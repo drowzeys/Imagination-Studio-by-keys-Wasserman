@@ -137,7 +137,17 @@ Rules:
   size; up to ten pictures go in one edit, and the model knows them as image 1, image 2, ...
 - The video model has no negative prompt on any route. `app/negation.py` lists what a prompt forbids by name and the
   page shows the list before the job is queued; never rewrite the user's prompt, and do not add "no X" lines to the
-  prompts the app writes for the picture (the ones about the sound track are measured and stay).
+  prompts the app writes, for the picture or the sound: a clip without lines is told `QUIET_PICTURE` ("Mouths stay
+  closed.", only where the shot has people) and `QUIET_SOUND` in `app/server.py`, a locked camera is "a locked, still
+  camera" (`MOVES` in `app/slate.py`). The tests hold a compiled prompt to the app's own check with `OWN` emptied.
+- Slate (`app/slate.py`, `app/static/slate.js`): a shot's `intent` never goes into the prompt. A sheet of the bible is
+  changed in place (`SL_BIBLE` and the `update_*` actions): never add a second one with the same name, the id is what
+  shots cast. A slot in bars (`tf.bars`, with `tf.song` on the project) sets the clip's frames through
+  `shot_frames`; the tempo is the user's. `tests/test_slate_page.py` runs the page code in node: keep it passing.
+- A clip from another machine's app is read through `app/remote.py` (`/api/qa`, `/api/slate/takes`): addresses are
+  `http://host:port` only and paths are media files inside that app's folder. Do not widen either.
+- Nothing a request handler calls may run a tool without a time limit (`tests/test_api_answers.py`); the GPU's name
+  is asked of nvidia-smi once and kept.
 - `app/shot.py` checks a finished single clip: first and last frame held, no cut inside one shot. Its thresholds are
   set from one production run and are written out, with the figures, at the top of the file: change them only with
   new measurements. A failed check never fails the job; the retake at the next seed is the user's choice.

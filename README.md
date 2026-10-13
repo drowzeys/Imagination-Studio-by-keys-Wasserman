@@ -655,9 +655,14 @@ show. In the production run that led to this check, a clip told "No photographs 
 the wall with photographs, twice, and came out clean once every mention of photographs was gone. Step 4 and step 5 of
 *Create* (and a Slate shot's preflight) now list what a prompt forbids by name ("no X", "without X", "not X",
 "never X") with the reason, in the box it was written in. Nothing is taken out or rewritten: the prompt goes as you
-wrote it, and the job in the queue repeats the list. The Studio's own sentences about the sound track ("Nobody
-speaks.", "No voices, no speech.") are not listed; they were measured to work. No route of the app has a negative
-prompt field: FastH3, MiniMax H3 Turbo and Qwen-Image-2.1-Turbo all run one forward a pass.
+wrote it, and the job in the queue repeats the list. The Studio's own sentences forbid nothing by name any more: a clip without spoken
+lines used to be told "Nobody speaks." and "No voices, no speech.", and a locked camera in Slate "the camera does not
+move". They now read "Mouths stay closed." (only where the shot has people: Slate's cast, or a person in the words),
+"Only ambient sound is heard." and "Static shot on a locked, still camera.", and a prompt the app writes passes its
+own check with nothing passed over. One comparison was made, not a study: the same two-person shot at 864x480, 5 s,
+seeds 42 and 43, in the old words and the new; in all four clips the speech-to-text model found no speech, and the
+mouths stayed closed in the frames looked at. A prompt that still carries the old sentences is not flagged for them.
+No route of the app has a negative prompt field: FastH3, MiniMax H3 Turbo and Qwen-Image-2.1-Turbo all run one forward a pass.
 `POST /api/prompt/check {"prompt": "..."}` gives the same list for a prompt written by hand.
 
 **The shot check.** After a single clip is rendered the app looks at its frames (`app/shot.py`) and writes the
@@ -687,6 +692,24 @@ verdict beside the clip in the queue:
   job), and a clip that fails is rendered a second time at seed + 1, like the Sharp Spec QA gate; the failed take is
   kept in the `qa` folder. Without the tick the verdict comes with a button, *Render it again at seed N*. The
   thresholds come from one run on one model at one size; `shot_check: false` in a job turns the check off.
+
+- *Where to trim.* FastH3 also opens some clips on an establishing shot nobody asked for and then cuts to the shot (4
+  of 36 clips in a later run, the cut at frames 10 to 28). The check's report carries `window`: the longest stretch of
+  the clip without a cut, as frames (`start`, `end`) and as the timeline's `in` and `out` seconds. The job card says
+  it and has *+ timeline, trimmed to it*; a job's result has it under `shot.takes[].window`, and
+  `GET /api/shot/window?path=renders/x.mp4` gives it for any clip in the studio's folder. It knows hard cuts only.
+  The other thing that run met, an action carried on past where the prompt stops, is not detected by anything here.
+
+**The Sharp Spec's QA gate, where its tools are missing.** The gate needs ffmpeg (the contact sheet, the sound) and a
+speech-to-text tool. On a machine without ffmpeg, a worker Spark as installed for one, the clip is made and the job's
+result now says that the gate did not run and why (`qa.skipped`, `qa.note`); so does a job queued with `qa: false`.
+`/api/state` has `qa.runs` and `qa.missing`. A machine that has the tools runs the gate on a clip from one that has
+not: `POST /api/qa {"from": "http://worker:7870", "job": "<its job id>"}` (the clip, the prompt and the seed are read
+from that job), or `{"from": ..., "path": "renders/x.mp4", "prompt": "..."}`, or `{"path": ...}` for a clip already
+here. The answer is a job to poll, outside the render queue (no GPU); its `qa` is the gate's report, with the clip
+kept under `qa/fetched`. Tried between two Sparks: the head fetched four clips from a worker's app and gave each a
+sheet and an identity verdict in 8 to 28 s. The transcript half had been failing on the Spark build with every clip
+(faster-whisper opening the sound through an older PyAV); it now runs, 12 s a clip on the CPU.
 
 **Without ffmpeg.** The header shows a line when ffmpeg is missing, with what then does not work (long videos, the
 timeline export, a frame taken from a clip, reference videos and audio), and such a job is refused when it is queued,
@@ -1155,19 +1178,42 @@ copying anything anywhere.
 
 | Part | What it does |
 |---|---|
-| **First AD** | Say what you are making. It creates scenes and shots, writes their prompts, casts characters, scouts locations, sets spoken lines and sound, and lists what it did. |
-| **Bible** | Logline, world and tone, defaults, how the film renders (resolution tier, quality), and which brain to use. |
+| **First AD** | Say what you are making. It creates scenes and shots, writes their prompts, casts characters, scouts locations, sets spoken lines and sound, and lists what it did. It changes or replaces a character, place, prop, cue or voice that is already there (the sheet keeps its id, so every shot that casts it follows), sets the song, a shot's slot in bars and a shot's LoRA. |
+| **Bible** | Logline, world and tone, defaults, the song (tempo, beats in a bar, first beat), how the film renders (resolution tier, quality), and which brain to use. |
 | **Studios** | Casting, Art Department, Locations, Lookbook: sheets filled from one line by ✦ Fill. A still pinned to a character is its reference picture. |
 | **Shots** | Specs (seconds, aspect, size, angle, lens, movement) and the six-section prompt; ✦ Structure, Tighten, Enrich, Distill, Shot, Angle, Beats, Variants; Director's notes; Slate's setups; picture-lock and mute; history. ✦ Coverage lays out a scene from one of Slate's twelve coverage plans. |
-| **Roll camera** | What the shot opens on (text, the last frame of the shot before, an image, the cast's stills), who is in it and where, spoken lines, soundscape, cue. The shot compiles to MiniMax H3's prompt form with a preflight list; one button queues it. Clips come back as takes: circle the one that works. |
+| **Roll camera** | What the shot opens on (text, the last frame of the shot before, an image, the cast's stills), who is in it and where, spoken lines, soundscape, cue. The shot compiles to MiniMax H3's prompt form with a preflight list; one button queues it. Clips come back as takes: circle the one that works. A LoRA from the hub can be put on one shot in place of the film's. *Import a take rendered on another machine* logs a clip another app made into the shot, with its seed and settings. |
 | **Sound** | Voice sheets (the voice of a spoken line) and music cues (the score line of a shot). |
 | **Deliver** | Render a whole scene in order, a continuity check, the shot list as Markdown or CSV, and the film's takes to the Editor's timeline. |
 
 The brain is Slate's: your own Claude Code or Codex sign-in on the machine that runs the app, or a local
 OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). Everything without a ✦ works with no brain. Films are
 Slate's own `project.json` under `~/TensorFoldStudio/slate/`: a project made in Slate opens here, and one made here
-downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at 5, 8, 10 or
-15 seconds and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
+downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at any length
+the model takes (their seconds, or their slot in bars) and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
+
+**What a shot sends to the model.** A shot's *intent* is a note for people and stays out of the prompt (it used to
+stand in as the action when a shot had no beat sheet, which put a run's timecodes into its prompts): what happens is
+the Subject section's, or the beat sheet's.
+
+**A music video.** Give the song's tempo in the Bible (the Studio does not listen to the song: the tempo and the
+first beat are yours, from the score or a beat tracker) and each shot a slot in bars. The shots are laid end to end
+from bar 1, and a shot's clip is rendered at the shortest length the model takes that covers its slot, so the cut
+can sit on the bar line: at 117.45 BPM a 2-bar slot is 98 frames and renders as 107, a 4-bar slot is 196 and renders
+as 209 (with the four fixed lengths it needed a 10 s clip, 243). Roll camera shows the slot, where it starts in the
+song and how many frames there are to trim. The cut itself is still made in the Editor or outside: nothing here lays
+the song under the timeline.
+
+**A LoRA on one shot.** *LoRA for this shot* in Roll camera puts one installed LoRA on that shot in place of the
+film's. It goes through the hub (strength, look, what it needs) and, on a DGX Spark, through the memory guard when
+the shot is queued; the shot's preflight says beforehand when it will be refused and what fits. On a Spark a clip
+with a LoRA is taken up to 1280x736 at 124 frames: the Sharp Spec tier takes none.
+
+**Takes from other machines.** A film's project is on one machine and its clips are often rendered by others, each
+by its own app. *Import a take* takes that app's address and one of its job ids (the clip, prompt, seed, settings and
+what its checks said are read from the job), or a path in its folder, or an uploaded file, and logs the take in the
+shot. `POST /api/slate/takes {"projectId", "shot", "from", "job"}` does the same for a script (`"log": true` writes
+it into the project file). An app forgets its jobs when it restarts; the clip's path still works.
 
 Not ported from Slate: sequence chunks, alt takes, punch-ups, the tone dial, pickups on a selected span, reference
 and audio analysis, the stills library, compiles for other generators, and its MCP server. The app has no sign-in of
