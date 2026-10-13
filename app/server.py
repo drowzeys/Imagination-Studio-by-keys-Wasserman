@@ -1012,7 +1012,8 @@ def work() -> None:
     while True:
         wake.wait()
         with lock:
-            job = next((jobs[i] for i in order if jobs[i]["status"] == "queued"), None)
+            # a job a render node should take, or one that waits for another clip, is left where it is (nodes.py)
+            job = next((jobs[i] for i in order if jobs[i]["status"] == "queued" and node_ready(jobs[i])), None)
             if job is None:
                 wake.clear()
                 continue
@@ -1068,7 +1069,7 @@ threading.Thread(target=work, daemon=True).start()
 
 def public(job: dict) -> dict:
     out = {k: job.get(k) for k in ("id", "kind", "status", "title", "outputs", "progress", "error", "created",
-                                    "started", "finished", "estimate", "engine", "qa", "passes", "pace", "source")}
+                                    "started", "finished", "estimate", "engine", "qa", "passes", "pace", "source", "node", "tries")}
     # by this machine's clock: the page may be open on another one
     out["elapsed"] = (job.get("finished") or time.time()) - job["started"] if job.get("started") else None
     out["log"] = job["log"][-3000:]
@@ -1362,6 +1363,22 @@ action_router, action_build, action_title, action_source = actions.attach(HOME, 
 app.include_router(action_router)
 import clear  # noqa: E402  (finished jobs and their files into the trash folder, and back, beside this file)
 app.include_router(clear.attach(HOME, jobs, order, lock)[0])
+import nodes  # noqa: E402  (render nodes: other machines behind this queue, and the queue kept across a restart)
+
+
+def node_caps() -> dict:
+    """What this studio can render, for a studio that hands jobs out to it."""
+
+    listing = next(r.endpoint for r in lora_router.routes if r.path == "/api/loras" and "GET" in r.methods)
+    said = state()
+    return {"platform": said["platform"], "engine": said["engine"], "ref2va": said["ref2va"], "turbo": said["turbo"],
+            "loras": [r["id"] for r in listing() if r.get("installed")]}
+
+
+node_router, node_ready, node_store = nodes.attach(HOME, PACK, jobs, order, lock, wake, running, node_caps, inside)
+nodes.guard(app, HOME)
+app.include_router(node_router)
+node_store()
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 
 if __name__ == "__main__":
