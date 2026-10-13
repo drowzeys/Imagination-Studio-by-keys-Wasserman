@@ -160,6 +160,16 @@ Rules:
   down and nobody knows why from its logs. Raise them only by measuring from below on a worker Spark, in small steps,
   under a second watchdog that kills your own server at 25 GB available; never by trying the size that failed, and
   never on a machine with `vm.panic_on_oom=1`. Do not lower the floor to make a job fit.
+- More than one DGX Spark (`app/sparks.py`, `app/static/sparks.js`, `docs/multi-spark.md`): a job's `sparks` (1 to
+  `LIMIT`, 8) is how many machines it may use, this one counted; the app uses what is there and says so. Only single
+  clips (`video` jobs) go to a worker, one per Spark at a time, through the worker's own job API over an ssh tunnel
+  the app opens and closes itself: a worker's app listens on its own 127.0.0.1 and is never opened to the network, and
+  nothing here runs as root, edits `/etc` or shares a folder. A worker renders only with this Spark's code (the files
+  of `CODE`, compared by hash; *Update and start* sends them with rsync) and its own memory guard, which is asked
+  before a clip is sent. A worker silent for `LOST` seconds is marked down and its clip goes back to the queue; do
+  not make that wait longer, and never retry a worker that went down without a person's *Check*. `MEASURED` is one
+  measured run: change it only with a new one. One clip split across Sparks (the engine's `h3-cuda-multispark`
+  branch) is measured and is not in the app: do not wire part of it in.
 - mflux and minimax-h3-mlx are pinned by commit and used at run time. Do not unpin.
 
 **Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), MiniMax (H3), Ash Hart (TensorFold), antirez (h3.c),
