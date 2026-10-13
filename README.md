@@ -199,6 +199,42 @@ What is different from the Mac build:
   at low priority with a memory guard beside it, because a Spark that runs out can become unreachable: see
   *The memory guard* below.
 
+### More than one DGX Spark: the Sparks setting
+
+A job can use more than one DGX Spark. **Sparks**, a number from 1 to 8, is how many machines a job may use, the one
+the app runs on counted as one. It is at the top of the Queue on every tab, in the last step of Create, on the
+Production board and in a Slate shot; through the API it is `"sparks": 5` beside `kind` and `params`. The app shows
+how many Sparks are there and able and uses that many: choose 8 with five machines and it says *5 of 8 available*
+and uses five.
+
+- **Several clips** (jobs in the queue, a Production board's segments, a Slate scene's shots) render one clip per
+  Spark, side by side. Each clip comes back into this Spark's Library, project or film at the path it would have
+  had here, with its seed, its settings and the Spark that rendered it; the QA gate and the shot check run here.
+- **One clip** renders on one Spark. So do a long video (a chain of clips), pictures, edits and Library actions, on
+  this Spark; the page says which and why before the job is queued.
+- **The Sparks tab** is the list of the other Sparks: add one by the address you would type after `ssh`, and
+  **Update and start** sends it this Spark's Studio code (rsync, as you; models are not sent) and starts its app.
+  Each row shows whether the Spark answers, its Studio's version, memory and disk free, what it can render
+  (FastH3 clips, Ref2VA, the image model, LoRAs, ffmpeg) and whether it is busy. It needs a key login to each Spark
+  and the Studio installed there once; nothing runs as root.
+- **Safe by construction.** A worker's app listens only on its own `127.0.0.1`; this app reaches it through an ssh
+  tunnel it opens and closes itself. One job runs on a Spark at a time. Every clip passes the worker's own memory
+  guard before it is sent, and a clip with a LoRA goes only to a Spark that has the LoRA and whose guard accepts it.
+  A worker that stops answering for 60 seconds is marked down and its clip is rendered elsewhere; cancel reaches
+  the worker.
+
+Measured through the app's own API on 2026-10-13, eight 56-frame 864x480 FastH3 clips, models loaded, one run each:
+
+| Sparks | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| Wall time, 8 clips | 263 s | 130 s | 98 s | 69 s | 65 s |
+| Against one Spark | 1.00x | 2.03x | 2.70x | 3.81x | 4.05x |
+
+Five were barely better than four for eight clips (two rounds of clips either way); the fifth pays from ten clips.
+Six to eight are not measured: five machines exist here. One clip split across Sparks is measured outside the app
+(1.40x, 1.73x and 1.77x on two, three and four) and is not built in. The whole of it, with what is not built:
+[docs/multi-spark.md](docs/multi-spark.md).
+
 ### The memory guard (DGX Spark)
 
 On a Spark the GPU and the system share one pool of memory. On 2026-10-13 one clip with a LoRA at 1376x768 took a

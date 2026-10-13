@@ -864,8 +864,9 @@ def without_ffmpeg(kind: str, params: dict) -> str:
     return f"{what} needs ffmpeg, which is not installed on this machine: {FFMPEG_HOW}" if what else ""
 
 
-def build(kind: str, params: dict, job_id: str) -> tuple[list[str], dict, list[str]]:
-    """(command, environment, output paths) for one job."""
+def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list[str], dict, list[str]]:
+    """(command, environment, output paths) for one job. ``room`` False leaves this machine's memory out of it: the
+    clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
     scripts = PACK / "scripts"
     if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove
@@ -942,9 +943,9 @@ def build(kind: str, params: dict, job_id: str) -> tuple[list[str], dict, list[s
             if params.get("ref_turbo"):
                 env["REF_TURBO"] = "1"
         env.update(passes(chosen, SPARK or (fast_h3 and not pictures)))  # Ref2VA runs on MiniMax H3
-        room = memory_of(params, env, frames, bool(styles), pictures)
-        if not room["fits"]:
-            raise HTTPException(400, room["reason"])
+        fits = memory_of(params, env, frames, bool(styles), pictures) if room else {"fits": True}
+        if not fits["fits"]:
+            raise HTTPException(400, fits["reason"])
         if image:
             return (["bash", str(scripts / "studio.sh"), "", prompt, str(target)],
                     {**env, "IMAGE_FILE": str(inside(image)), "RAW_PROMPT": "1"}, [str(target)])
@@ -959,9 +960,9 @@ def build(kind: str, params: dict, job_id: str) -> tuple[list[str], dict, list[s
         return ["bash", str(scripts / "video.sh"), prompt, str(target)], plain, [str(target)]
     if kind == "studio":  # text to image to video in one go
         env.update(passes(chosen, fast_h3))
-        room = memory_of(params, env, frames, bool(styles))
-        if not room["fits"]:
-            raise HTTPException(400, room["reason"])
+        fits = memory_of(params, env, frames, bool(styles)) if room else {"fits": True}
+        if not fits["fits"]:
+            raise HTTPException(400, fits["reason"])
         return (["bash", str(scripts / "studio.sh"), params["image_prompt"], prompt, str(target)],
                 {**env, "RAW_PROMPT": "1"}, [str(target), str(target.with_suffix(".png"))])
     raise HTTPException(400, f"unknown job kind {kind}")
@@ -1054,6 +1055,18 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     return True
 
 
+def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str]]:
+    """One render of a job's clip, on this machine or on the Spark the job was handed to (sparks.py), which leaves the
+    clip at the same path: (False when the job was cancelled meanwhile, the environment, the output paths)."""
+
+    worker = job.get("remote") and next((one for one in hub.workers() if one["address"] == job["remote"]), {"address": job["remote"]})
+    if worker:
+        _, env, outputs = build(job["kind"], params, job["id"], room=False)
+        return hub.render(job, worker, params, Path(outputs[0]), label), env, outputs
+    command, env, outputs = build(job["kind"], params, job["id"])
+    return run(job, command, env, label), env, outputs
+
+
 def hush(clip: Path) -> None:
     """The clip with its sound track silenced (``silent`` in a job's settings: a Flow clip without music). Asking the
     model for near silence is not enough: on the Mac it laid music of its own over two of three such clips."""
@@ -1079,21 +1092,20 @@ def gated(job: dict, clip: Path) -> bool:
                                "checked. A machine that has them can run the gate on it: POST /api/qa {\"from\": this app's address, "
                                f"\"path\": \"{relative(clip)}\", \"prompt\": the prompt}}, or import the take into its Slate shot.")
         return True
-    for take in range(1, QA_TAKES + 1):
-        if take > 1:
-            shutil.copy(clip, HOME / "qa" / f"{job['id']}-take{take - 1}.mp4")  # the failed take is kept
+    for number in range(1, QA_TAKES + 1):
+        if number > 1:
+            shutil.copy(clip, HOME / "qa" / f"{job['id']}-take{number - 1}.mp4")  # the failed take is kept
             params["seed"] = int(params.get("seed", 0)) + 1
-            command, env, _ = build("video", params, job["id"])
-            if not run(job, command, env, f"take {take} · "):
+            if not take(job, params, f"take {number} · ")[0]:
                 return False
-        job["progress"] = {"stage": "QA gate, take", "at": take, "of": QA_TAKES}
-        picture = HOME / "qa" / f"{job['id']}-take{take}.jpg"
+        job["progress"] = {"stage": "QA gate, take", "at": number, "of": QA_TAKES}
+        picture = HOME / "qa" / f"{job['id']}-take{number}.jpg"
         try:
             report = qa.check(clip, params["prompt"], picture, params.get("brain"))
         except Exception as error:  # noqa: BLE001 - the clip is made; a gate that cannot run does not lose it
             job["qa"] = {"passed": None, "takes": takes, "error": str(error)[-300:]}
             break
-        takes.append({**report, "take": take, "seed": int(params.get("seed", 0)), "sheet": relative(picture)})
+        takes.append({**report, "take": number, "seed": int(params.get("seed", 0)), "sheet": relative(picture)})
         job["qa"] = {"passed": report["passed"], "takes": takes}
         if report["passed"] or job["status"] == "cancelled":
             break
@@ -1124,24 +1136,24 @@ def shot_checked(job: dict, clip: Path, env: dict) -> bool:
     params, takes = job["params"], []
     # the QA gate has its own retake: a clip it rendered twice, or will judge, is not rendered a third time here
     may = bool(params.get("retake")) and "qa" not in job
-    for take in range(1, SHOT_TAKES + 1):
-        if take > 1:
-            kept = HOME / "qa" / f"{job['id']}-shot-take{take - 1}.mp4"  # the failed take is kept
+    for number in range(1, SHOT_TAKES + 1):
+        if number > 1:
+            kept = HOME / "qa" / f"{job['id']}-shot-take{number - 1}.mp4"  # the failed take is kept
             kept.parent.mkdir(exist_ok=True)
             shutil.copy(clip, kept)
             takes[-1]["kept"] = relative(kept)
             params["seed"] = int(params.get("seed", 0)) + 1
-            command, env, _ = build(job["kind"], params, job["id"])
-            if not run(job, command, env, f"take {take} · "):
+            done, env, _ = take(job, params, f"take {number} · ")
+            if not done:
                 return False
-        job["progress"] = {"stage": "shot check, take", "at": take, "of": SHOT_TAKES if may else 1}
+        job["progress"] = {"stage": "shot check, take", "at": number, "of": SHOT_TAKES if may else 1}
         first = env.get("IMAGE_FILE") or (str(clip.with_suffix(".png")) if job["kind"] == "studio" and clip.with_suffix(".png").is_file() else None)
         try:
             report = shot.check(clip, first, env.get("LAST_FRAME"), canvas_of(env, params.get("preset", "")), shot.one_shot(params.get("prompt") or ""), not SPARK)
         except Exception as error:  # noqa: BLE001 - the clip is made; a check that cannot run does not lose it
             job["shot"] = {"passed": None, "takes": takes, "error": str(error)[-300:]}
             break
-        takes.append({**report, "take": take, "seed": int(params.get("seed", 0))})
+        takes.append({**report, "take": number, "seed": int(params.get("seed", 0))})
         job["shot"] = {"passed": report["passed"], "takes": takes}
         if report["passed"] or job["status"] == "cancelled":
             break
@@ -1211,64 +1223,79 @@ def long_take(job: dict) -> bool:
     return True
 
 
+def perform(job: dict, worker: dict | None = None) -> None:
+    """One claimed job to its end: on this machine, or its clip on the Spark it was handed to (``worker``, sparks.py)
+    with everything else done here: the frame it opens on is cut here, the clip comes back to its own path, and the
+    QA gate, the shot check and the sound follow as on a clip made here."""
+
+    params = job["params"]
+    asked = dict(params)
+    try:
+        if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
+            source = inside(params["first_frame_from"])
+            if not source.is_file():
+                raise RuntimeError("the clip this one continues from has not been rendered")
+            still = HOME / "uploads" / f"{job['id']}_first.jpg"
+            last_frame(source, still)
+            params["image"] = relative(still)
+        if params.get("last_frame_from"):  # end on the first frame of another clip, so the two join
+            source = inside(params["last_frame_from"])
+            if not source.is_file():
+                raise RuntimeError("the clip this one leads into has not been rendered")
+            still = HOME / "uploads" / f"{job['id']}_last.png"
+            frame_at(source, still, 0)
+            params["last_image"] = relative(still)
+        if job["kind"] == "export":
+            export(job)
+        elif job["kind"] == "long":
+            if not long_take(job):
+                return
+        else:
+            done, env, outputs = take(job, params)
+            if not done:
+                return
+            job["outputs"] = [relative(Path(p)) for p in outputs if Path(p).is_file()]
+            if not job["outputs"]:
+                raise RuntimeError("the script finished without writing its output")
+            if job["kind"] == "video" and params.get("preset") == "sharp" and params.get("qa", True):
+                if not gated(job, Path(outputs[0])):
+                    return
+            elif job["kind"] == "video" and params.get("preset") == "sharp":
+                job["qa"] = qa.not_run("The QA gate was switched off for this job (qa: false): the clip is not checked.")
+            if job["kind"] in ("video", "studio") and params.get("shot_check", True):
+                if not shot_checked(job, Path(outputs[0]), env):
+                    return
+            if job["kind"] == "video" and params.get("silent"):
+                hush(Path(outputs[0]))
+            if job["kind"] == "video" and (params.get("reference_videos") or params.get("pace") in ("impacts", "flow")):
+                try:  # reported beside the clip like the QA gate; it never fails a clip that was made
+                    job["pace"] = {**pace.measure(Path(outputs[0])), "asked": params.get("pace") or "auto"}
+                except Exception as error:  # noqa: BLE001
+                    job["pace"] = {"verdict": "not measured", "note": str(error)[-200:]}
+        hub.record(job)  # the clip, its seed and settings, and the Spark that rendered it (sparks/takes.jsonl)
+        if job["status"] != "cancelled":
+            job["status"] = "done"
+    except sparks.Moved:  # the Spark it was on refused it, failed it or stopped answering: it is in the queue again
+        params.clear()  # as it was queued: a retake's seed and the frames cut for it are made again
+        params.update(asked)
+    except Exception as error:  # noqa: BLE001 - a failed job must not stop the queue
+        if job["status"] != "cancelled":
+            job["status"], job["error"] = "failed", str(getattr(error, "detail", error))
+    finally:
+        if job["status"] != "queued":
+            job["finished"] = time.time()
+
+
 def work() -> None:
     while True:
         wake.wait()
         with lock:
-            job = next((jobs[i] for i in order if jobs[i]["status"] == "queued"), None)
+            job = hub.claim()  # the next job for this machine; on a DGX Spark a worker may have taken others (sparks.py)
             if job is None:
                 wake.clear()
                 continue
-            job["status"], job["started"] = "running", time.time()
-        try:
-            params = job["params"]
-            if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
-                source = inside(params["first_frame_from"])
-                if not source.is_file():
-                    raise RuntimeError("the clip this one continues from has not been rendered")
-                still = HOME / "uploads" / f"{job['id']}_first.jpg"
-                last_frame(source, still)
-                params["image"] = relative(still)
-            if params.get("last_frame_from"):  # end on the first frame of another clip, so the two join
-                source = inside(params["last_frame_from"])
-                if not source.is_file():
-                    raise RuntimeError("the clip this one leads into has not been rendered")
-                still = HOME / "uploads" / f"{job['id']}_last.png"
-                frame_at(source, still, 0)
-                params["last_image"] = relative(still)
-            if job["kind"] == "export":
-                export(job)
-            elif job["kind"] == "long":
-                if not long_take(job):
-                    continue
-            else:
-                command, env, outputs = build(job["kind"], params, job["id"])
-                if not run(job, command, env):
-                    continue
-                job["outputs"] = [relative(Path(p)) for p in outputs if Path(p).is_file()]
-                if not job["outputs"]:
-                    raise RuntimeError("the script finished without writing its output")
-                if job["kind"] == "video" and params.get("preset") == "sharp" and params.get("qa", True):
-                    if not gated(job, Path(outputs[0])):
-                        continue
-                elif job["kind"] == "video" and params.get("preset") == "sharp":
-                    job["qa"] = qa.not_run("The QA gate was switched off for this job (qa: false): the clip is not checked.")
-                if job["kind"] in ("video", "studio") and params.get("shot_check", True):
-                    if not shot_checked(job, Path(outputs[0]), env):
-                        continue
-                if job["kind"] == "video" and params.get("silent"):
-                    hush(Path(outputs[0]))
-                if job["kind"] == "video" and (params.get("reference_videos") or params.get("pace") in ("impacts", "flow")):
-                    try:  # reported beside the clip like the QA gate; it never fails a clip that was made
-                        job["pace"] = {**pace.measure(Path(outputs[0])), "asked": params.get("pace") or "auto"}
-                    except Exception as error:  # noqa: BLE001
-                        job["pace"] = {"verdict": "not measured", "note": str(error)[-200:]}
-            job["status"] = "done"
-        except Exception as error:  # noqa: BLE001 - a failed job must not stop the queue
-            if job["status"] != "cancelled":
-                job["status"], job["error"] = "failed", str(error)
-        finally:
-            job["finished"] = time.time()
+        perform(job)
+        hub.kick.set()
 
 
 threading.Thread(target=work, daemon=True).start()
@@ -1277,7 +1304,7 @@ threading.Thread(target=work, daemon=True).start()
 def public(job: dict) -> dict:
     out = {k: job.get(k) for k in ("id", "kind", "status", "title", "outputs", "progress", "error", "created",
                                     "started", "finished", "estimate", "engine", "qa", "passes", "pace", "source", "shot",
-                                    "negations")}
+                                    "negations", "sparks", "spark", "moved")}
     # by this machine's clock: the page may be open on another one
     out["elapsed"] = (job.get("finished") or time.time()) - job["started"] if job.get("started") else None
     out["log"] = job["log"][-3000:]
@@ -1302,6 +1329,8 @@ def state() -> dict:
                         "presets": {k: longest_frames(v[2]) for k, v in PRESETS.items()}, "custom": longest_frames({"WIDTH": 1344, "HEIGHT": 768})},
             "ffmpeg": media_tools()["ffmpeg"], "ffmpeg_note": "" if media_tools()["ffmpeg"] else FFMPEG_NOTE,
             "shot_check": True, "negation_reason": negation.REASON,
+            # how many DGX Sparks a job may use (sparks.py); a Mac renders on itself
+            "sparks": {"supported": SPARK, "limit": sparks.LIMIT},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
@@ -1358,6 +1387,16 @@ def estimate_time(body: dict) -> dict:
                                 bool(body.get("ref_turbo")), bool(body.get("ref_media"))), "memory": room}
 
 
+def clip_estimate(kind: str, params: dict, referenced: bool = False, ref_media: bool = False) -> int | None:
+    """The time a job is expected to take on one machine (None where none was measured: a custom size or passes, a LoRA)."""
+
+    if kind not in ("video", "studio", "long") or params.get("preset") == "custom" or params.get("steps") not in (None, "") or params.get("loras"):
+        return None
+    return estimate(params.get("preset", ""), params.get("quality", "standard"), clip_seconds(params),
+                    kind == "video" and not params.get("image") and not params.get("first_frame_from"), referenced,
+                    bool(params.get("ref_turbo")), ref_media)
+
+
 @app.post("/api/jobs")
 def submit(body: dict) -> dict:
     kind = body.get("kind")
@@ -1391,21 +1430,26 @@ def submit(body: dict) -> dict:
     job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else kind), "params": params,
            "source": action_source(kind, params) if kind in actions.KINDS else None,
            "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(), "started": None,
-           "finished": None, "estimate": None if params.get("preset") == "custom" or params.get("steps") not in (None, "") or params.get("loras") else estimate(params.get("preset", ""), params.get("quality", "standard"),
-                                                  clip_seconds(params),
-                                                  kind == "video" and not params.get("image")
-                                                  and not params.get("first_frame_from"), referenced,
-                                                  bool(params.get("ref_turbo")), ref_media)
-           if kind in ("video", "studio", "long") else None}
+           "finished": None, "estimate": clip_estimate(kind, params, referenced, ref_media)}
     if referenced:  # the passes a reference clip runs: the number set by hand, or the model's 20, or the adapter's 4
         job["passes"] = int(params["steps"]) if params.get("steps") not in (None, "") else 4 if params.get("ref_turbo") else 20
     if kind in ("video", "studio", "long"):
         # said beside the job too, for a prompt that did not come through the wizard; the prompt goes as written
         job["negations"] = negation.check(params.get("prompt") or "")["negations"] or None
+    # how many Sparks the job may use, this one counted (sparks.py): the number given, or the one set on the Sparks page
+    try:
+        chosen = int(body.get("sparks") or hub.config()["sparks"])
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
+    if not 1 <= chosen <= sparks.LIMIT:
+        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
+    said = hub.plan({"sparks": chosen, "kind": kind, "params": params})
+    job["sparks"] = {"chosen": chosen if SPARK else 1, "available": said["available"], "used": said["used"], "says": said["says"]}
     with lock:
         jobs[job_id] = job
         order.append(job_id)
     wake.set()
+    hub.kick.set()
     return public(job)
 
 
@@ -1431,6 +1475,7 @@ def cancel(job_id: str) -> dict:
         process = running["process"] if running["id"] == job_id else None
         if process is not None:
             os.killpg(process.pid, signal.SIGTERM)
+        hub.kick.set()  # a clip on another Spark is cancelled there by the thread that follows it
     return public(job)
 
 
@@ -1487,7 +1532,12 @@ def library() -> list[dict]:
                 found.append({"path": relative(path), "kind": "video" if path.suffix.lower() in (".mp4", ".mov")
                               else "image", "folder": folder, "modified": path.stat().st_mtime,
                               "size": path.stat().st_size})
-    return sorted(found, key=lambda item: -item["modified"])[:400]
+    found = sorted(found, key=lambda item: -item["modified"])[:400]
+    made = hub.takes()  # which Spark rendered a clip, and at which seed (sparks.py)
+    for item in found:
+        if item["path"] in made:
+            item.update(spark=made[item["path"]].get("spark"), seed=made[item["path"]].get("seed"))
+    return found
 
 
 @app.delete("/api/library")
@@ -1722,6 +1772,35 @@ action_router, action_build, action_title, action_source = actions.attach(HOME, 
 app.include_router(action_router)
 import clear  # noqa: E402  (finished jobs and their files into the trash folder, and back, beside this file)
 app.include_router(clear.attach(HOME, jobs, order, lock)[0])
+import sparks  # noqa: E402  (worker Sparks behind this queue: a job's "sparks" number, beside this file)
+
+
+def about_this_spark() -> dict:
+    """What this app is and has, for a Studio on another Spark that hands clips to it (/api/spark/self)."""
+
+    listing = next(route.endpoint for route in lora_router.routes if route.path == "/api/loras" and "GET" in route.methods)
+    info = memory_guard.meminfo()
+    memory = {"available_mb": info.get("MemAvailable"), "total_mb": info.get("MemTotal"), "room_mb": memory_guard.room_mb(),
+              "floor_mb": memory_guard.floor_mb(info.get("MemTotal"))} if SPARK and info else {}
+    with lock:
+        active = sum(1 for job in jobs.values() if job["status"] in ("queued", "running"))
+    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent)
+
+
+def clip_time(kind: str, params: dict) -> int | None:
+    """One clip's time for the Sparks estimate; None for settings that would be refused or have no measured time."""
+
+    try:
+        return clip_estimate(kind, params, bool(params.get("references") or params.get("reference_videos")),
+                             bool(params.get("reference_videos") or params.get("reference_audios")))
+    except (HTTPException, ValueError, TypeError, KeyError):
+        return None
+
+
+hub = sparks.Hub(HOME, PACK, SPARK, jobs, order, lock, wake, about_this_spark, inside, perform, clip_time)
+app.include_router(hub.router())
+if hasattr(app.router, "on_shutdown"):
+    app.router.on_shutdown.append(hub.close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 
 if not media_tools()["ffmpeg"]:
@@ -1729,6 +1808,10 @@ if not media_tools()["ffmpeg"]:
 
 if __name__ == "__main__":
     import uvicorn
+
+    if os.environ.get("STUDIO_PIDFILE"):  # a worker Spark's app, started by another Spark's Studio: how that one finds it again
+        Path(os.environ["STUDIO_PIDFILE"]).write_text(str(os.getpid()))
+    hub.start()
 
     uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "7870")),
                 log_level="warning")

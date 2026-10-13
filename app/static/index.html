@@ -158,6 +158,7 @@ button.small.on { border-color:rgba(255,205,110,.8); color:#ffe9b8; background:r
 /* on a narrow screen a passes chooser is two cards a row, so Custom stays beside 20 passes */
 @media (max-width:640px) { .choice.passes { grid-template-columns:repeat(2,minmax(0,1fr)); } .choice.passes.odd > :first-child { grid-column:1 / -1; } }
 label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none; letter-spacing:0; font-size:12.5px; font-weight:400; color:var(--dim); margin:10px 0 0; cursor:pointer; } label.check input { margin-top:3px; flex:none; } label.check.off { opacity:.55; cursor:default; }
+.sparks button.small { min-width:30px; text-align:center; } .sparks button.on { background:var(--grad); color:#070810; font-weight:700; border-color:transparent; } .sparks button.far:not(.on) { opacity:.5; }
 .mgrid { display:grid; grid-template-columns:minmax(180px,260px) minmax(0,1fr); gap:14px; align-items:start; margin-top:12px; }
 </style>
 </head>
@@ -173,7 +174,8 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
   <div id="view"></div>
   <aside>
     <h2>Queue</h2>
-    <div class="note">One job at a time, in order. Renders are written under <span id="home"></span>.</div>
+    <div class="note">One job at a time on a machine, in order. Renders are written under <span id="home"></span>.</div>
+    <div id="sparks" style="margin-top:8px"></div>
     <div id="jobtools" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"></div>
     <div id="jobs" style="margin-top:10px"></div>
   </aside>
@@ -182,6 +184,7 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
 <script src="motion.js"></script>
 <script src="actions.js"></script>
 <script src="edit.js"></script>
+<script src="sparks.js"></script>
 <script>
 "use strict";
 if (location.search.includes("shot")) document.write('<img src="/api/wait?ms=4000" style="display:none">');
@@ -190,7 +193,10 @@ const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag)
   for (const [k, v] of Object.entries(attrs)) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
     else if (k === "html") n.innerHTML = v; else if (v !== false && v != null) n.setAttribute(k, v === true ? "" : v); }
   for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid.nodeType ? kid : document.createTextNode(kid)); return n; };
-const api = async (path, body, method) => { const r = await fetch(path, body === undefined ? { method: method || "GET" } :
+const api = async (path, body, method) => {
+  // every job queued from this page carries the number of Sparks chosen in the queue (sparks.js); the app ignores it where it does not apply
+  if (path === "/api/jobs" && body && body.kind && body.sparks === undefined) body = { sparks: SPK.n, ...body };
+  const r = await fetch(path, body === undefined ? { method: method || "GET" } :
     { method: method || "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await r.json().catch(() => ({})); if (!r.ok) throw new Error(data.error || data.detail || r.statusText); return data; };
 const file = path => "/files/" + path.split("/").map(encodeURIComponent).join("/");
@@ -226,7 +232,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Create", project = null;
-const TABS = ["Create", "Production", "Motion Previs", "Editor", "Library", "Tutorial"];
+const TABS = ["Create", "Production", "Motion Previs", "Editor", "Library", "Sparks", "Tutorial"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
   dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
@@ -810,6 +816,8 @@ function viewCreate() {
       negNote(),
       isLong() ? null : el("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px", title: "After the render the app looks at the clip (app/shot.py): does it open on its first frame and end on its last, and is there a cut inside it. The verdict is shown beside the clip either way." },
         bind(C, "retake", el("input", { type: "checkbox", style: "width:auto" })), "If the shot check fails (a keyframe not held, or a cut inside the shot), render it once more at the next seed. That is a second full render."),
+      // how many Sparks this job may use, and what that means for it, before it is queued (sparks.js)
+      el("div", { style: "margin-top:10px" }, sparksPick({ kind: isLong() ? "long" : "video", clips: 1, params: { loras: lorasOf(C), ...(isRef() ? { references: C.refs, reference_videos: C.refVideos, reference_audios: C.refAudios, ref_turbo: C.refPasses === "4" } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) } })),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !ready, onclick: async () => { try {
         const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
         const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
@@ -861,6 +869,9 @@ function viewProduction() {
       loraHub(project, saveProject),
       el("h3", {}, "Segment overview · " + total + " s total"),
       el("div", { class: "strip" }, project.segments.map((s, i) => el("div", { style: "flex:" + (s.seconds || 5) }, (i + 1) + " · " + (s.title || "") + " · " + Math.round(s.seconds * 100) / 100 + " s"))),
+      // segments that do not open on the one before render side by side, one per Spark (sparks.js)
+      sparksPick({ kind: "video", clips: Math.max(1, project.segments.filter(g => g.start !== "previous").length), params: { preset: project.preset, quality: project.quality, seconds: Number((project.segments[0] || {}).seconds || 5), loras: lorasOf(project) } }),
+      project.segments.some(g => g.start === "previous") && SPK.n > 1 && SPK.data && SPK.data.supported ? el("div", { class: "note" }, "A segment that opens on the last frame of the one before waits for it; the others render side by side.") : null,
       el("div", { class: "row" }, el("button", { class: "fit", onclick: () => { project.segments.push({ title: "", scene: project.segments.at(-1)?.scene || "", action: "", camera: "", voice: "", line: "", soundscape: "", seconds: 5, seed: 1,
           start: project.segments.length ? "previous" : "text", image: null, prompt: "" }); saveProject(); render(); } }, "+ Add a segment"),
         el("button", { class: "hot fit", disabled: !project.segments.length, onclick: async () => { try { for (let i = 0; i < project.segments.length; i++) if (!project.segments[i].output || segJob(project.segments[i])?.status === "failed") await generateSeg(i);
@@ -940,7 +951,8 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
           try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
       el("div", { class: "grid", style: "margin-top:10px" }, list.map(m =>
     el("div", { class: "tile" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
-      el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
+      el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + m.spark + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
+      m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, m.spark + (m.seed != null ? " · s" + m.seed : "")) : null),
       // the buttons on a row of their own: a long file name no longer pushes them out of the tile
       el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" }, actButtons(m),
       m.kind === "video" ? el("button", { class: "small", title: "Start a new clip on this clip's last frame", onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); C.image = r.path; C.prompt = ""; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } catch (e) { toast(e.message); } } }, "continue") : el("button", { class: "small", title: "End a new clip on this picture", onclick: () => { C.lastImage = m.path; C.prompt = ""; C.goes = "video"; if (C.start === "refs") C.start = "text"; C.step = 1; tab = "Create"; render(); } }, "last frame"),
@@ -1168,6 +1180,9 @@ function jobCard(job) { const p = job.progress; const elapsed = job.elapsed != n
       el("button", { class: "small", onclick: () => pre.classList.toggle("hide") }, "Log")),
     job.status === "running" ? el("div", {}, el("div", { class: "bar" }, el("i", { style: "width:" + share + "%" })),
       el("div", { class: "note" }, (p ? p.stage + " " + p.at + "/" + p.of + " · " : "loading · ") + (job.estimate && elapsed != null ? (job.estimate - elapsed > 5 ? "about " + mmss(job.estimate - elapsed) + " left" : "almost done") : "no time estimate for this setting") + (job.passes ? " · " + job.passes + " passes" : "") + (job.engine ? " · " + (job.engine === "zig" ? "native Zig engine" : job.engine === "cuda" ? "CUDA" : "MLX engine") : ""))) : null,
+    job.spark && S.sparks && S.sparks.supported && job.sparks && (job.sparks.chosen > 1 || (job.moved || []).length) ? el("div", { class: "note" }, (job.status === "running" ? "Rendering on " : job.status === "done" ? "Rendered on " : "Was on ") + job.spark + " · Sparks " + job.sparks.chosen) : null,
+    job.status === "queued" && job.sparks && job.sparks.chosen > 1 ? el("div", { class: "note" }, "Sparks " + job.sparks.chosen + (job.sparks.available < job.sparks.chosen ? " (" + job.sparks.available + " available)" : "") + " · " + job.sparks.says) : null,
+    (job.moved || []).map(m => el("div", { class: "note", style: "color:var(--warn)" }, "Taken back from " + m.from + ": " + m.why)),
     job.status === "done" && elapsed ? el("div", { class: "note" }, "Took " + mmss(elapsed) + (job.passes ? " · " + job.passes + " passes" : "") + (job.engine ? " · " + (job.engine === "zig" ? "native Zig engine" : job.engine === "cuda" ? "CUDA" : "MLX engine") : "")) : null, job.error ? el("div", { class: "note", style: "color:var(--bad)" }, job.error) : null, qaLines(job), shotLines(job), negLines(job), paceLine(job), pre); }
 function jobTools() { const done = jobs.filter(j => ["done", "cancelled"].includes(j.status)).length, failed = jobs.filter(j => j.status === "failed").length;
   for (const id of [...PICK]) if (!jobs.some(j => j.id === id && !["queued", "running"].includes(j.status))) PICK.delete(id);
@@ -1184,7 +1199,7 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig) { const had = lastSig; lastSig = sig; if (had && !document.activeElement.matches("input,textarea,select")) render(); } }
 
 function render() { $("#tabs").replaceChildren(...TABS.map(t => el("button", { class: t === tab ? "on" : "", onclick: () => { tab = t; history.replaceState(null, "", "#" + t); render(); } }, t)));
-  $("#view").replaceChildren({ Create: viewCreate, Production: viewProduction, "Motion Previs": viewMotion, Editor: viewEditor, Library: viewLibrary, Tutorial: viewTutorial }[tab]()); coach();
+  $("#view").replaceChildren({ Create: viewCreate, Production: viewProduction, "Motion Previs": viewMotion, Editor: viewEditor, Library: viewLibrary, Sparks: viewSparks, Tutorial: viewTutorial }[tab]()); coach();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
   if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true); }
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
