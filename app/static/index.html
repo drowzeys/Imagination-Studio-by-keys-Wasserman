@@ -170,6 +170,7 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
   <aside>
     <h2>Queue</h2>
     <div class="note">One job at a time, in order. Renders are written under <span id="home"></span>.</div>
+    <div id="nodes"></div>
     <div id="jobtools" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"></div>
     <div id="jobs" style="margin-top:10px"></div>
   </aside>
@@ -177,6 +178,7 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
 <script src="slate.js"></script>
 <script src="motion.js"></script>
 <script src="actions.js"></script>
+<script src="nodes.js"></script>
 <script>
 "use strict";
 if (location.search.includes("shot")) document.write('<img src="/api/wait?ms=4000" style="display:none">');
