@@ -168,6 +168,7 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
   <nav id="tabs"></nav>
   <small id="ver"></small>
 </header>
+<div id="warnbar" class="hide" role="status" style="margin:10px 22px 0;padding:9px 13px;border-radius:10px;border:1px solid rgba(245,193,92,.45);background:rgba(245,193,92,.08);color:var(--warn);font-size:13px"></div>
 <main>
   <div id="view"></div>
   <aside>
@@ -227,7 +228,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
 let S = null, jobs = [], tab = "Create", project = null;
 const TABS = ["Create", "Production", "Motion Previs", "Editor", "Library", "Tutorial"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
-  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null };
+  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
 const field = (labelText, node) => el("div", {}, el("label", {}, labelText), node);
 const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"; if (isBox) node.checked = !!obj[key]; else node.value = obj[key] ?? "";
@@ -310,7 +311,25 @@ function lastFramePanel() { const set = p => { C.lastImage = p; C.prompt = ""; }
     api("/api/library").then(list => list.filter(m => m.kind === "image").slice(0, 24).forEach(m => grid.append(el("div", { class: "tile" + (C.lastImage === m.path ? " on" : ""), onclick: () => { set(m.path); L.lib = false; render(); } }, media(m.path), el("div", { class: "cap" }, m.path.split("/").pop().slice(-26)))))).catch(() => {}); }
   if (C.lastImage) box.append(el("h3", {}, "Selected last frame"), el("div", { style: "max-width:420px" }, media(C.lastImage, { style: "width:100%;border-radius:8px" })));
   return box; }
-const isLong = () => Number(C.seconds) > 15;
+const isLong = () => !C.frames && Number(C.seconds) > 15;
+// Clip lengths (app/lengths.py). The model takes 17n + 5 frames at 24 a second and nothing in between: "seconds" is one
+// of the four usual lengths, "frames" a count of the user's own, and what is shown is always the exact time it gives.
+const exact = f => f + " frames · " + (f / S.lengths.fps).toFixed(3).replace(/\.?0+$/, "") + " s";
+const nearestFrames = s => { const L = S.lengths; let best = L.shortest; for (let f = L.shortest; f <= L.longest; f += L.step) if (Math.abs(f - s * L.fps) < Math.abs(best - s * L.fps)) best = f; return best; };
+const framesOf = o => Number(o.frames) || S.durations[o.seconds] || nearestFrames(Number(o.seconds) || 5);
+const lengthOf = o => o.frames ? { frames: Number(o.frames), seconds: Number(o.frames) / S.lengths.fps } : { seconds: Number(o.seconds) };
+const longestFor = o => (o.preset === "custom" ? S.lengths.custom : S.lengths.presets[o.preset]) || S.lengths.longest;
+function lengthPicker(obj, after, long = {}) { const L = S.lengths, own = !!obj.frames, most = longestFor(obj);
+  const pick = el("select", { "aria-label": "Clip length" }, [...Object.keys(S.durations).map(k => el("option", { value: k }, k + " s · " + exact(S.durations[k]))),
+    ...Object.entries(long).map(([k, v]) => el("option", { value: k }, v)), el("option", { value: "own" }, "Another length…")]);
+  pick.value = own ? "own" : String(obj.seconds);
+  pick.onchange = () => { if (pick.value === "own") { obj.frames = Math.min(framesOf(obj), most); obj.seconds = obj.frames / L.fps; } else { obj.frames = null; obj.seconds = Number(pick.value); } if (after) after(); };
+  if (!own) return pick;
+  if (obj.frames > most) { obj.frames = most; obj.seconds = most / L.fps; }
+  const slide = el("input", { type: "range", min: L.shortest, max: most, step: L.step, value: obj.frames, "aria-label": "Clip length in frames", style: "margin-top:6px" }), said = el("b", {}, exact(Number(obj.frames)));
+  slide.oninput = () => { said.textContent = exact(Number(slide.value)); };
+  slide.onchange = () => { obj.frames = Number(slide.value); obj.seconds = obj.frames / L.fps; if (after) after(); };
+  return el("div", {}, pick, slide, el("div", { class: "note" }, said, " · the model takes 17n + 5 frames: " + L.shortest + " to " + most + " here, " + L.step + " apart")); }
 // the explicit controls decide the mode, the quality and the output preset the server understands
 function sync() {
   if (C.start === "refs" && !(S && S.ref2va)) C.start = "text";
@@ -517,26 +536,28 @@ function videoControls(after) {
       el("div", { class: "note" }, "Any MiniMax H3 text encoder file on this machine. The Studio does not provide, check or recommend it: the file, its license and what you make with it are your own choice and responsibility.")) : null,
     el("div", { class: "row" },
       !S.x2 ? null : el("div", {}, el("label", {}, "Upscale"), el("label", { class: "switch" }, two, el("span", {}, "2x upscale", el("small", {}, UPSCALED[C.res] ? "2x decoder → " + UPSCALED[C.res][1] + ", about 10 s more" : "already part of this output")))),
-      el("div", { class: "fit", style: "width:250px" }, el("label", {}, "Length"), select(C, "seconds", { ...Object.fromEntries(Object.keys(S.durations).map(k => [k, k + " s · " + S.durations[k] + " frames"])),
-        ...(isRef() ? {} : Object.fromEntries(Object.entries(S.long).map(([k, v]) => [k, v + " · " + Math.ceil(k / 15) + " clips chained"]))) }, after)),
+      el("div", { class: "fit", style: "width:290px" }, el("label", {}, "Length"), lengthPicker(C, after, isRef() ? {} : Object.fromEntries(Object.entries(S.long).map(([k, v]) => [k, v + " · " + Math.ceil(k / 15) + " clips chained"])))),
       el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))));
 }
 function summary(est) {
   const size = output().size, hand = String(C.steps).trim() && !isRef() && C.engine !== "fasth3" ? " · " + C.steps + " passes (custom)" : "", engine = isRef() ? "MiniMax H3 Ref2VA · " + refPassText() : C.engine === "fasth3" ? "FastH3 · " + (String(C.steps).trim() ? C.steps + " passes (custom)" : C.passes + " passes") + " · " + S.engine : "MiniMax H3 · " + H3Q[C.h3quality][0];
   return el("div", { class: "summary" }, el("span", { class: "chip k" }, { t2v: "TEXT → VIDEO", scout: "QWEN IMAGE → VIDEO", i2v: "IMAGE → VIDEO", r2v: "REFERENCES → VIDEO" }[C.mode]),
-    el("span", { class: "chip" }, engine + hand), encoderOf() ? el("span", { class: "chip" }, "text encoder: " + (C.textEncoder === "__own" ? "your own" : encoderName(encoderOf()))) : null, el("span", { class: "chip" }, size[0] + " × " + size[1]), el("span", { class: "chip" }, isLong() ? S.long[C.seconds] + " · " + Math.ceil(C.seconds / 15) + " × 15 s" : C.seconds + " s · " + S.durations[C.seconds] + " f"), est);
+    el("span", { class: "chip" }, engine + hand), encoderOf() ? el("span", { class: "chip" }, "text encoder: " + (C.textEncoder === "__own" ? "your own" : encoderName(encoderOf()))) : null, el("span", { class: "chip" }, size[0] + " × " + size[1]), el("span", { class: "chip" }, isLong() ? S.long[C.seconds] + " · " + Math.ceil(C.seconds / 15) + " × 15 s" : exact(framesOf(C))), est);
 }
 function settingsRow(obj, after, keep = {}) {
   const presets = Object.entries(S.presets).filter(([k]) => !keep.presets || keep.presets(k));
   const qualities = Object.fromEntries(Object.entries(S.qualities).filter(([k]) => !keep.qualities || keep.qualities(k)));
   return el("div", { class: "row" },
-    field("Clip length", select(obj, "seconds", Object.fromEntries(Object.keys(S.durations).map(s => [s, s + " s (" + S.durations[s] + " frames)"])), after)),
+    field("Clip length", lengthPicker(obj, after)),
     field("Output", select(obj, "preset", Object.fromEntries(presets.map(([k, v]) => [k, v.label])), after)),
     field("Quality", select(obj, "quality", qualities, after)),
     el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(obj, "seed", el("input", { type: "number", min: 0 }))));
 }
-async function showEstimate(obj, node) { try { const r = await api("/api/estimate", { preset: obj.preset, quality: obj.quality, seconds: Number(obj.seconds), text_only: obj === C && noFrame(), referenced: obj === C && isRef(), ref_media: obj === C && refMedia(), ref_turbo: obj === C && isRef() && C.refPasses === "4", ...(obj === C ? { steps: String(C.steps).trim() } : {}), loras: obj === C && isRef() ? [] : lorasOf(obj) });
-  node.textContent = r.seconds ? "≈ " + mmss(r.seconds) + (S.platform === "spark" ? " on a DGX Spark, models loaded" : " on an M5 Ultra") : ""; } catch { node.textContent = ""; } }
+async function showEstimate(obj, node) { try { const r = await api("/api/estimate", { preset: obj.preset, quality: obj.quality, ...lengthOf(obj), text_only: obj === C && noFrame(), referenced: obj === C && isRef(), ref_media: obj === C && refMedia(), ref_turbo: obj === C && isRef() && C.refPasses === "4", ...(obj === C ? { steps: String(C.steps).trim() } : {}), loras: obj === C && isRef() ? [] : lorasOf(obj), with_lora: lorasOf(obj).length > 0, ...(obj.preset === "custom" && obj.cw ? { width: Number(obj.cw), height: Number(obj.ch) } : {}), references: obj === C && isRef() ? C.refs.length : 0 });
+  node.textContent = r.seconds ? "≈ " + mmss(r.seconds) + (S.platform === "spark" ? " on a DGX Spark, models loaded" : " on an M5 Ultra") : "";
+  // a DGX Spark's memory guard (spark/memory_guard.py): said here, before the clip is queued, with what fits
+  if (r.memory && r.memory.fits === false) put(node, el("div", { class: "tip", style: "margin-top:6px" }, el("b", {}, "This clip will be refused: memory"), el("div", {}, r.memory.reason)));
+  else if (r.memory && r.memory.need_mb) put(node, el("span", { title: "Estimated from measured peaks; the server is stopped if the machine runs low all the same." }, (r.seconds ? " · " : "") + "about " + Math.round(r.memory.need_mb / 1000) + " GB of this machine's memory")); } catch { node.textContent = ""; } }
 
 /* ---------- Motion reference: Motion Previs on <Video 1> of a reference clip ---------- */
 // C.motion: the analysis of the first reference video (a Motion Previs pack), what to carry over of it, and which
@@ -773,22 +794,26 @@ function viewCreate() {
       field("Music (N/A for none)", bind(C, "music", el("input", { "data-clear-to": "N/A" }))));
   } else if (C.step === 3) {
     const area = bind(C, "prompt", el("textarea", { style: "min-height:260px;font-family:ui-monospace,monospace;font-size:12px" }));
-    const again = async () => { const r = await api("/api/compose", { fields: { ...C, motion: isRef() ? motionFields() : null }, first_frame: !noFrame(), last_frame: !!lastOf(), seconds: Number(C.seconds), references: isRef() ? Math.max(C.refs.length, refMedia() ? 0 : 1) : 0, referenced: isRef(), loras: isRef() ? lorasOf(C) : [] }); C.prompt = r.prompt; area.value = r.prompt; };
-    if (!C.prompt) again();
-    put(body, el("h2", {}, "Review the prompt"), el("div", { class: "note" }, "This is what the video model receives, in MiniMax H3's own three-part format. Edit it freely; “Rebuild” discards edits."), area,
+    const again = async () => { const r = await api("/api/compose", { fields: { ...C, motion: isRef() ? motionFields() : null }, first_frame: !noFrame(), last_frame: !!lastOf(), ...lengthOf(C), references: isRef() ? Math.max(C.refs.length, refMedia() ? 0 : 1) : 0, referenced: isRef(), loras: isRef() ? lorasOf(C) : [] }); C.prompt = r.prompt; area.value = r.prompt; negShow(warned); };
+    const warned = el("div"); area.addEventListener("change", () => negShow(warned));
+    if (!C.prompt) again(); else negShow(warned);
+    put(body, el("h2", {}, "Review the prompt"), el("div", { class: "note" }, "This is what the video model receives, in MiniMax H3's own three-part format. Edit it freely; “Rebuild” discards edits."), area, warned,
       el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: again }, "Rebuild from steps 1–3"), el("span")));
   } else {
     const est = el("div", { class: "note" }); showEstimate(C, est);
     const job = C.job && jobs.find(j => j.id === C.job);
     const wants = loraWants();
     const ready = C.prompt.trim() && (isRef() ? C.refs.length + C.refVideos.length > 0 : noFrame() || C.image) && !wants.length;
-    put(body, el("h2", {}, "Render"), el("div", { class: "note" }, output().label + (String(C.steps).trim() && !isRef() ? " · " + C.steps + " passes (custom)" : "") + " · " + (isRef() ? "MiniMax H3 Ref2VA, " + refPassText() + ", " + [[C.refs.length, "picture"], [C.refVideos.length, "video"], [C.refAudios.length, "audio clip"]].filter(k => k[0]).map(k => k[0] + " reference " + k[1] + (k[0] === 1 ? "" : "s")).join(", ") + (motionFields() ? ", motion: " + MOTION_MODES[C.motion.mode][0].toLowerCase() + " from the " + MOTION_LAYERS[C.motion.layer][0].toLowerCase() + (C.motion.layer === "reference" ? "" : " layer") : "") : S.qualities[C.quality]) + " · " + (isLong() ? S.long[C.seconds] : C.seconds + " s") + (lastOf() ? " · ends on the last frame" : "") + " · seed " + C.seed), est,
+    put(body, el("h2", {}, "Render"), el("div", { class: "note" }, output().label + (String(C.steps).trim() && !isRef() ? " · " + C.steps + " passes (custom)" : "") + " · " + (isRef() ? "MiniMax H3 Ref2VA, " + refPassText() + ", " + [[C.refs.length, "picture"], [C.refVideos.length, "video"], [C.refAudios.length, "audio clip"]].filter(k => k[0]).map(k => k[0] + " reference " + k[1] + (k[0] === 1 ? "" : "s")).join(", ") + (motionFields() ? ", motion: " + MOTION_MODES[C.motion.mode][0].toLowerCase() + " from the " + MOTION_LAYERS[C.motion.layer][0].toLowerCase() + (C.motion.layer === "reference" ? "" : " layer") : "") : S.qualities[C.quality]) + " · " + (isLong() ? S.long[C.seconds] : exact(framesOf(C))) + (lastOf() ? " · ends on the last frame" : "") + " · seed " + C.seed), est,
       wants.map(w => el("div", { class: "note lorawant", style: "color:var(--warn)" }, el("b", {}, w.name + " needs: "), w.text + " ", el("button", { type: "button", class: "small", onclick: w.go }, w.label))),
       !ready ? el("div", { class: "note", style: "color:var(--warn)" }, C.prompt.trim() ? (isRef() ? (S.ref_media ? "Add a reference picture or video in step 2." : "Add a reference picture in step 2.") : "Pick or upload a first frame in step 2.") : "Open step 4 once to build the prompt.") : null,
+      negNote(),
+      isLong() ? null : el("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px", title: "After the render the app looks at the clip (app/shot.py): does it open on its first frame and end on its last, and is there a cut inside it. The verdict is shown beside the clip either way." },
+        bind(C, "retake", el("input", { type: "checkbox", style: "width:auto" })), "If the shot check fails (a keyframe not held, or a cut inside the shot), render it once more at the next seed. That is a second full render."),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !ready, onclick: async () => { try {
         const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
         const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
-          : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, seconds: Number(C.seconds) } });
+          : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
         C.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Queue this clip"),
         // the way back to step 1 once a clip is queued: with the same settings, or with the words cleared
         el("button", { class: "fit", onclick: () => { C.step = 0; C.job = null; render(); } }, "Back to the start, keep this setup"),
@@ -807,7 +832,7 @@ const segJob = seg => seg.job && jobs.find(j => j.id === seg.job);
 async function composeSeg(seg, index) { const first = seg.start !== "text"; const r = await api("/api/compose", { fields: { scene: seg.scene, action: seg.action, camera: seg.camera, soundscape: seg.soundscape, music: "N/A",
   dialogue: seg.line ? [{ voice: seg.voice, text: seg.line, language: "English" }] : [] }, first_frame: first }); seg.prompt = r.prompt; }
 async function generateSeg(index) { const seg = project.segments[index]; if (!seg.prompt) await composeSeg(seg, index);
-  const params = { prompt: seg.prompt, preset: project.preset, quality: project.quality, seconds: Number(seg.seconds), seed: Number(seg.seed || 1), ...(lorasOf(project).length ? { loras: lorasOf(project) } : {}), output: "projects/" + project.id + "/seg" + (index + 1) + "_" + Date.now() + ".mp4" };
+  const params = { prompt: seg.prompt, preset: project.preset, quality: project.quality, ...lengthOf(seg), seed: Number(seg.seed || 1), ...(lorasOf(project).length ? { loras: lorasOf(project) } : {}), output: "projects/" + project.id + "/seg" + (index + 1) + "_" + Date.now() + ".mp4" };
   if (seg.start === "image" && seg.image) params.image = seg.image;
   if (seg.start === "previous") { const prev = project.segments[index - 1]; if (!prev) throw new Error("the first segment has nothing to continue from"); const pj = segJob(prev);
     params.first_frame_from = prev.output || (pj && pj.params.output); if (!params.first_frame_from) throw new Error("generate segment " + index + " first, or queue them together"); }
@@ -835,7 +860,7 @@ function viewProduction() {
           for (const g of project.segments) { g.seed = S.sharp.seed; if (!S.sharp.seconds.includes(Number(g.seconds))) g.seconds = S.sharp.seconds[0]; } saveProject(); render(); }) : null),
       loraHub(project, saveProject),
       el("h3", {}, "Segment overview · " + total + " s total"),
-      el("div", { class: "strip" }, project.segments.map((s, i) => el("div", { style: "flex:" + (s.seconds || 5) }, (i + 1) + " · " + (s.title || "") + " · " + s.seconds + " s"))),
+      el("div", { class: "strip" }, project.segments.map((s, i) => el("div", { style: "flex:" + (s.seconds || 5) }, (i + 1) + " · " + (s.title || "") + " · " + Math.round(s.seconds * 100) / 100 + " s"))),
       el("div", { class: "row" }, el("button", { class: "fit", onclick: () => { project.segments.push({ title: "", scene: project.segments.at(-1)?.scene || "", action: "", camera: "", voice: "", line: "", soundscape: "", seconds: 5, seed: 1,
           start: project.segments.length ? "previous" : "text", image: null, prompt: "" }); saveProject(); render(); } }, "+ Add a segment"),
         el("button", { class: "hot fit", disabled: !project.segments.length, onclick: async () => { try { for (let i = 0; i < project.segments.length; i++) if (!project.segments[i].output || segJob(project.segments[i])?.status === "failed") await generateSeg(i);
@@ -850,7 +875,7 @@ function viewProduction() {
           el("button", { class: "small", disabled: i === 0, onclick: () => { project.segments.splice(i - 1, 0, project.segments.splice(i, 1)[0]); saveProject(); render(); } }, "↑"),
           el("button", { class: "small", onclick: () => { project.segments.splice(i, 1); saveProject(); render(); } }, "Remove")),
         el("div", { class: "row" }, keep(field("Title", bind(seg, "title", el("input"), saveProject))),
-          el("div", { class: "fit", style: "width:150px" }, el("label", {}, "Length"), select(seg, "seconds", Object.fromEntries(Object.keys(S.durations).map(s => [s, s + " s"])), saveProject)),
+          el("div", { class: "fit", style: "width:250px" }, el("label", {}, "Length"), lengthPicker({ get frames() { return seg.frames; }, set frames(v) { seg.frames = v; }, get seconds() { return seg.seconds; }, set seconds(v) { seg.seconds = v; }, preset: project.preset }, () => { saveProject(); render(); })),
           field("Opens on", select(seg, "start", { text: "nothing (text to video)", previous: "the last frame of the segment before", image: "an image from the library" }, () => { change(); render(); })),
           el("div", { class: "fit", style: "width:90px" }, el("label", {}, "Seed"), bind(seg, "seed", el("input", { type: "number" }), saveProject))),
         seg.start === "image" ? keep(field("Image path (copy from the Library tab)", bind(seg, "image", el("input", { placeholder: "scouts/…/scout_s3.png" }), saveProject))) : null,
@@ -864,8 +889,8 @@ function viewProduction() {
 }
 
 /* ---------- Editor ---------- */
-async function addToTimeline(path) { await ensureProject(); try { project = await api("/api/projects/" + project.id); } catch {} let duration = 5; try { duration = (await api("/api/probe?path=" + encodeURIComponent(path))).duration || 5; } catch {}
-  project.timeline.push({ path, in: 0, out: 0, duration }); await saveProject(); toast("Added to the timeline of " + project.name); if (tab === "Editor") render(); }
+async function addToTimeline(path, from = 0, to = 0) { await ensureProject(); try { project = await api("/api/projects/" + project.id); } catch {} let duration = 5; try { duration = (await api("/api/probe?path=" + encodeURIComponent(path))).duration || 5; } catch {}
+  project.timeline.push({ path, in: from, out: to, duration }); await saveProject(); toast("Added to the timeline of " + project.name + (to > from ? ", trimmed to " + from.toFixed(2) + " to " + to.toFixed(2) + " s" : "")); if (tab === "Editor") render(); }
 function viewEditor() {
   const box = el("section", { class: "card" }, el("h2", {}, "Clip editor"));
   ensureProject().then(async () => {
@@ -956,7 +981,7 @@ function lessons() {
         "4 passes is the quickest and a little softer. 8 is what FastH3 was trained for and the usual choice. 20 is for prompts with several actions or when 8 misses part of the prompt."], tip: "Try an idea at 4 or 8 passes first, then spend 20 on the version you like, with the same seed.", go: go(0, S.turbo ? "Video engine" : "Passes") },
       { t: "Resolution", d: ["480p (864 × 480) renders fastest and is the right size for testing. 720p and Native (1344 × 768) take longer and more memory." + (S.x2 ? " Draft and 2K render small and enlarge with the 2x decoder." : ""),
         "Custom lets you type a width and height: multiples of 32, each side " + S.custom.sides[0] + " to " + S.custom.sides[1] + ", and no more than 1344 × 768 pixels in total. Use it for portrait or square clips."], eg: "Portrait: 480 × 864.  Square: 768 × 768.", tip: "A custom size has no time estimate, so the queue cannot show the time left.", go: go(0, "Resolution") },
-      { t: "Length", d: ["A single clip is 5, 8, 10 or 15 seconds. Longer choices chain several 15 second clips; the lesson “Videos longer than 15 seconds” covers them.", "Time and memory grow with length, so test at 5 seconds."], go: go(0, "Length") },
+      { t: "Length", d: ["A single clip is 5, 8, 10 or 15 seconds, or “Another length…”: any count of 17n + 5 frames from 22 (0.9 s) to 362 (15.1 s), with the exact time shown as you move the slider. Longer choices chain several 15 second clips; the lesson “Videos longer than 15 seconds” covers them.", "Time and memory grow with length, so test at 5 seconds."], go: go(0, "Length") },
       { t: "Seed", d: ["The seed picks the variation. The same prompt, settings and seed give the same clip again; a different seed gives a different take on the same prompt."], tip: "When a clip is nearly right, keep the prompt and try seeds 2, 3 and 4 before rewriting anything.", go: go(0, "Seed") },
       { t: "Custom passes", d: ["Custom is a card of the Passes choice, right beside 20 passes. Choose it and a number box opens under the cards, starting at the count you had; type any number from " + S.custom.steps[0] + " to " + S.custom.steps[1] + ", for counts the cards do not offer, such as 6 or 12. Choosing another card again drops the custom count.", "With MiniMax H3 the Quality cards are recipes, and Custom sits in the same row after the two 20-step ones: it keeps the quality you had chosen (the note under the row names it) and changes only the count."], tip: "Like a custom size, this removes the time estimate.", go: go(0, "Passes") },
       { t: "Read the summary strip", d: ["Under the settings a strip repeats your choices as chips: the mode, the engine and passes, the size and the length, with the time estimate on the right. Check it before you move on."], go: go(0, "Length") } ] },
@@ -1008,7 +1033,7 @@ function lessons() {
       { t: "Let the First AD set it up", d: ["A new film opens on the First AD. Say what you are making in plain words. When it is clear, it creates the scenes and shots, writes their prompts, casts the characters and scouts the locations, and lists what it did."], eg: "A 30 second noir teaser: a detective, a rainy alley, one line of dialogue. Three shots.", tip: "The First AD and every ✦ button use the brain: your own Claude Code or Codex sign-in, or a local model. Pick it in the Bible and press “Test the brain”." },
       { t: "Bible and Studios", d: ["The Bible holds the logline, the world and tone, and how the film renders (resolution, quality). Studios holds the sheets: Casting, Art Department, Locations, Lookbook. Describe something in one line and ✦ Fill writes the sheet.", "In Casting, pin a still to a character (upload one, or have the image model make candidates from the sheet). That still is how the face stays the same from shot to shot."] },
       { t: "Shots", d: ["Each shot has specs (seconds, size, angle, lens, movement) and a prompt in six sections: Subject, Composition, Lighting, Camera, Style, Mood. ✦ Structure, Tighten, Enrich and the rest rewrite it; a Director's note changes it in plain words; the old version goes to History.", "✦ Coverage turns one scene description into a full set of shots from a coverage plan."] },
-      { t: "Roll camera", d: ["Under the prompt, choose what the shot opens on: text only, the last frame of the shot before, an image, or the cast's stills. Tick who is in the shot, add spoken lines, a soundscape and a cue.", "The shot is compiled to MiniMax H3's own prompt form, with a preflight list of anything that will not fit. “🎬 Render this shot” queues it; the clip comes back as a take. Circle the take that works."], tip: "Shots here are 5, 8, 10 or 15 seconds. Another length is rendered at the nearest one, and the preflight says so." },
+      { t: "Roll camera", d: ["Under the prompt, choose what the shot opens on: text only, the last frame of the shot before, an image, or the cast's stills. Tick who is in the shot, add spoken lines, a soundscape and a cue.", "The shot is compiled to MiniMax H3's own prompt form, with a preflight list of anything that will not fit. “🎬 Render this shot” queues it; the clip comes back as a take. Circle the take that works."], tip: "A shot is 1 to 15 seconds: it renders at the nearest length the model takes (17n + 5 frames), so a 6 second shot is 141 frames, 5.875 s." },
       { t: "Deliver", d: ["Deliver shows a scene as a strip. “Render every shot without a take” queues the scene in order; a shot that opens on the shot before starts from its last frame. “Send the film's takes to the Editor” puts the circled takes on the timeline, in order.", "The shot list downloads as Markdown or CSV, and the Bible downloads the project.json, which opens in Slate."] } ] },
     { id: "slatefilm", track: "Production", title: "A whole film in Slate, start to finished video", sub: "one sitting: idea, shots, renders, the final file", steps: [
       { t: "Start the film", d: ["This lesson takes one idea all the way to a finished video file without leaving the app. Open Production, pick “Wasserman Slate AI Studio”, type a name for the film and press “Create”.", "Everything you make is saved as you go in the film's own folder, in Slate's project format."], go: { tab: "Production", slate: true, spot: "Wasserman Slate AI Studio" } },
@@ -1107,12 +1132,31 @@ function viewTutorial() {
 // elapsed comes from the server: this browser's clock may differ from the machine that renders
 // Sam Wasserman's QA gate on a Sharp Spec clip: one line per take, with its contact sheet
 function qaLines(job) { const q = job.qa; if (!q) return null; const mark = r => ({ pass: "✓", fail: "✗", skipped: "–" }[r] || "?");
-  return el("div", { class: "note" }, el("b", { style: "color:" + (q.passed ? "var(--ok)" : q.passed === false ? "var(--bad)" : "inherit") }, "Wasserman QA gate: " + (q.passed && q.takes.at(-1).audio.result === "skipped" && q.takes.at(-1).identity.result === "skipped" ? "not checked, both gates are missing their tool on this machine" : q.passed ? "passed" + (q.takes.at(-1).audio.result === "skipped" || q.takes.at(-1).identity.result === "skipped" ? " the one gate that could run" : "") : q.passed === false ? "failed on both takes, the last take is kept" : "could not run")), q.error ? " · " + q.error : "",
+  return el("div", { class: "note" }, el("b", { style: "color:" + (q.passed ? "var(--ok)" : q.passed === false ? "var(--bad)" : "inherit") }, "Wasserman QA gate: " + (q.passed && q.takes.at(-1).audio.result === "skipped" && q.takes.at(-1).identity.result === "skipped" ? "not checked, both gates are missing their tool on this machine" : q.passed ? "passed" + (q.takes.at(-1).audio.result === "skipped" || q.takes.at(-1).identity.result === "skipped" ? " the one gate that could run" : "") : q.passed === false ? (q.takes.length > 1 ? "failed on both takes, the last take is kept" : "failed") : q.skipped ? "not run" : "could not run")), q.error ? " · " + q.error : "", q.note ? " · " + q.note : "", q.from ? " · run here on a clip fetched from " + q.from : "",
     q.takes.map(t => el("div", {}, "Take " + t.take + " · seed " + t.seed + " · speech " + mark(t.audio.result) + " " + (t.audio.heard ? "“" + t.audio.heard + "” · " : "") + t.audio.note + " · identity " + mark(t.identity.result) + " " + t.identity.note + (t.sharpness.length ? " · sharpness " + t.sharpness.join(" / ") : "") + " · ",
       el("a", { href: file(t.sheet), target: "_blank" }, "contact sheet")))); }
 // Sound against movement of a finished reference clip (app/pace.py): a flag beside the clip, never a failed job
 function paceLine(job) { const d = job.pace; if (!d) return null; const bad = d.verdict === "impact sound over slow motion";
   return el("div", { class: "note" }, el("b", { style: "color:" + (bad ? "var(--bad)" : d.verdict === "agree" ? "var(--ok)" : "inherit") }, "Sound and movement: " + (bad ? "impact sound over slow motion" : d.verdict === "agree" ? "agree" : "not measured")), d.note ? " · " + d.note : ""); }
+// The shot check on a finished clip (app/shot.py): keyframes held, no cut inside one shot. A flag beside the clip.
+function shotLines(job) { const q = job.shot; if (!q) return null; const takes = q.takes || [];
+  const frame = r => !r ? "none given" : (r.held ? "held" : "not held") + " (difference " + r.difference + " of 255, likeness " + r.likeness + ")";
+  const again = async () => { try { await api("/api/jobs", { kind: job.kind, title: job.title, params: { ...job.params, seed: q.offer } }); toast("Queued again at seed " + q.offer); poll(); } catch (e) { toast(e.message); } };
+  return el("div", { class: "note" }, el("b", { style: "color:" + (q.passed ? "var(--ok)" : q.passed === false ? "var(--bad)" : "inherit") }, "Shot check: " + (q.passed ? "passed" + (takes.length > 1 ? " on the second take" : "") : q.passed === false ? (takes.length > 1 ? "failed on both takes, the last take is kept" : "failed") : "could not run")), q.error ? " · " + q.error : "",
+    takes.map(t => el("div", {}, "Take " + t.take + " · seed " + t.seed + " · first frame " + frame(t.first) + " · last frame " + frame(t.last) + " · " + (t.cuts === null ? "cuts not looked for: the prompt writes a second shot" : t.cuts.length ? t.cuts.length + (t.cuts.length === 1 ? " cut" : " cuts") + " inside the shot, at " + t.cuts.map(c => c.seconds + " s").join(", ") : "no cut inside the shot"),
+      t.kept ? [" · ", el("a", { href: file(t.kept), target: "_blank" }, "the take that failed")] : null,
+      // the longest stretch without a cut (shot.py window): where an editor trims to when the model cut all the same
+      t.window && !t.window.whole ? [" · the longest stretch without a cut is frames " + t.window.start + " to " + (t.window.end - 1) + " (" + (t.window.frames / 24).toFixed(2) + " s)",
+        t === takes[takes.length - 1] && job.outputs && job.outputs[0] ? [" ", el("button", { class: "small", onclick: () => addToTimeline(job.outputs[0], t.window.in, t.window.out) }, "+ timeline, trimmed to it")] : null] : null)),
+    q.offer != null && !job.params.output ? el("div", {}, "The model does this at some seeds whatever the prompt says. ", el("button", { class: "small", onclick: again }, "Render it again at seed " + q.offer)) : null); }
+// What a video prompt forbids by name (app/negation.py): said, never taken out
+const negText = list => list.map(n => "“" + n.phrase + "”" + (n.field ? " (" + n.field + ")" : "")).join(", ");
+function negLines(job) { const list = job.negations; if (!list || !list.length) return null;
+  return el("div", { class: "note" }, el("b", { style: "color:var(--warn)" }, "The prompt forbids by name: "), negText(list) + ". " + S.negation_reason); }
+async function negShow(node) { const text = C.prompt; try { const r = await api("/api/prompt/check", { prompt: text }); C.negations = r.negations; C.negFor = text; } catch { C.negations = []; }
+  if (node) node.replaceChildren(...[negNote()].filter(Boolean)); }
+function negNote() { if (C.negFor !== C.prompt) { negShow(null).then(() => { if (C.negations.length) render(); }); return null; }
+  return C.negations.length ? el("div", { class: "tip", style: "margin-top:8px" }, el("b", {}, "This prompt forbids " + (C.negations.length === 1 ? "something" : C.negations.length + " things") + " by name"), negText(C.negations) + ". " + S.negation_reason + " The prompt is sent as you wrote it.") : null; }
 function jobCard(job) { const p = job.progress; const elapsed = job.elapsed != null ? job.elapsed : (job.started ? ((job.finished || Date.now() / 1000) - job.started) : null);
   // the bar follows the time against the estimate (a job has several stages, each with its own step count)
   const share = job.estimate && elapsed != null ? Math.min(99, Math.max(3, Math.round(100 * elapsed / job.estimate))) : (p ? Math.round(100 * p.at / p.of) : 3);
@@ -1124,7 +1168,7 @@ function jobCard(job) { const p = job.progress; const elapsed = job.elapsed != n
       el("button", { class: "small", onclick: () => pre.classList.toggle("hide") }, "Log")),
     job.status === "running" ? el("div", {}, el("div", { class: "bar" }, el("i", { style: "width:" + share + "%" })),
       el("div", { class: "note" }, (p ? p.stage + " " + p.at + "/" + p.of + " · " : "loading · ") + (job.estimate && elapsed != null ? (job.estimate - elapsed > 5 ? "about " + mmss(job.estimate - elapsed) + " left" : "almost done") : "no time estimate for this setting") + (job.passes ? " · " + job.passes + " passes" : "") + (job.engine ? " · " + (job.engine === "zig" ? "native Zig engine" : job.engine === "cuda" ? "CUDA" : "MLX engine") : ""))) : null,
-    job.status === "done" && elapsed ? el("div", { class: "note" }, "Took " + mmss(elapsed) + (job.passes ? " · " + job.passes + " passes" : "") + (job.engine ? " · " + (job.engine === "zig" ? "native Zig engine" : job.engine === "cuda" ? "CUDA" : "MLX engine") : "")) : null, job.error ? el("div", { class: "note", style: "color:var(--bad)" }, job.error) : null, qaLines(job), paceLine(job), pre); }
+    job.status === "done" && elapsed ? el("div", { class: "note" }, "Took " + mmss(elapsed) + (job.passes ? " · " + job.passes + " passes" : "") + (job.engine ? " · " + (job.engine === "zig" ? "native Zig engine" : job.engine === "cuda" ? "CUDA" : "MLX engine") : "")) : null, job.error ? el("div", { class: "note", style: "color:var(--bad)" }, job.error) : null, qaLines(job), shotLines(job), negLines(job), paceLine(job), pre); }
 function jobTools() { const done = jobs.filter(j => ["done", "cancelled"].includes(j.status)).length, failed = jobs.filter(j => j.status === "failed").length;
   for (const id of [...PICK]) if (!jobs.some(j => j.id === id && !["queued", "running"].includes(j.status))) PICK.delete(id);
   $("#jobtools").replaceChildren(...(done || failed ? [
@@ -1146,7 +1190,7 @@ function render() { $("#tabs").replaceChildren(...TABS.map(t => el("button", { c
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
   // links can preset the Create form: ?goes=image, ?engine=h3&res=720p&up=1&step=4 ...
   for (const [k, v] of new URLSearchParams(location.search)) if (k in C && k !== "mode") C[k] = k === "up" ? v === "1" : (k === "step" || k === "count" ? Number(v) : v);
-  S = await api("/api/state"); await loadLoras(); if (!S.turbo) C.engine = "fasth3"; sync(); $("#gohome").onclick = () => { tab = "Create"; C.step = 0; T.coach = false; history.replaceState(null, "", "#Create"); window.scrollTo(0, 0); render(); }; $("#plat").textContent = S.platform_label; $("#plat").className = "plat " + S.platform; document.title = "Wasserman Slate AI Studio · " + (S.platform === "spark" ? "DGX Spark" : "Mac"); $("#ver").textContent = "pack " + S.version; $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
+  S = await api("/api/state"); await loadLoras(); if (!S.turbo) C.engine = "fasth3"; sync(); $("#gohome").onclick = () => { tab = "Create"; C.step = 0; T.coach = false; history.replaceState(null, "", "#Create"); window.scrollTo(0, 0); render(); }; $("#plat").textContent = S.platform_label; if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } $("#plat").className = "plat " + S.platform; document.title = "Wasserman Slate AI Studio · " + (S.platform === "spark" ? "DGX Spark" : "Mac"); $("#ver").textContent = "pack " + S.version; $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
   // ?motionref opens the create wizard on the motion reference stored by the Motion Previs tab
   if (new URLSearchParams(location.search).has("motionref")) { try { const r = (await api("/api/motion/handoff")).reference; if (r) useMotionReference(r, await api("/api/motion/packs/" + r.pack).catch(() => null)); } catch {} } })();
 </script>

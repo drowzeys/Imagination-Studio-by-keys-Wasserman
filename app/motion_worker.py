@@ -869,7 +869,7 @@ def describe_camera(camera: dict | None, seconds: float | None = None) -> dict:
     parts.sort(key=lambda item: -item[0])
     if not parts:
         sentence = ("Handheld shot that holds its framing: the camera stays on one spot with a slight natural shake." if shake > SHAKE
-                    else "Locked-off static shot: the camera does not move.")
+                    else "Locked-off static shot on a still camera.")
     else:
         words = [text for _, text in parts]
         sentence = "The camera " + (words[0] if len(words) == 1 else ", ".join(words[:-1]) + " while it " + words[-1]) + "."

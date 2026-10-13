@@ -64,7 +64,7 @@ MEM_GB=$(awk '/MemTotal/{print int($2/1048576)}' /proc/meminfo)
 ok "$GPU, $(uname -m), ${MEM_GB} GB"
 case "$GPU" in *GB10*) ;; *) echo "  ! measured only on a DGX Spark (GB10, 128 GB unified memory); other GPUs are untested";; esac
 [ "$MEM_GB" -ge 100 ] || [ "$IMAGE_ONLY" = 1 ] || die "video needs about 90 GB of memory at 1344x768 (128 GB machine); this one has ${MEM_GB} GB. --image-only fits."
-for tool in git ffmpeg; do command -v "$tool" >/dev/null || die "install $tool first (sudo apt install $tool)"; done
+for tool in git ffmpeg ffprobe; do command -v "$tool" >/dev/null || die "install $tool first (sudo apt install $([ "$tool" = ffprobe ] && echo ffmpeg || echo "$tool"))"; done
 if ! command -v uv >/dev/null; then
   [ "$VERIFY" = 0 ] || die "no uv"
   curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null

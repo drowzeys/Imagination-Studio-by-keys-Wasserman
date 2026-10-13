@@ -65,7 +65,10 @@ Rules:
 - Qwen-Image-2.1-Turbo is non-commercial (Qwen Research License). MiniMax H3 has territory limits.
   Do not redistribute weights, and say so when asked to use the outputs commercially.
 - Image sizes are multiples of 16. For the studio chain both models must accept the canvas: multiples of 32, at most
-  768x1344 pixels in total. Video frames must be `17n + 5` (56, 73, 90, 124, 192, 243, 362).
+  768x1344 pixels in total. Video frames must be `17n + 5`, from 22 to 362 (`app/lengths.py`): the app takes any
+  of the 21 counts (`frames`, or `seconds` brought to the nearest) and always shows the exact seconds, frames / 24.
+  "10 s" is 243 frames, 10.125 s. Do not add a length the model does not take, and do not raise the 15 s limit
+  without measuring the memory on a Spark (362 frames at 1376x768 left 29.7 GB free on TensorFold's int8 engine).
 - Preferred flow: scout at 1280x736, let the person pick, then `IMAGE_FILE=... TWOK=1` (2048x1152, 2.5 min) or `QHD=1` (2560x1440, 6 min) for the 2K final; `X2=1` for a
   one-minute 1344x768 draft. `X2=1` needs WIDTH and HEIGHT in multiples of 64. 720-row canvases are not valid for the
   video model: use the QHD preset, which generates 736 rows and crops.
@@ -112,7 +115,8 @@ Rules:
   with the control-video prompt (`motion_template` in `app/server.py`: structural template,
   first-frame anchor, legend, "labels only", and the negative): keep that wording, and do not promise figures: one shot was
   measured. Do not promise an exact copy of a voice from reference audio either. On this machine every render runs through the
-  ComfyUI server of `spark/comfy.sh`, never as standalone model code: the server's loop is the only memory guard.
+  ComfyUI server of `spark/comfy.sh`, never as standalone model code: the guard beside the server (`spark/memory_guard.py watch`, started by `comfy.sh`) is the
+  only run-time memory guard.
 - On a DGX Spark reference to video is `oneshot-setup-spark.sh --ref2va` and the same `REF_IMAGES` / `REF_TURBO=1`
   (`spark_generate.py video --ref`): ComfyUI's `MiniMaxH3ReferenceToVideo` on its own blocks, never
   `TensorFoldH3Blocks`. The adapter is merged at run time, so it needs the bf16 transformer: on an 8-bit
@@ -127,6 +131,35 @@ Rules:
 - Merge adapters with the tools (`--lora`), never by hand into bfloat16.
 - The fast path is M5-only (Metal 4 tensor operations).
 - The two models never load together; `studio.sh` runs them one after the other.
+- Edit a picture (`edit_plan.py`, read by `qwen_image_edit.py` and `spark/spark_edit.py`): the noise is drawn for the
+  seed and the pictures together (`noise_seed`). Never seed it with the user's seed alone: an edit that starts from
+  the noise its picture was made from returns that picture, over-sharpened. The result has the first picture's own
+  size; up to ten pictures go in one edit, and the model knows them as image 1, image 2, ...
+- The video model has no negative prompt on any route. `app/negation.py` lists what a prompt forbids by name and the
+  page shows the list before the job is queued; never rewrite the user's prompt, and do not add "no X" lines to the
+  prompts the app writes, for the picture or the sound: a clip without lines is told `QUIET_PICTURE` ("Mouths stay
+  closed.", only where the shot has people) and `QUIET_SOUND` in `app/server.py`, a locked camera is "a locked, still
+  camera" (`MOVES` in `app/slate.py`). The tests hold a compiled prompt to the app's own check with `OWN` emptied.
+- Slate (`app/slate.py`, `app/static/slate.js`): a shot's `intent` never goes into the prompt. A sheet of the bible is
+  changed in place (`SL_BIBLE` and the `update_*` actions): never add a second one with the same name, the id is what
+  shots cast. A slot in bars (`tf.bars`, with `tf.song` on the project) sets the clip's frames through
+  `shot_frames`; the tempo is the user's. `tests/test_slate_page.py` runs the page code in node: keep it passing.
+- A clip from another machine's app is read through `app/remote.py` (`/api/qa`, `/api/slate/takes`): addresses are
+  `http://host:port` only and paths are media files inside that app's folder. Do not widen either.
+- Nothing a request handler calls may run a tool without a time limit (`tests/test_api_answers.py`); the GPU's name
+  is asked of nvidia-smi once and kept.
+- `app/shot.py` checks a finished single clip: first and last frame held, no cut inside one shot. Its thresholds are
+  set from one production run and are written out, with the figures, at the top of the file: change them only with
+  new measurements. A failed check never fails the job; the retake at the next seed is the user's choice.
+- On a DGX Spark a crop (the 720p preset) is made inside the workflow (`crop_frames` in `spark/spark_generate.py`),
+  not with ffmpeg afterwards. What needs ffmpeg is refused when it is queued (`without_ffmpeg` in `app/server.py`).
+- DGX Spark memory (`spark/memory_guard.py`; the README's *The memory guard*): a clip is checked before it is queued
+  (`memory_of` in `app/server.py`) and again in `spark_generate.py` before anything loads, and the guard stands beside
+  every server `comfy.sh` starts. Never start ComfyUI another way. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
+  are measurements: a clip with a LoRA is refused above 1280x736 at 124 frames because a 1376x768 one took a Spark
+  down and nobody knows why from its logs. Raise them only by measuring from below on a worker Spark, in small steps,
+  under a second watchdog that kills your own server at 25 GB available; never by trying the size that failed, and
+  never on a machine with `vm.panic_on_oom=1`. Do not lower the floor to make a job fit.
 - mflux and minimax-h3-mlx are pinned by commit and used at run time. Do not unpin.
 
 **Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), MiniMax (H3), Ash Hart (TensorFold), antirez (h3.c),

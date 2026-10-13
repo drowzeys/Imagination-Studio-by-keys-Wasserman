@@ -25,7 +25,7 @@ Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo ada
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
 contributor. This pack is their work, ported, pinned and measured. See [CREDITS.md](CREDITS.md). Built with Qwen.
 
-**2.6.5** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.6.6** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
@@ -125,6 +125,14 @@ bash oneshot-setup.sh            # the same command as on a Mac: on Linux it run
 bash scripts/app.sh              # http://127.0.0.1:7870
 ```
 
+ffmpeg is part of the install, and the installer stops without it. A Spark that was set up some other way (a copy of
+another Spark's folders, say) may lack it: the app then starts, says so in its log and in the page's header, and
+refuses the jobs that need it when they are queued. The 720p preset is not one of them any more: it generates
+1280x736 and crops to 1280x720, and the crop is now made inside the ComfyUI workflow, before the clip is encoded
+(one encode instead of two); in 2.6.5 it was an ffmpeg pass after the render, and a Spark without ffmpeg lost the
+finished clip there. Without ffmpeg a clip also keeps ComfyUI's own sound track instead of the limited 256 kb/s one,
+and the render says so.
+
 #### Upgrade from 2.5 or 2.6 (DGX Spark)
 
 ```bash
@@ -188,8 +196,58 @@ What is different from the Mac build:
 - **Why int8.** The GB10's tensor cores run int8 products at 245 TOPS and bf16 ones at 122 (measured on registers).
   PyTorch's stock int8 routine reaches about 52; the engine's own kernel 150 to 175 on FastH3's shapes.
 - ComfyUI keeps running with the models loaded after a render (`bash spark/comfy.sh stop` frees the memory). It runs
-  at low priority and is stopped if free memory falls under 4 GB, because a Spark that runs out can become
-  unreachable.
+  at low priority with a memory guard beside it, because a Spark that runs out can become unreachable: see
+  *The memory guard* below.
+
+### The memory guard (DGX Spark)
+
+On a Spark the GPU and the system share one pool of memory. On 2026-10-13 one clip with a LoRA at 1376x768 took a
+worker Spark down: the app accepted it, and the server's check (once a second, against 4 GB) did not act. The guard
+in `spark/memory_guard.py` replaces that check, in three layers that every way of starting a render goes through
+(the app, `scripts/video.sh`, `spark_generate.py`, a worker's copy of this folder):
+
+1. **Before a clip is queued, and again before anything is loaded**, its peak is estimated from measured peaks. A
+   clip that would leave the machine under its floor is refused, with the reason and the nearest size and length
+   that fit. In the app the settings step shows the same line before you queue; a clip that fits shows "about N GB of
+   this machine's memory".
+2. **While the server runs**, the guard reads the machine's memory twenty times a second. It stops the server when
+   available memory is under the floor (a tenth of the machine: 12.4 GB; `SPARK_MEMORY_FLOOR_MB`), or is falling so
+   fast that it would be under a third of the floor within a second, or when the kernel reports work stalled on
+   memory. The job fails with that reason. It also gives the model files' page cache back when little memory is
+   free (`SPARK_MEMORY_FREE_MB`, 8.3 GB): the GPU driver takes its memory from what is free, not from what is
+   available.
+3. The server is marked as the first process the kernel ends if memory runs out all the same.
+
+| Measured on a 124.5 GB Spark, nothing else running (118.7 GB available) | Rows a pass | Taken at the lowest point |
+|---|---|---|
+| TensorFold int8 engine, 864x480, 124 frames | 15.4K | 57.6 GB |
+| TensorFold int8 engine, 1376x768, 124 frames | 39.2K | 62.2 GB (62.1 to 64.2 in a production run) |
+| TensorFold int8 engine, 1376x768, 192 and 243 frames (that run, sampled every 11 s) | 59.9K, 75.3K | 67.1 GB, 69.0 to 70.9 GB |
+| With a LoRA (ComfyUI's own blocks, bfloat16), 864x480, 56 and 124 frames | 7.3K, 15.4K | 75.4 GB, 75.9 GB |
+| With a LoRA, 1280x736, 22, 56, 90, 107 and 124 frames | 7.4K to 35.0K | 74.8, 75.8 to 76.2, 76.2, 76.5, 76.6 GB |
+
+The estimate is a straight line through those points for each route plus 6 GB (no point is more than 1.7 GB from its
+line; most are one run). Three things it does not know, said plainly:
+
+- **A clip with a LoRA is refused above the largest one measured**, 1280x736 at 124 frames (35.0K rows), whatever
+  the line says: 1344x768 and the Sharp Spec size take a LoRA at no length, 864x480 up to 277 frames (11.5 s). By
+  the line the clip that took the Spark down needs 77 GB and leaves 41, and that is what the machine showed for a
+  minute before it was lost, so its end is not explained by how much memory the clip takes and the size is not
+  offered. Its logs were never read; what is known is in the next paragraph.
+- Reference clips (Ref2VA), MiniMax H3's own transformer and a Spark without the engine were not measured here; they
+  are estimated on the LoRA line with their references' rows added.
+- Pictures, edits and Library actions are not estimated: the running guard covers them.
+
+What was found about the old check: memory falls far faster than once a second can follow (7.2 GB a second while
+ComfyUI loads a model from the page cache, 13 GB in half a second while TensorFold's engine loads its weights), and
+"available" counts the page cache. With a LoRA, ComfyUI loads until nothing is free: free memory sat at 1.2 to 2.5 GB
+through every such render while 43 GB read as available, and the kernel logged the GPU driver being refused memory
+(`NVRM ... NV_ERR_NO_MEMORY`) at 2 GB free and 54 GB available. With the guard beside the server the same renders
+kept 8 GB or more free, took the same time (146 s against 145 s), and the driver logged nothing. Proof of the two
+refusals, without a machine near its limit: the app and `scripts/video.sh` both refuse the lost clip before anything
+loads, and a server started with `SPARK_MEMORY_FLOOR_MB=70000` was stopped during a small clip's load at 69.8 GB
+available (lowest point 69.77 GB while memory fell at 28 GB a second; gone in 0.5 s, the job failed with the reason).
+`python3 spark/memory_guard.py check --width 1376 --height 768 --frames 124 --lora` prints a verdict.
 
 Longer clips on the engine: 10 seconds at 1280x720 (243 frames) took 444 s, a pass 43.7 s, against 378 s on an M5 Ultra
 for the same prompt; a 30 second chained clip at 864x480 (two 15 second parts) took 611 s.
@@ -199,6 +257,34 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.6.6 (2026-10-13): what two music-video productions found.**
+> Two three-minute videos were made through the app on up to five DGX Sparks; this release fixes what they ran into.
+> - **A memory guard on a DGX Spark.** A clip with a LoRA, at 1376x768, took a Spark down. A job is now checked
+>   before it is queued and again before anything loads: the estimated peak comes from measured renders (int8 engine
+>   54.5 GB + 0.215 GB per 1000 rows; ComfyUI's bf16 blocks, which a LoRA uses, 75.0 GB + 0.047 GB), and a LoRA clip
+>   larger than the largest one measured (1280x736, 124 frames) is refused with the size that fits. Beside every
+>   render server a watch reads memory twenty times a second (the old loop read once a second) and stops the render
+>   under a floor of a tenth of the machine. That exact job is now refused by the app and by the scripts. Why the
+>   Spark died is only partly established: its logs were never read.
+> - **Edit a picture**: any seed gives an edit (the seed that made the source used to return a sharpened copy), up to
+>   nine further pictures, and the result has the source's own size. A given seed gives a different picture than in
+>   2.6.5.
+> - **Any clip length the model takes**: 21 lengths from 22 to 362 frames, in place of 5, 8, 10 and 15 s.
+> - **A prompt check for negations**: "no photographs" produced photographs. The page lists negated things before a
+>   job is queued; it never changes the prompt. The app's own added lines are now positive ("Mouths stay closed.").
+> - **A shot check after a render**: whether the first and last keyframe were held, any hard cut inside the clip, and
+>   the longest stretch without one, with an optional retake at the next seed. Thresholds are set on the first
+>   production's clips (12 of 12 cuts found, none invented in 7081 frame pairs). A dissolve to a close-up is not
+>   detected, and no wording or setting tried stops the model from cutting.
+> - **Slate for music videos**: tempo and bar grid on the project, shot slots in bars, a LoRA per shot (through the
+>   guard), a change action for characters and places, the shot's intent kept out of the prompt, and takes rendered
+>   on another machine imported into a shot.
+> - **720p on a DGX Spark without ffmpeg**, a QA gate that says when it did not run (and can run on a head node for a
+>   clip from a worker), and an API that keeps answering while a LoRA job starts.
+> - Not tested: the new pages in a browser beyond a load, a Mac under 96 GB, reference clips at the new lengths, LoRA
+>   clips above 1280x736 (on purpose), and the First AD's new actions with a live brain. On a Mac one short clip was
+>   rendered through this build; the memory guard does nothing there.
+>
 > **2.6.5 (2026-10-13): 3D Animation Style, and Multiple Angles in the essential package.**
 > - **3D Animation Style** (SOLRICKS) installs and renders: its file is in kohya's own layout
 >   (`lora_unet_blocks_0_attn_qkv_proj`), which the hub refused. Measured on a DGX Spark, same seed with and without
@@ -559,12 +645,103 @@ and roughly how long it takes.
 | **Quality** (MiniMax H3, with `--turbo`) | Turbo 5 + base sound (the standard), Turbo 3, 20 steps with the fast recipe, or plain 20 steps. |
 | **Resolution** | 480p (864x480), 720p (1280x720), or the fixed outputs Draft, 2K 2048x1152 and Native 1344x768. |
 | **2x upscale** | For 480p and 720p: the 2x decoder turns 480p into 1728x960 and 720p into 2560x1440, for about 10 s more. |
-| **Length** | 5, 8, 10 or 15 s as one clip; 30 s to 30 min as a chain of clips (below). |
+| **Length** | 5, 8, 10 or 15 s as one clip, or *Another length…* for any length the model takes (below); 30 s to 30 min as a chain of clips (further below). |
 | **Seed** | Same seed and settings give the same clip. |
 
 Then write the scene, what happens to the characters, and optionally the camera move. Steps 3 to 5: add spoken or sung lines and
 the soundscape, review the exact prompt the model will receive (edit it freely), and queue the render. The **Queue**
 on the right shows progress by pass, a time estimate, the log, and a cancel button.
+
+### Clip lengths: any length the model takes
+
+MiniMax H3 and FastH3 make clips of `17n + 5` frames at 24 frames a second and nothing in between. The four usual
+lengths are four of those counts, and their names are rounded: "10 s" is 243 frames, 10.125 s. *Another length…*
+in the Length box opens a slider over every count, and the page writes the frames and the exact seconds beside it.
+
+| | Frames | Seconds |
+|---|---|---|
+| Shortest | 22 | 0.917 |
+| The usual four | 124, 192, 243, 362 | 5.167, 8, 10.125, 15.083 |
+| All 21 | 22, 39, 56, 73, 90, 107, 124, 141, 158, 175, 192, 209, 226, 243, 260, 277, 294, 311, 328, 345, 362 | frames / 24 |
+
+Through the API a job carries `frames` (one of the counts; another number is refused with the two nearest) or
+`seconds` (any number from 0.9 to 15.1, brought to the nearest count: `seconds: 6` is 141 frames, 5.875 s). The end
+moment in a last-frame prompt is the clip's true length. Production segments and Slate shots take any length the
+same way. The longest clip stays the model's 15 seconds on every size of both builds. On a DGX Spark that was
+measured at the largest canvas, 1376x768 with a first and a last frame: 362 frames rendered with 29.7 GB of the
+machine's 121 GB still free at the lowest point (one run, TensorFold's int8 engine, 4 passes; the memory does not
+depend on the passes). A clip with a LoRA renders on ComfyUI's own bfloat16 blocks and needs more memory: it
+is taken up to 1280x736 at 124 frames (or as many rows a pass at a smaller size) and refused above that with the
+reason and what fits (*The memory guard*, in the DGX Spark section). On the Mac
+22, 141 and 345 frames were rendered at 864x480 through the app (26 s, 72 s and 226 s a job on an M5 Ultra, native
+engine, 8 passes); its limits are the ones it had.
+
+### What the app tells you about a prompt and a clip
+
+**Words that forbid.** The video model is run without a negative prompt, so every word in a prompt is something to
+show. In the production run that led to this check, a clip told "No photographs or portraits appear anywhere" hung
+the wall with photographs, twice, and came out clean once every mention of photographs was gone. Step 4 and step 5 of
+*Create* (and a Slate shot's preflight) now list what a prompt forbids by name ("no X", "without X", "not X",
+"never X") with the reason, in the box it was written in. Nothing is taken out or rewritten: the prompt goes as you
+wrote it, and the job in the queue repeats the list. The Studio's own sentences forbid nothing by name any more: a clip without spoken
+lines used to be told "Nobody speaks." and "No voices, no speech.", and a locked camera in Slate "the camera does not
+move". They now read "Mouths stay closed." (only where the shot has people: Slate's cast, or a person in the words),
+"Only ambient sound is heard." and "Static shot on a locked, still camera.", and a prompt the app writes passes its
+own check with nothing passed over. One comparison was made, not a study: the same two-person shot at 864x480, 5 s,
+seeds 42 and 43, in the old words and the new; in all four clips the speech-to-text model found no speech, and the
+mouths stayed closed in the frames looked at. A prompt that still carries the old sentences is not flagged for them.
+No route of the app has a negative prompt field: FastH3, MiniMax H3 Turbo and Qwen-Image-2.1-Turbo all run one forward a pass.
+`POST /api/prompt/check {"prompt": "..."}` gives the same list for a prompt written by hand.
+
+**The shot check.** After a single clip is rendered the app looks at its frames (`app/shot.py`) and writes the
+verdict beside the clip in the queue:
+
+- *First frame, last frame.* A keyframe is something the model reads, not a frame written into the clip, and
+  almost always the clip opens and ends on it. In the same run 63 of 64 keyframes were held (a mean difference of
+  1.4 to 3.9 grey levels of 255 between the frame and the picture); one clip opened on another picture (74.4), so its
+  join with the clip before jumped. Rendered again on another Spark at the same seed it came out the same, frame for
+  frame: it is what the model does at that seed. The check compares frame 0 with the first picture and the last frame
+  with the last, and says "not held" over 12 grey levels.
+- *A cut inside the shot.* FastH3 sometimes cuts to a close-up that is in neither keyframe: 12 cuts in 9 of that
+  run's 32 clips. The check finds a frame that is unlike the one before it (a correlation under 0.70) and changes at
+  least 1.75 times as much as the frames around it; it found all 12 and nothing else in the 7081 frame pairs. A
+  prompt that writes a `[Shot 2]` asks for a cut and is not checked for one. A cross-fade is not a cut.
+  No wording or setting we tried stops it. One of those clips (a couple dancing in a hall, small in a wide frame,
+  8 seconds at 1280x736) was rendered again at its own seed eight ways: as it was; with a camera line in plain
+  positive words ("one continuous wide shot from a locked-off camera…"); with the run's "No cut, no close-up" line;
+  on ComfyUI's own bfloat16 blocks in place of TensorFold's int8 engine; with dense attention; at 20 passes; at 5
+  seconds; and with the first frame alone. All eight left the wide shot for close-ups of the two faces. Five did it
+  with a hard cut, which the check reports. Three (the "no close-up" line, the first frame alone, 20 passes) did it
+  with a dissolve through a double exposure, **which the check does not see**: half a second of a dissolve measures
+  like half a second of honest fast movement in the run's other clips, so there is no threshold to set. The plain
+  positive camera line was also tried on the two other dining-hall clips at their seeds: both cut, twice each. So
+  look at a clip yourself, whatever the check says: it reports hard cuts and nothing subtler.
+- *The retake.* Tick "If the shot check fails, render it once more at the next seed" in step 5 (`retake: true` in a
+  job), and a clip that fails is rendered a second time at seed + 1, like the Sharp Spec QA gate; the failed take is
+  kept in the `qa` folder. Without the tick the verdict comes with a button, *Render it again at seed N*. The
+  thresholds come from one run on one model at one size; `shot_check: false` in a job turns the check off.
+
+- *Where to trim.* FastH3 also opens some clips on an establishing shot nobody asked for and then cuts to the shot (4
+  of 36 clips in a later run, the cut at frames 10 to 28). The check's report carries `window`: the longest stretch of
+  the clip without a cut, as frames (`start`, `end`) and as the timeline's `in` and `out` seconds. The job card says
+  it and has *+ timeline, trimmed to it*; a job's result has it under `shot.takes[].window`, and
+  `GET /api/shot/window?path=renders/x.mp4` gives it for any clip in the studio's folder. It knows hard cuts only.
+  The other thing that run met, an action carried on past where the prompt stops, is not detected by anything here.
+
+**The Sharp Spec's QA gate, where its tools are missing.** The gate needs ffmpeg (the contact sheet, the sound) and a
+speech-to-text tool. On a machine without ffmpeg, a worker Spark as installed for one, the clip is made and the job's
+result now says that the gate did not run and why (`qa.skipped`, `qa.note`); so does a job queued with `qa: false`.
+`/api/state` has `qa.runs` and `qa.missing`. A machine that has the tools runs the gate on a clip from one that has
+not: `POST /api/qa {"from": "http://worker:7870", "job": "<its job id>"}` (the clip, the prompt and the seed are read
+from that job), or `{"from": ..., "path": "renders/x.mp4", "prompt": "..."}`, or `{"path": ...}` for a clip already
+here. The answer is a job to poll, outside the render queue (no GPU); its `qa` is the gate's report, with the clip
+kept under `qa/fetched`. Tried between two Sparks: the head fetched four clips from a worker's app and gave each a
+sheet and an identity verdict in 8 to 28 s. The transcript half had been failing on the Spark build with every clip
+(faster-whisper opening the sound through an older PyAV); it now runs, 12 s a clip on the CPU.
+
+**Without ffmpeg.** The header shows a line when ffmpeg is missing, with what then does not work (long videos, the
+timeline export, a frame taken from a clip, reference videos and audio), and such a job is refused when it is queued,
+with the command that installs ffmpeg, not after its render. Single clips and pictures render without it.
 
 ### Image only
 
@@ -589,6 +766,25 @@ latents, and the model draws the picture again as the prompt describes it.
   Pick angles one by one or take a set (*Five views around*, *Full orbit*, *Four heights*, *Wide and close*): each
   angle is one picture from one load of the model, up to 12 a job. The ring writes the author's captions, such as
   `<mva> right side view, high-angle shot close-up`.
+- **Several pictures.** The model takes several pictures at once, so two references need no side-by-side montage
+  made elsewhere. Under the picture, *Further pictures* adds up to nine more. The first picture is the one that is
+  edited and is image 1 to the model; the others are image 2, image 3, … in the order listed. Name them that way:
+  "The man of image 2 stands beside the bed in the bedroom of image 1". Each further picture adds its rows to every
+  step: at 1280x736 with Turbo's 8 steps, one picture took 9 s on the Mac (M5 Ultra) and 15 s on the DGX Spark, two
+  13 and 22 s, three 15 and 30 s, ten 36 and 230 s (the Mac's peak was 41 GiB up to three pictures and 55 GiB with
+  ten; the Spark had 40.7 GB of 121 free at its lowest with ten). One set of pictures and one seed each. Give the
+  pictures that are needed: with ten, several of them showing the same two people, the two were drawn twice.
+- **The size of the result** is the picture's own: a 1280x736 picture comes back 1280x736 (2.6.5 returned 1344x768,
+  the model's own "about 1024x1024, in the picture's shape"). A side that is not a multiple of 32 is edited on the
+  model's grid and brought back (1280x720 is made at 1280x704). A picture under 512x512 or over 1536x1536 pixels in
+  all is edited at the nearest of the two in its own shape and comes back at that size, and the log says so
+  (2560x1472 came back 2016x1152); nothing is enlarged afterwards. *Size of the result* also offers the model's own
+  sizes, and a job may carry `width` and `height`.
+- **The seed.** The noise an edit starts from is drawn for the seed and the pictures together. Before, it was drawn
+  for the seed alone, and an edit made with the seed its picture had been made with started from that picture's own
+  noise: it came back as the same picture, over-sharpened (12 of 71 edits in one production run). Any seed now
+  gives an edit. The same seed, pictures and prompt still give the same result; a seed gives another picture than
+  it did in 2.6.5.
 - **Results** go to the Library. Under each: *first frame* opens a clip on it, *last frame* ends a clip on it, *edit
   again* feeds it back in. A front and a back view of one subject are a first and a last frame for a turn.
 
@@ -1010,19 +1206,42 @@ copying anything anywhere.
 
 | Part | What it does |
 |---|---|
-| **First AD** | Say what you are making. It creates scenes and shots, writes their prompts, casts characters, scouts locations, sets spoken lines and sound, and lists what it did. |
-| **Bible** | Logline, world and tone, defaults, how the film renders (resolution tier, quality), and which brain to use. |
+| **First AD** | Say what you are making. It creates scenes and shots, writes their prompts, casts characters, scouts locations, sets spoken lines and sound, and lists what it did. It changes or replaces a character, place, prop, cue or voice that is already there (the sheet keeps its id, so every shot that casts it follows), sets the song, a shot's slot in bars and a shot's LoRA. |
+| **Bible** | Logline, world and tone, defaults, the song (tempo, beats in a bar, first beat), how the film renders (resolution tier, quality), and which brain to use. |
 | **Studios** | Casting, Art Department, Locations, Lookbook: sheets filled from one line by ✦ Fill. A still pinned to a character is its reference picture. |
 | **Shots** | Specs (seconds, aspect, size, angle, lens, movement) and the six-section prompt; ✦ Structure, Tighten, Enrich, Distill, Shot, Angle, Beats, Variants; Director's notes; Slate's setups; picture-lock and mute; history. ✦ Coverage lays out a scene from one of Slate's twelve coverage plans. |
-| **Roll camera** | What the shot opens on (text, the last frame of the shot before, an image, the cast's stills), who is in it and where, spoken lines, soundscape, cue. The shot compiles to MiniMax H3's prompt form with a preflight list; one button queues it. Clips come back as takes: circle the one that works. |
+| **Roll camera** | What the shot opens on (text, the last frame of the shot before, an image, the cast's stills), who is in it and where, spoken lines, soundscape, cue. The shot compiles to MiniMax H3's prompt form with a preflight list; one button queues it. Clips come back as takes: circle the one that works. A LoRA from the hub can be put on one shot in place of the film's. *Import a take rendered on another machine* logs a clip another app made into the shot, with its seed and settings. |
 | **Sound** | Voice sheets (the voice of a spoken line) and music cues (the score line of a shot). |
 | **Deliver** | Render a whole scene in order, a continuity check, the shot list as Markdown or CSV, and the film's takes to the Editor's timeline. |
 
 The brain is Slate's: your own Claude Code or Codex sign-in on the machine that runs the app, or a local
 OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). Everything without a ✦ works with no brain. Films are
 Slate's own `project.json` under `~/TensorFoldStudio/slate/`: a project made in Slate opens here, and one made here
-downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at 5, 8, 10 or
-15 seconds and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
+downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at any length
+the model takes (their seconds, or their slot in bars) and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
+
+**What a shot sends to the model.** A shot's *intent* is a note for people and stays out of the prompt (it used to
+stand in as the action when a shot had no beat sheet, which put a run's timecodes into its prompts): what happens is
+the Subject section's, or the beat sheet's.
+
+**A music video.** Give the song's tempo in the Bible (the Studio does not listen to the song: the tempo and the
+first beat are yours, from the score or a beat tracker) and each shot a slot in bars. The shots are laid end to end
+from bar 1, and a shot's clip is rendered at the shortest length the model takes that covers its slot, so the cut
+can sit on the bar line: at 117.45 BPM a 2-bar slot is 98 frames and renders as 107, a 4-bar slot is 196 and renders
+as 209 (with the four fixed lengths it needed a 10 s clip, 243). Roll camera shows the slot, where it starts in the
+song and how many frames there are to trim. The cut itself is still made in the Editor or outside: nothing here lays
+the song under the timeline.
+
+**A LoRA on one shot.** *LoRA for this shot* in Roll camera puts one installed LoRA on that shot in place of the
+film's. It goes through the hub (strength, look, what it needs) and, on a DGX Spark, through the memory guard when
+the shot is queued; the shot's preflight says beforehand when it will be refused and what fits. On a Spark a clip
+with a LoRA is taken up to 1280x736 at 124 frames: the Sharp Spec tier takes none.
+
+**Takes from other machines.** A film's project is on one machine and its clips are often rendered by others, each
+by its own app. *Import a take* takes that app's address and one of its job ids (the clip, prompt, seed, settings and
+what its checks said are read from the job), or a path in its folder, or an uploaded file, and logs the take in the
+shot. `POST /api/slate/takes {"projectId", "shot", "from", "job"}` does the same for a script (`"log": true` writes
+it into the project file). An app forgets its jobs when it restarts; the clip's path still works.
 
 Not ported from Slate: sequence chunks, alt takes, punch-ups, the tone dial, pickups on a selected span, reference
 and audio analysis, the stills library, compiles for other generators, and its MCP server. The app has no sign-in of
@@ -1532,7 +1751,12 @@ LORA=~/TensorFoldStudio/loras/qwen-multiple-angles.safetensors:0.9 \
   bash scripts/edit.sh photo.png "<mva> right side view, high-angle shot" side.png
 SET_FILE=edits.json bash scripts/edit.sh photo.png          # [["prompt", "out.png"], ...] from one load
 BASE=1 bash scripts/edit.sh photo.png "..." out.png         # 40 steps, base model (--image-edit)
+IMAGES="person.png" bash scripts/edit.sh room.png "The person of image 2 sits on the sofa of image 1" out.png   # up to nine more, one a line
+SIZE=model RESOLUTION=1024 bash scripts/edit.sh photo.png "..." out.png   # the model's own size; the default is the picture's own
 ```
+
+The result has the size of the first picture (`WIDTH` and `HEIGHT` ask for another). The noise is drawn for `SEED`
+and the pictures together, so the seed a picture was made with is as good as any other for editing it.
 
 ### Video only, or from your own image
 
@@ -1550,7 +1774,9 @@ aspect ratio.
 MiniMax H3's first-and-last-frame mode holds a picture at the end of the clip the way it holds one at the start: the
 end keyframe is encoded as a condition latent at the clip's last latent frame and kept at every pass. `LAST_FRAME`
 works with `FIRST_FRAME`, or alone (the clip then arrives at the picture). Beside a first frame the last one is fitted
-by a centre crop, so give both the clip's aspect ratio.
+by a centre crop, so give both the clip's aspect ratio. A keyframe is read by the model, not written into the clip:
+in one production run 63 of 64 were held and one first frame was not, and FastH3 cut to a close-up inside 9 of 32
+such clips. The app checks both after the render (see [the shot check](#what-the-app-tells-you-about-a-prompt-and-a-clip)).
 
 ```bash
 FIRST_FRAME=teapot.png LAST_FRAME=bonsai.png bash scripts/video.sh "The teapot opens and a bonsai grows out of it" out.mp4

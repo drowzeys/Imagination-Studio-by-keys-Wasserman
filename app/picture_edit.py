@@ -6,6 +6,12 @@ A job of kind "edit" carries `image` (a picture in the studio's folder) and eith
 (a set of camera angles, one result each from one load of the model), with `loras` from the hub's image LoRAs.
 Results are written beside the scout images, so they are in the Library and can open or end a clip or be a reference.
 
+`images` is a list of further pictures the prompt can draw on (nine at most): the model takes several pictures at
+once and knows them as image 1 (the edited one), image 2, ... in the order given. The result has the edited picture's
+own size; `size: "model"` asks for the model's own (about `resolution` pixels squared, what 2.6.5 returned), and
+`width` with `height` for any other. `seed` picks the noise together with the pictures, so an edit made with the
+seed its picture was made with is an edit and not that picture again (edit_plan.py, beside the render scripts).
+
 The angle words are the caption grammar of akhaliq's Multiple Angles LoRA: `<mva> {direction}, {height}[ close-up]`.
 """
 
@@ -17,6 +23,9 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import edit_plan  # noqa: E402  (the sizes and the noise seed, shared with the two render scripts)
 
 # its author's 12 directions (30 degrees apart, clockwise seen from above) and 4 heights
 DIRECTIONS = [("front", "front view", 0), ("front-right", "front-right view", 30), ("front-right-quarter", "front-right quarter view", 60),
@@ -32,6 +41,8 @@ SETS = {
     "cover": ("Wide and close", [("front", "eye", False), ("front", "eye", True), ("front-right-quarter", "elevated", False), ("front-right-quarter", "elevated", True)]),
 }
 LIMIT = 12  # results from one job
+PICTURES = edit_plan.PICTURES  # pictures in one edit: the edited one and nine beside it
+KINDS = (".png", ".jpg", ".jpeg", ".webp")
 ANGLE_LORA = "qwen-multiple-angles"
 
 
@@ -90,7 +101,7 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
     @router.get("/api/edit/state")
     def state() -> dict:
         ok, why = ready()
-        return {"ready": ok, "why": why, "base": base_ready(), "limit": LIMIT, "angle_lora": ANGLE_LORA,
+        return {"ready": ok, "why": why, "base": base_ready(), "limit": LIMIT, "pictures": PICTURES, "angle_lora": ANGLE_LORA,
                 "directions": [{"id": key, "label": text.replace(" view", ""), "degrees": degrees} for key, text, degrees in DIRECTIONS],
                 "heights": [{"id": key, "label": text.replace(" shot", ""), "degrees": degrees} for key, text, degrees in HEIGHTS],
                 "sets": {key: {"label": name, "angles": [{"direction": d, "height": h, "close": c} for d, h, c in angles]} for key, (name, angles) in SETS.items()},
@@ -103,8 +114,15 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
         if not ok:
             raise HTTPException(400, why)
         source = inside(str(params.get("image") or ""))
-        if not source.is_file() or source.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+        if not source.is_file() or source.suffix.lower() not in KINDS:
             raise HTTPException(400, "pick the picture to edit: a png, jpg or webp in the studio's folder")
+        # further pictures the prompt draws on: image 2, image 3, ... to the model, in this order
+        beside = [inside(str(path)) for path in (params.get("images") or []) if path]
+        if len(beside) > PICTURES - 1:
+            raise HTTPException(400, f"at most {PICTURES} pictures in one edit: the one that is edited and {PICTURES - 1} beside it")
+        for path in beside:
+            if not path.is_file() or path.suffix.lower() not in KINDS:
+                raise HTTPException(400, f"no picture at {relative(path)}: a further picture is a png, jpg or webp in the studio's folder")
         picked = lora_resolve(params.get("loras"), "image")
         angles = params.get("angles") or []
         prompt = (params.get("prompt") or "").strip()
@@ -133,16 +151,32 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
             raise HTTPException(400, "seed and size are numbers")
         if resolution % 32 or not 512 <= resolution <= 1536:
             raise HTTPException(400, "the size is a multiple of 32 between 512 and 1536")
+        # the result's size: the picture's own unless the job says otherwise
+        size = str(params.get("size") or "source")
+        if size not in ("source", "model"):
+            raise HTTPException(400, 'size is "source" (the picture\'s own size) or "model" (about the given resolution squared)')
+        asked = {}
+        if params.get("width") or params.get("height"):
+            try:
+                asked = {"WIDTH": int(params["width"]), "HEIGHT": int(params["height"])}
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(400, "a size of your own needs a width and a height")
+            if edit_plan.refused(asked["WIDTH"], asked["HEIGHT"]):
+                raise HTTPException(400, edit_plan.refused(asked["WIDTH"], asked["HEIGHT"]))
         base = bool(params.get("base"))
         if base and not base_ready():
             raise HTTPException(400, "the 40-step base model is not installed here: oneshot-setup" + ("-spark" if spark else "") + ".sh --image-edit fetches it")
         folder.mkdir(parents=True, exist_ok=True)
         plan = folder / "edits.json"
         plan.write_text(json.dumps([[text, str(folder / name)] for text, name in edits]))
-        env = {"SET_FILE": str(plan), "SEED": seed, "RESOLUTION": resolution, "BASE": "1" if base else "",
-               "LORA": "\n".join(f"{p['path']}:{p['strength']:g}" for p in picked)}
+        env = {"SET_FILE": str(plan), "SEED": seed, "RESOLUTION": resolution, "SIZE": size, "BASE": "1" if base else "",
+               "LORA": "\n".join(f"{p['path']}:{p['strength']:g}" for p in picked),
+               "IMAGES": "\n".join(str(path) for path in beside), **asked}
         if not spark and 0 < memory_gib() < 96:
             env["QUANTIZE"] = "8"  # bfloat16 peaks at 43 GiB with the text encoder and the picture's rows
+            # the memory grows with the pixels (bfloat16 on an M5 Ultra: 41 GiB at 1280x736, 58 GiB at 2016x1152), so
+            # a large picture is edited at 1280x1280 pixels at most there; not measured on such a Mac
+            env["MOST_PIXELS"] = 1280 * 1280
         return ["bash", str(pack / "scripts/edit.sh"), str(source)], env, [str(folder / name) for _, name in edits]
 
     return router, build

@@ -145,6 +145,29 @@ def test_a_job_refuses_the_other_models_lora():
     assert "for clips" in refused(lambda: resolve([{"id": "camera-motion"}], "image"))
 
 
+def test_further_pictures_and_the_size_of_the_result():
+    home, build = studio()
+    (home / "uploads/man.png").write_bytes(b"png")
+    (home / "uploads/room.jpg").write_bytes(b"jpg")
+    # one picture, nothing said about the size: the result has the picture's own (2.6.5 returned the model's)
+    _, env, _ = build({"image": "uploads/cat.png", "prompt": "at night", "resolution": 1024}, "j1")
+    assert env["SIZE"] == "source" and env["IMAGES"] == "" and "WIDTH" not in env
+    # further pictures go in the order given, after the one that is edited
+    command, env, _ = build({"image": "uploads/cat.png", "images": ["uploads/man.png", "uploads/room.jpg"], "prompt": "the man of image 2 holds the cat"}, "j2")
+    assert command[-1] == str(home / "uploads/cat.png")
+    assert env["IMAGES"].split("\n") == [str(home / "uploads/man.png"), str(home / "uploads/room.jpg")]
+    # the model's own size, and a size of one's own
+    _, env, _ = build({"image": "uploads/cat.png", "prompt": "x", "size": "model", "resolution": 768}, "j3")
+    assert env["SIZE"] == "model" and env["RESOLUTION"] == 768
+    _, env, _ = build({"image": "uploads/cat.png", "prompt": "x", "width": 1280, "height": 720}, "j4")
+    assert (env["WIDTH"], env["HEIGHT"]) == (1280, 720)
+    assert "at most 10 pictures" in refused(lambda: build({"image": "uploads/cat.png", "images": ["uploads/man.png"] * 10, "prompt": "x"}, "j5"))
+    assert "no picture at uploads/gone.png" in refused(lambda: build({"image": "uploads/cat.png", "images": ["uploads/gone.png"], "prompt": "x"}, "j6"))
+    assert "size is" in refused(lambda: build({"image": "uploads/cat.png", "prompt": "x", "size": "huge"}, "j7"))
+    assert "outside" in refused(lambda: build({"image": "uploads/cat.png", "prompt": "x", "width": 4096, "height": 4096}, "j8"))
+    assert "a width and a height" in refused(lambda: build({"image": "uploads/cat.png", "prompt": "x", "width": 1024}, "j9"))
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):

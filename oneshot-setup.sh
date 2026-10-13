@@ -126,7 +126,7 @@ export PATH="/opt/homebrew/bin:$PATH"
 command -v uv >/dev/null || die "uv required: brew install uv"
 command -v python3.11 >/dev/null || die "python3.11 required: brew install python@3.11"
 command -v git >/dev/null || die "git required"
-[ "$VIDEO" = 0 ] || command -v ffmpeg >/dev/null || die "ffmpeg required: brew install ffmpeg"
+[ "$VIDEO" = 0 ] || { command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; } || die "ffmpeg (with ffprobe) required: brew install ffmpeg"
 
 fetch_ghcr() {
   command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || return 1

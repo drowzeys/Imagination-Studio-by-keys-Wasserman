@@ -28,6 +28,8 @@ import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import memory_guard  # noqa: E402  (what a clip needs and whether this machine has it, beside this file)
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
 URL = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190"))  # the port spark/comfy.sh starts it on
 STATE = PREFIX / "comfy.kind"
@@ -93,6 +95,39 @@ def ensure_server(kind: str) -> None:
         # the picture and video models together would not leave room for the render itself in 128 GB
         call("/free", {"unload_models": True, "free_memory": True})
     STATE.write_text(kind)
+
+
+def fresh_server(why: str) -> None:
+    """Stop the ComfyUI server and wait until its memory is back: the next render starts with nothing loaded."""
+
+    print(f"[tensorfold] restarting ComfyUI: {why}", flush=True)
+    subprocess.run(["bash", str(HERE / "comfy.sh"), "stop"], check=False)
+    for _ in range(60):
+        if not up():
+            break
+        time.sleep(1)
+    before = -1
+    for _ in range(90):  # the memory comes back a little after the process is gone
+        free = memory_guard.meminfo().get("MemAvailable", 0)
+        if free - before < 200:
+            break
+        before = free
+        time.sleep(1)
+
+
+def fits_or_exit(args, lora: bool = False, references: bool = False, base: bool = False, pictures: int = 0,
+                 reference_frames: int = 0) -> None:
+    """The memory check before anything is loaded (memory_guard.py): a clip whose estimated peak would leave this
+    machine under its floor is refused here, with the nearest size and length that fit, whoever started the render."""
+
+    found = memory_guard.check(args.width, args.height, args.frames, lora, references, base, args.engine == "tensorfold",
+                               pictures, reference_frames)
+    if found.get("route") is None:
+        return
+    print(f"[tensorfold] memory: about {found['need_mb'] / 1000:.0f} GB at the peak (give or take {found['error_mb'] / 1000:g}) of "
+          f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
+    if not found["fits"]:
+        sys.exit("refused before anything was loaded: " + found["reason"])
 
 
 def upload(image: str) -> str:
@@ -209,7 +244,13 @@ def finish_sound(item, target: Path, frames: int) -> None:
     length. The picture is not encoded again. Says what it found."""
 
     sound = getattr(item, "sound", None)
-    if sound is None or shutil.which("ffmpeg") is None:
+    if sound is None:
+        return
+    if shutil.which("ffmpeg") is None:
+        # not silently: the track ComfyUI wrote can overshoot full scale (see above)
+        print("[tensorfold] sound: left as ComfyUI wrote it, at about 130 kb/s and without the limiter: ffmpeg is not "
+              "installed on this machine (sudo apt install ffmpeg)", flush=True)
+        (PREFIX / "ComfyUI" / "output" / sound.get("subfolder", "") / sound["filename"]).unlink(missing_ok=True)
         return
     import numpy as np
 
@@ -241,6 +282,40 @@ def finish_sound(item, target: Path, frames: int) -> None:
     finally:
         track.unlink(missing_ok=True)
         (PREFIX / "ComfyUI" / "output" / sound.get("subfolder", "") / sound["filename"]).unlink(missing_ok=True)
+
+
+def crop_frames(workflow: dict, crop: str, width: int, height: int) -> bool:
+    """Centre-crop the decoded frames to ``crop`` (WxH) inside the workflow, before the clip is encoded: one encode
+    instead of two, and no ffmpeg (the 720p preset generates 1280x736 and crops; a Spark without ffmpeg failed there
+    after the whole render). True when the workflow does it; False when this ComfyUI has no crop node, and then
+    ``crop_file`` does it afterwards. Exits before anything is rendered when neither can."""
+
+    try:
+        wide, tall = (int(side) for side in crop.lower().split("x"))
+    except ValueError:
+        sys.exit(f"--crop is WIDTHxHEIGHT, got {crop}")
+    if wide > width or tall > height or (width - wide) % 2 or (height - tall) % 2:
+        sys.exit(f"cannot centre-crop {width}x{height} frames to {wide}x{tall}")
+    if "ImageCrop" in call("/object_info/ImageCrop"):
+        workflow["19"] = {"class_type": "ImageCrop", "inputs": {"image": ["13", 0], "width": wide, "height": tall,
+                                                                "x": (width - wide) // 2, "y": (height - tall) // 2}}
+        workflow["15"]["inputs"]["images"] = ["19", 0]
+        return True
+    if shutil.which("ffmpeg") is None:
+        sys.exit(f"the clip is generated at {width}x{height} and cropped to {wide}x{tall}, and this machine can do neither crop: "
+                 "its ComfyUI has no ImageCrop node and ffmpeg is not installed (sudo apt install ffmpeg)")
+    return False
+
+
+def crop_file(target: Path, crop: str) -> None:
+    """The crop after the render, with ffmpeg: only for a ComfyUI without a crop node (see ``crop_frames``)."""
+
+    wide, tall = crop.lower().split("x")
+    cropped = target.with_suffix(".crop.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(target), "-vf", f"crop={wide}:{tall}", "-c:v",
+                    "libx264", "-crf", "17", "-preset", "medium", "-pix_fmt", "yuv420p", "-c:a", "copy",
+                    str(cropped)], check=True)
+    cropped.replace(target)
 
 
 def fetch(item: dict, target: Path) -> None:
@@ -444,18 +519,9 @@ def reference(args) -> None:
         # After a FastH3 clip the server still holds what ComfyUI's own unloading does not give back (TensorFold's
         # engine keeps its int8 weights): measured, a reference render that followed one ran with 14 GB free
         # instead of 38. A server with nothing loaded is the safe start; it costs the load again.
-        print("[tensorfold] restarting ComfyUI: a reference render starts from a server with nothing loaded", flush=True)
-        subprocess.run(["bash", str(HERE / "comfy.sh"), "stop"], check=False)
-        for _ in range(60):
-            if not up():
-                break
-            time.sleep(1)
-        for _ in range(90):  # the memory comes back a little after the process is gone
-            with open("/proc/meminfo") as handle:
-                free = next(int(line.split()[1]) for line in handle if line.startswith("MemAvailable")) // 1024
-            if free > 70000:
-                break
-            time.sleep(1)
+        fresh_server("a reference render starts from a server with nothing loaded")
+    fits_or_exit(args, bool(loras) or args.ref_mode == "turbo", True, pictures=len(pictures),
+                 reference_frames=sum(min(args.frames, int(round((probe["seconds"] or 0) * FPS))) for _, probe in probes))
     ensure_server("ref2va")
     mode = args.ref_mode
     # a LoRA (the Turbo adapter, or one from the hub) is merged at run time, which needs the bf16 file: merged into
@@ -537,6 +603,7 @@ def reference(args) -> None:
                "inputs": {"noise": ["8", 0], "guider": ["11", 0], "sampler": ["9", 0], "sigmas": ["10", 0],
                           "latent_image": ["6", 1]}}
     save_sound(w, ["14", 0], w["16"]["inputs"]["filename_prefix"] + "_sound")
+    cropped = crop_frames(w, args.crop, args.width, args.height) if args.crop else True
     kind = "Ref2VA with the Turbo adapter" if mode == "turbo" else "Ref2VA"
     count = (f"{len(pictures)} reference picture(s)" + (f", {len(videos)} video(s)" if videos else "")
              + (f", {len(audios)} audio clip(s)" if audios else "") + (", the videos' own sound" if videos and args.ref_video_sound else ""))
@@ -551,6 +618,8 @@ def reference(args) -> None:
     target = Path(args.output)
     fetch(item, target)
     finish_sound(item, target, args.frames)
+    if not cropped:
+        crop_file(target, args.crop)
     print("[tensorfold] " + json.dumps({"output": str(target), "engine": "cuda", "model": "ref2va", "mode": mode,
                                         "forwards": steps, "total_s": round(seconds_taken, 1), "frames": args.frames,
                                         "size": [args.width, args.height], "references": len(pictures),
@@ -570,7 +639,7 @@ def video(args) -> None:
         if value % step:
             sys.exit(f"--{name} must be a multiple of {step}, got {value}")
     if (args.frames - 5) % 17:
-        sys.exit(f"--frames must be 17n + 5 (124, 192, 243, 362), got {args.frames}")
+        sys.exit(f"--frames must be 17n + 5 (22, 39, 56, ... 362), got {args.frames}")
     if args.ref or args.ref_video or args.ref_audio:
         return reference(args)
     base = args.base == "h3"
@@ -599,13 +668,8 @@ def video(args) -> None:
         # On a Spark the GPU and the system share one pool. With the bf16 weights (42 GB) a text encoder (26 GB) that
         # comes back for a new prompt makes ComfyUI move the model aside and load it again, and the two copies do not
         # fit: measured, free memory fell from 50 GB to 8. A server with nothing loaded keeps about 30 GB free.
-        print("[tensorfold] restarting ComfyUI: a LoRA render starts from a server with nothing loaded", flush=True)
-        subprocess.run(["bash", str(HERE / "comfy.sh"), "stop"], check=False)
-        for _ in range(60):
-            if not up():
-                break
-            time.sleep(1)
-        time.sleep(3)
+        fresh_server("a LoRA render starts from a server with nothing loaded")
+    fits_or_exit(args, bool(loras), False, base)
     ensure_server("video" + ("+h3base" if base else "") + ("+lora" if loras else ""))
     if base and not installed("unet", H3_FL2VA):
         sys.exit(f"MiniMax H3's own transformer ({H3_FL2VA}) is not installed: oneshot-setup-spark.sh --h3-base adds it "
@@ -667,6 +731,7 @@ def video(args) -> None:
     w["11"] = {"class_type": "CFGGuider", "inputs": {"model": model, "positive": ["6", 0], "negative": ["7", 0],
                                                      "cfg": 1.0}}
     save_sound(w, ["14", 0], w["16"]["inputs"]["filename_prefix"] + "_sound")
+    cropped = crop_frames(w, args.crop, args.width, args.height) if args.crop else True
     attention = f"sparse attention {sparsity}" if sparsity > 0 else "dense attention"
     runs = "TensorFold int8 blocks in ComfyUI" if args.engine == "tensorfold" else "ComfyUI, MiniMax H3 bf16" if base else f"ComfyUI, FastH3 {args.weights}"
     print(f"[tensorfold] engine: cuda ({runs}, {attention}), generating "
@@ -675,16 +740,12 @@ def video(args) -> None:
     target = Path(args.output)
     fetch(item, target)
     finish_sound(item, target, args.frames)
-    if args.crop:
-        width, height = args.crop.lower().split("x")
-        cropped = target.with_suffix(".crop.mp4")
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(target), "-vf", f"crop={width}:{height}", "-c:v",
-                        "libx264", "-crf", "17", "-preset", "medium", "-pix_fmt", "yuv420p", "-c:a", "copy",
-                        str(cropped)], check=True)
-        cropped.replace(target)
+    if not cropped:
+        crop_file(target, args.crop)
     print("[tensorfold] " + json.dumps({"output": str(target), "engine": "cuda", "forwards": args.steps,
                                         "total_s": round(seconds, 1), "frames": args.frames,
-                                        "size": [args.width, args.height], "sparsity": sparsity}), flush=True)
+                                        "size": [args.width, args.height], "sparsity": sparsity,
+                                        **({"cropped_to": args.crop} if args.crop else {})}), flush=True)
 
 
 def image(args) -> None:
@@ -801,16 +862,17 @@ def main() -> None:
 
 
 def stopped() -> str:
-    """Why the ComfyUI server ended, when its own log says so: spark/comfy.sh stops it when free memory runs low."""
+    """Why the ComfyUI server ended, when its own log says so: the memory guard beside it (memory_guard.py watch)
+    stops it when the machine runs low."""
 
     try:
         tail = (PREFIX / "comfy.log").read_text(errors="replace")[-4000:].splitlines()
     except OSError:
         return ""
     for line in reversed(tail):
-        if "free memory is" in line and "stopping ComfyUI" in line:
-            return ("the render was stopped to protect the machine: " + line.split("] ", 1)[-1].strip()
-                    + ". Use a shorter clip, a shorter or fewer reference videos, or a smaller size.")
+        if "stopping ComfyUI" in line and ("memory floor:" in line or "free memory is" in line):
+            return ("the render was stopped to protect the machine: " + line.split("] ", 1)[-1].replace("memory floor: ", "").strip()
+                    + ". Use a shorter clip, a shorter or fewer reference videos, or a smaller size; a LoRA clip needs more memory than one without.")
     return ""
 
 

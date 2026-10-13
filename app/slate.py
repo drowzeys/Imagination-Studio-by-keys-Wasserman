@@ -8,6 +8,7 @@ a shot to MiniMax H3's prompt form and the plan of the render that the Studio's 
 """
 
 import json
+import math
 import os
 import re
 import shutil
@@ -20,11 +21,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+import lengths  # which frame counts the model takes, beside this file
+import remote  # another machine's Studio app, read over its own API, beside this file
+import negation  # what a prompt forbids by name, beside this file
+
 router = APIRouter()
 HOME: Path = Path()
 DURATIONS: dict = {}
 compose = compose_references = None  # the Studio's own prompt builders, set by attach()
 ready = lambda: {}  # which optional parts this install has
+room = lambda plan, lora: {"fits": True, "reason": ""}  # whether a render plan fits this machine's memory, set by attach()
 LIMIT = 9
 TIMEOUT = 420
 CLI_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local/bin"), str(Path.home() / ".claude/local"))
@@ -38,7 +44,7 @@ SIZE_WORDS = {"EWS": "Extreme wide shot", "WS": "Wide shot", "MWS": "Medium wide
 ANGLE_WORDS = {"eye level": "at eye level", "low": "from a low angle", "high": "from a high angle", "overhead": "from directly overhead",
                "dutch": "with a tilted, dutch-angle horizon", "over-shoulder": "over the shoulder of the nearer person", "POV": "from the character's point of view"}
 # Slate's movement words in the camera vocabulary of MiniMax's H3 prompt guide
-MOVES = {"locked": "Static shot: the camera does not move.", "handheld": "Handheld: the camera shakes slightly.",
+MOVES = {"locked": "Static shot on a locked, still camera.", "handheld": "Handheld: the camera shakes slightly.",
          "push-in": "The camera pushes in with small amplitude at slow speed.", "pull-back": "The camera zooms out with small amplitude at slow speed.",
          "orbit": "Arc shot: the camera arcs around the subject at slow speed.", "pan": "The camera pans with small amplitude at slow speed.",
          "tilt": "The camera tilts with small amplitude at slow speed.", "track": "Tracking shot: the camera follows the subject at its pace.",
@@ -47,9 +53,10 @@ MOVES = {"locked": "Static shot: the camera does not move.", "handheld": "Handhe
 SECTIONS = ("subject", "composition", "lighting", "camera", "style", "mood")
 
 
-def attach(home: Path, durations: dict, plain, referenced, limit: int, parts) -> APIRouter:
-    global HOME, DURATIONS, compose, compose_references, LIMIT, ready
+def attach(home: Path, durations: dict, plain, referenced, limit: int, parts, fits=None) -> APIRouter:
+    global HOME, DURATIONS, compose, compose_references, LIMIT, ready, room
     HOME, DURATIONS, compose, compose_references, LIMIT, ready = home, durations, plain, referenced, limit, parts
+    room = fits or room
     (HOME / "slate").mkdir(parents=True, exist_ok=True)
     return router
 
@@ -155,6 +162,88 @@ def exists(body: dict) -> dict:
         target = (HOME / str(path)).resolve()
         out[path] = HOME.resolve() in target.parents and target.is_file()
     return out
+
+
+# ---------- a take rendered somewhere else, logged into a shot ----------
+
+SETTINGS = ("preset", "quality", "frames", "seconds", "width", "height", "steps", "loras", "references", "ref_turbo", "text_encoder")
+
+
+@router.post("/api/slate/takes")
+def import_take(body: dict) -> dict:
+    """A finished clip as a take of a shot: its file copied into the film's takes folder, with its seed and settings.
+
+    The film is on one machine and its clips are often rendered on others, each by its own app. The clip is named by
+    ``from`` (that app's address) with ``job`` (one of its finished jobs: the clip, prompt, seed and settings are
+    read from it) or ``path`` (a file of its studio folder), or by ``path`` alone for a file already in this studio
+    folder (an upload). ``seed``, ``prompt``, ``settings``, ``notes`` and ``rating`` say what the job does not.
+    Returns {"take"}: the page adds it to the shot; with ``log`` true it is written into the project file here, for
+    a script that drives the app."""
+
+    file = project_file(str(body.get("projectId") or ""))
+    if not file.is_file():
+        raise HTTPException(404, "no such film")
+    project = json.loads(file.read_text())
+    wanted = str(body.get("shot") or "").strip()
+    found = [(scene, shot) for scene in project.get("scenes") or [] for shot in scene.get("shots") or []
+             if shot.get("id") == wanted or (shot.get("name") or "").strip().lower() == wanted.lower()]
+    if len(found) != 1:
+        raise HTTPException(404 if not found else 400, "no such shot" if not found else f"{len(found)} shots are called {wanted}: give the shot's id")
+    scene, shot = found[0]
+    path, seed, prompt = str(body.get("path") or "").strip(), body.get("seed"), body.get("prompt")
+    settings, source, theirs = dict(body.get("settings") or {}), {}, {}
+    try:
+        if body.get("from"):
+            base = remote.address(str(body["from"]))
+            source = {"from": base}
+            if body.get("job"):
+                theirs = remote.job(base, str(body["job"]))
+                if theirs.get("status") != "done" or not theirs.get("outputs"):
+                    raise HTTPException(400, f"job {body['job']} on {base} is {theirs.get('status')}: there is no finished clip to import")
+                asked = theirs.get("params") or {}
+                path = path or theirs["outputs"][0]
+                seed = seed if seed not in (None, "") else asked.get("seed")
+                prompt = prompt or asked.get("prompt")
+                settings = {**{key: asked[key] for key in SETTINGS if asked.get(key) not in (None, "", [])}, **settings}
+                source.update(job=theirs.get("id"), engine=theirs.get("engine"), elapsed=theirs.get("elapsed"))
+            if not path:
+                raise HTTPException(400, "give the clip: one of that app's job ids, or the path of a file in its studio folder")
+            suffix = Path(path).suffix.lower()
+            target = file.parent / "takes" / f"{shot['id']}-{int(time.time() * 1000):x}{suffix}"
+            remote.fetch(base, path, target)
+            source["path"] = path
+        else:
+            given = (HOME / path).resolve() if path else None
+            if given is None or HOME.resolve() not in given.parents or not given.is_file():
+                raise HTTPException(400, "give the clip: another app's address with a job id or a path, or the path of a file in this studio folder")
+            if given.suffix.lower() not in remote.SUFFIXES[:2]:
+                raise HTTPException(400, "a take is a video file (.mp4 or .mov)")
+            target = file.parent / "takes" / f"{shot['id']}-{int(time.time() * 1000):x}{given.suffix.lower()}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(given, target)
+            source = {"path": path}
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    except LookupError as error:
+        raise HTTPException(404, str(error))
+    except OSError as error:
+        raise HTTPException(502, f"the other app did not answer: {str(error)[-200:]}")
+    try:
+        seed = int(seed) if seed not in (None, "") else None
+    except (TypeError, ValueError):
+        raise HTTPException(400, "a seed is a whole number")
+    rating = body.get("rating") if body.get("rating") in ("circled", "good", "no-good") else "good"
+    take = {"id": f"take-{int(time.time() * 1000):x}-{uuid.uuid4().hex[:5]}", "loggedAt": now(), "model": "minimax-h3",
+            "prompt": prompt or (shot.get("tf") or {}).get("h3") or "", "rating": rating, "notes": str(body.get("notes") or ""),
+            "mediaPath": str(target.resolve().relative_to(HOME.resolve())), "jobId": None, "seed": seed, "settings": settings,
+            "source": source, "imported": True}
+    for key in ("qa", "shot"):  # what that app's checks said of the clip, kept beside it
+        if theirs.get(key):
+            take[key] = theirs[key]
+    if body.get("log"):
+        shot.setdefault("takes", []).insert(0, take)
+        write(project)
+    return {"take": take, "scene": scene.get("id"), "shot": shot.get("id"), "logged": bool(body.get("log"))}
 
 
 # ---------- the brain: Slate's three backends ----------
@@ -316,10 +405,6 @@ def voice_of(sheet: dict | None, fallback: str = "") -> str:
     return f"a voice that is {sound}" if sound else "a natural voice"
 
 
-def nearest(seconds: float) -> int:
-    return min(sorted(DURATIONS, reverse=True), key=lambda d: abs(d - seconds))
-
-
 def find_shot(project: dict, shot_id: str) -> tuple[dict, dict, int]:
     for scene in project.get("scenes") or []:
         for index, shot in enumerate(scene.get("shots") or []):
@@ -338,6 +423,62 @@ def best_take(shot: dict) -> str | None:
     return next((take["mediaPath"] for take in takes if take.get("rating") != "no-good"), None)
 
 
+# ---------- a song under the film: tempo, bars, and each shot's slot ----------
+
+def song_of(project: dict) -> dict | None:
+    """The film's song as the bar grid needs it, or None when it has none: ``bpm``, ``beats`` in a bar, ``first``
+    (seconds to the first beat of bar 1) and ``bar`` (seconds). Kept under the project's "tf": {"song": {"name",
+    "bpm", "beatsPerBar", "firstBeat"}}; the tempo is the user's (from a beat tracker or the score), not measured here."""
+
+    song = (project.get("tf") or {}).get("song") or {}
+    try:
+        bpm, beats, first = float(song.get("bpm") or 0), int(song.get("beatsPerBar") or 4), float(song.get("firstBeat") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not 20 <= bpm <= 400 or not 1 <= beats <= 16:
+        return None
+    return {"name": str(song.get("name") or ""), "bpm": bpm, "beats": beats, "first": first, "bar": beats * 60.0 / bpm}
+
+
+def shot_frames(project: dict, shot: dict, song: dict | None) -> tuple[int, float | None]:
+    """(frames a shot renders, its slot in seconds or None): with a song and a slot in bars, the shortest length the
+    model takes that covers the slot (any 17n + 5 count, lengths.py), so the cut can sit on the bar line; else the
+    shot's own seconds brought to the nearest count."""
+
+    try:
+        bars = float((shot.get("tf") or {}).get("bars") or 0)
+    except (TypeError, ValueError):
+        bars = 0
+    if song and bars > 0:
+        slot = bars * song["bar"]
+        need = math.ceil(slot * lengths.FPS - 1e-6)
+        return next((count for count in lengths.counts() if count >= need), lengths.LONGEST), slot
+    asked = float((shot.get("spec") or {}).get("durationSec") or project.get("defaults", {}).get("durationSec") or 8)
+    return lengths.nearest(asked), None
+
+
+def slot_of(project: dict, shot_id: str) -> dict | None:
+    """Where a shot sits in the song: {"bars", "seconds", "frames" (the slot's own, at 24 a second), "start" (seconds
+    into the song), "bar" (the bar it starts on, counted from 1), "spare" (frames the clip has beyond its slot, to trim)}.
+    The shots are laid end to end in the film's order; one without a slot takes its clip's length."""
+
+    song = song_of(project)
+    if not song:
+        return None
+    at = song["first"]
+    for scene in project.get("scenes") or []:
+        for shot in scene.get("shots") or []:
+            frames, slot = shot_frames(project, shot, song)
+            if shot.get("id") == shot_id:
+                if slot is None:
+                    return None
+                own = round(slot * lengths.FPS)
+                return {"bars": float(shot["tf"]["bars"]), "seconds": round(slot, 3), "frames": own, "start": round(at, 3),
+                        "bar": round((at - song["first"]) / song["bar"] + 1, 2), "spare": frames - own}
+            at += slot if slot is not None else frames / lengths.FPS
+    return None
+
+
 def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     scene, shot, index = find_shot(project, shot_id)
     extra, film, parts = shot.get("tf") or {}, project.get("tf") or {}, ready()
@@ -347,9 +488,18 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     place = by_id("locations").get(extra.get("location"))
     start = extra.get("start") or "text"
 
-    seconds = nearest(float(spec.get("durationSec") or project.get("defaults", {}).get("durationSec") or 8))
-    if spec.get("durationSec") and float(spec["durationSec"]) != seconds:
-        warnings.append(f"This engine makes clips of {', '.join(map(str, sorted(DURATIONS)))} s: the shot is {spec['durationSec']:g} s and renders as {seconds} s.")
+    # any length the model takes (lengths.py): the shot's own seconds, brought to the nearest count of 17n + 5 frames
+    asked = float(spec.get("durationSec") or project.get("defaults", {}).get("durationSec") or 8)
+    song = song_of(project)
+    frames, slot_seconds = shot_frames(project, shot, song)
+    slot = slot_of(project, shot_id) if slot_seconds is not None else None
+    seconds = next((named for named, count in DURATIONS.items() if count == frames), round(frames / lengths.FPS, 3))
+    if extra.get("bars") and not song:
+        warnings.append("This shot has a slot in bars and the film has no song: set the tempo in the Bible, or the shot renders at its seconds.")
+    if slot and slot["spare"] < 0:
+        warnings.append(f"A slot of {slot['bars']:g} bars is {slot['seconds']:g} s, longer than a clip ({lengths.LONGEST / lengths.FPS:.1f} s): the clip ends {-slot['spare']} frames early. Split the slot.")
+    if not slot and spec.get("durationSec") and abs(frames / lengths.FPS - asked) > 0.5:
+        warnings.append(f"A clip is {lengths.SHORTEST / lengths.FPS:.1f} to {lengths.LONGEST / lengths.FPS:.0f} s long: the shot is {asked:g} s and renders as {lengths.says(frames)}.")
     if spec.get("fps") and int(spec["fps"]) != 24:
         warnings.append(f"MiniMax H3 renders at 24 fps; the shot says {spec['fps']}.")
     tier = film.get("res") if film.get("res") in SIZES else "480p"
@@ -399,8 +549,11 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     camera = " ".join(bit for bit in (sentence(framing), MOVES.get(spec.get("movement") or "", ""), part["camera"]) if bit)
     beats = [b for b in shot.get("beatSheet") or [] if (b.get("text") or "").strip()]
     lead = ["First,", "Then,", "After that,", "Next,", "Finally,"]
+    # What happens is the Subject section's, or the beat sheet's when there is one. The shot's intent is a note for
+    # people (what the shot is for, where it sits in the song): it used to stand in as the action when there were no
+    # beats, and a production run's timecodes and "the audience sees the collision coming" went to the model.
     action = " ".join(f"{lead[min(i, 3)] if i < len(beats) - 1 or i == 0 else lead[4]} {sentence(b['text'][0].lower() + b['text'][1:])}"
-                      for i, b in enumerate(beats)) if beats else sentence(shot.get("intent") or "")
+                      for i, b in enumerate(beats))
     voices, order, lines = by_id("voices"), [sheet.get("id") for sheet in cast], []
     for line in extra.get("lines") or []:
         if not (line.get("text") or "").strip():
@@ -416,19 +569,34 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     cue = by_id("music").get(extra.get("cue"))
     music = sentence(", ".join(bit for bit in (cue.get("genre"), cue.get("mood"), cue.get("tempo"), cue.get("instrumentation")) if bit)) if cue else (extra.get("music") or "N/A")
     fields = {"scene": picture, "camera": camera, "action": action, "dialogue": lines, "soundscape": extra.get("soundscape") or "",
-              "music": music, "subjects": subjects}
-    prompt = compose_references(fields, len(references)) if references else compose(fields, bool(image or previous))
+              "music": music, "subjects": subjects, "people": bool(cast) or None}  # None: the builder reads the words
+    prompt = compose_references(fields, len(references)) if references else compose(fields, bool(image or previous), frames=frames)
+    for one in negation.check_fields(fields)["negations"]:  # said, never rewritten (negation.py)
+        warnings.append(f"“{one['phrase']}” ({one['field'].lower()}): the video model has no negative prompt, and what a prompt names tends to appear. Say what is there instead.")
     limit = 7000
     if len(prompt) > limit:
         warnings.append(f"The prompt is {len(prompt)} characters; MiniMax H3's guide suggests at most {limit}. Tighten the shot.")
     if not (shot.get("prompt") or "").strip():
         warnings.append("The shot has no prompt yet.")
-    plan = {"seconds": seconds, "seed": int(extra.get("seed") or 1), "quality": film.get("quality") or "fh8",
+    # a LoRA for this shot alone (the hub's, as a job carries them): it stands in for the film's on this shot
+    own = [{"id": str(one["id"]), **({"strength": one["strength"]} if one.get("strength") not in (None, "") else {}),
+            **({"style": one["style"]} if one.get("style") else {})} for one in extra.get("loras") or [] if isinstance(one, dict) and one.get("id")]
+    plan = {"seconds": seconds, "frames": frames, "seed": int(extra.get("seed") or 1), "quality": film.get("quality") or "fh8",
+            **({"slot": slot} if slot else {}), **({"loras": own} if own and not references else {}),
             **({"preset": size} if isinstance(size, str) else {"preset": "custom", "width": size[0], "height": size[1]}),
             **({"references": references, "ref_turbo": film.get("refPasses") == "4"} if references else {}),
             **({"image": image} if image else {}), **({"first_frame_from": previous} if previous else {})}
     mode = "references" if references else "image" if image else "previous" if previous else "text"
-    return {"prompt": prompt, "plan": plan, "mode": mode, "warnings": warnings, "chars": len(prompt)}
+    if own and references:
+        warnings.append("A shot that opens on cast stills renders on the reference model: its own LoRA is left out.")
+    # the machine's memory (a DGX Spark's guard): said here, before the shot is queued, with what fits
+    try:
+        memory = room(plan, bool(plan.get("loras") or (film.get("loras") and not references)))
+    except Exception:  # noqa: BLE001 - a plan the queue will refuse for another reason
+        memory = {"fits": True, "reason": ""}
+    if not memory.get("fits", True):
+        warnings.append("This shot will be refused when queued: " + memory["reason"])
+    return {"prompt": prompt, "plan": plan, "mode": mode, "warnings": warnings, "chars": len(prompt), "memory": {"fits": memory.get("fits", True), "reason": memory.get("reason", ""), "need_mb": memory.get("need_mb"), "nearest": memory.get("nearest")}}
 
 
 @router.post("/api/slate/compile")

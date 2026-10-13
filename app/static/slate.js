@@ -17,6 +17,11 @@ const slScene = () => SL.p.scenes.find(s => s.id === SL.sceneId) || SL.p.scenes[
 const slShot = () => { const sc = slScene(); return sc ? sc.shots.find(s => s.id === SL.shotId) || sc.shots[0] || null : null; };
 const slTf = shot => shot.tf || (shot.tf = { start: "text", cast: [], location: "", lines: [], soundscape: "", music: "N/A", cue: "", seed: 1, image: null, h3: "", h3Auto: true });
 const slFilm = () => SL.p.tf || (SL.p.tf = { res: "480p", quality: S.qualities.fh8 ? "fh8" : Object.keys(S.qualities)[0], refPasses: "20" });
+// A song under the film (a music video): tempo and bar grid, kept under the project's "tf". A shot's slot is in bars.
+const slSong = () => { const g = (SL.p.tf || {}).song || {}, bpm = Number(g.bpm), beats = Number(g.beatsPerBar) || 4; return bpm >= 20 && bpm <= 400 ? { name: g.name || "", bpm, beats, first: Number(g.firstBeat) || 0, bar: beats * 60 / bpm } : null; };
+const slClock = t => Math.floor(t / 60) + ":" + (t % 60).toFixed(1).padStart(4, "0");
+// LoRAs a shot can take: the hub's installed ones that go on a clip from text or a frame
+const slShotLoras = () => (typeof LORAS === "undefined" ? [] : LORAS).filter(r => r.installed && r.usable !== false && r.target !== "image" && (r.status || "ready") === "ready" && (r.needs || "text") === "text");
 const slBlankShot = name => { const d = SL.p.defaults; return { id: slId("shot"), name, intent: "", spec: { durationSec: d.durationSec, fps: d.fps, aspectRatio: d.aspectRatio, lens: null, movement: null, size: null, angle: null },
   prompt: "", lockedLines: [], mutedLines: [], beatSheet: null, targetModel: "minimax-h3", maxChars: null, variants: [], history: [], takes: [], createdAt: slNow(), updatedAt: slNow() }; };
 const slKeep = (shot, label) => { if (!shot.prompt.trim()) return; shot.history.unshift({ id: slId("v"), savedAt: slNow(), label, prompt: shot.prompt }); shot.history = shot.history.slice(0, 50); };
@@ -50,7 +55,7 @@ const SL_FORMAT = `PROMPT FORMAT — the app's editor uses sectioned prompts. Wr
 const SL_SYSTEM = `You are the prompt-craft brain inside Slate, a professional prompt studio for filmmakers who generate images and video with AI models. You are an expert cinematographer, director, and prompt engineer. You write vivid, concrete, production-ready visual language — never vague adjectives, never filler like "high quality, 8k, masterpiece". Physical, photographable descriptions only. Respect every continuity fact you are given about characters, wardrobe, props, locations, lighting state, and time of day; if the user's request conflicts with continuity, follow the request and flag the conflict in one short line at the end prefixed with "CONTINUITY:".
 
 ${SL_FORMAT}`;
-const slSpec = shot => { const s = shot.spec; return [s.durationSec && s.durationSec + "s", s.fps && s.fps + "fps", s.aspectRatio, s.size, s.angle && s.angle + " angle", s.lens, s.movement].filter(Boolean).join(", ") || "unspecified"; };
+const slSpec = shot => { const s = shot.spec; return [shot.tf && shot.tf.bars && slSong() ? shot.tf.bars + " bars" : s.durationSec && s.durationSec + "s", s.fps && s.fps + "fps", s.aspectRatio, s.size, s.angle && s.angle + " angle", s.lens, s.movement].filter(Boolean).join(", ") || "unspecified"; };
 const slProfile = () => SL.data && SL.data.profiles.find(m => m.id === "minimax-h3");
 const slHint = () => { const prof = slProfile(); return prof ? `\nTARGET GENERATOR: ${prof.label} (${prof.kind}). Budget: ${prof.limits.maxChars} chars. Keep phrasing compatible with its dialect: ${prof.dialect.guidance.slice(0, 260)}…` : ""; };
 function slContext(scene) { const p = SL.p, out = ["PROJECT: " + p.name];
@@ -61,6 +66,7 @@ function slContext(scene) { const p = SL.p, out = ["PROJECT: " + p.name];
   if (p.lookbook.length) { out.push("\nACTIVE STYLE PROFILES (apply their language where relevant):"); for (const s of p.lookbook) out.push(`- ${s.source}: tone ${s.tone}; palette ${s.palette}; lighting ${s.lighting}; lenses ${s.lensLanguage}; movement ${s.movement}`); }
   if ((p.music || []).length) { out.push("\nSCORE (music cues):"); for (const m of p.music) out.push(`- ${m.name}${m.sceneRef ? ` (${m.sceneRef})` : ""}: ${[m.genre, m.mood].filter(Boolean).join(", ")}`); }
   if ((p.voices || []).length) { out.push("\nVOICE CAST:"); for (const v of p.voices) out.push(`- ${v.name}: ${[v.ageGender, v.accent, v.timbre].filter(Boolean).join(", ")}`); }
+  const song = slSong(); if (song) out.push(`\nSONG${song.name ? ' "' + song.name + '"' : ""}: ${song.bpm} BPM, ${song.beats} beats to the bar, one bar is ${song.bar.toFixed(3)} s; bar 1 starts ${song.first} s into the song. Shots are cut on bar lines: give each shot a slot in "bars".`);
   if (scene) { out.push(`\nCURRENT SCENE: ${scene.name}${scene.synopsis ? " — " + scene.synopsis : ""}`);
     if (scene.shots.length) { out.push("Shots so far in this scene (for continuity):"); for (const sh of scene.shots) out.push(`- ${sh.name} [${slSpec(sh)}]: ${sh.intent || sh.prompt.slice(0, 110).replace(/\n/g, " ") || "empty"}`); } }
   return out.join("\n"); }
@@ -111,6 +117,7 @@ CONVERSATION DISCIPLINE:
 - Don't interrogate — after at most one round of questions, make strong professional assumptions, state them briefly in the reply, and ACT.
 - When you act, the reply should read like an AD reporting back: what you set up and why, in a few tight sentences. Never paste full prompts into the reply — they're in the shots.
 - When the director asks for changes, use update_shot/update_scene on the existing work, not duplicates.
+- To change a character, location, prop, music cue or voice that is already in the bible (a recast, a new wardrobe, another time of day), use update_character/update_location/update_art/update_music_cue/update_voice with only the fields that change; send "replace":true to rewrite the whole sheet. Never add a second sheet with the same name. Shots that name the sheet in "cast" or "location" pick the change up when they compile; rewrite a shot's own "prompt" (update_shot) only where its text repeats the old description.
 
 PROMPT QUALITY: every "prompt" you write uses the sectioned format below, in vivid, concrete, production-ready cinematography language — no vague adjectives, no "8k masterpiece" filler. Repeat character/location descriptions verbatim from the bible in every prompt (generators see one prompt at a time). Respect all continuity facts.
 
@@ -129,36 +136,64 @@ PROMPT QUALITY: every "prompt" you write uses the sectioned format below, in viv
 
 (Only include sections with content, keep this order.)
 
-THIS SLATE RENDERS ITS OWN SHOTS: it runs inside TensorFold Studio on MiniMax H3, video with sound in one pass. A shot is 5, 8, 10 or 15 seconds, 24 fps. One or two actions fit in 5 seconds; put each further action in its own shot.
+THIS SLATE RENDERS ITS OWN SHOTS: it runs inside TensorFold Studio on MiniMax H3, video with sound in one pass. A shot is 1 to 15 seconds, 24 fps (5, 8, 10 and 15 are the usual lengths). One or two actions fit in 5 seconds; put each further action in its own shot.
+INTENT: a shot's "intent" is a one-line note for the crew (what the shot is for, where it sits in the cut). It never reaches the generator: everything that must be seen goes in the "prompt", the action in its Subject section or in "beatSheet".
 SPEECH AND SOUND: never write spoken words inside a "prompt". Every spoken line goes in the shot's "lines" with its speaker, about three words per second of the shot at most; a shot with no "lines" is rendered with nobody speaking. Describe ambience and physical sound in "soundscape".
 CAST AND PLACE: add characters and locations BEFORE the shots that use them, then name them in each shot's "cast" and "location" so their sheets are repeated in the compiled prompt.
+MUSIC VIDEOS: when the project has a SONG (or the director gives a tempo: set it with update_project "song"), give every shot "bars": its slot on the bar grid (2 bars at 120 BPM is 4 s). The clip is rendered a little longer than the slot and cut on the bar line; shots follow each other in order from bar 1, so the bars of all shots add up to the song. "lora" puts one installed LoRA on a single shot (a camera move, a look): name one from INSTALLED LORAS only, and null takes it off.
 "opensOn": "previous" makes a shot start on the last frame of the shot before it (one continuous move, no cut); "text" is a fresh frame, a cut.
 
 ACTIONS — when (and only when) the director's intent is clear enough to act, include actions. Available actions:
 
-- {"type":"update_project","logline"?,"world"?,"defaults"?:{"aspectRatio"?,"durationSec"?}}
+- {"type":"update_project","logline"?,"world"?,"defaults"?:{"aspectRatio"?,"durationSec"?},"song"?:{"name"?,"bpm"?:number,"beatsPerBar"?:number,"firstBeat"?:number}}
 - {"type":"create_scene","name","synopsis"?}
 - {"type":"update_scene","scene":"<name or id>","name"?,"synopsis"?}
-- {"type":"create_shot","scene":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?:{"durationSec"?,"aspectRatio"?,"size"?,"angle"?,"lens"?,"movement"?},"beatSheet"?:[{"from","to","text"}],"lines"?:[{"speaker":"<character name>","text":"<the exact words>"}],"soundscape"?,"cast"?:["<character names>"],"location"?:"<location name>","opensOn"?:("text"|"previous")}
-- {"type":"update_shot","shot":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?,"beatSheet"?,"lines"?,"soundscape"?,"cast"?,"location"?,"opensOn"?}
+- {"type":"create_shot","scene":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?:{"durationSec"?,"aspectRatio"?,"size"?,"angle"?,"lens"?,"movement"?},"beatSheet"?:[{"from","to","text"}],"lines"?:[{"speaker":"<character name>","text":"<the exact words>"}],"soundscape"?,"cast"?:["<character names>"],"location"?:"<location name>","opensOn"?:("text"|"previous"),"bars"?:number,"lora"?:{"name":"<an installed LoRA>","strength"?:number,"style"?:"<one of its looks>"}|null}
+- {"type":"update_shot","shot":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?,"beatSheet"?,"lines"?,"soundscape"?,"cast"?,"location"?,"opensOn"?,"bars"?,"lora"?}
 - {"type":"add_character","name","age"?,"gender"?,"ethnicity"?,"faceFeatures"?,"hair"?,"clothing"?,"expression"?,"eyeDirection"?,"mood"?,"environment"?,"keyLightSide"?,"lightingMood"?}
 - {"type":"add_location","name","interiorExterior"?("interior"|"exterior"|"both"),"description"?,"timeOfDay"?,"weather"?,"architecture"?,"textures"?,"practicalLights"?}
 - {"type":"add_art","kind"("prop"|"wardrobe"|"vehicle"),"name","description"?,"materials"?,"condition"?,"era"?,"distinctive"?}
 - {"type":"add_music_cue","name","sceneRef"?,"intent"?,"genre"?,"mood"?,"tempo"?,"instrumentation"?,"era"?,"structure"?,"vocals"?("instrumental"|"vocals"|"either"),"lyricTheme"?,"durationSec"?:number}
 - {"type":"add_voice","name","characterName"?,"ageGender"?,"accent"?,"timbre"?,"pitch"?,"pacing"?,"energy"?,"texture"?,"emotionalRange"?,"sampleLine"?}
+- {"type":"update_character","character":"<name or id>","name"?:"<new name>","replace"?:true, ...any add_character field}
+- {"type":"update_location","location":"<name or id>","name"?,"replace"?:true, ...any add_location field}
+- {"type":"update_art","art":"<name or id>","name"?,"replace"?:true, ...any add_art field}
+- {"type":"update_music_cue","cue":"<name or id>","name"?,"replace"?:true, ...any add_music_cue field}
+- {"type":"update_voice","voice":"<name or id>","name"?,"replace"?:true, ...any add_voice field}
 - {"type":"select","scene"?:"<name or id>","shot"?:"<name or id>"} — focus the UI on something you created or changed
 
 Spec vocabulary: size EWS|WS|MWS|MS|MCU|CU|ECU|Insert; angle eye level|low|high|overhead|dutch|over-shoulder|POV; movement locked|handheld|push-in|pull-back|orbit|pan|tilt|track|crane|drone|steadicam; lens 14mm|24mm|35mm|50mm|85mm|135mm|anamorphic|macro|tilt-shift.`;
+// The bible's sheets as the First AD writes them: `read` gives every field of a sheet (`all`, defaults filled in) and the ones this action sent (`sent`).
+const slSheetRead = (fields, fix = {}) => (a, str, p) => { const all = {}, sent = {}; for (const k of fields) { const v = fix[k] ? fix[k](a[k], str, p, a) : str(a[k]); all[k] = v; if (a[k] !== undefined && a[k] !== null) sent[k] = v; } return { all, sent }; };
+const SL_BIBLE = {
+  add_character: { key: "characters", ref: "character", id: "char", noun: "character", added: "Cast", unnamed: "Unnamed", blank: () => ({ scenario: "cinematic", notes: "" }),
+    read: slSheetRead(["age", "gender", "ethnicity", "faceFeatures", "hair", "clothing", "expression", "eyeDirection", "mood", "environment", "keyLightSide", "lightingMood"], { keyLightSide: (v, str) => str(v) || "Key light from left", lightingMood: (v, str) => str(v) || "Natural soft light" }) },
+  add_location: { key: "locations", ref: "location", id: "loc", noun: "location", added: "Scouted", unnamed: "Unnamed", blank: () => ({ notes: "" }),
+    read: slSheetRead(["interiorExterior", "description", "timeOfDay", "weather", "architecture", "textures", "practicalLights"], { interiorExterior: (v, str) => ["interior", "both"].includes(str(v)) ? str(v) : "exterior" }) },
+  add_art: { key: "artDept", ref: "art", id: "art", noun: "prop, wardrobe or vehicle", added: "Added", unnamed: "Unnamed", blank: () => ({ notes: "" }),
+    read: slSheetRead(["kind", "description", "materials", "condition", "era", "distinctive"], { kind: (v, str) => ["wardrobe", "vehicle"].includes(str(v)) ? str(v) : "prop" }) },
+  add_music_cue: { key: "music", ref: "cue", id: "cue", noun: "music cue", added: "Spotted cue", unnamed: "Untitled cue", blank: () => ({ lyrics: "", notes: "" }),
+    read: slSheetRead(["sceneRef", "intent", "genre", "mood", "tempo", "instrumentation", "era", "structure", "vocals", "lyricTheme", "durationSec"], { vocals: (v, str) => ["vocals", "either"].includes(str(v)) ? str(v) : "instrumental", durationSec: v => typeof v === "number" ? v : null }) },
+  add_voice: { key: "voices", ref: "voice", id: "voice", noun: "voice", added: "Cast voice", unnamed: "Unnamed voice", blank: () => ({ characterId: null, notes: "" }),
+    read: (a, str, p) => { const out = slSheetRead(["ageGender", "accent", "timbre", "pitch", "pacing", "energy", "texture", "emotionalRange", "sampleLine"])(a, str, p);
+      if (a.characterName !== undefined) { const who = p.characters.find(c => c.name.toLowerCase() === str(a.characterName).toLowerCase()); out.all.characterId = out.sent.characterId = who ? who.id : null; } return out; } } };
+const SL_BIBLE_CHANGE = { update_character: "add_character", update_location: "add_location", update_art: "add_art", update_music_cue: "add_music_cue", update_voice: "add_voice" };
 function slApply(actions) { const p = SL.p, receipts = [], str = v => typeof v === "string" ? v : "";
   const scene = ref => p.scenes.find(s => s.id === ref) || p.scenes.find(s => s.name.toLowerCase() === String(ref || "").trim().toLowerCase());
   const shotOf = ref => { for (const sc of p.scenes) { const sh = sc.shots.find(s => s.id === ref) || sc.shots.find(s => s.name.toLowerCase() === String(ref || "").trim().toLowerCase()); if (sh) return [sc, sh]; } };
   const named = (list, name) => list.find(x => (x.name || "").toLowerCase() === String(name || "").trim().toLowerCase());
   const gear = (shot, a) => { const tf = slTf(shot); if (Array.isArray(a.cast)) tf.cast = a.cast.map(n => named(p.characters, n)).filter(Boolean).map(c => c.id); if (a.location !== undefined) tf.location = (named(p.locations, a.location) || {}).id || "";
     if (Array.isArray(a.lines)) tf.lines = a.lines.filter(l => l && str(l.text).trim()).map(l => ({ characterId: (named(p.characters, l.speaker) || {}).id || null, voiceId: null, text: str(l.text).trim(), language: str(l.language) || "English", sung: !!l.sung }));
-    if (a.soundscape !== undefined) tf.soundscape = str(a.soundscape); if (["text", "previous"].includes(a.opensOn)) tf.start = a.opensOn; tf.h3Auto = true; };
+    if (a.soundscape !== undefined) tf.soundscape = str(a.soundscape); if (["text", "previous"].includes(a.opensOn)) tf.start = a.opensOn; tf.h3Auto = true;
+    if (a.bars !== undefined) { const n = Number(a.bars); if (n > 0 && n <= 64) tf.bars = n; else delete tf.bars; }
+    if (a.lora !== undefined) { const ask = a.lora && String(a.lora.name || a.lora.id || "").trim().toLowerCase(), hit = ask && slShotLoras().find(r => r.id === ask || (r.name || "").toLowerCase() === ask);
+      if (!a.lora) tf.loras = []; else if (hit) tf.loras = [{ id: hit.id, strength: Number(a.lora.strength) || hit.strength || 1, style: str(a.lora.style) && (hit.styles || {})[a.lora.style] !== undefined ? a.lora.style : "" }];
+      else receipts.push(`• No installed LoRA called "${a.lora.name || a.lora.id}" — the shot keeps ${tf.loras && tf.loras.length ? "its LoRA" : "the film's setting"}`); } };
   const spec = (to, patch) => { for (const k of ["durationSec", "fps", "aspectRatio", "size", "angle", "lens", "movement"]) if (patch && k in patch) to[k] = patch[k] ?? null; };
   for (const a of Array.isArray(actions) ? actions : []) try {
-    if (a.type === "update_project") { if (a.logline !== undefined) p.logline = a.logline; if (a.world !== undefined) p.world = a.world; if (a.defaults) Object.assign(p.defaults, a.defaults, { targetModel: "minimax-h3" }); receipts.push("✓ Updated project bible"); }
+    if (a.type === "update_project") { if (a.logline !== undefined) p.logline = a.logline; if (a.world !== undefined) p.world = a.world; if (a.defaults) Object.assign(p.defaults, a.defaults, { targetModel: "minimax-h3" });
+      if (a.song && typeof a.song === "object") { const g = slFilm().song || (slFilm().song = {}); for (const k of ["bpm", "beatsPerBar", "firstBeat"]) if (Number.isFinite(Number(a.song[k])) && a.song[k] !== null && a.song[k] !== "") g[k] = Number(a.song[k]); if (a.song.name !== undefined) g.name = str(a.song.name); SL.plan = {}; receipts.push(slSong() ? `✓ Song: ${slSong().bpm} BPM, a bar is ${slSong().bar.toFixed(2)} s` : "• Song noted, but it has no tempo between 20 and 400 BPM yet"); }
+      receipts.push("✓ Updated project bible"); }
     else if (a.type === "create_scene") { if (scene(a.name)) { receipts.push(`• Scene "${a.name}" already exists — skipped`); continue; } p.scenes.push({ id: slId("scene"), name: a.name, synopsis: a.synopsis || "", shots: [] }); SL.sceneId = p.scenes.at(-1).id; SL.shotId = null; receipts.push(`✓ Created scene "${a.name}"`); }
     else if (a.type === "update_scene") { const sc = scene(a.scene); if (!sc) { receipts.push(`✗ Scene "${a.scene}" not found`); continue; } if (a.name) sc.name = a.name; if (a.synopsis !== undefined) sc.synopsis = a.synopsis; receipts.push(`✓ Updated scene "${sc.name}"`); }
     else if (a.type === "create_shot") { const sc = scene(a.scene); if (!sc) { receipts.push(`✗ Scene "${a.scene}" not found for new shot`); continue; }
@@ -167,15 +202,15 @@ function slApply(actions) { const p = SL.p, receipts = [], str = v => typeof v =
     else if (a.type === "update_shot") { const hit = shotOf(a.shot); if (!hit) { receipts.push(`✗ Shot "${a.shot}" not found`); continue; } const [sc, shot] = hit;
       if (a.prompt !== undefined && a.prompt !== shot.prompt) { slKeep(shot, "before First AD change"); shot.prompt = a.prompt; slTf(shot).h3Auto = true; } if (a.name) shot.name = a.name; if (a.intent !== undefined) shot.intent = a.intent; spec(shot.spec, a.spec);
       if (a.beatSheet !== undefined) shot.beatSheet = a.beatSheet; gear(shot, a); delete SL.plan[shot.id]; shot.updatedAt = slNow(); SL.sceneId = sc.id; SL.shotId = shot.id; receipts.push(`✓ Updated "${shot.name}"`); }
-    else if (a.type === "add_character") { p.characters.push({ id: slId("char"), name: str(a.name) || "Unnamed", age: str(a.age), gender: str(a.gender), ethnicity: str(a.ethnicity), faceFeatures: str(a.faceFeatures), hair: str(a.hair), clothing: str(a.clothing), expression: str(a.expression),
-      eyeDirection: str(a.eyeDirection), mood: str(a.mood), environment: str(a.environment), keyLightSide: str(a.keyLightSide) || "Key light from left", lightingMood: str(a.lightingMood) || "Natural soft light", scenario: "cinematic", notes: "" }); receipts.push(`✓ Cast "${str(a.name)}"`); }
-    else if (a.type === "add_location") { const ie = str(a.interiorExterior); p.locations.push({ id: slId("loc"), name: str(a.name) || "Unnamed", interiorExterior: ["interior", "both"].includes(ie) ? ie : "exterior", description: str(a.description), timeOfDay: str(a.timeOfDay), weather: str(a.weather),
-      architecture: str(a.architecture), textures: str(a.textures), practicalLights: str(a.practicalLights), notes: "" }); receipts.push(`✓ Scouted "${str(a.name)}"`); }
-    else if (a.type === "add_art") { const kind = ["wardrobe", "vehicle"].includes(str(a.kind)) ? str(a.kind) : "prop"; p.artDept.push({ id: slId("art"), kind, name: str(a.name) || "Unnamed", description: str(a.description), materials: str(a.materials), condition: str(a.condition), era: str(a.era), distinctive: str(a.distinctive), notes: "" }); receipts.push(`✓ Added ${kind} "${str(a.name)}"`); }
-    else if (a.type === "add_music_cue") { (p.music = p.music || []).push({ id: slId("cue"), name: str(a.name) || "Untitled cue", sceneRef: str(a.sceneRef), intent: str(a.intent), genre: str(a.genre), mood: str(a.mood), tempo: str(a.tempo), instrumentation: str(a.instrumentation), era: str(a.era), structure: str(a.structure),
-      vocals: ["vocals", "either"].includes(str(a.vocals)) ? str(a.vocals) : "instrumental", lyricTheme: str(a.lyricTheme), lyrics: "", durationSec: typeof a.durationSec === "number" ? a.durationSec : null, notes: "" }); receipts.push(`✓ Spotted cue "${str(a.name)}"`); }
-    else if (a.type === "add_voice") { const who = p.characters.find(c => c.name.toLowerCase() === str(a.characterName).toLowerCase()); (p.voices = p.voices || []).push({ id: slId("voice"), name: str(a.name) || "Unnamed voice", characterId: who ? who.id : null, ageGender: str(a.ageGender), accent: str(a.accent), timbre: str(a.timbre),
-      pitch: str(a.pitch), pacing: str(a.pacing), energy: str(a.energy), texture: str(a.texture), emotionalRange: str(a.emotionalRange), sampleLine: str(a.sampleLine), notes: "" }); receipts.push(`✓ Cast voice "${str(a.name)}"`); }
+    else if (SL_BIBLE[a.type] || SL_BIBLE_CHANGE[a.type]) { const adding = !!SL_BIBLE[a.type], def = SL_BIBLE[a.type] || SL_BIBLE[SL_BIBLE_CHANGE[a.type]], list = p[def.key] || (p[def.key] = []);
+      // an add with a name the bible already has is a rewrite of that sheet, and an update changes the fields it gives: the id stays, so every shot that casts it follows
+      const ref = adding ? a.name : a[def.ref], hit = list.find(x => x.id === ref) || named(list, ref);
+      if (!adding && !hit) { receipts.push(`✗ ${def.noun} "${ref}" not found — nothing changed`); continue; }
+      const given = def.read(a, str, p);
+      if (!hit) { list.push({ id: slId(def.id), ...def.blank(), ...given.all, name: str(a.name) || def.unnamed }); receipts.push(`✓ ${def.added} "${str(a.name)}"`); continue; }
+      const whole = adding || a.replace === true, was = hit.name;
+      Object.assign(hit, whole ? given.all : given.sent, { name: (str(a.name).trim() && (adding ? hit.name : str(a.name).trim())) || hit.name });
+      SL.plan = {}; receipts.push(`✓ ${whole ? "Rewrote" : "Changed"} ${def.noun} "${was}"${hit.name !== was ? ` → "${hit.name}"` : ""}${whole ? "" : Object.keys(given.sent).length ? ": " + Object.keys(given.sent).join(", ") : hit.name !== was ? "" : ": nothing to change"}`); }
     else if (a.type === "select") { const hit = a.shot && shotOf(a.shot), sc = !hit && a.scene && scene(a.scene); if (hit) { SL.sceneId = hit[0].id; SL.shotId = hit[1].id; } else if (sc) { SL.sceneId = sc.id; SL.shotId = null; } }
     else receipts.push("✗ Unknown action " + (a.type || "?"));
   } catch (e) { receipts.push(`✗ ${a.type} failed: ${e.message}`); }
@@ -183,9 +218,10 @@ function slApply(actions) { const p = SL.p, receipts = [], str = v => typeof v =
 async function slAD(message) { const p = SL.p, log = p.copilot || (p.copilot = []);
   const inv = ["CURRENT SCENE/SHOT INVENTORY (ids in brackets):", ...(p.scenes.length ? [] : ["- (no scenes yet)"]), ...p.scenes.flatMap(sc => [`- Scene "${sc.name}" [${sc.id}]${sc.synopsis ? " — " + sc.synopsis : ""}`,
     ...sc.shots.map(sh => `    · Shot "${sh.name}" [${sh.id}] ${[sh.spec.durationSec && sh.spec.durationSec + "s", sh.spec.size, sh.spec.movement].filter(Boolean).join(", ")} — ${sh.intent || sh.prompt.slice(0, 80).replace(/\n/g, " ") || "empty"}`)])].join("\n");
+  const loras = slShotLoras(); const invLoras = "\n\nINSTALLED LORAS (for a shot's \"lora\"): " + (loras.length ? loras.map(r => r.name + (Object.keys(r.styles || {}).length ? " [" + Object.keys(r.styles).join(", ") + "]" : "")).join("; ") : "(none)");
   const convo = log.slice(-14).map(m => `${m.role === "user" ? "DIRECTOR" : "FIRST AD"}: ${m.text}`).join("\n\n");
   log.push({ role: "user", text: message }); slSave();
-  const r = await slBrain("First AD", `${slContext()}\n\n${inv}\n\n${convo ? "CONVERSATION SO FAR:\n" + convo + "\n\n" : ""}DIRECTOR: ${message}`, { json: true, system: SL_AD });
+  const r = await slBrain("First AD", `${slContext()}\n\n${inv}${invLoras}\n\n${convo ? "CONVERSATION SO FAR:\n" + convo + "\n\n" : ""}DIRECTOR: ${message}`, { json: true, system: SL_AD });
   if (!r) { log.pop(); return slDraw(); } const receipts = slApply(r.json.actions); log.push({ role: "assistant", text: String(r.json.reply || ""), receipts }); p.copilot = log.slice(-60); slDraw(); }
 
 /* ---------- from a shot to the queue ---------- */
@@ -195,8 +231,26 @@ async function slBrainCompile(shot) { const base = await slCompile(shot), prof =
   if (r && typeof r.json.prompt === "string" && r.json.prompt.trim()) { tf.h3 = r.json.prompt.trim(); tf.h3Auto = false; } slDraw(); }
 async function slRender(scene, shot, chain) { const tf = slTf(shot), c = await slCompile(shot, chain), stamp = Date.now().toString(36);
   const output = "slate/" + SL.p.id + "/takes/" + shot.id + "-" + stamp + ".mp4", prompt = (tf.h3Auto === false && tf.h3.trim()) || c.prompt;
-  const j = await api("/api/jobs", { kind: "video", title: scene.name + " · " + shot.name, params: { ...c.plan, prompt, output, ...(lorasOf(slFilm()).length && !(c.plan.references || []).length ? { loras: lorasOf(slFilm()) } : {}), brain: { backend: SL.p.defaults.brain, endpoint: SL.p.defaults.localEndpoint, model: SL.p.defaults.localModel }, slate: { project: SL.p.id, scene: scene.id, shot: shot.id } } });
-  shot.takes.unshift({ id: slId("take"), loggedAt: slNow(), model: "minimax-h3", prompt, rating: "good", notes: "", mediaPath: output, jobId: j.id, seed: c.plan.seed }); return output; }
+  const j = await api("/api/jobs", { kind: "video", title: scene.name + " · " + shot.name, params: { ...c.plan, prompt, output, ...(!(c.plan.references || []).length && (lorasOf(c.plan).length || lorasOf(slFilm()).length) ? { loras: lorasOf(c.plan).length ? lorasOf(c.plan) : lorasOf(slFilm()) } : {}), brain: { backend: SL.p.defaults.brain, endpoint: SL.p.defaults.localEndpoint, model: SL.p.defaults.localModel }, slate: { project: SL.p.id, scene: scene.id, shot: shot.id } } });
+  shot.takes.unshift({ id: slId("take"), loggedAt: slNow(), model: "minimax-h3", prompt, rating: "good", notes: "", mediaPath: output, jobId: j.id, seed: c.plan.seed, settings: Object.fromEntries(["preset", "quality", "frames", "seconds", "width", "height", "loras"].filter(k => j.params && j.params[k] != null).map(k => [k, j.params[k]])) }); return output; }
+// A take rendered somewhere else (another machine's app, or a file) logged into this shot with its seed and settings.
+async function slImportTake(shot, given) { const body = { projectId: SL.p.id, shot: shot.id, ...Object.fromEntries(Object.entries(given).filter(([, v]) => v !== "" && v != null)) };
+  clearTimeout(slTimer); await api("/api/slate/projects/" + SL.p.id, SL.p, "PUT");  // the film as it is now: the server reads the shot from the file
+  const r = await api("/api/slate/takes", body); shot.takes.unshift(r.take); SL.have[r.take.mediaPath] = true; return r.take; }
+const slTakeLine = take => [take.seed != null ? "seed " + take.seed : "seed ?", take.settings && (take.settings.preset || take.settings.width) ? (take.settings.width ? take.settings.width + "×" + take.settings.height : take.settings.preset) : null,
+  take.settings && take.settings.frames ? take.settings.frames + " frames" : take.settings && take.settings.seconds ? take.settings.seconds + " s" : null, take.settings && take.settings.quality, take.settings && (take.settings.loras || []).length ? "LoRA " + take.settings.loras.map(l => l.id).join(" + ") : null,
+  take.imported ? "imported" + (take.source && take.source.from ? " from " + take.source.from.replace(/^https?:\/\//, "") : "") : null, take.loggedAt.slice(0, 16).replace("T", " ")].filter(Boolean).join(" · ");
+function slImport(scene, shot) { const f = SL.imp || (SL.imp = { from: "", clip: "", seed: "", notes: "" }); try { if (!f.from) f.from = localStorage.getItem("slate-import-from") || ""; } catch {}
+  const done = take => { toast("Imported a take of " + shot.name + (take.seed != null ? ", seed " + take.seed : "")); f.clip = ""; f.seed = ""; f.notes = ""; slDraw(); };
+  const up = el("input", { type: "file", accept: "video/mp4,video/quicktime", onchange: async () => { try { const data = new FormData(); data.append("file", up.files[0]); const j = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (!j.path) return toast(j.error || "upload failed");
+    done(await slImportTake(shot, { path: j.path, seed: f.seed, notes: f.notes })); } catch (e) { toast(e.message); } } });
+  const go = async () => { const clip = f.clip.trim(); if (!f.from.trim() || !clip) return toast("Give the other app's address and one of its job ids, or a clip's path in its folder");
+    try { localStorage.setItem("slate-import-from", f.from.trim()); } catch {}
+    try { done(await slImportTake(shot, { from: f.from.trim(), ...(/[\/.]/.test(clip) ? { path: clip } : { job: clip }), seed: f.seed, notes: f.notes })); } catch (e) { toast(e.message); } };
+  return slFold("import", "Import a take rendered on another machine", () => el("div", {}, el("div", { class: "note" }, "A clip another machine's app made of this shot comes into the film with its seed and settings: give that app's address and the job's id (its prompt, seed and settings are read from the job), or a path in its folder. A file you have goes in by upload."),
+    el("div", { class: "row" }, field("The other app's address", bind(f, "from", el("input", { placeholder: "http://10.100.10.5:7870" }))), field("Its job id, or a clip's path", bind(f, "clip", el("input", { placeholder: "1013-131100-5eb633  or  renders/1013-131100-5eb633.mp4" }))),
+      el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed, if not the job's"), bind(f, "seed", el("input", { type: "number", min: 0 })))),
+    el("div", { class: "row" }, field("Notes", bind(f, "notes", el("input", { placeholder: "rendered on Spark 5, the take in the cut" }))), el("button", { class: "primary fit", onclick: go }, "Import the take"), field("or upload the clip", up)))); }
 const slBest = shot => { const t = shot.takes.filter(t => t.mediaPath && SL.have[t.mediaPath]); return (t.find(t => t.rating === "circled") || t.find(t => t.rating !== "no-good") || {}).mediaPath || null; };
 // A new take of one shot, from a take already made. With notes on that take, the brain first rewrites the shot's prompt
 // to answer them (the old prompt goes to History); without notes it is the same prompt at the next seed.
@@ -291,8 +345,8 @@ function slTakes(scene, shot) { return shot.takes.filter(t => t.mediaPath).map(t
     slFeedback(scene, shot, take)); }); }
 // notes on a take, and a new take from them
 function slFeedback(scene, shot, take) { const active = job => job && ["queued", "running"].includes(job.status), waiting = active(jobs.find(j => j.id === take.jobId));
-  const box = bind(take, "notes", el("textarea", { rows: 2, style: "min-height:52px", placeholder: "Notes / feedback on this take: what to keep, what to fix (“her face changes at the end”, “slower push-in”, “the line is mumbled”) · seed " + (take.seed ?? "?") + " · " + take.loggedAt.slice(0, 16).replace("T", " ") }), slSave);
-  return el("div", { class: "row", style: "align-items:flex-end;margin-top:8px" }, el("div", {}, box),
+  const box = bind(take, "notes", el("textarea", { rows: 2, style: "min-height:52px", placeholder: "Notes / feedback on this take: what to keep, what to fix (“her face changes at the end”, “slower push-in”, “the line is mumbled”) · " + slTakeLine(take) }), slSave);
+  return el("div", { class: "row", style: "align-items:flex-end;margin-top:8px" }, el("div", {}, take.imported || take.settings ? el("div", { class: "note", style: "margin:0 0 4px" }, slTakeLine(take)) : null, box),
     el("button", { class: "fit hot", disabled: waiting || !!SL.busy, title: "With notes: the brain revises the shot's prompt to answer them, then a new take is queued. Without notes: the same prompt at the next seed. The takes you have are kept.", onclick: () => slRegenerate(scene, shot, take) }, "↻ Regenerate")); }
 function slRoll(scene, shot) { const tf = slTf(shot), p = SL.p, plan = SL.plan[shot.id], redo = () => { delete SL.plan[shot.id]; slDraw(); }, soft = () => { tf.h3Auto !== false && delete SL.plan[shot.id]; };
   if (!plan) { SL.plan[shot.id] = { pending: true }; slCompile(shot).then(render, e => { SL.plan[shot.id] = { prompt: "", plan: {}, warnings: [e.message], mode: "text" }; render(); }); }
@@ -310,19 +364,27 @@ function slRoll(scene, shot) { const tf = slTf(shot), p = SL.p, plan = SL.plan[s
     el("div", { class: "row" }, el("button", { class: "small fit", onclick: () => { tf.lines.push({ characterId: tf.cast[0] || null, voiceId: null, text: "", language: "English", sung: false }); slDraw(); } }, "+ Add a line"), el("span")),
     el("div", { class: "row" }, field("Soundscape", slIn(tf, "soundscape", { placeholder: "Rain on a tin roof, distant traffic, a kettle starting to boil." }, soft)), el("div", { class: "fit", style: "width:210px" }, el("label", {}, "Score"), slPick(tf, "cue", { "": "no cue (N/A)", ...Object.fromEntries((p.music || []).map(m => [m.id, m.name])) }, redo)),
       el("div", { class: "fit", style: "width:100px" }, el("label", {}, "Seed"), slIn(tf, "seed", { type: "number", min: 0 }, soft))),
+    (() => { const all = slShotLoras(), own = (tf.loras || [])[0], rec = own && all.find(r => r.id === own.id), pick = { id: own ? own.id : "" };
+      if (!all.length && !own) return null;
+      return el("div", { class: "row" }, el("div", { class: "fit", style: "width:260px" }, el("label", { title: "One LoRA from the hub on this shot alone: a camera move, a look. It stands in for the film's LoRAs on this shot, and goes through the same checks when the shot is queued." }, "LoRA for this shot"),
+          select(pick, "id", { "": lorasOf(slFilm()).length ? "the film's (" + lorasOf(slFilm()).length + ")" : "none", ...Object.fromEntries(all.map(r => [r.id, r.name])), ...(own && !rec ? { [own.id]: own.id + " (not installed)" } : {}) }, () => { const r = all.find(x => x.id === pick.id); tf.loras = r ? [{ id: r.id, strength: r.strength || 1, style: "" }] : []; redo(); })),
+        own ? el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Strength"), bind(own, "strength", el("input", { type: "number", step: 0.05 }), () => { own.strength = Number(own.strength) || 1; soft(); slSave(); })) : null,
+        own && rec && Object.keys(rec.styles || {}).length ? el("div", { class: "fit", style: "width:200px" }, el("label", {}, "Look"), select(own, "style", { "": "its trigger only", ...Object.fromEntries(Object.keys(rec.styles).map(k => [k, k])) }, () => { soft(); slDraw(); })) : null, el("span")); })(),
+    plan && plan.plan && plan.plan.slot ? el("div", { class: "note" }, "Slot: " + plan.plan.slot.bars + " bars = " + plan.plan.slot.seconds.toFixed(2) + " s (" + plan.plan.slot.frames + " frames), from bar " + plan.plan.slot.bar + " at " + slClock(plan.plan.slot.start) + " of the song. The clip is " + plan.plan.frames + " frames (" + (plan.plan.frames / 24).toFixed(2) + " s): " + (plan.plan.slot.spare >= 0 ? plan.plan.slot.spare + " to trim." : "shorter than the slot.")) : null,
     plan && (plan.warnings || []).length ? el("div", { class: "tip" }, el("b", {}, "Preflight"), plan.warnings.map(w => el("div", {}, "• " + w))) : null,
     el("label", {}, "MiniMax H3 prompt" + (tf.h3Auto === false ? " · edited by hand or by the brain: Compile replaces it" : " · compiled from the shot")), h3,
     el("div", { class: "summary" }, el("span", { class: "chip k" }, { text: "TEXT → VIDEO", previous: "LAST FRAME → VIDEO", image: "IMAGE → VIDEO", references: "CAST STILLS → VIDEO" }[plan && plan.mode] || "…"),
-      plan && plan.plan && plan.plan.seconds ? [el("span", { class: "chip" }, plan.plan.seconds + " s"), el("span", { class: "chip" }, size || ""), el("span", { class: "chip" }, plan.plan.references ? "Ref2VA · " + (plan.plan.ref_turbo ? "Turbo 4" : "20") + " passes" : S.qualities[plan.plan.quality] || plan.plan.quality), el("span", { class: "chip" }, plan.chars + " characters")] : null),
+      plan && plan.plan && plan.plan.seconds ? [el("span", { class: "chip" }, plan.plan.slot ? plan.plan.slot.bars + " bars · " + plan.plan.frames + " frames" : plan.plan.seconds + " s"), (plan.plan.loras || []).length ? el("span", { class: "chip" }, "LoRA · " + plan.plan.loras.map(l => l.id).join(" + ")) : null, el("span", { class: "chip" }, size || ""), el("span", { class: "chip" }, plan.plan.references ? "Ref2VA · " + (plan.plan.ref_turbo ? "Turbo 4" : "20") + " passes" : S.qualities[plan.plan.quality] || plan.plan.quality), el("span", { class: "chip" }, plan.chars + " characters")] : null),
     el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "fit", onclick: () => { tf.h3Auto = true; redo(); } }, "Compile"), el("button", { class: "fit", disabled: !!SL.busy || !shot.prompt.trim(), onclick: () => slBrainCompile(shot) }, "✦ Compile with the brain"),
       el("button", { class: "hot fit", disabled: !shot.prompt.trim() && tf.h3Auto !== false, onclick: async () => { try { await slRender(scene, shot); await poll(); slDraw(); toast("Queued: " + shot.name); } catch (e) { toast(e.message); } } }, "🎬 Render this shot"), el("span")),
-    shot.takes.some(t => t.mediaPath) ? el("h3", {}, "Takes · circle the one that works") : null, slTakes(scene, shot)); }
+    shot.takes.some(t => t.mediaPath) ? el("h3", {}, "Takes · circle the one that works") : null, slTakes(scene, shot), slImport(scene, shot)); }
 function slWorkspace(scene, shot) { if (!SL.open.cat) SL.open.cat = SL.data.categories[0].id; const edit = el("textarea", { style: "min-height:250px;font:12.5px/1.55 var(--mono)", placeholder: "# Subject\nwho or what the shot is about, the action, wardrobe\n\n# Composition\n# Lighting\n# Camera\n# Style\n# Mood" }); edit.value = shot.prompt;
   edit.addEventListener("input", () => { shot.prompt = edit.value; shot.updatedAt = slNow(); slTf(shot).h3Auto !== false && delete SL.plan[shot.id]; slSave(); });
   const note = el("input", { placeholder: "Talk to the shot: make it rain, keep the neon", onkeydown: e => { if (e.key === "Enter" && note.value.trim()) slNote(shot, note.value.trim()); } }), cats = SL.data.categories, cat = cats.find(c => c.id === SL.open.cat) || cats[0], lines = shot.prompt.split("\n");
   const flip = (list, n) => { list.includes(n) ? list.splice(list.indexOf(n), 1) : list.push(n); delete SL.plan[shot.id]; slDraw(); };
-  return el("div", {}, el("div", { class: "row" }, field("Shot", slIn(shot, "name")), field("Intent: what the shot is for", slIn(shot, "intent", { placeholder: "She realises the letter is gone." }, () => { delete SL.plan[shot.id]; }))),
-    el("div", { class: "row" }, el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seconds"), bind(shot.spec, "durationSec", el("input", { type: "number", min: 1, max: 15 }), () => { delete SL.plan[shot.id]; slSave(); })),
+  return el("div", {}, el("div", { class: "row" }, field("Shot", slIn(shot, "name")), field("Intent: what the shot is for (a note for people, kept out of the prompt)", slIn(shot, "intent", { placeholder: "She realises the letter is gone." }))),
+    el("div", { class: "row" }, el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seconds"), bind(shot.spec, "durationSec", el("input", { type: "number", min: 1, max: 15, step: "any", disabled: !!(slSong() && slTf(shot).bars) }), () => { delete SL.plan[shot.id]; slSave(); })),
+      slSong() ? el("div", { class: "fit", style: "width:110px" }, el("label", { title: "The shot's slot on the song's bar grid. The clip is rendered at the shortest length that covers it and cut on the bar line." }, "Slot, in bars"), bind(slTf(shot), "bars", el("input", { type: "number", min: 0, max: 64, step: "any", placeholder: "none" }), () => { const tf = slTf(shot); tf.bars = Number(tf.bars) > 0 ? Number(tf.bars) : null; SL.plan = {}; slDraw(); })) : null,
       ...["aspectRatio", "size", "angle", "lens", "movement"].map(k => el("div", { style: "min-width:96px" }, el("label", {}, { aspectRatio: "Aspect", size: "Size", angle: "Angle", lens: "Lens", movement: "Movement" }[k]), slPick(shot.spec, k, slOpts(SL_SPEC[k]), () => { delete SL.plan[shot.id]; render(); })))),
     el("div", { "data-clear": "slate-shot" }, el("div", { class: "seghead" }, el("label", { style: "flex:1;margin:0" }, "Prompt · Subject, Composition, Lighting, Camera, Style, Mood"), clearButton("slate-shot", "Clear", "Empty this shot's prompt (Undo puts it back)")), edit),
     el("div", { class: "row chips", style: "margin-top:8px" }, !shot.prompt.trim() ? el("button", { class: "small", onclick: () => { shot.prompt = SL_HEADS.map(h => "# " + h + "\n").join("\n"); slDraw(); } }, "Insert the six headings") : null,
@@ -364,6 +426,13 @@ function slBible() { const p = SL.p, d = p.defaults, film = slFilm(), b = SL.bra
     field("World and tone", slArea(p, "world", { style: "min-height:90px", placeholder: "Where and when this is, what it looks and feels like. Every prompt the brain writes is written inside this." })),
     el("h3", {}, "Defaults for new shots"), el("div", { class: "row" }, field("Aspect ratio", slPick(d, "aspectRatio", Object.fromEntries(SL_SPEC.aspectRatio.map(v => [v, v])))), field("Clip length", select(d, "durationSec", Object.fromEntries(Object.keys(S.durations).map(s => [s, s + " s"])), () => { d.durationSec = Number(d.durationSec); slSave(); })),
       field("Target generator", el("input", { value: "MiniMax H3 · rendered here, powered by TensorFold", disabled: true }))),
+    el("h3", {}, "Song · for a music video"), (() => { const g = film.song || (film.song = { name: "", bpm: "", beatsPerBar: 4, firstBeat: 0 }), song = slSong(), again = () => { SL.plan = {}; slDraw(); };
+      const bars = SL.p.scenes.flatMap(sc => sc.shots).reduce((n, sh) => n + (Number((sh.tf || {}).bars) || 0), 0);
+      return [el("div", { class: "row" }, field("Song", slIn(g, "name", { placeholder: "Title, artist" })), el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Tempo, BPM"), bind(g, "bpm", el("input", { type: "number", min: 20, max: 400, step: "any", placeholder: "none" }), again)),
+          el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Beats in a bar"), bind(g, "beatsPerBar", el("input", { type: "number", min: 1, max: 16 }), again)),
+          el("div", { class: "fit", style: "width:150px" }, el("label", { title: "Seconds from the start of the song to the first beat of bar 1" }, "First beat at, s"), bind(g, "firstBeat", el("input", { type: "number", step: "any" }), again))),
+        el("div", { class: "note" }, song ? "One bar is " + song.bar.toFixed(3) + " s. A shot's slot is set in bars in Shots; its clip is rendered at the shortest length the model takes that covers the slot, to be cut on the bar line. " + (bars ? "The shots' slots add up to " + bars + " bars, " + slClock(song.first + bars * song.bar) + " of song." : "No shot has a slot yet.")
+          : "With a tempo here, each shot can be given a slot in bars and its clip length follows the bar grid. The tempo is yours to give (from the score or a beat tracker): the Studio does not listen to the song.")]; })(),
     el("h3", {}, "How this film renders"), el("div", { class: "row" }, field("Resolution", slPick(film, "res", { "480p": "480p tier · 864 × 480 at 16:9 (fast)", "720p": "720p tier · 1280 × 720 at 16:9", ...(S.sharp ? { sharp: "Wasserman Sharp Spec · 1376 × 768, 16:9 only" } : {}) })), field("Quality", slPick(film, "quality", S.qualities)),
       S.sharp ? sharpButton(film.res === "sharp" && film.quality === S.sharp.quality, () => { film.res = "sharp"; film.quality = S.sharp.quality; d.aspectRatio = "16:9"; if (!S.sharp.seconds.includes(Number(d.durationSec))) d.durationSec = S.sharp.seconds[0];
         for (const sc of SL.p.scenes) for (const sh of sc.shots) { slTf(sh).seed = S.sharp.seed; sh.spec.aspectRatio = "16:9"; if (!S.sharp.seconds.includes(Number(sh.spec.durationSec))) sh.spec.durationSec = S.sharp.seconds[0]; } slSave(); slDraw(); }) : null,
