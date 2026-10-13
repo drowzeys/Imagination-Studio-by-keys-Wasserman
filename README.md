@@ -25,7 +25,7 @@ Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo ada
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
 contributor. This pack is their work, ported, pinned and measured. See [CREDITS.md](CREDITS.md). Built with Qwen.
 
-**2.6.6** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.7.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
@@ -293,6 +293,25 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.7.0 (2026-10-13): the Sparks setting, one to eight DGX Sparks for a job.**
+> - **A Sparks tab**: add a worker DGX Spark by the address you would give `ssh`, check it, update its Studio code and
+>   start its app, stop it. Each row shows its version, memory guard, memory and disk, and what it renders.
+> - **A Sparks chooser, 1 to 8**, at the top of the Queue, in Create, on the Production board and on a Slate shot
+>   (`sparks: N` in the API). The app uses as many as are up and able to do the job and says so ("5 of 8 available").
+> - **Several clips go one per Spark, in parallel**, and land in the head's Library and project as if rendered there,
+>   with seed, settings and Spark on each take. One clip stays on one Spark; a long video stays on the head (each
+>   piece opens on the last frame of the one before); a clip with a LoRA or reference pictures goes only to a worker
+>   that has them and whose memory guard accepts it.
+> - **Measured**, the same eight clips (56 frames, 864x480, FastH3 8 passes) through the app: 263.2 s on one Spark,
+>   129.8 s on two (2.03x), 97.5 s on three (2.70x), 69.0 s on four (3.81x), 65.0 s on five (4.05x). Five is little
+>   better than four for eight clips: they go in two rounds either way.
+> - **How it connects**: each worker's app listens on its own 127.0.0.1 and the head opens one ssh tunnel to it. A
+>   worker silent for 60 s during a job is marked down and its clip rendered elsewhere.
+> - **Not built**: one clip split across several Sparks (measured at 72.2 s on one against 40.9 s on four, but the
+>   installer does not build that engine and the app does not run its ranks; see `docs/multi-spark.md`). **Not
+>   tested**: six to eight Sparks (five exist here), LoRA and reference clips on real workers, Production and Slate
+>   clicked through with real workers. If the head app restarts during a job, a worker's finished clip is not fetched.
+>
 > **2.6.6 (2026-10-13): what two music-video productions found.**
 > Two three-minute videos were made through the app on up to five DGX Sparks; this release fixes what they ran into.
 > - **A memory guard on a DGX Spark.** A clip with a LoRA, at 1376x768, took a Spark down. A job is now checked
