@@ -1703,8 +1703,18 @@ import qa  # noqa: E402  (Sam Wasserman's QA gate, beside this file)
 import remote  # noqa: E402  (another machine's Studio app, read over its own API, beside this file)
 import slate  # noqa: E402  (Wasserman Slate AI Studio, beside this file)
 
+
+
+def slate_room(plan: dict, lora: bool) -> dict:
+    """Whether a Slate shot's render plan fits this machine's memory: the same check a queued job gets (memory_of)."""
+
+    chosen, _ = custom(plan) if plan.get("preset") == "custom" else ({}, False)
+    sized = {**(PRESETS[plan["preset"]][2] if plan.get("preset") in PRESETS else {}), **chosen}
+    return memory_of(plan, sized, int(plan["frames"]), lora, {"pictures": plan["references"], "videos": []} if plan.get("references") else None)
+
+
 app.include_router(slate.attach(HOME, DURATIONS, compose, compose_references, REFERENCE_LIMIT,
-                                lambda: {"ref2va": ref2va_ready(), "ref2va_turbo": ref2va_turbo_ready()}))
+                                lambda: {"ref2va": ref2va_ready(), "ref2va_turbo": ref2va_turbo_ready()}, slate_room))
 import motion  # noqa: E402  (Motion Previs: a Python port of Sam Wasserman's Motion Previs Studio analysis, beside this file)
 app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)

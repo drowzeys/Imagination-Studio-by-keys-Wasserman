@@ -8,6 +8,7 @@ a shot to MiniMax H3's prompt form and the plan of the render that the Studio's 
 """
 
 import json
+import math
 import os
 import re
 import shutil
@@ -29,6 +30,7 @@ HOME: Path = Path()
 DURATIONS: dict = {}
 compose = compose_references = None  # the Studio's own prompt builders, set by attach()
 ready = lambda: {}  # which optional parts this install has
+room = lambda plan, lora: {"fits": True, "reason": ""}  # whether a render plan fits this machine's memory, set by attach()
 LIMIT = 9
 TIMEOUT = 420
 CLI_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local/bin"), str(Path.home() / ".claude/local"))
@@ -51,9 +53,10 @@ MOVES = {"locked": "Static shot on a locked, still camera.", "handheld": "Handhe
 SECTIONS = ("subject", "composition", "lighting", "camera", "style", "mood")
 
 
-def attach(home: Path, durations: dict, plain, referenced, limit: int, parts) -> APIRouter:
-    global HOME, DURATIONS, compose, compose_references, LIMIT, ready
+def attach(home: Path, durations: dict, plain, referenced, limit: int, parts, fits=None) -> APIRouter:
+    global HOME, DURATIONS, compose, compose_references, LIMIT, ready, room
     HOME, DURATIONS, compose, compose_references, LIMIT, ready = home, durations, plain, referenced, limit, parts
+    room = fits or room
     (HOME / "slate").mkdir(parents=True, exist_ok=True)
     return router
 
@@ -420,6 +423,62 @@ def best_take(shot: dict) -> str | None:
     return next((take["mediaPath"] for take in takes if take.get("rating") != "no-good"), None)
 
 
+# ---------- a song under the film: tempo, bars, and each shot's slot ----------
+
+def song_of(project: dict) -> dict | None:
+    """The film's song as the bar grid needs it, or None when it has none: ``bpm``, ``beats`` in a bar, ``first``
+    (seconds to the first beat of bar 1) and ``bar`` (seconds). Kept under the project's "tf": {"song": {"name",
+    "bpm", "beatsPerBar", "firstBeat"}}; the tempo is the user's (from a beat tracker or the score), not measured here."""
+
+    song = (project.get("tf") or {}).get("song") or {}
+    try:
+        bpm, beats, first = float(song.get("bpm") or 0), int(song.get("beatsPerBar") or 4), float(song.get("firstBeat") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not 20 <= bpm <= 400 or not 1 <= beats <= 16:
+        return None
+    return {"name": str(song.get("name") or ""), "bpm": bpm, "beats": beats, "first": first, "bar": beats * 60.0 / bpm}
+
+
+def shot_frames(project: dict, shot: dict, song: dict | None) -> tuple[int, float | None]:
+    """(frames a shot renders, its slot in seconds or None): with a song and a slot in bars, the shortest length the
+    model takes that covers the slot (any 17n + 5 count, lengths.py), so the cut can sit on the bar line; else the
+    shot's own seconds brought to the nearest count."""
+
+    try:
+        bars = float((shot.get("tf") or {}).get("bars") or 0)
+    except (TypeError, ValueError):
+        bars = 0
+    if song and bars > 0:
+        slot = bars * song["bar"]
+        need = math.ceil(slot * lengths.FPS - 1e-6)
+        return next((count for count in lengths.counts() if count >= need), lengths.LONGEST), slot
+    asked = float((shot.get("spec") or {}).get("durationSec") or project.get("defaults", {}).get("durationSec") or 8)
+    return lengths.nearest(asked), None
+
+
+def slot_of(project: dict, shot_id: str) -> dict | None:
+    """Where a shot sits in the song: {"bars", "seconds", "frames" (the slot's own, at 24 a second), "start" (seconds
+    into the song), "bar" (the bar it starts on, counted from 1), "spare" (frames the clip has beyond its slot, to trim)}.
+    The shots are laid end to end in the film's order; one without a slot takes its clip's length."""
+
+    song = song_of(project)
+    if not song:
+        return None
+    at = song["first"]
+    for scene in project.get("scenes") or []:
+        for shot in scene.get("shots") or []:
+            frames, slot = shot_frames(project, shot, song)
+            if shot.get("id") == shot_id:
+                if slot is None:
+                    return None
+                own = round(slot * lengths.FPS)
+                return {"bars": float(shot["tf"]["bars"]), "seconds": round(slot, 3), "frames": own, "start": round(at, 3),
+                        "bar": round((at - song["first"]) / song["bar"] + 1, 2), "spare": frames - own}
+            at += slot if slot is not None else frames / lengths.FPS
+    return None
+
+
 def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     scene, shot, index = find_shot(project, shot_id)
     extra, film, parts = shot.get("tf") or {}, project.get("tf") or {}, ready()
@@ -431,9 +490,15 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
 
     # any length the model takes (lengths.py): the shot's own seconds, brought to the nearest count of 17n + 5 frames
     asked = float(spec.get("durationSec") or project.get("defaults", {}).get("durationSec") or 8)
-    frames = lengths.nearest(asked)
+    song = song_of(project)
+    frames, slot_seconds = shot_frames(project, shot, song)
+    slot = slot_of(project, shot_id) if slot_seconds is not None else None
     seconds = next((named for named, count in DURATIONS.items() if count == frames), round(frames / lengths.FPS, 3))
-    if spec.get("durationSec") and abs(frames / lengths.FPS - asked) > 0.5:
+    if extra.get("bars") and not song:
+        warnings.append("This shot has a slot in bars and the film has no song: set the tempo in the Bible, or the shot renders at its seconds.")
+    if slot and slot["spare"] < 0:
+        warnings.append(f"A slot of {slot['bars']:g} bars is {slot['seconds']:g} s, longer than a clip ({lengths.LONGEST / lengths.FPS:.1f} s): the clip ends {-slot['spare']} frames early. Split the slot.")
+    if not slot and spec.get("durationSec") and abs(frames / lengths.FPS - asked) > 0.5:
         warnings.append(f"A clip is {lengths.SHORTEST / lengths.FPS:.1f} to {lengths.LONGEST / lengths.FPS:.0f} s long: the shot is {asked:g} s and renders as {lengths.says(frames)}.")
     if spec.get("fps") and int(spec["fps"]) != 24:
         warnings.append(f"MiniMax H3 renders at 24 fps; the shot says {spec['fps']}.")
@@ -513,12 +578,25 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
         warnings.append(f"The prompt is {len(prompt)} characters; MiniMax H3's guide suggests at most {limit}. Tighten the shot.")
     if not (shot.get("prompt") or "").strip():
         warnings.append("The shot has no prompt yet.")
+    # a LoRA for this shot alone (the hub's, as a job carries them): it stands in for the film's on this shot
+    own = [{"id": str(one["id"]), **({"strength": one["strength"]} if one.get("strength") not in (None, "") else {}),
+            **({"style": one["style"]} if one.get("style") else {})} for one in extra.get("loras") or [] if isinstance(one, dict) and one.get("id")]
     plan = {"seconds": seconds, "frames": frames, "seed": int(extra.get("seed") or 1), "quality": film.get("quality") or "fh8",
+            **({"slot": slot} if slot else {}), **({"loras": own} if own and not references else {}),
             **({"preset": size} if isinstance(size, str) else {"preset": "custom", "width": size[0], "height": size[1]}),
             **({"references": references, "ref_turbo": film.get("refPasses") == "4"} if references else {}),
             **({"image": image} if image else {}), **({"first_frame_from": previous} if previous else {})}
     mode = "references" if references else "image" if image else "previous" if previous else "text"
-    return {"prompt": prompt, "plan": plan, "mode": mode, "warnings": warnings, "chars": len(prompt)}
+    if own and references:
+        warnings.append("A shot that opens on cast stills renders on the reference model: its own LoRA is left out.")
+    # the machine's memory (a DGX Spark's guard): said here, before the shot is queued, with what fits
+    try:
+        memory = room(plan, bool(plan.get("loras") or (film.get("loras") and not references)))
+    except Exception:  # noqa: BLE001 - a plan the queue will refuse for another reason
+        memory = {"fits": True, "reason": ""}
+    if not memory.get("fits", True):
+        warnings.append("This shot will be refused when queued: " + memory["reason"])
+    return {"prompt": prompt, "plan": plan, "mode": mode, "warnings": warnings, "chars": len(prompt), "memory": {"fits": memory.get("fits", True), "reason": memory.get("reason", ""), "need_mb": memory.get("need_mb"), "nearest": memory.get("nearest")}}
 
 
 @router.post("/api/slate/compile")
