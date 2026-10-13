@@ -241,8 +241,10 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
     what = ("a clip with a LoRA" if lora else "a clip from references" if references else "this clip")
     how = "ComfyUI's own blocks with the full-precision (bfloat16) weights" if route == "bf16" else "TensorFold's int8 engine"
     if why == "unmeasured":
-        said = (f"{what} renders on {how}, and {width}x{height}, {says(frames)} is {out['rows'] / 1000:.1f}K rows a pass: over the "
-                f"largest such clip measured on a DGX Spark (1280x736, {MEASURED_ROWS[route] / 1000:.1f}K rows). Above that the memory it takes "
+        over = (f"{width}x{height} is a larger frame than" if width * height > MEASURED_PIXELS[route]
+                else f"{width}x{height}, {says(frames)} is {out['rows'] / 1000:.1f}K rows a pass, more than")
+        said = (f"{what} renders on {how}, and {over} the largest such clip measured on a DGX Spark "
+                f"(1280x736, 124 frames: {MEASURED_ROWS[route] / 1000:.1f}K rows a pass). Above that the memory it takes "
                 "is not known, and one such clip (1376x768, 124 frames) took a Spark down, so it is refused")
     else:
         said = (f"{what} renders on {how} and needs about {need / 1000:.0f} GB at its peak (give or take {ERROR_MB / 1000:g}); this "
