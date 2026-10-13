@@ -25,7 +25,7 @@ Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo ada
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
 contributor. This pack is their work, ported, pinned and measured. See [CREDITS.md](CREDITS.md). Built with Qwen.
 
-**2.6.5** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.6.6** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
@@ -257,6 +257,34 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.6.6 (2026-10-13): what two music-video productions found.**
+> Two three-minute videos were made through the app on up to five DGX Sparks; this release fixes what they ran into.
+> - **A memory guard on a DGX Spark.** A clip with a LoRA, at 1376x768, took a Spark down. A job is now checked
+>   before it is queued and again before anything loads: the estimated peak comes from measured renders (int8 engine
+>   54.5 GB + 0.215 GB per 1000 rows; ComfyUI's bf16 blocks, which a LoRA uses, 75.0 GB + 0.047 GB), and a LoRA clip
+>   larger than the largest one measured (1280x736, 124 frames) is refused with the size that fits. Beside every
+>   render server a watch reads memory twenty times a second (the old loop read once a second) and stops the render
+>   under a floor of a tenth of the machine. That exact job is now refused by the app and by the scripts. Why the
+>   Spark died is only partly established: its logs were never read.
+> - **Edit a picture**: any seed gives an edit (the seed that made the source used to return a sharpened copy), up to
+>   nine further pictures, and the result has the source's own size. A given seed gives a different picture than in
+>   2.6.5.
+> - **Any clip length the model takes**: 21 lengths from 22 to 362 frames, in place of 5, 8, 10 and 15 s.
+> - **A prompt check for negations**: "no photographs" produced photographs. The page lists negated things before a
+>   job is queued; it never changes the prompt. The app's own added lines are now positive ("Mouths stay closed.").
+> - **A shot check after a render**: whether the first and last keyframe were held, any hard cut inside the clip, and
+>   the longest stretch without one, with an optional retake at the next seed. Thresholds are set on the first
+>   production's clips (12 of 12 cuts found, none invented in 7081 frame pairs). A dissolve to a close-up is not
+>   detected, and no wording or setting tried stops the model from cutting.
+> - **Slate for music videos**: tempo and bar grid on the project, shot slots in bars, a LoRA per shot (through the
+>   guard), a change action for characters and places, the shot's intent kept out of the prompt, and takes rendered
+>   on another machine imported into a shot.
+> - **720p on a DGX Spark without ffmpeg**, a QA gate that says when it did not run (and can run on a head node for a
+>   clip from a worker), and an API that keeps answering while a LoRA job starts.
+> - Not tested: the new pages in a browser beyond a load, a Mac under 96 GB, reference clips at the new lengths, LoRA
+>   clips above 1280x736 (on purpose), and the First AD's new actions with a live brain. On a Mac one short clip was
+>   rendered through this build; the memory guard does nothing there.
+>
 > **2.6.5 (2026-10-13): 3D Animation Style, and Multiple Angles in the essential package.**
 > - **3D Animation Style** (SOLRICKS) installs and renders: its file is in kohya's own layout
 >   (`lora_unet_blocks_0_attn_qkv_proj`), which the hub refused. Measured on a DGX Spark, same seed with and without
