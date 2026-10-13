@@ -86,6 +86,24 @@ def test_the_first_ad_changes_a_sheet_instead_of_adding_a_second_one():
     assert got["prompt_names_them"]
 
 
+def test_an_imported_take_joins_the_shots_takes():
+    got = run("""
+      SL.p = film(); slApply([{ type: "create_scene", name: "Scene 1" }, { type: "create_shot", scene: "Scene 1", name: "1.4" }]);
+      const shot = SL.p.scenes[0].shots[0];
+      answers = { "/api/slate/takes": { take: { id: "take-1", loggedAt: "2026-10-13T17:00:00.000Z", mediaPath: "slate/p-test/takes/x.mp4", seed: 43, rating: "good", notes: "", imported: true,
+                    settings: { preset: "sharp", frames: 124, quality: "fh8", loras: [{ id: "camera-motion" }] }, source: { from: "http://10.100.10.5:7870", job: "w2" } } } };
+      const take = await slImportTake(shot, { from: "http://10.100.10.5:7870", job: "w2", seed: "", notes: "" });
+      out.calls = calls.map(c => c[0]); out.sent = calls[1][1]; out.takes = shot.takes.map(t => t.id); out.have = SL.have[take.mediaPath];
+      out.line = slTakeLine(take); out.best = slBest(shot);
+    """)
+    if got is None:
+        return
+    assert got["calls"] == ["/api/slate/projects/p-test", "/api/slate/takes"]  # the film is saved first: the server reads the shot from the file
+    assert got["sent"] == {"projectId": "p-test", "shot": got["sent"]["shot"], "from": "http://10.100.10.5:7870", "job": "w2"}  # empty fields are not sent
+    assert got["takes"] == ["take-1"] and got["have"] is True and got["best"] == "slate/p-test/takes/x.mp4"
+    assert got["line"] == "seed 43 · sharp · 124 frames · fh8 · LoRA camera-motion · imported from 10.100.10.5:7870 · 2026-10-13 17:00"
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):

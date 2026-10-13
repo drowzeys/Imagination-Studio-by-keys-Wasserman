@@ -21,6 +21,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 import lengths  # which frame counts the model takes, beside this file
+import remote  # another machine's Studio app, read over its own API, beside this file
 import negation  # what a prompt forbids by name, beside this file
 
 router = APIRouter()
@@ -158,6 +159,88 @@ def exists(body: dict) -> dict:
         target = (HOME / str(path)).resolve()
         out[path] = HOME.resolve() in target.parents and target.is_file()
     return out
+
+
+# ---------- a take rendered somewhere else, logged into a shot ----------
+
+SETTINGS = ("preset", "quality", "frames", "seconds", "width", "height", "steps", "loras", "references", "ref_turbo", "text_encoder")
+
+
+@router.post("/api/slate/takes")
+def import_take(body: dict) -> dict:
+    """A finished clip as a take of a shot: its file copied into the film's takes folder, with its seed and settings.
+
+    The film is on one machine and its clips are often rendered on others, each by its own app. The clip is named by
+    ``from`` (that app's address) with ``job`` (one of its finished jobs: the clip, prompt, seed and settings are
+    read from it) or ``path`` (a file of its studio folder), or by ``path`` alone for a file already in this studio
+    folder (an upload). ``seed``, ``prompt``, ``settings``, ``notes`` and ``rating`` say what the job does not.
+    Returns {"take"}: the page adds it to the shot; with ``log`` true it is written into the project file here, for
+    a script that drives the app."""
+
+    file = project_file(str(body.get("projectId") or ""))
+    if not file.is_file():
+        raise HTTPException(404, "no such film")
+    project = json.loads(file.read_text())
+    wanted = str(body.get("shot") or "").strip()
+    found = [(scene, shot) for scene in project.get("scenes") or [] for shot in scene.get("shots") or []
+             if shot.get("id") == wanted or (shot.get("name") or "").strip().lower() == wanted.lower()]
+    if len(found) != 1:
+        raise HTTPException(404 if not found else 400, "no such shot" if not found else f"{len(found)} shots are called {wanted}: give the shot's id")
+    scene, shot = found[0]
+    path, seed, prompt = str(body.get("path") or "").strip(), body.get("seed"), body.get("prompt")
+    settings, source, theirs = dict(body.get("settings") or {}), {}, {}
+    try:
+        if body.get("from"):
+            base = remote.address(str(body["from"]))
+            source = {"from": base}
+            if body.get("job"):
+                theirs = remote.job(base, str(body["job"]))
+                if theirs.get("status") != "done" or not theirs.get("outputs"):
+                    raise HTTPException(400, f"job {body['job']} on {base} is {theirs.get('status')}: there is no finished clip to import")
+                asked = theirs.get("params") or {}
+                path = path or theirs["outputs"][0]
+                seed = seed if seed not in (None, "") else asked.get("seed")
+                prompt = prompt or asked.get("prompt")
+                settings = {**{key: asked[key] for key in SETTINGS if asked.get(key) not in (None, "", [])}, **settings}
+                source.update(job=theirs.get("id"), engine=theirs.get("engine"), elapsed=theirs.get("elapsed"))
+            if not path:
+                raise HTTPException(400, "give the clip: one of that app's job ids, or the path of a file in its studio folder")
+            suffix = Path(path).suffix.lower()
+            target = file.parent / "takes" / f"{shot['id']}-{int(time.time() * 1000):x}{suffix}"
+            remote.fetch(base, path, target)
+            source["path"] = path
+        else:
+            given = (HOME / path).resolve() if path else None
+            if given is None or HOME.resolve() not in given.parents or not given.is_file():
+                raise HTTPException(400, "give the clip: another app's address with a job id or a path, or the path of a file in this studio folder")
+            if given.suffix.lower() not in remote.SUFFIXES[:2]:
+                raise HTTPException(400, "a take is a video file (.mp4 or .mov)")
+            target = file.parent / "takes" / f"{shot['id']}-{int(time.time() * 1000):x}{given.suffix.lower()}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(given, target)
+            source = {"path": path}
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    except LookupError as error:
+        raise HTTPException(404, str(error))
+    except OSError as error:
+        raise HTTPException(502, f"the other app did not answer: {str(error)[-200:]}")
+    try:
+        seed = int(seed) if seed not in (None, "") else None
+    except (TypeError, ValueError):
+        raise HTTPException(400, "a seed is a whole number")
+    rating = body.get("rating") if body.get("rating") in ("circled", "good", "no-good") else "good"
+    take = {"id": f"take-{int(time.time() * 1000):x}-{uuid.uuid4().hex[:5]}", "loggedAt": now(), "model": "minimax-h3",
+            "prompt": prompt or (shot.get("tf") or {}).get("h3") or "", "rating": rating, "notes": str(body.get("notes") or ""),
+            "mediaPath": str(target.resolve().relative_to(HOME.resolve())), "jobId": None, "seed": seed, "settings": settings,
+            "source": source, "imported": True}
+    for key in ("qa", "shot"):  # what that app's checks said of the clip, kept beside it
+        if theirs.get(key):
+            take[key] = theirs[key]
+    if body.get("log"):
+        shot.setdefault("takes", []).insert(0, take)
+        write(project)
+    return {"take": take, "scene": scene.get("id"), "shot": shot.get("id"), "logged": bool(body.get("log"))}
 
 
 # ---------- the brain: Slate's three backends ----------

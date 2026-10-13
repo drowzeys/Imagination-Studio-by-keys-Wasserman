@@ -133,6 +133,69 @@ def test_the_head_runs_the_gate_on_a_workers_clip():
         server.jobs.pop("w1", None)
 
 
+def test_a_take_rendered_elsewhere_is_logged_into_its_shot():
+    """The film is here, the clip was rendered by another machine's app: the take comes in with its file, seed and
+    settings, by that app's job, by a path there, or as a file already in this studio folder."""
+
+    import slate
+
+    film = client.post("/api/slate/projects", json={"name": "Hesitation"}).json()
+    film["scenes"] = [{"id": "scene-1", "name": "Scene 1", "synopsis": "", "shots": [
+        {"id": "shot-14", "name": "1.4 First Smiles", "intent": "", "spec": {}, "prompt": "# Subject\nLeo and Mia.", "takes": [], "tf": {"h3": "the compiled prompt"}},
+        {"id": "shot-15", "name": "1.5 Twin", "takes": []}, {"id": "shot-16", "name": "1.5 Twin", "takes": []}]}]
+    assert client.put(f"/api/slate/projects/{film['id']}", json=film).status_code == 200
+    theirs = server.HOME / "renders" / "s1_4.mp4"
+    theirs.write_bytes(b"\0\0\0\x18ftypmp42" + b"y" * 3000)
+    server.jobs["w2"] = {"id": "w2", "kind": "video", "status": "done", "title": "t", "outputs": ["renders/s1_4.mp4"], "error": None, "log": "", "created": 0,
+                         "started": 10.0, "finished": 215.0, "progress": None, "estimate": None, "engine": "cuda",
+                         "qa": {"passed": None, "skipped": True, "takes": [], "note": "did not run"},
+                         "params": {"prompt": "the prompt as rendered", "seed": 43, "preset": "sharp", "quality": "fh8", "frames": 124, "qa": False,
+                                    "loras": [{"id": "camera-motion", "strength": 0.9}], "output": "x.mp4"}}
+    server.jobs["w3"] = {**server.jobs["w2"], "id": "w3", "status": "running", "outputs": []}
+    base, stop = other_app()
+    try:
+        # by the other app's job, logged into the project file (what a script does)
+        got = client.post("/api/slate/takes", json={"projectId": film["id"], "shot": "1.4 first smiles", "from": base, "job": "w2", "notes": "Spark 5", "log": True})
+        assert got.status_code == 200, got.text
+        take = got.json()["take"]
+        assert take["seed"] == 43 and take["prompt"] == "the prompt as rendered" and take["notes"] == "Spark 5" and take["rating"] == "good"
+        assert take["settings"] == {"preset": "sharp", "quality": "fh8", "frames": 124, "loras": [{"id": "camera-motion", "strength": 0.9}]}
+        assert take["source"] == {"from": base, "job": "w2", "engine": "cuda", "elapsed": 205.0, "path": "renders/s1_4.mp4"} and take["imported"] is True
+        assert take["qa"]["skipped"] is True  # what the worker's gate said travels with the take
+        media = server.HOME / take["mediaPath"]
+        assert media.read_bytes() == theirs.read_bytes() and media.parent == server.HOME / "slate" / film["id"] / "takes" and media.name.startswith("shot-14-")
+        saved = client.get(f"/api/slate/projects/{film['id']}").json()["scenes"][0]["shots"][0]["takes"]
+        assert [t["id"] for t in saved] == [take["id"]] and got.json()["logged"] is True
+        assert slate.best_take({"takes": saved}) == take["mediaPath"]  # it stands for the shot like any take
+        # by a path there, with the seed said; not logged here: the page adds it to the film it holds
+        second = client.post("/api/slate/takes", json={"projectId": film["id"], "shot": "shot-14", "from": base, "path": "renders/s1_4.mp4", "seed": "44", "rating": "circled",
+                                                         "settings": {"preset": "sharp"}})
+        assert second.status_code == 200 and second.json()["take"]["seed"] == 44 and second.json()["take"]["rating"] == "circled" and second.json()["logged"] is False
+        assert second.json()["take"]["prompt"] == "the compiled prompt"  # none given: the shot's own
+        assert len(client.get(f"/api/slate/projects/{film['id']}").json()["scenes"][0]["shots"][0]["takes"]) == 1
+        # a file already in this studio folder (an upload)
+        (server.HOME / "uploads" / "mine.mp4").write_bytes(b"clip of mine")
+        local = client.post("/api/slate/takes", json={"projectId": film["id"], "shot": "shot-14", "path": "uploads/mine.mp4", "seed": 7}).json()["take"]
+        assert (server.HOME / local["mediaPath"]).read_bytes() == b"clip of mine" and local["source"] == {"path": "uploads/mine.mp4"} and local["seed"] == 7
+        # what cannot be imported says why, and nothing is written
+        for body, code, word in (({"shot": "no such shot", "from": base, "job": "w2"}, 404, "no such shot"),
+                                 ({"shot": "1.5 Twin", "from": base, "job": "w2"}, 400, "2 shots are called"),
+                                 ({"shot": "shot-14", "from": base, "job": "w3"}, 400, "is running"),
+                                 ({"shot": "shot-14", "from": base, "job": "w404"}, 404, "has no job"),
+                                 ({"shot": "shot-14", "from": base, "path": "renders/none.mp4"}, 404, "has no file"),
+                                 ({"shot": "shot-14", "from": base}, 400, "give the clip"),
+                                 ({"shot": "shot-14", "from": "http://127.0.0.1:9", "path": "renders/a.mp4"}, 502, "did not answer"),
+                                 ({"shot": "shot-14", "path": "../outside.mp4"}, 400, "give the clip"),
+                                 ({"shot": "shot-14", "path": "projects"}, 400, "give the clip"),
+                                 ({"shot": "shot-14", "from": base, "job": "w2", "seed": "x"}, 400, "whole number")):
+            refused = client.post("/api/slate/takes", json={"projectId": film["id"], **body})
+            assert refused.status_code == code and word in refused.json()["error"], (body, refused.status_code, refused.text)
+        assert client.post("/api/slate/takes", json={"projectId": "nope", "shot": "x"}).status_code == 404
+    finally:
+        stop()
+        server.jobs.pop("w2", None), server.jobs.pop("w3", None)
+
+
 def test_another_apps_address_and_paths():
     assert remote.address("spark-5:7870") == "http://spark-5:7870" and remote.address(" http://10.0.0.5:7870/ ") == "http://10.0.0.5:7870"
     for bad in ("", "file:///etc/passwd", "http://host/files/x", "http://user:pw@host:1", "http://host:1?x=1"):
