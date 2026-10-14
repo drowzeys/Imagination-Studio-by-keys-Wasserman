@@ -156,8 +156,11 @@ Rules:
 - DGX Spark memory (`spark/memory_guard.py`; the README's *The memory guard*): a clip is checked before it is queued
   (`memory_of` in `app/server.py`) and again in `spark_generate.py` before anything loads, and the guard stands beside
   every server `comfy.sh` starts. Never start ComfyUI another way. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
-  are measurements: a clip with a LoRA is refused above 1280x736 at 124 frames because a 1376x768 one took a Spark
-  down and nobody knows why from its logs. Raise them only by measuring from below on a worker Spark, in small steps,
+  are measurements, one route each. A LoRA on FastH3 is merged into TensorFold's int8 engine (`TensorFoldH3Blocks`
+  takes the block projections' patches off ComfyUI and calls `tf_h3_set_weight`; route `int8-lora`, measured to
+  1376x768 at 243 frames); on ComfyUI's bfloat16 blocks (an engine without that symbol, `--engine comfy`, Ref2VA,
+  `--base h3`) a clip with a LoRA is refused above 1280x736 at 124 frames because a 1376x768 one took a Spark down
+  there and nobody knows why from its logs. Never merge a LoRA into the saved `.tf-int8` copy. Raise them only by measuring from below on a worker Spark, in small steps,
   under a second watchdog that kills your own server at 25 GB available; never by trying the size that failed, and
   never on a machine with `vm.panic_on_oom=1`. Do not lower the floor to make a job fit.
 - More than one DGX Spark (`app/sparks.py`, `app/static/sparks.js`, `docs/multi-spark.md`): a job's `sparks` (1 to

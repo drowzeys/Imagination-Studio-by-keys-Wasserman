@@ -26,6 +26,13 @@ ten times a second through whole jobs of the app; "need" is what the job took fr
       1376x768, 124 frames                                       39.2K    62.2 GB (62.1 to 64.2 in a production run)
       1376x768, 192 frames, sampled every 11 s in that run       59.9K    67.1 GB
       1376x768, 243 frames, the same                             75.3K    69.0 to 70.9 GB
+    TensorFold's int8 engine with a LoRA merged into it (2026-10-14, a worker Spark, The Wasserman 80s Horror at 1.0,
+    each from a stopped server, under a second watchdog at 25 GB)
+      864x480,  124 frames                                       15.4K    57.6 GB
+      1280x736, 124 frames                                       35.0K    61.4 GB
+      1376x768, 124 frames                                       39.2K    62.3 GB
+      1376x768, 192 frames                                       59.9K    66.5 GB
+      1376x768, 243 frames                                       75.3K    69.7 GB
     ComfyUI's own blocks, bfloat16 weights with a LoRA merged in
       864x480,   56 frames                                        7.3K    75.4 GB
       1280x736,  22 frames                                        7.4K    74.8 GB
@@ -40,8 +47,10 @@ point is more than 1.7 GB from its line; 6 GB is added because most points are o
 sampled coarsely. The bfloat16 route is nearly flat: the text encoder (26 GB) and the transformer (42 GB) are both
 held, and the rows add little.
 
-A clip with a LoRA (or the Ref2VA Turbo adapter, which is one) is refused above the largest size it was measured at
-(MEASURED_ROWS, and a frame larger than MEASURED_PIXELS), whatever the line says. By the line the clip that took the Spark down (39.2K rows) needs 77 GB and
+A LoRA merged into the int8 engine (the TensorFoldH3Blocks node, an engine with tf_h3_set_weight) takes what the
+engine takes without one: its points lie on the int8 line. A clip with a LoRA (or the Ref2VA Turbo adapter, which is
+one) is refused above the largest size it was measured at on its route (MEASURED_ROWS, and a frame larger than
+MEASURED_PIXELS), whatever the line says. On the bfloat16 route, by the line the clip that took the Spark down (39.2K rows) needs 77 GB and
 leaves 41, which is what that Spark showed for a minute before it was lost: its end is not a matter of how much
 memory the clip takes, no line through smaller sizes predicts it, and nobody may find out where it starts by trying.
 Raise MEASURED_ROWS only with a new measurement, approached from below. Reference clips (Ref2VA), MiniMax H3's own
@@ -75,14 +84,17 @@ SIZES = ((864, 480), (1280, 736), (1344, 768), (1376, 768))
 IDLE_MB = 6000
 PORT = os.environ.get("SPARK_COMFY_PORT", "8190")
 # route -> (MB with the models loaded and no rows, MB per thousand rows). See the table above.
-ESTIMATES = {"int8": (54_500, 215), "bf16": (75_000, 47)}
+ESTIMATES = {"int8": (54_500, 215), "int8-lora": (54_500, 215), "bf16": (75_000, 47)}
 ERROR_MB = 6000
 # The most rows each route was measured at; a route with patched bfloat16 weights is refused above its own.
-MEASURED_ROWS = {"int8": 75_336, "bf16": 34_960}
-# ... and the largest frame it was measured at (1280x736): a wider frame with fewer of them is as unknown
-MEASURED_PIXELS = {"bf16": 1280 * 736}
+MEASURED_ROWS = {"int8": 75_336, "int8-lora": 75_336, "bf16": 34_960}
+# ... and the largest frame it was measured at: a wider frame with fewer of them is as unknown
+MEASURED_PIXELS = {"int8-lora": 1376 * 768, "bf16": 1280 * 736}
+# the largest clip each patched route was measured at, as the refusal names it
+LARGEST = {"int8-lora": "1376x768, 243 frames", "bf16": "1280x736, 124 frames"}
 # the measured points themselves, (rows, MB): tests/test_memory_guard.py holds the lines to them
 MEASURED = {"int8": ((15_390, 57_575), (39_216, 62_187), (39_216, 64_200), (59_856, 67_100), (75_336, 69_000), (75_336, 70_900)),
+            "int8-lora": ((15_390, 57_622), (34_960, 61_418), (39_216, 62_321), (59_856, 66_468), (75_336, 69_668)),
             "bf16": ((7_290, 75_369), (7_360, 74_805), (15_390, 75_898), (16_560, 75_841), (16_560, 76_160), (25_760, 76_237),
                      (30_360, 76_505), (34_960, 76_600))}
 POLL_S, RATE_WINDOW_S, STALL_WINDOW_S, STALL_SHARE = 0.05, 0.25, 2.0, 0.5
@@ -183,10 +195,24 @@ def rows(width: int, height: int, frames: int, pictures: int = 0, reference_fram
 
 
 def route_of(lora: bool = False, references: bool = False, base: bool = False, engine: bool = True) -> str:
-    """Which weights a clip runs on: TensorFold's int8 engine, or ComfyUI's own blocks with the bfloat16 file (a
-    LoRA, a clip from references, MiniMax H3's own transformer, or a machine without the engine)."""
+    """Which weights a clip runs on: TensorFold's int8 engine (with a LoRA merged into it: "int8-lora"), or ComfyUI's
+    own blocks with the bfloat16 file (a clip from references, MiniMax H3's own transformer, or a machine without the
+    engine, or with an engine build that cannot take a LoRA)."""
 
-    return "bf16" if lora or references or base or not engine else "int8"
+    if references or base or not engine:
+        return "bf16"
+    return "int8-lora" if lora else "int8"
+
+
+def engine_takes_lora(library) -> bool:
+    """Whether the engine library at `library` merges a LoRA itself (it has tf_h3_set_weight); read from the file,
+    so that nothing loads CUDA to find out."""
+
+    try:
+        with open(library, "rb") as handle:
+            return b"tf_h3_set_weight" in handle.read()
+    except OSError:
+        return False
 
 
 def need_mb(route: str, count: int) -> int:
@@ -218,7 +244,7 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
         available_mb = room_mb() or total_mb - IDLE_MB
     floor = floor_mb(total_mb)
     route = route_of(lora, references, base, engine)
-    patched = route == "bf16" and lora  # a LoRA or the Turbo adapter, merged into the bfloat16 weights as they load
+    patched = lora and route in MEASURED_PIXELS  # a LoRA or the Turbo adapter merged into the weights as they load
 
     def one(w: int, h: int, f: int) -> tuple[bool, int, int, str]:
         count = rows(w, h, f, pictures, reference_frames)
@@ -239,20 +265,22 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
     out["nearest"] = {"frames": shorter, "seconds": round(shorter / FPS, 3) if shorter else None,
                       "size": list(smaller) if smaller else None}
     what = ("a clip with a LoRA" if lora else "a clip from references" if references else "this clip")
-    how = "ComfyUI's own blocks with the full-precision (bfloat16) weights" if route == "bf16" else "TensorFold's int8 engine"
+    how = {"bf16": "ComfyUI's own blocks with the full-precision (bfloat16) weights", "int8": "TensorFold's int8 engine",
+           "int8-lora": "TensorFold's int8 engine with the LoRA merged into it"}[route]
     if why == "unmeasured":
         over = (f"{width}x{height} is a larger frame than" if width * height > MEASURED_PIXELS[route]
                 else f"{width}x{height}, {says(frames)} is {out['rows'] / 1000:.1f}K rows a pass, more than")
         said = (f"{what} renders on {how}, and {over} the largest such clip measured on a DGX Spark "
-                f"(1280x736, 124 frames: {MEASURED_ROWS[route] / 1000:.1f}K rows a pass). Above that the memory it takes "
-                "is not known, and one such clip (1376x768, 124 frames) took a Spark down, so it is refused")
+                f"({LARGEST[route]}: {MEASURED_ROWS[route] / 1000:.1f}K rows a pass). Above that the memory it takes "
+                "is not known, and a clip with a LoRA on the bfloat16 weights (1376x768, 124 frames) took a Spark down, "
+                "so it is refused")
     else:
         said = (f"{what} renders on {how} and needs about {need / 1000:.0f} GB at its peak (give or take {ERROR_MB / 1000:g}); this "
                 f"machine has {available_mb / 1000:.0f} GB for it and keeps {floor / 1000:.0f} GB free as its floor, so it is refused")
     fit = [f"{says(shorter)} at this size" if shorter else "", f"{smaller[0]}x{smaller[1]} at this length" if smaller else ""]
     fit = " or ".join(bit for bit in fit if bit)
     out["reason"] = said + (f". What fits: {fit}." if fit else ". No smaller size or shorter length of this kind fits either.")
-    if lora and why == "memory":
+    if lora and why == "memory" and route == "bf16":
         out["reason"] += " Without the LoRA the clip runs on the int8 engine, which needs less."
     return out
 

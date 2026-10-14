@@ -4,6 +4,12 @@ ComfyUI keeps the text encoder, the sampler, the patch projections, the final la
 replaces the 50 blocks of each denoising pass with one call into libtf_h3.so (TensorFold's H3 family, built from
 zig/src/families/h3/cuda.zig), which reads the same checkpoint file and quantizes it on the GPU when first used.
 
+A LoRA on the model (LoraLoaderModelOnly ahead of this node) is taken off ComfyUI's patches for the projections the
+engine holds and merged here instead, as ComfyUI merges it into the bf16 weights (its LoRA arithmetic, then the
+seeded rounding to bf16); the engine quantizes the merged weight to int8. Only the touched projections are redone,
+and a later render without the LoRA puts the checkpoint's own back. The int8 copy saved beside the checkpoint is
+never changed. The LoRA's other keys (patch projections, final layer, modulation) stay ComfyUI's.
+
 Environment: TF_H3_LIB (the library; default beside this file), TF_H3_CHECK=1 (first pass of a run: also run
 ComfyUI's own blocks and log how close the engine is), TF_H3_PROFILE=1 (log where a pass's time went).
 """
@@ -13,6 +19,7 @@ import logging
 import math
 import os
 import time
+import uuid
 
 import torch
 
@@ -34,6 +41,14 @@ class Inputs(ctypes.Structure):
 
 _library = None
 _engines = {}   # checkpoint path -> engine handle; the int8 weights stay on the GPU while ComfyUI runs
+_merged = {}    # checkpoint path -> {model key: the patches merged into that projection}
+
+# the engine's projections, by their names in the model and the number tf_h3_set_weight knows them by
+PROJECTIONS = {"attn.qkv_proj.weight": 0, "attn.to_gate_compress.weight": 1, "attn.out_proj.weight": 2,
+               "mlp.fc1.weight": 3, "mlp.fc2.weight": 4}
+# what else of a block the engine holds: a patch on it cannot be honoured
+HELD = ("norm1.", "norm2.", "attn.q_norm.", "attn.k_norm.", "attn.qkv_proj.", "attn.to_gate_compress.",
+        "attn.out_proj.", "mlp.fc1.", "mlp.fc2.")
 
 
 def library():
@@ -50,6 +65,10 @@ def library():
         lib.tf_h3_profile.argtypes = [ctypes.c_void_p, ctypes.c_int]
         lib.tf_h3_spent.restype = ctypes.c_int
         lib.tf_h3_spent.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_double * 16), ctypes.POINTER(ctypes.c_char_p * 16)]
+        if hasattr(lib, "tf_h3_set_weight"):
+            lib.tf_h3_set_weight.restype = ctypes.c_int
+            lib.tf_h3_set_weight.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint64,
+                                             ctypes.c_uint32, ctypes.c_uint32]
         _library = lib
     return _library
 
@@ -73,6 +92,76 @@ def release():
     for handle in _engines.values():
         library().tf_h3_close(handle)
     _engines.clear()
+    _merged.clear()
+
+
+def take_block_patches(patcher):
+    """The patches on the engine's projections, removed from `patcher` (a clone): {model key: patches}."""
+    taken = {}
+    for key in list(patcher.patches):
+        if not (isinstance(key, str) and key.startswith("diffusion_model.blocks.")):
+            continue
+        part = key.split(".", 3)[3]                     # diffusion_model.blocks.N.<part>
+        if part in PROJECTIONS:
+            taken[key] = patcher.patches.pop(key)
+        elif part.startswith(HELD):
+            raise ValueError(f"TensorFold H3: a LoRA patches {key}, which the engine holds and cannot take; "
+                             "render this LoRA with --engine comfy")
+    return taken
+
+
+def merge(handle, path, patches):
+    """Brings the engine's projections to the checkpoint's weights with `patches` merged in, redoing only the ones
+    whose patches changed since the last call."""
+    import comfy.float
+    import comfy.lora
+    import comfy.model_management
+    import comfy.utils
+    from safetensors import safe_open
+
+    done = _merged.setdefault(path, {})
+    def same(a, b):
+        return a is not None and b is not None and len(a) == len(b) and all(
+            x[1] is y[1] and x[0] == y[0] and x[2] == y[2] and x[3] == y[3] for x, y in zip(a, b))
+    todo = sorted(k for k in set(patches) | set(done) if not same(patches.get(k), done.get(k)))
+    if not todo:
+        return
+    if not hasattr(library(), "tf_h3_set_weight"):
+        raise RuntimeError("TensorFold H3: this engine cannot take a LoRA; rebuild it (spark/build-engine.sh)")
+    mark = time.perf_counter()
+    device = torch.device("cuda")
+    compute = comfy.model_management.lora_compute_dtype(device)
+    torch.cuda.synchronize()
+    with safe_open(path, framework="pt", device="cpu") as f:
+        for key in todo:
+            block, part = key.split(".", 3)[2:]
+            weight = f.get_tensor(key[len("diffusion_model."):])
+            if key in patches:
+                w = comfy.lora.calculate_weight(patches[key], weight.to(device, dtype=compute, copy=True), key)
+                w = comfy.float.stochastic_rounding(w, torch.bfloat16, seed=comfy.utils.string_to_seed(key))
+            else:
+                w = weight.to(device)
+            w = w.to(torch.bfloat16).contiguous()
+            torch.cuda.synchronize()
+            if library().tf_h3_set_weight(handle, int(block), PROJECTIONS[part], w.data_ptr(), w.shape[0], w.shape[1]):
+                done.clear()   # the engine is part merged: the next call redoes everything
+                raise RuntimeError(f"TensorFold H3: the engine refused {key} {tuple(w.shape)}")
+            del w, weight
+            if key in patches:
+                done[key] = list(patches[key])
+            else:
+                done.pop(key, None)
+    try:
+        # the checkpoint's pages the merge read are not needed again: give them back
+        fd = os.open(path, os.O_RDONLY)
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        os.close(fd)
+    except OSError:
+        pass
+    merged = sum(1 for k in todo if k in patches)
+    logging.info(f"TensorFold H3: LoRA merged into {merged} projections"
+                 + (f", {len(todo) - merged} put back to the checkpoint's" if len(todo) > merged else "")
+                 + f", in {time.perf_counter() - mark:.1f} s")
 
 
 def tile_plan(layout, device):
@@ -117,10 +206,11 @@ def cosine(a, b):
 class Blocks:
     """One patched model's state: the engine, and what stays the same through a sampling run."""
 
-    def __init__(self, diffusion_model, path, sparsity):
+    def __init__(self, diffusion_model, path, sparsity, patches=None):
         self.model = diffusion_model
         self.path = path
         self.sparsity = sparsity
+        self.patches = patches or {}
         self.plans = {}
         self.checked = False
         self.passes = 0
@@ -152,6 +242,7 @@ class Blocks:
                         slot=slot.data_ptr(), sizes=sizes.data_ptr(), rows=rows, lines=tables.shape[1], rot=cos.shape[1],
                         tiles=sizes.shape[0], prefix_tiles=prefix, keep=keep, blocks=blocks, attention_out=0)
         handle = engine(self.path)
+        merge(handle, self.path, self.patches)
         # the engine's kernels go on the default stream: whatever torch has queued on its own must have landed
         torch.cuda.synchronize()
         took = library().tf_h3_forward(handle, ctypes.byref(inputs))
@@ -161,6 +252,9 @@ class Blocks:
 
     def check(self, args):
         """The engine against ComfyUI's own blocks on this pass's stream: after one block and after all of them."""
+        if self.patches:
+            logging.info("TensorFold H3 check: ComfyUI's blocks run without the LoRA here (the engine holds it), "
+                         "so the figures below include the LoRA's own effect")
         start = args["img"].clone()
         options = args["transformer_options"]
 
@@ -340,8 +434,12 @@ class TensorFoldH3Blocks:
         if not isinstance(diffusion_model, MiniMaxH3Model):
             raise ValueError("TensorFold H3 needs a MiniMax H3 / FastH3 model")
         path = folder_paths.get_full_path_or_raise("diffusion_models", unet_name)
-        state = Blocks(diffusion_model, path, sparsity)
         m = model.clone()
+        state = Blocks(diffusion_model, path, sparsity, take_block_patches(m))
+        if state.patches:
+            # what ComfyUI patches differs now from the model it came from: its loaded copy must not count as this one
+            m.patches_uuid = uuid.uuid4()
+            logging.info(f"TensorFold H3: {len(state.patches)} projections carry a LoRA; the engine merges it")
         for i in range(len(diffusion_model.blocks)):
             m.set_model_patch_replace(state.first if i == 0 else passthrough, "dit", "double_block", i)
 

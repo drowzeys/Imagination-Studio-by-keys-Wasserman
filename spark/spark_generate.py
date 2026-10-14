@@ -456,9 +456,10 @@ def forget_uploads() -> None:
 
 
 def hub_loras(specs) -> list[tuple[str, float]]:
-    """The --lora files as (name ComfyUI lists, strength). ComfyUI merges a LoRA at run time, which only works on a
-    bf16 file and on its own blocks: an 8-bit file's weights are rotated, and the TensorFold engine reads its own
-    copy of the weights. PATH or PATH:STRENGTH; a slider LoRA takes a minus strength."""
+    """The --lora files as (name ComfyUI lists, strength). A LoRA is merged at run time into bf16 weights, never the
+    8-bit file's (they are rotated): on FastH3 TensorFold's node merges the block projections and the engine
+    quantizes them, ComfyUI the rest; on Ref2VA and MiniMax H3's own transformer ComfyUI merges all of it into its
+    own blocks. PATH or PATH:STRENGTH; a slider LoRA takes a minus strength."""
 
     loras = []
     for spec in specs:
@@ -647,9 +648,15 @@ def video(args) -> None:
         args.steps = 25 if base else 8
     loras = hub_loras(args.lora)
     if loras:
-        if args.engine == "tensorfold" or args.weights != "bf16":
-            print("[tensorfold] a LoRA renders on ComfyUI's own blocks with the bf16 weights", flush=True)
-        args.engine, args.weights = "comfy", "bf16"
+        # TensorFold's engine merges a LoRA into its int8 weights itself (the TensorFoldH3Blocks node); ComfyUI merges
+        # the LoRA's keys outside the blocks into the bf16 file, never into the 8-bit one (its weights are rotated)
+        if args.engine == "tensorfold" and not memory_guard.engine_takes_lora(ENGINE_LIB):
+            print("[tensorfold] this engine build cannot take a LoRA (spark/build-engine.sh updates it): "
+                  "ComfyUI's own blocks with the bf16 weights", flush=True)
+            args.engine = "comfy"
+        if args.weights != "bf16":
+            print("[tensorfold] a LoRA renders with the bf16 weights", flush=True)
+        args.weights = "bf16"
     if base:
         # the undistilled model: ComfyUI's own blocks, dense attention (FastH3's sparse routing is FastH3's), the
         # model's own schedule (video shift 12, audio 3)
@@ -664,13 +671,15 @@ def video(args) -> None:
     if args.engine == "tensorfold" and not ENGINE_LIB.exists():
         sys.exit(f"no TensorFold engine at {ENGINE_LIB}: run spark/build-engine.sh, or use --engine comfy")
     last = STATE.read_text().strip() if STATE.exists() else ""
-    if up() and (loras or base or "lora" in last or "h3base" in last):
+    on_comfy = bool(loras) and args.engine != "tensorfold"
+    if up() and (on_comfy or base or "lora" in last or "h3base" in last):
         # On a Spark the GPU and the system share one pool. With the bf16 weights (42 GB) a text encoder (26 GB) that
         # comes back for a new prompt makes ComfyUI move the model aside and load it again, and the two copies do not
         # fit: measured, free memory fell from 50 GB to 8. A server with nothing loaded keeps about 30 GB free.
         fresh_server("a LoRA render starts from a server with nothing loaded")
     fits_or_exit(args, bool(loras), False, base)
-    ensure_server("video" + ("+h3base" if base else "") + ("+lora" if loras else ""))
+    # a LoRA on the engine needs no server of its own: the node merges it and puts the weights back after
+    ensure_server("video" + ("+h3base" if base else "") + ("+lora" if on_comfy else ""))
     if base and not installed("unet", H3_FL2VA):
         sys.exit(f"MiniMax H3's own transformer ({H3_FL2VA}) is not installed: oneshot-setup-spark.sh --h3-base adds it "
                  "(40 GB), or render on FastH3 without --base h3")
@@ -733,7 +742,7 @@ def video(args) -> None:
     save_sound(w, ["14", 0], w["16"]["inputs"]["filename_prefix"] + "_sound")
     cropped = crop_frames(w, args.crop, args.width, args.height) if args.crop else True
     attention = f"sparse attention {sparsity}" if sparsity > 0 else "dense attention"
-    runs = "TensorFold int8 blocks in ComfyUI" if args.engine == "tensorfold" else "ComfyUI, MiniMax H3 bf16" if base else f"ComfyUI, FastH3 {args.weights}"
+    runs = ("TensorFold int8 blocks in ComfyUI" + (", the LoRA merged into them" if loras else "")) if args.engine == "tensorfold" else "ComfyUI, MiniMax H3 bf16" if base else f"ComfyUI, FastH3 {args.weights}"
     print(f"[tensorfold] engine: cuda ({runs}, {attention}), generating "
           f"{args.width}x{args.height}, {args.frames} frames", flush=True)
     item, seconds = render(w, "12")

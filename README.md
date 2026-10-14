@@ -25,7 +25,7 @@ Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo ada
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
 contributor. This pack is their work, ported, pinned and measured. See [CREDITS.md](CREDITS.md). Built with Qwen.
 
-**2.7.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.7.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
@@ -259,19 +259,25 @@ in `spark/memory_guard.py` replaces that check, in three layers that every way o
 | TensorFold int8 engine, 864x480, 124 frames | 15.4K | 57.6 GB |
 | TensorFold int8 engine, 1376x768, 124 frames | 39.2K | 62.2 GB (62.1 to 64.2 in a production run) |
 | TensorFold int8 engine, 1376x768, 192 and 243 frames (that run, sampled every 11 s) | 59.9K, 75.3K | 67.1 GB, 69.0 to 70.9 GB |
-| With a LoRA (ComfyUI's own blocks, bfloat16), 864x480, 56 and 124 frames | 7.3K, 15.4K | 75.4 GB, 75.9 GB |
-| With a LoRA, 1280x736, 22, 56, 90, 107 and 124 frames | 7.4K to 35.0K | 74.8, 75.8 to 76.2, 76.2, 76.5, 76.6 GB |
+| With a LoRA merged into the int8 engine (2.7.1), 864x480, 124 frames | 15.4K | 57.6 GB |
+| With a LoRA merged into the int8 engine, 1280x736 and 1376x768, 124 frames | 35.0K, 39.2K | 61.4 GB, 62.3 GB |
+| With a LoRA merged into the int8 engine, 1376x768, 192 and 243 frames | 59.9K, 75.3K | 66.5 GB, 69.7 GB |
+| With a LoRA on ComfyUI's own blocks (bfloat16; before 2.7.1), 864x480, 56 and 124 frames | 7.3K, 15.4K | 75.4 GB, 75.9 GB |
+| The same, 1280x736, 22, 56, 90, 107 and 124 frames | 7.4K to 35.0K | 74.8, 75.8 to 76.2, 76.2, 76.5, 76.6 GB |
 
 The estimate is a straight line through those points for each route plus 6 GB (no point is more than 1.7 GB from its
 line; most are one run). Three things it does not know, said plainly:
 
-- **A clip with a LoRA is refused above the largest one measured**, 1280x736 at 124 frames (35.0K rows), whatever
-  the line says: 1344x768 and the Sharp Spec size take a LoRA at no length, 864x480 up to 277 frames (11.5 s). By
-  the line the clip that took the Spark down needs 77 GB and leaves 41, and that is what the machine showed for a
-  minute before it was lost, so its end is not explained by how much memory the clip takes and the size is not
-  offered. Its logs were never read; what is known is in the next paragraph.
+- **A clip with a LoRA is refused above the largest one measured on its route.** Since 2.7.1 a LoRA on FastH3 is
+  merged into TensorFold's int8 engine and takes what a clip without one takes (the table: within 0.6 GB at every
+  size), measured from 864x480 up to 1376x768 at 243 frames (75.3K rows), as far as the engine itself was measured:
+  every size the app offers, up to 10 s at the Sharp Spec size. On ComfyUI's own bfloat16 blocks (a Spark whose engine
+  predates 2.7.1, or `--engine comfy`) it stays refused above 1280x736 at 124 frames (35.0K rows), whatever the line
+  says. By that line the clip that took the Spark down needs 77 GB and leaves 41, and that is what the machine showed
+  for a minute before it was lost, so its end is not explained by how much memory the clip takes and the size is not
+  offered there. Its logs were never read; what is known is in the next paragraph.
 - Reference clips (Ref2VA), MiniMax H3's own transformer and a Spark without the engine were not measured here; they
-  are estimated on the LoRA line with their references' rows added.
+  are estimated on the bfloat16 LoRA line with their references' rows added.
 - Pictures, edits and Library actions are not estimated: the running guard covers them.
 
 What was found about the old check: memory falls far faster than once a second can follow (7.2 GB a second while
@@ -292,6 +298,17 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.7.1 (2026-10-14): a LoRA on a DGX Spark renders on TensorFold's int8 engine again.**
+> - **LoRA clips are merged into the engine** (`TensorFoldH3Blocks`): the node takes the LoRA's patches for the block
+>   projections off ComfyUI, merges them into the bfloat16 weights as ComfyUI does, and the engine quantizes them
+>   (`tf_h3_set_weight`, engine `1f7ecc75`). The memory and the speed are the engine's own: 1376x768 at 124 frames
+>   took 62.3 GB against 62.2 without a LoRA, and 864x480 at 124 frames 114 s against 140 s on ComfyUI's blocks.
+> - **The memory guard takes LoRA clips up to 1376x768 at 243 frames**, measured from below on a worker Spark (a route
+>   of its own, `int8-lora`); the Sharp Spec size and 1344x768 take a LoRA again. A Spark whose engine is older
+>   renders a LoRA on ComfyUI's bfloat16 blocks with the old limit (1280x736, 124 frames), and the app says which.
+> - Same seed, the engine's LoRA clip and ComfyUI's bfloat16 one show the same shot (*LoRAs* in the hub section).
+>   Reference clips (Ref2VA), MiniMax H3's own transformer (`--base h3`) and the Turbo path keep ComfyUI's blocks.
 
 > **2.7.0 (2026-10-13): the Sparks setting, one to eight DGX Sparks for a job.**
 > - **A Sparks tab**: add a worker DGX Spark by the address you would give `ssh`, check it, update its Studio code and
@@ -725,9 +742,9 @@ moment in a last-frame prompt is the clip's true length. Production segments and
 same way. The longest clip stays the model's 15 seconds on every size of both builds. On a DGX Spark that was
 measured at the largest canvas, 1376x768 with a first and a last frame: 362 frames rendered with 29.7 GB of the
 machine's 121 GB still free at the lowest point (one run, TensorFold's int8 engine, 4 passes; the memory does not
-depend on the passes). A clip with a LoRA renders on ComfyUI's own bfloat16 blocks and needs more memory: it
-is taken up to 1280x736 at 124 frames (or as many rows a pass at a smaller size) and refused above that with the
-reason and what fits (*The memory guard*, in the DGX Spark section). On the Mac
+depend on the passes). A clip with a LoRA renders on the same engine with the LoRA merged into it (2.7.1) and is
+taken up to 1376x768 at 243 frames, the largest it was measured at, and refused above that with the reason and what
+fits (*The memory guard*, in the DGX Spark section). On the Mac
 22, 141 and 345 frames were rendered at 864x480 through the app (26 s, 72 s and 226 s a job on an M5 Ultra, native
 engine, 8 passes); its limits are the ones it had.
 
@@ -1143,8 +1160,14 @@ studio shot into a worn 4:3 tape recording. The numbers say the clip changed, no
 
 How it renders: on a Mac the file is rewritten once (`scripts/convert-lora.py`) and merged at load by the MLX engine,
 for MiniMax H3 at any quality and for FastH3 (which then runs on the MLX engine, not the native one). On a DGX Spark
-ComfyUI merges it into FastH3's full-precision weights and its own blocks render the clip, not the TensorFold engine.
-Both are slower than the usual path and have no time estimate.
+(2.7.1) TensorFold's ComfyUI node merges it into FastH3's full-precision projections the way ComfyUI would (its LoRA
+arithmetic, then its seeded rounding to bfloat16) and the engine quantizes them to int8, so the clip renders on the
+engine at its usual speed and memory: 864x480, 124 frames took 114 s against 140 s on ComfyUI's own blocks, plus
+12.5 s for the merge the first time a LoRA is used (a later clip without it puts the checkpoint's weights back the
+same way). Same seed, The Wasserman 80s Horror at 1.0: the engine's clip and ComfyUI's bfloat16 one show the same shot
+(pixel correlation 0.80, the sound 0.89), closer than the two engines are without a LoRA (0.55), and both far from
+the clip without the LoRA (0.43 to 0.49). The LoRA's keys outside the blocks (the text refiner, the modulation, the
+final layer) are merged by ComfyUI as before. A LoRA still has no time estimate.
 
 **LoRAs on a clip from references.** The hub is also offered on a clip made from references (MiniMax H3 Ref2VA), and
 the LoRA is merged into that transformer: by the MLX engine on a Mac, and on a DGX Spark by ComfyUI into the
@@ -1290,7 +1313,8 @@ the song under the timeline.
 **A LoRA on one shot.** *LoRA for this shot* in Roll camera puts one installed LoRA on that shot in place of the
 film's. It goes through the hub (strength, look, what it needs) and, on a DGX Spark, through the memory guard when
 the shot is queued; the shot's preflight says beforehand when it will be refused and what fits. On a Spark a clip
-with a LoRA is taken up to 1280x736 at 124 frames: the Sharp Spec tier takes none.
+with a LoRA is taken up to 1376x768 at 243 frames (2.7.1; before that 1280x736 at 124, and the Sharp Spec tier took
+none).
 
 **Takes from other machines.** A film's project is on one machine and its clips are often rendered by others, each
 by its own app. *Import a take* takes that app's address and one of its job ids (the clip, prompt, seed, settings and
@@ -2189,7 +2213,8 @@ the image was `ghcr.io/drowzeys/keys-mac-tensorfold-studio`; the Mac setup still
 |---|---|
 | Host | Mac Studio M5 Ultra, 256 GB, macOS 27.0.1 |
 | Engine | TensorFold 0.6.5 (`609ca419`) + twelve commits, `drowzeys/TensorFold` branch `studio` @ `a2068c031e08109a0ec14c26b1ca655cf50ac34c` (Apache-2.0) |
-| Native engine (FastH3) | TensorFold 1.0.4's Zig runtime + an H3 family for Metal and one for CUDA, `drowzeys/TensorFold` branch `h3-1.0.4` @ `b7e309e042e48b72e75e9fb87342df4e9bf22f37`; built with Zig 0.17. Same output bit for bit as the 1.0.2-based engine of 2.0 to 2.2 |
+| Native engine (FastH3) | TensorFold 1.0.4's Zig runtime + an H3 family for Metal and one for CUDA, `drowzeys/TensorFold` branch `h3-1.0.4` @ `b7e309e042e48b72e75e9fb87342df4e9bf22f37` (the DGX Spark's CUDA
+library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for LoRAs); built with Zig 0.17. Same output bit for bit as the 1.0.2-based engine of 2.0 to 2.2 |
 | Image model | `Qwen/Qwen-Image-2.1-Turbo`: 7B transformer (32 blocks, bfloat16), 64-channel VAE, Qwen3-VL text encoder; 8 steps on the schedule saved with the checkpoint |
 | Image adapter (installs from before 2.3) | `Viggle/Qwen-Image-2.1-viggle-turbo`, v0.3, rank 256, 6 steps on its trained nodes, on `Qwen/Qwen-Image-2.1` |
 | Video model | `MiniMaxAI/MiniMax-H3`, `FL2VA` partition: 33B transformer, Qwen3-VL text encoder, video and audio VAEs |
