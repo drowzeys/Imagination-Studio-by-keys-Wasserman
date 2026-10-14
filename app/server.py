@@ -820,7 +820,8 @@ def clip_seconds(params: dict) -> float:
 
 def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | None = None) -> dict:
     """Whether a clip fits this machine's memory (spark/memory_guard.py; a DGX Spark only, everything fits on a Mac):
-    the size it is generated at, its frames, whether a LoRA or references put it on ComfyUI's own bfloat16 blocks."""
+    the size it is generated at, its frames, whether references put it on ComfyUI's own bfloat16 blocks and whether a
+    LoRA is merged into TensorFold's engine (or, with an engine build that cannot take one, goes to those blocks too)."""
 
     if not SPARK:
         return {"fits": True, "reason": ""}
@@ -830,8 +831,10 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
         width, height = 864, 480
     found = found or {}
     videos = found.get("videos") or []
-    return memory_guard.check(width, height, frames, lora=lora or bool(found and params.get("ref_turbo")), references=bool(found),
-                              base=env.get("SPARK_BASE") == "h3", engine=SPARK_ENGINE_LIB.exists(),
+    lora = lora or bool(found and params.get("ref_turbo"))
+    engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
+    return memory_guard.check(width, height, frames, lora=lora, references=bool(found),
+                              base=env.get("SPARK_BASE") == "h3", engine=engine,
                               pictures=len(found.get("pictures") or []),
                               reference_frames=sum(min(frames, int(round((media_seconds(path)[0] or frames / FPS) * FPS))) for path in videos))
 

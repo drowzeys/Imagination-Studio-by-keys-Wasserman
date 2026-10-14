@@ -7,7 +7,7 @@
 # Environment: PREFIX, NVCC, TF_COMMIT, TF_SOURCE (an existing checkout to build instead of fetching one).
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
-TF_COMMIT="${TF_COMMIT:-b7e309e042e48b72e75e9fb87342df4e9bf22f37}"
+TF_COMMIT="${TF_COMMIT:-1f7ecc75ded5df6da151d4d5eeee87b35161e3c2}"
 ZIG_VERSION=0.17.0
 OUT="$PREFIX/tf-h3"
 if [ -s "$OUT/libtf_h3.so" ] && [ "$(cat "$OUT/commit" 2>/dev/null)" = "$TF_COMMIT" ] && [ -z "${TF_SOURCE:-}" ]; then

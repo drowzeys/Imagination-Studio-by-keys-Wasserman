@@ -42,29 +42,49 @@ def test_the_floor_is_a_tenth_of_the_machine():
 
 
 def test_the_clip_that_took_a_spark_down_is_refused():
-    """1376x768, 124 frames, FastH3 8 passes, Camera Motion at 0.9: accepted on 2026-10-13, and the machine was lost."""
+    """1376x768, 124 frames, FastH3 8 passes, Camera Motion at 0.9: accepted on 2026-10-13 on ComfyUI's bfloat16
+    blocks, and the machine was lost. Where the LoRA still goes there (an engine that cannot take one) it is refused."""
 
-    found = G.check(1376, 768, 124, lora=True, available_mb=IDLE, total_mb=SPARK_MB)
+    found = G.check(1376, 768, 124, lora=True, engine=False, available_mb=IDLE, total_mb=SPARK_MB)
     assert found["fits"] is False and found["route"] == "bf16"
     assert "refused" in found["reason"] and "LoRA" in found["reason"] and "What fits" in found["reason"]
     near = found["nearest"]
     assert near["size"] == [1280, 736] and near["frames"] is None  # no length of a 1376x768 LoRA clip was ever measured
     assert "1280x736 at this length" in found["reason"]
-    # what it offers does fit: it is the largest LoRA clip that was measured
-    assert G.check(*near["size"], 124, lora=True, available_mb=IDLE, total_mb=SPARK_MB)["fits"]
+    # what it offers does fit: it is the largest LoRA clip that was measured there
+    assert G.check(*near["size"], 124, lora=True, engine=False, available_mb=IDLE, total_mb=SPARK_MB)["fits"]
+    # on the engine, with the LoRA merged into its int8 weights, the same clip was measured and fits
+    merged = G.check(1376, 768, 124, lora=True, available_mb=IDLE, total_mb=SPARK_MB)
+    assert merged["fits"] is True and merged["route"] == "int8-lora"
     # the same clip without the LoRA is the film's own setting, rendered 45 times that day
     assert G.check(1376, 768, 124, available_mb=IDLE, total_mb=SPARK_MB)["fits"]
     assert G.check(1376, 768, 243, available_mb=IDLE, total_mb=SPARK_MB)["fits"]
 
 
 def test_a_lora_clip_is_never_taken_above_what_was_measured():
-    most = G.MEASURED_ROWS["bf16"]
-    for width, height in G.SIZES:
-        for frames in G.counts():
-            found = G.check(width, height, frames, lora=True, available_mb=IDLE, total_mb=SPARK_MB)
-            assert found["fits"] == (G.rows(width, height, frames) <= most and width * height <= 1280 * 736), (width, height, frames)
+    for engine, route, pixels in ((False, "bf16", 1280 * 736), (True, "int8-lora", 1376 * 768)):
+        most = G.MEASURED_ROWS[route]
+        for width, height in G.SIZES:
+            for frames in G.counts():
+                found = G.check(width, height, frames, lora=True, engine=engine, available_mb=IDLE, total_mb=SPARK_MB)
+                assert found["route"] == route
+                assert found["fits"] == (G.rows(width, height, frames) <= most and width * height <= pixels), (route, width, height, frames)
     # more memory does not change that: where it starts is not known
-    assert not G.check(1376, 768, 124, lora=True, available_mb=10 * IDLE, total_mb=10 * SPARK_MB)["fits"]
+    assert not G.check(1376, 768, 124, lora=True, engine=False, available_mb=10 * IDLE, total_mb=10 * SPARK_MB)["fits"]
+    over = G.check(1376, 768, 260, lora=True, available_mb=10 * IDLE, total_mb=10 * SPARK_MB)
+    assert not over["fits"] and "1376x768, 243 frames" in over["reason"] and over["nearest"]["frames"] == 243
+
+
+def test_which_route_a_lora_takes():
+    assert G.route_of(lora=True) == "int8-lora" and G.route_of() == "int8"
+    assert G.route_of(lora=True, engine=False) == "bf16"
+    assert G.route_of(lora=True, references=True) == "bf16" and G.route_of(lora=True, base=True) == "bf16"
+    with tempfile.TemporaryDirectory() as folder:
+        old, new = Path(folder) / "old.so", Path(folder) / "new.so"
+        old.write_bytes(b"\x7fELF tf_h3_open tf_h3_forward")
+        new.write_bytes(b"\x7fELF tf_h3_open tf_h3_forward tf_h3_set_weight")
+        assert not G.engine_takes_lora(old) and G.engine_takes_lora(new)
+        assert not G.engine_takes_lora(Path(folder) / "missing.so")
 
 
 def test_the_estimate_follows_the_measured_points():
