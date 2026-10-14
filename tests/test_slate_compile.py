@@ -133,7 +133,8 @@ def test_a_shots_own_lora_goes_into_its_plan_and_through_the_memory_guard():
         assert asked[-1][2] is True
     finally:
         slate.room = had
-    # with the app's own guard: on a DGX Spark the shot that took a machine down is refused in the shot's preflight
+    # with the app's own guard on a DGX Spark: a Sharp shot with a LoRA at 124 frames fits where the engine merges the
+    # LoRA itself (2.7.1, measured to 1376x768 at 243 frames), and is refused in the preflight where it predates that
     if server.SPARK:
         import memory_guard
 
@@ -144,7 +145,9 @@ def test_a_shots_own_lora_goes_into_its_plan_and_through_the_memory_guard():
             made["scenes"][0]["shots"][0]["tf"]["bars"] = None
             made["scenes"][0]["shots"][0]["spec"]["durationSec"] = 5
             real = slate.compile_shot(made, "shot-1")
-            assert real["plan"]["frames"] == 124 and real["memory"]["fits"] is False and "1280x736 at this length" in real["memory"]["reason"]
+            merges = server.SPARK_ENGINE_LIB.exists() and memory_guard.engine_takes_lora(server.SPARK_ENGINE_LIB)
+            assert real["plan"]["frames"] == 124
+            assert real["memory"]["fits"] is True if merges else (real["memory"]["fits"] is False and "1280x736 at this length" in real["memory"]["reason"])
             made["tf"]["res"] = "720p"
             assert slate.compile_shot(made, "shot-1")["memory"]["fits"] is True
         finally:

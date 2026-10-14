@@ -25,7 +25,7 @@ Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo ada
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
 contributor. This pack is their work, ported, pinned and measured. See [CREDITS.md](CREDITS.md). Built with Qwen.
 
-**2.7.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.7.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
@@ -298,6 +298,13 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.7.2 (2026-10-14): typing a custom size.** The Width and Height boxes of a custom resolution, and the box of
+> a custom number of passes, took one digit at a time: every key redrew the form and the box under the cursor with it.
+> The value still changes with every key; the form is redrawn once the box is finished (Enter, Tab or a click elsewhere).
+> The seed was checked at the same time, on both machines: two seeds give two different clips on a Mac (Zig engine), on a
+> DGX Spark (TensorFold int8 engine) and on a Spark with a LoRA merged into that engine. The Create tab, each Production
+> segment and each Slate shot keep a seed of their own, and the Sharp Spec sets every segment or shot to 42.
 
 > **2.7.1 (2026-10-14): a LoRA on a DGX Spark renders on TensorFold's int8 engine again.**
 > - **LoRA clips are merged into the engine** (`TensorFoldH3Blocks`): the node takes the LoRA's patches for the block
