@@ -239,6 +239,9 @@ let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
 const field = (labelText, node) => el("div", {}, el("label", {}, labelText), node);
 const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"; if (isBox) node.checked = !!obj[key]; else node.value = obj[key] ?? "";
   node.addEventListener("input", () => { obj[key] = isBox ? node.checked : (node.type === "number" ? Number(node.value) : node.value); if (after) after(); }); return node; };
+// a field the page is redrawn after only once it is finished (Enter, Tab or a click elsewhere): redrawing on every key
+// rebuilt the box under the cursor, so each digit needed a click first
+const typed = (node, after) => { node.addEventListener("change", () => after && after()); return node; };
 const select = (obj, key, options, after) => { const n = el("select", {}, Object.entries(options).map(([v, t]) => el("option", { value: v }, t))); return bind(obj, key, n, after); };
 const media = (path, attrs = {}) => /\.(mp4|mov)$/i.test(path) ? el("video", { src: file(path), controls: true, preload: "metadata", ...attrs }) : el("img", { src: file(path), loading: "lazy", ...attrs });
 
@@ -373,7 +376,7 @@ function passChooser(key, options, start, after, more) {
   const at = cards.map(c => c[0]).lastIndexOf(true), nodes = cards.map(c => c[1]);
   nodes.splice(at < 0 ? nodes.length : at + 1, 0, card(customOn(), "Custom", "your own number of passes", () => { if (!customOn()) C.steps = String(start()); changed(); }));
   return [el("div", { class: "choice tight passes" + (nodes.length % 2 ? " odd" : ""), role: "radiogroup" }, nodes),
-    customOn() ? el("div", { class: "row" }, el("div", { class: "fit", style: "width:150px" }, el("label", {}, "Number of passes"), bind(C, "steps", el("input", { type: "number", min: low, max: high, step: 1 }), after)),
+    customOn() ? el("div", { class: "row" }, el("div", { class: "fit", style: "width:150px" }, el("label", {}, "Number of passes"), typed(bind(C, "steps", el("input", { type: "number", min: low, max: high, step: 1 })), after)),
       el("div", { class: "note" }, "From " + low + " to " + high + ". No time estimate for a custom count." + (more ? " " + more : ""))) : null];
 }
 // MiniMax H3's qualities are recipes (which adapter, which sound), not counts: a custom count runs inside the chosen one
@@ -532,8 +535,8 @@ function videoControls(after) {
       // a quality of MiniMax H3 is a recipe: Custom keeps the one that was chosen and changes only its count
       : passChooser("h3quality", H3Q, () => H3_PASSES[C.h3quality], after, "Inside “" + H3Q[C.h3quality][0] + "”, the quality that was chosen: it keeps its adapter and its sound, and only the number of passes changes."),
     el("label", {}, "Resolution"), choice(C, "res", Object.fromEntries(Object.entries(RES).filter(([k]) => (S.x2 || !["draft", "2k"].includes(k)) && (k !== "sharp" || S.sharp))), changed, true),
-    C.res === "custom" ? el("div", { class: "row" }, el("div", { class: "fit", style: "width:130px" }, el("label", {}, "Width"), bind(C, "cw", el("input", { type: "number", step: 32, min: S.custom.sides[0], max: S.custom.sides[1] }), after)),
-      el("div", { class: "fit", style: "width:130px" }, el("label", {}, "Height"), bind(C, "ch", el("input", { type: "number", step: 32, min: S.custom.sides[0], max: S.custom.sides[1] }), after)),
+    C.res === "custom" ? el("div", { class: "row" }, el("div", { class: "fit", style: "width:130px" }, el("label", {}, "Width"), typed(bind(C, "cw", el("input", { type: "number", step: 32, min: S.custom.sides[0], max: S.custom.sides[1] })), after)),
+      el("div", { class: "fit", style: "width:130px" }, el("label", {}, "Height"), typed(bind(C, "ch", el("input", { type: "number", step: 32, min: S.custom.sides[0], max: S.custom.sides[1] })), after)),
       el("div", { class: "note" }, "Multiples of 32, each side " + S.custom.sides[0] + " to " + S.custom.sides[1] + ", at most 1344 × 768 pixels in all. No time estimate for a custom size.")) : null,
     loraHub(C, () => { C.prompt = ""; }),
     el("label", {}, "Text encoder"),
