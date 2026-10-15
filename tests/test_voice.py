@@ -271,12 +271,22 @@ def test_an_h3_job_unloads_drama3_before_it_runs():
             out = server.HOME / "renders" / f"{job_id}.png"
             return [sys.executable, "-c", f"open({str(out)!r}, 'wb').write(b'png')"], {}, [str(out)]
 
+        # while it is loaded a clip is measured against the memory the machine had before it loaded
+        assert voice.room_mb() == int(one.before_gb * 1024)
+        if server.SPARK:
+            had_room = server.memory_guard.room_mb
+            try:
+                server.memory_guard.room_mb = lambda: 1000
+                assert server.memory_of({}, {"WIDTH": 864, "HEIGHT": 480}, 121, False)["available_mb"] == voice.room_mb()
+            finally:
+                server.memory_guard.room_mb = had_room
         server.build = build
         job = {"id": "test-h3-yield", "kind": "image", "status": "running", "title": "t", "params": {}, "log": "", "outputs": [],
                "started": time.time(), "finished": None, "remote": None}
         server.perform(job)
         assert job["status"] == "done", job
         assert seen == {"loaded": False, "locked": False} and "Drama 3 was unloaded" in job["log"]
+        assert voice.room_mb() is None
     finally:
         server.build = built
         one.release("test over")

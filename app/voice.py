@@ -219,6 +219,7 @@ class Cuda:
         self.log: list[str] = []
         self.owner = ""  # what this server wrote in the lock folder's owner file
         self.loaded_at = self.last_used = 0.0
+        self.before_gb = -1.0  # MemAvailable just before the server started: what a job has once it is unloaded
         self.load_s_measured: float | None = None
         self.device_gb: float | None = None
         self.killed = ""  # why the guard killed the engine, if it did
@@ -361,7 +362,7 @@ class Cuda:
             env = dict(os.environ)
             env["LD_LIBRARY_PATH"] = str(self.lib.parent) + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
             self.answers, self.log, self.killed, self.device_gb = queue.Queue(), [], "", None
-            began = time.time()
+            began, self.before_gb = time.time(), mem_available_gb()
             self.process = subprocess.Popen(self.argv(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                             stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
             threading.Thread(target=self.read, args=(self.process,), daemon=True).start()
@@ -605,6 +606,16 @@ def state() -> dict:
     if hasattr(one, "status"):
         out["server"] = one.status()
     return out
+
+
+def room_mb() -> int | None:
+    """While a Drama 3 server is loaded: the memory this machine had before it loaded (MB), which any other job of the
+    queue gets back, since the server is unloaded before that job starts (server.memory_of). None otherwise."""
+
+    one = _backend
+    if one is None or not hasattr(one, "loaded") or not one.loaded() or getattr(one, "before_gb", -1) < 0:
+        return None
+    return int(one.before_gb * 1024)
 
 
 def release(why: str) -> bool:
