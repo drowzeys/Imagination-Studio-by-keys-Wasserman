@@ -610,6 +610,33 @@ def test_pictures_and_a_clip_from_a_new_picture_go_to_a_worker_with_the_image_mo
     assert asked["image_prompt"] == "a lot at dusk" and asked["shot_check"] is False and "output" not in asked
 
 
+def test_a_worker_kept_for_long_batches_takes_clips_only_from_one():
+    """``batch``: a slow worker (a Mac) is given a clip only when that many are waiting; pictures whenever it is free."""
+
+    spark, mac = Worker("spark-a"), Worker("mac-studio", platform="mac", engine="MLX engine", guard=False, memory={}, image=True)
+    fresh(spark, mac)
+    assert client.post(f"/api/sparks/workers/{mac.address}", json={"batch": "many"}).status_code == 400
+    row = next(r for r in client.post(f"/api/sparks/workers/{mac.address}", json={"batch": 6}).json()["workers"] if r["name"] == "mac-studio")
+    assert row["batch"] == 6
+    said = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 3}).json()
+    assert said["used"] == 2 and "kept for long batches" in said["without"][0]["why"] and said["without"][0]["name"] == "mac-studio"
+    assert client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 12}).json()["used"] == 3
+    pictures = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "scout", "clips": 1}).json()
+    assert pictures["used"] == 2 and [w["name"] for w in pictures["without"]] == ["spark-a"]  # the Mac is free for pictures; spark-a has no image model
+    # a short batch of clips: the Sparks only
+    done = finished([queue(3, seed=60 + n)["id"] for n in range(3)])
+    assert "mac-studio" not in {job["spark"] for job in done} and not mac.jobs
+    # a long one: the Mac takes clips too
+    done = finished([queue(3, seed=70 + n)["id"] for n in range(12)])
+    assert "mac-studio" in {job["spark"] for job in done}
+    # pictures: whenever it is free
+    body = lambda seed: {"kind": "scout", "sparks": 3, "title": "scout", "params": {"prompt": "a lot at dusk", "count": 1, "preset": "small", "seed": seed}}
+    finished([client.post("/api/jobs", json=body(n)).json()["id"] for n in range(3)])
+    assert any(job["kind"] == "scout" for job in mac.jobs.values())
+    # unset again: any clip
+    assert next(r for r in client.post(f"/api/sparks/workers/{mac.address}", json={"batch": 0}).json()["workers"] if r["name"] == "mac-studio")["batch"] is None
+
+
 def test_the_commands_on_a_worker_run_in_bash_on_linux_and_macos():
     """What ssh runs on a worker: bash whatever the login shell (zsh on a Mac), and nothing that only Linux has."""
 

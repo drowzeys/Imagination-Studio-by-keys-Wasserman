@@ -22,7 +22,9 @@ A worker that stops answering while it renders is marked down and its clip goes 
 machine; a worker is never waited on for more than LOST seconds. One job runs on a Spark at a time.
 
 Kept in the studio folder, under sparks/:
-  sparks.json    {"workers": [{"address", "name", "folder", "enabled"}], "sparks": the number new jobs start with}
+  sparks.json    {"workers": [{"address", "name", "folder", "enabled", "batch"}], "sparks": the number new jobs start with}
+                 batch: a worker for long batches only (a slow one, a Mac): it is given a clip only when at least this
+                 many clips are waiting in the queue; pictures go to it whenever it is free. Unset: any clip.
   takes.jsonl    one line per finished clip: its path, seed, settings and the Spark that rendered it
   tunnels.json   the tunnels this app has open (closed by the next start if this one was killed)
 
@@ -392,7 +394,7 @@ class Hub:
         info, why = live["info"] or {}, self.usable(worker)
         memory = info.get("memory") or {}
         return {"address": worker["address"], "name": worker.get("name") or worker["address"], "folder": worker.get("folder"),
-                "enabled": worker.get("enabled", True), "state": live["state"], "says": STATES.get(live["state"], live["state"]),
+                "enabled": worker.get("enabled", True), "batch": worker.get("batch"), "state": live["state"], "says": STATES.get(live["state"], live["state"]),
                 "why": live["why"], "usable": not why, "unusable": why, "working": live["working"], "checked": live["checked"],
                 "job": live["job"], "version": info.get("version") or live.get("version"),
                 "memory_gb": round(memory["available_mb"] / 1000, 1) if memory.get("available_mb") is not None else live.get("memory_gb"),
@@ -663,15 +665,32 @@ class Hub:
         except (TypeError, ValueError):
             return 1
 
+    def overflow(self, worker: dict, kind: str, waiting: int) -> str:
+        """Why a worker kept for long batches is not given this clip now ("" when it may be): it takes clips only when
+        ``batch`` or more are waiting, so a short batch is not held up by its one slow clip."""
+
+        try:
+            batch = int(worker.get("batch") or 0)
+        except (TypeError, ValueError):
+            batch = 0
+        if batch > 1 and kind in ("video", "studio") and waiting < batch:
+            return f"kept for long batches: it takes clips when {batch} or more are waiting ({waiting} now)"
+        return ""
+
+    def waiting(self) -> int:
+        """Clips queued now that may go to another machine."""
+
+        return sum(1 for job in self.jobs.values() if job["status"] == "queued" and job["kind"] in ("video", "studio") and self.asked(job) > 1)
+
     def team(self, job: dict) -> list[str]:
         """The workers a job may render on, in the list's order: the first N - 1 that are up and can render it."""
 
         sparks = job.get("sparks") or {}
         if not self.spark or self.asked(job) < 2 or here_only(job["kind"], job["params"]) or sparks.get("moves", 0) >= MOVES:
             return []
-        found = []
+        found, waiting = [], self.waiting()
         for worker in self.workers():
-            if worker["address"] in (sparks.get("not") or {}) or self.usable(worker):
+            if worker["address"] in (sparks.get("not") or {}) or self.usable(worker) or self.overflow(worker, job["kind"], waiting):
                 continue
             if capable(job["kind"], job["params"], self.state(worker["address"])["info"]):
                 continue
@@ -942,7 +961,8 @@ class Hub:
             return {"supported": False, "limit": LIMIT, "chosen": 1, "available": 1, "listed": 1, "used": 1, "mode": "one", "says": MAC, "without": [], "estimate": None}
         able, without = [], []
         for worker in self.workers():
-            why = self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"])
+            why = (self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"])
+                   or self.overflow(worker, kind, max(clips, self.waiting())))
             (without.append({"name": worker.get("name") or worker["address"], "why": why}) if why else able.append(worker["address"]))
         listed, available = 1 + len(able) + len(without), 1 + len(able)
         here = here_only(kind, params)
@@ -1027,6 +1047,11 @@ class Hub:
                 raise HTTPException(404, "no such Spark in the list")
             if "enabled" in body:
                 worker["enabled"] = bool(body["enabled"])
+            if "batch" in body:  # clips only in batches of at least this many waiting (None or 0: any clip)
+                try:
+                    worker["batch"] = max(0, min(int(body["batch"] or 0), 1000)) or None
+                except (TypeError, ValueError):
+                    raise HTTPException(400, "batch is a whole number of clips, or 0 for any clip")
             if body.get("name"):
                 worker["name"] = str(body["name"]).strip()[:60]
             if "folder" in body:

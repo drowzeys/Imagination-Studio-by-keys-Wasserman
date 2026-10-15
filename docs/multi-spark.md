@@ -48,7 +48,10 @@ stays a Spark; the Mac takes single clips from the same queue.
   not a Spark's, and the same seed does not give the same frames as on a Spark. Measured on an M3 Ultra (MLX, 8-bit
   weights, no tensor units): a 5 s 864x480 clip at 8 passes took 643 s (70.7 s a pass), against 73 s on a Spark,
   about 9 times. With N clips and a Mac in the team the Mac's one clip is the last to finish whenever N is under
-  about twice that ratio: untick **use** for such a Mac and tick it for long batches.
+  about twice that ratio. For such a worker set `batch`: it is then given a clip only when at least that many clips
+  are waiting, and pictures whenever it is free, so short, urgent batches stay on the Sparks and long ones use it as
+  overflow (`curl -X POST .../api/sparks/workers/<address> -d '{"batch": 20}'`; `0` gives it any clip again). The plan
+  says *kept for long batches* beside it while a batch is shorter. Its row shows the number.
 - **What it is not given:** what it has not installed (Ref2VA, a LoRA), and a text encoder chosen by its file name
   (a Spark names a file in ComfyUI's folder, a Mac takes a path). Long videos, edits and Library actions stay on
   this Spark, as for any worker. The plan under the chooser says, Mac by Mac, why one is left out.
