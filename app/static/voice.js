@@ -4,7 +4,8 @@
    text, an optional voice to clone (with the speaker's consent), one take per job in the render queue. A take can go to
    the create wizard as reference audio (<Audio N>) for MiniMax H3 Ref2VA. Nothing is sent to Fish Audio. */
 const VO = { takes: null, text: "", ref: null, refText: "", consent: false, seed: 1, temperature: 1.0, top_p: 0.9, top_k: 30, job: null, cutting: "", player: null, stream: true };
-const VO_EXAMPLE = "<|speaker:0|> [whispering] Did you hear that noise downstairs? <|speaker:1|> [sighs] It's probably just the cat. Go back to sleep. <|speaker:0|> Cats don't knock on doors.";
+// one turn a line: on one line Drama 3 drops later turns far more often (the app also breaks the lines itself, voice.py dialogue)
+const VO_EXAMPLE = "<|speaker:0|> [whispering] Did you hear that noise downstairs?\n<|speaker:1|> [sighs] It's probably just the cat. Go back to sleep.\n<|speaker:0|> Cats don't knock on doors.";
 const voOn = () => !!(S && S.voice && S.voice.available);
 const voActive = () => VO.job && ["queued", "running"].includes(VO.job.status);
 // the CUDA engine's take plays while it is made (GET /api/voice/takes/{id}/live): one player a take, kept across redraws
@@ -14,6 +15,7 @@ function voLive(job) {
   return el("div", {}, el("div", { class: "note", style: "margin:8px 0 0" }, "Playing while it is made:"), VO.player.el); }
 const voSpeed = st => st.backend === "cuda"
   ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 42 GB). About 18 s to load the first time; it stays loaded for " + Math.round(((st.server || {}).idle_unload_s || 300) / 60) + " minutes after a take and is unloaded at once when a video or picture job starts. Then about 0.7 s for each second of speech, the first sound after about 0.3 s, played as it comes; Whisper checks the words after."
+  : st.serves ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 50 GB with its word check). About 5 s to load the first time; it stays loaded for " + Math.round(((st.server || {}).idle_unload_s || 300) / 60) + " minutes after a take and is unloaded at once when a video or picture job starts. Then about 0.35 s for each second of speech, the first sound after about 0.2 s, played as it comes. The engine checks its own words with Whisper as it goes: a runaway tail is cut, and a part with missing words is drawn again (a take that was short while playing is made once more)."
   : st.checks ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 50 GB). About 4 s to load, then about 0.35 s for each second of speech, the first sound after about 0.25 s when it plays as it is made. The engine checks its own words with Whisper as it goes: a runaway tail is cut, and a part with missing words is drawn again (when it is not played as it is made) or reported."
   : "One take at a time in the queue, never beside a video render (Drama 3 takes about 50 GB). About 3 s to load, then roughly 0.4 s for each second of speech; Whisper checks the words after.";
 // the MLX engine's own end-of-text check, part by part (take.verify): what it did and what it did not hear

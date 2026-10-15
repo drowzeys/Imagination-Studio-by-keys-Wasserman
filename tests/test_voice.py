@@ -192,9 +192,10 @@ def test_a_cuda_take_runs_on_a_persistent_server_that_holds_the_lock_until_unloa
         assert one.loaded() and voice.lock_owner().startswith("studio-voice drama3")
         assert client.get("/api/voice/state").json()["server"]["loaded"] is True
         pid = one.process.pid
-        job = client.post("/api/voice/takes", json={"text": "Again.", "asr": False}).json()
+        job = client.post("/api/voice/takes", json={"text": "<|speaker:0|> Again. <|speaker:1|> Yes.", "asr": False}).json()
         take = wait(job["id"])["voice"]
-        assert one.process.pid == pid and take["load_s"] is None
+        assert one.process.pid == pid and take["load_s"] is None and take["streamed"] is True
+        assert requests_of(folder)[-1]["text"] == "<|speaker:0|> Again.\n<|speaker:1|> Yes."
         # a reference clip is sent as WAV with its text
         clip = server.HOME / "uploads" / "cuda-ref.wav"
         with wave.open(str(clip), "wb") as w:
@@ -448,6 +449,105 @@ def test_an_mlx_take_plays_while_made_and_its_score_is_the_engines_check():
         assert voice.estimate("One two three.", False, True) < voice.estimate("One two three.", False, False) + 1  # no Whisper after
     finally:
         voice._backend, voice.qa.ready, voice.qa.transcribe = had, had_ready, had_transcribe
+
+
+MLX_SERVE = r"""
+import json, os, struct, sys, wave
+args = sys.argv[1:]
+assert args[:3] == ["-I", "-m", "tensorfold.drama3"] and args[-1] == "--serve" and "--model" in args
+log = open(os.environ["FAKE_DRAMA3_LOG"], "a")
+print("[drama3] loading", file=sys.stderr, flush=True)
+print(json.dumps({"ready": True, "engine": "tensorfold-drama3-mlx", "load_s": 0.1, "verify": True, "stream": True}), file=sys.stderr, flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    log.write(line); log.flush()
+    samples = struct.pack("<h", 9) * 44100
+    if request.get("pcm"):
+        with open(request["pcm"], "wb") as pcm:
+            pcm.write(samples)
+    with wave.open(request["wav"], "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(44100); w.writeframes(samples)
+    short = "SHORT" in request["text"] and request.get("stream")
+    verify = [{"words": 4, "matched": 2 if short else 4, "missing": ["the", "cat"] if short else [], "action": "redraw" if short else "ok",
+               "attempts": 1 if short else 2, "heard": "It is", "asr_s": 0.1}]
+    print(json.dumps({"ok": True, "id": request.get("id"), "frames": 21, "eos": True, "audio_s": 1.0, "first_audio_ms": 210.0, "total_ms": 400.0,
+                      "fps": 80.0, "rtf": 0.4, "wav": request["wav"], "pcm": request.get("pcm"), "stream": bool(request.get("stream")),
+                      "chunks": [{"finish": "stop"}], "finish": ["stop"], "stop_rule": [False], "verify": verify, "peak_memory_gb": 47.5}),
+          file=sys.stderr, flush=True)
+"""
+
+
+def fake_mlx_server(folder: Path) -> "voice.Mlx":
+    """An Mlx backend whose venv python is a stand-in for `python -m tensorfold.drama3 --serve` (drama3-mlx 92c09a8e)."""
+
+    python = folder / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f"#!{sys.executable}\n" + MLX_SERVE)
+    python.chmod(0o755)
+    os.environ.update(DRAMA3_VENV=str(folder / "venv"), FAKE_DRAMA3_LOG=str(folder / "requests.jsonl"))
+    try:
+        one = voice.Mlx()
+    finally:
+        os.environ.pop("DRAMA3_VENV")
+    one.known, one.streams, one.serves, one.NEED_GB = (time.time(), ""), True, True, 0
+    return one
+
+
+def test_dialogue_turns_go_on_lines_of_their_own():
+    assert voice.dialogue("Hello there.") == "Hello there."
+    assert voice.dialogue("<|speaker:0|> Hi. <|speaker:0|> Again.") == "<|speaker:0|> Hi.\n<|speaker:0|> Again."
+    text = "[a direction] <|speaker:0|> [whispering] Did you? <|speaker:1|> No.  <|speaker:0|>Yes.\n<|speaker:1|> Fine."
+    assert voice.dialogue(text) == "[a direction] <|speaker:0|> [whispering] Did you?\n<|speaker:1|> No.\n<|speaker:0|>Yes.\n<|speaker:1|> Fine."
+    assert voice.dialogue(voice.dialogue(text)) == voice.dialogue(text)
+
+
+def test_an_mlx_take_runs_on_the_served_engine_plays_while_made_and_is_retaken_when_short():
+    folder = Path(tempfile.mkdtemp())
+    one = fake_mlx_server(folder)
+    had, had_ready, had_transcribe = voice._backend, voice.qa.ready, voice.qa.transcribe
+    try:
+        voice._backend = one
+        voice.qa.ready = lambda: {"transcript": True, "runs": True, "missing": []}
+        voice.qa.transcribe = lambda clip: (_ for _ in ()).throw(AssertionError("transcribed twice"))
+        state = client.get("/api/voice/state").json()
+        assert state["live"] is True and state["server"]["loaded"] is False
+        text = "<|speaker:0|> [whispering] Did you hear that? <|speaker:1|> It is the cat. " + "And then more words follow here. " * 20
+        job = client.post("/api/voice/takes", json={"text": text, "seed": 4}).json()
+        body = client.get(f"/api/voice/takes/{job['id']}/live").content
+        assert body[:4] == b"RIFF" and len(body) == 44 + 88200, len(body)
+        take = wait(job["id"])["voice"]
+        sent = requests_of(folder)
+        assert len(sent) == 1  # the engine chunks long text itself: one request
+        assert sent[0]["text"].startswith("<|speaker:0|> [whispering] Did you hear that?\n<|speaker:1|> It is the cat.")
+        assert sent[0]["stream"] is True and sent[0]["pcm"].endswith("0.pcm") and sent[0]["seed"] == 4 and sent[0]["id"] == job["id"]
+        assert take["backend"] == "mlx" and take["streamed"] is True and take["first_audio_ms"] == 210.0 and take["load_s"] is not None
+        assert take["frames_per_s"] == 80.0 and take["peak_memory_gb"] == 47.5 and take["asr"]["by"] == "engine" and take["asr"]["score"] == 100
+        assert one.loaded() and voice.lock_owner().startswith("studio-voice drama3")
+        # a part short while it played: asked again, not streamed, on the same server
+        pid = one.process.pid
+        job = client.post("/api/voice/takes", json={"text": "SHORT: it is the cat.", "ref_audio": None}).json()
+        take = wait(job["id"])["voice"]
+        again = requests_of(folder)[-2:]
+        assert again[0]["stream"] is True and again[1]["stream"] is False and "pcm" not in again[1] and one.process.pid == pid
+        assert take["retaken"]["played"][0]["action"] == "redraw" and take["verify"][0]["action"] == "ok" and take["streamed"] is False
+        assert take["load_s"] is None
+        # "live": false: one request, not streamed
+        wait(client.post("/api/voice/takes", json={"text": "Quiet.", "live": False}).json()["id"])
+        assert requests_of(folder)[-1]["stream"] is False
+        assert voice.release("a video job needs the GPU") and not one.loaded() and not voice.LOCK.exists()
+    finally:
+        one.release("test over")
+        voice._backend, voice.qa.ready, voice.qa.transcribe = had, had_ready, had_transcribe
+
+
+def test_an_mlx_engine_without_serve_runs_once_a_take():
+    fake = FakeStreaming(Path(tempfile.mkdtemp()))
+    assert not hasattr(fake, "serving")  # the per-take path, as 2.7.6 (test_an_mlx_take_plays_while_made_...)
+    one = voice.Mlx()
+    one.known, one.streams, one.serves = (time.time(), ""), True, False
+    assert one.serving() is False
+    command = one.command(Path("t.txt"), Path("o.wav"), Path("s.json"), None, 1, {"temperature": 1.0, "top_p": 0.9, "top_k": 30}, live=True)
+    assert "--stream" in command and "--serve" not in command
 
 
 if __name__ == "__main__":
