@@ -11,7 +11,8 @@
 # Audio's API; the weights come from Hugging Face (fishaudio/drama-3) and stay on this machine.
 #
 # Mac (Apple silicon, 64 GB or more): 39 GB for Fish's checkpoint, 39 GB for the MLX conversion, about 6 GB for the venv.
-# Environment: DRAMA3_SRC (the TensorFold clone, default ~/tensorfold-drama3-mlx; an existing one is used as it is),
+# Environment: DRAMA3_SRC (the TensorFold clone, default ~/tensorfold-drama3-mlx, or ~/TensorFold when that one has the
+# port already; an existing clone is used as it is),
 # DRAMA3_VENV (~/drama3-venv), DRAMA3_CHECKPOINT (~/models/drama-3), DRAMA3_MODEL (~/models/drama-3-mlx).
 #
 # DGX Spark: the CUDA engine (branch drama3-cuda) is built by hand, see the README (Voice on a DGX Spark): its build
@@ -71,6 +72,10 @@ fi
 MEM=$(sysctl -n hw.memsize)
 [ "$MEM" -ge $((64 * 1024 * 1024 * 1024)) ] || die "Drama 3 peaks at about 52 GB: a Mac with 64 GB or more"
 SRC="${DRAMA3_SRC:-$HOME/tensorfold-drama3-mlx}"
+# a TensorFold clone at ~/TensorFold that has the port already (the README's earlier hand setup) is used as it is
+if [ -z "${DRAMA3_SRC:-}" ] && [ ! -d "$SRC" ] && git -C "$HOME/TensorFold" merge-base --is-ancestor "$MLX_COMMIT" HEAD 2>/dev/null; then
+  SRC="$HOME/TensorFold"
+fi
 VENV="${DRAMA3_VENV:-$HOME/drama3-venv}"
 MODEL="${DRAMA3_MODEL:-$HOME/models/drama-3-mlx}"
 PY="$VENV/bin/python"
