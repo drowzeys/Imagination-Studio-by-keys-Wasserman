@@ -1234,6 +1234,10 @@ def perform(job: dict, worker: dict | None = None) -> None:
     params = job["params"]
     asked = dict(params)
     try:
+        # a Drama 3 server kept loaded after a voice take (voice.py, the CUDA engine) never stands beside a render here
+        if job["kind"] not in ("voice", "export") and worker is None and not job.get("remote"):
+            if voice.release(f"a {job['kind']} job needs the GPU"):
+                job["log"] += "[tensorfold] Drama 3 was unloaded to give this job its memory\n"
         if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
             source = inside(params["first_frame_from"])
             if not source.is_file():
@@ -1339,7 +1343,7 @@ def state() -> dict:
             "sparks": {"supported": SPARK, "limit": sparks.LIMIT},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
-            # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py); on a DGX Spark not available yet
+            # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py): MLX on a Mac, CUDA on a DGX Spark
             "voice": voice.state(),
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
 

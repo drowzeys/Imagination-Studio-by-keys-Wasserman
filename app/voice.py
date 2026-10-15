@@ -1,24 +1,28 @@
 """Voice: Fish Audio Drama 3 text to speech, run on this machine. Built with Fish Audio.
 
 A take is one job in the app's queue (one at a time, so it never runs beside a MiniMax H3 render: Drama 3 alone peaks
-at about 50 GB of memory). It runs the engine's own command line as a separate process, in its own environment:
+at about 50 GB of memory on a Mac, 42 GB on a DGX Spark). Two engines, both TensorFold's, each a separate process:
 
-    $DRAMA3_VENV/bin/python -I -m tensorfold.drama3 --text-file t.txt [--ref-audio a.wav --ref-text "..."] --out x.wav
+- ``mlx`` (Apple Silicon, the default on a Mac): the engine's own command line in its own environment, one process
+  a take, which holds the studio's GPU lock folder (~/studio-gpu.lock.d, the one the render scripts outside the app
+  take with ``mkdir``) for the time it runs:
 
-and, for the time it runs, also holds the studio's GPU lock folder (~/studio-gpu.lock.d, the one the render scripts
-outside the app take with ``mkdir``), so nothing that respects the lock loads a model beside it.
+      $DRAMA3_VENV/bin/python -I -m tensorfold.drama3 --text-file t.txt [--ref-audio a.wav --ref-text "..."] --out x.wav
+
+- ``cuda`` (DGX Spark, the default on Linux): ``drama3-generate --serve 1``, TensorFold's native Zig + CUDA port, as a
+  persistent server loaded on the first take, holding the GPU lock while loaded, unloaded after five idle minutes and
+  at once before any other job of this machine's queue (``Cuda`` below says how).
 
 Nothing here calls Fish Audio's API. The weights are Fish Audio Materials under the Fish Audio Community License v1.0:
 research, non-commercial and small-company commercial use; a hosted text-to-speech or voice-cloning service needs a
 licence of its own from Fish Audio; a real person's voice is cloned only with that person's consent, which a take with a
 reference clip must state (``consent``).
 
-Backends (``DRAMA3_BACKEND``): ``mlx`` (TensorFold's MLX port, Apple Silicon; the default on a Mac) and ``cuda``
-(TensorFold's CUDA port for a DGX Spark; the default on Linux, and not available yet: the Voice tab says so).
-
 Measured on a Mac Studio M5 Ultra (TensorFold drama3-mlx f623fb1a, 8-bit experts): about 63 frames a second while
 decoding against 21.5 for real time, so a take is made in about 0.4 times its length, plus about 3 s to load the
-model; 47 to 52 GB of memory at the peak.
+model; 47 to 52 GB of memory at the peak. On a DGX Spark (TensorFold drama3-cuda 81173e6c): 29 to 31 frames a
+second (about 0.7 times the take's length), first sound after about 0.27 s (0.47 s with a clip to clone), 18 s to load
+once, 41.6 GB at the peak.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import queue
 import random
 import re
 import shutil
@@ -64,6 +69,7 @@ def tool(name: str) -> str | None:
 
 class Mlx:
     name, label = "mlx", "TensorFold MLX · Apple Silicon"
+    fps, load_s = 60.0, 3.0  # measured on an M5 Ultra: about 63 frames a second, 3 s to load
 
     def __init__(self) -> None:
         self.venv = Path(os.environ.get("DRAMA3_VENV", Path.home() / "drama3-venv")).expanduser()
@@ -114,18 +120,468 @@ class Mlx:
         return command
 
 
+def mem_available_gb() -> float:
+    """MemAvailable of this machine in GB (a DGX Spark's GPU and system share one pool); -1 when unknown."""
+
+    try:
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024 ** 2
+    except (OSError, ValueError, IndexError):
+        pass
+    return -1.0
+
+
+def comfy_up(port: int | None = None) -> bool:
+    """Whether the studio's ComfyUI server (spark/comfy.sh) answers on its port: it may hold the video models."""
+
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port or int(os.environ.get("SPARK_COMFY_PORT", 8190))), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def pieces(text: str, limit: int) -> list[str]:
+    """Text over ``limit`` words cut at sentence ends into parts of about ``limit`` words; each part opens on the
+    speaker tag that was speaking (the CUDA engine takes one part a request, its context is 4096 rows)."""
+
+    if len(words(spoken(text))) <= limit:
+        return [text]
+    sentences, speaker = [], None
+    for part in re.split(r"(<\|speaker:\d+\|>)", text):
+        if SPEAKER.fullmatch(part):
+            speaker = part
+            continue
+        for sentence in re.split(r"(?<=[.!?…])\s+", part.strip()):
+            if sentence.strip():
+                sentences.append((speaker, sentence.strip()))
+    out, current, count, said = [], [], 0, None
+    for who, sentence in sentences:
+        size = len(words(spoken(sentence)))
+        if current and count + size > limit:
+            out.append(" ".join(current))
+            current, count, said = [], 0, None
+        if who and who != said:
+            current.append(who)
+            said = who
+        current.append(sentence)
+        count += size
+    if current:
+        out.append(" ".join(current))
+    return [one for one in out if spoken(one)]
+
+
+def one_speaker(text: str) -> bool:
+    return set(SPEAKER.findall(text)) <= {"0"}
+
+
 class Cuda:
-    """TensorFold's CUDA port of Drama 3 for a DGX Spark: still being built. When it lands, ``check`` looks for its
-    environment and ``command`` returns its command line (same arguments, same stats file); nothing else changes."""
+    """TensorFold's CUDA port of Drama 3 (``drama3-generate``, Zig + CUDA, no Python) on a DGX Spark.
+
+    The engine runs as a persistent server (``--serve 1``: one JSON request a line on its stdin, one JSON answer a
+    line on its stderr), loaded on the first take (about 18 s, 38.6 GB of weights, 41.6 GB at the peak), and:
+
+    - holds the studio's GPU lock folder (``~/studio-gpu.lock.d``) for as long as it is loaded, not only while a take
+      runs, so a script outside the app that respects the lock never loads a model beside it;
+    - is shut down, its memory given back, after ``DRAMA3_IDLE_S`` seconds without a take (300 by default), and at
+      once when any other job of this machine's queue starts (``release``, called by server.py), so it never stands
+      beside a MiniMax H3 or Qwen render;
+    - stops the studio's ComfyUI server before it loads when that server holds the memory it needs (the next video
+      reloads its models, as after ``spark/comfy.sh stop``);
+    - stands under a kill-guard: a thread reads MemAvailable four times a second and kills the engine by its PID
+      under ``DRAMA3_GUARD_GB`` (8 GB), as the engine's own run_guarded.sh does;
+    - dies with the app: its stdin is the app's pipe, and the engine ends at the end of its input.
+    """
 
     name, label = "cuda", "TensorFold CUDA · DGX Spark"
+    fps, load_s = 30.0, 18.0  # measured on a GB10: 29 to 31 frames a second sampled, 17 to 18 s to load from NFS
+    NEED_GB = 50.0  # free memory wanted before it loads: 41.6 GB at the peak, and the guard's 8 GB beside it
+    CHUNK_WORDS = 60  # a request's text at most (about 27 s of speech, ~600 frames, well inside max_ctx 4096)
+    GAP_S = 0.15  # the silence put between two parts of a long take
+
+    def __init__(self) -> None:
+        prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
+        here = prefix / "drama3"
+        self.bin = Path(os.environ.get("DRAMA3_CUDA_BIN", here / "bin" / "drama3-generate")).expanduser()
+        self.lib = Path(os.environ.get("DRAMA3_CUDA_LIB", self.bin.parent.parent / "lib" / "libtensorfold_drama3.so")).expanduser()
+        self.model = Path(os.environ.get("DRAMA3_CUDA_MODEL", Path.home() / "models" / "drama-3")).expanduser()
+        self.codec = Path(os.environ.get("DRAMA3_CUDA_CODEC", here / "codec-v1.safetensors")).expanduser()
+        self.idle_s = float(os.environ.get("DRAMA3_IDLE_S", 300))
+        self.guard_gb = float(os.environ.get("DRAMA3_GUARD_GB", 8))
+        self.known: tuple[float, str] | None = None
+        self.mutex = threading.RLock()  # a request, a load and an unload never run at once
+        self.process: subprocess.Popen | None = None
+        self.answers: "queue.Queue[dict]" = queue.Queue()
+        self.log: list[str] = []
+        self.owner = ""  # what this server wrote in the lock folder's owner file
+        self.loaded_at = self.last_used = 0.0
+        self.load_s_measured: float | None = None
+        self.device_gb: float | None = None
+        self.killed = ""  # why the guard killed the engine, if it did
+        self.events: list[dict] = []  # loads and unloads, newest last (shown in /api/voice/state)
+        self.idler: threading.Thread | None = None
+
+    # -- availability --
 
     def check(self) -> str:
-        return ("Not available yet on a DGX Spark: TensorFold's CUDA port of Drama 3 is still being built. "
-                "The Voice step runs on a Mac (MLX) for now.")
+        """Why Drama 3 cannot run here ("" when it can): files looked at, then memory; at most every 10 s."""
 
-    def command(self, *args, **kwargs) -> list[str]:
-        raise RuntimeError(self.check())
+        if self.process is not None and self.process.poll() is None:
+            return ""
+        if self.known and time.time() - self.known[0] < 10:
+            return self.known[1]
+        why = self.look()
+        self.known = (time.time(), why)
+        return why
+
+    def look(self) -> str:
+        if not sys.platform.startswith("linux"):
+            return "The CUDA backend runs on a DGX Spark (Linux, CUDA)."
+        if not os.access(self.bin, os.X_OK):
+            return f"No Drama 3 engine at {self.bin} (README, Voice: build TensorFold's drama3-cuda branch; DRAMA3_CUDA_BIN names another)."
+        if not self.lib.is_file():
+            return f"No libtensorfold_drama3.so at {self.lib} (the same build makes it; DRAMA3_CUDA_LIB names another)."
+        if not (self.model / "config.json").is_file() or not (self.model / "model.safetensors.index.json").is_file():
+            return f"No Drama 3 checkpoint at {self.model} (hf download fishaudio/drama-3; DRAMA3_CUDA_MODEL names another)."
+        if not self.codec.is_file():
+            return (f"No converted codec at {self.codec} (once: codec_convert.py {self.model} {self.codec}; "
+                    "DRAMA3_CUDA_CODEC names another).")
+        free = mem_available_gb()
+        if 0 <= free < self.NEED_GB and not comfy_up():
+            return (f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory and this Spark has {free:.0f} GB available now "
+                    "(something outside the studio holds the rest).")
+        return ""
+
+    # -- the server --
+
+    def loaded(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def note(self, what: str, **more) -> None:
+        self.events = (self.events + [{"at": time.time(), "what": what, **more}])[-20:]
+
+    def status(self) -> dict:
+        return {"loaded": self.loaded(), "idle_unload_s": self.idle_s, "load_s": self.load_s_measured,
+                "idle_for_s": round(time.time() - self.last_used, 1) if self.loaded() and self.last_used else None,
+                "events": self.events[-5:]}
+
+    def read(self, process: subprocess.Popen) -> None:
+        """The engine's stderr: its JSON answers into ``answers``, the rest into ``log``."""
+
+        for line in process.stderr:
+            line = line.rstrip("\n")
+            if line.startswith("{"):
+                try:
+                    self.answers.put(json.loads(line))
+                    continue
+                except ValueError:
+                    pass
+            self.log = (self.log + [line])[-200:]
+            found = re.search(r"weights on the device: ([\d.]+) GB", line)
+            if found:
+                self.device_gb = float(found.group(1))
+        self.answers.put({"ok": False, "error": "the engine stopped", "gone": True})
+
+    def guard(self, process: subprocess.Popen) -> None:
+        """MemAvailable four times a second; the engine is killed by its PID under the floor."""
+
+        while process.poll() is None:
+            free = mem_available_gb()
+            if 0 <= free < self.guard_gb:
+                self.killed = f"MemAvailable {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed Drama 3 (pid {process.pid})"
+                try:
+                    os.kill(process.pid, 9)
+                except OSError:
+                    pass
+                return
+            time.sleep(0.25)
+
+    def idle(self) -> None:
+        """Unloads the engine after ``idle_s`` without a take, and gives its memory and the GPU lock back."""
+
+        while True:
+            time.sleep(5)
+            if not self.loaded():
+                if self.process is not None and self.mutex.acquire(blocking=False):
+                    try:  # it ended by itself (a crash, the guard): the lock goes back
+                        if self.process is not None and not self.loaded():
+                            self.stop("the engine ended (" + (self.killed or f"status {self.process.returncode}") + ")")
+                    finally:
+                        self.mutex.release()
+                continue
+            if time.time() - self.last_used < self.idle_s or not self.mutex.acquire(blocking=False):
+                continue
+            try:
+                if self.loaded() and time.time() - self.last_used >= self.idle_s:
+                    self.stop(f"idle for {self.idle_s:g} s")
+            finally:
+                self.mutex.release()
+
+    def make_room(self, job: dict) -> None:
+        """Enough free memory to load, or a RuntimeError saying why not: the studio's ComfyUI server (the video
+        models) is stopped first when it holds what Drama 3 needs."""
+
+        free = mem_available_gb()
+        if free < 0 or free >= self.NEED_GB:
+            return
+        if comfy_up():
+            job["progress"] = {"stage": "stopping ComfyUI to free the video models' memory", "at": 0, "of": 1}
+            subprocess.run(["bash", str(Path(__file__).resolve().parent.parent / "spark" / "comfy.sh"), "stop"],
+                           capture_output=True, text=True, timeout=30)
+            for _ in range(60):
+                if not comfy_up():
+                    break
+                time.sleep(1)
+            settle()
+            free = mem_available_gb()
+            self.note("stopped ComfyUI before loading", available_gb=round(free, 1))
+        if 0 <= free < self.NEED_GB:
+            raise RuntimeError(f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory to load and this Spark has "
+                               f"{free:.0f} GB available")
+
+    def start(self, job: dict) -> bool:
+        """The server loaded and ready, under the GPU lock; False when the job was cancelled meanwhile."""
+
+        if self.loaded():
+            return True
+        if self.process is not None:
+            self.stop("the engine had ended (" + (self.killed or f"status {self.process.returncode}") + ")")
+        mine = f"studio-voice drama3 {os.getpid()}"
+        if not take_lock(job, mine):
+            return False
+        job.pop("lock", None)  # the server's, not the take's: it is given back when the server stops
+        self.owner = mine
+        try:
+            self.make_room(job)
+            job["progress"] = {"stage": "loading Drama 3 (about 18 s)", "at": 0, "of": 1}
+            env = dict(os.environ)
+            env["LD_LIBRARY_PATH"] = str(self.lib.parent) + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+            self.answers, self.log, self.killed, self.device_gb = queue.Queue(), [], "", None
+            began = time.time()
+            self.process = subprocess.Popen(self.argv(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
+            threading.Thread(target=self.read, args=(self.process,), daemon=True).start()
+            threading.Thread(target=self.guard, args=(self.process,), daemon=True).start()
+            if self.idler is None:
+                self.idler = threading.Thread(target=self.idle, daemon=True)
+                self.idler.start()
+            while True:
+                if job["status"] == "cancelled":
+                    self.stop("the take was cancelled while loading")
+                    return False
+                try:
+                    answer = self.answers.get(timeout=0.5)
+                except queue.Empty:
+                    if time.time() - began > 600:
+                        raise RuntimeError("Drama 3 did not load in 10 minutes")
+                    continue
+                if answer.get("ready"):
+                    break
+                raise RuntimeError("Drama 3 did not load: " + self.why(answer))
+            self.loaded_at = self.last_used = time.time()
+            self.load_s_measured = round(self.loaded_at - began, 1)
+            self.note("loaded", seconds=self.load_s_measured, device_gb=self.device_gb)
+            job["load_s"] = self.load_s_measured
+            return True
+        except BaseException:
+            self.stop("it failed to load")
+            raise
+
+    def argv(self) -> list[str]:
+        return [str(self.bin), "--model", str(self.model), "--codec", str(self.codec), "--serve", "1"]
+
+    def why(self, answer: dict) -> str:
+        said = self.killed or answer.get("error") or "no answer"
+        tail = [line for line in self.log if line.strip()][-2:]
+        return said + (" (" + " / ".join(tail)[-300:] + ")" if tail and answer.get("gone") else "")
+
+    def ask(self, job: dict, request: dict, seconds: float) -> dict | None:
+        """One request to the loaded server: its answer, or None when the job was cancelled (the server is then
+        stopped: a request cannot be taken back)."""
+
+        self.process.stdin.write(json.dumps(request) + "\n")
+        self.process.stdin.flush()
+        began = time.time()
+        while True:
+            if job["status"] == "cancelled":
+                self.stop("the take was cancelled")
+                return None
+            try:
+                answer = self.answers.get(timeout=0.25)
+            except queue.Empty:
+                if time.time() - began > seconds:
+                    self.stop("a request took longer than %d s" % seconds)
+                    raise RuntimeError(f"Drama 3 did not answer in {seconds:.0f} s")
+                continue
+            if answer.get("ready"):
+                continue
+            if not answer.get("ok"):
+                if answer.get("gone"):
+                    self.stop("the engine ended during a take")
+                raise RuntimeError("Drama 3: " + self.why(answer))
+            return answer
+
+    def stop(self, why: str) -> None:
+        """The server ended (stdin closed, killed after 20 s), its memory back, the GPU lock given back."""
+
+        with self.mutex:
+            process, self.process = self.process, None
+            if process is not None:
+                if process.poll() is None:
+                    try:
+                        process.stdin.close()
+                    except OSError:
+                        pass
+                    try:
+                        process.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=10)
+                settle()
+                self.note("unloaded", why=why, available_gb=round(mem_available_gb(), 1))
+            if self.owner and lock_owner() == self.owner:
+                shutil.rmtree(LOCK, ignore_errors=True)
+            self.owner = ""
+
+    def release(self, why: str) -> bool:
+        """Unload now if loaded (another job needs the GPU): True when it was loaded."""
+
+        with self.mutex:
+            if self.process is None:
+                return False
+            self.stop(why)
+            return True
+
+    # -- a take --
+
+    def make(self, job: dict, text: str, wav: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict) -> dict | None:
+        """One take through the server: the measurements (the stats the MLX engine writes), or None when cancelled.
+        Long text goes in parts (``pieces``); after the first, a one-speaker take without a clip clones the first
+        part's voice, so it keeps one voice; a clip given is used for every part."""
+
+        parts = pieces(text, self.CHUNK_WORDS)
+        live = wav.with_suffix(".live")
+        live.mkdir(exist_ok=True)
+        LIVE[job["id"]] = {"parts": [live / f"{i}.pcm" for i in range(len(parts))], "done": False, "finished": 0, "gap_s": self.GAP_S}
+        with self.mutex:
+            began = time.time()
+            if not self.start(job):
+                return None
+            loaded = time.time()
+            answers, files = [], []
+            try:
+                for index, part in enumerate(parts):
+                    job["progress"] = {"stage": "Drama 3 voice" + (f", part {index + 1} of {len(parts)}" if len(parts) > 1 else ""),
+                                       "at": index, "of": len(parts)}
+                    out = wav if len(parts) == 1 else wav.with_name(f"{wav.stem}.part{index}.wav")
+                    request = {"text": part, "wav": str(out), "pcm": str(LIVE[job["id"]]["parts"][index]), "seed": seed + index,
+                               "temperature": sampling["temperature"], "top_k": int(sampling["top_k"]),
+                               "top_p": sampling["top_p"], "max_frames": 1500}
+                    voice_of = reference
+                    if not voice_of and index and files and one_speaker(text):
+                        voice_of = (files[0], spoken(parts[0]))
+                    if voice_of:
+                        request.update(ref_audio=str(voice_of[0]), ref_text=voice_of[1])
+                    answer = self.ask(job, request, 120 + 1500 / 10)
+                    if answer is None:
+                        return None
+                    answers.append(answer)
+                    files.append(out)
+                    LIVE[job["id"]]["finished"] = index + 1
+                    self.last_used = time.time()
+            finally:
+                self.last_used = time.time()
+                LIVE[job["id"]]["done"] = True
+                # the raw parts go a minute later: a page may still be playing the end of the live take
+                threading.Timer(60, forget_live, args=(job["id"], live)).start()
+        if len(files) > 1:
+            join_wavs(files, wav, self.GAP_S)
+            for one in files:
+                one.unlink(missing_ok=True)
+        frames = sum(int(a.get("frames") or 0) for a in answers)
+        audio = sum(float(a.get("audio_s") or 0) for a in answers) + self.GAP_S * (len(answers) - 1)
+        decoding = sum(int(a.get("frames") or 0) / float(a["fps"]) for a in answers if a.get("fps"))
+        made = time.time() - loaded
+        return {"frames": frames, "audio_s": round(audio, 3), "frames_per_s": round(frames / decoding, 1) if decoding else None,
+                "rtf": round(made / audio, 2) if audio else None, "total_s": round(time.time() - began, 1),
+                "engine_s": round(sum(float(a.get("total_ms") or 0) for a in answers) / 1000, 2),
+                "first_audio_ms": answers[0].get("first_audio_ms") if answers else None,
+                "encode_ms": answers[0].get("encode_ms") if answers else None,
+                "load_s": job.get("load_s"), "device_gb": self.device_gb,
+                "chunks": len(answers), "finish": ["stop" if a.get("eos") else "length" for a in answers]}
+
+
+LIVE: dict[str, dict] = {}  # a running take's raw PCM parts, as the engine writes them (the live WAV, /live)
+
+
+def forget_live(job_id: str, folder: Path) -> None:
+    LIVE.pop(job_id, None)
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+def live_wav(entry: dict, rate: int = 44100, poll: float = 0.05):
+    """A running take as one WAV, while it is made: the header (its length left open), then each part's raw PCM as the
+    engine writes it, the gap between parts. Ends when the take is done, or after 10 minutes without a byte."""
+
+    import struct
+
+    open_length = 0xFFFFFFFF - 36
+    yield (b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+           + b"data" + struct.pack("<I", open_length))
+    quiet = time.time()
+    for index, part in enumerate(entry["parts"]):
+        sent = 0
+        while True:
+            try:
+                with open(part, "rb") as handle:
+                    handle.seek(sent)
+                    data = handle.read()
+            except OSError:
+                data = b""
+            data = data[: len(data) - (len(data) % 2)] if entry["finished"] <= index else data
+            if data:
+                if index and not sent:
+                    yield b"\0" * (int(rate * entry.get("gap_s", 0)) * 2)
+                sent += len(data)
+                quiet = time.time()
+                yield data
+                continue
+            if entry["finished"] > index:
+                break
+            if entry["done"] or time.time() - quiet > 600:
+                return
+            time.sleep(poll)
+
+
+def settle() -> None:
+    """Waits until MemAvailable stops climbing (the memory comes back a little after a process is gone), 30 s at most."""
+
+    before = -1.0
+    for _ in range(30):
+        free = mem_available_gb()
+        if free - before < 0.2:
+            return
+        before = free
+        time.sleep(1)
+
+
+def join_wavs(files: list[Path], target: Path, gap_s: float) -> None:
+    import wave
+
+    with wave.open(str(files[0])) as first:
+        params = first.getparams()
+    with wave.open(str(target), "wb") as out:
+        out.setparams(params)
+        silence = b"\0" * (int(params.framerate * gap_s) * params.sampwidth * params.nchannels)
+        for index, one in enumerate(files):
+            with wave.open(str(one)) as handle:
+                if index:
+                    out.writeframes(silence)
+                out.writeframes(handle.readframes(handle.getnframes()))
 
 
 BACKENDS = {"mlx": Mlx, "cuda": Cuda}
@@ -143,9 +599,20 @@ def backend():
 def state() -> dict:
     one = backend()
     why = one.check()
-    return {"available": not why, "why": why, "backend": one.name, "label": one.label, "credit": CREDIT, "licence": LICENCE,
-            "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
-            "text_limit": TEXT_LIMIT, "reference_seconds": REFERENCE_SECONDS, "speakers": 16}
+    out = {"available": not why, "why": why, "backend": one.name, "label": one.label, "credit": CREDIT, "licence": LICENCE,
+           "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
+           "text_limit": TEXT_LIMIT, "reference_seconds": REFERENCE_SECONDS, "speakers": 16, "live": hasattr(one, "make")}
+    if hasattr(one, "status"):
+        out["server"] = one.status()
+    return out
+
+
+def release(why: str) -> bool:
+    """Before any other job of this machine's queue (server.py): a loaded Drama 3 server is unloaded and gives back
+    its memory and the GPU lock. True when it was loaded."""
+
+    one = _backend
+    return bool(one is not None and hasattr(one, "release") and one.release(why))
 
 
 # ---------- text ----------
@@ -168,10 +635,14 @@ def expected_seconds(text: str) -> float:
 
 
 def estimate(text: str, referenced: bool, asr: bool) -> int:
-    seconds = expected_seconds(text)
-    # load 3 s, prefill under 0.5 s a chunk, frames at ~63 a second, the codec; a reference is encoded first;
+    seconds, one = expected_seconds(text), backend()
+    # load (3 s on a Mac; 18 s on a Spark unless the server is loaded already), prefill under 0.5 s a chunk, frames at
+    # the engine's rate (~63 a second on an M5 Ultra, ~30 on a GB10), the codec; a reference is encoded first;
     # Whisper on the CPU after it (loading included)
-    return int(4 + seconds * (FRAME_RATE / 60 + 0.05) + (3 if referenced else 0) + (6 + seconds * 0.4 if asr else 0))
+    fps, load = float(getattr(one, "fps", 60.0)), float(getattr(one, "load_s", 3.0))
+    if hasattr(one, "loaded") and one.loaded():
+        load = 0.0
+    return int(1 + load + seconds * (FRAME_RATE / fps + 0.05) + (3 if referenced else 0) + (6 + seconds * 0.4 if asr else 0))
 
 
 def sheet_text(sheet: dict) -> str:
@@ -223,10 +694,10 @@ def stale() -> bool:
         return False
 
 
-def take_lock(job: dict) -> bool:
+def take_lock(job: dict, mine: str = "") -> bool:
     """Waits for the GPU lock (a job that is cancelled meanwhile stops waiting): True once it is this job's."""
 
-    mine = f"studio-voice {job['id']} {os.getpid()}"
+    mine = mine or f"studio-voice {job['id']} {os.getpid()}"
     while True:
         try:
             LOCK.mkdir()
@@ -309,11 +780,13 @@ def perform(job: dict) -> bool:
         job["progress"] = {"stage": "reading the voice reference", "at": 0, "of": 1}
         source, clean = inside(params["ref_audio"]), stem.with_suffix(".ref.wav")
         ffmpeg = tool("ffmpeg")
-        if ffmpeg:  # any sound file or video: the engine reads WAV, FLAC and OGG itself
-            done = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(source), "-vn", "-ac", "1", "-ar", "44100", str(clean)],
-                                  capture_output=True, text=True, timeout=120)
+        if ffmpeg:  # any sound file or video, as 44.1 kHz mono 16-bit WAV (the CUDA engine reads WAV only)
+            done = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(source), "-vn", "-ac", "1", "-ar", "44100",
+                                   "-c:a", "pcm_s16le", str(clean)], capture_output=True, text=True, timeout=120)
             if done.returncode:
                 raise RuntimeError("the reference clip could not be read: " + done.stderr.strip()[-200:])
+        elif backend().name == "cuda" and source.suffix.lower() != ".wav":
+            raise RuntimeError("the CUDA engine reads a WAV reference only, and this machine has no ffmpeg to convert it")
         else:
             shutil.copy(source, clean)
         if not params.get("ref_text"):
@@ -322,28 +795,36 @@ def perform(job: dict) -> bool:
                 raise RuntimeError("no transcript of the reference clip: write what it says")
             params["ref_text"] = heard.strip()
         reference = (clean, params["ref_text"])
-    command = backend().command(text_file, wav, stats, reference, int(params["seed"]),
-                                {k: params[k] for k in SAMPLING})
-    if not take_lock(job):
-        return False
-    try:
-        job["progress"] = {"stage": "Drama 3 voice", "at": 0, "of": 1}
-        job["engine"] = backend().name
-        if not run(job, command, {}):
+    one = backend()
+    job["engine"] = one.name
+    if hasattr(one, "make"):  # the CUDA engine: a persistent server, which holds the GPU lock itself while loaded
+        measured = one.make(job, params["text"], wav, reference, int(params["seed"]), {k: params[k] for k in SAMPLING})
+        if measured is None:
             return False
-    finally:
-        drop_lock(job)
+        stats.write_text(json.dumps(measured, indent=1) + "\n")
+    else:
+        command = one.command(text_file, wav, stats, reference, int(params["seed"]), {k: params[k] for k in SAMPLING})
+        if not take_lock(job):
+            return False
+        try:
+            job["progress"] = {"stage": "Drama 3 voice", "at": 0, "of": 1}
+            if not run(job, command, {}):
+                return False
+        finally:
+            drop_lock(job)
+        try:
+            measured = json.loads(stats.read_text())
+        except (OSError, ValueError):
+            measured = {}
     if not wav.is_file():
         raise RuntimeError("Drama 3 finished without writing its take")
-    try:
-        measured = json.loads(stats.read_text())
-    except (OSError, ValueError):
-        measured = {}
     take = {"id": job["id"], "path": relative(wav), "title": params.get("title") or job.get("title"), "text": params["text"],
-            "seed": params["seed"], **{k: params[k] for k in SAMPLING}, "backend": backend().name, "created": time.time(),
+            "seed": params["seed"], **{k: params[k] for k in SAMPLING}, "backend": one.name, "created": time.time(),
             "duration": measured.get("audio_s"), "frames": measured.get("frames"), "frames_per_s": measured.get("frames_per_s"),
             "rtf": measured.get("rtf"), "total_s": measured.get("total_s"), "peak_memory_gb": measured.get("peak_memory_gb"),
-            "chunks": measured.get("chunks"), "finish": measured.get("finish"),
+            "device_gb": measured.get("device_gb"),
+            "chunks": measured.get("chunks"), "finish": measured.get("finish"), "first_audio_ms": measured.get("first_audio_ms"),
+            "load_s": measured.get("load_s"), "engine_s": measured.get("engine_s"),
             "reference": {"path": params["ref_audio"], "text": params["ref_text"], "consent": True} if params.get("ref_audio") else None,
             "slate": params.get("slate"), "credit": CREDIT}
     if params.get("asr") and qa.ready()["transcript"]:
@@ -425,6 +906,25 @@ def take_audio(take_id: str):
     if not target.is_file():
         raise HTTPException(404, "the take's file is gone (deleted to the trash folder?)")
     return FileResponse(target, media_type="audio/wav", filename=f"drama3-{take_id}.wav")
+
+
+@router.get("/api/voice/takes/{take_id}/live")
+def take_live(take_id: str):
+    """The take that is being made, as a WAV that plays while it is made (the CUDA engine's raw PCM as it comes)."""
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", take_id):
+        raise HTTPException(400, "bad take id")
+    entry, began = LIVE.get(take_id), time.time()
+    # a take that has started (its text is written first) and is not at the engine yet: its clip is being read
+    while entry is None and (HOME / "voice" / f"{take_id}.txt").is_file() and not (HOME / "voice" / f"{take_id}.take.json").is_file() \
+            and time.time() - began < 300:
+        time.sleep(0.2)
+        entry = LIVE.get(take_id)
+    if entry is None:
+        raise HTTPException(404, "no take is being made under that id")
+    from fastapi.responses import StreamingResponse
+
+    return StreamingResponse(live_wav(entry), media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/api/voice/cut")
