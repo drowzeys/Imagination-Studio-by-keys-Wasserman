@@ -300,6 +300,17 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.7.5 (2026-10-15): Voice on the DGX Spark.** The Voice tab now works on a DGX Spark as on the Mac, through
+> TensorFold's native CUDA port of Fish Audio Drama 3 (`drama3-generate`, Zig + CUDA, no Python at run time; nothing is
+> sent to Fish Audio). The engine is a persistent server: the first take loads it (about 18 s, 41.6 GB at the peak),
+> later takes start at once, and it is unloaded, its memory given back, after five idle minutes and at once before any
+> video or picture job of the queue starts, so it never stands beside MiniMax H3. It holds the studio's GPU lock for as
+> long as it is loaded and stands under its own memory guard. A take **plays while it is made** (the first sound
+> about 0.3 s after the take starts on a loaded engine). Long text goes in parts and keeps one voice. Measured on a
+> GB10 through the app: 28 to 31 frames a second (a take made in 0.7 to 0.8 times its length), Whisper 92 to 100 %
+> on a plain line, a cloned voice, two speakers, a Slate cast voice and a 56 s read. See
+> [Voice on a DGX Spark](#voice-on-a-dgx-spark-cuda). **Built with Fish Audio.**
+
 > **2.7.4 (2026-10-15): Voice, with Fish Audio Drama 3.** A new **Voice** tab speaks text with Fish Audio Drama 3 on
 > the Mac itself, through TensorFold's MLX port (nothing is sent to Fish Audio): up to 16 speakers in one take
 > (`<|speaker:0|>` ... `<|speaker:15|>`), `[directions]` for the delivery (`[whispering]`, `[sighs]`, or a description of
@@ -1366,9 +1377,10 @@ on rookiestar28's ComfyUI-MiniMaxH3-Studio, which does far more; no code is shar
 
 ## Voice (Fish Audio Drama 3)
 
-**Built with Fish Audio.** The **Voice** tab turns text into speech with Fish Audio Drama 3, run on this Mac by
-TensorFold's MLX port of it (the 35B Qwen3.5 MoE backbone, its codebook tower and the Fish codec, in MLX). No Fish
-Audio cloud API is called and the pack ships no Drama 3 weights.
+**Built with Fish Audio.** The **Voice** tab turns text into speech with Fish Audio Drama 3, run on this machine by
+TensorFold's ports of it: on a Mac the MLX port (the 35B Qwen3.5 MoE backbone, its codebook tower and the Fish codec,
+in MLX), on a DGX Spark the native CUDA port ([below](#voice-on-a-dgx-spark-cuda)). No Fish Audio cloud API is called
+and the pack ships no Drama 3 weights.
 
 - **Write what is said.** Text without a tag is speaker 0; `<|speaker:0|>` to `<|speaker:15|>` switch voices.
   Directions in brackets steer the delivery: `[whispering]`, `[sighs]`, `[laughs]`, or a description of the voice
@@ -1420,12 +1432,72 @@ hf download fishaudio/drama-3 --local-dir ~/models/drama-3        # Fish Audio C
 ```
 
 The app finds `~/drama3-venv` and `~/models/drama-3-mlx` itself (`DRAMA3_VENV` and `DRAMA3_MODEL` name others) and
-says on the tab what is missing. `DRAMA3_BACKEND=mlx|cuda` picks the engine: `cuda`, the default on a DGX Spark, is
-TensorFold's CUDA port, which is still being built, so there the tab says *not available yet* and its controls stay
-off. The API: `GET /api/voice/state`, `POST /api/voice/takes {text, ref_audio?, ref_text?, consent?, seed?,
+says on the tab what is missing. `DRAMA3_BACKEND=mlx|cuda` picks the engine (`mlx` on a Mac, `cuda` on a DGX Spark by
+default). The API: `GET /api/voice/state`, `POST /api/voice/takes {text, ref_audio?, ref_text?, consent?, seed?,
 temperature?, top_p?, top_k?}` (a job of kind `voice`), `GET /api/voice/takes`, `GET /api/voice/takes/{id}/audio`,
-`POST /api/voice/sheet {sheet, project}` and `POST /api/voice/cut {path, seconds}`. Takes are kept in
-`~/TensorFoldStudio/voice/` (the WAV, its settings and measurements, and the text).
+`GET /api/voice/takes/{id}/live` (CUDA: the take as it is made), `POST /api/voice/sheet {sheet, project}` and
+`POST /api/voice/cut {path, seconds}`. Takes are kept in `~/TensorFoldStudio/voice/` (the WAV, its settings and
+measurements, and the text).
+
+### Voice on a DGX Spark (CUDA)
+
+On a DGX Spark the tab runs **TensorFold's native CUDA port of Drama 3**: one binary, `drama3-generate` (Zig with
+CUDA kernels built for the GB10's sm_121: the backbone, the codebook tower and the Fish codec, no Python or PyTorch at
+run time), with `libtensorfold_drama3.so` beside it.
+
+- **A persistent server.** The first take starts `drama3-generate --serve 1` (one JSON request a line on its stdin,
+  one JSON answer a line on its stderr) and waits for it to load: about 18 s from the checkpoint, 38.6 GB of weights
+  on the device, 41.6 GB at the peak. Later takes go straight to it.
+- **It gives the GPU back.** While loaded it holds `~/studio-gpu.lock.d` (a script outside the app that takes the
+  lock waits for it). It is unloaded, and its memory comes back, after **five minutes without a take**
+  (`DRAMA3_IDLE_S`), and **at once when any other job of this machine's queue starts** (a video, a picture, a long
+  video): Drama 3 and MiniMax H3 never stand side by side. Before it loads, the studio's ComfyUI server is stopped
+  if it holds the memory Drama 3 needs (about 50 GB free is wanted); the next video loads its models again.
+- **Its own memory guard**: available memory is read four times a second and the engine is killed by its PID under
+  8 GB (`DRAMA3_GUARD_GB`); the take fails with the reason and the lock goes back. The engine also ends with the app.
+- **Plays while it is made.** The engine writes the take's samples as it makes them and the tab plays them behind an
+  open WAV header (`/api/voice/takes/{id}/live`): the first sound about 0.3 s after a take starts on a loaded engine
+  (18.5 s on the first take, which loads it), and the take is made faster than it plays.
+- **Long text** goes in parts of about 60 words cut at sentence ends (each part opens on the speaker who was
+  speaking), joined with 0.15 s between them. A one-speaker take without a clip clones its first part's voice for the
+  others (measured on a 56 s read: 271, 272 and 269 Hz in its three thirds); a clip given is used for every part.
+- **A voice to clone** may be any sound file: it is converted to 44.1 kHz mono WAV with ffmpeg first (the engine
+  reads WAV).
+
+| Measured, DGX Spark GB10 (TensorFold `drama3-cuda` 81173e6c), through the app | Audio | Engine time | Through the app, word check included | Whisper |
+|---|---|---|---|---|
+| One speaker, 16 words, first take (loads the engine, 18.3 s) | 8.2 s | 5.9 s (30.9 frames/s) | 37.7 s | 16 of 16, 100 % |
+| Cloned voice from an MP3 clip (3.9 s, transcript left to Whisper), with `[sighs]` | 6.1 s | 5.0 s (28.0 frames/s, first sound 0.47 s) | 29.7 s | 16 of 16, 100 % |
+| Two speakers, three lines, `[whispering]` and `[sighs]` | 11.6 s | 8.4 s (30.2 frames/s) | 21.1 s | 20 of 20, 100 % |
+| Slate Cast voice (a sheet's description as direction) | 4.1 s | 3.3 s (28.3 frames/s) | 14.2 s | 11 of 12, 92 % ("harbor") |
+| A 120-word read, three parts | 55.7 s | 40.8 s (30.7 frames/s) | 56.9 s | 118 of 120, 98 % |
+
+The cloned take came out at about 130 Hz against the clip's 125 Hz. Engine time is the requests' own (prefill,
+frames, codec); the app's time adds Whisper on the CPU (and, for a clip without its words, Whisper on the clip first).
+
+**Spark requirements.** A DGX Spark (GB10, 128 GB), the CUDA toolkit 12.9 or newer and zig 0.17 to build, 39 GB
+of disk for Fish's checkpoint and 1.6 GB for the converted codec, and about 50 GB of free memory when a take starts
+(nothing else of the studio runs beside it). The port is on TensorFold's `drama3-cuda` branch, which is not yet
+published, so there is no installer step: the setup is by hand.
+
+```bash
+git clone -b drama3-cuda <TensorFold with the drama3-cuda branch> ~/tf-drama3
+hf download fishaudio/drama-3 --local-dir ~/models/drama-3          # Fish Audio Community License: read it first
+# build as the branch's tools/drama3/build_local.sh does (it has its author's paths): nvcc makes drama3.fatbin,
+# drama3_fp8.fatbin and drama3_codec.fatbin for sm_121 beside the CUDA engine's other fatbins, then
+#   zig build -Dfatbins=FATBIN_DIR -Dsm=121 -Doptimize=ReleaseFast --prefix OUT drama3-generate drama3-lib
+mkdir -p ~/.local/opt/tensorfold-studio/drama3/{bin,lib}
+cp OUT/bin/drama3-generate ~/.local/opt/tensorfold-studio/drama3/bin/
+cp OUT/lib/libtensorfold_drama3.so ~/.local/opt/tensorfold-studio/drama3/lib/
+# once, offline: Fish's codec.pth into the native codec's layout (PyTorch and Fish's reference code, ORACLE_DIR)
+python3 ~/tf-drama3/tools/drama3/codec_convert.py ~/models/drama-3 ~/.local/opt/tensorfold-studio/drama3/codec-v1.safetensors
+~/.local/opt/tensorfold-studio/drama3/bin/drama3-generate --model ~/models/drama-3 \
+  --codec ~/.local/opt/tensorfold-studio/drama3/codec-v1.safetensors --text "Hello there." --wav hello.wav   # check
+```
+
+The app looks in `$PREFIX/drama3` (`~/.local/opt/tensorfold-studio/drama3`) and `~/models/drama-3`;
+`DRAMA3_CUDA_BIN`, `DRAMA3_CUDA_LIB`, `DRAMA3_CUDA_MODEL` and `DRAMA3_CUDA_CODEC` name others, and the tab says what is
+missing. The worker Sparks of the Sparks setting do not make voice takes: a take runs on the Spark whose app you use.
 
 **Licence.** Drama 3's weights and codec are Fish Audio Materials under the **Fish Audio Community License v1.0**:
 research, non-commercial and small-company commercial use; a hosted service that lets others generate speech or

@@ -833,7 +833,11 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
     videos = found.get("videos") or []
     lora = lora or bool(found and params.get("ref_turbo"))
     engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
-    return memory_guard.check(width, height, frames, lora=lora, references=bool(found),
+    # a Drama 3 server kept loaded after a voice take is unloaded before this job starts (voice.release): its memory
+    # counts as this job's, like the ComfyUI server's own
+    drama3 = voice.room_mb()
+    room = max(memory_guard.room_mb() or 0, drama3) if drama3 else None
+    return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room,
                               base=env.get("SPARK_BASE") == "h3", engine=engine,
                               pictures=len(found.get("pictures") or []),
                               reference_frames=sum(min(frames, int(round((media_seconds(path)[0] or frames / FPS) * FPS))) for path in videos))
@@ -1234,6 +1238,10 @@ def perform(job: dict, worker: dict | None = None) -> None:
     params = job["params"]
     asked = dict(params)
     try:
+        # a Drama 3 server kept loaded after a voice take (voice.py, the CUDA engine) never stands beside a render here
+        if job["kind"] not in ("voice", "export") and worker is None and not job.get("remote"):
+            if voice.release(f"a {job['kind']} job needs the GPU"):
+                job["log"] += "[tensorfold] Drama 3 was unloaded to give this job its memory\n"
         if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
             source = inside(params["first_frame_from"])
             if not source.is_file():
@@ -1339,7 +1347,7 @@ def state() -> dict:
             "sparks": {"supported": SPARK, "limit": sparks.LIMIT},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
-            # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py); on a DGX Spark not available yet
+            # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py): MLX on a Mac, CUDA on a DGX Spark
             "voice": voice.state(),
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
 
@@ -1808,7 +1816,7 @@ def about_this_spark() -> dict:
 
     listing = next(route.endpoint for route in lora_router.routes if route.path == "/api/loras" and "GET" in route.methods)
     info = memory_guard.meminfo()
-    memory = {"available_mb": info.get("MemAvailable"), "total_mb": info.get("MemTotal"), "room_mb": memory_guard.room_mb(),
+    memory = {"available_mb": info.get("MemAvailable"), "total_mb": info.get("MemTotal"), "room_mb": max(memory_guard.room_mb() or 0, voice.room_mb() or 0) or None,
               "floor_mb": memory_guard.floor_mb(info.get("MemTotal"))} if SPARK and info else {}
     with lock:
         active = sum(1 for job in jobs.values() if job["status"] in ("queued", "running"))

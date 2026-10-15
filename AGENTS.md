@@ -174,15 +174,20 @@ Rules:
   measured run: change it only with a new one. One clip split across Sparks (the engine's `h3-cuda-multispark`
   branch) is measured and is not in the app: do not wire part of it in.
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
-  machine only, as TensorFold's command line (`$DRAMA3_VENV/bin/python -I -m tensorfold.drama3`) in its own venv, never
-  imported into the app's. Never call Fish Audio's cloud API. A take is a `voice` job in the one-at-a-time queue and
-  holds `~/studio-gpu.lock.d` while the model runs: Drama 3 (about 50 GB) and MiniMax H3 never run together. A take
-  with a reference clip needs `consent: true`; keep the consent box and the "Built with Fish Audio" line on the tab.
-  `DRAMA3_BACKEND=mlx|cuda`: `cuda` (the DGX Spark default) reports "not available yet" until TensorFold's CUDA port
-  lands; plug it in through the `Cuda` class (same arguments, same stats file), nothing else. A take sent as Ref2VA
-  reference audio keeps MiniMax's 2 to 15 s per clip and 15 s per kind (`/api/voice/cut`). The weights are Fish Audio
-  Materials (Fish Audio Community License v1.0): do not redistribute them, and say that a hosted TTS or cloning
-  service needs Fish's own licence.
+  machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
+  cloud API. `DRAMA3_BACKEND=mlx|cuda`. `mlx` (the Mac default) is the command line in its own venv
+  (`$DRAMA3_VENV/bin/python -I -m tensorfold.drama3`), one process a take, holding `~/studio-gpu.lock.d` while it runs.
+  `cuda` (the DGX Spark default) is TensorFold's native `drama3-generate --serve 1` (`$PREFIX/drama3/bin`, branch
+  `drama3-cuda`; `DRAMA3_CUDA_BIN`, `DRAMA3_CUDA_MODEL`, `DRAMA3_CUDA_CODEC`): a persistent server loaded on the first
+  take that holds `~/studio-gpu.lock.d` for as long as it is loaded, is unloaded after `DRAMA3_IDLE_S` (300) idle seconds
+  and **before any other local job of the queue** (`voice.release`, called at the top of `server.perform`), stops
+  the studio's ComfyUI first when that holds the memory it needs, and stands under a MemAvailable kill-guard
+  (`DRAMA3_GUARD_GB`, 8). Keep all four: Drama 3 (42 GB on a Spark, about 50 on a Mac) and MiniMax H3 never run together.
+  Its answers are the JSON lines on its stderr; long text goes in parts (`pieces`, 60 words) and a one-speaker take
+  clones its first part's voice for the rest. A take with a reference clip needs `consent: true`; keep the consent box
+  and the "Built with Fish Audio" line on the tab. A take sent as Ref2VA reference audio keeps MiniMax's 2 to 15 s per
+  clip and 15 s per kind (`/api/voice/cut`). The weights are Fish Audio Materials (Fish Audio Community License v1.0):
+  do not redistribute them, and say that a hosted TTS or cloning service needs Fish's own licence.
 - mflux and minimax-h3-mlx are pinned by commit and used at run time. Do not unpin.
 
 **Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), MiniMax (H3), Ash Hart (TensorFold), antirez (h3.c),
