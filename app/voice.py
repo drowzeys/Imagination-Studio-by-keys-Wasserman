@@ -856,7 +856,8 @@ def perform(job: dict) -> bool:
                 break
             # played as it was made, a part came out with words missing and could not be drawn again (sent audio is not
             # taken back): the take is made once more without playing, where the engine redraws such a part itself
-            # (measured on the M5 Ultra: two-speaker takes that played short at 35 and 80 % came back whole)
+            # (measured on the M5 Ultra, the two-speaker example: seed 1 played at 35 % and came back whole after one
+            # redraw; seed 2 played at 80 % and stayed at 80 % after three draws, the last line missing)
             retaken = {"played": checked_by_engine(measured), "seconds": measured.get("audio_s")}
             job["log"] += "[tensorfold] a part was short while playing: the take is made again without playing, so it can be redrawn\n"
             live = False

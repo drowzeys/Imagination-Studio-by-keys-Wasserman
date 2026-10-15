@@ -300,6 +300,19 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.7.6 (2026-10-15): the Mac's Voice tab catches up with the Spark's.** On a Mac a take now **plays while it is
+> made** (the engine's `--stream`, through the same `/api/voice/takes/{id}/live` as on a Spark) and the engine
+> **checks its own words** as it goes (TensorFold `drama3-mlx` 4a8a982f: Whisper on MLX after each part, a runaway tail
+> cut, a part with missing words drawn again, and a stop rule on the model's own end signal). The check's word count
+> is the take's score, so the take is no longer transcribed a second time, and the tab shows it part by part, with
+> the time to the first sound. A part cannot be drawn again once it has been heard: a take that comes out short while
+> playing is made once more without playing (*Play while it is made* off does that from the start). Measured on the
+> M5 Ultra through the app: 8 s of speech in 8.7 s from the click, the first sound 5.3 s after it (start-up and the
+> 3.7 s load, then 0.22 s), a 46 s read in 21.9 s. **Both engines are now public** on
+> [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) (`drama3-mlx` for the Mac, `drama3-cuda` for the
+> Spark), and `oneshot-setup.sh --voice` installs the Mac one (`scripts/setup-voice.sh`); on a Spark it checks the
+> hand-built engine and prints the steps. **Built with Fish Audio.**
+
 > **2.7.5 (2026-10-15): Voice on the DGX Spark.** The Voice tab now works on a DGX Spark as on the Mac, through
 > TensorFold's native CUDA port of Fish Audio Drama 3 (`drama3-generate`, Zig + CUDA, no Python at run time; nothing is
 > sent to Fish Audio). The engine is a persistent server: the first take loads it (about 18 s, 41.6 GB at the peak),
@@ -1393,9 +1406,18 @@ and the pack ships no Drama 3 weights.
   the takes came out at 130 and 133 Hz with every word right.
 - **Settings.** Seed, and Fish's sampling defaults: temperature 1.0, top-p 0.9, top-k 30.
 - **Each take** is a job in the queue, so it never runs beside a video render, and it holds the studio's GPU lock
-  folder (`~/studio-gpu.lock.d`) while the model runs, waiting if a script outside the app holds it. Whisper (the QA
-  gate's own, `app/qa.py`) then transcribes the take and gives a word match, with what it heard on hover; numbers
-  written as figures by Whisper ("30" for "thirty") count as misses.
+  folder (`~/studio-gpu.lock.d`) while the model runs, waiting if a script outside the app holds it.
+- **The word check.** On a Mac the engine checks itself (TensorFold `drama3-mlx` 4a8a982f or later): every part it
+  speaks is heard by Whisper large-v3-turbo on MLX and aligned to the text; words after the end, or a long tail of
+  sound, are cut; a part with words missing is drawn again with a new seed (twice at most, the best kept); and a
+  take that passed a likely end and went on is stopped on the model's own end signal. The tab shows the check part by
+  part (ok, trimmed, redrawn, words not heard) and its count as the take's score, with what was heard on hover. On a
+  Spark, and with an older Mac engine, Whisper (the QA gate's own, `app/qa.py`, on the CPU) transcribes the finished
+  take instead; numbers written as figures by Whisper ("30" for "thirty") count as misses there.
+- **Plays while it is made**, on both machines: the tab plays the take from `/api/voice/takes/{id}/live` as the
+  engine writes it. On a Mac a heard part cannot be drawn again, so a take whose check finds a part short while it
+  plays is made once more without playing, and the take says so; untick *Play while it is made* to skip the played
+  take (`"live": false` in the API).
 - **A take as a MiniMax H3 voice reference.** *Use as Ref2VA voice reference* opens the create wizard on reference
   to video with the take as the next `<Audio N>` (2 to 15 s a clip, 15 s in all: a longer take is cut to its first 15
   seconds, asked first). Add a picture or a video of who speaks, and describe the same voice in the line's Voice box:
@@ -1407,7 +1429,20 @@ and the pack ships no Drama 3 weights.
   in the prompt. A take over 15 s is cut on the sheet first; what does not fit MiniMax's limits is said in the
   preflight and left out.
 
-| Measured, Mac Studio M5 Ultra (TensorFold `drama3-mlx` f623fb1a, 8-bit experts) | Audio | Engine time | Through the app, word check included | Whisper |
+| Measured, Mac Studio M5 Ultra (TensorFold `drama3-mlx` 4a8a982f, 8-bit experts, played while made), 2.7.6 | Audio | Engine time | Through the app, check included | Words heard |
+|---|---|---|---|---|
+| One speaker, 16 words | 8.0 s | 2.7 s (71.9 frames/s, first sound 0.22 s; 5.3 s after the click) | 8.7 s | 16 of 16 |
+| Cloned voice from an MP3 clip (3.9 s, transcript left to Whisper on the CPU first) | 6.6 s | 2.4 s | 18.4 s | 16 of 16 |
+| Two speakers, three lines, seed 1: short while playing (7 of 20), made again and redrawn once | 12.5 s | 11.8 s the second run | 30.5 s | 20 of 20 |
+| Two speakers, seed 2: short while playing, the last line still missing after three draws | 22.8 s | | 38.8 s | 16 of 20 |
+| Slate Cast voice | 3.2 s | 1.3 s | 7.2 s | 12 of 12 |
+| A 120-word read, three parts (two tails trimmed) | 46.4 s | 15.9 s (68.1 frames/s) | 21.9 s | 120 of 120 |
+
+Peak memory 48.7 to 49.9 GB played while made, 55.7 GB with a redraw. Frames are drawn at about 70 a second while
+playing (the codec decodes in windows) and 83 when not. The first sound comes 5.3 s after the click because each
+take starts the engine's process and loads the model (3.7 s); the engine's own clock says 0.22 s.
+
+| Measured, Mac Studio M5 Ultra (TensorFold `drama3-mlx` f623fb1a, 8-bit experts), 2.7.4 | Audio | Engine time | Through the app, word check included | Whisper |
 |---|---|---|---|---|
 | One speaker, 18 words | 8.3 s | 3.3 s (63.3 frames/s) | 16.7 s | 17 of 18 ("Phish") |
 | Cloned voice, with `[sighs]` and `[laughs]` | 7.0 s | 2.8 s | 16.1 s | 12 of 12 |
@@ -1421,11 +1456,13 @@ word check loads Whisper on the CPU. Peak memory 48 to 51 GB.
 **Mac requirements.** An Apple-silicon Mac with 64 GB of memory or more (the run peaks at about 52 GB; nothing else
 of the studio runs beside it), about 40 GB of disk for the converted weights (and 39 GB for Fish's checkpoint while
 converting), and TensorFold's Drama 3 port in an environment of its own. The port is on TensorFold's `drama3-mlx`
-branch and is not yet published, so there is no installer step for it: the setup is by hand.
+branch of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold). `bash oneshot-setup.sh --voice` (or
+`bash scripts/setup-voice.sh` alone, `--verify` to check) does all of it: the clone at 4a8a982f in
+`~/tensorfold-drama3-mlx`, its venv, Fish's checkpoint, the conversion and a test line. By hand:
 
 ```bash
-git clone -b drama3-mlx <TensorFold with the drama3-mlx branch> ~/TensorFold
-python3.11 -m venv ~/drama3-venv && ~/drama3-venv/bin/pip install -e ~/TensorFold mlx mlx-lm soundfile torch
+git clone -b drama3-mlx https://github.com/drowzeys/TensorFold.git ~/tensorfold-drama3-mlx
+python3.11 -m venv ~/drama3-venv && ~/drama3-venv/bin/pip install -e ~/tensorfold-drama3-mlx mlx mlx-lm mlx-whisper soundfile torch
 hf download fishaudio/drama-3 --local-dir ~/models/drama-3        # Fish Audio Community License: read it first
 ~/drama3-venv/bin/python -m tensorfold.families.drama3.convert ~/models/drama-3 ~/models/drama-3-mlx   # once, about a minute
 ~/drama3-venv/bin/python -m tensorfold.drama3 --text "Hello there." --out hello.wav                  # check
@@ -1435,7 +1472,7 @@ The app finds `~/drama3-venv` and `~/models/drama-3-mlx` itself (`DRAMA3_VENV` a
 says on the tab what is missing. `DRAMA3_BACKEND=mlx|cuda` picks the engine (`mlx` on a Mac, `cuda` on a DGX Spark by
 default). The API: `GET /api/voice/state`, `POST /api/voice/takes {text, ref_audio?, ref_text?, consent?, seed?,
 temperature?, top_p?, top_k?}` (a job of kind `voice`), `GET /api/voice/takes`, `GET /api/voice/takes/{id}/audio`,
-`GET /api/voice/takes/{id}/live` (CUDA: the take as it is made), `POST /api/voice/sheet {sheet, project}` and
+`GET /api/voice/takes/{id}/live` (the take as it is made; `"live": false` in a take's settings: not played, Mac only), `POST /api/voice/sheet {sheet, project}` and
 `POST /api/voice/cut {path, seconds}`. Takes are kept in `~/TensorFoldStudio/voice/` (the WAV, its settings and
 measurements, and the text).
 
@@ -1477,11 +1514,14 @@ frames, codec); the app's time adds Whisper on the CPU (and, for a clip without 
 
 **Spark requirements.** A DGX Spark (GB10, 128 GB), the CUDA toolkit 12.9 or newer and zig 0.17 to build, 39 GB
 of disk for Fish's checkpoint and 1.6 GB for the converted codec, and about 50 GB of free memory when a take starts
-(nothing else of the studio runs beside it). The port is on TensorFold's `drama3-cuda` branch, which is not yet
-published, so there is no installer step: the setup is by hand.
+(nothing else of the studio runs beside it). The port is on the `drama3-cuda` branch of
+[drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) (81173e6c). The setup is by hand: the branch's build
+script carries its author's paths and its zig build embeds the kernel fatbins of TensorFold's whole CUDA engine
+(prebuilt, or every one built by nvcc), so there is no installer step yet; `bash oneshot-setup-spark.sh --voice` (or
+`scripts/setup-voice.sh`) checks what the app looks for and prints these steps for what is missing.
 
 ```bash
-git clone -b drama3-cuda <TensorFold with the drama3-cuda branch> ~/tf-drama3
+git clone -b drama3-cuda https://github.com/drowzeys/TensorFold.git ~/tf-drama3 && git -C ~/tf-drama3 checkout 81173e6c
 hf download fishaudio/drama-3 --local-dir ~/models/drama-3          # Fish Audio Community License: read it first
 # build as the branch's tools/drama3/build_local.sh does (it has its author's paths): nvcc makes drama3.fatbin,
 # drama3_fp8.fatbin and drama3_codec.fatbin for sm_121 beside the CUDA engine's other fatbins, then
