@@ -185,6 +185,7 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
 <script src="actions.js"></script>
 <script src="edit.js"></script>
 <script src="sparks.js"></script>
+<script src="voice.js"></script>
 <script>
 "use strict";
 if (location.search.includes("shot")) document.write('<img src="/api/wait?ms=4000" style="display:none">');
@@ -232,7 +233,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Create", project = null;
-const TABS = ["Create", "Production", "Motion Previs", "Editor", "Library", "Sparks", "Tutorial"];
+const TABS = ["Create", "Production", "Motion Previs", "Voice", "Editor", "Library", "Sparks", "Tutorial"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
   dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
@@ -243,7 +244,8 @@ const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"
 // rebuilt the box under the cursor, so each digit needed a click first
 const typed = (node, after) => { node.addEventListener("change", () => after && after()); return node; };
 const select = (obj, key, options, after) => { const n = el("select", {}, Object.entries(options).map(([v, t]) => el("option", { value: v }, t))); return bind(obj, key, n, after); };
-const media = (path, attrs = {}) => /\.(mp4|mov)$/i.test(path) ? el("video", { src: file(path), controls: true, preload: "metadata", ...attrs }) : el("img", { src: file(path), loading: "lazy", ...attrs });
+const media = (path, attrs = {}) => /\.(mp4|mov)$/i.test(path) ? el("video", { src: file(path), controls: true, preload: "metadata", ...attrs })
+  : /\.(wav|mp3|m4a|aac|flac|ogg)$/i.test(path) ? el("audio", { src: file(path), controls: true, preload: "metadata", style: "width:100%", ...attrs }) : el("img", { src: file(path), loading: "lazy", ...attrs });
 
 const IMAGE_SIZES = { "1344x768": "1344x768 (16:9)", "1664x928": "1664x928 (16:9, larger)", "1024x1024": "1024x1024 (square)", "768x1344": "768x1344 (9:16)" };
 Object.assign(C, { goes: "video", start: "text", engine: "fasth3", passes: "8", h3quality: "standard", res: "480p", up: false, h3passes: "preset", refs: [], subjects: [], refPasses: "20", refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null });
@@ -1202,7 +1204,7 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig) { const had = lastSig; lastSig = sig; if (had && !document.activeElement.matches("input,textarea,select")) render(); } }
 
 function render() { $("#tabs").replaceChildren(...TABS.map(t => el("button", { class: t === tab ? "on" : "", onclick: () => { tab = t; history.replaceState(null, "", "#" + t); render(); } }, t)));
-  $("#view").replaceChildren({ Create: viewCreate, Production: viewProduction, "Motion Previs": viewMotion, Editor: viewEditor, Library: viewLibrary, Sparks: viewSparks, Tutorial: viewTutorial }[tab]()); coach();
+  $("#view").replaceChildren({ Create: viewCreate, Production: viewProduction, "Motion Previs": viewMotion, Voice: viewVoice, Editor: viewEditor, Library: viewLibrary, Sparks: viewSparks, Tutorial: viewTutorial }[tab]()); coach();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
   if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true); }
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
