@@ -82,8 +82,15 @@ class Worker:
                         if outer.fails:
                             job.update(status="failed", error="ComfyUI stopped: the memory floor")
                             return
-                        outer.files[f"renders/{job['id']}.mp4"] = f"made on {outer.name}".encode()
-                        job.update(status="done", outputs=[f"renders/{job['id']}.mp4"])
+                        made = f"made on {outer.name}".encode()
+                        if job["kind"] == "scout":  # its pictures, named by their seeds, and the sheet
+                            seed, count = int(job["params"].get("seed", 0)), int(job["params"].get("count", 4))
+                            outputs = [f"scouts/{job['id']}/scout_s{seed + n}.png" for n in range(count)] + [f"scouts/{job['id']}/sheet.jpg"]
+                        else:  # a clip, and for a clip from a new picture the picture beside it
+                            outputs = [f"renders/{job['id']}.mp4"] + ([f"renders/{job['id']}.png"] if job["kind"] == "studio" else [])
+                        for path in outputs:
+                            outer.files[path] = made
+                        job.update(status="done", outputs=outputs)
 
                     threading.Thread(target=finish, daemon=True).start()
                     return self.answer(job)
@@ -151,7 +158,15 @@ def local_render(job, command, env, label=""):
         time.sleep(TAKES)
         if job["status"] == "cancelled":
             return False
+        if job["kind"] == "scout":  # scout.sh prompt count folder: the pictures and the sheet
+            folder, seed = Path(command[-1]), int(env.get("SEED", 0))
+            folder.mkdir(parents=True, exist_ok=True)
+            for path in [folder / f"scout_s{seed + n}.png" for n in range(int(command[-2]))] + [folder / "sheet.jpg"]:
+                path.write_bytes(b"made here")
+            return True
         Path(command[-1]).write_bytes(b"made here")
+        if job["kind"] == "studio":
+            Path(command[-1]).with_suffix(".png").write_bytes(b"made here")
         return True
     finally:
         local_render.now -= 1
@@ -237,10 +252,24 @@ def test_what_a_worker_can_render_decides_what_it_is_given():
     assert "ffmpeg" in sparks.capable("video", {"references": ["uploads/a.png"], "reference_videos": ["uploads/m.mp4"]}, {**plain, "ref2va": True})
     assert "text encoder" in sparks.capable("video", {"text_encoder": "other.safetensors"}, plain)
     assert sparks.capable("video", {"text_encoder": "other.safetensors"}, {**plain, "text_encoders": ["other.safetensors"]}) == ""
-    assert "FastH3" in sparks.capable("video", {}, {}) and "only single clips" in sparks.capable("scout", {}, plain)
+    assert "FastH3" in sparks.capable("video", {}, {}) and "only single clips and pictures" in sparks.capable("edit", {}, plain)
+    # pictures need the image model there; a clip from a new picture needs it and FastH3
+    assert "image model" in sparks.capable("scout", {}, plain) and sparks.capable("scout", {}, {"image": True}) == ""
+    assert "image model" in sparks.capable("studio", {}, plain) and "FastH3" in sparks.capable("studio", {}, {"image": True})
+    assert sparks.capable("studio", {}, {**plain, "image": True}) == ""
     # what stays on this Spark whatever the number, and why
-    assert "chain" in sparks.here_only("long", {}) and "picture model" in sparks.here_only("studio", {}) and sparks.here_only("video", {}) == ""
-    assert "this Spark" in sparks.here_only("edit", {})
+    assert "chain" in sparks.here_only("long", {}) and sparks.here_only("studio", {}) == "" and sparks.here_only("scout", {}) == ""
+    assert sparks.here_only("video", {}) == "" and "this Spark" in sparks.here_only("edit", {})
+    # what a worker made, matched to where it goes here
+    here = [Path("scouts/j/scout_s5.png"), Path("scouts/j/scout_s6.png"), Path("scouts/j/sheet.jpg")]
+    assert sparks.pairs(["scouts/t/scout_s5.png", "scouts/t/scout_s6.png", "scouts/t/sheet.jpg"], here)[2] == ("scouts/t/sheet.jpg", here[2])
+    assert sparks.pairs(["scouts/t/scout_s5.png", "scouts/t/sheet.jpg"], here) == [("scouts/t/scout_s5.png", here[0]), ("scouts/t/sheet.jpg", here[2])]
+    for theirs in ([], ["scouts/t/scout_s6.png"]):
+        try:
+            sparks.pairs(theirs, here)
+            raise AssertionError(theirs)
+        except LookupError:
+            pass
 
 
 def test_the_time_at_a_number_follows_the_rounds_the_clips_go_in():
@@ -554,6 +583,31 @@ def test_a_mac_worker_takes_the_clips_it_can_render():
     before = len(mac.jobs)
     done = finished([queue(3, seed=50 + n)["id"] for n in range(4)])
     assert len(mac.jobs) == before and "mac-studio" not in {job["spark"] for job in done}
+
+
+def test_pictures_and_a_clip_from_a_new_picture_go_to_a_worker_with_the_image_model():
+    spark, mac = Worker("spark-a"), Worker("mac-studio", platform="mac", engine="MLX engine", guard=False, memory={}, image=True)
+    fresh(spark, mac)
+    body = lambda seed: {"kind": "scout", "sparks": 3, "title": "scout", "params": {"prompt": "a lot at dusk", "count": 2, "preset": "small", "seed": seed}}
+    ids = [client.post("/api/jobs", json=body(10 * n)).json()["id"] for n in range(4)]
+    done = finished(ids)
+    assert all(job["status"] == "done" for job in done), [(job["status"], job["error"]) for job in done]
+    assert {job["spark"] for job in done} <= {hub.name, "mac-studio"} and "mac-studio" in {job["spark"] for job in done}
+    assert not any(job["kind"] == "scout" for job in spark.jobs.values())  # no image model there
+    there = next(job for job in done if job["spark"] == "mac-studio")
+    seed = there["params"]["seed"]
+    assert there["outputs"] == [f"scouts/{there['id']}/scout_s{seed}.png", f"scouts/{there['id']}/scout_s{seed + 1}.png", f"scouts/{there['id']}/sheet.jpg"]
+    assert all((server.HOME / path).read_bytes() == b"made on mac-studio" for path in there["outputs"])
+    # a clip from a new picture: the clip and its picture come back to their paths here
+    studio = {"kind": "studio", "sparks": 3, "title": "studio", "params": {"prompt": "a walk", "image_prompt": "a lot at dusk", "preset": PRESET,
+                                                                           "quality": QUALITY, "frames": 22, "shot_check": False}}
+    done = finished([client.post("/api/jobs", json={**studio, "params": {**studio["params"], "seed": n}}).json()["id"] for n in range(4)])
+    assert all(job["status"] == "done" for job in done), [(job["status"], job["error"]) for job in done]
+    there = next(job for job in done if job["spark"] == "mac-studio")
+    assert there["outputs"] == [f"renders/{there['id']}.mp4", f"renders/{there['id']}.png"]
+    assert all((server.HOME / path).read_bytes() == b"made on mac-studio" for path in there["outputs"])
+    asked = next(job for job in mac.jobs.values() if job["kind"] == "studio")["params"]
+    assert asked["image_prompt"] == "a lot at dusk" and asked["shot_check"] is False and "output" not in asked
 
 
 def test_the_commands_on_a_worker_run_in_bash_on_linux_and_macos():

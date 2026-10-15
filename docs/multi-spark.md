@@ -41,12 +41,16 @@ A Mac with the Studio installed (`bash oneshot-setup.sh`, FastH3 included) can s
 add it the same way, by its ssh address (`user@mac-studio`), with a key login from this Spark to that user. The head
 stays a Spark; the Mac takes single clips from the same queue.
 
-- **What it is given:** FastH3 clips, from text or from a first and last frame, at the sizes and passes a Spark
-  offers, with a LoRA when that LoRA is installed on the Mac. It renders them on its own engine (the native Zig engine
+- **What it is given:** what any worker is given when it has what the job needs: FastH3 clips, from text or from a
+  first and last frame, at the sizes and passes a Spark offers, with a LoRA when that LoRA is installed on the Mac;
+  pictures (a scout) and clips from a new picture, on its image model. It renders them on its own engine (the native Zig engine
   on an M5, MLX elsewhere, with the 8-bit weights on a chip without tensor units), so a clip takes the Mac's time,
-  not a Spark's, and the same seed does not give the same frames as on a Spark.
+  not a Spark's, and the same seed does not give the same frames as on a Spark. Measured on an M3 Ultra (MLX, 8-bit
+  weights, no tensor units): a 5 s 864x480 clip at 8 passes took 643 s (70.7 s a pass), against 73 s on a Spark,
+  about 9 times. With N clips and a Mac in the team the Mac's one clip is the last to finish whenever N is under
+  about twice that ratio: untick **use** for such a Mac and tick it for long batches.
 - **What it is not given:** what it has not installed (Ref2VA, a LoRA), and a text encoder chosen by its file name
-  (a Spark names a file in ComfyUI's folder, a Mac takes a path). Long videos, pictures and Library actions stay on
+  (a Spark names a file in ComfyUI's folder, a Mac takes a path). Long videos, edits and Library actions stay on
   this Spark, as for any worker. The plan under the chooser says, Mac by Mac, why one is left out.
 - **Memory:** a Mac has no memory guard to ask (its memory is not shared with a CUDA driver); it is not held to one.
 - **Its row** says *Mac · MLX engine* (or *native Zig engine*) beside its name. With a Mac in the team the time
@@ -90,7 +94,8 @@ A job queued without `sparks` takes the number set on the Sparks tab. `GET /api/
 | A segment or shot that opens on the last frame of the one before | It waits for that one, then renders on any free Spark. A board that is one chain renders one clip at a time. |
 | A long video (over 15 s) | One Spark, this one: it is a chain, each piece opens on the last frame of the one before. |
 | A clip with a LoRA, or from references (Ref2VA) | Only on Sparks that have that LoRA, or Ref2VA, installed, and only when that Spark's memory guard accepts the clip. With none: this Spark. |
-| Pictures, edits, Library actions (Turnaround, Upscale, Remove a person), a timeline export, a clip that starts from a new picture | This Spark. |
+| A set of pictures (a scout), a clip that starts from a new picture | Like a clip: one per Spark, on this Spark and the workers that have the image model (and FastH3, for the clip). The pictures and the clip come back to the paths they would have here. |
+| Edits, Library actions (Turnaround, Upscale, Remove a person), a timeline export | This Spark. |
 
 A clip rendered on a worker comes back into this Spark's studio folder at the path it would have had here (the
 Library, a project's segment, a Slate take), and the QA gate, the shot check and the silenced sound track run here,
@@ -152,7 +157,8 @@ measured run lost at four. It is an estimate. Six to eight Sparks are not measur
   a rank, and so five on one clip, was never run. Until then one clip renders on one Spark and the page says so.
 - **A long video's pieces side by side.** The pieces are a chain. Rendering them at once needs keyframes between
   the pieces, which is another way of making a long video and is not built.
-- **Pictures and Library actions on a worker.** Only single clips are handed over.
+- **Edits and Library actions on a worker.** Clips and pictures are handed over; an edit or an action reads pictures by
+  paths of this studio folder that are not sent.
 - **The queue across a restart.** Jobs are kept in memory: if this app stops while a worker renders, the worker
   finishes its clip in its own folder and this app, started again, does not fetch it.
 - **Starting a worker's install.** The app sends code, not models or the environment.

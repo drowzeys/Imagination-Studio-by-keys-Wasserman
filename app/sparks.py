@@ -15,7 +15,8 @@ What N means:
 - one clip: it renders on one Spark. Splitting one clip across Sparks is measured (docs/multi-spark.md) and is not
   in the app;
 - a long video is a chain (each piece opens on the last frame of the one before): one Spark, this one;
-- pictures, edits, Library actions and exports: this Spark.
+- a set of pictures (a scout) and a clip from a new picture (studio) go to a worker that has the image model, like a clip;
+- edits, Library actions and exports: this Spark.
 
 A worker that stops answering while it renders is marked down and its clip goes back to the queue for another
 machine; a worker is never waited on for more than LOST seconds. One job runs on a Spark at a time.
@@ -26,8 +27,8 @@ Kept in the studio folder, under sparks/:
   tunnels.json   the tunnels this app has open (closed by the next start if this one was killed)
 
 A worker may also be a Mac (Apple silicon, its Studio installed with oneshot-setup.sh). It says so on /api/spark/self
-("platform": "mac", "engine": the MLX or native engine) and is handed the same single clips, FastH3 from text or a
-first and last frame, when it has what the clip needs; what only a Spark's install names the same way (a text encoder
+("platform": "mac", "engine": the MLX or native engine) and is handed the same jobs as a Spark worker (FastH3 clips
+from text or a first and last frame, pictures, a clip from a new picture) when it has what the job needs; what only a Spark's install names the same way (a text encoder
 chosen by its file) stays on the Sparks. A Mac has no memory guard to ask: its memory is not shared with a CUDA
 driver. The commands run on a worker over ssh are written for bash on Linux and on macOS (no setsid, no /proc there).
 """
@@ -63,7 +64,7 @@ LOST = float(os.environ.get("STUDIO_SPARK_LOST", "60"))    # a worker silent thi
 CALL = float(os.environ.get("STUDIO_SPARK_CALL", "10"))    # the longest one request to a worker may take
 MOVES = 2        # a clip is taken back from a worker at most this often; after that it renders on this Spark
 DISK_GB = 2      # a worker with less free disk than this is not given a clip
-KINDS = ("video",)  # what is handed to a worker: single clips
+KINDS = ("video", "scout", "studio")  # what is handed to a worker: single clips, a set of pictures, a clip from a new picture
 PREFIX = "$HOME/.local/opt/tensorfold-studio"
 THEIR_HOME = "$HOME/TensorFoldStudio"  # a worker's studio folder, and where its app's pid and log are kept
 ADDRESS = re.compile(r"(?:[a-z_][a-z0-9_-]{0,31}@)?[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
@@ -246,7 +247,11 @@ def capable(kind: str, params: dict, info: dict | None) -> str:
 
     info = info or {}
     if kind not in KINDS:
-        return "only single clips are handed to another Spark"
+        return "only single clips and pictures are handed to another Spark"
+    if kind in ("scout", "studio") and not info.get("image"):
+        return "the image model (Qwen-Image-2.1) is not installed there"
+    if kind == "scout":
+        return ""
     if not info.get("fasth3"):
         return "FastH3 is not installed there"
     media = bool(params.get("reference_videos") or params.get("reference_audios"))
@@ -280,11 +285,25 @@ def here_only(kind: str, params: dict) -> str:
 
     if kind == "long":
         return "A long video is a chain: each piece opens on the last frame of the one before, so its pieces render one after another, on this Spark."
-    if kind == "studio":
-        return "A clip that starts from a new picture renders on this Spark: the picture model is here."
     if kind not in KINDS:
-        return "Pictures, edits, Library actions and exports render on this Spark: only clips are handed to other Sparks."
+        return "Edits, Library actions and exports render on this Spark: only clips and pictures are handed to other Sparks."
     return ""
+
+
+def pairs(theirs: list[str], targets: list[Path]) -> list[tuple[str, Path]]:
+    """What a worker made (paths in its folder) matched to where each goes here: one for one in the order the job
+    builds them, or by file name when the worker kept fewer (a picture of a scout that failed). LookupError when the
+    first output, the clip or the first picture, is not among them."""
+
+    if not theirs or not targets:
+        raise LookupError("its job finished without an output")
+    if len(theirs) == len(targets):
+        return list(zip(theirs, targets))
+    names = {Path(path).name: path for path in theirs}
+    found = [(names[target.name], target) for target in targets if target.name in names]
+    if not found or found[0][1] != targets[0]:
+        raise LookupError("its job finished without " + targets[0].name)
+    return found
 
 
 def speedup(used: int, clips: int) -> tuple[float, bool]:
@@ -807,16 +826,17 @@ class Hub:
         theirs.update(qa=False, shot_check=False)  # both run here, on the fetched clip, where their tools are
         return theirs
 
-    def render(self, job: dict, worker: dict, params: dict, target: Path, label: str = "") -> bool:
-        """One take of ``job``'s clip rendered on ``worker`` and fetched to ``target``. False when the job was
-        cancelled meanwhile; Moved when the worker refused the clip, failed it, or stopped answering."""
+    def render(self, job: dict, worker: dict, params: dict, targets: list[Path], label: str = "") -> bool:
+        """One take of ``job`` rendered on ``worker`` and its outputs fetched to ``targets`` (the paths they would have
+        here: a clip, a clip and its picture, a scout's pictures and sheet). False when the job was cancelled meanwhile;
+        Moved when the worker refused the job, failed it, or stopped answering."""
 
         address, name = worker["address"], worker.get("name") or worker["address"]
         say = lambda text: job.update(log=(job["log"] + f"[sparks] {text}\n")[-20000:])
         try:
             base = self.connect(address)
-            # the worker's own memory guard, asked before anything is sent (its app asks it again when the job is queued)
-            room = (call(base, "/api/estimate", {**{key: params.get(key) for key in ("preset", "quality", "frames", "seconds", "width", "height", "steps", "text_encoder", "ref_turbo")},
+            # the worker's own memory guard, asked before a clip is sent (its app asks it again when the job is queued)
+            room = {} if job["kind"] == "scout" else (call(base, "/api/estimate", {**{key: params.get(key) for key in ("preset", "quality", "frames", "seconds", "width", "height", "steps", "text_encoder", "ref_turbo")},
                                                  "with_lora": bool(params.get("loras")), "referenced": bool(params.get("references") or params.get("reference_videos")),
                                                  "references": len(params.get("references") or [])}) or {}).get("memory") or {}
             if room.get("fits") is False:
@@ -862,15 +882,14 @@ class Hub:
                 return False
             time.sleep(POLL)
         try:
-            if not theirs.get("outputs"):
-                raise LookupError("its job finished without a clip")
-            remote.fetch(base, theirs["outputs"][0], target, timeout=300)
+            for theirs_path, target in pairs(theirs.get("outputs") or [], targets):
+                remote.fetch(base, theirs_path, target, timeout=300)
         except (OSError, LookupError, ValueError) as error:
             self.move(job, worker, f"its clip could not be fetched ({str(error)[-160:]})", down=isinstance(error, OSError))
             return False
         said = [line for line in (theirs.get("log") or "").splitlines() if "[tensorfold]" in line or "[studio]" in line]
         job["log"] = (job["log"] + "\n".join(said[-12:]) + ("\n" if said else ""))[-20000:]
-        say(f"{name} rendered it in {theirs.get('elapsed') or 0:.0f} s; the clip is in this Spark's folder")
+        say(f"{name} rendered it in {theirs.get('elapsed') or 0:.0f} s; " + ("the clip is" if job["kind"] == "video" else "its outputs are") + " in this Spark's folder")
         return job["status"] == "running"
 
     # ---- what a clip was rendered on ----------------------------------------------------------------------------------

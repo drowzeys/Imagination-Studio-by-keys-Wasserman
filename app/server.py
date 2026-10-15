@@ -1133,7 +1133,7 @@ def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str
     worker = job.get("remote") and next((one for one in hub.workers() if one["address"] == job["remote"]), {"address": job["remote"]})
     if worker:
         _, env, outputs = build(job["kind"], params, job["id"], room=False)
-        return hub.render(job, worker, params, Path(outputs[0]), label), env, outputs
+        return hub.render(job, worker, params, [Path(one) for one in outputs], label), env, outputs
     command, env, outputs = build(job["kind"], params, job["id"])
     return run(job, command, env, label), env, outputs
 

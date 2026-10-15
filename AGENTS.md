@@ -164,14 +164,14 @@ Rules:
   under a second watchdog that kills your own server at 25 GB available; never by trying the size that failed, and
   never on a machine with `vm.panic_on_oom=1`. Do not lower the floor to make a job fit.
 - More than one DGX Spark (`app/sparks.py`, `app/static/sparks.js`, `docs/multi-spark.md`): a job's `sparks` (1 to
-  `LIMIT`, 8) is how many machines it may use, this one counted; the app uses what is there and says so. Only single
-  clips (`video` jobs) go to a worker, one per Spark at a time, through the worker's own job API over an ssh tunnel
+  `LIMIT`, 8) is how many machines it may use, this one counted; the app uses what is there and says so. Single
+  clips (`video`), scouts and clips from a new picture (`scout`, `studio`, on a worker with the image model) go to a worker, one per Spark at a time, through the worker's own job API over an ssh tunnel
   the app opens and closes itself: a worker's app listens on its own 127.0.0.1 and is never opened to the network, and
   nothing here runs as root, edits `/etc` or shares a folder. A worker renders only with this Spark's code (the files
   of `CODE`, compared by hash; *Update and start* sends them with rsync) and its own memory guard, which is asked
   before a clip is sent. A worker silent for `LOST` seconds is marked down and its clip goes back to the queue; do
   not make that wait longer, and never retry a worker that went down without a person's *Check*. `MEASURED` is one
-  measured run: change it only with a new one. A worker may be a Mac (`platform` "mac" on `/api/spark/self`): it takes the same single clips when it has what they need, has no memory guard to ask, and every command sent over ssh runs under bash and needs neither `setsid` nor `/proc`; keep it so. One clip split across Sparks (the engine's `h3-cuda-multispark`
+  measured run: change it only with a new one. A worker may be a Mac (`platform` "mac" on `/api/spark/self`): it takes the same jobs when it has what they need, has no memory guard to ask, and every command sent over ssh runs under bash and needs neither `setsid` nor `/proc`; keep it so. One clip split across Sparks (the engine's `h3-cuda-multispark`
   branch) is measured and is not in the app: do not wire part of it in.
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
