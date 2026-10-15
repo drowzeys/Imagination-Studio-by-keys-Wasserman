@@ -3,23 +3,32 @@
    Text to speech on this machine with TensorFold's port of Fish Audio Drama 3: speaker tags and [directions] in the
    text, an optional voice to clone (with the speaker's consent), one take per job in the render queue. A take can go to
    the create wizard as reference audio (<Audio N>) for MiniMax H3 Ref2VA. Nothing is sent to Fish Audio. */
-const VO = { takes: null, text: "", ref: null, refText: "", consent: false, seed: 1, temperature: 1.0, top_p: 0.9, top_k: 30, job: null, cutting: "", live: null };
+const VO = { takes: null, text: "", ref: null, refText: "", consent: false, seed: 1, temperature: 1.0, top_p: 0.9, top_k: 30, job: null, cutting: "", player: null, stream: true };
 const VO_EXAMPLE = "<|speaker:0|> [whispering] Did you hear that noise downstairs? <|speaker:1|> [sighs] It's probably just the cat. Go back to sleep. <|speaker:0|> Cats don't knock on doors.";
 const voOn = () => !!(S && S.voice && S.voice.available);
 const voActive = () => VO.job && ["queued", "running"].includes(VO.job.status);
 // the CUDA engine's take plays while it is made (GET /api/voice/takes/{id}/live): one player a take, kept across redraws
 function voLive(job) {
-  if (!(S.voice && S.voice.live) || !job || job.status !== "running") return null;
-  if (!VO.live || VO.live.id !== job.id) VO.live = { id: job.id, el: el("audio", { src: "/api/voice/takes/" + encodeURIComponent(job.id) + "/live", controls: true, autoplay: true, preload: "auto", style: "width:100%;margin-top:8px" }) };
-  return el("div", {}, el("div", { class: "note", style: "margin:8px 0 0" }, "Playing while it is made:"), VO.live.el); }
+  if (!(S.voice && S.voice.live) || !job || job.status !== "running" || (job.params && job.params.live === false)) return null;
+  if (!VO.player || VO.player.id !== job.id) VO.player = { id: job.id, el: el("audio", { src: "/api/voice/takes/" + encodeURIComponent(job.id) + "/live", controls: true, autoplay: true, preload: "auto", style: "width:100%;margin-top:8px" }) };
+  return el("div", {}, el("div", { class: "note", style: "margin:8px 0 0" }, "Playing while it is made:"), VO.player.el); }
 const voSpeed = st => st.backend === "cuda"
   ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 42 GB). About 18 s to load the first time; it stays loaded for " + Math.round(((st.server || {}).idle_unload_s || 300) / 60) + " minutes after a take and is unloaded at once when a video or picture job starts. Then about 0.7 s for each second of speech, the first sound after about 0.3 s, played as it comes; Whisper checks the words after."
+  : st.checks ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 50 GB). About 4 s to load, then about 0.35 s for each second of speech, the first sound after about 0.25 s when it plays as it is made. The engine checks its own words with Whisper as it goes: a runaway tail is cut, and a part with missing words is drawn again (when it is not played as it is made) or reported."
   : "One take at a time in the queue, never beside a video render (Drama 3 takes about 50 GB). About 3 s to load, then roughly 0.4 s for each second of speech; Whisper checks the words after.";
+// the MLX engine's own end-of-text check, part by part (take.verify): what it did and what it did not hear
+function voCheck(t) {
+  if (!t.verify || !t.verify.length) return null;
+  const n = a => t.verify.filter(v => v.action === a).length, redrawn = t.verify.reduce((x, v) => x + Math.max(0, (v.attempts || 1) - 1), 0);
+  const missing = t.verify.flatMap(v => v.missing || []), late = t.verify.filter(v => v.late_s).length;
+  return "engine check: " + [n("ok") ? n("ok") + " ok" : null, n("trim") ? n("trim") + " trimmed" : null, redrawn ? redrawn + " redrawn" : null,
+    n("redraw") ? n("redraw") + " still short" : null, late ? late + " cut after playing" : null].filter(Boolean).join(", ") + (t.verify.length > 1 ? " of " + t.verify.length + " parts" : "")
+    + (missing.length ? " · not heard: " + missing.slice(0, 8).join(", ") + (missing.length > 8 ? "…" : "") : ""); }
 async function voLoad() { try { VO.takes = await api("/api/voice/takes"); } catch { VO.takes = []; } if (tab === "Voice") render(); }
 const voLine = t => [t.duration != null ? t.duration.toFixed(1) + " s" : null, t.frames_per_s ? t.frames_per_s + " frames/s" : null, t.rtf ? "made in " + t.rtf + "× its length" : null,
   t.first_audio_ms ? "first sound after " + (t.first_audio_ms / 1000).toFixed(2) + " s" : null, t.load_s ? "model loaded in " + Math.round(t.load_s) + " s" : null,
-  t.asr && t.asr.score != null ? "Whisper " + t.asr.score + " % (" + t.asr.found + " of " + t.asr.words + " words)" : t.asr && t.asr.skipped ? "no word check: " + t.asr.skipped : null,
-  "seed " + t.seed, t.reference ? "cloned voice" : null].filter(Boolean).join(" · ");
+  t.asr && t.asr.score != null ? "Whisper" + (t.asr.by === "engine" ? " (engine)" : "") + " " + t.asr.score + " % (" + t.asr.found + " of " + t.asr.words + " words)" : t.asr && t.asr.skipped ? "no word check: " + t.asr.skipped : null,
+  "seed " + t.seed, t.reference ? "cloned voice" : null, voCheck(t)].filter(Boolean).join(" · ");
 // a take (or any sound file of the studio) as a reference audio clip of a MiniMax H3 Ref2VA clip: 2 to 15 s each
 async function voUseAsRef(path, seconds) {
   if (!S.ref_media) return toast("Reference audio needs MiniMax H3 Ref2VA, which is not installed here (" + (S.platform === "spark" ? "oneshot-setup-spark.sh" : "oneshot-setup.sh") + " --ref2va).");
@@ -36,7 +45,7 @@ async function voUseAsRef(path, seconds) {
 async function voRender() {
   if (!VO.text.trim()) return toast("Write what is said first");
   if (VO.ref && !VO.consent) return toast("Tick the consent box to clone this voice, or take the clip out");
-  try { VO.job = await api("/api/voice/takes", { text: VO.text, seed: VO.seed, temperature: VO.temperature, top_p: VO.top_p, top_k: VO.top_k,
+  try { VO.job = await api("/api/voice/takes", { text: VO.text, seed: VO.seed, temperature: VO.temperature, top_p: VO.top_p, top_k: VO.top_k, live: VO.stream,
     ...(VO.ref ? { ref_audio: VO.ref, ref_text: VO.refText, consent: VO.consent } : {}) }); } catch (e) { return toast(e.message); }
   await poll(); render(); }
 function voReference() {
@@ -84,6 +93,8 @@ function viewVoice() {
     voReference());
   put(box, el("div", { class: "row", style: "margin-top:16px;align-items:center" }, el("div", { class: "fit" }, el("button", { class: "hot", disabled: !st.available || voActive() || (VO.ref && !VO.consent), onclick: voRender }, voActive() ? "Rendering…" : "Render the take")),
     el("div", { class: "note", style: "margin:0" }, st.available ? voSpeed(st) : "")));
+  if (st.available && st.checks) put(box, el("label", { class: "check", title: "Sent audio cannot be taken back: played as it is made, a part with missing words is reported, not drawn again" },
+    el("input", { type: "checkbox", checked: VO.stream, onchange: e => { VO.stream = e.target.checked; } }), el("span", {}, "Play while it is made (off: a part with missing words is drawn again before you hear it)")));
   if (VO.job) put(box, VO.job.status === "failed" ? el("div", { class: "tip" }, el("b", {}, "The take failed. "), VO.job.error || "") : voActive() ? jobCard(VO.job) : null);
   if (VO.job) put(box, voLive(VO.job));
   put(box, el("h3", { style: "margin-top:22px" }, "Takes"), VO.takes.length ? VO.takes.slice(0, 40).map(voTake) : el("div", { class: "note" }, "No takes yet."));

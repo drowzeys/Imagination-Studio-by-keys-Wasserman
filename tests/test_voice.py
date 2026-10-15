@@ -378,6 +378,72 @@ def test_a_cast_voice_goes_into_a_shot_on_cast_stills_as_reference_audio():
         slate.ready = had
 
 
+STREAMING = r"""
+import json, struct, sys, time
+args = sys.argv[1:]
+out, stats = args[args.index("--out") + 1], args[args.index("--stats") + 1]
+print("[drama3] loaded /fake/drama-3-mlx in 3.7s", flush=True)
+samples = struct.pack("<h", 7) * 44100 * 2
+with open(out, "wb") as w:
+    w.write(b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 44100, 88200, 2, 16) + b"data" + struct.pack("<I", 0xFFFFFFFF - 36))
+    w.flush()
+    for i in range(8):
+        w.write(samples[i * 22050:(i + 1) * 22050]); w.flush(); time.sleep(0.05 if "--stream" in args else 0)
+    w.seek(4); w.write(struct.pack("<I", 36 + len(samples))); w.seek(40); w.write(struct.pack("<I", len(samples)))
+json.dump({"frames": 43, "audio_s": 2.0, "frames_per_s": 73.0, "rtf": 0.35, "total_s": 0.7, "first_audio_s": 0.234, "stream": "--stream" in args,
+           "peak_memory_gb": 49.4, "chunks": 2, "finish": ["eos", "stop_rule"],
+           "verify": [{"words": 5, "matched": 5, "missing": [], "action": "ok", "attempts": 1, "heard": "One two three four five.", "asr_s": 0.1, "coverage": 1.0},
+                      {"words": 4, "matched": 3, "missing": ["cat"], "action": "trim", "attempts": 2, "cut_s": 1.9, "heard": "It is the", "asr_s": 0.1}]},
+          open(stats, "w"))
+print("[drama3] wrote", out, "first audio 0.234s, total 0.7s", flush=True)
+"""
+
+
+class FakeStreaming(Fake):
+    """The MLX engine from drama3-mlx 4a8a982f on: --stream writes a growing WAV, its stats carry its own check."""
+
+    streams = True
+
+    def __init__(self, folder: Path):
+        super().__init__(folder)
+        self.script.write_text(STREAMING)
+
+    def command(self, text_file, out, stats, reference, seed, sampling, live=False):
+        command = super().command(text_file, out, stats, reference, seed, sampling)
+        self.seen[-1]["live"] = live
+        return command + (["--stream"] if live else [])
+
+
+def test_an_mlx_take_plays_while_made_and_its_score_is_the_engines_check():
+    had, had_ready, had_transcribe = voice._backend, voice.qa.ready, voice.qa.transcribe
+    fake = FakeStreaming(Path(tempfile.mkdtemp()))
+    try:
+        voice._backend = fake
+        voice.qa.ready = lambda: {"transcript": True, "runs": True, "missing": []}
+        voice.qa.transcribe = lambda clip: (_ for _ in ()).throw(AssertionError("transcribed twice"))
+        state = client.get("/api/voice/state").json()
+        assert state["live"] is True and state["checks"] is True
+        job = client.post("/api/voice/takes", json={"text": "One two three four five. It is the cat.", "seed": 3}).json()
+        body = client.get(f"/api/voice/takes/{job['id']}/live").content
+        assert body[:4] == b"RIFF" and len(body) == 44 + 2 * 88200, len(body)  # the engine's own header is not sent twice
+        done = wait(job["id"])
+        assert done["status"] == "done", done
+        take = done["voice"]
+        assert fake.seen[-1]["live"] is True and take["streamed"] is True
+        assert take["first_audio_ms"] == 234.0 and take["load_s"] == 3.7 and take["frames_per_s"] == 73.0
+        assert [v["action"] for v in take["verify"]] == ["ok", "trim"] and take["verify"][1]["missing"] == ["cat"]
+        assert take["asr"]["by"] == "engine" and take["asr"]["found"] == 8 and take["asr"]["words"] == 9 and take["asr"]["score"] == 89
+        assert take["asr"]["missing"] == ["cat"]
+        with wave.open(str(server.HOME / take["path"])) as w:
+            assert w.getnframes() == 2 * 44100
+        # not played as it is made: no --stream, so the engine may draw a part again
+        job = client.post("/api/voice/takes", json={"text": "Quiet.", "live": False}).json()
+        assert wait(job["id"])["status"] == "done" and fake.seen[-1]["live"] is False
+        assert voice.estimate("One two three.", False, True) < voice.estimate("One two three.", False, False) + 1  # no Whisper after
+    finally:
+        voice._backend, voice.qa.ready, voice.qa.transcribe = had, had_ready, had_transcribe
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
