@@ -67,70 +67,18 @@ def tool(name: str) -> str | None:
 
 # ---------- backends ----------
 
-class Mlx:
-    name, label = "mlx", "TensorFold MLX · Apple Silicon"
-    fps, load_s = 75.0, 4.0  # measured on an M5 Ultra (drama3-mlx 4a8a982f): 73 frames a second streamed, 83 not; 3.7 s to load
-
-    def __init__(self) -> None:
-        self.venv = Path(os.environ.get("DRAMA3_VENV", Path.home() / "drama3-venv")).expanduser()
-        self.model = Path(os.environ.get("DRAMA3_MODEL", Path.home() / "models/drama-3-mlx")).expanduser()
-        self.known: tuple[float, str] | None = None  # (when, why not) of the last look: a look runs a process
-        # an engine with --stream (a growing WAV while it speaks) and its own end-of-text check (--verify, on by
-        # default there, with --stop-rule): drama3-mlx 4a8a982f or later; an older one gets neither flag
-        self.streams = False
-
-    def python(self) -> Path:
-        return self.venv / "bin" / "python"
-
-    def check(self) -> str:
-        """Why Drama 3 cannot run here ("" when it can): looked at once a minute at most, never longer than 20 s."""
-
-        if self.known and (not self.known[1] or time.time() - self.known[0] < 60):
-            return self.known[1]
-        why = self.look()
-        self.known = (time.time(), why)
-        return why
-
-    def look(self) -> str:
-        if sys.platform != "darwin":
-            return "The MLX backend runs on a Mac (Apple Silicon)."
-        if not self.python().is_file():
-            return f"No Drama 3 environment at {self.venv} (README, Voice: TensorFold's drama3-mlx branch in its own venv)."
-        if not (self.model / "config.json").is_file() or not (self.model / "codec.safetensors").is_file():
-            return (f"No converted Drama 3 model at {self.model} (python -m tensorfold.families.drama3.convert "
-                    "~/models/drama-3 ~/models/drama-3-mlx).")
-        try:
-            memory = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=5).stdout.strip() or 0)
-        except (OSError, ValueError, subprocess.TimeoutExpired):
-            memory = 0
-        if memory and memory < MEMORY_GB * 1024 ** 3:
-            return f"This Mac has {memory / 1024 ** 3:.0f} GB of memory; Drama 3 needs about 52 GB free, so {MEMORY_GB} GB or more."
-        try:
-            done = subprocess.run([str(self.python()), "-I", "-c", "import importlib.util as u; print(bool(u.find_spec('tensorfold.drama3')), "
-                                   "bool(u.find_spec('tensorfold.families.drama3.stream')))"], capture_output=True, text=True, timeout=20)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            return f"The Drama 3 environment did not answer: {error}"
-        found = done.stdout.split()
-        if not found or found[0] != "True":
-            return f"The environment at {self.venv} has no tensorfold.drama3 (install TensorFold's drama3-mlx branch into it)."
-        self.streams = found[1:] == ["True"]
-        return ""
-
-    def command(self, text_file: Path, out: Path, stats: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict,
-                live: bool = False) -> list[str]:
-        command = [str(self.python()), "-I", "-m", "tensorfold.drama3", "--model", str(self.model), "--text-file", str(text_file),
-                   "--out", str(out), "--stats", str(stats), "--seed", str(seed), "--temperature", f"{sampling['temperature']:g}",
-                   "--top-p", f"{sampling['top_p']:g}", "--top-k", str(int(sampling["top_k"]))]
-        if reference:
-            command += ["--ref-audio", str(reference[0]), "--ref-text", reference[1]]
-        if self.streams and live:  # the WAV at --out grows as it is spoken (its sizes are set when done): /live reads it
-            command += ["--stream"]
-        return command
-
-
 def mem_available_gb() -> float:
-    """MemAvailable of this machine in GB (a DGX Spark's GPU and system share one pool); -1 when unknown."""
+    """MemAvailable of this machine in GB (a DGX Spark's GPU and system share one pool); on a Mac what vm_stat counts
+    as free, inactive, speculative and purgeable; -1 when unknown."""
 
+    if sys.platform == "darwin":
+        try:
+            said = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=2).stdout
+            size = int(re.search(r"page size of (\d+) bytes", said).group(1))
+            pages = sum(int(found) for found in re.findall(r"Pages (?:free|inactive|speculative|purgeable):\s+(\d+)", said))
+            return pages * size / 1024 ** 3
+        except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+            return -1.0
     try:
         with open("/proc/meminfo") as handle:
             for line in handle:
@@ -183,41 +131,43 @@ def pieces(text: str, limit: int) -> list[str]:
     return [one for one in out if spoken(one)]
 
 
+def dialogue(text: str) -> str:
+    """Two or more speaker tags: each turn after the first on a line of its own. Written on one line, Drama 3 drops
+    later turns far more often (TensorFold drama3-mlx 92c09a8e: streamed dialogue takes short 12 of 48 times on one
+    line, 1 of 48 a turn a line)."""
+
+    if len(SPEAKER.findall(text)) < 2:
+        return text
+    first = SPEAKER.search(text)
+    head, rest = text[: first.end()], text[first.end():]
+    return head + re.sub(r"[ \t]*\n?[ \t]*(<\|speaker:\d+\|>)", r"\n\1", rest)
+
+
 def one_speaker(text: str) -> bool:
     return set(SPEAKER.findall(text)) <= {"0"}
 
 
-class Cuda:
-    """TensorFold's CUDA port of Drama 3 (``drama3-generate``, Zig + CUDA, no Python) on a DGX Spark.
-
-    The engine runs as a persistent server (``--serve 1``: one JSON request a line on its stdin, one JSON answer a
-    line on its stderr), loaded on the first take (about 18 s, 38.6 GB of weights, 41.6 GB at the peak), and:
+class Served:
+    """A Drama 3 engine run as a persistent server, the protocol both TensorFold ports speak (``--serve``: one JSON
+    request a line on its stdin, one JSON answer a line on its stderr, lines that are not protocol never start with
+    ``{``). Loaded on the first take, and then:
 
     - holds the studio's GPU lock folder (``~/studio-gpu.lock.d``) for as long as it is loaded, not only while a take
       runs, so a script outside the app that respects the lock never loads a model beside it;
     - is shut down, its memory given back, after ``DRAMA3_IDLE_S`` seconds without a take (300 by default), and at
       once when any other job of this machine's queue starts (``release``, called by server.py), so it never stands
       beside a MiniMax H3 or Qwen render;
-    - stops the studio's ComfyUI server before it loads when that server holds the memory it needs (the next video
-      reloads its models, as after ``spark/comfy.sh stop``);
-    - stands under a kill-guard: a thread reads MemAvailable four times a second and kills the engine by its PID
-      under ``DRAMA3_GUARD_GB`` (8 GB), as the engine's own run_guarded.sh does;
+    - on a DGX Spark, stops the studio's ComfyUI server before it loads when that server holds the memory it needs
+      (the next video reloads its models, as after ``spark/comfy.sh stop``);
+    - stands under a kill-guard: a thread reads the available memory (MemAvailable on Linux, vm_stat on a Mac) and
+      kills the engine by its PID under ``DRAMA3_GUARD_GB`` (8 GB);
     - dies with the app: its stdin is the app's pipe, and the engine ends at the end of its input.
     """
 
-    name, label = "cuda", "TensorFold CUDA · DGX Spark"
-    fps, load_s = 30.0, 18.0  # measured on a GB10: 29 to 31 frames a second sampled, 17 to 18 s to load from NFS
-    NEED_GB = 50.0  # free memory wanted before it loads: 41.6 GB at the peak, and the guard's 8 GB beside it
-    CHUNK_WORDS = 60  # a request's text at most (about 27 s of speech, ~600 frames, well inside max_ctx 4096)
-    GAP_S = 0.15  # the silence put between two parts of a long take
+    load_s = 10.0
+    NEED_GB = 50.0
 
     def __init__(self) -> None:
-        prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
-        here = prefix / "drama3"
-        self.bin = Path(os.environ.get("DRAMA3_CUDA_BIN", here / "bin" / "drama3-generate")).expanduser()
-        self.lib = Path(os.environ.get("DRAMA3_CUDA_LIB", self.bin.parent.parent / "lib" / "libtensorfold_drama3.so")).expanduser()
-        self.model = Path(os.environ.get("DRAMA3_CUDA_MODEL", Path.home() / "models" / "drama-3")).expanduser()
-        self.codec = Path(os.environ.get("DRAMA3_CUDA_CODEC", here / "codec-v1.safetensors")).expanduser()
         self.idle_s = float(os.environ.get("DRAMA3_IDLE_S", 300))
         self.guard_gb = float(os.environ.get("DRAMA3_GUARD_GB", 8))
         self.known: tuple[float, str] | None = None
@@ -233,37 +183,7 @@ class Cuda:
         self.killed = ""  # why the guard killed the engine, if it did
         self.events: list[dict] = []  # loads and unloads, newest last (shown in /api/voice/state)
         self.idler: threading.Thread | None = None
-
-    # -- availability --
-
-    def check(self) -> str:
-        """Why Drama 3 cannot run here ("" when it can): files looked at, then memory; at most every 10 s."""
-
-        if self.process is not None and self.process.poll() is None:
-            return ""
-        if self.known and time.time() - self.known[0] < 10:
-            return self.known[1]
-        why = self.look()
-        self.known = (time.time(), why)
-        return why
-
-    def look(self) -> str:
-        if not sys.platform.startswith("linux"):
-            return "The CUDA backend runs on a DGX Spark (Linux, CUDA)."
-        if not os.access(self.bin, os.X_OK):
-            return f"No Drama 3 engine at {self.bin} (README, Voice: build TensorFold's drama3-cuda branch; DRAMA3_CUDA_BIN names another)."
-        if not self.lib.is_file():
-            return f"No libtensorfold_drama3.so at {self.lib} (the same build makes it; DRAMA3_CUDA_LIB names another)."
-        if not (self.model / "config.json").is_file() or not (self.model / "model.safetensors.index.json").is_file():
-            return f"No Drama 3 checkpoint at {self.model} (hf download fishaudio/drama-3; DRAMA3_CUDA_MODEL names another)."
-        if not self.codec.is_file():
-            return (f"No converted codec at {self.codec} (once: codec_convert.py {self.model} {self.codec}; "
-                    "DRAMA3_CUDA_CODEC names another).")
-        free = mem_available_gb()
-        if 0 <= free < self.NEED_GB and not comfy_up():
-            return (f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory and this Spark has {free:.0f} GB available now "
-                    "(something outside the studio holds the rest).")
-        return ""
+        self.ready: dict = {}  # the engine's ready line
 
     # -- the server --
 
@@ -307,7 +227,7 @@ class Cuda:
                 except OSError:
                     pass
                 return
-            time.sleep(0.25)
+            time.sleep(0.25 if SPARK else 1.0)  # a Mac's count is a vm_stat process: once a second
 
     def idle(self) -> None:
         """Unloads the engine after ``idle_s`` without a take, and gives its memory and the GPU lock back."""
@@ -337,7 +257,7 @@ class Cuda:
         free = mem_available_gb()
         if free < 0 or free >= self.NEED_GB:
             return
-        if comfy_up():
+        if SPARK and comfy_up():
             job["progress"] = {"stage": "stopping ComfyUI to free the video models' memory", "at": 0, "of": 1}
             subprocess.run(["bash", str(Path(__file__).resolve().parent.parent / "spark" / "comfy.sh"), "stop"],
                            capture_output=True, text=True, timeout=30)
@@ -349,7 +269,7 @@ class Cuda:
             free = mem_available_gb()
             self.note("stopped ComfyUI before loading", available_gb=round(free, 1))
         if 0 <= free < self.NEED_GB:
-            raise RuntimeError(f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory to load and this Spark has "
+            raise RuntimeError(f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory to load and this machine has "
                                f"{free:.0f} GB available")
 
     def start(self, job: dict) -> bool:
@@ -366,9 +286,8 @@ class Cuda:
         self.owner = mine
         try:
             self.make_room(job)
-            job["progress"] = {"stage": "loading Drama 3 (about 18 s)", "at": 0, "of": 1}
-            env = dict(os.environ)
-            env["LD_LIBRARY_PATH"] = str(self.lib.parent) + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+            job["progress"] = {"stage": f"loading Drama 3 (about {self.load_s:.0f} s)", "at": 0, "of": 1}
+            env = self.environment()
             self.answers, self.log, self.killed, self.device_gb = queue.Queue(), [], "", None
             began, self.before_gb = time.time(), mem_available_gb()
             self.process = subprocess.Popen(self.argv(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
@@ -389,6 +308,7 @@ class Cuda:
                         raise RuntimeError("Drama 3 did not load in 10 minutes")
                     continue
                 if answer.get("ready"):
+                    self.ready = answer
                     break
                 raise RuntimeError("Drama 3 did not load: " + self.why(answer))
             self.loaded_at = self.last_used = time.time()
@@ -401,7 +321,10 @@ class Cuda:
             raise
 
     def argv(self) -> list[str]:
-        return [str(self.bin), "--model", str(self.model), "--codec", str(self.codec), "--serve", "1"]
+        raise NotImplementedError
+
+    def environment(self) -> dict:
+        return dict(os.environ)
 
     def why(self, answer: dict) -> str:
         said = self.killed or answer.get("error") or "no answer"
@@ -465,9 +388,205 @@ class Cuda:
             self.stop(why)
             return True
 
+class Mlx(Served):
+    """TensorFold's MLX port of Drama 3 on a Mac, in its own venv. From drama3-mlx 92c09a8e on it runs as a persistent
+    server (``python -m tensorfold.drama3 --serve``, ``Served``: about 5.3 s to ready, once, model, codec and Whisper
+    kept, 45 to 50 GB); an older engine runs its command line once a take (``command``, ``mlx_take``). The engine
+    chunks long text itself and checks its own words (``--verify``, ``--stop-rule``)."""
+
+    name, label = "mlx", "TensorFold MLX · Apple Silicon"
+    fps, load_s = 75.0, 5.5  # measured on an M5 Ultra: 70 to 73 frames a second streamed, 83 not; 5.3 s to ready
+    NEED_GB = 58.0  # free memory wanted before it loads: about 50 GB with Whisper, and the guard's 8 GB beside it
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.venv = Path(os.environ.get("DRAMA3_VENV", Path.home() / "drama3-venv")).expanduser()
+        self.model = Path(os.environ.get("DRAMA3_MODEL", Path.home() / "models/drama-3-mlx")).expanduser()
+        self.known: tuple[float, str] | None = None  # (when, why not) of the last look: a look runs a process
+        # an engine with --stream (a growing WAV while it speaks) and its own end-of-text check (--verify, on by
+        # default there, with --stop-rule): drama3-mlx 4a8a982f or later; an older one gets neither flag
+        self.streams = False
+        self.serves = False  # --serve: drama3-mlx 92c09a8e or later
+
+    def serving(self) -> bool:
+        return self.serves and self.check() == ""
+
+    def argv(self) -> list[str]:
+        return [str(self.python()), "-I", "-m", "tensorfold.drama3", "--model", str(self.model), "--serve"]
+
+    def python(self) -> Path:
+        return self.venv / "bin" / "python"
+
+    def check(self) -> str:
+        """Why Drama 3 cannot run here ("" when it can): looked at once a minute at most, never longer than 20 s."""
+
+        if self.loaded():
+            return ""
+        if self.known and (not self.known[1] or time.time() - self.known[0] < 60):
+            return self.known[1]
+        why = self.look()
+        self.known = (time.time(), why)
+        return why
+
+    def look(self) -> str:
+        if sys.platform != "darwin":
+            return "The MLX backend runs on a Mac (Apple Silicon)."
+        if not self.python().is_file():
+            return f"No Drama 3 environment at {self.venv} (README, Voice: TensorFold's drama3-mlx branch in its own venv)."
+        if not (self.model / "config.json").is_file() or not (self.model / "codec.safetensors").is_file():
+            return (f"No converted Drama 3 model at {self.model} (python -m tensorfold.families.drama3.convert "
+                    "~/models/drama-3 ~/models/drama-3-mlx).")
+        try:
+            memory = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=5).stdout.strip() or 0)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            memory = 0
+        if memory and memory < MEMORY_GB * 1024 ** 3:
+            return f"This Mac has {memory / 1024 ** 3:.0f} GB of memory; Drama 3 needs about 52 GB free, so {MEMORY_GB} GB or more."
+        try:
+            done = subprocess.run([str(self.python()), "-I", "-c", "import importlib.util as u; s = u.find_spec('tensorfold.drama3'); "
+                                   "print(bool(s), bool(u.find_spec('tensorfold.families.drama3.stream')), "
+                                   "bool(s and s.origin and '\"--serve\"' in open(s.origin).read()))"],
+                                  capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return f"The Drama 3 environment did not answer: {error}"
+        found = done.stdout.split()
+        if not found or found[0] != "True":
+            return f"The environment at {self.venv} has no tensorfold.drama3 (install TensorFold's drama3-mlx branch into it)."
+        self.streams = found[1:2] == ["True"]
+        self.serves = found[2:3] == ["True"]
+        return ""
+
+    def command(self, text_file: Path, out: Path, stats: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict,
+                live: bool = False) -> list[str]:
+        command = [str(self.python()), "-I", "-m", "tensorfold.drama3", "--model", str(self.model), "--text-file", str(text_file),
+                   "--out", str(out), "--stats", str(stats), "--seed", str(seed), "--temperature", f"{sampling['temperature']:g}",
+                   "--top-p", f"{sampling['top_p']:g}", "--top-k", str(int(sampling["top_k"]))]
+        if reference:
+            command += ["--ref-audio", str(reference[0]), "--ref-text", reference[1]]
+        if self.streams and live:  # the WAV at --out grows as it is spoken (its sizes are set when done): /live reads it
+            command += ["--stream"]
+        return command
+
+    def make(self, job: dict, text: str, wav: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict,
+             live: bool = True) -> dict | None:
+        """One take through the server, the whole text in one request (the engine chunks it): the measurements, or
+        None when cancelled. Played while made (``pcm``, /live), a part the engine's check would have drawn again
+        cannot be (it has been heard): the take is asked once more without streaming, where the engine redraws it."""
+
+        folder = wav.with_suffix(".live")
+        folder.mkdir(exist_ok=True)
+        pcm = folder / "0.pcm"
+        if live:
+            LIVE[job["id"]] = {"parts": [pcm], "done": False, "finished": 0, "gap_s": 0}
+        request = {"text": dialogue(text), "wav": str(wav), "seed": seed, "temperature": sampling["temperature"],
+                   "top_k": int(sampling["top_k"]), "top_p": sampling["top_p"], "id": job["id"]}
+        if reference:
+            request.update(ref_audio=str(reference[0]), ref_text=reference[1])
+        seconds = 300 + expected_seconds(text) * 4  # frames, the check and two redraws a part, with room
+        with self.mutex:
+            began = time.time()
+            try:
+                if not self.start(job):
+                    return None
+                loaded = time.time()
+                job["progress"] = {"stage": "Drama 3 voice", "at": 0, "of": 1}
+                answer = self.ask(job, {**request, "pcm": str(pcm), "stream": True} if live else {**request, "stream": False}, seconds)
+                if answer is None:
+                    return None
+                retaken = None
+                if live and any(isinstance(part, dict) and part.get("action") == "redraw" for part in answer.get("verify") or []):
+                    # (measured with drama3-mlx 4a8a982f on the M5 Ultra, the two-speaker example: seed 1 played at
+                    # 35 % came back whole after one redraw; seed 2 at 80 % stayed short after three draws)
+                    retaken = {"played": checked_by_engine(answer), "seconds": answer.get("audio_s")}
+                    job["log"] += "[tensorfold] a part was short while playing: the take is made again without playing, so it can be redrawn\n"
+                    job["progress"] = {"stage": "Drama 3 voice, again without playing", "at": 0, "of": 1}
+                    again = self.ask(job, {**request, "stream": False}, seconds)
+                    if again is None:
+                        return None
+                    answer = again
+            finally:
+                self.last_used = time.time()
+                if job["id"] in LIVE:
+                    LIVE[job["id"]].update(finished=1, done=True)
+                threading.Timer(60, forget_live, args=(job["id"], folder)).start()
+        chunks = answer.get("chunks")
+        return {"frames": answer.get("frames"), "audio_s": answer.get("audio_s"), "frames_per_s": answer.get("fps"),
+                "rtf": answer.get("rtf"), "total_s": round(time.time() - began, 1),
+                "engine_s": round(float(answer.get("total_ms") or 0) / 1000, 2), "first_audio_ms": answer.get("first_audio_ms"),
+                "encode_ms": answer.get("encode_ms"), "load_s": job.get("load_s"), "peak_memory_gb": answer.get("peak_memory_gb"),
+                "chunks": len(chunks) if isinstance(chunks, list) else chunks, "finish": answer.get("finish"),
+                "verify": answer.get("verify"), "stream": bool(answer.get("stream")), "retaken": retaken,
+                "made_s": round(time.time() - loaded, 2)}
+
+
+class Cuda(Served):
+    """TensorFold's CUDA port of Drama 3 (``drama3-generate``, Zig + CUDA, no Python) on a DGX Spark.
+
+    A persistent server (``--serve 1``, ``Served``), loaded on the first take: about 18 s, 38.6 GB of weights,
+    41.6 GB at the peak. Long text goes in parts here (``pieces``): the engine's context is 4096 rows.
+    """
+
+    name, label = "cuda", "TensorFold CUDA · DGX Spark"
+    fps, load_s = 30.0, 18.0  # measured on a GB10: 29 to 31 frames a second sampled, 17 to 18 s to load from NFS
+    NEED_GB = 50.0  # free memory wanted before it loads: 41.6 GB at the peak, and the guard's 8 GB beside it
+    CHUNK_WORDS = 60  # a request's text at most (about 27 s of speech, ~600 frames, well inside max_ctx 4096)
+    GAP_S = 0.15  # the silence put between two parts of a long take
+
+    def __init__(self) -> None:
+        super().__init__()
+        prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
+        here = prefix / "drama3"
+        self.bin = Path(os.environ.get("DRAMA3_CUDA_BIN", here / "bin" / "drama3-generate")).expanduser()
+        self.lib = Path(os.environ.get("DRAMA3_CUDA_LIB", self.bin.parent.parent / "lib" / "libtensorfold_drama3.so")).expanduser()
+        self.model = Path(os.environ.get("DRAMA3_CUDA_MODEL", Path.home() / "models" / "drama-3")).expanduser()
+        self.codec = Path(os.environ.get("DRAMA3_CUDA_CODEC", here / "codec-v1.safetensors")).expanduser()
+
+    def serving(self) -> bool:
+        return True
+
+    def environment(self) -> dict:
+        env = dict(os.environ)
+        env["LD_LIBRARY_PATH"] = str(self.lib.parent) + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+        return env
+
+    # -- availability --
+
+    def check(self) -> str:
+        """Why Drama 3 cannot run here ("" when it can): files looked at, then memory; at most every 10 s."""
+
+        if self.process is not None and self.process.poll() is None:
+            return ""
+        if self.known and time.time() - self.known[0] < 10:
+            return self.known[1]
+        why = self.look()
+        self.known = (time.time(), why)
+        return why
+
+    def look(self) -> str:
+        if not sys.platform.startswith("linux"):
+            return "The CUDA backend runs on a DGX Spark (Linux, CUDA)."
+        if not os.access(self.bin, os.X_OK):
+            return f"No Drama 3 engine at {self.bin} (README, Voice: build TensorFold's drama3-cuda branch; DRAMA3_CUDA_BIN names another)."
+        if not self.lib.is_file():
+            return f"No libtensorfold_drama3.so at {self.lib} (the same build makes it; DRAMA3_CUDA_LIB names another)."
+        if not (self.model / "config.json").is_file() or not (self.model / "model.safetensors.index.json").is_file():
+            return f"No Drama 3 checkpoint at {self.model} (hf download fishaudio/drama-3; DRAMA3_CUDA_MODEL names another)."
+        if not self.codec.is_file():
+            return (f"No converted codec at {self.codec} (once: codec_convert.py {self.model} {self.codec}; "
+                    "DRAMA3_CUDA_CODEC names another).")
+        free = mem_available_gb()
+        if 0 <= free < self.NEED_GB and not comfy_up():
+            return (f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory and this Spark has {free:.0f} GB available now "
+                    "(something outside the studio holds the rest).")
+        return ""
+
+    def argv(self) -> list[str]:
+        return [str(self.bin), "--model", str(self.model), "--codec", str(self.codec), "--serve", "1"]
+
     # -- a take --
 
-    def make(self, job: dict, text: str, wav: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict) -> dict | None:
+    def make(self, job: dict, text: str, wav: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict,
+             live: bool = True) -> dict | None:
         """One take through the server: the measurements (the stats the MLX engine writes), or None when cancelled.
         Long text goes in parts (``pieces``); after the first, a one-speaker take without a clip clones the first
         part's voice, so it keeps one voice; a clip given is used for every part."""
@@ -487,7 +606,7 @@ class Cuda:
                     job["progress"] = {"stage": "Drama 3 voice" + (f", part {index + 1} of {len(parts)}" if len(parts) > 1 else ""),
                                        "at": index, "of": len(parts)}
                     out = wav if len(parts) == 1 else wav.with_name(f"{wav.stem}.part{index}.wav")
-                    request = {"text": part, "wav": str(out), "pcm": str(LIVE[job["id"]]["parts"][index]), "seed": seed + index,
+                    request = {"text": dialogue(part), "wav": str(out), "pcm": str(LIVE[job["id"]]["parts"][index]), "seed": seed + index,
                                "temperature": sampling["temperature"], "top_k": int(sampling["top_k"]),
                                "top_p": sampling["top_p"], "max_frames": 1500}
                     voice_of = reference
@@ -521,7 +640,7 @@ class Cuda:
                 "first_audio_ms": answers[0].get("first_audio_ms") if answers else None,
                 "encode_ms": answers[0].get("encode_ms") if answers else None,
                 "load_s": job.get("load_s"), "device_gb": self.device_gb,
-                "chunks": len(answers), "finish": ["stop" if a.get("eos") else "length" for a in answers]}
+                "chunks": len(answers), "finish": ["stop" if a.get("eos") else "length" for a in answers], "stream": True}
 
 
 LIVE: dict[str, dict] = {}  # a running take's raw PCM parts, as the engine writes them (the live WAV, /live)
@@ -627,7 +746,8 @@ def state() -> dict:
     out = {"available": not why, "why": why, "backend": one.name, "label": one.label, "credit": CREDIT, "licence": LICENCE,
            "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
            "text_limit": TEXT_LIMIT, "reference_seconds": REFERENCE_SECONDS, "speakers": 16,
-           "live": hasattr(one, "make") or bool(getattr(one, "streams", False)), "checks": bool(getattr(one, "streams", False))}
+           "live": bool(getattr(one, "streams", False)) or (hasattr(one, "serving") and one.serving()), "checks": bool(getattr(one, "streams", False)),
+           "serves": bool(hasattr(one, "serving") and one.serving())}
     if hasattr(one, "status"):
         out["server"] = one.status()
     return out
@@ -815,7 +935,7 @@ def perform(job: dict) -> bool:
     folder.mkdir(parents=True, exist_ok=True)
     stem = folder / job["id"]
     wav, stats, text_file = stem.with_suffix(".wav"), stem.with_suffix(".stats.json"), stem.with_suffix(".txt")
-    text_file.write_text(params["text"] + "\n")
+    text_file.write_text(dialogue(params["text"]) + "\n")  # what the engine reads: a turn a line
     reference = None
     if params.get("ref_audio"):
         job["progress"] = {"stage": "reading the voice reference", "at": 0, "of": 1}
@@ -838,8 +958,9 @@ def perform(job: dict) -> bool:
         reference = (clean, params["ref_text"])
     one = backend()
     job["engine"] = one.name
-    if hasattr(one, "make"):  # the CUDA engine: a persistent server, which holds the GPU lock itself while loaded
-        measured = one.make(job, params["text"], wav, reference, int(params["seed"]), {k: params[k] for k in SAMPLING})
+    if hasattr(one, "make") and one.serving():  # a persistent server, which holds the GPU lock itself while loaded
+        measured = one.make(job, params["text"], wav, reference, int(params["seed"]), {k: params[k] for k in SAMPLING},
+                            live=params.get("live", True) is not False)
         if measured is None:
             return False
         stats.write_text(json.dumps(measured, indent=1) + "\n")

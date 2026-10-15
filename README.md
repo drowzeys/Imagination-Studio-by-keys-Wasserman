@@ -300,6 +300,17 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.7.7 (2026-10-15): Voice answers at once on the Mac, and dialogue keeps its lines.** The Mac's Drama 3 now runs
+> as a persistent server, like the Spark's (TensorFold `drama3-mlx` 92c09a8e, `--serve`): the first take loads it
+> (5.2 s, about 50 GB with its word check), later takes start at once, and it is unloaded after five idle minutes and
+> before any video or picture job, holding the studio's GPU lock while loaded. **Once loaded, a take's first sound
+> reaches the page 0.23 to 0.30 s after it is asked for** (5.4 s on the first take, 2.7.6's every take). A two-speaker
+> line is now sent a turn a line on both machines (on one line Drama 3 dropped later turns; Fish's own prompt format),
+> and the tab's example is written so: on the M5 Ultra the two-speaker example came back whole on seeds 1 to 4, three
+> of them while playing and one made again without playing. The Mac engine also redraws a part whose last word is
+> missing. Measured through the Mac app: a 46 s read in 16.8 s, a Slate cast line in 1.5 s, every take's words all
+> heard. **Built with Fish Audio.**
+
 > **2.7.6 (2026-10-15): the Mac's Voice tab catches up with the Spark's.** On a Mac a take now **plays while it is
 > made** (the engine's `--stream`, through the same `/api/voice/takes/{id}/live` as on a Spark) and the engine
 > **checks its own words** as it goes (TensorFold `drama3-mlx` 4a8a982f: Whisper on MLX after each part, a runaway tail
@@ -1407,6 +1418,9 @@ and the pack ships no Drama 3 weights.
 - **Settings.** Seed, and Fish's sampling defaults: temperature 1.0, top-p 0.9, top-k 30.
 - **Each take** is a job in the queue, so it never runs beside a video render, and it holds the studio's GPU lock
   folder (`~/studio-gpu.lock.d`) while the model runs, waiting if a script outside the app holds it.
+- **A turn a line.** Text with two or more speaker tags is sent with each turn after the first on a line of its own,
+  on both machines (`voice.dialogue`): written on one line, Drama 3 dropped later turns far more often (TensorFold's
+  measurement: 12 of 48 streamed dialogue takes short on one line, 1 of 48 a turn a line).
 - **The word check.** On a Mac the engine checks itself (TensorFold `drama3-mlx` 4a8a982f or later): every part it
   speaks is heard by Whisper large-v3-turbo on MLX and aligned to the text; words after the end, or a long tail of
   sound, are cut; a part with words missing is drawn again with a new seed (twice at most, the best kept); and a
@@ -1428,6 +1442,20 @@ and the pack ships no Drama 3 weights.
   the project file); ticked, a shot that opens on cast stills sends it as the speaker's reference audio and names it
   in the prompt. A take over 15 s is cut on the sheet first; what does not fit MiniMax's limits is said in the
   preflight and left out.
+
+| Measured, Mac Studio M5 Ultra (TensorFold `drama3-mlx` 92c09a8e, the persistent server, played while made), 2.7.7 | Audio | First sound on the page | Through the app, check included | Words heard |
+|---|---|---|---|---|
+| One speaker, 16 words, first take (loads the server, 5.2 s) | 8.0 s | 5.43 s (engine 0.21 s) | 8.2 s | 16 of 16 |
+| Cloned voice from an MP3 clip (transcript left to Whisper on the CPU first) | 6.6 s | 10.7 s (engine 0.52 s) | 13.4 s | 16 of 16 |
+| Two speakers, the tab's example, seeds 1, 2, 3 | 10.6, 9.4, 11.1 s | 0.30, 0.29, 0.23 s | 4.1, 3.6, 4.1 s | 20 of 20 each |
+| Two speakers, seed 4: short while playing, made again without playing, redrawn once | 9.9 s | 0.28 s | 19.4 s | 20 of 20 |
+| A 120-word read, three parts (two tails trimmed) | 46.4 s | 0.30 s | 16.8 s | 120 of 120 |
+| Slate Cast voice | 3.2 s | 0.30 s | 1.5 s | 12 of 12 |
+| One speaker, 9 words, loaded | 2.5 s | 0.24 s | 1.5 s | 9 of 9 |
+
+First sound on the page is the first byte of `/api/voice/takes/{id}/live` after the take was asked for. Peak memory
+48.5 to 49.9 GB (55.7 GB with a redraw); the server unloaded after 300 idle seconds and before a video job, and gave
+the GPU lock back both times.
 
 | Measured, Mac Studio M5 Ultra (TensorFold `drama3-mlx` 4a8a982f, 8-bit experts, played while made), 2.7.6 | Audio | Engine time | Through the app, check included | Words heard |
 |---|---|---|---|---|
@@ -1457,7 +1485,7 @@ word check loads Whisper on the CPU. Peak memory 48 to 51 GB.
 of the studio runs beside it), about 40 GB of disk for the converted weights (and 39 GB for Fish's checkpoint while
 converting), and TensorFold's Drama 3 port in an environment of its own. The port is on TensorFold's `drama3-mlx`
 branch of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold). `bash oneshot-setup.sh --voice` (or
-`bash scripts/setup-voice.sh` alone, `--verify` to check) does all of it: the clone at 4a8a982f in
+`bash scripts/setup-voice.sh` alone, `--verify` to check) does all of it: the clone at 92c09a8e in
 `~/tensorfold-drama3-mlx`, its venv, Fish's checkpoint, the conversion and a test line. By hand:
 
 ```bash
@@ -1468,7 +1496,11 @@ hf download fishaudio/drama-3 --local-dir ~/models/drama-3        # Fish Audio C
 ~/drama3-venv/bin/python -m tensorfold.drama3 --text "Hello there." --out hello.wav                  # check
 ```
 
-The app finds `~/drama3-venv` and `~/models/drama-3-mlx` itself (`DRAMA3_VENV` and `DRAMA3_MODEL` name others) and
+From `drama3-mlx` 92c09a8e the app runs the engine as a persistent server (`python -m tensorfold.drama3 --serve`,
+the same protocol as the Spark's), as described for the Spark [below](#voice-on-a-dgx-spark-cuda): loaded on the first
+take, unloaded after five idle minutes (`DRAMA3_IDLE_S`) and before any other job, under the GPU lock and a memory
+guard (vm_stat's free, inactive, speculative and purgeable pages; 8 GB, `DRAMA3_GUARD_GB`). An older engine runs once a
+take. The app finds `~/drama3-venv` and `~/models/drama-3-mlx` itself (`DRAMA3_VENV` and `DRAMA3_MODEL` name others) and
 says on the tab what is missing. `DRAMA3_BACKEND=mlx|cuda` picks the engine (`mlx` on a Mac, `cuda` on a DGX Spark by
 default). The API: `GET /api/voice/state`, `POST /api/voice/takes {text, ref_audio?, ref_text?, consent?, seed?,
 temperature?, top_p?, top_k?}` (a job of kind `voice`), `GET /api/voice/takes`, `GET /api/voice/takes/{id}/audio`,

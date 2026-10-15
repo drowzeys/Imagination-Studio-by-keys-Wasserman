@@ -21,7 +21,7 @@
 set -euo pipefail
 
 REPO="https://github.com/drowzeys/TensorFold.git"
-MLX_BRANCH="drama3-mlx"; MLX_COMMIT="4a8a982f"
+MLX_BRANCH="drama3-mlx"; MLX_COMMIT="92c09a8e"
 CUDA_BRANCH="drama3-cuda"; CUDA_COMMIT="81173e6c"
 VERIFY=0
 for arg in "$@"; do
