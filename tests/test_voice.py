@@ -390,10 +390,11 @@ with open(out, "wb") as w:
     for i in range(8):
         w.write(samples[i * 22050:(i + 1) * 22050]); w.flush(); time.sleep(0.05 if "--stream" in args else 0)
     w.seek(4); w.write(struct.pack("<I", 36 + len(samples))); w.seek(40); w.write(struct.pack("<I", len(samples)))
+short = "--stream" in args and "--short" in args
 json.dump({"frames": 43, "audio_s": 2.0, "frames_per_s": 73.0, "rtf": 0.35, "total_s": 0.7, "first_audio_s": 0.234, "stream": "--stream" in args,
            "peak_memory_gb": 49.4, "chunks": 2, "finish": ["eos", "stop_rule"],
            "verify": [{"words": 5, "matched": 5, "missing": [], "action": "ok", "attempts": 1, "heard": "One two three four five.", "asr_s": 0.1, "coverage": 1.0},
-                      {"words": 4, "matched": 3, "missing": ["cat"], "action": "trim", "attempts": 2, "cut_s": 1.9, "heard": "It is the", "asr_s": 0.1}]},
+                      {"words": 4, "matched": 3, "missing": ["cat"], "action": "redraw" if short else "trim", "attempts": 2, "cut_s": 1.9, "heard": "It is the", "asr_s": 0.1}]},
           open(stats, "w"))
 print("[drama3] wrote", out, "first audio 0.234s, total 0.7s", flush=True)
 """
@@ -411,7 +412,7 @@ class FakeStreaming(Fake):
     def command(self, text_file, out, stats, reference, seed, sampling, live=False):
         command = super().command(text_file, out, stats, reference, seed, sampling)
         self.seen[-1]["live"] = live
-        return command + (["--stream"] if live else [])
+        return command + (["--stream"] if live else []) + (["--short"] if "SHORT" in self.seen[-1]["text"] else [])
 
 
 def test_an_mlx_take_plays_while_made_and_its_score_is_the_engines_check():
@@ -436,6 +437,11 @@ def test_an_mlx_take_plays_while_made_and_its_score_is_the_engines_check():
         assert take["asr"]["missing"] == ["cat"]
         with wave.open(str(server.HOME / take["path"])) as w:
             assert w.getnframes() == 2 * 44100
+        # a part short while it played: made once more without playing, where the engine can redraw it
+        job = client.post("/api/voice/takes", json={"text": "SHORT take. It is the cat."}).json()
+        take = wait(job["id"])["voice"]
+        assert [s["live"] for s in fake.seen[-2:]] == [True, False] and take["retaken"]["played"][1]["action"] == "redraw"
+        assert take["verify"][1]["action"] == "trim" and take["streamed"] is False and "made again without playing" in wait(job["id"])["log"]
         # not played as it is made: no --stream, so the engine may draw a part again
         job = client.post("/api/voice/takes", json={"text": "Quiet.", "live": False}).json()
         assert wait(job["id"])["status"] == "done" and fake.seen[-1]["live"] is False

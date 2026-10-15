@@ -28,7 +28,7 @@ async function voLoad() { try { VO.takes = await api("/api/voice/takes"); } catc
 const voLine = t => [t.duration != null ? t.duration.toFixed(1) + " s" : null, t.frames_per_s ? t.frames_per_s + " frames/s" : null, t.rtf ? "made in " + t.rtf + "× its length" : null,
   t.first_audio_ms ? "first sound after " + (t.first_audio_ms / 1000).toFixed(2) + " s" : null, t.load_s ? "model loaded in " + Math.round(t.load_s) + " s" : null,
   t.asr && t.asr.score != null ? "Whisper" + (t.asr.by === "engine" ? " (engine)" : "") + " " + t.asr.score + " % (" + t.asr.found + " of " + t.asr.words + " words)" : t.asr && t.asr.skipped ? "no word check: " + t.asr.skipped : null,
-  "seed " + t.seed, t.reference ? "cloned voice" : null, voCheck(t)].filter(Boolean).join(" · ");
+  "seed " + t.seed, t.reference ? "cloned voice" : null, voCheck(t), t.retaken ? "made again without playing: a part was short while it played" : null].filter(Boolean).join(" · ");
 // a take (or any sound file of the studio) as a reference audio clip of a MiniMax H3 Ref2VA clip: 2 to 15 s each
 async function voUseAsRef(path, seconds) {
   if (!S.ref_media) return toast("Reference audio needs MiniMax H3 Ref2VA, which is not installed here (" + (S.platform === "spark" ? "oneshot-setup-spark.sh" : "oneshot-setup.sh") + " --ref2va).");

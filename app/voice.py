@@ -845,32 +845,23 @@ def perform(job: dict) -> bool:
         stats.write_text(json.dumps(measured, indent=1) + "\n")
     else:
         live = bool(getattr(one, "streams", False) and params.get("live", True))
-        if live:
-            command = one.command(text_file, wav, stats, reference, int(params["seed"]), {k: params[k] for k in SAMPLING}, live=True)
-        else:
-            command = one.command(text_file, wav, stats, reference, int(params["seed"]), {k: params[k] for k in SAMPLING})
-        if not take_lock(job):
-            return False
-        if live:
-            wav.unlink(missing_ok=True)
-            LIVE[job["id"]] = {"parts": [wav], "wav": True, "done": False, "finished": 0, "gap_s": 0}
-        try:
-            job["progress"] = {"stage": "Drama 3 voice", "at": 0, "of": 1}
-            if not run(job, command, {}):
+        retaken = None
+        while True:
+            outcome = mlx_take(job, one, text_file, wav, stats, reference, params, live)
+            if outcome is None:
                 return False
-        finally:
-            drop_lock(job)
-            if live:
-                LIVE[job["id"]].update(finished=1, done=True)
-                threading.Timer(60, LIVE.pop, args=(job["id"], None)).start()
-        try:
-            measured = json.loads(stats.read_text())
-        except (OSError, ValueError):
-            measured = {}
-        if measured.get("first_audio_s") is not None:
-            measured["first_audio_ms"] = round(1000 * float(measured["first_audio_s"]), 1)
-        loaded = re.search(r"\[drama3\] loaded .* in ([\d.]+)s", job.get("log") or "")
-        measured.setdefault("load_s", float(loaded.group(1)) if loaded else None)
+            measured = outcome
+            short = [part for part in (measured.get("verify") or []) if isinstance(part, dict) and part.get("action") == "redraw"]
+            if not (live and short):
+                break
+            # played as it was made, a part came out with words missing and could not be drawn again (sent audio is not
+            # taken back): the take is made once more without playing, where the engine redraws such a part itself
+            # (measured on the M5 Ultra: two-speaker takes that played short at 35 and 80 % came back whole)
+            retaken = {"played": checked_by_engine(measured), "seconds": measured.get("audio_s")}
+            job["log"] += "[tensorfold] a part was short while playing: the take is made again without playing, so it can be redrawn\n"
+            live = False
+        if retaken:
+            measured["retaken"] = retaken
     if not wav.is_file():
         raise RuntimeError("Drama 3 finished without writing its take")
     take = {"id": job["id"], "path": relative(wav), "title": params.get("title") or job.get("title"), "text": params["text"],
@@ -880,7 +871,7 @@ def perform(job: dict) -> bool:
             "device_gb": measured.get("device_gb"),
             "chunks": measured.get("chunks"), "finish": measured.get("finish"), "first_audio_ms": measured.get("first_audio_ms"),
             "load_s": measured.get("load_s"), "engine_s": measured.get("engine_s"), "verify": checked_by_engine(measured),
-            "streamed": bool(measured.get("stream")),
+            "streamed": bool(measured.get("stream")), "retaken": measured.get("retaken"),
             "reference": {"path": params["ref_audio"], "text": params["ref_text"], "consent": True} if params.get("ref_audio") else None,
             "slate": params.get("slate"), "credit": CREDIT}
     if params.get("asr") and take["verify"]:
@@ -901,6 +892,42 @@ def perform(job: dict) -> bool:
     job["voice"] = take
     job["progress"] = None
     return True
+
+
+def mlx_take(job: dict, one, text_file: Path, wav: Path, stats: Path, reference, params: dict, live: bool) -> dict | None:
+    """One run of the MLX engine's command line under the GPU lock: its stats (load time and first sound added), or
+    None when the job was cancelled. ``live``: --stream, the WAV at ``wav`` growing as it is spoken (/live reads it)."""
+
+    sampling = {k: params[k] for k in SAMPLING}
+    if live:
+        command = one.command(text_file, wav, stats, reference, int(params["seed"]), sampling, live=True)
+    else:
+        command = one.command(text_file, wav, stats, reference, int(params["seed"]), sampling)
+    if not take_lock(job):
+        return None
+    if live:
+        wav.unlink(missing_ok=True)
+        LIVE[job["id"]] = {"parts": [wav], "wav": True, "done": False, "finished": 0, "gap_s": 0}
+    stats.unlink(missing_ok=True)
+    began = len(job.get("log") or "")
+    try:
+        job["progress"] = {"stage": "Drama 3 voice" + ("" if live or not params.get("live", True) else ", again without playing"), "at": 0, "of": 1}
+        if not run(job, command, {}):
+            return None
+    finally:
+        drop_lock(job)
+        if live:
+            LIVE[job["id"]].update(finished=1, done=True)
+            threading.Timer(60, LIVE.pop, args=(job["id"], None)).start()
+    try:
+        measured = json.loads(stats.read_text())
+    except (OSError, ValueError):
+        measured = {}
+    if measured.get("first_audio_s") is not None:
+        measured["first_audio_ms"] = round(1000 * float(measured["first_audio_s"]), 1)
+    loaded = re.search(r"\[drama3\] loaded .* in ([\d.]+)s", (job.get("log") or "")[began:])
+    measured.setdefault("load_s", float(loaded.group(1)) if loaded else None)
+    return measured
 
 
 def checked_by_engine(measured: dict) -> list[dict] | None:
