@@ -1,10 +1,10 @@
-# keys+Wasserman Slate AI Studio, powered by TensorFold (Mac + DGX Spark)
+# keys+Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3 (Mac + DGX Spark)
 
 **An AI film studio on your own machine: plan a film the way a crew does in the Wasserman Slate AI Studio, and render
 it here. Qwen-Image-2.1-Turbo images and MiniMax H3 / FastH3 video with sound, on TensorFold: Apple-silicon Macs
 (Metal) and the NVIDIA DGX Spark (CUDA).**
 
-[![Wasserman Slate AI Studio, powered by TensorFold: an AI film studio for Mac and NVIDIA DGX Spark](samples/banner.jpg)](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark)
+[![Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3: an AI film studio for Mac and NVIDIA DGX Spark](samples/banner.jpg)](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3)
 
 *Banner art made with this studio's own Qwen-Image-2.1 step (1664x928, seed 25); the lettering was set afterwards.*
 
@@ -23,9 +23,10 @@ we share is the best AI film studio there is, and this pack is where his plannin
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
 Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
-contributor. This pack is their work, ported, pinned and measured. See [CREDITS.md](CREDITS.md). Built with Qwen.
+contributor, and Fish Audio (Drama 3, text to speech). This pack is their work, ported, pinned and measured. See
+[CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
-**2.7.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.7.3** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
@@ -118,7 +119,7 @@ badge, or a purple `MAC · APPLE SILICON MX · H3-METAL`.
 the Qwen team for Qwen-Image-2.1-Turbo, and the ComfyUI team for the runtime this build stands on.
 
 ```bash
-git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark.git && cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark
+git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git && cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3
 sudo apt install -y git ffmpeg
 bash oneshot-setup.sh            # the same command as on a Mac: on Linux it runs oneshot-setup-spark.sh
                                  # 99 GB of models, the engine build, a test image and a 5 second test clip
@@ -136,7 +137,7 @@ and the render says so.
 #### Upgrade from 2.5 or 2.6 (DGX Spark)
 
 ```bash
-cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark && git pull
+cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3 && git pull
 bash oneshot-setup.sh --upgrade  # on Linux: oneshot-setup-spark.sh --upgrade
 ```
 
@@ -298,6 +299,14 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.7.3 (2026-10-15): the new name.** The studio is now *Wasserman Slate AI Studio, powered by TensorFold, built
+> with integrated Fish Audio Drama 3*, and the repository moved to
+> `drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3` (the old
+> address redirects). Fish Audio Drama 3, a 35B text-to-speech model with up to 16 voices per scene, voice cloning and
+> direction tags, is being ported to run locally on TensorFold: natively on CUDA for the DGX Spark and on MLX for the
+> Mac. **The voice step is not in this release yet**; it arrives when both ports pass their parity checks against
+> Fish's reference. No Fish Audio cloud API is used, and the pack ships no Drama 3 weights.
 
 > **2.7.2 (2026-10-14): typing a custom size.** The Width and Height boxes of a custom resolution, and the box of
 > a custom number of passes, took one digit at a time: every key redrew the form and the box under the cursor with it.
@@ -668,8 +677,8 @@ megabytes. On an M1 to M4 the setup also writes the 8-bit FastH3 weights (37 GB)
 
 ```bash
 brew install python@3.11 uv ffmpeg
-git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark.git
-cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark
+git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git
+cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3
 bash oneshot-setup.sh --app             # engine, image model, FastH3, 2x decoder, the app; ends with a test clip
 bash oneshot-setup.sh --turbo --app     # the same plus MiniMax H3 Turbo (64 GB more on disk, 128 GB of memory)
 bash oneshot-setup.sh --ref2va --app    # the same plus reference pictures to video (64 GB more on disk, 128 GB of memory)
@@ -678,7 +687,7 @@ bash oneshot-setup.sh --ref2va --app    # the same plus reference pictures to vi
 #### Upgrade from 2.5 or 2.6 (Mac)
 
 ```bash
-cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark && git pull
+cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3 && git pull
 bash oneshot-setup.sh --upgrade         # add --app to rebuild the double-clickable app as well
 ```
 
@@ -699,7 +708,7 @@ if it is not running and opens it in your browser; double-click again to come ba
 
 **Or hand it to your coding agent.** Paste this:
 
-> Clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark and follow its AGENTS.md section "Install for a
+> Clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3 and follow its AGENTS.md section "Install for a
 > person and build the one-click app". Tell me before any large download starts and when the app is ready.
 
 `--turbo` adds MiniMax H3's own transformer and its Turbo adapter, and with them a second engine card in the app;
@@ -1272,7 +1281,7 @@ else; `--make-package DIR` writes those archives from a bundle. No LoRA file is 
 **For AI agents** (no prompts anywhere; run in this order on a new machine):
 
 ```bash
-git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark.git && cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark
+git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git && cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3
 bash oneshot-setup.sh --no-render --no-loras        # the Studio (oneshot-setup-spark.sh on a DGX Spark); model weights as listed under One-shot
 bash oneshot-essential-bundle.sh --json > lora-bundle.json; echo "exit $?"   # 0 all present, 1 some unavailable (listed), 2 usage or disk
 bash oneshot-essential-bundle.sh --verify --json    # fetches nothing: "present", "unavailable", "gated", and "menu" (group -> LoRAs -> state)
@@ -1776,8 +1785,8 @@ gives the same scene with a different rendering.
 ## One-shot
 
 ```bash
-git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark.git
-cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark
+git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git
+cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3
 brew install python@3.11 uv ffmpeg
 bash oneshot-setup.sh               # both models and the 2x decoder: 182 GB of weights
 bash oneshot-setup.sh --image-only  # or just Qwen-Image-2.1: 33 GB
@@ -1788,7 +1797,7 @@ bash oneshot-setup.sh --image-only  # or just Qwen-Image-2.1: 33 GB
 1. Gets TensorFold 0.6.5 with the H3 and Qwen-Image families (`drowzeys/TensorFold` at `a2068c03`), from the **GHCR
    prebuilt carrier** when Docker is available (checksums verified), otherwise from git at the same commit.
    The native FastH3 engine (`tf-h3-dit`) comes from the same carrier, or without Docker as a checksummed download
-   from the [v2.0 release](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark/releases/tag/v2.0); no Zig toolchain is needed.
+   from the [v2.0 release](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/tag/v2.0); no Zig toolchain is needed.
 2. Installs it with mflux at `add5164e` and the dependency lock ([`requirements.lock`](requirements.lock): mlx 0.32.3,
    mlx-lm 0.32.0, mlx-vlm 0.7.4, …) into its own venv at `~/.local/opt/tensorfold-studio`.
 3. Downloads `Qwen/Qwen-Image-2.1-Turbo` (33 GB) to `~/qwen-models/Qwen-Image-2.1-Turbo`. Where an earlier install's
