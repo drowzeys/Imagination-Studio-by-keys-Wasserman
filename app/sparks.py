@@ -24,6 +24,12 @@ Kept in the studio folder, under sparks/:
   sparks.json    {"workers": [{"address", "name", "folder", "enabled"}], "sparks": the number new jobs start with}
   takes.jsonl    one line per finished clip: its path, seed, settings and the Spark that rendered it
   tunnels.json   the tunnels this app has open (closed by the next start if this one was killed)
+
+A worker may also be a Mac (Apple silicon, its Studio installed with oneshot-setup.sh). It says so on /api/spark/self
+("platform": "mac", "engine": the MLX or native engine) and is handed the same single clips, FastH3 from text or a
+first and last frame, when it has what the clip needs; what only a Spark's install names the same way (a text encoder
+chosen by its file) stays on the Sparks. A Mac has no memory guard to ask: its memory is not shared with a CUDA
+driver. The commands run on a worker over ssh are written for bash on Linux and on macOS (no setsid, no /proc there).
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ import json
 import math
 import os
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -75,6 +82,8 @@ STATES = {"new": "not checked yet", "unreachable": "does not answer over ssh", "
           "stopped": "its Studio app is not running", "update": "its Studio code differs from this Spark's",
           "ready": "idle", "busy": "rendering", "down": "stopped answering"}
 MAC = "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine."
+# what a worker's platform is called; a worker that does not say is a Spark
+PLATFORMS = {"spark": "DGX Spark", "mac": "Mac"}
 ONE_CLIP = ("Splitting a single clip across Sparks is measured (1.40x on 2, 1.73x on 3, 1.77x on 4 for a 5 s 864x480 clip) "
             "and is not in the app yet.")
 
@@ -169,7 +178,9 @@ def shell(address: str, command: str, timeout: float = 30) -> tuple[int, str]:
     when ssh itself cannot reach it or log in."""
 
     try:
-        done = subprocess.run([*SSH, address, command], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        # run by bash whatever the login shell there is (zsh on a Mac has no /dev/tcp): ssh hands the line to that shell
+        done = subprocess.run([*SSH, address, "bash -c " + shlex.quote(command)], capture_output=True, text=True, timeout=timeout,
+                              stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return 255, f"no answer over ssh in {timeout:g} s"
     except OSError as error:
@@ -250,9 +261,18 @@ def capable(kind: str, params: dict, info: dict | None) -> str:
     if missing:
         return "the LoRA " + ", ".join(missing) + " is not installed there"
     encoder = params.get("text_encoder")
-    if encoder not in (None, "", "regular") and Path(str(encoder)).name not in (info.get("text_encoders") or []):
-        return "the text encoder file is not on that Spark"
+    if encoder not in (None, "", "regular"):
+        if platform_of(info) != "spark":  # a Spark names the file in ComfyUI's folder, a Mac takes a path: not the same setting
+            return "a text encoder chosen by its file is a Spark's setting; this worker is a " + PLATFORMS.get(platform_of(info), platform_of(info))
+        if Path(str(encoder)).name not in (info.get("text_encoders") or []):
+            return "the text encoder file is not on that Spark"
     return ""
+
+
+def platform_of(info: dict | None) -> str:
+    """What a worker runs on, from its /api/spark/self: "spark" or "mac"."""
+
+    return str((info or {}).get("platform") or "spark")
 
 
 def here_only(kind: str, params: dict) -> str:
@@ -358,7 +378,7 @@ class Hub:
                 "job": live["job"], "version": info.get("version") or live.get("version"),
                 "memory_gb": round(memory["available_mb"] / 1000, 1) if memory.get("available_mb") is not None else live.get("memory_gb"),
                 "disk_gb": info.get("disk_gb"),
-                "guard": bool(info.get("guard")),
+                "guard": bool(info.get("guard")), "platform": platform_of(info) if info else None, "engine": info.get("engine"),
                 "can": {key: bool(info.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(info.get("loras") or [])} if info else None}
 
     def overview(self) -> dict:
@@ -372,6 +392,7 @@ class Hub:
         return {"supported": True, "limit": LIMIT, "note": "", "available": 1 + sum(1 for row in rows if row["usable"]), "listed": 1 + len(rows),
                 "default": max(1, min(int(found.get("sparks") or 1), LIMIT)), "workers": rows, "folder": self.default_folder(),
                 "this": {"name": self.name, "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
+                         "platform": platform_of(mine), "engine": mine.get("engine"),
                          "memory_gb": round((mine.get("memory") or {}).get("available_mb", 0) / 1000, 1), "disk_gb": mine.get("disk_gb"),
                          "can": {key: bool(mine.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(mine.get("loras") or [])}}}
 
@@ -452,14 +473,15 @@ class Hub:
         where = f'"$HOME/{worker.get("folder") or self.default_folder()}"'
         code, said = self.shell(worker["address"], (
             f'F={where}; P="${{PREFIX:-{PREFIX}}}"; H="{THEIR_HOME}"; echo "host $(hostname)"; echo "version $(cat "$F/VERSION" 2>/dev/null)"; '
-            '[ -f "$F/app/server.py" ] && echo "pack yes"; [ -x "$P/venv/bin/python" ] && echo "install yes"; '
-            'grep -E "^(MemTotal|MemAvailable)" /proc/meminfo; '
+            '[ -f "$F/app/server.py" ] && echo "pack yes"; [ -x "$P/venv/bin/python" ] && echo "install yes"; echo "os $(uname -s)"; '
+            'if [ -r /proc/meminfo ]; then grep -E "^(MemTotal|MemAvailable)" /proc/meminfo; '
+            'else echo "MemTotal: $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )) kB"; fi; '
             f'(exec 3<>/dev/tcp/127.0.0.1/{PORT}) 2>/dev/null && echo "app yes"; '
             '[ -f "$H/app.pid" ] && kill -0 "$(cat "$H/app.pid")" 2>/dev/null && echo "ours yes"; true'), 25)
         found = {"reached": code == 0, "said": said}
         for line in said.splitlines() if code == 0 else []:
             key, _, value = line.partition(" ")
-            if key in ("host", "version", "pack", "install", "app", "ours"):
+            if key in ("host", "version", "pack", "install", "app", "ours", "os"):
                 found[key] = value.strip()
             elif key.rstrip(":") in ("MemTotal", "MemAvailable"):
                 found[key.rstrip(":")] = int(value.split()[0]) // 1024
@@ -483,7 +505,7 @@ class Hub:
             self.hang_up(address)
             set_to("bare", ("No Studio code in " + (worker.get("folder") or self.default_folder()) + " there. " if not found.get("pack") else "")
                    + ("" if found.get("install") else "No Studio environment there (models, ComfyUI, the engine): run oneshot-setup-spark.sh on that Spark once; "
-                      "“Update and start” sends the code, not the models."), info=None)
+                      "on a Mac oneshot-setup.sh; “Update and start” sends the code, not the models."), info=None)
             return live
         if not found.get("app"):
             self.hang_up(address)
@@ -500,7 +522,7 @@ class Hub:
             set_to("down", "Its app does not answer through the tunnel: " + str(error)[-160:], info=None)
             return live
         changed = differs(self.code(), info.get("code"))
-        if changed or not info.get("guard"):
+        if changed or (not info.get("guard") and platform_of(info) == "spark"):  # a Mac has no memory guard to bring
             set_to("update", f"Its Studio code differs from this Spark's in {len(changed)} file{'s' if len(changed) != 1 else ''} ({', '.join(changed[:3])}"
                    + (", …" if len(changed) > 3 else "") + "): “Update and start” brings it level.", info=info)
             return live
@@ -543,31 +565,37 @@ class Hub:
             live.update(state="update", why="The code is there. An app that this Studio did not start is running on that Spark: stop it there, "
                         "then press “Update and start” again.", checked=time.time(), info=None)
             return live
-        code, said = self.shell(address, self.stop_command(folder, comfy=False) + "; " + self.start_command(folder), 40)
+        # the app needs a few seconds to come up: waited for there, in the same ssh call (a Mac's sshd holds a burst of
+        # short logins from one address against it)
+        code, said = self.shell(address, self.stop_command(folder, comfy=False) + "; " + self.start_command(folder) + "; " + self.up_command(), 75)
         if code:
             live.update(state="stopped", why="Its app could not be started: " + said[-200:], checked=time.time(), info=None)
             return live
-        for _ in range(30):  # the app needs a few seconds to come up
-            time.sleep(1)
-            if self.probe(worker).get("app"):
-                break
         return self.check(worker)
 
     @staticmethod
     def start_command(folder: str) -> str:
-        # in a subshell of its own with every stream closed off: ssh returns at once and the app outlives it
+        # in a subshell of its own with every stream closed off: ssh returns at once and the app outlives it (in a session
+        # of its own where there is setsid; macOS has none, and nohup with no terminal is enough there)
         return (f'cd "$HOME/{folder}" && mkdir -p "{THEIR_HOME}" && (STUDIO_PIDFILE="{THEIR_HOME}/app.pid" HOST=127.0.0.1 PORT={PORT} '
-                f'nohup setsid bash scripts/app.sh > "{THEIR_HOME}/app.log" 2>&1 < /dev/null &) && echo started')
+                f'nohup $(command -v setsid) bash scripts/app.sh > "{THEIR_HOME}/app.log" 2>&1 < /dev/null &) && echo started')
+
+    @staticmethod
+    def up_command(wait: int = 30) -> str:
+        """Wait there, up to ``wait`` seconds, for the app to answer on its 127.0.0.1:PORT."""
+
+        return (f'for i in $(seq {wait}); do (exec 3<>/dev/tcp/127.0.0.1/{PORT}) 2>/dev/null && echo "app up" && break; sleep 1; done; true')
 
     @staticmethod
     def stop_command(folder: str, comfy: bool = True) -> str:
         """Stop the app a head started on a worker (by the pid that app wrote down, checked to be a Studio app) and,
         with ``comfy``, the ComfyUI server behind it, which gives the models' memory back."""
 
-        stop = (f'H="{THEIR_HOME}"; if [ -f "$H/app.pid" ] && grep -qa "app/server.py" "/proc/$(cat "$H/app.pid")/cmdline" 2>/dev/null; then '
+        stop = (f'H="{THEIR_HOME}"; if [ -f "$H/app.pid" ] && ps -o command= -p "$(cat "$H/app.pid")" 2>/dev/null | grep -q "app/server.py"; then '
                 'kill "$(cat "$H/app.pid")"; for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$(cat "$H/app.pid")" 2>/dev/null || break; sleep 0.5; done; '
                 'rm -f "$H/app.pid"; echo "app stopped"; else echo "no app of ours"; fi')
-        return stop + (f'; cd "$HOME/{folder}" && bash spark/comfy.sh stop' if comfy else "")
+        # ComfyUI is a Spark's: a Mac renders without it
+        return stop + (f'; if [ "$(uname -s)" = Linux ]; then cd "$HOME/{folder}" && bash spark/comfy.sh stop; fi' if comfy else "")
 
     def stop(self, worker: dict) -> dict:
         """A worker's app (the one a head started) and its ComfyUI server stopped: its memory is free again."""
@@ -909,6 +937,8 @@ class Hub:
             mode, says = "parallel", f"One clip per Spark, {min(used, clips)} at a time: {clips} clips on {min(used, clips)} Sparks."
         else:
             mode, says = "one", f"This clip renders on one Spark, the first that is free of the {used}; other queued clips render beside it. " + ONE_CLIP
+        macs = [name for name, platform in ((worker.get("name") or worker["address"], platform_of(self.state(worker["address"])["info"]))
+                                            for worker in self.workers() if worker["address"] in able[:used - 1]) if platform != "spark"]
         estimate = None
         try:  # one clip's time on one Spark: given, or the app's own measured figure for these settings
             seconds = float(body.get("seconds") or self.timing(kind, params) or 0)
@@ -916,8 +946,11 @@ class Hub:
             seconds = 0
         if seconds > 0:
             faster, measured = speedup(used, clips) if mode == "parallel" else (1.0, True)
+            note = "an estimate from one measured run of 8 clips" + ("" if measured else f"; {used} Sparks were not measured (five exist)")
+            if macs and mode == "parallel":  # the run was on Sparks: a Mac's clip takes its own time
+                measured, note = False, note + "; measured on Sparks only, and " + ", ".join(macs) + " is a Mac, whose clips take longer"
             estimate = {"seconds": int(seconds * clips / faster), "one_spark": int(seconds * clips), "faster": round(faster, 2), "measured": measured,
-                        "note": "an estimate from one measured run of 8 clips" + ("" if measured else f"; {used} Sparks were not measured (five exist)")}
+                        "note": note}
         return {"supported": True, "limit": LIMIT, "chosen": chosen, "available": available, "listed": listed, "used": used, "mode": mode,
                 "count": count, "says": says, "without": without, "estimate": estimate}
 
@@ -1029,8 +1062,9 @@ class Hub:
         return router
 
 
-def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, models: Path) -> dict:
-    """What an app says of itself on /api/spark/self."""
+def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, installed: dict) -> dict:
+    """What an app says of itself on /api/spark/self. ``installed``: {"fasth3", "image"}, found where this platform keeps
+    the models (ComfyUI's folders on a Spark, FASTH3_DIR and QWEN_MODEL_DIR on a Mac)."""
 
     try:
         disk = round(shutil.disk_usage(home).free / 1e9, 1)
@@ -1038,7 +1072,6 @@ def about(home: Path, code: dict, state: dict, loras: list, active: int, memory:
         disk = None
     return {"name": socket.gethostname(), "version": state["version"], "platform": state["platform"], "engine": state["engine"],
             "guard": bool(memory), "code": code, "active": active, "memory": memory, "disk_gb": disk,
-            "fasth3": any((models / "FastH3-Comfy/diffusion_models").glob("*fasth3*")),
-            "image": any((models / "Qwen-Image-2.1-Comfy/diffusion_models").glob("qwen_image_2.1*.safetensors")),
+            "fasth3": bool(installed.get("fasth3")), "image": bool(installed.get("image")),
             "ref2va": state["ref2va"], "ref2va_turbo": state["ref2va_turbo"], "ffmpeg": state["ffmpeg"],
             "loras": loras, "text_encoders": state["text_encoders"]}

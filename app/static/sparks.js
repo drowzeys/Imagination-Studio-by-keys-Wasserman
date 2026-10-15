@@ -43,6 +43,8 @@ function spkQueue() { const box = document.querySelector("#sparks"); if (!box ||
     Array.from({ length: d.limit }, (_, i) => el("button", { type: "button", class: "small fit" + (SPK.n === i + 1 ? " on" : "") + (i + 1 > d.available ? " far" : ""), onclick: () => spkSet(i + 1) }, String(i + 1)))),
     el("div", { class: "note" }, spkCount(d, SPK.n) + (SPK.n > 1 ? ": queued clips render one per Spark." : ".")))); }
 const spkDo = async (path, body, method) => { try { SPK.data = await api(path, body, method); SPK.plans = {}; } catch (e) { toast(e.message, 6000); } spkQueue(); render(); };
+// a worker on a Mac (app/sparks.py PLATFORMS): said beside its name, with the engine it renders on
+const spkOn = w => w.platform === "mac" ? "Mac · " + (w.engine || "MLX engine") : null;
 const spkHas = can => !can ? "" : [can.fasth3 ? "FastH3 clips (text, first and last frame)" : "no FastH3", can.ref2va ? "Ref2VA" + (can.ref2va_turbo ? " with Turbo" : "") : "no Ref2VA", can.image ? "image model" : "no image model",
   can.loras ? can.loras + " LoRA" + (can.loras === 1 ? "" : "s") : "no LoRAs", can.ffmpeg ? "ffmpeg" : "no ffmpeg"].join(" · ");
 const spkDot = state => el("span", { style: "display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:" + ({ ready: "var(--ok)", busy: "var(--warn)", update: "var(--warn)", stopped: "#94a3b8", new: "#64748b" }[state] || "var(--bad)") });
@@ -57,7 +59,7 @@ function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}
       el("button", { class: "small", disabled: !!w.working, title: "Send this Spark's Studio code to it (rsync over ssh, as you), start its app on its own 127.0.0.1, and check it again. Models are not sent.", onclick: () => spkDo("/api/sparks/workers/" + a(w.address) + "/update", {}) }, "Update and start"),
       el("button", { class: "small", disabled: !!w.working, title: "Stop its Studio app and its ComfyUI server: its memory is free again", onclick: () => confirm("Stop the Studio app on " + w.name + " and free its memory?") && spkDo("/api/sparks/workers/" + a(w.address) + "/stop", {}) }, "Stop"),
       el("button", { class: "small", title: "Take this Spark off the list (what runs on it is left as it is)", onclick: () => confirm("Remove " + w.name + " from the list?") && spkDo("/api/sparks/workers/" + a(w.address), undefined, "DELETE") }, "Remove")),
-    el("div", { class: "note" }, [w.version ? "Studio " + w.version : null, w.guard ? "memory guard" : w.state === "ready" || w.state === "busy" ? null : w.version ? "memory guard not confirmed" : null, w.memory_gb != null ? w.memory_gb + " GB of memory available" : null,
+    el("div", { class: "note" }, [spkOn(w), w.version ? "Studio " + w.version : null, w.guard ? "memory guard" : w.platform === "mac" || w.state === "ready" || w.state === "busy" ? null : w.version ? "memory guard not confirmed" : null, w.memory_gb != null ? w.memory_gb + " GB of memory available" : null,
       w.disk_gb != null ? w.disk_gb + " GB of disk free" : null, w.job ? "rendering job " + w.job : null].filter(Boolean).join(" · ")),
     w.can ? el("div", { class: "note" }, "Renders: " + spkHas(w.can)) : null,
     w.why || (w.unusable && w.state === "ready") ? el("div", { class: "note", style: "color:var(--warn)" }, w.why || w.unusable) : null);
@@ -69,7 +71,7 @@ function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}
     d.workers.map(row),
     el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "fit", disabled: !d.workers.length, onclick: () => spkDo("/api/sparks/check", {}) }, "Check all"), el("span")),
     el("h3", {}, "Add a Spark"),
-    el("div", { class: "note" }, "Its address as you would type it after ssh. It needs the Studio installed once (oneshot-setup-spark.sh, with the FastH3 models); “Update and start” then sends this Spark's Studio code and starts its app. No password is asked and nothing is installed as root: if ssh asks for a password, set up a key login first."),
+    el("div", { class: "note" }, "Its address as you would type it after ssh. It needs the Studio installed once (oneshot-setup-spark.sh, with the FastH3 models; on a Mac oneshot-setup.sh, which takes FastH3 clips on its own engine); “Update and start” then sends this Spark's Studio code and starts its app. No password is asked and nothing is installed as root: if ssh asks for a password, set up a key login first."),
     el("div", { class: "row" }, field("Address", bind(f, "address", el("input", { placeholder: "10.100.10.5  or  user@spark-5" }))), field("Studio folder there, under the home folder", bind(f, "folder", el("input", { placeholder: d.folder }))),
       el("button", { class: "primary fit", onclick: async () => { if (!f.address.trim()) return toast("Give the Spark's address"); await spkDo("/api/sparks/workers", { address: f.address.trim(), folder: f.folder.trim() || null }); f.address = ""; } }, "Add")));
   return box; }

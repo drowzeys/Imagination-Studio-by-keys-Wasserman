@@ -171,7 +171,7 @@ Rules:
   of `CODE`, compared by hash; *Update and start* sends them with rsync) and its own memory guard, which is asked
   before a clip is sent. A worker silent for `LOST` seconds is marked down and its clip goes back to the queue; do
   not make that wait longer, and never retry a worker that went down without a person's *Check*. `MEASURED` is one
-  measured run: change it only with a new one. One clip split across Sparks (the engine's `h3-cuda-multispark`
+  measured run: change it only with a new one. A worker may be a Mac (`platform` "mac" on `/api/spark/self`): it takes the same single clips when it has what they need, has no memory guard to ask, and every command sent over ssh runs under bash and needs neither `setsid` nor `/proc`; keep it so. One clip split across Sparks (the engine's `h3-cuda-multispark`
   branch) is measured and is not in the app: do not wire part of it in.
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's

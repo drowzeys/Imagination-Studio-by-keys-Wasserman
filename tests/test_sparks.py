@@ -108,7 +108,7 @@ class Worker:
 
         self.http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self.http.server_address[1]}"
-        self.address = f"10.9.9.{self.http.server_address[1] % 250 + 1}"
+        self.address = f"10.9.{self.http.server_address[1] // 256}.{self.http.server_address[1] % 256}"  # one per port: never two alike
         threading.Thread(target=self.http.serve_forever, daemon=True).start()
 
 
@@ -519,6 +519,75 @@ def test_a_mac_shows_one_and_says_why():
     assert not mac.started  # no loop, no ssh, on a Mac
 
 
+def test_a_mac_worker_takes_the_clips_it_can_render():
+    """A Mac with the Studio installed: no memory guard to bring, its own engine, the same single clips when it has
+    what they need."""
+
+    spark, mac = Worker("spark-a"), Worker("mac-studio", platform="mac", engine="MLX engine", guard=False, memory={})
+    fresh(spark, mac)
+    seen = client.get("/api/sparks").json()
+    row = next(row for row in seen["workers"] if row["name"] == "mac-studio")
+    assert row["state"] == "ready" and row["usable"] and row["platform"] == "mac" and row["engine"] == "MLX engine" and not row["guard"]
+    assert seen["available"] == 3 and seen["this"]["platform"] in ("spark", "mac")
+    # what it cannot render is said, worker by worker; a Spark's text encoder file is not a Mac's setting
+    refs = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 2, "params": {"references": ["uploads/face.png"]}}).json()
+    assert [w["name"] for w in refs["without"]] == ["spark-a", "mac-studio"] and "Ref2VA" in refs["without"][1]["why"]
+    spark.has["text_encoders"] = mac.has["text_encoders"] = ["other.safetensors"]
+    hub.act(spark.address, "check"), hub.act(mac.address, "check")
+    settle()
+    encoder = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 2, "params": {"text_encoder": "other.safetensors"}}).json()
+    assert [w["name"] for w in encoder["without"]] == ["mac-studio"] and "Mac" in encoder["without"][0]["why"]
+    assert "Mac" in sparks.capable("video", {"text_encoder": "x.safetensors"}, {"fasth3": True, "platform": "mac", "text_encoders": ["x.safetensors"]})
+    # the measured speedup is a run on Sparks: with a Mac in the team the estimate says it is not measured
+    said = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 6, "seconds": 40}).json()
+    assert said["used"] == 3 and said["estimate"]["measured"] is False and "mac-studio is a Mac" in said["estimate"]["note"]
+    assert client.post("/api/sparks/plan", json={"sparks": 2, "kind": "video", "clips": 6, "seconds": 40}).json()["estimate"]["measured"] is True
+    # plain clips go to it as to a Spark and come back here
+    done = finished([queue(3, seed=40 + n)["id"] for n in range(6)])
+    assert all(job["status"] == "done" for job in done) and "mac-studio" in {job["spark"] for job in done}
+    clip = next(job for job in done if job["spark"] == "mac-studio")
+    assert (server.HOME / clip["outputs"][0]).read_bytes() == b"made on mac-studio" and mac.most == 1
+    # a clip it cannot render never reaches it: here, a Mac without FastH3
+    mac.has["fasth3"] = False
+    hub.act(mac.address, "check")
+    settle()
+    before = len(mac.jobs)
+    done = finished([queue(3, seed=50 + n)["id"] for n in range(4)])
+    assert len(mac.jobs) == before and "mac-studio" not in {job["spark"] for job in done}
+
+
+def test_the_commands_on_a_worker_run_in_bash_on_linux_and_macos():
+    """What ssh runs on a worker: bash whatever the login shell (zsh on a Mac), and nothing that only Linux has."""
+
+    seen = []
+    had = sparks.subprocess.run
+    sparks.subprocess.run = lambda command, **kwargs: seen.append(command) or subprocess.CompletedProcess(command, 0, "", "")
+    try:
+        sparks.shell("user@mac", 'echo "$HOME"; (exec 3<>/dev/tcp/127.0.0.1/7870) && echo yes')
+    finally:
+        sparks.subprocess.run = had
+    assert seen[0][-2] == "user@mac" and seen[0][-1] == """bash -c 'echo "$HOME"; (exec 3<>/dev/tcp/127.0.0.1/7870) && echo yes'"""
+    start, stop, up = sparks.Hub.start_command("keys-studio"), sparks.Hub.stop_command("keys-studio"), sparks.Hub.up_command()
+    assert "$(command -v setsid) bash scripts/app.sh" in start and "HOST=127.0.0.1" in start and "nohup" in start
+    assert "/proc/" not in stop and 'ps -o command= -p "$(cat "$H/app.pid")"' in stop and '[ "$(uname -s)" = Linux ]' in stop
+    assert "/dev/tcp/127.0.0.1/7870" in up and "app up" in up
+    for line in (start, stop, up):  # each runs as it is in bash
+        assert subprocess.run(["bash", "-n", "-c", line], timeout=10).returncode == 0, line
+    # a Mac's probe: no /proc/meminfo, its memory from sysctl
+    one = Worker("mac-b", platform="mac", guard=False, memory={})
+    fresh()
+    WORKERS[one.address] = one
+    had_shell = hub.shell
+    hub.shell = lambda address, command, timeout=30: (SHELLS.append((address, command)) or 0, "host mac-b\nversion 2.7.2\npack yes\ninstall yes\nos Darwin\nMemTotal: 268435456 kB\napp yes")
+    try:
+        found = hub.probe({"address": one.address, "folder": "keys-studio"})
+    finally:
+        hub.shell = had_shell
+    assert found["os"] == "Darwin" and found["MemTotal"] == 262144 and found["app"] == "yes" and "MemAvailable" not in found
+    probe = SHELLS[-1][1]
+    assert "sysctl -n hw.memsize" in probe and "[ -r /proc/meminfo ]" in probe
+
+
 def test_nothing_here_runs_a_tool_without_a_time_limit():
     tree = ast.parse((ROOT / "app/sparks.py").read_text())
     for call in [node for node in ast.walk(tree) if isinstance(node, ast.Call)]:
@@ -542,7 +611,8 @@ vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"));
 vm.runInThisContext(`(async () => { const out = {};
   const five = { supported: true, limit: 8, available: 5, listed: 5, default: 1, this: { name: "head", state: "ready", version: "2.6.6", memory_gb: 110, disk_gb: 70, can: { fasth3: true, image: true, ref2va: true, ref2va_turbo: true, ffmpeg: true, loras: 22 } },
     workers: [{ address: "10.100.10.5", name: "gx10-5482", state: "ready", says: "idle", enabled: true, usable: true, guard: true, version: "2.6.6", memory_gb: 116.1, disk_gb: 40, can: { fasth3: true, loras: 0 }, why: "", working: "" },
-              { address: "10.100.10.3", name: "spark-0060", state: "down", says: "stopped answering", enabled: true, usable: false, unusable: "it stopped answering", why: "It stopped answering for 60 s while rendering", working: "", version: "2.6.6" }] };
+              { address: "10.100.10.3", name: "spark-0060", state: "down", says: "stopped answering", enabled: true, usable: false, unusable: "it stopped answering", why: "It stopped answering for 60 s while rendering", working: "", version: "2.6.6" },
+              { address: "user@mac-studio", name: "mac-studio", state: "ready", says: "idle", enabled: true, usable: true, guard: false, platform: "mac", engine: "MLX engine", version: "2.6.6", disk_gb: 60, can: { fasth3: true, image: true, loras: 0 }, why: "", working: "" }] };
   out.counts = [spkCount(five, 1), spkCount(five, 5), spkCount(five, 8), spkCount({ supported: false }, 1)];
   answers["/api/sparks"] = five; answers["/api/sparks/plan"] = { supported: true, count: "5 of 8 available", says: "One clip per Spark, 5 at a time: 8 clips on 5 Sparks.", mode: "parallel", without: [{ name: "spark-0060", why: "it stopped answering" }], estimate: { seconds: 80, one_spark: 320, faster: 4, note: "an estimate" } };
   await spkLoad(); spkSet(8);
@@ -569,7 +639,7 @@ def test_the_page_draws_the_chooser_and_the_list():
     assert out["buttons"] == list("12345678") and out["on"] == ["8"] and out["far"] == ["6", "7", "8"]
     assert "5 of 8 available" in out["says"] and "One clip per Spark" in out["says"] and "spark-0060 (it stopped answering)" in out["says"] and "Estimate" in out["says"]
     assert out["sent"] == {"sparks": 8, "kind": "video", "params": {}, "clips": 8, "seconds": 0} and out["kept"]
-    for words in ("gx10-5482", "10.100.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "5 available"):
+    for words in ("gx10-5482", "10.100.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "5 available", "Mac · MLX engine"):
         assert words in out["page"], words
     assert out["mac"][0] == 1 and out["mac"][1] == ["1"] and "DGX Sparks" in out["mac"][2]
     # every job the page queues carries the number

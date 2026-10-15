@@ -4,7 +4,8 @@ A job in the Studio can use more than one DGX Spark. You choose a number from 1 
 the job may use, the one the app runs on counted as one. The app shows how many are there and able, uses that many,
 and says what the number will do before you queue anything.
 
-On a Mac the setting shows 1: multi-Spark rendering is for DGX Sparks.
+On a Mac the setting shows 1: multi-Spark rendering is run from a DGX Spark. A Mac can be one of its workers
+(*A Mac as a worker* below).
 
 ## What you need
 
@@ -33,6 +34,27 @@ memory back. **Remove** takes it off the list. Untick **use** to keep a Spark in
 A worker's app is never opened to the network. This app reaches it through an ssh tunnel that it opens itself and
 closes when you remove the worker or stop the app. The list is kept in `sparks/sparks.json` in the studio folder
 (`~/TensorFoldStudio`), not in the code.
+
+## A Mac as a worker
+
+A Mac with the Studio installed (`bash oneshot-setup.sh`, FastH3 included) can stand in the list beside the Sparks:
+add it the same way, by its ssh address (`user@mac-studio`), with a key login from this Spark to that user. The head
+stays a Spark; the Mac takes single clips from the same queue.
+
+- **What it is given:** FastH3 clips, from text or from a first and last frame, at the sizes and passes a Spark
+  offers, with a LoRA when that LoRA is installed on the Mac. It renders them on its own engine (the native Zig engine
+  on an M5, MLX elsewhere, with the 8-bit weights on a chip without tensor units), so a clip takes the Mac's time,
+  not a Spark's, and the same seed does not give the same frames as on a Spark.
+- **What it is not given:** what it has not installed (Ref2VA, a LoRA), and a text encoder chosen by its file name
+  (a Spark names a file in ComfyUI's folder, a Mac takes a path). Long videos, pictures and Library actions stay on
+  this Spark, as for any worker. The plan under the chooser says, Mac by Mac, why one is left out.
+- **Memory:** a Mac has no memory guard to ask (its memory is not shared with a CUDA driver); it is not held to one.
+- **Its row** says *Mac · MLX engine* (or *native Zig engine*) beside its name. With a Mac in the team the time
+  estimate says it is not measured: the measured run below is five Sparks.
+- **Start and stop:** *Update and start* sends the code, starts the Mac's app with `nohup` on its own `127.0.0.1:7870`
+  (there is no `setsid` on macOS) and waits for it in the same ssh call; *Stop* stops the app (there is no ComfyUI
+  server on a Mac). Every command runs under `bash` whatever the login shell there is. An app the Mac's own launcher
+  started is not one the head started: stop it on the Mac first, as on a Spark.
 
 ## Choose the number
 

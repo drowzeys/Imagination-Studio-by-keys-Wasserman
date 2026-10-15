@@ -1904,7 +1904,7 @@ import sparks  # noqa: E402  (worker Sparks behind this queue: a job's "sparks" 
 
 
 def about_this_spark() -> dict:
-    """What this app is and has, for a Studio on another Spark that hands clips to it (/api/spark/self)."""
+    """What this app is and has, for a Studio on a Spark that hands clips to it (/api/spark/self): a Spark's or a Mac's."""
 
     listing = next(route.endpoint for route in lora_router.routes if route.path == "/api/loras" and "GET" in route.methods)
     info = memory_guard.meminfo()
@@ -1912,7 +1912,20 @@ def about_this_spark() -> dict:
               "floor_mb": memory_guard.floor_mb(info.get("MemTotal"))} if SPARK and info else {}
     with lock:
         active = sum(1 for job in jobs.values() if job["status"] in ("queued", "running"))
-    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent)
+    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, installed())
+
+
+def installed() -> dict:
+    """Whether FastH3 and the image model are here, where this platform keeps them: ComfyUI's folders on a Spark, the
+    folders the scripts read on a Mac (FASTH3_DIR, QWEN_MODEL_DIR). A worker is handed only what it has (sparks.py)."""
+
+    if SPARK:
+        models = SPARK_REF2VA.parent
+        return {"fasth3": any((models / "FastH3-Comfy/diffusion_models").glob("*fasth3*")),
+                "image": any((models / "Qwen-Image-2.1-Comfy/diffusion_models").glob("qwen_image_2.1*.safetensors"))}
+    fasth3 = Path(os.environ.get("FASTH3_DIR", Path.home() / "h3-models/FastH3-8-Step-V2"))
+    qwen = Path(os.environ.get("QWEN_MODEL_DIR", Path.home() / "qwen-models/Qwen-Image-2.1-Turbo"))
+    return {"fasth3": (fasth3 / "fastvideo_inference.json").is_file(), "image": (qwen / "model_index.json").is_file()}
 
 
 def clip_time(kind: str, params: dict) -> int | None:
