@@ -849,7 +849,7 @@ class Hub:
             self.move(job, worker, f"it stopped answering before the clip was queued ({str(error)[-120:]})", down=True)
             return False
         job["their_job"] = made["id"]
-        say(f"{name} took the clip as its job {made['id']}" + (f"; its memory guard: about {room['need_mb'] / 1000:.0f} GB needed, {room.get('available_mb', 0) / 1000:.0f} GB there" if room.get("need_mb") else ""))
+        say(f"{name} took the {'clip' if job['kind'] == 'video' else 'job'} as its job {made['id']}" + (f"; its memory guard: about {room['need_mb'] / 1000:.0f} GB needed, {room.get('available_mb', 0) / 1000:.0f} GB there" if room.get("need_mb") else ""))
         silent, theirs = None, {}
         while True:
             if job["status"] != "running":  # cancelled here: cancelled there
