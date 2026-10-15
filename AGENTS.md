@@ -176,7 +176,11 @@ Rules:
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
   cloud API. `DRAMA3_BACKEND=mlx|cuda`. `mlx` (the Mac default) is the command line in its own venv
-  (`$DRAMA3_VENV/bin/python -I -m tensorfold.drama3`), one process a take, holding `~/studio-gpu.lock.d` while it runs.
+  (`$DRAMA3_VENV/bin/python -I -m tensorfold.drama3`, drama3-mlx 4a8a982f or later), one process a take, holding
+  `~/studio-gpu.lock.d` while it runs; with `--stream` its WAV grows at the take's path and `/live` serves it, its own
+  check (`--verify`, `--stop-rule`, both on by default: never pass `--no-verify`) is the take's score, so the app does not
+  transcribe it again, and a take with a part still short after playing is made once more without `--stream`.
+  `scripts/setup-voice.sh` (`oneshot-setup.sh --voice`) installs it; on a Spark it only checks and prints the hand steps.
   `cuda` (the DGX Spark default) is TensorFold's native `drama3-generate --serve 1` (`$PREFIX/drama3/bin`, branch
   `drama3-cuda`; `DRAMA3_CUDA_BIN`, `DRAMA3_CUDA_MODEL`, `DRAMA3_CUDA_CODEC`): a persistent server loaded on the first
   take that holds `~/studio-gpu.lock.d` for as long as it is loaded, is unloaded after `DRAMA3_IDLE_S` (300) idle seconds

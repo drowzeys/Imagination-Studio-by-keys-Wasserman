@@ -69,12 +69,15 @@ def tool(name: str) -> str | None:
 
 class Mlx:
     name, label = "mlx", "TensorFold MLX · Apple Silicon"
-    fps, load_s = 60.0, 3.0  # measured on an M5 Ultra: about 63 frames a second, 3 s to load
+    fps, load_s = 75.0, 4.0  # measured on an M5 Ultra (drama3-mlx 4a8a982f): 73 frames a second streamed, 83 not; 3.7 s to load
 
     def __init__(self) -> None:
         self.venv = Path(os.environ.get("DRAMA3_VENV", Path.home() / "drama3-venv")).expanduser()
         self.model = Path(os.environ.get("DRAMA3_MODEL", Path.home() / "models/drama-3-mlx")).expanduser()
         self.known: tuple[float, str] | None = None  # (when, why not) of the last look: a look runs a process
+        # an engine with --stream (a growing WAV while it speaks) and its own end-of-text check (--verify, on by
+        # default there, with --stop-rule): drama3-mlx 4a8a982f or later; an older one gets neither flag
+        self.streams = False
 
     def python(self) -> Path:
         return self.venv / "bin" / "python"
@@ -103,20 +106,25 @@ class Mlx:
         if memory and memory < MEMORY_GB * 1024 ** 3:
             return f"This Mac has {memory / 1024 ** 3:.0f} GB of memory; Drama 3 needs about 52 GB free, so {MEMORY_GB} GB or more."
         try:
-            done = subprocess.run([str(self.python()), "-I", "-c", "import importlib.util as u; print(bool(u.find_spec('tensorfold.drama3')))"],
-                                  capture_output=True, text=True, timeout=20)
+            done = subprocess.run([str(self.python()), "-I", "-c", "import importlib.util as u; print(bool(u.find_spec('tensorfold.drama3')), "
+                                   "bool(u.find_spec('tensorfold.families.drama3.stream')))"], capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.TimeoutExpired) as error:
             return f"The Drama 3 environment did not answer: {error}"
-        if done.stdout.strip() != "True":
+        found = done.stdout.split()
+        if not found or found[0] != "True":
             return f"The environment at {self.venv} has no tensorfold.drama3 (install TensorFold's drama3-mlx branch into it)."
+        self.streams = found[1:] == ["True"]
         return ""
 
-    def command(self, text_file: Path, out: Path, stats: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict) -> list[str]:
+    def command(self, text_file: Path, out: Path, stats: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict,
+                live: bool = False) -> list[str]:
         command = [str(self.python()), "-I", "-m", "tensorfold.drama3", "--model", str(self.model), "--text-file", str(text_file),
                    "--out", str(out), "--stats", str(stats), "--seed", str(seed), "--temperature", f"{sampling['temperature']:g}",
                    "--top-p", f"{sampling['top_p']:g}", "--top-k", str(int(sampling["top_k"]))]
         if reference:
             command += ["--ref-audio", str(reference[0]), "--ref-text", reference[1]]
+        if self.streams and live:  # the WAV at --out grows as it is spoken (its sizes are set when done): /live reads it
+            command += ["--stream"]
         return command
 
 
@@ -536,6 +544,22 @@ def live_wav(entry: dict, rate: int = 44100, poll: float = 0.05):
     quiet = time.time()
     for index, part in enumerate(entry["parts"]):
         sent = 0
+        if entry.get("wav"):  # a growing WAV (the MLX engine's --stream): its samples start after its "data" header
+            sent = -1
+            while sent < 0:
+                try:
+                    with open(part, "rb") as handle:
+                        head = handle.read(4096)
+                except OSError:
+                    head = b""
+                at = head.find(b"data")
+                if at >= 0 and len(head) >= at + 8:
+                    sent = at + 8
+                elif entry["done"] or time.time() - quiet > 600:
+                    return
+                else:
+                    time.sleep(poll)
+        start = sent
         while True:
             try:
                 with open(part, "rb") as handle:
@@ -545,7 +569,7 @@ def live_wav(entry: dict, rate: int = 44100, poll: float = 0.05):
                 data = b""
             data = data[: len(data) - (len(data) % 2)] if entry["finished"] <= index else data
             if data:
-                if index and not sent:
+                if index and sent == start:
                     yield b"\0" * (int(rate * entry.get("gap_s", 0)) * 2)
                 sent += len(data)
                 quiet = time.time()
@@ -602,7 +626,8 @@ def state() -> dict:
     why = one.check()
     out = {"available": not why, "why": why, "backend": one.name, "label": one.label, "credit": CREDIT, "licence": LICENCE,
            "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
-           "text_limit": TEXT_LIMIT, "reference_seconds": REFERENCE_SECONDS, "speakers": 16, "live": hasattr(one, "make")}
+           "text_limit": TEXT_LIMIT, "reference_seconds": REFERENCE_SECONDS, "speakers": 16,
+           "live": hasattr(one, "make") or bool(getattr(one, "streams", False)), "checks": bool(getattr(one, "streams", False))}
     if hasattr(one, "status"):
         out["server"] = one.status()
     return out
@@ -647,6 +672,8 @@ def expected_seconds(text: str) -> float:
 
 def estimate(text: str, referenced: bool, asr: bool) -> int:
     seconds, one = expected_seconds(text), backend()
+    if getattr(one, "streams", False):  # the MLX engine checks its words itself (~0.2 s a part): no Whisper after
+        asr, seconds = False, seconds * 1.05
     # load (3 s on a Mac; 18 s on a Spark unless the server is loaded already), prefill under 0.5 s a chunk, frames at
     # the engine's rate (~63 a second on an M5 Ultra, ~30 on a GB10), the codec; a reference is encoded first;
     # Whisper on the CPU after it (loading included)
@@ -773,6 +800,9 @@ def checked(body: dict) -> dict:
             raise HTTPException(400, "write what the reference clip says (this machine has no speech-to-text tool to hear it)")
         params.update(ref_audio=relative(clip), ref_text=ref_text, consent=True)
     params["asr"] = body.get("asr", True) is not False
+    # MLX: play the take while it is made (--stream). Sent audio cannot be taken back, so a part with missing words
+    # is then reported instead of drawn again; "live": false lets the engine redraw it
+    params["live"] = body.get("live", True) is not False
     if isinstance(body.get("slate"), dict):  # a Slate voice sheet's cast voice: which film and sheet it belongs to
         params["slate"] = {k: str(v)[:80] for k, v in body["slate"].items() if k in ("project", "voice")}
     return params
@@ -814,19 +844,25 @@ def perform(job: dict) -> bool:
             return False
         stats.write_text(json.dumps(measured, indent=1) + "\n")
     else:
-        command = one.command(text_file, wav, stats, reference, int(params["seed"]), {k: params[k] for k in SAMPLING})
-        if not take_lock(job):
-            return False
-        try:
-            job["progress"] = {"stage": "Drama 3 voice", "at": 0, "of": 1}
-            if not run(job, command, {}):
+        live = bool(getattr(one, "streams", False) and params.get("live", True))
+        retaken = None
+        while True:
+            outcome = mlx_take(job, one, text_file, wav, stats, reference, params, live)
+            if outcome is None:
                 return False
-        finally:
-            drop_lock(job)
-        try:
-            measured = json.loads(stats.read_text())
-        except (OSError, ValueError):
-            measured = {}
+            measured = outcome
+            short = [part for part in (measured.get("verify") or []) if isinstance(part, dict) and part.get("action") == "redraw"]
+            if not (live and short):
+                break
+            # played as it was made, a part came out with words missing and could not be drawn again (sent audio is not
+            # taken back): the take is made once more without playing, where the engine redraws such a part itself
+            # (measured on the M5 Ultra, the two-speaker example: seed 1 played at 35 % and came back whole after one
+            # redraw; seed 2 played at 80 % and stayed at 80 % after three draws, the last line missing)
+            retaken = {"played": checked_by_engine(measured), "seconds": measured.get("audio_s")}
+            job["log"] += "[tensorfold] a part was short while playing: the take is made again without playing, so it can be redrawn\n"
+            live = False
+        if retaken:
+            measured["retaken"] = retaken
     if not wav.is_file():
         raise RuntimeError("Drama 3 finished without writing its take")
     take = {"id": job["id"], "path": relative(wav), "title": params.get("title") or job.get("title"), "text": params["text"],
@@ -835,10 +871,15 @@ def perform(job: dict) -> bool:
             "rtf": measured.get("rtf"), "total_s": measured.get("total_s"), "peak_memory_gb": measured.get("peak_memory_gb"),
             "device_gb": measured.get("device_gb"),
             "chunks": measured.get("chunks"), "finish": measured.get("finish"), "first_audio_ms": measured.get("first_audio_ms"),
-            "load_s": measured.get("load_s"), "engine_s": measured.get("engine_s"),
+            "load_s": measured.get("load_s"), "engine_s": measured.get("engine_s"), "verify": checked_by_engine(measured),
+            "streamed": bool(measured.get("stream")), "retaken": measured.get("retaken"),
             "reference": {"path": params["ref_audio"], "text": params["ref_text"], "consent": True} if params.get("ref_audio") else None,
             "slate": params.get("slate"), "credit": CREDIT}
-    if params.get("asr") and qa.ready()["transcript"]:
+    if params.get("asr") and take["verify"]:
+        # the engine heard every part with Whisper already (its end-of-text check): its count is the take's score,
+        # and the take is not transcribed a second time
+        take["asr"] = engine_score(take["verify"])
+    elif params.get("asr") and qa.ready()["transcript"]:
         job["progress"] = {"stage": "Whisper word check", "at": 0, "of": 1}
         try:
             heard = qa.transcribe(wav)
@@ -852,6 +893,61 @@ def perform(job: dict) -> bool:
     job["voice"] = take
     job["progress"] = None
     return True
+
+
+def mlx_take(job: dict, one, text_file: Path, wav: Path, stats: Path, reference, params: dict, live: bool) -> dict | None:
+    """One run of the MLX engine's command line under the GPU lock: its stats (load time and first sound added), or
+    None when the job was cancelled. ``live``: --stream, the WAV at ``wav`` growing as it is spoken (/live reads it)."""
+
+    sampling = {k: params[k] for k in SAMPLING}
+    if live:
+        command = one.command(text_file, wav, stats, reference, int(params["seed"]), sampling, live=True)
+    else:
+        command = one.command(text_file, wav, stats, reference, int(params["seed"]), sampling)
+    if not take_lock(job):
+        return None
+    if live:
+        wav.unlink(missing_ok=True)
+        LIVE[job["id"]] = {"parts": [wav], "wav": True, "done": False, "finished": 0, "gap_s": 0}
+    stats.unlink(missing_ok=True)
+    began = len(job.get("log") or "")
+    try:
+        job["progress"] = {"stage": "Drama 3 voice" + ("" if live or not params.get("live", True) else ", again without playing"), "at": 0, "of": 1}
+        if not run(job, command, {}):
+            return None
+    finally:
+        drop_lock(job)
+        if live:
+            LIVE[job["id"]].update(finished=1, done=True)
+            threading.Timer(60, LIVE.pop, args=(job["id"], None)).start()
+    try:
+        measured = json.loads(stats.read_text())
+    except (OSError, ValueError):
+        measured = {}
+    if measured.get("first_audio_s") is not None:
+        measured["first_audio_ms"] = round(1000 * float(measured["first_audio_s"]), 1)
+    loaded = re.search(r"\[drama3\] loaded .* in ([\d.]+)s", (job.get("log") or "")[began:])
+    measured.setdefault("load_s", float(loaded.group(1)) if loaded else None)
+    return measured
+
+
+def checked_by_engine(measured: dict) -> list[dict] | None:
+    """The MLX engine's end-of-text check, part by part (``verify`` in its stats), as kept on the take."""
+
+    parts = measured.get("verify")
+    if not isinstance(parts, list) or not parts:
+        return None
+    keep = ("words", "matched", "missing", "tail_words", "action", "attempts", "cut_s", "late_s", "heard", "asr_s", "reason")
+    return [{k: one.get(k) for k in keep if k in one} for one in parts if isinstance(one, dict)] or None
+
+
+def engine_score(parts: list[dict]) -> dict:
+    """A take's word score from the engine's check: words heard of words written, over all its parts."""
+
+    total = sum(int(one.get("words") or 0) for one in parts)
+    found = sum(int(one.get("matched") or 0) for one in parts)
+    return {"heard": " ".join(str(one.get("heard") or "").strip() for one in parts).strip(), "score": round(100 * found / total) if total else None,
+            "found": found, "words": total, "missing": [w for one in parts for w in (one.get("missing") or [])], "by": "engine"}
 
 
 def takes() -> list[dict]:
