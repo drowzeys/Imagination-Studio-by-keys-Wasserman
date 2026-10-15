@@ -1,4 +1,4 @@
-Wasserman Slate AI Studio, powered by TensorFold (Mac + DGX Spark)
+Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3 (Mac + DGX Spark)
 Pack: drowzeys / keys.
 
 This pack installs and runs other people's work. See CREDITS.md. It ships no model weights.
@@ -11,7 +11,13 @@ MiniMax H3 is licensed under the MiniMax H3 Community License Agreement, Copyrig
 The MiniMax H3 Community License limits the territories in which MiniMax H3 may be used. The 2x video decoder
 (speach1sdef178/MiniMax-H3-X2-Detail-VAE) is a derivative of MiniMax H3 under the same licence.
 
-Read both licences before downloading the weights.
+Fish Audio Drama 3 is licensed under the Fish Audio Community License v1.0, Copyright (c) 2026 Fish Audio. Built with
+Fish Audio. Free for non-commercial use and for commercial use below US$500,000 annual revenue; offering speech
+generation to third parties (a Hosted Service) needs a separate licence from Fish Audio. Cloning a real person's voice
+without their consent is not allowed. This pack ships no Drama 3 weights: they are downloaded from Fish Audio's
+release (huggingface.co/fishaudio/drama-3) when a user installs them.
+
+Read these licences before downloading the weights.
 
 Engine source: TensorFold (Apache-2.0, Ash Hart and contributors) with
 - an H3 family adapted from minimax-h3-mlx (Apache-2.0, mrbizarro) and int8 kernels that follow the quantization

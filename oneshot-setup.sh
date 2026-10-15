@@ -57,7 +57,7 @@ REF_REPO="https://github.com/mrbizarro/minimax-h3-mlx.git"
 REF_COMMIT="79190205258454b43e6c9e50e577de234222419c"
 # the native engine for FastH3: TensorFold 1.0.4's Zig + Metal runtime with the H3 family, from the same fork
 ZIG_COMMIT="b7e309e042e48b72e75e9fb87342df4e9bf22f37"
-ZIG_ENGINE_URL="https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-Mac-DGXSpark/releases/download/v2.3/zig-engine-b7e309e0-macos-arm64.tar.gz"
+ZIG_ENGINE_URL="https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v2.3/zig-engine-b7e309e0-macos-arm64.tar.gz"
 ZIG_ENGINE_SHA256="d142b1d3c57d3c5bfc4d2a0d4f83ca5bf91e8091ac6357cda52759a250fd391c"
 MFLUX_REPO="https://github.com/mflux-community/mflux.git"
 MFLUX_COMMIT="add5164e62c07cbcc9aec7a95c2e19c75605880c"
