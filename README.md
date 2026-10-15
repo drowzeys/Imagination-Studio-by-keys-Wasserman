@@ -26,7 +26,7 @@ decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-A
 contributor, and Fish Audio (Drama 3, text to speech). This pack is their work, ported, pinned and measured. See
 [CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
-**2.7.3** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.7.4** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
@@ -299,6 +299,19 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.7.4 (2026-10-15): Voice, with Fish Audio Drama 3.** A new **Voice** tab speaks text with Fish Audio Drama 3 on
+> the Mac itself, through TensorFold's MLX port (nothing is sent to Fish Audio): up to 16 speakers in one take
+> (`<|speaker:0|>` ... `<|speaker:15|>`), `[directions]` for the delivery (`[whispering]`, `[sighs]`, or a description of
+> the voice), and a voice cloned from a clip, with a consent box that must be ticked. Each take runs in the render
+> queue, one at a time and never beside a video (Drama 3 peaks at about 50 GB), under the studio's GPU lock; Whisper
+> then checks its words. *Use as Ref2VA voice reference* puts a take into the create wizard as reference audio
+> (`<Audio N>`; a take over 15 s is cut to its first 15). In Slate's **Sound** tab a voice sheet has **Cast voice**: its
+> sample line spoken in the voice the sheet describes, kept on the sheet, and sent as that speaker's reference audio in
+> shots that open on cast stills. On a DGX Spark the tab is there and says the CUDA port is not available yet. Measured
+> on the M5 Ultra: 63 frames a second (about 2.9 times real time), 3 to 4.5 s of engine time for a 7 to 11 s line, 16 to
+> 18 s a take through the app with the word check. See [Voice (Fish Audio Drama 3)](#voice-fish-audio-drama-3).
+> **Built with Fish Audio.**
 
 > **2.7.3 (2026-10-15): the new name.** The studio is now *Wasserman Slate AI Studio, powered by TensorFold, built
 > with integrated Fish Audio Drama 3*, and the repository moved to
@@ -1305,7 +1318,7 @@ copying anything anywhere.
 | **Studios** | Casting, Art Department, Locations, Lookbook: sheets filled from one line by ✦ Fill. A still pinned to a character is its reference picture. |
 | **Shots** | Specs (seconds, aspect, size, angle, lens, movement) and the six-section prompt; ✦ Structure, Tighten, Enrich, Distill, Shot, Angle, Beats, Variants; Director's notes; Slate's setups; picture-lock and mute; history. ✦ Coverage lays out a scene from one of Slate's twelve coverage plans. |
 | **Roll camera** | What the shot opens on (text, the last frame of the shot before, an image, the cast's stills), who is in it and where, spoken lines, soundscape, cue. The shot compiles to MiniMax H3's prompt form with a preflight list; one button queues it. Clips come back as takes: circle the one that works. A LoRA from the hub can be put on one shot in place of the film's. *Import a take rendered on another machine* logs a clip another app made into the shot, with its seed and settings. |
-| **Sound** | Voice sheets (the voice of a spoken line) and music cues (the score line of a shot). |
+| **Sound** | Voice sheets (the voice of a spoken line) and music cues (the score line of a shot). **Cast voice** speaks a sheet's sample line with Fish Audio Drama 3 in the voice it describes; ticked, the take goes into shots that open on cast stills as that speaker's reference audio. |
 | **Deliver** | Render a whole scene in order, a continuity check, the shot list as Markdown or CSV, and the film's takes to the Editor's timeline. |
 
 The brain is Slate's: your own Claude Code or Codex sign-in on the machine that runs the app, or a local
@@ -1350,6 +1363,74 @@ The app drives the same scripts as the command line, one job at a time, and keep
 under `~/TensorFoldStudio`. What it is not: the editor has one video track with trims and ordering only (no
 transforms, text, transitions or audio mixing), and there is no assisted prompt writing. The workflow is modelled
 on rookiestar28's ComfyUI-MiniMaxH3-Studio, which does far more; no code is shared with it.
+
+## Voice (Fish Audio Drama 3)
+
+**Built with Fish Audio.** The **Voice** tab turns text into speech with Fish Audio Drama 3, run on this Mac by
+TensorFold's MLX port of it (the 35B Qwen3.5 MoE backbone, its codebook tower and the Fish codec, in MLX). No Fish
+Audio cloud API is called and the pack ships no Drama 3 weights.
+
+- **Write what is said.** Text without a tag is speaker 0; `<|speaker:0|>` to `<|speaker:15|>` switch voices.
+  Directions in brackets steer the delivery: `[whispering]`, `[sighs]`, `[laughs]`, or a description of the voice
+  (`[a deep, gravelly man in his late fifties, slow and patient]`), which designs a voice without a recording and is
+  not read out (measured: that one at 76 Hz, "a bright young woman" at 228 Hz, both transcribed without the bracket).
+  Long text is split at sentence ends and keeps one voice.
+- **Clone a voice (optional).** A clean clip of one speaker, about 10 to 30 seconds (2 to 60 are taken), and what it
+  says; left empty, Whisper writes the transcript. The consent box (*I have the speaker's consent to clone this
+  voice*) must be ticked, and the API refuses a clip without `"consent": true`. Measured with a 3.9 s clip at 125 Hz:
+  the takes came out at 130 and 133 Hz with every word right.
+- **Settings.** Seed, and Fish's sampling defaults: temperature 1.0, top-p 0.9, top-k 30.
+- **Each take** is a job in the queue, so it never runs beside a video render, and it holds the studio's GPU lock
+  folder (`~/studio-gpu.lock.d`) while the model runs, waiting if a script outside the app holds it. Whisper (the QA
+  gate's own, `app/qa.py`) then transcribes the take and gives a word match, with what it heard on hover; numbers
+  written as figures by Whisper ("30" for "thirty") count as misses.
+- **A take as a MiniMax H3 voice reference.** *Use as Ref2VA voice reference* opens the create wizard on reference
+  to video with the take as the next `<Audio N>` (2 to 15 s a clip, 15 s in all: a longer take is cut to its first 15
+  seconds, asked first). Add a picture or a video of who speaks, and describe the same voice in the line's Voice box:
+  what a reference audio clip does is in [Reference videos and reference audio](#reference-videos-and-reference-audio-ref2va).
+  *Clone this voice* uses a take as the clone clip of the next, for the same speaker across lines.
+- **Slate.** On the Sound tab a voice sheet has **Cast voice**: the sheet's sample line, with its description (age and
+  gender, accent, timbre, pitch, pacing, energy, texture) as the direction. The take is kept on the sheet (`drama` in
+  the project file); ticked, a shot that opens on cast stills sends it as the speaker's reference audio and names it
+  in the prompt. A take over 15 s is cut on the sheet first; what does not fit MiniMax's limits is said in the
+  preflight and left out.
+
+| Measured, Mac Studio M5 Ultra (TensorFold `drama3-mlx` f623fb1a, 8-bit experts) | Audio | Engine time | Through the app, word check included | Whisper |
+|---|---|---|---|---|
+| One speaker, 18 words | 8.3 s | 3.3 s (63.3 frames/s) | 16.7 s | 17 of 18 ("Phish") |
+| Cloned voice, with `[sighs]` and `[laughs]` | 7.0 s | 2.8 s | 16.1 s | 12 of 12 |
+| Cloned voice, transcript left to Whisper | 4.3 s | 1.8 s | 24.8 s | 15 of 15 |
+| Two speakers, three lines | 11.3 s | 4.4 s | 17.7 s | 20 of 20 |
+| Slate Cast voice (a sheet's description as direction) | 7.5 s | 3.0 s | 16.2 s | 15 of 15 |
+
+Engine time is Drama 3's own (prefill, frames and codec); the process also loads the model (about 3 s) and the
+word check loads Whisper on the CPU. Peak memory 48 to 51 GB.
+
+**Mac requirements.** An Apple-silicon Mac with 64 GB of memory or more (the run peaks at about 52 GB; nothing else
+of the studio runs beside it), about 40 GB of disk for the converted weights (and 39 GB for Fish's checkpoint while
+converting), and TensorFold's Drama 3 port in an environment of its own. The port is on TensorFold's `drama3-mlx`
+branch and is not yet published, so there is no installer step for it: the setup is by hand.
+
+```bash
+git clone -b drama3-mlx <TensorFold with the drama3-mlx branch> ~/TensorFold
+python3.11 -m venv ~/drama3-venv && ~/drama3-venv/bin/pip install -e ~/TensorFold mlx mlx-lm soundfile torch
+hf download fishaudio/drama-3 --local-dir ~/models/drama-3        # Fish Audio Community License: read it first
+~/drama3-venv/bin/python -m tensorfold.families.drama3.convert ~/models/drama-3 ~/models/drama-3-mlx   # once, about a minute
+~/drama3-venv/bin/python -m tensorfold.drama3 --text "Hello there." --out hello.wav                  # check
+```
+
+The app finds `~/drama3-venv` and `~/models/drama-3-mlx` itself (`DRAMA3_VENV` and `DRAMA3_MODEL` name others) and
+says on the tab what is missing. `DRAMA3_BACKEND=mlx|cuda` picks the engine: `cuda`, the default on a DGX Spark, is
+TensorFold's CUDA port, which is still being built, so there the tab says *not available yet* and its controls stay
+off. The API: `GET /api/voice/state`, `POST /api/voice/takes {text, ref_audio?, ref_text?, consent?, seed?,
+temperature?, top_p?, top_k?}` (a job of kind `voice`), `GET /api/voice/takes`, `GET /api/voice/takes/{id}/audio`,
+`POST /api/voice/sheet {sheet, project}` and `POST /api/voice/cut {path, seconds}`. Takes are kept in
+`~/TensorFoldStudio/voice/` (the WAV, its settings and measurements, and the text).
+
+**Licence.** Drama 3's weights and codec are Fish Audio Materials under the **Fish Audio Community License v1.0**:
+research, non-commercial and small-company commercial use; a hosted service that lets others generate speech or
+clone voices needs a separate licence from Fish Audio; show "Built with Fish Audio" where it is used; never clone a
+real person's voice without their consent, impersonate anyone, or train other speech models on the outputs.
 
 ## Motion Previs: a shot into control layers and a camera move
 

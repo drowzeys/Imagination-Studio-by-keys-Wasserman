@@ -1253,6 +1253,9 @@ def perform(job: dict, worker: dict | None = None) -> None:
         elif job["kind"] == "long":
             if not long_take(job):
                 return
+        elif job["kind"] == "voice":  # Fish Audio Drama 3 text to speech (voice.py), under the GPU lock
+            if not voice_perform(job):
+                return
         else:
             done, env, outputs = take(job, params)
             if not done:
@@ -1307,7 +1310,7 @@ threading.Thread(target=work, daemon=True).start()
 def public(job: dict) -> dict:
     out = {k: job.get(k) for k in ("id", "kind", "status", "title", "outputs", "progress", "error", "created",
                                     "started", "finished", "estimate", "engine", "qa", "passes", "pace", "source", "shot",
-                                    "negations", "sparks", "spark", "moved")}
+                                    "negations", "sparks", "spark", "moved", "voice")}
     # by this machine's clock: the page may be open on another one
     out["elapsed"] = (job.get("finished") or time.time()) - job["started"] if job.get("started") else None
     out["log"] = job["log"][-3000:]
@@ -1336,6 +1339,8 @@ def state() -> dict:
             "sparks": {"supported": SPARK, "limit": sparks.LIMIT},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
+            # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py); on a DGX Spark not available yet
+            "voice": voice.state(),
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
 
 
@@ -1755,6 +1760,26 @@ import shot  # noqa: E402  (a clip's keyframes held and no cut inside it, beside
 import qa  # noqa: E402  (Sam Wasserman's QA gate, beside this file)
 import remote  # noqa: E402  (another machine's Studio app, read over its own API, beside this file)
 import slate  # noqa: E402  (Wasserman Slate AI Studio, beside this file)
+import voice  # noqa: E402  (Voice: Fish Audio Drama 3 text to speech, run locally, beside this file)
+
+
+def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) -> dict:
+    """A job that is not a clip (a voice take) into the queue: it renders on this machine, one at a time with the rest."""
+
+    job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+    job = {"id": job_id, "kind": kind, "status": "queued", "title": title, "params": params, "source": None, "outputs": [],
+           "progress": None, "error": None, "log": "", "created": time.time(), "started": None, "finished": None,
+           "estimate": estimate, "sparks": {"chosen": 1, "available": 1, "used": 1, "says": ""}}
+    with lock:
+        jobs[job_id] = job
+        order.append(job_id)
+    wake.set()
+    hub.kick.set()
+    return public(job)
+
+
+voice_router, voice_perform = voice.attach(HOME, run, enqueue, inside, relative, media_seconds, qa)
+app.include_router(voice_router)
 
 
 
