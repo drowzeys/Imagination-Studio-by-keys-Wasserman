@@ -1,4 +1,8 @@
-"""Keys and Wasserman LoRA Hub: a library of style LoRAs for MiniMax H3 that a clip can be rendered with.
+"""Keys and Wasserman LoRA Hub: a library of LoRAs, each filed under the model it was trained on.
+
+The hub holds LoRAs for MiniMax H3 (a clip), Qwen-Image (a new picture, Edit a picture) and, stored as they are, for models the
+Studio has no engine for yet (lora_kinds.py reads which model a file is for from its header). A job is offered, and merges,
+only the LoRAs of its own model.
 
 A recipe says where a LoRA's file comes from and how it is used: its trigger word, the phrases that pick one of its
 looks, the strength it was made for. The presets that ship with the pack are in lora-presets.json beside this file;
@@ -10,8 +14,9 @@ and whether the Studio can use it (`status`: ready, gated behind its author's ap
 `python app/loras.py install camera,style` downloads the ready presets of those groups (the one-shot installers'
 `--loras`).
 
-A job carries `loras: [{"id", "strength", "style"}]`. On a Mac the file is rewritten once into the layout the MLX
-engine merges at load (scripts/convert-lora.py); on a DGX Spark ComfyUI merges the file as it is.
+A job carries `loras: [{"id", "strength", "style"}]`. On a Mac a MiniMax H3 file is rewritten once into the layout the MLX
+engine merges at load (scripts/convert-lora.py); on a DGX Spark ComfyUI merges the file as it is. A picture LoRA is read as
+its author wrote it on both.
 """
 
 from __future__ import annotations
@@ -33,10 +38,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 import lora_flows
+import lora_kinds
 import lora_layout
 
 PRESETS = Path(__file__).with_name("lora-presets.json")
-FIELDS = ("name", "author", "url", "page", "sha256", "trigger", "styles", "strength", "range", "base", "licence", "notes")
+FIELDS = ("name", "author", "url", "page", "sha256", "trigger", "styles", "strength", "range", "base", "kind", "licence", "notes")
 LIMIT = 4  # LoRAs on one clip
 # the hub's sections, in the order they are shown (lora-groups.json, which the essential bundle's folders follow)
 SECTIONS = json.loads(Path(__file__).with_name("lora-groups.json").read_text())
@@ -65,20 +71,16 @@ def token() -> str:
 
 
 def check(path: Path, target: str = "video") -> int:
-    """The number of adapted modules, after making sure the file is a low-rank LoRA for MiniMax H3's transformer, in
-    any of the layouts LoRAs are published in (lora_layout.py). An image LoRA (`target: image`) is one for
-    Qwen-Image-2.1's transformer, whose blocks are named transformer_blocks.N."""
+    """The number of adapted modules, after making sure the file is a low-rank LoRA for the model it is said to be for:
+    `video` (or `h3`) MiniMax H3's transformer, `image` (or `qwen-image`) Qwen-Image's, or any other kind of lora_kinds.py,
+    in any of the layouts LoRAs are published in. A file for another model is refused by name: "it is a Flux.2 LoRA"."""
 
-    names = list(lora_layout.header(path)[0])
-    if target == "image":
-        pairs = [name for name in names if re.search(r"(^|\.)transformer_blocks\.\d+\..*lora_(A|down)", name)]
-        if not pairs:
-            raise ValueError("not a LoRA for Qwen-Image-2.1's transformer (no lora_A tensors on transformer_blocks.N)")
-        return len(pairs)
-    found = lora_layout.modules(names)
-    if lora_layout.layout(names) == "unknown" or not any(re.search(r"(^|\.)blocks\.\d+\.(attn|mlp)\.", name) for name in found):
-        raise ValueError("not a LoRA for MiniMax H3's transformer (no lora_A tensors on blocks.N.attn / blocks.N.mlp)")
-    return len(found)
+    wanted = {"video": "h3", "image": "qwen-image"}.get(target, target)
+    found = lora_kinds.detect(path)
+    if found["kind"] != wanted:
+        what = lora_kinds.label(found["kind"]) + (f" ({found['family']})" if found["family"] else "")
+        raise ValueError(f"not a LoRA for {lora_kinds.label(wanted)}'s transformer: it is a {what} LoRA")
+    return found["modules"]
 
 
 def rewritten(path: Path) -> bool:
@@ -187,7 +189,7 @@ def download(recipe: dict, target: Path, state: dict) -> None:
                 state["done"] += len(chunk)
         if recipe.get("sha256") and digest.hexdigest() != recipe["sha256"]:
             raise RuntimeError("the downloaded file does not match the recipe's sha256")
-        check(part, recipe.get("target", "video"))
+        check(part, recipe.get("kind") or lora_kinds.kind_of_target(recipe.get("target")))
         part.replace(target)
     finally:
         part.unlink(missing_ok=True)
@@ -219,6 +221,19 @@ def attach(home: Path, pack: Path, spark: bool):
         except (OSError, ValueError):
             return []
 
+    def shaped(recipe: dict) -> dict:
+        """A recipe with the model it is for (`kind`, from the file's header or the preset), the jobs that merge it on this
+        machine, and, for a model the Studio has no engine for, the status `stored`."""
+
+        kind = recipe.get("kind") or lora_kinds.kind_of_target(recipe.get("target"))
+        kind = kind if kind in lora_kinds.KINDS else "other"
+        out = {**recipe, "kind": kind, "base": lora_kinds.label(kind), "target": lora_kinds.target_of(kind)}
+        if kind != "h3" and recipe.get("status", "ready") == "ready" and not lora_kinds.KINDS[kind]["jobs"]:
+            out.update(status="stored", why=lora_kinds.why_not(kind, "video", spark))
+        out["jobs"] = list(lora_kinds.jobs_for(kind, spark)) if out.get("status", "ready") in ("ready", "gated") else []
+        out["jobs_why"] = {job: lora_kinds.why_not(kind, job, spark) for job in lora_kinds.KINDS[kind]["jobs"] if job not in out["jobs"] and out.get("status", "ready") in ("ready", "gated")}
+        return out
+
     def recipes() -> list[dict]:
         built = [{"status": "ready", "category": ["mine"], **r, "builtin": True} for r in json.loads(PRESETS.read_text())]
         # a LoRA that belongs to a Library action (actions.py) is installed like the others and used by that action,
@@ -233,7 +248,7 @@ def attach(home: Path, pack: Path, spark: bool):
                 extra = []
             built += [{"status": "ready", "needs": "text", **r, "builtin": True} for r in extra if r.get("id") and r.get("url") and r["id"] not in taken]
             taken = {r["id"] for r in built}
-        return built + [{"status": "ready", "category": ["mine"], "needs": "text", **r, "builtin": False} for r in added() if r.get("id") not in taken]
+        return [shaped(r) for r in built + [{"status": "ready", "category": ["mine"], "needs": "text", **r, "builtin": False} for r in added() if r.get("id") not in taken]]
 
     def find(lora_id: str) -> dict:
         found = next((r for r in recipes() if r["id"] == lora_id), None)
@@ -244,16 +259,16 @@ def attach(home: Path, pack: Path, spark: bool):
     def source(lora_id: str) -> Path:
         return folder / f"{lora_id}.safetensors"
 
-    def images(lora_id: str) -> bool:
-        """Whether this is a LoRA for the image model (Edit a picture), not for a clip."""
+    def kind_of(lora_id: str) -> str:
+        """The model this LoRA is for (lora_kinds.py): "h3" unless the recipe says another."""
 
-        return any(r["id"] == lora_id and r.get("target") == "image" for r in recipes())
+        return next((r["kind"] for r in recipes() if r["id"] == lora_id), "h3")
 
     def ready(lora_id: str) -> Path:
-        """The file a render reads: the author's on a Spark, the rewritten one on a Mac. An image LoRA is read as its
-        author wrote it on both."""
+        """The file a render reads: the author's on a Spark, the rewritten one on a Mac, for a MiniMax H3 LoRA. A LoRA for any
+        other model is read as its author wrote it on both."""
 
-        if images(lora_id):
+        if kind_of(lora_id) != "h3":
             return source(lora_id)
         if not spark:
             return folder / f"{lora_id}.mlx.safetensors"
@@ -267,11 +282,11 @@ def attach(home: Path, pack: Path, spark: bool):
         state = busy.get(recipe["id"])
         installed = ready(recipe["id"]).is_file() and not state
         # usable: its file is here and this machine has what it runs on (a clip, a Library action or Edit a picture)
-        return {**recipe, "installed": installed, "installing": state, "usable": installed and recipe.get("status") != "unsupported",
+        return {**recipe, "installed": installed, "installing": state, "usable": installed and recipe.get("status") not in ("unsupported", "stored"),
                 "flow": lora_flows.public(recipe["id"]) if recipe.get("flow") else None}
 
     def prepare(lora_id: str) -> None:
-        if ready(lora_id).is_file() or images(lora_id):
+        if ready(lora_id).is_file() or kind_of(lora_id) != "h3":
             return
         if not spark:
             convert(source(lora_id), ready(lora_id), pack)
@@ -284,7 +299,7 @@ def attach(home: Path, pack: Path, spark: bool):
     def prebuilt(recipe: dict, state: dict) -> bool:
         """On a Mac with no file from a bundle: the hosted build already in the MLX engine's layout, when there is one."""
 
-        if recipe.get("target") == "image":
+        if recipe["kind"] != "h3":
             return False  # read as its author wrote it: there is no build to fetch
         if not spark and not source(recipe["id"]).is_file():  # a Mac build an essential package put in the bundle
             where, name = bundle(), recipe["id"] + ".mlx.safetensors"
@@ -350,6 +365,14 @@ def attach(home: Path, pack: Path, spark: bool):
     def groups() -> list[dict]:
         return [{"id": key, "name": name} for key, name in GROUPS]
 
+    @router.get("/api/loras/kinds")
+    def kinds() -> list[dict]:
+        """The models a LoRA can be for, and the jobs that merge each one on this machine."""
+
+        return [{"id": key, "label": info["label"], "short": info["short"], "jobs": list(lora_kinds.jobs_for(key, spark)),
+                 "why": {job: lora_kinds.why_not(key, job, spark) for job in lora_kinds.JOBS if lora_kinds.why_not(key, job, spark)}}
+                for key, info in lora_kinds.KINDS.items()]
+
     @router.post("/api/loras")
     def add(body: dict) -> dict:
         name = (body.get("name") or "").strip()
@@ -358,6 +381,9 @@ def attach(home: Path, pack: Path, spark: bool):
             raise HTTPException(400, "a LoRA needs a name and either a download address or an uploaded file")
         if url and not url.startswith(("https://", "http://")):
             raise HTTPException(400, "the download address starts with https://")
+        said = (body.get("kind") or "").strip()
+        if said and said not in lora_kinds.KINDS:
+            raise HTTPException(400, "kind is one of " + ", ".join(lora_kinds.KINDS))
         lora_id = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48] or "lora"
         with lock:
             taken = {r["id"] for r in recipes()}
@@ -368,24 +394,32 @@ def attach(home: Path, pack: Path, spark: bool):
                 strength = float(body.get("strength") or 1.0)
             except (TypeError, ValueError):
                 raise HTTPException(400, "strength is a number")
+            kind = said or "h3"  # a file behind an address is checked against this when it arrives
             recipe = {"id": lora_id, "name": name, "author": (body.get("author") or "").strip(), "url": url,
                       "page": (body.get("page") or "").strip(), "trigger": (body.get("trigger") or "").strip(),
                       "styles": {str(k).strip(): str(v).strip() for k, v in styles.items() if str(k).strip() and str(v).strip()},
-                      "strength": strength, "base": "MiniMax H3", "licence": (body.get("licence") or "").strip(),
+                      "strength": strength, "licence": (body.get("licence") or "").strip(),
                       "notes": (body.get("notes") or "").strip()}
             if upload:
                 given = (home / upload).resolve()
                 if home.resolve() not in given.parents or not given.is_file():
                     raise HTTPException(400, "the uploaded file is not in the studio's folder")
                 try:
-                    check(given)
+                    found = lora_kinds.detect(given)  # the header says which model it is for
+                    if said and said != found["kind"]:
+                        raise ValueError(f"you said it is a {lora_kinds.label(said)} LoRA, and its tensors are a {lora_kinds.label(found['kind'])} LoRA's")
+                    kind = found["kind"]
+                    recipe["kind"] = kind
                     shutil.move(str(given), source(lora_id))
-                    prepare(lora_id)
+                    if kind == "h3":
+                        prepare(lora_id)
                 except (ValueError, RuntimeError) as error:
                     source(lora_id).unlink(missing_ok=True)
                     raise HTTPException(400, f"that file cannot be used: {error}")
+            recipe["kind"] = kind
+            recipe["base"] = lora_kinds.label(kind)
             book.write_text(json.dumps(added() + [recipe], indent=1))
-        return public({**recipe, "builtin": False})
+        return public(shaped({**recipe, "builtin": False, "needs": "text", "category": ["mine"]}))
 
     @router.post("/api/loras/{lora_id}/install")
     def install(lora_id: str) -> dict:
@@ -417,15 +451,22 @@ def attach(home: Path, pack: Path, spark: bool):
                 book.write_text(json.dumps([r for r in added() if r.get("id") != lora_id], indent=1))
         return {"removed": lora_id, "recipe": not recipe["builtin"]}
 
-    def resolve(picked, target: str = "video") -> list[dict]:
-        """A job's `loras` as [{"path", "strength", "lead"}]; 400 when one is unknown, not installed, or made for the
-        other model (`target`: "video" for a clip, "image" for Edit a picture)."""
+    def resolve(picked, target: str = "video", job: str = "") -> list[dict]:
+        """A job's `loras` as [{"path", "strength", "lead"}]; 400 when one is unknown, not installed, or made for another
+        model than the job's (`target`: "video" for a clip, "image" for a new picture or Edit a picture; `job` names the
+        job, "video", "scout" or "edit", where a machine does one image job and not the other)."""
 
         out = []
+        job = job or ("video" if target == "video" else "edit")
         for item in picked or []:
             recipe = find(str(item.get("id")))
-            if recipe.get("target", "video") != target:
-                raise HTTPException(400, f"{recipe['name']} is a LoRA for " + ("pictures: use it in Create, Edit a picture" if target == "video" else "clips, not for the image model"))
+            if recipe.get("status") == "stored":
+                raise HTTPException(400, f"{recipe['name']} is stored in the hub: {recipe.get('why', 'the Studio has no engine for it yet')}")
+            if recipe.get("target") != target:
+                raise HTTPException(400, f"{recipe['name']} is a {recipe['base']} LoRA: it cannot go on {lora_kinds.JOBS.get(job, job)}"
+                                    + (", it is for pictures: use it in Create, a new picture or Edit a picture" if recipe["kind"] == "qwen-image" else ", it is for clips" if recipe["kind"] == "h3" else ""))
+            if job not in recipe["jobs"] and recipe.get("status") in ("ready", "gated") and (reason := lora_kinds.why_not(recipe["kind"], job, spark)):
+                raise HTTPException(400, f"{recipe['name']} cannot go on {lora_kinds.JOBS.get(job, job)} here: {reason}")
             if not ready(recipe["id"]).is_file():
                 raise HTTPException(400, f"the LoRA {recipe['name']} is not installed: install it in the LoRA hub first")
             try:
@@ -443,9 +484,9 @@ def attach(home: Path, pack: Path, spark: bool):
             phrase = (recipe.get("styles") or {}).get(str(item.get("style") or ""), "")
             lead = ", ".join(part for part in (recipe.get("trigger", ""), phrase) if part)
             out.append({"id": recipe["id"], "name": recipe["name"], "path": str(ready(recipe["id"])), "strength": strength, "trigger": recipe.get("trigger", ""), "lead": lead,
-                        "comma": bool(recipe.get("comma"))})
+                        "comma": bool(recipe.get("comma")), "kind": recipe["kind"]})
         if len(out) > LIMIT:
-            raise HTTPException(400, f"at most {LIMIT} LoRAs on one clip")
+            raise HTTPException(400, f"at most {LIMIT} LoRAs on one " + ("clip" if target == "video" else "picture"))
         return out
 
     def lead(prompt: str, picked: list[dict]) -> str:
@@ -504,7 +545,7 @@ def main(argv: list[str]) -> int:
                 came = "the bundle" if bundled(recipe) or bundle().startswith("http") else recipe["page"]
                 download(recipe, target, {"done": 0, "of": 0})
                 print(f"got   {recipe['name']} by {recipe['author']} ({target.stat().st_size >> 20} MB), from {came}")
-            if sys.platform == "darwin" and not mlx.is_file() and recipe.get("target") != "image":
+            if sys.platform == "darwin" and not mlx.is_file() and lora_kinds.kind_of_target(recipe.get("target")) == "h3":
                 convert(target, mlx, Path(__file__).resolve().parent.parent)
         except Exception as error:  # noqa: BLE001 - one author's page being down does not stop the rest
             failed += 1

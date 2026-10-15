@@ -117,7 +117,7 @@ def lora_file(path: Path, keys: list[str]) -> None:
 def test_the_hub_tells_a_picture_lora_from_a_clip_lora():
     folder = Path(tempfile.mkdtemp())
     picture, clip = folder / "p.safetensors", folder / "c.safetensors"
-    lora_file(picture, ["diffusion_model.transformer_blocks.0.attn.to_k.lora_A.weight", "diffusion_model.transformer_blocks.0.attn.to_k.lora_B.weight"])
+    lora_file(picture, ["diffusion_model.transformer_blocks.0.img_mlp.out.lora_A.weight", "diffusion_model.transformer_blocks.0.img_mlp.out.lora_B.weight"])
     lora_file(clip, ["diffusion_model.blocks.0.attn.qkv_proj.lora_A.weight", "diffusion_model.blocks.0.attn.qkv_proj.lora_B.weight"])
     assert loras.check(picture, "image") == 1 and loras.check(clip) == 1
     for path, target in ((picture, "video"), (clip, "image")):

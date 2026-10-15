@@ -1407,6 +1407,18 @@ author's, for credit.
   look phrase are put at the start of the shot for you. Up to four can be stacked.
 - **Add.** "+ Add your own LoRA" takes a recipe: a name, the address of the `.safetensors` file or an uploaded file,
   the trigger word, the strength, and optional looks. Presets are in `app/lora-presets.json`.
+- **One model each.** A LoRA is trained on one model, and its tensors are named after that model's layers. The hub reads
+  them (`app/lora_kinds.py`, any trainer's layout: ai-toolkit, diffusers, PEFT, kohya) and files each upload under its model:
+  MiniMax H3 (a clip), Qwen-Image 2.x (a new picture, Edit a picture), and, kept as they are and marked *stored, no engine
+  yet*, Flux, LTX-Video and Stable Diffusion (the Studio runs none of them). A file that is not a low-rank LoRA is refused,
+  and so is one whose model is not the one the form says. Each card shows its model and the jobs that merge it; "For:"
+  filters the hub by job; a job offers, and accepts, only its own model's LoRAs (`POST /api/jobs` with `loras: [{"id", "strength"}]`
+  on a `video`, `scout` or `edit` job; `GET /api/loras` lists `kind`, `jobs` and, where a job is not possible here, `jobs_why`).
+  A picture LoRA is merged into the 40-step base model it was trained on (`"base": false` keeps the Turbo model) at the strength
+  given, its trigger word opens the prompt, and its file is read as its author wrote it. On a Mac a clip LoRA is rewritten once
+  for the MLX engine; a picture LoRA works in *Edit a picture* (mflux), and not in a new picture, whose TensorFold merge has
+  no fused `img_mlp.gate_up` layer: the card says so. Add one by API: copy the file into the studio folder and
+  `POST /api/loras {"name", "file", "trigger", "strength", "licence"}`; `kind` is detected, and only needed for a download address.
 
 **Wasserman**
 

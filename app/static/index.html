@@ -419,8 +419,8 @@ function loraWants() { const out = [];
     else if (r.needs === "first-last") {
       if (isRef()) out.push({ name: r.name, text: "It works on a clip that starts from a first frame, not from references.", label: "Start from a first frame", go: () => { Object.assign(C, { goes: "video", start: "own", step: 1 }); changed(); } });
       else if (!lastOf()) out.push({ name: r.name, text: "Add a last frame" + (r.same_first_last ? " (for an orbit, “Same as the first frame”)" : "") + ".", label: "Go to the last frame", go: () => { C.step = 1; changed(); } }); }
-    else if (r.status === "unsupported" || r.needs === "workflow" || r.needs === "image") out.push(r.needs === "image" ? { name: r.name, text: "It is a LoRA for pictures, not for a clip. It works in Edit a picture.", label: "Open Edit a picture", go: () => { C.loras = C.loras.filter(x => x.id !== r.id); edUse(r); } }
-      : { name: r.name, text: "It is not a LoRA for a clip made here: it runs through its own action. Take it out of this clip.", label: "Take it out", go: () => { C.loras = C.loras.filter(x => x.id !== r.id); changed(); } }); }
+    else if (r.status === "unsupported" || r.status === "stored" || r.needs === "workflow" || r.needs === "image" || (r.kind && r.kind !== "h3")) out.push(r.needs === "image" || r.kind === "qwen-image" ? { name: r.name, text: "It is a LoRA for pictures, not for a clip. It works in Edit a picture.", label: "Open Edit a picture", go: () => { C.loras = C.loras.filter(x => x.id !== r.id); edUse(r); } }
+      : { name: r.name, text: r.status === "stored" ? "It is a " + r.base + " LoRA, stored in the hub: the Studio has no " + r.base + " engine yet. Take it out of this clip." : "It is not a LoRA for a clip made here: it runs through its own action. Take it out of this clip.", label: "Take it out", go: () => { C.loras = C.loras.filter(x => x.id !== r.id); changed(); } }); }
   return out; }
 function flowRow(obj, r, done) { if (!C.lineart) C.lineart = "medium"; const f = r.flow, own = obj === C, vids = own ? C.refVideos.length : 0, pics = own ? C.refs.length : 0;
   const lacks = !own ? "This LoRA works in Create, on a clip from references." : flowLacks(r);
@@ -435,7 +435,13 @@ function flowRow(obj, r, done) { if (!C.lineart) C.lineart = "medium"; const f =
 async function loadLoras() { try { LORAS = await api("/api/loras"); if (!HUB.groups.length) HUB.groups = await api("/api/loras/groups"); } catch { LORAS = []; } }
 // what a LoRA works from, as the card's first tag
 const LORA_NEEDS = { text: "Text or first frame", "first-last": "First + last frame", reference: "Reference pictures", "source-video": "Source video", workflow: "Its own workflow", image: "A picture to edit", action: "A Library action" };
-const HUB = { open: false, browse: false, tab: "all", q: "", mine: false, groups: [], form: { name: "", url: "", file: "", trigger: "", strength: 1, styles: "", author: "", notes: "" }, timer: null };
+const HUB = { open: false, browse: false, tab: "all", job: "all", q: "", mine: false, groups: [], form: { name: "", url: "", file: "", kind: "", trigger: "", strength: 1, styles: "", author: "", notes: "" }, timer: null };
+// each LoRA is for one model, and a job merges only its own model's: the jobs, as the hub names them
+const JOB_NAMES = { video: "Clips", scout: "New pictures", edit: "Edit a picture" };
+// the picture LoRAs picked for a new picture (Create, A picture, and a clip's scouts); the clip's own list is C.loras
+const PICT = { get loras() { return C.imageLoras || (C.imageLoras = []); }, set loras(v) { C.imageLoras = v; } };
+const picsOf = () => lorasOf(PICT).map(p => ({ id: p.id, strength: Number(p.strength) || 1 }));
+const picsParams = () => picsOf().length ? { loras: picsOf() } : {};
 function hubWatch(redraw) { if (HUB.timer || !LORAS.some(r => r.installing && r.installing.stage !== "failed")) return;
   HUB.timer = setInterval(async () => { await loadLoras(); if (!LORAS.some(r => r.installing && r.installing.stage !== "failed")) { clearInterval(HUB.timer); HUB.timer = null; } redraw(); }, 1500); }
 // a slider LoRA turns one way above 0 and the other way below it: a track centred on 0, its ends named, and the number beside it
@@ -448,7 +454,7 @@ function loraSlider(p, r, range, save) { const ends = r.ends || ["the other way"
       el("button", { type: "button", class: "small", style: "flex:none;width:auto", title: "Back to 0: the LoRA has no effect", onclick: () => set(0) }, "Off (0)")),
     el("datalist", { id: "zero-" + r.id }, el("option", { value: 0, label: "0" }))); }
 // obj.loras is the list a clip, a board or a film renders with; save runs after every change
-function loraHub(obj, save = () => {}, redraw = render) { if (!obj.loras) obj.loras = [];
+function loraHub(obj, save = () => {}, redraw = render, job = "video") { if (!obj.loras) obj.loras = [];
   const done = () => { save(); redraw(); }, picked = id => obj.loras.find(p => p.id === id);
   const chip = r => { const on = picked(r.id), st = r.installing;
     const label = st && st.stage !== "failed" ? r.name + " · " + st.stage + (st.of ? " " + Math.round(100 * st.done / st.of) + "%" : "…") : (on ? "✓ " : r.installed ? "" : "⤓ ") + r.name;
@@ -465,15 +471,18 @@ function loraHub(obj, save = () => {}, redraw = render) { if (!obj.loras) obj.lo
       obj === C && !(r.flow && r.flow.asks.length) ? loraWants().filter(w => w.name === r.name).map(w => el("div", { class: "note", style: "flex-basis:100%;color:var(--warn)" }, el("b", {}, "Needs: "), w.text + " ", el("button", { type: "button", class: "small", onclick: w.go }, w.label))) : null,
       r.builtin ? null : el("button", { class: "fit small", title: "Take this LoRA out of the hub (its file goes to the trash folder)", onclick: async () => { if (!confirm("Remove “" + r.name + "” from the hub?")) return; try { await api("/api/loras/" + r.id, undefined, "DELETE"); obj.loras = obj.loras.filter(x => x.id !== r.id); await loadLoras(); done(); } catch (e) { toast(e.message); } } }, "🗑")); };
   const f = HUB.form, up = el("input", { type: "file", accept: ".safetensors", onchange: async () => { if (!up.files[0]) return; const data = new FormData(); data.append("file", up.files[0]); try { const r = await (await fetch("/api/upload", { method: "POST", body: data })).json(); f.file = r.path; toast("Uploaded " + up.files[0].name); } catch (e) { toast(e.message); } } });
-  const form = !HUB.open ? null : el("div", { class: "group" }, el("div", { class: "note" }, "A recipe for a MiniMax H3 LoRA: where its file comes from and how it is used. It becomes a button in the hub on this machine."),
+  const form = !HUB.open ? null : el("div", { class: "group" }, el("div", { class: "note" }, "A recipe for a LoRA: where its file comes from and how it is used. An uploaded file says which model it is for in its own header (MiniMax H3, Qwen-Image, Flux, LTX-Video, Stable Diffusion) and is filed under that; for a download address, say which. It becomes a card in the hub on this machine."),
     el("div", { class: "row" }, field("Name", bind(f, "name", el("input", { placeholder: "My 16mm western LoRA" }))), field("By", bind(f, "author", el("input", { placeholder: "its author" })))),
-    el("div", { class: "row" }, field("Download address of the .safetensors file", bind(f, "url", el("input", { placeholder: "https://…/lora.safetensors" }))), field("or upload the file", up)),
+    el("div", { class: "row" }, field("Download address of the .safetensors file", bind(f, "url", el("input", { placeholder: "https://…/lora.safetensors" }))), field("or upload the file", up),
+      field("Model it is for", select(f, "kind", { "": "Detect from the file (an address: MiniMax H3)", h3: "MiniMax H3 (clips)", "qwen-image": "Qwen-Image (pictures)", flux: "Flux (stored)", ltx: "LTX-Video (stored)", sd: "Stable Diffusion (stored)" }))),
     el("div", { class: "row" }, field("Trigger word", bind(f, "trigger", el("input", { placeholder: "added at the start of the shot" }))), el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Strength"), bind(f, "strength", el("input", { type: "number", step: 0.1, min: 0.1, max: 2 }))),
       field("Looks (optional): name = phrase; name = phrase", bind(f, "styles", el("input", { placeholder: "VHS = shot on VHS.; 16mm = shot on 16mm film." })))),
     field("Notes", bind(f, "notes", el("input", { placeholder: "what it does, the sizes and steps it was made for" }))),
     el("div", { class: "row" }, el("button", { class: "fit primary", onclick: async () => { try { const styles = Object.fromEntries(f.styles.split(";").map(x => x.split("=").map(y => y.trim())).filter(x => x.length === 2 && x[0] && x[1]));
-        const r = await api("/api/loras", { ...f, styles }); if (!r.installed && r.url) await api("/api/loras/" + r.id + "/install", {}); await loadLoras(); obj.loras.push({ id: r.id, strength: r.strength || 1, style: Object.keys(r.styles || {})[0] || "" });
-        HUB.form = { name: "", url: "", file: "", trigger: "", strength: 1, styles: "", author: "", notes: "" }; HUB.open = false; hubWatch(redraw); done(); } catch (e) { toast(e.message); } } }, "Add to the hub"),
+        const r = await api("/api/loras", { ...f, styles }); if (!r.installed && r.url) await api("/api/loras/" + r.id + "/install", {}); await loadLoras();
+        if ((r.jobs || []).includes(job)) obj.loras.push({ id: r.id, strength: r.strength || 1, style: Object.keys(r.styles || {})[0] || "" });
+        toast("Added as a " + r.base + " LoRA" + (r.status === "stored" ? ": stored, the Studio has no engine for it yet" : (r.jobs || []).length ? ": for " + r.jobs.map(j => JOB_NAMES[j].toLowerCase()).join(", ") : ""));
+        HUB.form = { name: "", url: "", file: "", kind: "", trigger: "", strength: 1, styles: "", author: "", notes: "" }; HUB.open = false; hubWatch(redraw); done(); } catch (e) { toast(e.message); } } }, "Add to the hub"),
       el("button", { class: "fit", onclick: () => { HUB.open = false; redraw(); } }, "Cancel")));
   const failed = LORAS.filter(r => r.installing && r.installing.stage === "failed");
   const use = r => { if (picked(r.id)) obj.loras = obj.loras.filter(p => p.id !== r.id); else obj.loras.push({ id: r.id, strength: r.strength || 1, style: Object.keys(r.styles || {})[0] || "" }); done(); };
@@ -483,18 +492,22 @@ function loraHub(obj, save = () => {}, redraw = render) { if (!obj.loras) obj.lo
     for (const r of list) { try { await api("/api/loras/" + r.id + "/install", {}); } catch (e) { toast(e.message); } }
     await loadLoras(); hubWatch(redraw); redraw(); };
   const inTab = r => HUB.tab === "all" || (r.category || ["mine"]).includes(HUB.tab);
-  const words = HUB.q.trim().toLowerCase(), hit = r => !words || [r.name, r.author, r.what, r.notes, r.trigger].join(" ").toLowerCase().includes(words);
-  const shown = LORAS.filter(r => inTab(r) && hit(r) && (!HUB.mine || r.installed));
-  const card = r => { const on = picked(r.id), st = r.installing, busy = st && st.stage !== "failed", dead = r.status === "unsupported";
-    return el("div", { class: "hubcard" + (on ? " on" : "") + (dead ? " off" : ""), "data-lora": r.id },
+  const words = HUB.q.trim().toLowerCase(), hit = r => !words || [r.name, r.author, r.what, r.notes, r.trigger, r.base].join(" ").toLowerCase().includes(words);
+  const forJob = (r, id) => id === "all" || (id === "stored" ? r.status === "stored" : (r.jobs || ["video"]).includes(id));
+  const shown = LORAS.filter(r => inTab(r) && forJob(r, HUB.job) && hit(r) && (!HUB.mine || r.installed));
+  const card = r => { const on = picked(r.id), st = r.installing, busy = st && st.stage !== "failed", dead = r.status === "unsupported", stored = r.status === "stored";
+    return el("div", { class: "hubcard" + (on ? " on" : "") + (dead || stored ? " off" : ""), "data-lora": r.id },
       el("div", {}, el("b", {}, r.name), el("div", { class: "by", title: "The author's own page, for credit and for the file's licence" }, (r.author ? "by " + r.author : "") + (r.page ? " · " + r.page : ""))),
       el("div", {}, r.what || r.notes || ""),
-      el("div", { class: "tags" }, el("span", { class: "tag" + (dead ? " warn" : "") }, LORA_NEEDS[r.needs] || LORA_NEEDS.text),
+      el("div", { class: "tags" }, el("span", { class: "tag" + (stored ? " warn" : ""), title: "The model this LoRA was trained for: a job merges only its own model's LoRAs" }, r.base || "MiniMax H3"),
+        (r.jobs || []).length ? el("span", { class: "tag", title: "The jobs that merge it on this machine" }, "for " + r.jobs.map(j => JOB_NAMES[j].toLowerCase()).join(", ")) : null,
+        el("span", { class: "tag" + (dead ? " warn" : "") }, LORA_NEEDS[r.needs] || LORA_NEEDS.text),
         r.licence_tag ? el("span", { class: "tag" + (/none|gated|custom/i.test(r.licence_tag) ? " warn" : ""), title: r.licence || "" }, r.licence_tag) : null,
         r.size ? el("span", { class: "tag" }, sizeText(r.size)) : null,
         r.trigger ? el("span", { class: "tag", title: "Added to the prompt for you" }, "trigger: " + r.trigger) : null,
         r.tested ? el("span", { class: "tag", title: "Where we rendered a clip with it" }, "tested: " + r.tested) : null),
-      dead || r.status === "gated" ? el("div", { class: "note" + (dead ? "" : ""), style: dead ? "color:var(--warn)" : "" }, (dead ? "Not supported in the Studio yet. " : "") + (r.why || "")) : null,
+      dead || stored || r.status === "gated" ? el("div", { class: "note", style: dead || stored ? "color:var(--warn)" : "" }, (dead ? "Not supported in the Studio yet. " : stored ? "Stored, no engine yet. " : "") + (r.why || "")) : null,
+      Object.entries(r.jobs_why || {}).map(([j, why]) => el("div", { class: "note", style: "color:var(--warn)" }, JOB_NAMES[j] + ": " + why)),
       r.status === "action" ? actHubNote(r) : null,
       r.notes && !dead ? el("div", { class: "note" }, r.notes) : null,
       st && st.stage === "failed" ? el("div", { class: "note", style: "color:var(--bad)" }, st.error) : null,
@@ -503,12 +516,14 @@ function loraHub(obj, save = () => {}, redraw = render) { if (!obj.loras) obj.lo
         busy ? el("button", { type: "button", class: "small", disabled: true }, st.stage + (st.of ? " " + Math.round(100 * st.done / st.of) + "%" : "…")) :
         !r.installed ? el("button", { type: "button", class: "small", title: r.page || "", onclick: () => install([r]) }, "⤓ Install") :
         r.status === "action" ? actHubButton(r) :
-        r.target === "image" ? el("button", { type: "button", class: "small lora", title: "Opens Create on Edit a picture with this LoRA on", onclick: () => edUse(r) }, "Use in Edit a picture") :
+        stored ? null :
+        r.target === "image" ? [(r.jobs || []).includes("scout") ? el("button", { type: "button", class: "small lora", title: "Opens Create on a new picture with this LoRA on", onclick: () => { if (!PICT.loras.some(p => p.id === r.id)) PICT.loras = [...PICT.loras, { id: r.id, strength: r.strength || 1 }]; Object.assign(C, { goes: "image", step: 0 }); changed(); } }, "Use in a new picture") : null,
+          (r.jobs || []).includes("edit") ? el("button", { type: "button", class: "small lora", title: "Opens Create on Edit a picture with this LoRA on", onclick: () => edUse(r) }, "Use in Edit a picture") : null] :
         el("button", { type: "button", class: "small lora" + (on ? " on" : ""), onclick: () => use(r) }, on ? "✓ On this clip" : "Use on this clip"),
         r.installed && !busy ? el("button", { type: "button", class: "small", title: "Moves this LoRA's file to the trash folder" + (r.builtin ? "; the preset stays in the hub" : " and takes it out of the hub"), onclick: async () => { if (!confirm("Remove the file of “" + r.name + "” from this machine?")) return; try { await api("/api/loras/" + r.id, undefined, "DELETE"); obj.loras = obj.loras.filter(x => x.id !== r.id); await loadLoras(); done(); } catch (e) { toast(e.message); } } }, "Remove") : null)); };
   // how many of the hub's LoRAs can be used on this machine now, and why the others cannot
   const hubTally = () => { const sets = LORAS.filter(r => r.builtin), ok = sets.filter(r => r.usable), not = sets.filter(r => !r.usable);
-    const why = r => r.status === "unsupported" ? (r.platforms && !r.platforms.includes("mac") && S.platform !== "spark" ? "DGX Spark only" : "not on this machine") : r.status === "gated" ? "waits on its author's approval of your download" : "not installed";
+    const why = r => r.status === "stored" ? "stored, no engine yet" : r.status === "unsupported" ? (r.platforms && !r.platforms.includes("mac") && S.platform !== "spark" ? "DGX Spark only" : "not on this machine") : r.status === "gated" ? "waits on its author's approval of your download" : "not installed";
     return ok.length + " of " + sets.length + " LoRAs are usable on this " + (S.platform === "spark" ? "DGX Spark" : "Mac") + (not.length ? ". Not usable: " + not.map(r => r.name + " (" + why(r) + ")").join(", ") + "." : "."); };
   const count = id => LORAS.filter(r => id === "all" || (r.category || ["mine"]).includes(id)).length;
   const tabs = [{ id: "all", name: "All" }, ...HUB.groups].filter(g => g.id === "all" || count(g.id));
@@ -516,20 +531,24 @@ function loraHub(obj, save = () => {}, redraw = render) { if (!obj.loras) obj.lo
   const toInstall = shown.filter(r => !r.installed && r.status !== "unsupported" && !(r.installing && r.installing.stage !== "failed"));
   const browser = !HUB.browse ? null : el("div", { class: "group", id: "lorabrowser" },
     el("div", { class: "hubtabs" }, tabs.map(g => el("button", { type: "button", class: "small" + (HUB.tab === g.id ? " on" : ""), onclick: () => { HUB.tab = g.id; redraw(); } }, g.name + " (" + count(g.id) + ")"))),
+    el("div", { class: "hubtabs", id: "hubjobs", title: "Show the LoRAs a job can merge" }, el("span", { class: "note", style: "align-self:center;margin-right:6px" }, "For:"),
+      [["all", "Any job"], ["video", "Clips"], ["scout", "New pictures"], ["edit", "Edit a picture"], ["stored", "Stored, no engine yet"]].map(([id, name]) =>
+        el("button", { type: "button", class: "small" + (HUB.job === id ? " on" : ""), onclick: () => { HUB.job = id; redraw(); } }, name + " (" + LORAS.filter(r => forJob(r, id)).length + ")"))),
     el("div", { class: "row", style: "align-items:center" }, search,
       el("label", { class: "fit", style: "display:flex;gap:6px;align-items:center;margin:0" }, el("input", { type: "checkbox", checked: HUB.mine, style: "width:auto", onchange: e => { HUB.mine = e.target.checked; redraw(); } }), "Installed only"),
       HUB.tab !== "all" && toInstall.length ? el("button", { type: "button", class: "fit small", onclick: () => install(toInstall) }, "⤓ Install all " + toInstall.length + " in this category") : null,
       el("button", { type: "button", class: "fit small", onclick: () => { HUB.open = !HUB.open; redraw(); } }, "+ Add your own LoRA")),
-    el("div", { class: "note" }, "Each LoRA is its author's work, under that file's own licence; the page named on a card is where it comes from and who to credit. Install takes the file from the LoRA bundle on this machine when there is one (no network), and otherwise from the author's page, and checks it. " + (S.platform === "spark" ? "" : "On a Mac the file is then rewritten once for the MLX engine. ") + "A LoRA for pictures is read as its author wrote it, and is used in Create, Edit a picture. " + "LoRAs from the hub are for text-to-video and first-frame clips; a clip made from reference pictures or videos does not take them yet."),
+    el("div", { class: "note" }, "Each LoRA is its author's work, under that file's own licence; the page named on a card is where it comes from and who to credit. Install takes the file from the LoRA bundle on this machine when there is one (no network), and otherwise from the author's page, and checks it. " + (S.platform === "spark" ? "" : "On a Mac the file is then rewritten once for the MLX engine. ") + "Each LoRA works with one model, named on its card: a clip takes MiniMax H3 LoRAs, a new picture and Edit a picture take Qwen-Image LoRAs (read as their author wrote them), and a LoRA for a model the Studio has no engine for (Flux, LTX-Video, Stable Diffusion) is kept here, marked stored. " + "LoRAs from the hub are for text-to-video and first-frame clips; a clip made from reference pictures or videos does not take them yet."),
     el("div", { class: "note", id: "hubtally" }, hubTally()),
     shown.length ? el("div", { class: "hubgrid" }, shown.map(card)) : el("div", { class: "note", style: "padding:10px" }, "Nothing here matches."));
-  const quick = LORAS.filter(r => r.status !== "action" && r.target !== "image" && (r.installed || picked(r.id) || (r.installing && r.installing.stage !== "failed")));  // a Library action's LoRA is not for a clip; a picture LoRA is picked in Edit a picture
-  return el("div", { class: "hub" }, el("label", {}, "Keys and Wasserman LoRA Hub"),
+  const quick = LORAS.filter(r => r.status !== "action" && (r.jobs || ["video"]).includes(job) && (r.installed || picked(r.id) || (r.installing && r.installing.stage !== "failed")));  // only the LoRAs this job merges: a Library action's LoRA, a LoRA for another model, and a stored one are not offered
+  return el("div", { class: "hub" }, el("label", {}, "Keys and Wasserman LoRA Hub" + (job === "video" ? "" : " · " + JOB_NAMES[job].toLowerCase())),
     el("div", { class: "chips" }, quick.map(chip),
       el("button", { type: "button", class: "small" + (HUB.browse ? " on lora" : ""), id: "lorabrowse", onclick: () => { HUB.browse = !HUB.browse; redraw(); } }, HUB.browse ? "▾ Close the hub" : "▸ Browse the hub (" + LORAS.length + " LoRAs in " + (tabs.length - 1) + " groups)")),
     failed.filter(r => !HUB.browse).map(r => el("div", { class: "note", style: "color:var(--bad)" }, r.name + ": " + r.installing.error)),
     browser, obj.loras.map(row), form,
-    obj.loras.length ? el("div", { class: "note" }, S.platform === "spark" ? "With a LoRA the clip renders on ComfyUI's own blocks with the full-precision weights, not the TensorFold engine: slower, and no time estimate." : "With a LoRA, FastH3 renders on the MLX engine, not the native one: slower, and no time estimate. MiniMax H3 at 20 steps is what most LoRAs were made for.") : null); }
+    obj.loras.length && job !== "video" ? el("div", { class: "note" }, "A picture LoRA is merged into the 40-step Qwen-Image-2.1 base model it was trained on (slower than the Turbo scouts), at the strength shown; its trigger word opens the prompt for you.") : null,
+    obj.loras.length && job === "video" ? el("div", { class: "note" }, S.platform === "spark" ? "With a LoRA the clip renders on ComfyUI's own blocks with the full-precision weights, not the TensorFold engine: slower, and no time estimate." : "With a LoRA, FastH3 renders on the MLX engine, not the native one: slower, and no time estimate. MiniMax H3 at 20 steps is what most LoRAs were made for.") : null); }
 function videoControls(after) {
   const two = bind(C, "up", el("input", { type: "checkbox", disabled: !UPSCALED[C.res] }), changed);
   return el("div", { class: "group" },
@@ -716,8 +735,9 @@ function viewCreate() {
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
       el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
+      imageModel().startsWith("qwen") ? loraHub(PICT, () => {}, render, "scout") : null,
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
-        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() } });
+        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel(), ...(imageModel().startsWith("qwen") ? picsParams() : {}) } });
         C.imageJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make image"), el("span")));
     if (made) { put(body, el("h3", {}, "Images"), jobCard(made));
       if (made.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, made.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
@@ -789,10 +809,10 @@ function viewCreate() {
       if (C.mode === "scout") {
         if (!C.imagePrompt) C.imagePrompt = C.scene;
         const scout = C.scoutJob && jobs.find(j => j.id === C.scoutJob);
-        put(body, imageModelPick(), field("Image prompt (" + imageModelName() + ")", bind(C, "imagePrompt", el("textarea"))),
+        put(body, imageModelPick(), field("Image prompt (" + imageModelName() + ")", bind(C, "imagePrompt", el("textarea"))), imageModel().startsWith("qwen") ? loraHub(PICT, () => {}, render, "scout") : null,
           el("div", { class: "row" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
             el("button", { class: "primary fit", disabled: !C.imagePrompt.trim(), onclick: async () => { try { const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
-              params: { prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
+              params: { prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(imageModel().startsWith("qwen") ? picsParams() : {}), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
           scout ? el("div", { class: "note" }, "Scout job: ", el("span", { class: "pill " + scout.status }, scout.status)) : el("div", { class: "note" }, "Six scouts take about half a minute. They are made at the size the video model starts from."));
         if (scout && scout.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, scout.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
           el("div", { class: "tile" + (C.image === p ? " on" : ""), onclick: () => { C.image = p; render(); } }, media(p), el("div", { class: "cap" }, p.split("/").pop(), C.image === p ? "✓ selected" : "pick")))));

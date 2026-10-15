@@ -65,6 +65,17 @@ def label(direction: str, height: str, close: bool) -> str:
     return f"{direction}_{height}{'_close' if close else ''}"
 
 
+def base_installed(spark: bool) -> bool:
+    """Whether the 40-step Qwen-Image-2.1 base model is here: what picture LoRAs are trained on."""
+
+    if spark:
+        models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
+        return (models / "diffusion_models/qwen_image_2.1_bf16.safetensors").is_file()
+    turbo = Path(os.environ.get("QWEN_MODEL_DIR", Path.home() / "qwen-models/Qwen-Image-2.1-Turbo"))
+    base = Path(os.environ.get("QWEN_BASE_DIR", turbo.parent / "Qwen-Image-2.1"))
+    return (base / "transformer").is_dir() and (base / "processor").is_dir()
+
+
 def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, models=lambda: []):
     """``models``: the picture models installed here, [{"id", "label", "note"}, ...] with Qwen first (server.py)."""
 
@@ -97,10 +108,7 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         return True, ""
 
     def base_ready() -> bool:
-        if spark:
-            models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
-            return (models / "diffusion_models/qwen_image_2.1_bf16.safetensors").is_file()
-        return (model_dirs()[1] / "transformer").is_dir() and (model_dirs()[1] / "processor").is_dir()
+        return base_installed(spark)
 
     def memory_gib() -> int:
         try:

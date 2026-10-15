@@ -6,6 +6,8 @@
 # Environment: PREFIX, TURBO (1: Qwen-Image-2.1-Turbo on its own 8 steps; 0: base model), STEPS (base model only),
 # WIDTH, HEIGHT (multiples of 16), SEED, PROMPT_FILE, EXTRA (--seeds 1,2,3 writes out_s1.png ...).
 # IMAGE_MODEL=qwen-full is the base model as TURBO=0 runs it (Qwen 2.1 Full, 40 steps at CFG 4).
+# LORA (one picture LoRA, PATH or PATH:STRENGTH, a line each; Qwen only; the base model, TURBO=0 or qwen-full, is what
+# picture LoRAs are trained on).
 # IMAGE_MODEL=flux3k-fast | flux3k-full makes it with FLUX3-K instead (oneshot-setup-spark.sh --flux3): Fast is the
 # distilled checkpoint (16 steps), Full the base one (50 steps); BFL's prompt upsampler writes the caption first
 # (UPSAMPLE=0 sends a prompt that is already a full scene caption as written).
@@ -19,5 +21,8 @@ ARGS=(image -o "$OUT" --width "${WIDTH:-1344}" --height "${HEIGHT:-768}" --seed 
 [ "${TURBO:-1}" = 1 ] || ARGS+=(--base --steps "${STEPS:-40}")
 [ "${UPSAMPLE:-1}" = 1 ] || ARGS+=(--no-upsample)
 if [ -n "${PROMPT_FILE:-}" ]; then ARGS+=(--prompt-file "$PROMPT_FILE"); else ARGS+=(--prompt "$PROMPT"); fi
+if [ -n "${LORA:-}" ]; then
+  while IFS= read -r ONE; do [ -z "$ONE" ] || ARGS+=(--lora "$ONE"); done <<<"$LORA"
+fi
 # shellcheck disable=SC2086
 PREFIX="$PREFIX" exec "$PREFIX/venv/bin/python" "$HERE/spark_generate.py" "${ARGS[@]}" ${EXTRA:-}

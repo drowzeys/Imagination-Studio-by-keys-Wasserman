@@ -944,6 +944,19 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
             if width % 16 or height % 16 or not (256 <= width <= 2048 and 256 <= height <= 2048):
                 raise HTTPException(400, "image sides are multiples of 16 between 256 and 2048")
         env = {"SEED": seed, "WIDTH": width, "HEIGHT": height, **image_model_env(params)}
+        # picture LoRAs from the hub (a LoRA for another model is refused, and so is one this machine's engine cannot merge): the
+        # trigger opens the prompt, and they are merged into the 40-step base model they were trained on when it is installed.
+        # They are Qwen-Image LoRAs: FLUX3-K takes none (as in Edit a picture), and a Flux LoRA stays stored in the hub
+        if params.get("loras") and env["IMAGE_MODEL"] not in ("qwen", "qwen-full"):
+            raise HTTPException(400, "picture LoRAs from the hub are Qwen-Image's: pick Qwen 2.1 Turbo or Full for them, or leave them out for FLUX3-K")
+        picked = lora_resolve(params.get("loras"), "image", job="scout")
+        if picked:
+            prompt = " ".join([p["trigger"] for p in picked if p["trigger"] and p["trigger"] not in prompt] + [prompt])
+            base = params.get("base")
+            base = True if env["IMAGE_MODEL"] == "qwen-full" else picture_edit.base_installed(SPARK) if base in (None, "") else bool(base)
+            if base and env["IMAGE_MODEL"] != "qwen-full" and not picture_edit.base_installed(SPARK):  # qwen-full: image_model_env checked it
+                raise HTTPException(400, "the 40-step base model is not installed here: oneshot-setup" + ("-spark" if SPARK else "") + ".sh --image-edit fetches it")
+            env.update(LORA="\n".join(f"{p['path']}:{p['strength']:g}" for p in picked), TURBO="0" if base else "1")
         first = int(seed)
         outputs = [str(folder / f"scout_s{first + i}.png") for i in range(count)] + [str(folder / "sheet.jpg")]
         return ["bash", str(scripts / "scout.sh"), prompt, str(count), str(folder)], env, outputs

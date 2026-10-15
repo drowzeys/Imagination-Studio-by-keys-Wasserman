@@ -191,3 +191,24 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_hub_picture_loras_go_on_qwen_turbo_or_full_and_never_on_flux3():
+    import server
+    from fastapi import HTTPException
+
+    had, had_resolve = server.image_models, server.lora_resolve
+    try:
+        server.image_models = lambda: ["qwen", "qwen-full", "flux3k-fast", "flux3k-full"]
+        server.lora_resolve = lambda picked, target="video", job="": [{"path": "/x/face.safetensors", "strength": 1.0, "trigger": "facetok"}] if picked else []
+        face = [{"id": "face", "strength": 1}]
+        try:
+            server.build("scout", {"prompt": "a portrait", "count": 1, "seed": 3, "image_model": "flux3k-fast", "loras": face}, "j2")
+            raise AssertionError("a picture LoRA went on FLUX3-K")
+        except HTTPException as error:
+            assert "Qwen-Image's" in error.detail, error.detail
+        cmd, env, _ = server.build("scout", {"prompt": "a portrait", "count": 1, "seed": 3, "image_model": "qwen-full", "loras": face}, "j3")
+        assert env["IMAGE_MODEL"] == "qwen-full" and env["TURBO"] == "0" and "face.safetensors" in env["LORA"], env
+        assert cmd[2].startswith("facetok "), cmd
+    finally:
+        server.image_models, server.lora_resolve = had, had_resolve

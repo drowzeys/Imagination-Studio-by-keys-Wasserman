@@ -938,12 +938,56 @@ def music(args) -> None:
                                         "total_s": round(seconds, 1), "eos": audio_s < args.seconds - 0.5, **level}), flush=True)
 
 
+def image_graph(args, text: str, seed: int, loras: list[tuple[str, float]]) -> dict:
+    """The ComfyUI graph of one picture: Qwen-Image-2.1 (Turbo, or with --base the 40-step model), the hub's picture LoRAs merged
+    into its weights in order, and the sampler on the merged model."""
+
+    w = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_BASE if args.base else QWEN,
+                                                     "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN_TEXT, "type": "qwen_image", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_VAE}},
+        "5": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["3", 0], "prompt": text,
+                                                                "negative_prompt": args.negative, "resolution": 1024}},
+        "6": {"class_type": "EmptyLatentImage", "inputs": {"width": args.width, "height": args.height, "batch_size": 1}},
+        "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/image_{uuid.uuid4().hex[:8]}"}},
+    }
+    model = ["1", 0]
+    for index, (name, strength) in enumerate(loras):
+        w[str(80 + index)] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model, "lora_name": name, "strength_model": strength}}
+        model = [str(80 + index), 0]
+    if args.base:
+        w["12"] = {"class_type": "KSampler",
+                   "inputs": {"model": model, "seed": seed, "steps": args.steps or 40, "cfg": args.cfg,
+                              "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
+                              "negative": ["5", 1], "latent_image": ["6", 0], "denoise": 1.0}}
+    else:
+        w["8"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}}
+        w["9"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
+        w["10"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": TURBO_SIGMAS}}
+        w["11"] = {"class_type": "CFGGuider", "inputs": {"model": model, "positive": ["5", 0],
+                                                         "negative": ["5", 1], "cfg": 1.0}}
+        w["12"] = {"class_type": "SamplerCustomAdvanced",
+                   "inputs": {"noise": ["8", 0], "guider": ["11", 0], "sampler": ["9", 0], "sigmas": ["10", 0],
+                              "latent_image": ["6", 0]}}
+    return w
+
+
 def image(args) -> None:
     for name, value in (("width", args.width), ("height", args.height)):
         if value % 16:
             sys.exit(f"--{name} must be a multiple of 16, got {value}")
     flux3 = args.model in FLUX3
     ensure_server("flux3" if flux3 else "image")
+    if flux3 and args.lora:
+        sys.exit("picture LoRAs are Qwen-Image's: FLUX3-K takes none (leave --lora out, or use --model qwen)")
+    if args.lora and args.base and not installed("unet", QWEN_BASE):
+        sys.exit("the base model is not installed: oneshot-setup-spark.sh --image-edit fetches Qwen-Image-2.1 (14 GB; Qwen Research License, non-commercial)")
+    loras = [] if flux3 else hub_loras(args.lora)  # picture LoRAs, merged into the model's bf16 weights at run time, the way Edit a picture does
+    for name, _ in loras:
+        if not installed("lora", name):
+            sys.exit(f"ComfyUI does not list the LoRA {name}")
     text = prompt_of(args)
     target = Path(args.output)
     seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else [args.seed]
@@ -959,37 +1003,12 @@ def image(args) -> None:
                                                 "total_s": round(seconds, 1)}), flush=True)
         return
     for seed in seeds:
-        w = {
-            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_BASE if args.base else QWEN,
-                                                         "weight_dtype": "default"}},
-            "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN_TEXT, "type": "qwen_image", "device": "default"}},
-            "4": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_VAE}},
-            "5": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["3", 0], "prompt": text,
-                                                                    "negative_prompt": args.negative, "resolution": 1024}},
-            "6": {"class_type": "EmptyLatentImage", "inputs": {"width": args.width, "height": args.height, "batch_size": 1}},
-            "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
-            "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/image_{uuid.uuid4().hex[:8]}"}},
-        }
-        if args.base:
-            w["12"] = {"class_type": "KSampler",
-                       "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps or 40, "cfg": args.cfg,
-                                  "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
-                                  "negative": ["5", 1], "latent_image": ["6", 0], "denoise": 1.0}}
-        else:
-            w["8"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}}
-            w["9"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
-            w["10"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": TURBO_SIGMAS}}
-            w["11"] = {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": ["5", 0],
-                                                             "negative": ["5", 1], "cfg": 1.0}}
-            w["12"] = {"class_type": "SamplerCustomAdvanced",
-                       "inputs": {"noise": ["8", 0], "guider": ["11", 0], "sampler": ["9", 0], "sigmas": ["10", 0],
-                                  "latent_image": ["6", 0]}}
-        item, seconds = render(w, "12")
+        item, seconds = render(image_graph(args, text, seed, loras), "12")
         out = target.with_name(f"{target.stem}_s{seed}{target.suffix}") if args.seeds else target
         fetch(item, out)
         print("[tensorfold] " + json.dumps({"output": str(out), "engine": "cuda", "width": args.width,
                                             "height": args.height, "seed": seed, "turbo": not args.base,
-                                            "total_s": round(seconds, 1)}), flush=True)
+                                            "loras": [name for name, _ in loras], "total_s": round(seconds, 1)}), flush=True)
 
 
 def main() -> None:
@@ -1052,6 +1071,7 @@ def main() -> None:
     i.add_argument("--steps", type=int, default=None, help="Qwen's base model (40) or FLUX3-K (16 Fast, 50 Full)")
     i.add_argument("--cfg", type=float, default=4.0, help="base model only")
     i.add_argument("--negative", default="")
+    i.add_argument("--lora", action="append", default=[], help="a picture LoRA, PATH or PATH:STRENGTH (repeat to stack); the base model (--base) is what they are trained on")
     i.set_defaults(run=image)
     m = kinds.add_parser("music", help="MiniMax Music 3: lyrics and a style caption to a song (oneshot-setup-spark.sh --music)")
     m.add_argument("--caption", default=""); m.add_argument("--caption-file", default="")
