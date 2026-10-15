@@ -472,7 +472,8 @@ for line in sys.stdin:
                "attempts": 1 if short else 2, "heard": "It is", "asr_s": 0.1}]
     print(json.dumps({"ok": True, "id": request.get("id"), "frames": 21, "eos": True, "audio_s": 1.0, "first_audio_ms": 210.0, "total_ms": 400.0,
                       "fps": 80.0, "rtf": 0.4, "wav": request["wav"], "pcm": request.get("pcm"), "stream": bool(request.get("stream")),
-                      "chunks": [{"finish": "stop"}], "finish": ["stop"], "stop_rule": [False], "verify": verify, "peak_memory_gb": 47.5}),
+                      "chunks": [{"finish": "stop"}], "finish": ["stop"], "stop_rule": [False], "verify": verify, "peak_memory_gb": 47.5,
+                      **({"ref_texts": ["Hello there."], "ref_asr_ms": 90.0} if request.get("ref_audio") and not request.get("ref_text") else {})}),
           file=sys.stderr, flush=True)
 """
 
@@ -531,6 +532,16 @@ def test_an_mlx_take_runs_on_the_served_engine_plays_while_made_and_is_retaken_w
         assert again[0]["stream"] is True and again[1]["stream"] is False and "pcm" not in again[1] and one.process.pid == pid
         assert take["retaken"]["played"][0]["action"] == "redraw" and take["verify"][0]["action"] == "ok" and take["streamed"] is False
         assert take["load_s"] is None
+        # a clip to clone without its words: the engine hears it, the app's Whisper does not run first
+        one.hears = True
+        clip = server.HOME / "uploads" / "mlx-ref.wav"
+        with wave.open(str(clip), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(44100); w.writeframes(struct.pack("<h", 0) * 44100 * 3)
+        job = client.post("/api/voice/takes", json={"text": "Cloned.", "ref_audio": "uploads/mlx-ref.wav", "ref_text": "", "consent": True}).json()
+        done = wait(job["id"])
+        assert done["status"] == "done", done
+        sent = requests_of(folder)[-1]
+        assert sent["ref_text"] == "" and sent["ref_audio"].endswith(".ref.wav") and done["voice"]["reference"]["text"] == "Hello there."
         # "live": false: one request, not streamed
         wait(client.post("/api/voice/takes", json={"text": "Quiet.", "live": False}).json()["id"])
         assert requests_of(folder)[-1]["stream"] is False
@@ -548,6 +559,49 @@ def test_an_mlx_engine_without_serve_runs_once_a_take():
     assert one.serving() is False
     command = one.command(Path("t.txt"), Path("o.wav"), Path("s.json"), None, 1, {"temperature": 1.0, "top_p": 0.9, "top_k": 30}, live=True)
     assert "--stream" in command and "--serve" not in command
+
+
+def test_a_cuda_take_with_missing_words_is_drawn_again_not_played_and_the_best_kept():
+    folder = Path(tempfile.mkdtemp())
+    one = fake_cuda(folder)
+    had, had_ready, had_transcribe = voice._backend, voice.qa.ready, voice.qa.transcribe
+    text = "<|speaker:0|> Did you hear that noise downstairs? <|speaker:1|> It's probably just the cat. <|speaker:0|> Cats don't knock on doors."
+    full, short = "Did you hear that noise downstairs? It's probably just the cat. Cats don't knock on doors.", "Did you hear that noise downstairs? It's probably just the cat."
+    try:
+        voice._backend = one
+        voice.qa.ready = lambda: {"transcript": True, "runs": True, "missing": []}
+        voice.qa.transcribe = lambda clip: full if ".draw2" in str(clip) else short  # the first two draws drop the last turn
+        job = client.post("/api/voice/takes", json={"text": text, "seed": 7}).json()
+        done = wait(job["id"])
+        take = done["voice"]
+        sent = requests_of(folder)[-3:]
+        assert [r["seed"] for r in sent] == [7, 1007, 2007] and "pcm" in sent[0] and "pcm" not in sent[1] and "pcm" not in sent[2]
+        assert take["verify"][0]["action"] == "ok" and take["verify"][0]["attempts"] == 3 and take["asr"] == {**take["asr"], "score": 100, "by": "whisper"}
+        assert take["retaken"]["played"][0]["action"] == "redraw" and take["retaken"]["played"][0]["missing"] == ["cats", "don't", "knock", "on", "doors"]
+        assert take["streamed"] is False and (server.HOME / take["path"]).is_file() and not list((server.HOME / "voice").glob(f"{job['id']}.draw*"))
+        assert "words missing" in done["log"]
+        # every draw short: the best one is kept after two draws again, and said
+        voice.qa.transcribe = lambda clip: short
+        take = wait(client.post("/api/voice/takes", json={"text": text, "seed": 1}).json()["id"])["voice"]
+        assert take["verify"][0]["action"] == "redraw" and take["verify"][0]["attempts"] == 3 and take["asr"]["score"] < 100
+        # the whole text heard at once: no draw again
+        voice.qa.transcribe = lambda clip: full
+        count = len(requests_of(folder))
+        take = wait(client.post("/api/voice/takes", json={"text": text, "seed": 2}).json()["id"])["voice"]
+        assert len(requests_of(folder)) == count + 1 and take["retaken"] is None and take["streamed"] is True and take["verify"][0]["attempts"] == 1
+    finally:
+        one.release("test over")
+        voice._backend, voice.qa.ready, voice.qa.transcribe = had, had_ready, had_transcribe
+
+
+def test_the_word_check_is_the_engines():
+    import wordcheck
+    text = "<|speaker:0|> [sighs] It's probably just the cat. <|speaker:1|> Cats don't knock on doors."
+    assert wordcheck.check_text(text, "It's probably just the cat. Cats don't knock on doors.")["action"] == "ok"
+    assert wordcheck.check_text(text, "It's probably just the cat. Cats don't knock on the")["reason"] == "the last word is missing"
+    assert wordcheck.check_text("It costs 41 dollars.", "It costs forty-one dollars.")["action"] == "ok"
+    assert wordcheck.check_text("Built with TensorFold.", "Built with Tensor Fold.")["action"] == "ok"  # a near-exact merge
+    assert wordcheck.check_text("Go to the cat.", "Go to the.")["action"] == "redraw"  # the last content word
 
 
 if __name__ == "__main__":

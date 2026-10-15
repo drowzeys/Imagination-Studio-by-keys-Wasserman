@@ -300,6 +300,17 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.7.8 (2026-10-15): no dropped lines on the Spark, a cloned voice at once on the Mac.** On a DGX Spark the app
+> now gives every take the Mac engine's end-of-text check (`app/wordcheck.py`, its rules copied from TensorFold's
+> `drama3-mlx`): Whisper hears the take, and when words are missing (under 85 % heard, three in a row, or the ending)
+> the take is made again with another seed, not played, twice at most, the best kept and the first one's check kept
+> beside it. The two-speaker example on seeds 1 to 8 through the head app: before, seed 2 lost its last line (15 of
+> 20 words) and the other seven were whole; after, all eight whole, seed 2 drawn again once (42.7 s for the take
+> against 18 to 25 s for the others). On the Mac a voice to clone left without its words is heard by the engine's own
+> Whisper on the GPU (TensorFold `drama3-mlx` 8f3d4b33), not by the app's on the CPU first: the first sound of a
+> cloned take reaches the page **0.56 to 0.63 s** after the request, against 10.6 to 10.8 s in 2.7.7.
+> **Built with Fish Audio.**
+
 > **2.7.7 (2026-10-15): Voice answers at once on the Mac, and dialogue keeps its lines.** The Mac's Drama 3 now runs
 > as a persistent server, like the Spark's (TensorFold `drama3-mlx` 92c09a8e, `--serve`): the first take loads it
 > (5.2 s, about 50 GB with its word check), later takes start at once, and it is unloaded after five idle minutes and
@@ -1412,7 +1423,7 @@ and the pack ships no Drama 3 weights.
   not read out (measured: that one at 76 Hz, "a bright young woman" at 228 Hz, both transcribed without the bracket).
   Long text is split at sentence ends and keeps one voice.
 - **Clone a voice (optional).** A clean clip of one speaker, about 10 to 30 seconds (2 to 60 are taken), and what it
-  says; left empty, Whisper writes the transcript. The consent box (*I have the speaker's consent to clone this
+  says; left empty, Whisper writes the transcript (on a Mac the engine's own, already loaded; on a Spark the app's). The consent box (*I have the speaker's consent to clone this
   voice*) must be ticked, and the API refuses a clip without `"consent": true`. Measured with a 3.9 s clip at 125 Hz:
   the takes came out at 130 and 133 Hz with every word right.
 - **Settings.** Seed, and Fish's sampling defaults: temperature 1.0, top-p 0.9, top-k 30.
@@ -1426,8 +1437,9 @@ and the pack ships no Drama 3 weights.
   sound, are cut; a part with words missing is drawn again with a new seed (twice at most, the best kept); and a
   take that passed a likely end and went on is stopped on the model's own end signal. The tab shows the check part by
   part (ok, trimmed, redrawn, words not heard) and its count as the take's score, with what was heard on hover. On a
-  Spark, and with an older Mac engine, Whisper (the QA gate's own, `app/qa.py`, on the CPU) transcribes the finished
-  take instead; numbers written as figures by Whisper ("30" for "thirty") count as misses there.
+  Spark the app runs the same check (`app/wordcheck.py`, the engine's rules) on what Whisper (the QA gate's own,
+  `app/qa.py`, on the CPU) hears in the finished take, and makes a take with missing words again with another seed,
+  not played, twice at most, keeping the best (2.7.8). With an older Mac engine Whisper only scores the take.
 - **Plays while it is made**, on both machines: the tab plays the take from `/api/voice/takes/{id}/live` as the
   engine writes it. On a Mac a heard part cannot be drawn again, so a take whose check finds a part short while it
   plays is made once more without playing, and the take says so; untick *Play while it is made* to skip the played
@@ -1485,7 +1497,7 @@ word check loads Whisper on the CPU. Peak memory 48 to 51 GB.
 of the studio runs beside it), about 40 GB of disk for the converted weights (and 39 GB for Fish's checkpoint while
 converting), and TensorFold's Drama 3 port in an environment of its own. The port is on TensorFold's `drama3-mlx`
 branch of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold). `bash oneshot-setup.sh --voice` (or
-`bash scripts/setup-voice.sh` alone, `--verify` to check) does all of it: the clone at 92c09a8e in
+`bash scripts/setup-voice.sh` alone, `--verify` to check) does all of it: the clone at 8f3d4b33 in
 `~/tensorfold-drama3-mlx`, its venv, Fish's checkpoint, the conversion and a test line. By hand:
 
 ```bash

@@ -407,9 +407,15 @@ class Mlx(Served):
         # default there, with --stop-rule): drama3-mlx 4a8a982f or later; an older one gets neither flag
         self.streams = False
         self.serves = False  # --serve: drama3-mlx 92c09a8e or later
+        self.hears = False  # --serve hears a reference left without its text: drama3-mlx 8f3d4b33 or later
 
     def serving(self) -> bool:
         return self.serves and self.check() == ""
+
+    @property
+    def checks(self) -> bool:
+        """Whether the engine checks its own words (drama3-mlx 4a8a982f on): the app then does not."""
+        return self.streams
 
     def argv(self) -> list[str]:
         return [str(self.python()), "-I", "-m", "tensorfold.drama3", "--model", str(self.model), "--serve"]
@@ -445,7 +451,8 @@ class Mlx(Served):
         try:
             done = subprocess.run([str(self.python()), "-I", "-c", "import importlib.util as u; s = u.find_spec('tensorfold.drama3'); "
                                    "print(bool(s), bool(u.find_spec('tensorfold.families.drama3.stream')), "
-                                   "bool(s and s.origin and '\"--serve\"' in open(s.origin).read()))"],
+                                   "bool(s and s.origin and '\"--serve\"' in open(s.origin).read()), "
+                                   "bool(s and s.origin and 'ref_text_optional' in open(s.origin).read()))"],
                                   capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.TimeoutExpired) as error:
             return f"The Drama 3 environment did not answer: {error}"
@@ -454,6 +461,7 @@ class Mlx(Served):
             return f"The environment at {self.venv} has no tensorfold.drama3 (install TensorFold's drama3-mlx branch into it)."
         self.streams = found[1:2] == ["True"]
         self.serves = found[2:3] == ["True"]
+        self.hears = found[3:4] == ["True"]
         return ""
 
     def command(self, text_file: Path, out: Path, stats: Path, reference: tuple[Path, str] | None, seed: int, sampling: dict,
@@ -516,6 +524,7 @@ class Mlx(Served):
                 "encode_ms": answer.get("encode_ms"), "load_s": job.get("load_s"), "peak_memory_gb": answer.get("peak_memory_gb"),
                 "chunks": len(chunks) if isinstance(chunks, list) else chunks, "finish": answer.get("finish"),
                 "verify": answer.get("verify"), "stream": bool(answer.get("stream")), "retaken": retaken,
+                "ref_texts": answer.get("ref_texts"), "ref_asr_ms": answer.get("ref_asr_ms"),
                 "made_s": round(time.time() - loaded, 2)}
 
 
@@ -540,6 +549,8 @@ class Cuda(Served):
         self.lib = Path(os.environ.get("DRAMA3_CUDA_LIB", self.bin.parent.parent / "lib" / "libtensorfold_drama3.so")).expanduser()
         self.model = Path(os.environ.get("DRAMA3_CUDA_MODEL", Path.home() / "models" / "drama-3")).expanduser()
         self.codec = Path(os.environ.get("DRAMA3_CUDA_CODEC", here / "codec-v1.safetensors")).expanduser()
+
+    checks = False  # no end-of-text check of its own: the app's (``redrawn``)
 
     def serving(self) -> bool:
         return True
@@ -592,9 +603,10 @@ class Cuda(Served):
         part's voice, so it keeps one voice; a clip given is used for every part."""
 
         parts = pieces(text, self.CHUNK_WORDS)
-        live = wav.with_suffix(".live")
-        live.mkdir(exist_ok=True)
-        LIVE[job["id"]] = {"parts": [live / f"{i}.pcm" for i in range(len(parts))], "done": False, "finished": 0, "gap_s": self.GAP_S}
+        folder = wav.with_suffix(".live")
+        if live:  # played while it is made: the engine writes each part's raw PCM there as it goes (/live)
+            folder.mkdir(exist_ok=True)
+            LIVE[job["id"]] = {"parts": [folder / f"{i}.pcm" for i in range(len(parts))], "done": False, "finished": 0, "gap_s": self.GAP_S}
         with self.mutex:
             began = time.time()
             if not self.start(job):
@@ -606,9 +618,11 @@ class Cuda(Served):
                     job["progress"] = {"stage": "Drama 3 voice" + (f", part {index + 1} of {len(parts)}" if len(parts) > 1 else ""),
                                        "at": index, "of": len(parts)}
                     out = wav if len(parts) == 1 else wav.with_name(f"{wav.stem}.part{index}.wav")
-                    request = {"text": dialogue(part), "wav": str(out), "pcm": str(LIVE[job["id"]]["parts"][index]), "seed": seed + index,
+                    request = {"text": dialogue(part), "wav": str(out), "seed": seed + index,
                                "temperature": sampling["temperature"], "top_k": int(sampling["top_k"]),
                                "top_p": sampling["top_p"], "max_frames": 1500}
+                    if live:
+                        request["pcm"] = str(LIVE[job["id"]]["parts"][index])
                     voice_of = reference
                     if not voice_of and index and files and one_speaker(text):
                         voice_of = (files[0], spoken(parts[0]))
@@ -619,13 +633,15 @@ class Cuda(Served):
                         return None
                     answers.append(answer)
                     files.append(out)
-                    LIVE[job["id"]]["finished"] = index + 1
+                    if live:
+                        LIVE[job["id"]]["finished"] = index + 1
                     self.last_used = time.time()
             finally:
                 self.last_used = time.time()
-                LIVE[job["id"]]["done"] = True
-                # the raw parts go a minute later: a page may still be playing the end of the live take
-                threading.Timer(60, forget_live, args=(job["id"], live)).start()
+                if live:
+                    LIVE[job["id"]]["done"] = True
+                    # the raw parts go a minute later: a page may still be playing the end of the live take
+                    threading.Timer(60, forget_live, args=(job["id"], folder)).start()
         if len(files) > 1:
             join_wavs(files, wav, self.GAP_S)
             for one in files:
@@ -640,7 +656,7 @@ class Cuda(Served):
                 "first_audio_ms": answers[0].get("first_audio_ms") if answers else None,
                 "encode_ms": answers[0].get("encode_ms") if answers else None,
                 "load_s": job.get("load_s"), "device_gb": self.device_gb,
-                "chunks": len(answers), "finish": ["stop" if a.get("eos") else "length" for a in answers], "stream": True}
+                "chunks": len(answers), "finish": ["stop" if a.get("eos") else "length" for a in answers], "stream": live}
 
 
 LIVE: dict[str, dict] = {}  # a running take's raw PCM parts, as the engine writes them (the live WAV, /live)
@@ -916,7 +932,7 @@ def checked(body: dict) -> dict:
         if seconds is not None and not low - 0.05 <= seconds <= high + 0.05:
             raise HTTPException(400, f"a voice to clone is {low:g} to {high:g} seconds of speech, and this clip is {seconds:.1f} s")
         ref_text = " ".join(str(body.get("ref_text") or "").split())
-        if not ref_text and not qa.ready()["transcript"]:
+        if not ref_text and not qa.ready()["transcript"] and not hears_references(backend()):
             raise HTTPException(400, "write what the reference clip says (this machine has no speech-to-text tool to hear it)")
         params.update(ref_audio=relative(clip), ref_text=ref_text, consent=True)
     params["asr"] = body.get("asr", True) is not False
@@ -950,12 +966,14 @@ def perform(job: dict) -> bool:
             raise RuntimeError("the CUDA engine reads a WAV reference only, and this machine has no ffmpeg to convert it")
         else:
             shutil.copy(source, clean)
-        if not params.get("ref_text"):
+        if not params.get("ref_text") and hears_references(backend()):
+            pass  # the Mac engine's server hears the clip itself with its loaded Whisper (ref_texts in its answer)
+        elif not params.get("ref_text"):
             heard = qa.transcribe(clean)
             if not heard:
                 raise RuntimeError("no transcript of the reference clip: write what it says")
             params["ref_text"] = heard.strip()
-        reference = (clean, params["ref_text"])
+        reference = (clean, params.get("ref_text") or "")
     one = backend()
     job["engine"] = one.name
     if hasattr(one, "make") and one.serving():  # a persistent server, which holds the GPU lock itself while loaded
@@ -963,6 +981,12 @@ def perform(job: dict) -> bool:
                             live=params.get("live", True) is not False)
         if measured is None:
             return False
+        if params.get("ref_audio") and not params.get("ref_text") and measured.get("ref_texts"):
+            params["ref_text"] = str(measured["ref_texts"][0]).strip()  # what the engine heard in the clip
+        if not getattr(one, "checks", False) and params.get("asr") and qa.ready()["transcript"]:
+            measured = redrawn(job, one, params, wav, reference, measured)
+            if measured is None:
+                return False
         stats.write_text(json.dumps(measured, indent=1) + "\n")
     else:
         live = bool(getattr(one, "streams", False) and params.get("live", True))
@@ -996,7 +1020,10 @@ def perform(job: dict) -> bool:
             "streamed": bool(measured.get("stream")), "retaken": measured.get("retaken"),
             "reference": {"path": params["ref_audio"], "text": params["ref_text"], "consent": True} if params.get("ref_audio") else None,
             "slate": params.get("slate"), "credit": CREDIT}
-    if params.get("asr") and take["verify"]:
+    if params.get("asr") and measured.get("app_check"):
+        # the app's own end-of-text check (``redrawn``: the CUDA engine has none) heard the kept take already
+        take["asr"] = {**engine_score(take["verify"]), "by": "whisper"}
+    elif params.get("asr") and take["verify"]:
         # the engine heard every part with Whisper already (its end-of-text check): its count is the take's score,
         # and the take is not transcribed a second time
         take["asr"] = engine_score(take["verify"])
@@ -1014,6 +1041,60 @@ def perform(job: dict) -> bool:
     job["voice"] = take
     job["progress"] = None
     return True
+
+
+def hears_references(one) -> bool:
+    """Whether the engine transcribes a reference clip itself when its text is left out (the Mac engine's server,
+    drama3-mlx 8f3d4b33 on): the app then does not run its own Whisper on the CPU first."""
+
+    return bool(getattr(one, "hears", False) and hasattr(one, "serving") and one.serving())
+
+
+RETRIES = 2  # draws again of a take with missing words, as the Mac engine's --verify-retries
+
+
+def redrawn(job: dict, one, params: dict, wav: Path, reference, measured: dict) -> dict | None:
+    """The end-of-text check for an engine without one of its own (the CUDA engine): Whisper hears the take and
+    ``wordcheck`` (the Mac engine's rules) aligns it to the text. Words missing (under 85 % heard, three in a row, or
+    the ending): the take is made again with another seed, not played, ``RETRIES`` times at most, and the best kept.
+    The kept take's check is its ``verify`` (attempts counted); a take that was redrawn keeps the first one's check
+    as ``retaken``, as on the Mac. None when the job was cancelled."""
+
+    import wordcheck
+
+    def heard(path: Path) -> dict:
+        job["progress"] = {"stage": "Whisper word check", "at": 0, "of": 1}
+        return wordcheck.check_text(params["text"], qa.transcribe(path) or "")
+
+    def score(check: dict) -> tuple:
+        return (check["action"] != "redraw", round(check["coverage"], 3), -check["longest_missing_run"], -len(check["tail_words"]))
+
+    first = heard(wav)
+    best, best_measured, attempts = first, measured, 1
+    while best["action"] == "redraw" and attempts <= RETRIES:
+        seed = int(params["seed"]) + 1000 * attempts
+        job["log"] += f"[tensorfold] words missing ({best['reason']}): drawn again, seed {seed}, not played\n"
+        attempt = wav.with_name(f"{wav.stem}.draw{attempts}.wav")
+        again = one.make(job, params["text"], attempt, reference, seed, {k: params[k] for k in SAMPLING}, live=False)
+        if again is None:
+            attempt.unlink(missing_ok=True)
+            return None
+        attempts += 1
+        check = heard(attempt)
+        if score(check) > score(best):
+            attempt.replace(wav)
+            best, best_measured = check, {**again, "redraw_seed": seed}
+        else:
+            attempt.unlink(missing_ok=True)
+    keep = ("words", "matched", "missing", "tail_words", "action", "reason", "heard", "coverage", "longest_missing_run", "ending_missing")
+    out = dict(best_measured)
+    out["verify"] = [{**{k: best.get(k) for k in keep}, "attempts": attempts}]
+    out["app_check"] = True
+    if attempts > 1:
+        out["retaken"] = {"played": [{k: first.get(k) for k in keep}], "seconds": measured.get("audio_s"), "attempts": attempts}
+        out["load_s"] = measured.get("load_s")
+        out["first_audio_ms"] = measured.get("first_audio_ms")
+    return out
 
 
 def mlx_take(job: dict, one, text_file: Path, wav: Path, stats: Path, reference, params: dict, live: bool) -> dict | None:

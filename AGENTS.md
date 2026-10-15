@@ -187,7 +187,7 @@ Rules:
   plays while it is made (`pcm` to `/api/voice/takes/{id}/live`). Dialogue goes a turn a line (`dialogue`; on one line
   the model drops later turns). The Mac engine chunks long text and checks its own words (`verify`, `stop_rule`:
   never turn them off); its count is the take's score, and a take with a part short while it played is asked again
-  without streaming. On a Spark long text goes in parts (`pieces`, 60 words) and Whisper scores the take.
+  without streaming. On a Spark long text goes in parts (`pieces`, 60 words), and the app runs the Mac engine's check itself (`app/wordcheck.py`, copied from TensorFold's verify.py: keep the rules the engine's) on Whisper's transcript, drawing a take with missing words again, not played, `RETRIES` (2) times, the best kept. The Mac engine's server hears a clip to clone left without its words (8f3d4b33): the app then does not transcribe it first.
   `scripts/setup-voice.sh` (`oneshot-setup.sh --voice`) installs the Mac engine; on a Spark it only checks and prints
   the hand steps. A take with a reference clip needs `consent: true`; keep the consent box and the "Built with Fish
   Audio" line on the tab. A take sent as Ref2VA reference audio keeps MiniMax's 2 to 15 s per clip and 15 s per kind
