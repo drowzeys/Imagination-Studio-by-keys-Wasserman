@@ -23,7 +23,7 @@ function voCheck(t) {
   if (!t.verify || !t.verify.length) return null;
   const n = a => t.verify.filter(v => v.action === a).length, redrawn = t.verify.reduce((x, v) => x + Math.max(0, (v.attempts || 1) - 1), 0);
   const missing = t.verify.flatMap(v => v.missing || []), late = t.verify.filter(v => v.late_s).length;
-  return "engine check: " + [n("ok") ? n("ok") + " ok" : null, n("trim") ? n("trim") + " trimmed" : null, redrawn ? redrawn + " redrawn" : null,
+  return (t.asr && t.asr.by === "whisper" ? "word check: " : "engine check: ") + [n("ok") ? n("ok") + " ok" : null, n("trim") ? n("trim") + " trimmed" : null, redrawn ? redrawn + " redrawn" : null,
     n("redraw") ? n("redraw") + " still short" : null, late ? late + " cut after playing" : null].filter(Boolean).join(", ") + (t.verify.length > 1 ? " of " + t.verify.length + " parts" : "")
     + (missing.length ? " · not heard: " + missing.slice(0, 8).join(", ") + (missing.length > 8 ? "…" : "") : ""); }
 async function voLoad() { try { VO.takes = await api("/api/voice/takes"); } catch { VO.takes = []; } if (tab === "Voice") render(); }
