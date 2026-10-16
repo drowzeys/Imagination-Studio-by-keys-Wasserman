@@ -1,7 +1,7 @@
 # Agent one-shot — Wasserman Slate AI Studio, powered by TensorFold: Qwen-Image-2.1 + MiniMax H3 (MLX, Apple Silicon)
 
 **Repo:** https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3  
-**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.5` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engine)  
+**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engine)  
 **Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2068c03`, own venv, int8 tensor-unit kernels
 
 ```bash
@@ -193,8 +193,19 @@ Rules:
   Audio" line on the tab. A take sent as Ref2VA reference audio keeps MiniMax's 2 to 15 s per clip and 15 s per kind
   (`/api/voice/cut`). The weights are Fish Audio Materials (Fish Audio Community License v1.0): do not redistribute
   them, and say that a hosted TTS or cloning service needs Fish's own licence.
-- mflux and minimax-h3-mlx are pinned by commit and used at run time. Do not unpin.
+- Picture models (`IMAGE_MODELS` in `app/server.py`, `image_model` on scout and studio jobs, `IMAGE_MODEL` to
+  `scripts/image.sh`): `qwen` (Qwen-Image-2.1-Turbo, every install), `flux3k-fast` and `flux3k-full` (Black Forest
+  Labs' FLUX 3 Image Klein, distilled 16 steps and base 50 steps at CFG 3.5, `oneshot-setup.sh --flux3`). Call them
+  FLUX3-K in anything a person reads. FLUX3-K takes full scene captions: BFL's prompt upsampler always writes one
+  first (`UPSAMPLE=0` only for a prompt that already is one). On a Spark it runs inside ComfyUI's workflow
+  (`TextGenerate` with their settings, `flux3_workflow` in `spark/spark_generate.py`), never as standalone code; on a
+  Mac on flux3-mlx in `$PREFIX/flux3-venv`, never in the Studio's venv. Edit a picture takes `image_model` too
+  (`app/picture_edit.py`, `IMAGE_MODEL` to `scripts/edit.sh`): FLUX3-K edits are `flux3_workflow` in `spark/spark_edit.py`
+  (ReferenceMultiLatent, upsampler with the i2i prompt) and `flux3_edit.py` on a Mac; LoRAs, angles and `base` are
+  Qwen's and a FLUX3-K edit refuses them. FLUX Kommunity
+  License: say so when asked about commercial use, and do not redistribute the weights.
+- mflux, minimax-h3-mlx and flux3-mlx are pinned by commit and used at run time. Do not unpin.
 
-**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), MiniMax (H3), Ash Hart (TensorFold), antirez (h3.c),
+**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), felix-ab (flux3-mlx), MiniMax (H3), Ash Hart (TensorFold), antirez (h3.c),
 RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx / Phosphene), Filip Strand and mflux contributors, Viggle, speach1sdef178, LightX2V,
 NVIDIA Research, FastVideo, Sam Wasserman (Slate: the film workflow in Production; keep app/static/slate/NOTICE. Motion Previs Studio: the Motion Previs tab's analysis is a modified Python port of it; keep LICENSES/Motion-Previs-Studio-NOTICE, THIRD_PARTY_NOTICES.md and the headers of app/motion*.py, and keep the link to the original), Apple MLX. Authors only — no credit hyperlinks, except the link to Motion Previs Studio.

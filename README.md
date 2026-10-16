@@ -300,6 +300,33 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.8.0 (2026-10-15): pick the picture model: Qwen 2.1 Turbo, FLUX3-K Fast or FLUX3-K Full.** Black Forest Labs'
+> FLUX 3 Image Klein ("FLUX3-K") joins Qwen-Image-2.1-Turbo wherever the Studio makes a picture from a prompt: *Image
+> only*, the scouts a clip starts from, and a last frame. **FLUX3-K Fast** is the distilled checkpoint (16 steps),
+> **FLUX3-K Full** the base one (50 steps at CFG 3.5); both get a full scene caption from BFL's prompt upsampler first.
+> On a DGX Spark they run on ComfyUI's own FLUX 3 nodes (ComfyUI moves to `5a665890`, v0.41.0 and later), upsampler
+> included, so the render stays under the memory guard; on a Mac on flux3-mlx (Apache-2.0, a port of BFL's reference
+> code) in an environment of its own. `oneshot-setup.sh --flux3` installs them (41 GB; the Hugging Face repos are gated:
+> accept the FLUX Kommunity License first). Measured at 1344x768 with the model loaded, bf16: Qwen Turbo 9.7 s on an
+> M5 Ultra; FLUX3-K Fast 10.3 to 10.7 s on a Spark (ComfyUI; diffusers took 15.5 s for the same picture) and 14.9 s on
+> an M5 Ultra; FLUX3-K Full 57.5 s on a Spark and 53.6 s on an M5 Ultra; the upsampler, once per prompt, about 18 s on
+> a Spark and 5 s on an M5 Ultra. Against Qwen on the same six prompts and two seeds, FLUX3-K spelled a poster's title and tagline
+> right where Qwen wrote "SOME ONE IS STOLL LISTENNING", drew whole figures for character sheets where Qwen cut them at
+> the waist, and kept two characters recognisable in a two-reference shot; Fast looked as good as Full. The same seed
+> draws a different picture on the two machines (the runtimes draw their noise differently). **Edit a picture** offers
+> the same choice: FLUX3-K takes the picture, and up to nine more beside it, as reference latents (BFL's edit layout:
+> every picture on the prompt and on the negative, the result at the first picture's size), and the upsampler sees the
+> pictures before it writes the caption of the result (its i2i system prompt). Image LoRAs, the camera ring and the
+> 40-step base model stay Qwen's. Measured with the job's own scripts, seed 7, 1344x768, upsampler included: an edit
+> took 24 s with Qwen, 37 s with FLUX3-K Fast and 139 s with Full on a DGX Spark, 10, 37 and 240 s on an M5 Ultra; two
+> pictures (a person from one put in the place of another) 23, 44 and 188 s on a Spark, 13, 42 and 427 s on the Mac.
+> The reference rows lengthen every step, so Full is slow for edits on a Mac (about four times its text-to-image
+> time): Fast is the FLUX3-K for edits. FLUX3-K follows "switch the neon off" where Qwen left the signs lit on the
+> Spark. FLUX 3 Image Klein is under the FLUX Kommunity License: non-commercial use, and commercial use of the
+> outputs only for Qualifying Users (under US$5M revenue). The carrier image moves to
+> `ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0`: the same Mac payload, and the DGX Spark's prebuilt engine is now the
+> LoRA build of 2.7.1 (`h3-cuda-lora` `1f7ecc75`), so a Spark install takes it instead of building it from source.
+
 > **2.7.8 (2026-10-15): no dropped lines on the Spark, a cloned voice at once on the Mac.** On a DGX Spark the app
 > now gives every take the Mac engine's end-of-text check (`app/wordcheck.py`, its rules copied from TensorFold's
 > `drama3-mlx`): Whisper hears the take, and when words are missing (under 85 % heard, three in a row, or the ending)
@@ -895,7 +922,10 @@ with the command that installs ffmpeg, not after its render. Single clips and pi
 ![Create: image only](samples/ui_create_image.png)
 
 Choose *Image only*, describe the picture, pick a size and how many takes. Each image has **Download** and
-**animate this**, which carries it into a video as the first frame.
+**animate this**, which carries it into a video as the first frame. Where FLUX3-K is installed (`--flux3`), *Picture
+model* chooses between **Qwen 2.1 Turbo** (the quickest), **FLUX3-K Fast** and **FLUX3-K Full**; the same choice is
+offered for scouts and for a last frame made from a prompt. FLUX3-K writes a full scene description from your prompt
+before the first picture (5 to 20 s, once per prompt), then about 10 to 15 s a picture for Fast and a minute for Full.
 
 ### Edit a picture
 
@@ -913,6 +943,11 @@ latents, and the model draws the picture again as the prompt describes it.
   Pick angles one by one or take a set (*Five views around*, *Full orbit*, *Four heights*, *Wide and close*): each
   angle is one picture from one load of the model, up to 12 a job. The ring writes the author's captions, such as
   `<mva> right side view, high-angle shot close-up`.
+- **Picture model.** Where FLUX3-K is installed, *Picture model* above the picture offers **Qwen 2.1 Turbo**,
+  **FLUX3-K Fast** and **FLUX3-K Full**. FLUX3-K edits from words, with further pictures too; BFL's upsampler looks
+  at the pictures and writes the caption of the result first, so a short request is enough. It follows "switch the
+  neon off" where Qwen left the signs lit, and is slower: an edit took 24 s with Qwen, 37 s with Fast and 139 s with
+  Full on a DGX Spark, and 10, 37 and 240 s on an M5 Ultra, where Full is too slow for edits (427 s with two pictures). The LoRAs, the camera ring and the 40-step choice are Qwen's and are hidden for FLUX3-K.
 - **Several pictures.** The model takes several pictures at once, so two references need no side-by-side montage
   made elsewhere. Under the picture, *Further pictures* adds up to nine more. The first picture is the one that is
   edited and is image 1 to the model; the others are image 2, image 3, … in the order listed. Name them that way:
@@ -2073,6 +2108,9 @@ MiniMax's own image-to-video prompts use; `RAW_PROMPT=1` passes yours untouched.
 bash scripts/image.sh "A neon shop sign that reads OPEN LATE, rainy night, reflections on wet pavement" out.png
 TURBO=0 bash scripts/image.sh "..." out.png                 # 40 steps, base model
 WIDTH=2048 HEIGHT=2048 bash scripts/image.sh "..." out.png  # sizes in multiples of 16
+IMAGE_MODEL=flux3k-fast bash scripts/image.sh "..." out.png # FLUX3-K Fast, 16 steps (oneshot-setup.sh --flux3)
+IMAGE_MODEL=flux3k-full bash scripts/image.sh "..." out.png # FLUX3-K Full, 50 steps at CFG 3.5
+IMAGE_MODEL=flux3k-fast UPSAMPLE=0 bash scripts/image.sh "a full scene caption ..." out.png   # no prompt upsampler
 ```
 
 ### Edit a picture
@@ -2085,6 +2123,7 @@ SET_FILE=edits.json bash scripts/edit.sh photo.png          # [["prompt", "out.p
 BASE=1 bash scripts/edit.sh photo.png "..." out.png         # 40 steps, base model (--image-edit)
 IMAGES="person.png" bash scripts/edit.sh room.png "The person of image 2 sits on the sofa of image 1" out.png   # up to nine more, one a line
 SIZE=model RESOLUTION=1024 bash scripts/edit.sh photo.png "..." out.png   # the model's own size; the default is the picture's own
+IMAGE_MODEL=flux3k-fast IMAGES="person.png" bash scripts/edit.sh room.png "..." out.png   # FLUX3-K Fast (flux3k-full: Full), --flux3
 ```
 
 The result has the size of the first picture (`WIDTH` and `HEIGHT` ask for another). The noise is drawn for `SEED`
@@ -2447,14 +2486,15 @@ videos at once, and sound by ear (the figures above are measurements).
 ### GHCR prebuilt carrier
 
 ```bash
-docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.6.5
-# index digest: sha256:759aa57789223c4f63ecea950638b90d045a39d5c7452ff411fea5ecbcda8e0b (linux/arm64 + linux/amd64)
-docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.6.5 cp -a /payload/. /out/payload/
+docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0
+# index digest: sha256:44dba56cb8e316cdc35a3e227f1d5109901ad9209a0cdb408e3ef27e5a2265be (linux/arm64 + linux/amd64)
+docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0 cp -a /payload/. /out/payload/
 ```
 
 One image for both builds. For a Mac it holds the TensorFold wheel, `requirements.lock`, the render scripts, the
 prebuilt native FastH3 engine (`zig-engine/tf-h3-dit`, built for Apple Silicon at the pinned commit) and `SHA256SUMS`.
-For a DGX Spark it holds the prebuilt CUDA engine (`spark-engine/libtf_h3.so`, GB10, aarch64), which
+For a DGX Spark it holds the prebuilt CUDA engine (`spark-engine/libtf_h3.so`, GB10, aarch64; since 2.8.0 the
+`h3-cuda-lora` build at `1f7ecc75`, with LoRA support, so a Spark install no longer builds it from source), which
 `spark/build-engine.sh` takes when Docker is there and otherwise builds from source. **It is not a runtime**: neither
 Metal nor the Spark's models run in a container, so the setup installs natively. Rebuild it with
 `PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh`, to include its engine). Up to 2.2
@@ -2517,7 +2557,8 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 
 ## Credits
 
-Cite the original authors first: the Qwen team (Qwen-Image-2.1), the MiniMax team (MiniMax H3), Ash Hart and the
+Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
+picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
 [CREDITS.md](CREDITS.md). Pack: drowzeys / keys.

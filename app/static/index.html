@@ -235,7 +235,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
 let S = null, jobs = [], tab = "Create", project = null;
 const TABS = ["Create", "Production", "Motion Previs", "Voice", "Editor", "Library", "Sparks", "Tutorial"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
-  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
+  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
 const field = (labelText, node) => el("div", {}, el("label", {}, labelText), node);
 const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"; if (isBox) node.checked = !!obj[key]; else node.value = obj[key] ?? "";
@@ -315,8 +315,8 @@ function lastFramePanel() { const set = p => { C.lastImage = p; C.prompt = ""; }
       el("button", { class: "fit", onclick: () => { L.lib = !L.lib; render(); } }, L.lib ? "Hide the Library" : "Pick from the Library"),
       C.lastImage ? el("button", { class: "fit", onclick: () => { set(null); render(); } }, "No last frame") : null),
     clipFrames(set, "From a clip in the Library"),
-    el("div", { class: "row", style: "margin-top:8px;align-items:flex-end" }, field("Or make one from a prompt (Qwen-Image-2.1)", bind(L, "prompt", el("input", { placeholder: "the picture the clip ends on" }))),
-      el("button", { class: "fit", onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try { const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: { prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
+    el("div", { class: "row", style: "margin-top:8px;align-items:flex-end" }, field("Or make one from a prompt (" + imageModelName() + ")", bind(L, "prompt", el("input", { placeholder: "the picture the clip ends on" }))),
+      el("button", { class: "fit", onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try { const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: { prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
       scout ? el("span", { class: "pill " + scout.status }, scout.status) : null));
   if (L.lib) { const grid = el("div", { class: "grid", style: "margin-top:10px" }); box.append(grid);
     api("/api/library").then(list => list.filter(m => m.kind === "image").slice(0, 24).forEach(m => grid.append(el("div", { class: "tile" + (C.lastImage === m.path ? " on" : ""), onclick: () => { set(m.path); L.lib = false; render(); } }, media(m.path), el("div", { class: "cap" }, m.path.split("/").pop().slice(-26)))))).catch(() => {}); }
@@ -362,6 +362,13 @@ const output = () => C.preset === "custom" ? { label: "Custom " + C.cw + "x" + C
 const extras = () => ({ ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}), ...(String(C.steps).trim() ? { steps: Number(C.steps) } : {}), ...(lorasOf(C).length ? { loras: lorasOf(C) } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) });
 function changed() { sync(); C.prompt = ""; render(); }
 // one decision shown as cards: options are value -> [title, detail]
+// The picture model a prompt goes to (server.py IMAGE_MODELS): Qwen 2.1 Turbo on every install, FLUX3-K Fast and Full
+// where oneshot-setup --flux3 put them. Only installed ones are offered; a choice that is not installed falls back to Qwen.
+const imageModels = () => (S.image_models && S.image_models.length ? S.image_models : [{ id: "qwen", label: "Qwen 2.1 Turbo", note: "" }]);
+const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : "qwen");
+const imageModelName = () => imageModels().find(m => m.id === imageModel()).label;
+const imageModelPick = after => imageModels().length < 2 ? null : el("div", {}, el("label", {}, "Picture model"),
+  choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [m.label, m.note]])), after || render, true));
 const choice = (obj, key, options, after, tight) => el("div", { class: "choice" + (tight ? " tight" : ""), role: "radiogroup" }, Object.entries(options).map(([v, [title, sub]]) =>
   el("button", { type: "button", role: "radio", "aria-checked": String(obj[key]) === v ? "true" : "false", class: String(obj[key]) === v ? "on" : "", onclick: () => { obj[key] = v; if (after) after(); } }, el("b", {}, title), sub ? el("span", {}, sub) : null)));
 // A number of passes of your own is the Custom card of each passes chooser, right after its 20-pass card. C.steps
@@ -552,7 +559,7 @@ function videoControls(after) {
 }
 function summary(est) {
   const size = output().size, hand = String(C.steps).trim() && !isRef() && C.engine !== "fasth3" ? " · " + C.steps + " passes (custom)" : "", engine = isRef() ? "MiniMax H3 Ref2VA · " + refPassText() : C.engine === "fasth3" ? "FastH3 · " + (String(C.steps).trim() ? C.steps + " passes (custom)" : C.passes + " passes") + " · " + S.engine : "MiniMax H3 · " + H3Q[C.h3quality][0];
-  return el("div", { class: "summary" }, el("span", { class: "chip k" }, { t2v: "TEXT → VIDEO", scout: "QWEN IMAGE → VIDEO", i2v: "IMAGE → VIDEO", r2v: "REFERENCES → VIDEO" }[C.mode]),
+  return el("div", { class: "summary" }, el("span", { class: "chip k" }, { t2v: "TEXT → VIDEO", scout: "SCOUT IMAGE → VIDEO", i2v: "IMAGE → VIDEO", r2v: "REFERENCES → VIDEO" }[C.mode]),
     el("span", { class: "chip" }, engine + hand), encoderOf() ? el("span", { class: "chip" }, "text encoder: " + (C.textEncoder === "__own" ? "your own" : encoderName(encoderOf()))) : null, el("span", { class: "chip" }, size[0] + " × " + size[1]), el("span", { class: "chip" }, isLong() ? S.long[C.seconds] + " · " + Math.ceil(C.seconds / 15) + " × 15 s" : exact(framesOf(C))), est);
 }
 function settingsRow(obj, after, keep = {}) {
@@ -694,21 +701,22 @@ function viewCreate() {
     C.step < 4 ? el("button", { class: "primary fit", onclick: () => { C.step++; render(); } }, "Next") : null);
   body.setAttribute("data-clear", "create-" + C.step);
   sync();
-  const goes = el("div", {}, el("label", {}, "The prompt goes to"), choice(C, "goes", { video: ["Video with sound", S.turbo ? "FastH3 or MiniMax H3" : "FastH3"], image: ["Image only", "Qwen-Image-2.1"], edit: ["Edit a picture", "Qwen-Image-2.1 on a picture you give it"] }, changed));
+  const goes = el("div", {}, el("label", {}, "The prompt goes to"), choice(C, "goes", { video: ["Video with sound", S.turbo ? "FastH3 or MiniMax H3" : "FastH3"], image: ["Image only", imageModels().map(m => m.label).join(", ")], edit: ["Edit a picture", "Qwen-Image-2.1 on a picture you give it"] }, changed));
   const picture = field("Describe the scene / condition where it takes place", bind(C, "scene", el("textarea", { placeholder: isRef() ? "The woman with red hair sits at a wooden desk in a small radio studio at night, medium close-up, a warm lamp on the left." : "A middle-aged baker in a cream shirt and green apron behind a wooden counter in a small bakery at dawn, warm window light from the left…" })));
   if (C.mode === "edit") return viewEdit(goes);  // a picture re-drawn by the image model (edit.js)
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
     const [w, h] = C.imageSize.split("x").map(Number);
-    put(body, el("h2", {}, "What are you making?"), goes, picture,
+    put(body, el("h2", {}, "What are you making?"), goes, picture, imageModelPick(),
       el("label", {}, "Size"), choice(C, "imageSize", { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
       el("div", { class: "row" },
         el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
-      el("div", { class: "note" }, "Each image takes a few seconds after the model loads; seeds count up from the one given."),
+      el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
+        : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
-        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h } });
+        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() } });
         C.imageJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make image"), el("span")));
     if (made) { put(body, el("h3", {}, "Images"), jobCard(made));
       if (made.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, made.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
@@ -719,7 +727,7 @@ function viewCreate() {
   if (C.step === 0) {
     const est = el("span", { class: "eta" });
     put(body, el("h2", {}, "What are you making?"), goes,
-      el("label", {}, "The clip starts from"), choice(C, "start", { text: ["Text only", "no first frame"], scout: ["A Qwen scout image", "make several, pick one"], own: ["Your own image", "upload a picture"],
+      el("label", {}, "The clip starts from"), choice(C, "start", { text: ["Text only", "no first frame"], scout: ["A scout image", "make several with " + imageModels().map(m => m.label).join(" or ") + ", pick one"], own: ["Your own image", "upload a picture"],
         ...(S.ref2va ? { refs: S.ref_media ? ["References", "pictures, videos or audio: keep a face, a motion or a voice"] : ["Reference pictures", "keep a face or a thing, in a new scene"] } : {}) }, changed),
       isRef() ? el("div", { class: "note", style: "margin:8px 0" }, "You add them on the next screen: ", el("a", { href: "#", onclick: e => { e.preventDefault(); C.step = 1; render(); } }, "2. " + refWord()), ".") : null,
       videoControls(() => { render(); }), summary(est), picture,
@@ -780,10 +788,10 @@ function viewCreate() {
       if (C.mode === "scout") {
         if (!C.imagePrompt) C.imagePrompt = C.scene;
         const scout = C.scoutJob && jobs.find(j => j.id === C.scoutJob);
-        put(body, field("Image prompt (Qwen-Image-2.1)", bind(C, "imagePrompt", el("textarea"))),
+        put(body, imageModelPick(), field("Image prompt (" + imageModelName() + ")", bind(C, "imagePrompt", el("textarea"))),
           el("div", { class: "row" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
             el("button", { class: "primary fit", disabled: !C.imagePrompt.trim(), onclick: async () => { try { const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
-              params: { prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
+              params: { prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
           scout ? el("div", { class: "note" }, "Scout job: ", el("span", { class: "pill " + scout.status }, scout.status)) : el("div", { class: "note" }, "Six scouts take about half a minute. They are made at the size the video model starts from."));
         if (scout && scout.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, scout.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
           el("div", { class: "tile" + (C.image === p ? " on" : ""), onclick: () => { C.image = p; render(); } }, media(p), el("div", { class: "cap" }, p.split("/").pop(), C.image === p ? "✓ selected" : "pick")))));
@@ -1008,7 +1016,7 @@ function lessons() {
       { t: "Several speakers, other languages, singing", d: ["Add one line per speaker and describe each voice differently so the model can tell them apart. Language is a plain word such as English or Spanish. Tick “sung” for a line that is sung."], go: go(2, "+ Add a line") },
       { t: "Soundscape and music", d: ["Soundscape is the background: room tone, weather, footsteps, objects. Music is “N/A” for none, or a short description of the score."], eg: "Soundscape: Rain on a tin roof, distant traffic, a kettle starting to boil.\nMusic: slow solo piano, sparse and warm", tip: "Music under speech makes the words harder to hear. Keep it N/A for talking clips and add music in an editor later.", go: go(2, "Soundscape") } ] },
     { id: "frame", track: "Create", title: "Start from a picture", sub: "a scout image or your own", steps: [
-      { t: "Why start from a picture", d: ["With a first frame you decide the look before the slow part. The clip opens on exactly that picture and moves from there, so faces, clothes and framing are fixed.", "Pick “A Qwen scout image” to have the app make candidates, or “Your own image” to upload one."], go: go(0, "The clip starts from", { start: "scout" }) },
+      { t: "Why start from a picture", d: ["With a first frame you decide the look before the slow part. The clip opens on exactly that picture and moves from there, so faces, clothes and framing are fixed.", "Pick “A scout image” to have the app make candidates, or “Your own image” to upload one."], go: go(0, "The clip starts from", { start: "scout" }) },
       { t: "Make scouts and pick one", d: ["Step 2 shows the image prompt, copied from your scene box. Set how many, press “Make scouts”, and click the one you want. Scouts are made at the size the video starts from."], tip: "Scouts take seconds each. Make six and choose, rather than rendering six videos.", go: go(1, "Make scouts", { start: "scout" }) },
       { t: "Or upload your own", d: ["With “Your own image”, step 2 has an upload box. The picture is stretched onto the clip's canvas, so match the clip's shape: 16:9 for the presets, or set a Custom size with the picture's shape."], go: go(1, "Upload an image", { start: "own" }) },
       { t: "Write for a clip that already has its picture", d: ["Keep the scene box true to the picture: describe what is in it. The work is in the second box, which says what changes from that frame on."], eg: "Scene: the picture as it is.  What happens: She turns from the window, picks up the cup and takes a sip.", tip: "Asking for things the picture does not show (a different outfit, another place) makes the clip jump or melt.", go: go(0, "What happens to the characters") } ] },
@@ -1024,7 +1032,7 @@ function lessons() {
       { t: "Pick a long length", d: ["The model makes at most 15 seconds at a time. Choose 30 seconds or more under Length and the app renders several 15 second clips, each opening on the last frame of the one before, then joins them."], tip: "Not available with reference pictures.", go: go(0, "Length", { start: "text" }) },
       { t: "Write story beats", d: ["With a long length a “Story beats” box appears. Write one line per 15 second clip, in order. The last line is used for every clip after it."], eg: "He rides down the chute.\nHe stops at the river and looks back.\nHe wades across carrying the bike.", tip: "Without beats every clip gets the same action, so the video repeats itself. “Show me in the app” sets the length to 30 seconds so the box is there.", go: go(0, "Story beats", { start: "text", seconds: "30" }) },
       { t: "What to expect", d: ["Finished clips appear in the queue as they land. The look drifts a little with every clip, so faces and colors change over a long video. For a film where each part must look right, use the Production tab and check each segment."], go: go(0, "Length") } ] },
-    { id: "image", track: "Create", title: "Images only", sub: "stills with Qwen-Image", steps: [
+    { id: "image", track: "Create", title: "Images only", sub: "stills with Qwen 2.1 Turbo or FLUX3-K", steps: [
       { t: "Switch to image", d: ["Set “The prompt goes to” to “Image only”. The form shrinks to one box, a size, how many and a seed."], go: { tab: "Create", step: 0, spot: "The prompt goes to", set: { goes: "image" } } },
       { t: "Make and use them", d: ["“Make image” queues the batch; seeds count up from the one you gave. Each result has “Download” and “animate this”, which takes the image to Create as the first frame of a video."], go: { tab: "Create", step: 0, spot: "Make image", set: { goes: "image" } } } ] },
     { id: "edit", track: "Create", title: "Edit a picture", sub: "change a picture in words, or move the camera round it", steps: [

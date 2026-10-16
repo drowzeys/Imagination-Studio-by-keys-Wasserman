@@ -1,4 +1,4 @@
-"""Edit a picture on a DGX Spark (CUDA): Qwen-Image-2.1 with the picture as its reference, through ComfyUI.
+"""Edit a picture on a DGX Spark (CUDA): Qwen-Image-2.1 or FLUX3-K with the picture as its reference, through ComfyUI.
 
     spark_edit.py --image photo.png --prompt "make it night" -o out.png
     spark_edit.py --image photo.png --lora angles.safetensors:0.9 --set '[["<mva> back view, eye-level shot", "back.png"], ...]'
@@ -12,7 +12,13 @@ The first --image is the picture that is edited: the result has its size. Furthe
 beside it; the model knows them as image 1, image 2, ... in the order given. The noise is drawn for the seed and the
 pictures together, and the sizes are worked out in edit_plan.py (beside qwen_image_edit.py), where both are explained.
 
-Credit: the Qwen team for Qwen-Image-2.1 and Qwen-Image-2.1-Turbo, ComfyUI for the runtime.
+--model flux3k-fast or flux3k-full: FLUX3-K (BFL's FLUX 3 Image Klein) on ComfyUI's FLUX 3 nodes, the layout of their
+edit templates: every picture is a reference latent (Set Reference Multi Latent) on the prompt and on the negative, the
+result takes the first picture's size, and BFL's prompt upsampler sees the pictures and writes the caption (its i2i
+system prompt). Fast runs 16 steps, Full 50 at CFG 3.5. No LoRAs and no base model: those are Qwen's.
+
+Credit: the Qwen team for Qwen-Image-2.1 and Qwen-Image-2.1-Turbo, Black Forest Labs for FLUX 3 Image Klein and its
+prompt upsampler, ComfyUI for the runtime.
 """
 import time
 import subprocess
@@ -41,6 +47,91 @@ def prepared(path: str, size: tuple[int, int], folder: Path, index: int) -> Path
         target = folder / f"edit_{index}.png"
         picture.save(target)
     return target
+
+
+# BFL's upsampler: the user turn that carries the pictures (flux3-mlx's pup.py, from their reference), the most pixels
+# a picture is shown at for one, two, or three and more pictures, its grid, and its JPEG quality
+I2I_SCAFFOLD = "Reference images follow in order (the first image, the second image, ...).\nUser request: {}\nOutput the caption."
+UPSAMPLER_PIXELS = {1: 1024 * 1024, 2: 724 * 724}
+UPSAMPLER_GRID, UPSAMPLER_JPEG = 32, 92
+
+
+def upsampler_pictures(paths: list[str], folder: Path) -> list[Path]:
+    """The pictures as BFL's upsampler is shown them: over white, at its size budget, through JPEG. ComfyUI's
+    TextGenerate takes one batch, so with several pictures each is centred on a white canvas of the largest size."""
+
+    import io
+    from PIL import Image, ImageOps
+
+    budget = UPSAMPLER_PIXELS.get(len(paths), 512 * 512)
+    shown = []
+    for path in paths:
+        with Image.open(path) as opened:
+            picture = ImageOps.exif_transpose(opened).convert("RGBA")
+        picture = Image.alpha_composite(Image.new("RGBA", picture.size, (255, 255, 255, 255)), picture).convert("RGB")
+        w, h = (max(UPSAMPLER_GRID, round(v / UPSAMPLER_GRID) * UPSAMPLER_GRID) for v in picture.size)
+        if w * h > budget:
+            scale = (budget / (w * h)) ** 0.5
+            w, h = (max(UPSAMPLER_GRID, int(v * scale) // UPSAMPLER_GRID * UPSAMPLER_GRID) for v in (w, h))
+        buffer = io.BytesIO()
+        picture.resize((w, h), Image.Resampling.LANCZOS).save(buffer, format="JPEG", quality=UPSAMPLER_JPEG)
+        shown.append(Image.open(io.BytesIO(buffer.getvalue())).convert("RGB"))
+    wide, tall = max(p.width for p in shown), max(p.height for p in shown)
+    out = []
+    for index, picture in enumerate(shown):
+        if picture.size != (wide, tall):
+            canvas = Image.new("RGB", (wide, tall), (255, 255, 255))
+            canvas.paste(picture, ((wide - picture.width) // 2, (tall - picture.height) // 2))
+            picture = canvas
+        target = folder / f"shown_{index}.png"
+        picture.save(target)
+        out.append(target)
+    return out
+
+
+def flux3_workflow(args, pictures: list[str], shown: list[str], prompt: str, seed: int, made: tuple[int, int] | None = None) -> dict:
+    """FLUX3-K's edit on ComfyUI's FLUX 3 nodes: the pictures as reference latents, the caption from BFL's upsampler."""
+
+    unet, steps, cfg = sg.FLUX3[args.model]
+    w = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.FLUX3_TEXT, "type": "flux3", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": sg.FLUX3_VAE}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}},
+        # Fast is distilled without guidance (its template zeroes the negative); Full runs an empty prompt against it
+        "7": ({"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}} if args.model == "flux3k-fast"
+              else {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": ""}}),
+        # every picture goes to the prompt and to the negative, at the size it was brought to (edit_plan.py)
+        "17": {"class_type": "ReferenceMultiLatent", "inputs": {"positive": ["5", 0], "negative": ["7", 0], "vae": ["4", 0],
+                                                               "resolution": "keep resolution"}},
+        "12": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps if args.steps_set else steps,
+                                                    "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "positive": ["17", 0],
+                                                    "negative": ["17", 1], "latent_image": ["17", 2], "denoise": 1.0}},
+        "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/edit_{uuid.uuid4().hex[:8]}"}},
+    }
+    for index, picture in enumerate(pictures):
+        w[str(30 + index)] = {"class_type": "LoadImage", "inputs": {"image": picture}}
+        w["17"]["inputs"][f"images.image{index}"] = [str(30 + index), 0]
+    if made:  # a size asked for by hand in another shape than the picture's
+        w["6"] = {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": made[0], "height": made[1], "batch_size": 1}}
+        w["12"]["inputs"]["latent_image"] = ["6", 0]
+    if shown:  # BFL's upsampler writes the caption from the pictures and the prompt, inside the same workflow
+        batch = ["50", 0]
+        for index, picture in enumerate(shown):
+            w[str(50 + index)] = {"class_type": "LoadImage", "inputs": {"image": picture}}
+            if index:
+                w[str(70 + index)] = {"class_type": "ImageBatch", "inputs": {"image1": batch, "image2": [str(50 + index), 0]}}
+                batch = [str(70 + index), 0]
+        w["20"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.FLUX3_UPSAMPLER, "type": "flux3", "device": "default"}}
+        w["21"] = {"class_type": "TextGenerate", "inputs": {
+            "clip": ["20", 0], "prompt": I2I_SCAFFOLD.format(prompt), "image": batch, "max_length": 3584, "sampling_mode": "on",
+            "sampling_mode.temperature": 1.0, "sampling_mode.top_k": 1, "sampling_mode.top_p": 0.95, "sampling_mode.min_p": 0.0,
+            "sampling_mode.repetition_penalty": 1.05, "sampling_mode.seed": 0, "sampling_mode.presence_penalty": 0.0,
+            "thinking": False, "use_default_template": True, "mtp": "auto", "system_prompt": sg.flux3_system_prompt("i2i")}}
+        w["22"] = {"class_type": "PreviewAny", "inputs": {"source": ["21", 0]}}
+        w["5"]["inputs"]["text"] = ["21", 0]
+    return w
 
 
 def workflow(args, pictures: list[str], prompt: str, seed: int, loras: list[tuple[str, float]], made: tuple[int, int] | None = None) -> dict:
@@ -97,7 +188,15 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=0, help="with --height: another size for the result (the edit shifts when its shape differs from the picture's)")
     parser.add_argument("--height", type=int, default=0)
     parser.add_argument("--lora", action="append", default=[], help="an image LoRA, PATH or PATH:STRENGTH (repeat to stack)")
+    parser.add_argument("--model", choices=("qwen", *sg.FLUX3), default="qwen",
+                        help="qwen: Qwen-Image-2.1 (the default); flux3k-fast or flux3k-full: FLUX3-K (oneshot-setup-spark.sh --flux3)")
+    parser.add_argument("--no-upsample", dest="upsample", action="store_false",
+                        help="FLUX3-K: send the prompt as written (a full caption of the result) instead of BFL's prompt upsampler's")
     args = parser.parse_args()
+    args.steps_set = "--steps" in sys.argv[1:]
+    flux3 = args.model in sg.FLUX3
+    if flux3 and (args.base or args.lora):
+        sys.exit("image LoRAs and the base model are Qwen-Image-2.1's: FLUX3-K takes neither")
     for path in args.image:
         if not Path(path).is_file():
             sys.exit(f"no picture at {path}")
@@ -123,7 +222,9 @@ def main() -> None:
                 break
             time.sleep(1)
         time.sleep(5)
-    sg.ensure_server("image")
+    sg.ensure_server("flux3" if flux3 else "image")
+    if flux3 and not sg.installed("unet", sg.FLUX3[args.model][0]):
+        sys.exit(f"{args.model} is not installed: oneshot-setup-spark.sh --flux3")
     if args.base and not sg.installed("unet", sg.QWEN_BASE):
         sys.exit("the base model is not installed: oneshot-setup-spark.sh --image-edit fetches Qwen-Image-2.1 (14 GB; Qwen Research License, non-commercial)")
     loras = sg.hub_loras(args.lora)
@@ -141,16 +242,21 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="studio-edit-") as scratch:
             fitted = [tuple(plan["source"])] + [edit_plan.beside(*one, made) for one in sizes[1:]]
             pictures = [sg.upload(str(prepared(path, fit, Path(scratch), index))) for index, (path, fit) in enumerate(zip(args.image, fitted))]
+            shown = [sg.upload(str(p)) for p in upsampler_pictures(args.image, Path(scratch))] if flux3 and args.upsample else []
         for prompt, output in edits:
-            item, seconds = sg.render(workflow(args, pictures, prompt, noise, loras, made if tuple(plan["source"]) != made else None), "12")
+            other = made if tuple(plan["source"]) != made else None
+            if flux3:
+                item, seconds = sg.render(flux3_workflow(args, pictures, shown, prompt, noise, other), "12")
+            else:
+                item, seconds = sg.render(workflow(args, pictures, prompt, noise, loras, other), "12")
             sg.fetch(item, Path(output))
             if size != made:  # a side that is not on the model's grid: the result is brought back to the picture's own
                 from PIL import Image
 
                 with Image.open(output) as opened:
                     opened.resize(size, Image.Resampling.LANCZOS).save(output)
-            print("[tensorfold] " + json.dumps({"output": str(output), "engine": "cuda", "edit": prompt[:80], "seed": args.seed, "noise_seed": noise,
-                                                "turbo": not args.base, "loras": [name for name, _ in loras], "pictures": len(pictures),
+            print("[tensorfold] " + json.dumps({"output": str(output), "engine": "cuda", "model": args.model, "edit": prompt[:80], "seed": args.seed,
+                                                "noise_seed": noise, "turbo": not args.base, **({"upsampled": args.upsample} if flux3 else {}), "loras": [name for name, _ in loras], "pictures": len(pictures),
                                                 "size": list(size), "made_at": list(made), "total_s": round(seconds, 1)}), flush=True)
     finally:
         for name in sg.UPLOADED:

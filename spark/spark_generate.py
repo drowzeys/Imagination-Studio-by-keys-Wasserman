@@ -59,6 +59,16 @@ QWEN_TEXT = "qwen3vl_8b_int8_convrot.safetensors"
 QWEN_VAE = "qwen_image_2.1_vae_bf16.safetensors"
 # the schedule saved with the Turbo checkpoint (model_index.json, sample_sigmas), then zero
 TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0.0"
+# FLUX3-K (Black Forest Labs' FLUX 3 Image Klein, ComfyUI's own FLUX 3 nodes): Fast is the distilled checkpoint (16 steps,
+# no guidance), Full the base one (50 steps at CFG 3.5), the settings of BFL's model cards. Both take full scene captions:
+# BFL's prompt upsampler (Qwen3.5 9B, 8-bit) writes one from the prompt inside the same workflow, with the system prompt
+# of their system_prompts.json. FLUX Kommunity License.
+FLUX3_DIR = "FLUX3-K-Comfy"
+FLUX3 = {"flux3k-fast": ("flux3_image_klein_sd_bf16.safetensors", 16, 1.0),
+         "flux3k-full": ("flux3_image_klein_base_bf16.safetensors", 50, 3.5)}
+FLUX3_TEXT = "qwen3vl_4b_bf16.safetensors"
+FLUX3_UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors"
+FLUX3_VAE = "flux2-vae.safetensors"
 
 
 def call(path, data=None):
@@ -757,14 +767,70 @@ def video(args) -> None:
                                         **({"cropped_to": args.crop} if args.crop else {})}), flush=True)
 
 
+def flux3_system_prompt(task: str = "t2i") -> str:
+    """A system prompt of BFL's prompt upsampler (system_prompts.json, downloaded with the model): t2i for a picture
+    from words, i2i for an edit, where it sees the pictures too."""
+
+    path = MODELS / FLUX3_DIR / "system_prompts.json"
+    try:
+        return json.loads(path.read_text())[task]
+    except (OSError, ValueError, KeyError):
+        sys.exit(f"FLUX3-K's prompt upsampler has no system prompt at {path}: run oneshot-setup-spark.sh --flux3")
+
+
+def flux3_workflow(args, text: str, seed: int, caption: str = "") -> dict:
+    """FLUX3-K on ComfyUI's own FLUX 3 nodes, the layout of BFL's templates: the upsampler (TextGenerate, their
+    sampling settings) writes the caption, which goes to the Qwen3-VL text encoder, then the sampler."""
+
+    unet, steps, cfg = FLUX3[args.model]
+    w = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": FLUX3_TEXT, "type": "flux3", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": FLUX3_VAE}},
+        "6": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": args.width, "height": args.height, "batch_size": 1}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": ""}},
+        "12": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps or steps,
+                                                    "cfg": cfg, "sampler_name": "euler", "scheduler": "simple",
+                                                    "positive": ["5", 0], "negative": ["7", 0], "latent_image": ["6", 0],
+                                                    "denoise": 1.0}},
+        "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/image_{uuid.uuid4().hex[:8]}"}},
+    }
+    if caption:
+        w["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": caption}}
+    else:
+        w["20"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": FLUX3_UPSAMPLER, "type": "flux3", "device": "default"}}
+        w["21"] = {"class_type": "TextGenerate", "inputs": {
+            "clip": ["20", 0], "prompt": text, "max_length": 3584, "sampling_mode": "on",
+            "sampling_mode.temperature": 1.0, "sampling_mode.top_k": 1, "sampling_mode.top_p": 0.95,
+            "sampling_mode.min_p": 0.0, "sampling_mode.repetition_penalty": 1.05, "sampling_mode.seed": 0,
+            "sampling_mode.presence_penalty": 1.5, "thinking": False, "use_default_template": True, "mtp": "auto",
+            "system_prompt": flux3_system_prompt()}}
+        w["22"] = {"class_type": "PreviewAny", "inputs": {"source": ["21", 0]}}
+        w["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": ["21", 0]}}
+    return w
+
+
 def image(args) -> None:
     for name, value in (("width", args.width), ("height", args.height)):
         if value % 16:
             sys.exit(f"--{name} must be a multiple of 16, got {value}")
-    ensure_server("image")
+    flux3 = args.model in FLUX3
+    ensure_server("flux3" if flux3 else "image")
     text = prompt_of(args)
     target = Path(args.output)
     seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else [args.seed]
+    if flux3:
+        caption = "" if args.upsample else text
+        for seed in seeds:
+            item, seconds = render(flux3_workflow(args, text, seed, caption), "12")
+            out = target.with_name(f"{target.stem}_s{seed}{target.suffix}") if args.seeds else target
+            fetch(item, out)
+            print("[tensorfold] " + json.dumps({"output": str(out), "engine": "cuda", "model": args.model,
+                                                "width": args.width, "height": args.height, "seed": seed,
+                                                "steps": args.steps or FLUX3[args.model][1], "upsampled": args.upsample,
+                                                "total_s": round(seconds, 1)}), flush=True)
+        return
     for seed in seeds:
         w = {
             "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_BASE if args.base else QWEN,
@@ -779,7 +845,7 @@ def image(args) -> None:
         }
         if args.base:
             w["12"] = {"class_type": "KSampler",
-                       "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps, "cfg": args.cfg,
+                       "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps or 40, "cfg": args.cfg,
                                   "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
                                   "negative": ["5", 1], "latent_image": ["6", 0], "denoise": 1.0}}
         else:
@@ -850,8 +916,13 @@ def main() -> None:
     i.add_argument("-o", "--output", required=True)
     i.add_argument("--width", type=int, default=1344); i.add_argument("--height", type=int, default=768)
     i.add_argument("--seed", type=int, default=0); i.add_argument("--seeds", default="", help="several pictures: 1,2,3")
+    i.add_argument("--model", choices=("qwen", *FLUX3), default=os.environ.get("IMAGE_MODEL") or "qwen",
+                   help="qwen: Qwen-Image-2.1-Turbo (the default); flux3k-fast: FLUX3-K distilled, 16 steps; "
+                        "flux3k-full: FLUX3-K base, 50 steps at CFG 3.5 (oneshot-setup-spark.sh --flux3)")
+    i.add_argument("--no-upsample", dest="upsample", action="store_false",
+                   help="FLUX3-K: send the prompt as written (a full scene caption) instead of BFL's prompt upsampler's")
     i.add_argument("--base", action="store_true", help="the base model without the turbo adapter")
-    i.add_argument("--steps", type=int, default=40, help="base model only")
+    i.add_argument("--steps", type=int, default=None, help="Qwen's base model (40) or FLUX3-K (16 Fast, 50 Full)")
     i.add_argument("--cfg", type=float, default=4.0, help="base model only")
     i.add_argument("--negative", default="")
     i.set_defaults(run=image)

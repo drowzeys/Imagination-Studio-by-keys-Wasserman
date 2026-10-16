@@ -1,5 +1,5 @@
 #!/bin/bash
-# Edit a picture with Qwen-Image-2.1: the picture goes in as the model's reference, the prompt says what changes.
+# Edit a picture with Qwen-Image-2.1 or FLUX3-K: the picture goes in as the model's reference, the prompt says what changes.
 #   bash scripts/edit.sh photo.png "make it night" out.png
 #   SET_FILE=edits.json bash scripts/edit.sh photo.png        # several edits from one load: [[prompt, output], ...]
 #   LORA=/path/angles.safetensors:0.9 bash scripts/edit.sh photo.png "<mva> back view, eye-level shot" back.png
@@ -11,7 +11,9 @@
 # pixels squared, default 1024, keeping its shape), WIDTH and HEIGHT (another size for the result), LORA (one PATH or
 # PATH:STRENGTH a line), QUANTIZE (bits for the weights on a Mac: 8 on a 64 GB Mac; unset keeps bfloat16, 43 GiB at
 # its peak with one picture), MOST_PIXELS (with SIZE=source: the most pixels an edit is made at; a larger picture is
-# made at this many, in its own shape. Unset is 1536x1536; the app sets 1280x1280 on a Mac under 96 GB).
+# made at this many, in its own shape. Unset is 1536x1536; the app sets 1280x1280 on a Mac under 96 GB), IMAGE_MODEL
+# (qwen, the default; flux3k-fast or flux3k-full: FLUX3-K through flux3-mlx, oneshot-setup.sh --flux3; no LORA, BASE
+# or QUANTIZE there), FLUX3_MODEL_DIR (default ~/flux3-models) and UPSAMPLE=0 (FLUX3-K: the prompt as written).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # On a DGX Spark (Linux, CUDA) the same interface is served by spark/edit.sh.
@@ -21,6 +23,26 @@ QWEN_MODEL_DIR="${QWEN_MODEL_DIR:-$HOME/qwen-models/Qwen-Image-2.1-Turbo}"
 QWEN_BASE_DIR="${QWEN_BASE_DIR:-$(dirname "$QWEN_MODEL_DIR")/Qwen-Image-2.1}"
 IMAGE="${1:-}"; PROMPT="${2:-}"; OUT="${3:-}"
 [ -f "$IMAGE" ] || { echo "give the picture to edit: bash scripts/edit.sh photo.png \"what changes\" out.png" >&2; exit 1; }
+# IMAGE_MODEL=flux3k-fast | flux3k-full: FLUX3-K's edit (flux3_edit.py) in its own environment
+case "${IMAGE_MODEL:-qwen}" in
+  flux3k-fast|flux3k-full)
+    [ -z "${LORA:-}" ] && [ "${BASE:-0}" != 1 ] || { echo "image LoRAs and the base model are Qwen-Image-2.1's: FLUX3-K takes neither" >&2; exit 2; }
+    FLUX3_MODEL_DIR="${FLUX3_MODEL_DIR:-$HOME/flux3-models}"
+    CKPT="$FLUX3_MODEL_DIR/$([ "$IMAGE_MODEL" = flux3k-fast ] && echo FLUX3-K-Fast || echo FLUX3-K-Full)"
+    [ -x "$PREFIX/flux3-venv/bin/python" ] && [ -s "$CKPT/model.safetensors" ] \
+      || { echo "FLUX3-K is not installed here (no $CKPT): bash oneshot-setup.sh --flux3" >&2; exit 1; }
+    ARGS=("$CKPT" --model "$IMAGE_MODEL" --image "$IMAGE" --seed "${SEED:-0}" --size "${SIZE:-source}" --resolution "${RESOLUTION:-1024}")
+    if [ -n "${IMAGES:-}" ]; then
+      while IFS= read -r ONE; do [ -z "$ONE" ] || ARGS+=(--image "$ONE"); done <<<"$IMAGES"
+    fi
+    [ -z "${WIDTH:-}" ] || [ -z "${HEIGHT:-}" ] || ARGS+=(--width "$WIDTH" --height "$HEIGHT")
+    [ -z "${MOST_PIXELS:-}" ] || ARGS+=(--most "$MOST_PIXELS")
+    [ "${UPSAMPLE:-1}" = 0 ] || ARGS+=(--upsampler "$FLUX3_MODEL_DIR/FLUX3-K-pup-MLX-8bit")
+    if [ -n "${SET_FILE:-}" ]; then ARGS+=(--set "@$SET_FILE"); else ARGS+=(--prompt "$PROMPT" -o "$OUT"); fi
+    exec "$PREFIX/flux3-venv/bin/python" "$HERE/../flux3_edit.py" "${ARGS[@]}";;
+  qwen) ;;
+  *) echo "IMAGE_MODEL is qwen, flux3k-fast or flux3k-full, not ${IMAGE_MODEL}" >&2; exit 2;;
+esac
 MODEL="$QWEN_MODEL_DIR"
 if [ "${BASE:-0}" = 1 ]; then
   MODEL="$QWEN_BASE_DIR"

@@ -1,12 +1,17 @@
 "use strict";
 /* Edit a picture, the third thing a prompt can go to in Create (app/picture_edit.py).
-   Qwen-Image-2.1 re-draws a picture you give it. Image LoRAs from the hub apply here and nowhere else; with
-   akhaliq's Multiple Angles LoRA the step becomes a camera: pick directions and heights, get one picture each. */
-const ED = { state: null, image: null, more: [], prompt: "", seed: 1, size: "source", base: false, loras: [], way: "words", picking: false,
+   The picture model re-draws a picture you give it: Qwen-Image-2.1, or FLUX3-K Fast or Full where they are installed.
+   Image LoRAs from the hub apply to Qwen here and nowhere else; with akhaliq's Multiple Angles LoRA the step becomes
+   a camera: pick directions and heights, get one picture each. FLUX3-K takes neither: it edits from words. */
+const ED = { state: null, image: null, more: [], prompt: "", seed: 1, size: "source", base: false, loras: [], way: "words", picking: false, model: "qwen",
   angles: [{ direction: "front-right-quarter", height: "eye", close: false }], job: null, lib: null };
 const edImageLoras = () => LORAS.filter(r => r.target === "image");
 const edAngleLora = () => ED.state && LORAS.find(r => r.id === ED.state.angle_lora);
 const edHas = id => ED.loras.some(p => p.id === id);
+// the model an edit goes to: one the server offers (/api/edit/state models), Qwen when it is there
+const edModels = () => (ED.state && ED.state.models) || [];
+const edModel = () => (edModels().some(m => m.id === ED.model) ? ED.model : (edModels()[0] || { id: "qwen" }).id);
+const edQwen = () => edModel() === "qwen";
 const edSame = (a, b) => a.direction === b.direction && a.height === b.height && !!a.close === !!b.close;
 async function edLoad() { try { ED.state = await api("/api/edit/state"); } catch (e) { ED.state = { ready: false, why: e.message, directions: [], heights: [], sets: {}, limit: 12 }; } if (tab === "Create" && C.goes === "edit") render(); }
 // from the hub, or a Library tile: open the step on this LoRA or this picture
@@ -15,7 +20,7 @@ function edUse(r) { if (!edHas(r.id)) ED.loras.push({ id: r.id, strength: r.stre
 function edOpen(path, way) { ED.image = path; ED.more = ED.more.filter(p => p !== path); ED.way = way || "words"; C.goes = "edit"; C.step = 0; tab = "Create"; history.replaceState(null, "", "#Create"); render(); }
 function edWants() { const out = [];
   if (!ED.image) out.push("the picture to edit");
-  if (ED.way === "angles") { const r = edAngleLora();
+  if (ED.way === "angles" && edQwen()) { const r = edAngleLora();
     if (!r) out.push("the Multiple Angles LoRA, which this copy of the hub does not list");
     else if (!r.installed) out.push("the Multiple Angles LoRA installed (LoRA hub, Fun)");
     if (!ED.angles.length) out.push("at least one camera angle"); }
@@ -70,7 +75,7 @@ function edCamera() { const st = ED.state, on = a => ED.angles.some(b => edSame(
     el("label", { style: "margin-top:10px" }, ED.angles.length ? ED.angles.length + (ED.angles.length === 1 ? " picture" : " pictures") + " to make" : "Nothing picked yet: click a direction"),
     el("div", { class: "row", id: "editangles" }, ED.angles.map(a => el("button", { type: "button", class: "fit small lora on", title: "Take this angle out", onclick: () => flip(a) }, name(a) + " ✕")),
       ED.angles.length > 1 ? el("button", { type: "button", class: "fit small", onclick: () => { ED.angles = []; render(); } }, "Clear the list") : null, el("span"))); }
-function edLoras() { const list = edImageLoras(); if (!list.length) return null;
+function edLoras() { const list = edImageLoras(); if (!list.length || !edQwen()) return null;
   return el("div", { class: "group", id: "editloras" }, el("h3", {}, "Image LoRAs"),
     el("div", { class: "note" }, "LoRAs for the image model. They apply to this step only; a clip's LoRAs are chosen in the clip's own step."),
     list.map(r => { const p = ED.loras.find(x => x.id === r.id), range = r.range || [0.1, 2], st = r.installing, busy = st && st.stage !== "failed";
@@ -86,10 +91,14 @@ function viewEdit(goes) { const body = el("div"), st = ED.state;
   const made = ED.job && jobs.find(j => j.id === ED.job), angle = edAngleLora(), wants = edWants();
   put(body, el("h2", {}, "What are you making?"), goes);
   if (!st.ready) { put(body, el("div", { class: "note", style: "color:var(--warn)" }, el("b", {}, "Edit a picture is not set up on this machine. "), st.why)); return el("section", { class: "card" }, body); }
-  const ways = { words: ["Change it in words", "Say what is different"] };
-  if (angle) ways.angles = ["Move the camera", "Multiple Angles LoRA" + (angle.installed ? "" : ": not installed yet")];
+  const ways = { words: ["Change it in words", "Say what is different"] }, qwen = edQwen();
+  if (!qwen) ED.way = "words";  // the camera is Qwen's Multiple Angles LoRA
+  ED.model = edModel();
+  const models = edModels().length > 1 ? el("div", { id: "editmodel" }, el("label", {}, "Picture model"),
+    choice(ED, "model", Object.fromEntries(edModels().map(m => [m.id, [m.label, m.note]])), render, true)) : null;
+  if (angle && qwen) ways.angles = ["Move the camera", "Multiple Angles LoRA" + (angle.installed ? "" : ": not installed yet")];
   if (ED.way === "angles" && angle && angle.installed && !edHas(angle.id)) ED.loras.push({ id: angle.id, strength: angle.strength || 1 });
-  put(body, edPicture(),
+  put(body, models, edPicture(),
     el("div", { class: "group", id: "editwhat" }, el("h3", {}, "2 · What changes"), Object.keys(ways).length > 1 ? choice(ED, "way", ways, render, true) : null,
       ED.way === "angles" && angle ? (angle.installed ? edCamera() : el("div", { class: "note", style: "color:var(--warn)" }, el("b", {}, "Needs: "), "the Multiple Angles LoRA installed. Press Install under Image LoRAs below."))
         : field("Say what is different in the new picture", bind(ED, "prompt", el("textarea", { placeholder: "The same statue at night under a full moon, wet paving stones, a lantern on the wall behind it." }))),
@@ -98,11 +107,11 @@ function viewEdit(goes) { const body = el("div"), st = ED.state;
     el("div", { class: "row" },
       el("div", { class: "fit", style: "width:300px" }, el("label", {}, "Size of the result"), bind(ED, "size", el("select", {}, [["source", "Same as the picture"], ["768", "About 768 × 768 pixels (faster)"], ["1024", "About 1024 × 1024 pixels"], ["1280", "About 1280 × 1280 pixels (slower)"]].map(([v, t]) => el("option", { value: v }, t))))),
       el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(ED, "seed", el("input", { type: "number", min: 0 }))),
-      st.base ? el("div", { class: "fit", style: "min-width:340px" }, el("label", {}, "Steps"), choice(ED, "base", { false: ["8 steps", "Turbo"], true: ["40 steps", "base model, slower"] }, () => { ED.base = ED.base === "true" || ED.base === true; render(); }, true)) : null, el("span")),
-    el("div", { class: "note" }, st.note + ". “Same as the picture” returns the picture's own width and height (a 1280 × 736 picture comes back 1280 × 736); the other sizes keep its shape at about that many pixels. Results go to the Library, where a picture can open a clip, end one, or be a reference."),
+      st.base && qwen ? el("div", { class: "fit", style: "min-width:340px" }, el("label", {}, "Steps"), choice(ED, "base", { false: ["8 steps", "Turbo"], true: ["40 steps", "base model, slower"] }, () => { ED.base = ED.base === "true" || ED.base === true; render(); }, true)) : null, el("span")),
+    el("div", { class: "note" }, (qwen ? st.note : (edModels().find(m => m.id === edModel()) || {}).label + ", " + (edModels().find(m => m.id === edModel()) || {}).note + "; it sees all the pictures and writes the caption of the result itself") + ". “Same as the picture” returns the picture's own width and height (a 1280 × 736 picture comes back 1280 × 736); the other sizes keep its shape at about that many pixels. Results go to the Library, where a picture can open a clip, end one, or be a reference."),
     wants.length ? el("div", { class: "note lorawant", style: "color:var(--warn)" }, el("b", {}, "Needs: "), wants.join("; ") + ".") : null,
     el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: wants.length > 0, onclick: async () => { try { if (ED.way !== "angles" && !ED.prompt.trim()) throw new Error("Say what is different in the new picture first");
-        const params = { image: ED.image, seed: Number(ED.seed) || 0, ...(ED.size === "source" ? { size: "source" } : { size: "model", resolution: Number(ED.size) || 1024 }), ...(ED.way === "words" && ED.more.length ? { images: ED.more } : {}), base: ED.base === true || ED.base === "true", loras: ED.loras.filter(p => { const r = LORAS.find(x => x.id === p.id); return r && r.installed; }) };
+        const params = { image: ED.image, seed: Number(ED.seed) || 0, ...(ED.size === "source" ? { size: "source" } : { size: "model", resolution: Number(ED.size) || 1024 }), ...(ED.way === "words" && ED.more.length ? { images: ED.more } : {}), image_model: edModel(), ...(qwen ? { base: ED.base === true || ED.base === "true", loras: ED.loras.filter(p => { const r = LORAS.find(x => x.id === p.id); return r && r.installed; }) } : {}) };
         if (ED.way === "angles") params.angles = ED.angles; else params.prompt = ED.prompt;
         const j = await api("/api/jobs", { kind: "edit", title: ED.way === "angles" ? "Angles: " + ED.angles.length + (ED.angles.length === 1 ? " view" : " views") : "Edit: " + ED.prompt.slice(0, 40), params });
         ED.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, ED.way === "angles" ? "Make " + (ED.angles.length === 1 ? "this view" : "these " + ED.angles.length + " views") : "Edit the picture"), el("span")));

@@ -587,6 +587,47 @@ def turbo_ready() -> bool:
     return any((model / "FL2VA" / "transformer").glob("*.safetensors")) and any((ZIG_ENGINE.parent / "adapters").glob("lightx2v*"))
 
 
+# The picture models a person picks from (`image_model` on a scout or studio job, IMAGE_MODEL to scripts/image.sh).
+# Qwen-Image-2.1-Turbo is every install's; FLUX3-K (Black Forest Labs' FLUX 3 Image Klein, oneshot-setup.sh --flux3) adds
+# Fast, the distilled checkpoint at 16 steps, and Full, the base one at 50. Seconds per 1344x768 picture, measured with
+# the model loaded, bf16: Qwen 9.7 on an M5 Ultra; FLUX3-K Fast 10.5 on a DGX Spark (ComfyUI) and 14.9 on an M5 Ultra
+# (flux3-mlx), Full 57.5 on a Spark and 53.6 on an M5 Ultra; BFL's prompt upsampler adds about 18 s on a Spark (8-bit,
+# ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt.
+IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Research License (non-commercial)"),
+                "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
+                "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast")}
+FLUX3_FILES = {"flux3k-fast": "flux3_image_klein_sd_bf16.safetensors", "flux3k-full": "flux3_image_klein_base_bf16.safetensors"}
+
+
+def image_models() -> list[str]:
+    """The picture models installed here, Qwen first: FLUX3-K's ComfyUI files on a Spark, its own venv and BFL's
+    checkpoints on a Mac."""
+
+    found = ["qwen"]
+    for name, unet in FLUX3_FILES.items():
+        if SPARK:
+            folder = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "FLUX3-K-Comfy"
+            ready = (folder / "diffusion_models" / unet).is_file() and (folder / "system_prompts.json").is_file()
+        else:
+            folder = Path(os.environ.get("FLUX3_MODEL_DIR", Path.home() / "flux3-models"))
+            ready = ((ZIG_ENGINE.parent / "flux3-venv" / "bin" / "python").exists()
+                     and (folder / ("FLUX3-K-Fast" if name == "flux3k-fast" else "FLUX3-K-Full") / "model.safetensors").is_file())
+        if ready:
+            found.append(name)
+    return found
+
+
+def image_model_env(params: dict) -> dict:
+    """IMAGE_MODEL for a job's picture, refused when that model is not installed here."""
+
+    name = params.get("image_model") or "qwen"
+    if name not in IMAGE_MODELS:
+        raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
+    if name not in image_models():
+        raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh --flux3 adds it")
+    return {"IMAGE_MODEL": name}
+
+
 def text_encoders() -> dict[str, str]:
     """Other MiniMax H3 text encoder files found on this machine: file name -> what TEXT_ENCODER is set to for it.
     A file put in the text_encoders folder beside the model (on a Spark, ComfyUI's own folder) is offered by name."""
@@ -889,7 +930,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
             width, height = int(params["width"]), int(params["height"])
             if width % 16 or height % 16 or not (256 <= width <= 2048 and 256 <= height <= 2048):
                 raise HTTPException(400, "image sides are multiples of 16 between 256 and 2048")
-        env = {"SEED": seed, "WIDTH": width, "HEIGHT": height}
+        env = {"SEED": seed, "WIDTH": width, "HEIGHT": height, **image_model_env(params)}
         first = int(seed)
         outputs = [str(folder / f"scout_s{first + i}.png") for i in range(count)] + [str(folder / "sheet.jpg")]
         return ["bash", str(scripts / "scout.sh"), prompt, str(count), str(folder)], env, outputs
@@ -971,7 +1012,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
         if not fits["fits"]:
             raise HTTPException(400, fits["reason"])
         return (["bash", str(scripts / "studio.sh"), params["image_prompt"], prompt, str(target)],
-                {**env, "RAW_PROMPT": "1"}, [str(target), str(target.with_suffix(".png"))])
+                {**env, **image_model_env(params), "RAW_PROMPT": "1"}, [str(target), str(target.with_suffix(".png"))])
     raise HTTPException(400, f"unknown job kind {kind}")
 
 
@@ -1336,7 +1377,9 @@ def state() -> dict:
             # reference videos and audio: wherever Ref2VA is installed
             "ref_media": ref2va_ready(), "reference_video_limit": REFERENCE_VIDEO_LIMIT,
             "reference_audio_limit": REFERENCE_AUDIO_LIMIT, "reference_total": REFERENCE_TOTAL,
-            "text_encoders": sorted(text_encoders()), "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
+            "text_encoders": sorted(text_encoders()),
+            # the picture models installed here, in the order the page offers them (IMAGE_MODELS)
+            "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
             "platform": machine()[0], "platform_label": machine()[1], "last_frame": True,
             # every clip length the model takes (lengths.py), and the longest this machine renders at each size
             "lengths": {"fps": FPS, "step": lengths.STEP, "shortest": lengths.SHORTEST, "longest": lengths.LONGEST,
@@ -1760,7 +1803,8 @@ lora_router, lora_resolve, lora_lead = loras.attach(HOME, PACK, SPARK)
 app.include_router(lora_router)
 app.include_router(lineart.attach(HOME))
 import picture_edit  # noqa: E402  (a picture re-drawn by the image model, with the hub's image LoRAs)
-edit_router, edit_build = picture_edit.attach(HOME, PACK, SPARK, lora_resolve, inside, relative)
+edit_router, edit_build = picture_edit.attach(HOME, PACK, SPARK, lora_resolve, inside, relative,
+                                              lambda: [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()])
 app.include_router(edit_router)
 import pace  # noqa: E402  (whether a clip's sound and motion agree, beside this file)
 import negation  # noqa: E402  (what a prompt forbids by name, shown before a job is queued, beside this file)
