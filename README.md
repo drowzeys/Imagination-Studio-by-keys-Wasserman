@@ -11,6 +11,8 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 *Named at the request of the TensorFold project: this is an app built on TensorFold, not a TensorFold product.*
 
+*Name, credits, colours and voice for anything public: the [brand guide](docs/BRAND.md).*
+
 ## Big credit: Sam Wasserman (wassermanproductions.com)
 
 **Sam Wasserman shaped the production side of this studio: the AI film workflow and the ideas behind it.** Slate, his
