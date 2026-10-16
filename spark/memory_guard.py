@@ -285,6 +285,41 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
     return out
 
 
+# MiniMax Music 3 on ComfyUI (spark_generate.py music): (MB with its three files loaded and nothing made, MB per second
+# of song asked for). Measured 2026-10-16 on a worker Spark (124.5 GB, 5.7 GB in use before the first song, ComfyUI
+# 5a665890, DiT fp16 + text encoder pruned bf16, one run each): the peak a song took from the machine, MemTotal -
+# MemAvailable sampled once a second through the whole run, less those 5.7 GB. The text encoder (16.7 GB) and the DiT
+# (4.9 GB) are held throughout; the length adds little.
+MUSIC_ESTIMATE = (27_800, 11)
+# (seconds asked, seconds made, MB): the measured songs; tests/test_music.py holds the line to them
+MUSIC_MEASURED = ((30, 30.0, 28_070), (60, 60.0, 28_665), (120, 55.6, 28_617), (120, 120.0, 29_078),
+                  (300, 189.8, 28_996), (60, 60.0, 29_299))  # the last: through the app, from an empty page cache
+MUSIC_LONGEST = 300  # the app's longest song
+
+
+def music_check(seconds: float, available_mb: int | None = None, total_mb: int | None = None) -> dict:
+    """Whether a MiniMax Music 3 song of up to ``seconds`` fits this machine, as ``check`` answers for a clip (route
+    "music"); everything fits where there is no /proc/meminfo."""
+
+    if total_mb is None:
+        total_mb = meminfo().get("MemTotal", 0)
+    if not total_mb:
+        return {"fits": True, "reason": "", "route": None}
+    if available_mb is None:
+        available_mb = room_mb() or total_mb - IDLE_MB
+    floor = floor_mb(total_mb)
+    fixed, per_second = MUSIC_ESTIMATE
+    need = int(fixed + per_second * float(seconds))
+    left = available_mb - need - ERROR_MB
+    out = {"fits": left >= floor, "reason": "", "need_mb": need, "error_mb": ERROR_MB, "left_mb": left, "floor_mb": floor,
+           "available_mb": available_mb, "route": "music", "rows": None, "nearest": None}
+    if not out["fits"]:
+        out["reason"] = (f"a song of up to {seconds:g} s needs about {need / 1000:.0f} GB at its peak (give or take "
+                         f"{ERROR_MB / 1000:g}); this machine has {available_mb / 1000:.0f} GB for it and keeps "
+                         f"{floor / 1000:.0f} GB free as its floor, so it is refused. Something outside the studio holds the rest")
+    return out
+
+
 # ---------- layer 2: the floor under a running server ----------
 
 def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0) -> str:

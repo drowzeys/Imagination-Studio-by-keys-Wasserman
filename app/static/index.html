@@ -186,6 +186,7 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
 <script src="edit.js"></script>
 <script src="sparks.js"></script>
 <script src="voice.js"></script>
+<script src="music.js"></script>
 <script>
 "use strict";
 if (location.search.includes("shot")) document.write('<img src="/api/wait?ms=4000" style="display:none">');
@@ -233,7 +234,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Create", project = null;
-const TABS = ["Create", "Production", "Motion Previs", "Voice", "Editor", "Library", "Sparks", "Tutorial"];
+const TABS = ["Create", "Production", "Motion Previs", "Voice", "Music", "Editor", "Library", "Sparks", "Tutorial"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
   dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
@@ -841,7 +842,8 @@ function viewCreate() {
         el("button", { class: "fit", onclick: () => { Object.assign(C, { step: 0, job: null, prompt: "", scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, lastImage: null, scoutJob: null, beats: "", refs: [], subjects: [], refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null }); MA.job = null; Object.assign(REF_SAID, { pictures: "", videos: "", audios: "" }); render(); } }, "Start a new clip"), el("span")));
     if (job) { put(body, el("h3", {}, "This clip"), jobCard(job));
       if (job.status === "done") put(body, el("video", { class: "main", src: file(job.outputs[0]), controls: true }),
-        el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: () => addToTimeline(job.outputs[0]) }, "Add to the editor timeline"), el("a", { class: "fit", href: file(job.outputs[0]), download: "" }, "Download"), el("span"))); }
+        el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: () => addToTimeline(job.outputs[0]) }, "Add to the editor timeline"), el("a", { class: "fit", href: file(job.outputs[0]), download: "" }, "Download"),
+          job.kind === "long" ? el("button", { class: "fit", title: "Opens the Music tab with this video chosen: pick a song there and press “Use as soundtrack”", onclick: () => { MU.under = job.outputs[0]; MU.videos = null; tab = "Music"; history.replaceState(null, "", "#Music"); render(); toast("This video is chosen: open “Use as soundtrack” under a song"); } }, "Lay a song under it") : el("span"))); }
   }
   return el("section", { class: "card" }, steps, body, next);
 }
@@ -939,8 +941,8 @@ function viewEditor() {
     const exp = project.exportJob && jobs.find(j => j.id === project.exportJob);
     put(box, el("h3", {}, "Preview"), player, el("div", { class: "row", style: "margin:8px 0" }, el("button", { class: "fit", disabled: !tl.length, onclick: () => load(0, true) }, "▶ Play the sequence"),
         el("div", { class: "fit", style: "width:150px" }, size), el("button", { class: "primary fit", disabled: !tl.length, onclick: async () => { try { const [w, h] = size.value.split("x").map(Number);
-          const j = await api("/api/jobs", { kind: "export", title: "Export " + project.name, params: { clips: tl, width: w, height: h } }); project.exportJob = j.id; await saveProject(); await poll(); render(); } catch (e) { toast(e.message); } } }, "Export"), el("span")),
-      info, el("h3", {}, "Timeline"), strip,
+          const j = await api("/api/jobs", { kind: "export", title: "Export " + project.name, params: { clips: tl, width: w, height: h, ...(project.soundtrack ? { soundtrack: project.soundtrack } : {}) } }); project.exportJob = j.id; await saveProject(); await poll(); render(); } catch (e) { toast(e.message); } } }, "Export"), el("span")),
+      muExportPick(project), info, el("h3", {}, "Timeline"), strip,
       exp ? el("div", { style: "margin-top:10px" }, jobCard(exp), exp.status === "done" ? el("div", {}, el("video", { class: "main", src: file(exp.outputs[0]), controls: true }), el("a", { href: file(exp.outputs[0]), download: "" }, "Download the export")) : null) : null,
       el("h3", {}, "Media bin"), el("div", { class: "grid" }, lib.slice(0, 60).map(m => el("div", { class: "tile" }, media(m.path, { controls: false, muted: true, onmouseenter: e => e.target.play().catch(() => {}), onmouseleave: e => e.target.pause() }),
         el("div", { class: "cap" }, m.path.split("/").pop().slice(0, 20), el("button", { class: "small", onclick: () => addToTimeline(m.path) }, "+ timeline"))))));
@@ -1212,7 +1214,7 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig) { const had = lastSig; lastSig = sig; if (had && !document.activeElement.matches("input,textarea,select")) render(); } }
 
 function render() { $("#tabs").replaceChildren(...TABS.map(t => el("button", { class: t === tab ? "on" : "", onclick: () => { tab = t; history.replaceState(null, "", "#" + t); render(); } }, t)));
-  $("#view").replaceChildren({ Create: viewCreate, Production: viewProduction, "Motion Previs": viewMotion, Voice: viewVoice, Editor: viewEditor, Library: viewLibrary, Sparks: viewSparks, Tutorial: viewTutorial }[tab]()); coach();
+  $("#view").replaceChildren({ Create: viewCreate, Production: viewProduction, "Motion Previs": viewMotion, Voice: viewVoice, Music: viewMusic, Editor: viewEditor, Library: viewLibrary, Sparks: viewSparks, Tutorial: viewTutorial }[tab]()); coach();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
   if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true); }
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();

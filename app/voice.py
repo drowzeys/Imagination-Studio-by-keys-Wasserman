@@ -166,10 +166,13 @@ class Served:
 
     load_s = 10.0
     NEED_GB = 50.0
+    # what the server is called in messages and in the lock folder's owner file, and the variables of its idle time and
+    # its guard: Drama 3's here, MiniMax Music 3's in music.py
+    title, owner_tag, idle_env, guard_env = "Drama 3", "studio-voice drama3", "DRAMA3_IDLE_S", "DRAMA3_GUARD_GB"
 
     def __init__(self) -> None:
-        self.idle_s = float(os.environ.get("DRAMA3_IDLE_S", 300))
-        self.guard_gb = float(os.environ.get("DRAMA3_GUARD_GB", 8))
+        self.idle_s = float(os.environ.get(self.idle_env, 300))
+        self.guard_gb = float(os.environ.get(self.guard_env, 8))
         self.known: tuple[float, str] | None = None
         self.mutex = threading.RLock()  # a request, a load and an unload never run at once
         self.process: subprocess.Popen | None = None
@@ -221,7 +224,7 @@ class Served:
         while process.poll() is None:
             free = mem_available_gb()
             if 0 <= free < self.guard_gb:
-                self.killed = f"MemAvailable {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed Drama 3 (pid {process.pid})"
+                self.killed = f"MemAvailable {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed {self.title} (pid {process.pid})"
                 try:
                     os.kill(process.pid, 9)
                 except OSError:
@@ -269,7 +272,7 @@ class Served:
             free = mem_available_gb()
             self.note("stopped ComfyUI before loading", available_gb=round(free, 1))
         if 0 <= free < self.NEED_GB:
-            raise RuntimeError(f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory to load and this machine has "
+            raise RuntimeError(f"{self.title} needs about {self.NEED_GB:.0f} GB of free memory to load and this machine has "
                                f"{free:.0f} GB available")
 
     def start(self, job: dict) -> bool:
@@ -279,14 +282,14 @@ class Served:
             return True
         if self.process is not None:
             self.stop("the engine had ended (" + (self.killed or f"status {self.process.returncode}") + ")")
-        mine = f"studio-voice drama3 {os.getpid()}"
+        mine = f"{self.owner_tag} {os.getpid()}"
         if not take_lock(job, mine):
             return False
         job.pop("lock", None)  # the server's, not the take's: it is given back when the server stops
         self.owner = mine
         try:
             self.make_room(job)
-            job["progress"] = {"stage": f"loading Drama 3 (about {self.load_s:.0f} s)", "at": 0, "of": 1}
+            job["progress"] = {"stage": f"loading {self.title} (about {self.load_s:.0f} s)", "at": 0, "of": 1}
             env = self.environment()
             self.answers, self.log, self.killed, self.device_gb = queue.Queue(), [], "", None
             began, self.before_gb = time.time(), mem_available_gb()
@@ -305,12 +308,12 @@ class Served:
                     answer = self.answers.get(timeout=0.5)
                 except queue.Empty:
                     if time.time() - began > 600:
-                        raise RuntimeError("Drama 3 did not load in 10 minutes")
+                        raise RuntimeError(f"{self.title} did not load in 10 minutes")
                     continue
                 if answer.get("ready"):
                     self.ready = answer
                     break
-                raise RuntimeError("Drama 3 did not load: " + self.why(answer))
+                raise RuntimeError(f"{self.title} did not load: " + self.why(answer))
             self.loaded_at = self.last_used = time.time()
             self.load_s_measured = round(self.loaded_at - began, 1)
             self.note("loaded", seconds=self.load_s_measured, device_gb=self.device_gb)
@@ -331,9 +334,10 @@ class Served:
         tail = [line for line in self.log if line.strip()][-2:]
         return said + (" (" + " / ".join(tail)[-300:] + ")" if tail and answer.get("gone") else "")
 
-    def ask(self, job: dict, request: dict, seconds: float) -> dict | None:
+    def ask(self, job: dict, request: dict, seconds: float, progress=None) -> dict | None:
         """One request to the loaded server: its answer, or None when the job was cancelled (the server is then
-        stopped: a request cannot be taken back)."""
+        stopped: a request cannot be taken back). Progress lines (``{"id", "progress"}``, sent when the request asks
+        for them) go to ``progress``."""
 
         self.process.stdin.write(json.dumps(request) + "\n")
         self.process.stdin.flush()
@@ -347,14 +351,18 @@ class Served:
             except queue.Empty:
                 if time.time() - began > seconds:
                     self.stop("a request took longer than %d s" % seconds)
-                    raise RuntimeError(f"Drama 3 did not answer in {seconds:.0f} s")
+                    raise RuntimeError(f"{self.title} did not answer in {seconds:.0f} s")
                 continue
             if answer.get("ready"):
+                continue
+            if "ok" not in answer and isinstance(answer.get("progress"), dict):
+                if progress is not None:
+                    progress(answer["progress"])
                 continue
             if not answer.get("ok"):
                 if answer.get("gone"):
                     self.stop("the engine ended during a take")
-                raise RuntimeError("Drama 3: " + self.why(answer))
+                raise RuntimeError(f"{self.title}: " + self.why(answer))
             return answer
 
     def stop(self, why: str) -> None:

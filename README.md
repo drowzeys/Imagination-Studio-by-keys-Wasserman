@@ -26,15 +26,53 @@ we share is the best AI film studio there is, and this pack is where his plannin
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
 Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
-contributor, Fish Audio (Drama 3, text to speech), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
+contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
 [CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
-**2.8.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.9.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
-(video with sound) · **Fish Audio Drama 3** (Voice) · int8 kernels on the M5 tensor units and on the GB10's tensor
+(video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 2.9.0
+
+- **Music: MiniMax Music 3 (MiniMax-Music3).** A new **Music** tab beside Voice makes a whole song with sung vocals
+  from your lyrics and a style, on this machine: up to five minutes, 44.1 kHz stereo. See
+  [Music (MiniMax Music 3)](#music-minimax-music-3).
+  - **Lyrics** take section tags (`[Intro]`, `[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]`, `[Instrumental]`,
+    `[Outro]` ...) on lines of their own; the tab has a button for each and says when a tag looks wrong.
+  - **Style** is a caption: genre, tempo, key, mood, vocals, instruments. A helper writes one from those six boxes.
+  - **Use as soundtrack:** a song can be laid under a long video, the Editor's export or any clip of the Library. It
+    sits under the clip's own sound, is lowered up to 12 dB while someone speaks, and no peak passes -1 dBFS.
+  - **Mac:** TensorFold's MLX port (`music3-mlx`, pinned at 71c7c1f8), installed by `bash oneshot-setup.sh --music`
+    into its own environment, with the 22 GB of weights. **DGX Spark:** ComfyUI's own MiniMax Music 3 nodes,
+    `bash oneshot-setup-spark.sh --music`.
+  - **Measured through the app, one 60 s song on each machine** (the same pop lyrics and style, seed 7, 30 steps; one run
+    each):
+
+    | 60 s song | Mac Studio M5 Ultra (MLX) | DGX Spark (ComfyUI, CUDA) |
+    |---|---|---|
+    | Whole job, song made | **75.8 s** (59.99 s of song), files in the page cache | **289.0 s** (59.99 s of song), ComfyUI started and the files read from an empty page cache |
+    | Words and melody (autoregressive model) | 37.8 s | 176.3 s |
+    | Sound (DiT, 30 steps) | 34.6 s | 96.3 s |
+    | Decoder | 2.0 s | 4.1 s |
+    | Model load | 0.9 s (first song) | inside the stages above (ComfyUI loads as it goes); about 12 s more than with the files cached |
+    | Peak memory | 27.6 GB (MLX's own peak); the machine's in use rose 32.9 GB | 29.3 GB taken from the machine (MemTotal - MemAvailable, 5.1 GB before) |
+    | Whisper on the take | 96 % of the words sung (128 of 134); the song reached 43 % of the lyrics at 60 s | 1 %: on this take Whisper heard only "We'll be right back" twice. A second take through the app (hip-hop lyrics, seed 11, 273.2 s): 98 % (166 of 169), all the lyrics reached |
+
+  - **Honest limits.** A song is not played while it is made (no streaming yet). Whisper's count on sung words is
+    rough, and one Spark take in three was barely heard by it (above). Lengths measured: on the Spark 30, 60, 120 and
+    300 s asked (one run each; the 300 s one ended itself at 189.8 s, so no song over 120 s was made to its full length
+    there); on the Mac songs of 10, 30 and 60 s. Other lengths are untested, and so is anything but the default
+    settings. On the Spark the autoregressive stage runs in ComfyUI's Python loop at about 9 frames a
+    second, so a song takes about 4.4 times its length there against 1.25 on the Mac.
+- **Upgrade** with `git pull`, then `bash oneshot-setup.sh --upgrade --music` (on either machine) to add the Music tab's
+  engine and weights; restart the app.
+- **Licence:** MiniMax-Music3 Community License. Commercial use is allowed, but a commercial product must show
+  "MiniMax-Music3" in its interface (the tab does). Above US$20 million of yearly revenue you need MiniMax's written
+  authorisation, and a hosted service must keep safeguards against misuse.
 
 ## New in 2.8.0 and 2.8.1
 
@@ -1776,6 +1814,81 @@ research, non-commercial and small-company commercial use; a hosted service that
 clone voices needs a separate licence from Fish Audio; show "Built with Fish Audio" where it is used; never clone a
 real person's voice without their consent, impersonate anyone, or train other speech models on the outputs.
 
+## Music (MiniMax Music 3)
+
+**MiniMax-Music3.** The **Music** tab makes a song from lyrics and a style with MiniMax Music 3, on this machine: sung
+vocals, up to five minutes (the app offers 10 to 300 s; the model takes up to 360), 44.1 kHz stereo WAV. No cloud is
+called and the pack ships no weights.
+
+- **Lyrics.** Section tags on lines of their own, above the lines they hold: `[Intro]`, `[Verse]`, `[Pre-Chorus]`,
+  `[Chorus]`, `[Post-Chorus]`, `[Bridge]`, `[Hook]`, `[Instrumental]`, `[Solo]`, `[Break]`, `[Build]`, `[Outro]`.
+  `[Instrumental]` is a passage without singing; lines in (parentheses) are backing vocals. Empty lyrics make an
+  instrumental. The tab warns about lyrics without tags and tags it does not know (the model may sing them).
+- **Style.** One caption with the genre, tempo, key, mood, the voice that sings and the instruments, e.g. "Upbeat
+  modern pop, 118 BPM, bright synths, punchy four-on-the-floor kick ... Warm female lead vocal with layered
+  harmonies." The *Style helper* writes one from six boxes; you can still edit it.
+- **Length** is the longest the song may be: the model may end it sooner (measured: asked for 120 s, the short
+  hip-hop lyrics ended at 55.6 s on the Spark and 60.9 s on the Mac). The take says when the model ended it.
+- **Settings** are MiniMax's: 30 DiT steps at CFG 1.7, the autoregressive model at CFG 1.5 and top-k 50
+  (`steps`, `dit_cfg`, `ar_cfg`, `top_k` in the API).
+- **Each song** is a job in the queue, so it never runs beside a video render or a voice take. The model stays loaded
+  for five minutes after a song (`MUSIC3_IDLE_S`) and is unloaded at once when any other job starts; Drama 3 is
+  unloaded before a song in the same way. While loaded it holds the studio's GPU lock (`~/studio-gpu.lock.d`).
+- **The lyrics check.** With faster-whisper installed, Whisper listens to the take and counts the lyrics' words it
+  heard, in order, up to the last one it heard (`asr.score`), and how far into the lyrics the song got
+  (`asr.reached`). Sung words are harder to hear than spoken ones: treat it as a rough count.
+- **Use as soundtrack.** Under a song, *Use as soundtrack* lays it under a video: a long video (its card in Create has
+  *Lay a song under it*), the Editor's export or any clip of the Library. In the Editor, *Song under the export* does
+  it for the whole timeline. ffmpeg mixes the song at -10 dB (your choice, -30 to 0) under the clip's own sound; a
+  compressor keyed by the clip's speech band (200 Hz to 3.5 kHz) lowers it by up to 12 dB while someone speaks
+  (measured in `tests/test_music.py`: 6 to 13.5 dB on a test tone); a limiter at four times the rate keeps every peak
+  under -1 dBFS, checked after the AAC encode (under the 48.6 s promo: -1.46 dBFS on the Mac, -2.0 on the Spark). The picture is copied;
+  the result is a new file in `exports/`.
+
+**On a Mac** the song runs on TensorFold's MLX port of MiniMax Music 3 (fork branch `music3-mlx`, commit 71c7c1f8: the
+autoregressive model with its depth decoder, the DiT and the DAV decoder, in MLX), as a persistent process in its own
+environment (`python -m tensorfold.music3 --serve`, Drama 3's protocol), under a memory guard (8 GB of vm_stat's free
+pages, `MUSIC3_GUARD_GB`). `bash oneshot-setup.sh --music` (`scripts/setup-music.sh`) clones the branch at that commit
+into `$PREFIX/music3-src`, makes `$PREFIX/music3-venv`, downloads the weights to `~/music3-models/MiniMax-Music3-Comfy`
+(`MUSIC3_MODEL` names another folder; `MUSIC3_VENV` another environment) and makes a 10 s test song. 64 GB of memory
+or more. Measured on a Mac Studio M5 Ultra 256 GB: the installer's test song, 10 s in 12.1 s, 28.1 GB at the peak;
+through the app, a 60 s song in 75.8 s (the autoregressive model 37.8 s, the DiT 34.6 s, the decoder 2.0 s), MLX's
+peak 27.6 GB. TensorFold's own run of the command line (the same hip-hop lyrics as the Spark's, seed 7): 30 s in
+61.2 s, 60 s in 82.5 s, both at 27.6 GB.
+
+**On a DGX Spark** the song runs in the studio's ComfyUI (`spark_generate.py music`) on ComfyUI's own MiniMax Music 3
+nodes, laid out as ComfyUI's blueprint *Text to Music (MiniMax Music 3)*: the text encoder (pruned, bf16, 16.7 GB) runs
+the autoregressive model, the DiT (fp16, 4.9 GB) the 30 steps, the DAV decoder works in tiles. A song starts from a
+ComfyUI with nothing else loaded (the server is restarted when it held the video or picture models); afterwards its
+models are freed with ComfyUI's `/free`, after the idle time or before the next job. The memory guard beside the
+server is the one every render has, and the song is checked before it is queued (`memory_guard.music_check`).
+`bash oneshot-setup-spark.sh --music` downloads the three files (22 GB) to `~/spark-studio-models/MiniMax-Music3-Comfy`.
+Measured on one DGX Spark (GB10, ComfyUI 5a665890, one run each, the models in the page cache; peak memory is
+MemTotal - MemAvailable sampled once a second, less the 5.7 GB the machine held before):
+
+| Asked for | Made | Whole run | Autoregressive model | DiT, 30 steps | Decoder | Peak memory taken |
+|---|---|---|---|---|---|---|
+| 30 s (hip-hop lyrics) | 30.0 s | 131.0 s (ComfyUI started for it); 127.5 s loaded | 84.2 s | 44.2 s | 2.1 s | 28.1 GB |
+| 60 s (hip-hop lyrics) | 60.0 s | 260.6 s | 163.8 s | 92.5 s | 4.0 s | 28.7 GB |
+| 120 s (hip-hop lyrics) | 55.6 s (the model ended it) | 239.1 s | 152.4 s | 82.8 s | 3.7 s | 28.6 GB |
+| 120 s (long pop lyrics) | 120.0 s | 527.6 s | 331.4 s | 188.1 s | 7.7 s | 29.1 GB |
+| 300 s (long pop lyrics) | 189.8 s (the model ended it) | 844.7 s | 530.1 s | 301.9 s | 12.3 s | 29.0 GB |
+
+On the Spark the autoregressive stage is ComfyUI's Python loop, about 9 frames a second (25 make a second of song), and
+it is the larger part of every song; the Mac's MLX port runs it about four times faster. Through the app, from an
+empty page cache with ComfyUI stopped, a 60 s song took 289.0 s and 29.3 GB (the table in [New in 2.9.0](#new-in-290)).
+Whisper heard 96 % of the words of the 60 s hip-hop song above (162 of 168).
+
+The API: `GET /api/music/state`, `POST /api/music/takes {caption, lyrics, seconds, seed?, steps?, dit_cfg?, ar_cfg?,
+top_k?, title?, asr?}` (a job of kind `music`), `GET /api/music/takes`, `GET /api/music/takes/{id}/audio`, `POST
+/api/music/soundtrack {take, video, music_db?}` (a job of kind `soundtrack`), and an export job's `params.soundtrack
+{take, music_db?}`. Songs are kept in `~/TensorFoldStudio/music/` (the WAV and its settings and measurements).
+
+**Licence.** MiniMax-Music3 is under the **MiniMax-Music3 Community License**: commercial use is allowed; a commercial
+product or service must display "MiniMax-Music3" in its user interface; a licensee above US$20 million of yearly
+revenue needs MiniMax's prior written authorisation; a hosted service must keep safeguards against misuse. Do not
+redistribute the weights.
+
 ## Motion Previs: a shot into control layers and a camera move
 
 **New to it? Start with the walkthrough:** [TUTORIAL.md, section 9](TUTORIAL.md#9-motion-previs-make-a-clip-that-moves-like-another)
@@ -2711,7 +2824,7 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 ## Credits
 
 Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
-picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3), Ash Hart and the
+picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
 [CREDITS.md](CREDITS.md). Pack: drowzeys / keys.

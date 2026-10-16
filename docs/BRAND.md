@@ -35,6 +35,7 @@ the TensorFold project and the model makers.
 | Qwen-Image pictures | **Built with Qwen**; the model is Qwen-Image-2.1 (Qwen 2.1 Turbo / Qwen 2.1 Full in the UI) |
 | FLUX pictures | **FLUX3-K** in the UI. In prose: FLUX 3 Image Klein by Black Forest Labs |
 | Video with sound | MiniMax H3 / FastH3. With an H3 LoRA: *Powered by MiniMax H3* |
+| Songs from the Music tab: in the app, in soundtracks, in demo audio | **MiniMax-Music3** (required in a commercial UI by its licence); in prose: MiniMax Music 3 by MiniMax |
 | Long-form credits | The README's thank-you list and [CREDITS.md](../CREDITS.md): authors first, no credit hyperlinks except Motion Previs Studio |
 
 **Licence reminders, for anything public:**
@@ -43,6 +44,8 @@ the TensorFold project and the model makers.
 - **MiniMax H3** limits territories.
 - **Fish Audio Drama 3** is under the Fish Audio Community License: a hosted text-to-speech or voice-cloning service
   needs Fish's own licence.
+- **MiniMax-Music3** (the Music tab) allows commercial use, but a commercial UI must display "MiniMax-Music3"; above
+  US$20M yearly revenue MiniMax's written authorisation is needed; a hosted service keeps misuse safeguards.
 - **Never redistribute weights.** When someone asks about selling outputs, point them to the licences.
 - **Never call Fish Audio's cloud.** The Studio is local.
 
@@ -126,7 +129,7 @@ which reads as a slate or a lens.
 - The banner and demo stills are made in the Studio. Say so: *made with this studio's own Qwen-Image-2.1 step*.
 - End cards:
   - Background, with the lockup centred.
-  - Then the credit line: *Built with Fish Audio · Built with Qwen · FLUX 3 Klein by Black Forest Labs · MiniMax H3*.
+  - Then the credit line: *Built with Fish Audio · Built with Qwen · FLUX 3 Klein by Black Forest Labs · MiniMax H3 · MiniMax-Music3* (the last only where a song plays).
 - No third-party logos (Apple, NVIDIA, Fish Audio, BFL, Qwen, MiniMax) unless their brand rules allow it. Name them in
   text.
 

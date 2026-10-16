@@ -11,6 +11,9 @@
 #                                       # non-commercial): Edit a picture works without it, on Turbo's 8 steps
 #   bash oneshot-setup.sh --voice       # also Fish Audio Drama 3 for the Voice tab (scripts/setup-voice.sh: TensorFold's
 #                                       # drama3-mlx in its own venv, 39 GB checkpoint + 39 GB MLX conversion, 64 GB of memory)
+#   bash oneshot-setup.sh --music       # also MiniMax Music 3 for the Music tab (scripts/setup-music.sh: TensorFold's
+#                                       # music3-mlx in its own venv, 22 GB of weights, 64 GB of memory; MiniMax-Music3
+#                                       # Community License: commercial use allowed, a commercial UI shows "MiniMax-Music3")
 #   bash oneshot-setup.sh --flux3       # also FLUX3-K (BFL's FLUX 3 Image Klein) as picture models beside Qwen-Image
 #                                       # (scripts/setup-flux3.sh: flux3-mlx in its own venv, 41 GB; FLUX Kommunity License)
 #   bash oneshot-setup.sh --image-only  # the image model only (33 GB), render a test image
@@ -38,7 +41,7 @@ if [ "$(uname -s)" = Linux ]; then
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
+      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
       --fasth3) ;;
       --turbo|--app|--ref2va) echo "note: $arg is for the Mac build and does nothing on a DGX Spark";;
       *) echo "unknown option $arg" >&2; exit 2;;
@@ -76,7 +79,7 @@ REF_ADAPTER_NAME="lightx2v_ref2v_4step_v0.1_ourlayout.safetensors"
 X2_REPO="speach1sdef178/MiniMax-H3-X2-Detail-VAE"
 X2_NAME="MiniMax-H3-X2-Detail-v1.safetensors"
 X2_SHA256="2296840f4acedcaa976688e7d7b97f7bf570b136e400385d3f46224011897aac"
-MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0
+MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0
 for arg in "$@"; do
   case "$arg" in
     --image-only) VIDEO=0;;
@@ -86,6 +89,7 @@ for arg in "$@"; do
     --motion) MOTION=1;;
     --voice) VOICE=1;;
     --flux3) FLUX3=1;;
+    --music) MUSIC=1;;
     --image-edit) IMAGE_EDIT=1;;
     --app) APP=1;;
     --verify|--no-render) MODE="$arg";;
@@ -386,6 +390,10 @@ if [ "$LORAS" != none ] && [ "$VIDEO" = 1 ] && [ "$MODE" != "--verify" ]; then
 fi
 if [ "$VOICE" = 1 ]; then  # Fish Audio Drama 3 for the Voice tab: its own venv and weights, never this one's
   if [ "$MODE" = "--verify" ]; then bash "$HERE/scripts/setup-voice.sh" --verify; else bash "$HERE/scripts/setup-voice.sh"; fi
+fi
+if [ "$MUSIC" = 1 ] || { [ "$MODE" = "--verify" ] && [ -x "$PREFIX/music3-venv/bin/python" ]; }; then  # MiniMax Music 3: its own venv and weights
+  PREFIX="$PREFIX" bash "$HERE/scripts/setup-music.sh" $([ "$MODE" = "--verify" ] && echo --verify) \
+    || [ "$MUSIC" = 1 ] || echo "  ! MiniMax Music 3 is not fully set up: bash scripts/setup-music.sh"
 fi
 if [ "$FLUX3" = 1 ] || [ -x "$PREFIX/flux3-venv/bin/python" ]; then  # FLUX3-K picture models: their own venv and weights
   PREFIX="$PREFIX" bash "$HERE/scripts/setup-flux3.sh" $([ "$MODE" = "--verify" ] || [ "$UPGRADE" = 1 ] && echo --verify) \

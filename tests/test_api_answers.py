@@ -70,6 +70,21 @@ def test_no_request_runs_a_tool_without_a_time_limit():
     assert sorted(set(unlimited)) == ["export", "hush", "long_take"], sorted(set(unlimited))
 
 
+def test_music_runs_no_tool_without_a_time_limit():
+    """app/music.py (MiniMax Music 3): the engine's look in a request (/api/music/state, a song checked before it is
+    queued) and even the soundtrack mix of the job thread have a limit."""
+
+    import ast
+
+    tree = ast.parse((ROOT / "app/music.py").read_text())
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and ast.unparse(node.func) in ("subprocess.run", "subprocess.check_output")]
+    assert calls and all(any(keyword.arg == "timeout" for keyword in call.keywords) for call in calls), \
+        [ast.unparse(call)[:80] for call in calls if not any(keyword.arg == "timeout" for keyword in call.keywords)]
+    started = time.time()
+    state = client.get("/api/state").json()["music"]
+    assert time.time() - started < 25 and "available" in state and state["credit"] == "MiniMax-Music3"
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
