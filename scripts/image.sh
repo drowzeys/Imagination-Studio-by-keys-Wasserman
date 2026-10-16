@@ -4,17 +4,18 @@
 #   TURBO=0 bash scripts/image.sh "a prompt" out.png        # the base model, 40 steps (needs QWEN_BASE_DIR)
 #   PROMPT_FILE=prompts/baker-image.txt bash scripts/image.sh "" out.png
 #   IMAGE_MODEL=flux3k-fast bash scripts/image.sh "a prompt" out.png   # FLUX3-K Fast (16 steps); flux3k-full: 50 steps
+#   IMAGE_MODEL=qwen-full bash scripts/image.sh "a prompt" out.png     # Qwen 2.1 Full: the base model, 40 steps at CFG 4
 # Environment: PREFIX, QWEN_MODEL_DIR (Qwen-Image-2.1-Turbo: 8 steps on the schedule saved with the checkpoint),
 # QWEN_BASE_DIR (Qwen-Image-2.1, for TURBO=0), TURBO, STEPS (base model only, default 40), WIDTH, HEIGHT (multiples
-# of 16), SEED, EXTRA (extra flags). An install from before 2.3 has the base model at QWEN_MODEL_DIR: it keeps
-# working as it did, with the Viggle turbo adapter on its six nodes. IMAGE_MODEL (qwen, the default; flux3k-fast;
-# flux3k-full), FLUX3_MODEL_DIR (default ~/flux3-models) and UPSAMPLE choose and steer FLUX3-K.
+# of 16), SEED, EXTRA (extra flags), QWEN_CFG (base model only, default 4; 1 runs it without guidance). An install from before 2.3 has the base model at QWEN_MODEL_DIR: it keeps
+# working as it did, with the Viggle turbo adapter on its six nodes. IMAGE_MODEL (qwen, the default; qwen-full, the
+# base model as TURBO=0 runs it; flux3k-fast; flux3k-full), FLUX3_MODEL_DIR (default ~/flux3-models) and UPSAMPLE choose and steer FLUX3-K.
 set -euo pipefail
 # On a DGX Spark (Linux, CUDA) the same interface is served by spark/image.sh.
 [ "$(uname -s)" != Linux ] || exec bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/spark/image.sh" "$@"
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 QWEN_MODEL_DIR="${QWEN_MODEL_DIR:-$HOME/qwen-models/Qwen-Image-2.1-Turbo}"
-QWEN_BASE_DIR="${QWEN_BASE_DIR:-$HOME/qwen-models/Qwen-Image-2.1}"
+QWEN_BASE_DIR="${QWEN_BASE_DIR:-$(dirname "$QWEN_MODEL_DIR")/Qwen-Image-2.1}"
 [ -d "$QWEN_MODEL_DIR" ] || QWEN_MODEL_DIR="$QWEN_BASE_DIR"
 TURBO_ADAPTER="${TURBO_ADAPTER:-$PREFIX/adapters/Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r256.safetensors}"
 PROMPT="${1:-}"; OUT="${2:-outputs/image.png}"
@@ -35,7 +36,8 @@ case "${IMAGE_MODEL:-qwen}" in
     # shellcheck disable=SC2086
     exec "$PREFIX/flux3-venv/bin/python" "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/flux3_generate.py" "${ARGS[@]}" ${EXTRA:-};;
   qwen) ;;
-  *) echo "IMAGE_MODEL is qwen, flux3k-fast or flux3k-full, not ${IMAGE_MODEL}" >&2; exit 2;;
+  qwen-full) TURBO=0;;
+  *) echo "IMAGE_MODEL is qwen, qwen-full, flux3k-fast or flux3k-full, not ${IMAGE_MODEL}" >&2; exit 2;;
 esac
 # the Turbo checkpoint carries its schedule in model_index.json; the base model does not
 if grep -q sample_sigmas "$QWEN_MODEL_DIR/model_index.json" 2>/dev/null; then DISTILLED=1; else DISTILLED=0; fi
@@ -47,7 +49,7 @@ elif [ "${TURBO:-1}" = 1 ]; then
 else
   [ "$DISTILLED" = 0 ] || QWEN_MODEL_DIR="$QWEN_BASE_DIR"
   [ -d "$QWEN_MODEL_DIR/transformer" ] || { echo "TURBO=0 needs the base model: hf download Qwen/Qwen-Image-2.1 --local-dir $QWEN_BASE_DIR" >&2; exit 1; }
-  ARGS=("$QWEN_MODEL_DIR" "${SIZE[@]}" --steps "${STEPS:-40}")
+  ARGS=("$QWEN_MODEL_DIR" "${SIZE[@]}" --steps "${STEPS:-40}" --cfg "${QWEN_CFG:-4}")
 fi
 if [ -n "${PROMPT_FILE:-}" ]; then ARGS+=(--prompt-file "$PROMPT_FILE"); else ARGS+=(--prompt "$PROMPT"); fi
 # shellcheck disable=SC2086

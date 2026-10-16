@@ -27,14 +27,26 @@ decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-A
 contributor, Fish Audio (Drama 3, text to speech), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
 [CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
-**2.8.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.8.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
-**Qwen-Image-2.1-Turbo**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
+**Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
-## New in 2.8.0
+## New in 2.8.0 and 2.8.1
+
+- **2.8.1: Qwen 2.1 Full.** The picker now offers Qwen-Image-2.1 in two versions, as it does FLUX3-K: **Qwen 2.1
+  Turbo** (8 steps, the quickest) and **Qwen 2.1 Full**.
+  - **What Full is:** the 40-step base model with true guidance (CFG 4 with an empty negative prompt, as Qwen's own
+    pipeline runs it). It gives more detail than Turbo.
+  - **Where it is offered:** wherever the base weights are installed, which is the same files Edit a picture's 40-step
+    choice uses (`oneshot-setup.sh --image-edit`).
+  - **Mac:** the Mac's generator gained `--cfg` for it.
+  - **DGX Spark:** it runs ComfyUI's 40-step CFG-4 workflow.
+  - **Times on an M5 Ultra at 1344x768:** Turbo 12 s, Full 47 s, both peaking at 15.3 GiB. Full run without guidance
+    took 24 s and was barely better than Turbo, so guidance stays on.
+
 
 **[▶ Watch the 60 s demo](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v2.8.0/wasserman-studio-mac-demo.mp4)**:
 the Studio on one Mac Studio M5 Ultra, recorded live on 2026-10-16. It shows the app at work, two clips with sound,
@@ -70,6 +82,7 @@ Studio, through ComfyUI, they take 57.5 s and 10.5 s.*
 | | DGX Spark | Mac Studio M5 Ultra |
 |---|---|---|
 | Qwen 2.1 Turbo, 8 steps | 9.5 s | 9.7 s |
+| Qwen 2.1 Full, 40 steps at CFG 4 (2.8.1) | | 47 s (whole run, model load included) |
 | FLUX3-K Fast, 16 steps | 10.3 to 10.7 s | 14.9 s |
 | FLUX3-K Full, 50 steps | 57.5 s | 53.6 s |
 | FLUX3-K prompt upsampler, once per prompt | about 18 s | 5 s |
@@ -374,6 +387,16 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.8.1 (2026-10-16): Qwen 2.1 Full.** The picture-model choice adds Qwen-Image-2.1's 40-step base model as
+> **Qwen 2.1 Full**, beside **Qwen 2.1 Turbo**, as FLUX3-K has Fast and Full.
+> - **Guidance:** it runs with true classifier-free guidance at 4 and an empty negative prompt, as Qwen's own pipeline
+>   does: ComfyUI's CFG-4 workflow on a DGX Spark, and `qwen_image_generate.py --cfg 4` on a Mac. The Mac's
+>   generator had no guidance before.
+> - **Where it is offered:** where the base weights are installed (`--image-edit`).
+> - **Measured on an M5 Ultra at 1344x768:** Turbo 12 s, Full 47 s, both peaking at 15.3 GiB. Full without guidance
+>   took 24 s and looked barely better than Turbo.
+> - **Docs:** the README opens with what is new, the 2.8.0 demo and a new banner.
 
 > **2.8.0 (2026-10-15): pick the picture model: Qwen 2.1 Turbo, FLUX3-K Fast or FLUX3-K Full.** Black Forest Labs'
 > FLUX 3 Image Klein ("FLUX3-K") joins Qwen-Image-2.1-Turbo wherever the Studio makes a picture from a prompt: *Image
@@ -1085,7 +1108,7 @@ Spark it is one more ComfyUI graph, with the LoRA merged at run time on the bflo
 ![Create: Qwen scout to video](samples/ui_create_qwen_h3.png)
 
 Choose *A scout image*. Step 2 makes as many candidates as you ask for, at the size the video model starts from, with
-the picture model you pick: Qwen 2.1 Turbo (six take about half a minute), FLUX3-K Fast or FLUX3-K Full. Click the
+the picture model you pick: Qwen 2.1 Turbo (six take about half a minute), Qwen 2.1 Full, FLUX3-K Fast or FLUX3-K Full. Click the
 one you want. Either engine animates it. With FastH3 this is an
 untrained use that worked in our one test (see [FastH3](#fasth3-new-in-18)).
 

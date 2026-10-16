@@ -34,6 +34,16 @@ def test_only_installed_models_are_offered_and_asked_for():
         assert env["IMAGE_MODEL"] == "flux3k-fast"
         labels = [m["label"] for m in server.state()["image_models"]]
         assert labels == ["Qwen 2.1 Turbo", "FLUX3-K Fast", "FLUX3-K Full"], labels
+        # Qwen 2.1 Full: the base model, offered only where its weights are, and refused by name elsewhere
+        try:
+            server.image_model_env({"image_model": "qwen-full"})
+            raise AssertionError("qwen-full was accepted without its weights")
+        except HTTPException as error:
+            assert "Qwen 2.1 Full is not installed" in error.detail and "--image-edit" in error.detail, error.detail
+        server.image_models = lambda: ["qwen", "qwen-full", "flux3k-fast", "flux3k-full"]
+        assert server.image_model_env({"image_model": "qwen-full"}) == {"IMAGE_MODEL": "qwen-full"}
+        labels = [m["label"] for m in server.state()["image_models"]]
+        assert labels == ["Qwen 2.1 Turbo", "Qwen 2.1 Full", "FLUX3-K Fast", "FLUX3-K Full"], labels
     finally:
         server.image_models = had
 
@@ -144,6 +154,28 @@ def test_the_upsampler_is_shown_the_pictures_on_one_canvas():
         sizes = {Image.open(p).size for p in two}
         assert len(sizes) == 1 and next(iter(sizes))[0] <= 724 * 2  # one batch: the same size, over white
         assert Image.open(two[1]).convert("RGB").getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_qwen_full_runs_the_base_model_with_guidance():
+    if sys.platform.startswith("linux"):
+        script = (ROOT / "spark/image.sh").read_text()
+        assert '[ "${IMAGE_MODEL:-qwen}" != qwen-full ] || { export IMAGE_MODEL=qwen; TURBO=0; }' in script
+        assert 'ARGS+=(--base --steps "${STEPS:-40}")' in script
+        return
+    with tempfile.TemporaryDirectory() as folder:
+        base = Path(folder) / "Qwen-Image-2.1"
+        (base / "transformer").mkdir(parents=True)
+        prefix = Path(folder) / "prefix"
+        (prefix / "venv/bin").mkdir(parents=True)
+        # a stand-in python that prints the arguments image.sh hands to qwen_image_generate.py
+        (prefix / "venv/bin/python").write_text("#!/bin/sh\nshift\necho \"$@\"\n")
+        (prefix / "venv/bin/python").chmod(0o755)
+        done = subprocess.run(["bash", str(ROOT / "scripts/image.sh"), "a lighthouse", str(Path(folder) / "out.png")],
+                              capture_output=True, text=True,
+                              env={"PATH": "/usr/bin:/bin", "HOME": folder, "IMAGE_MODEL": "qwen-full", "PREFIX": str(prefix),
+                                   "QWEN_MODEL_DIR": str(Path(folder) / "Qwen-Image-2.1-Turbo")})
+        assert done.returncode == 0, done.stderr
+        assert done.stdout.startswith(str(base)) and "--steps 40 --cfg 4" in done.stdout, done.stdout
 
 
 def test_an_unknown_model_is_refused_by_the_script():

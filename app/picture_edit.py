@@ -128,6 +128,8 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         """(command, environment, output paths) for one edit job."""
 
         model = str(params.get("image_model") or "qwen")
+        if model == "qwen-full":  # Qwen 2.1 Full is this step's 40-step base model
+            model, params = "qwen", {**params, "base": True}
         if model not in STEPS:
             raise HTTPException(400, f"unknown picture model {model}: one of {', '.join(STEPS)}")
         ok, why = ready(model)
