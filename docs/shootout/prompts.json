@@ -1,0 +1,10 @@
+[
+ {"id": "1-poster", "prompt": "A cinematic movie poster for a sci-fi thriller. The title at the top reads \"MIDNIGHT SIGNAL\" in large bold letters, and the tagline at the bottom reads \"Some frequencies should never be answered\". A lone astronaut stands before a giant radio telescope under a starry night sky."},
+ {"id": "2-portrait", "prompt": "Photoreal extreme close-up portrait of a 60-year-old fisherman with weathered sun-damaged skin, freckles and pale blue eyes looking straight into the camera, soft window light, every pore and eyelash visible, 85mm lens, shallow depth of field."},
+ {"id": "3-turnaround", "prompt": "A full-body character turnaround sheet of a young woman space mechanic with short silver hair, an orange jumpsuit and a tool belt: front view, side view and back view standing side by side on a plain light grey background, the same design in all three views."},
+ {"id": "4-nightmarket", "prompt": "A crowded night market at night, dozens of people walking between food stalls, steam rising from woks, many glowing neon and paper lantern signs above the stalls, wet pavement reflecting the lights, wide shot."},
+ {"id": "5-spatial", "prompt": "a red cube on top of a blue sphere, to the left of a green pyramid, on a white table"},
+ {"id": "6-food", "prompt": "Professional food photography of a stack of three fluffy pancakes with a melting pat of butter, fresh blueberries and maple syrup dripping down the side, on a white ceramic plate on a rustic wooden table, soft morning light."},
+ {"id": "7-watercolor", "prompt": "A watercolor illustration of a small fox wearing a red scarf, reading a book under a blossoming cherry tree, soft pastel washes, visible paper texture, delicate ink outlines."},
+ {"id": "8-hands", "prompt": "Close-up photograph of a pianist's two hands playing a grand piano, all ten fingers on the black and white keys, dramatic side lighting."}
+]
