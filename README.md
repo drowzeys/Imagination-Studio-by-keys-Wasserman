@@ -1,8 +1,9 @@
 # keys+Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3 (Mac + DGX Spark)
 
 **An AI film studio on your own machine: plan a film the way a crew does in the Wasserman Slate AI Studio, and render
-it here. Qwen-Image-2.1-Turbo images and MiniMax H3 / FastH3 video with sound, on TensorFold: Apple-silicon Macs
-(Metal) and the NVIDIA DGX Spark (CUDA).**
+it here. Pictures from Qwen-Image-2.1-Turbo or FLUX3-K (Black Forest Labs' FLUX 3 Image Klein), MiniMax H3 / FastH3
+video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Macs (Metal) and the NVIDIA DGX Spark
+(CUDA).**
 
 [![Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3: an AI film studio for Mac and NVIDIA DGX Spark](samples/banner.jpg)](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3)
 
@@ -23,14 +24,88 @@ we share is the best AI film studio there is, and this pack is where his plannin
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
 Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
-contributor, and Fish Audio (Drama 3, text to speech). This pack is their work, ported, pinned and measured. See
+contributor, Fish Audio (Drama 3, text to speech), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
 [CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
-**2.7.4** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.8.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
-**Qwen-Image-2.1-Turbo** (text to image) and **MiniMax H3** (video with sound) · int8 kernels on the M5 tensor units
-and on the GB10's tensor cores · a 2x video decoder for 2K finals on the Mac
+**Qwen-Image-2.1-Turbo**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
+(video with sound) · **Fish Audio Drama 3** (Voice) · int8 kernels on the M5 tensor units and on the GB10's tensor
+cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 2.8.0
+
+**[▶ Watch the 60 s demo](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v2.8.0/wasserman-studio-mac-demo.mp4)**:
+the Studio on one Mac Studio M5 Ultra, recorded live on 2026-10-16. It shows the app at work, two clips with sound,
+and the times and memory measured during those renders.
+
+![Two demo clips made on the M5 Ultra: a FLUX3-K Fast picture to 864x480 video, a Qwen 2.1 Turbo picture to 1344x768 video](samples/demo_mac_280.jpg)
+
+- **Pick the picture model.** Wherever the Studio makes a picture you can choose **Qwen 2.1 Turbo** (the quickest),
+  **FLUX3-K Fast** (the distilled checkpoint, 16 steps) or **FLUX3-K Full** (the base checkpoint, 50 steps at CFG 3.5).
+  That covers *Image only*, scouts, the first frame of a clip and a last frame. Install them with
+  `bash oneshot-setup.sh --flux3` (41 GB); first accept the FLUX Kommunity License on Hugging Face.
+  - **How each prompt is handled:** BFL's prompt upsampler writes a full scene caption from your prompt first.
+  - **On a DGX Spark:** FLUX3-K runs on ComfyUI's own FLUX 3 nodes, with ComfyUI moving to `5a665890`.
+  - **On a Mac:** it runs on flux3-mlx in an environment of its own.
+- **Edit a picture with FLUX3-K.** It also takes up to nine further reference pictures, for example a person from one
+  picture put into the place of another. The LoRAs, the camera ring and the 40-step base model stay Qwen's.
+- **Better text and whole figures.** On the same prompts and seeds, FLUX3-K:
+  - spelled a poster's title and tagline where Qwen wrote "SOME ONE IS STOLL LISTENNING";
+  - drew whole figures for character sheets where Qwen cut them at the waist;
+  - kept two characters recognisable in a two-reference shot.
+- **New carrier image.** `ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0` now holds the DGX Spark's LoRA engine
+  (`h3-cuda-lora` `1f7ecc75`), so a Spark install no longer builds it from source.
+- **Upgrade** with `git pull`, then `bash oneshot-setup.sh --upgrade`. Add `--flux3` for the FLUX3-K weights.
+
+![FLUX3-K against Qwen 2.1 Turbo on the same poster prompt and two seeds](samples/flux3k_vs_qwen_poster.jpg)
+
+*The poster prompt, two seeds. Left: Qwen 2.1 Turbo, on the Mac. Middle and right: FLUX3-K Full ("Base") and FLUX3-K
+Fast ("Distilled"), here run through diffusers on a Spark, so the times are diffusers' (91 s and 15.5 s). In the
+Studio, through ComfyUI, they take 57.5 s and 10.5 s.*
+
+**Picture times**, 1344x768, model loaded, bf16:
+
+| | DGX Spark | Mac Studio M5 Ultra |
+|---|---|---|
+| Qwen 2.1 Turbo, 8 steps | 9.5 s | 9.7 s |
+| FLUX3-K Fast, 16 steps | 10.3 to 10.7 s | 14.9 s |
+| FLUX3-K Full, 50 steps | 57.5 s | 53.6 s |
+| FLUX3-K prompt upsampler, once per prompt | about 18 s | 5 s |
+| Edit a picture: Qwen / FLUX3-K Fast / FLUX3-K Full | 24 / 37 / 139 s | 10 / 37 / 240 s |
+| Two-picture edit: Qwen / Fast / Full | 23 / 44 / 188 s | 13 / 42 / 427 s |
+
+FLUX3-K Full is slow for edits on a Mac, so Fast is the FLUX3-K to use there.
+
+**A whole clip, text to picture to 5 s of video with sound**, measured through the app. On the Mac these are the demo
+renders; on the Spark, the 2.8.0 tests.
+
+| | Picture | Video (FastH3, 8 passes) | Total | Peak memory of the render |
+|---|---|---|---|---|
+| Mac, 864x480, FLUX3-K Fast | 11 s | 70 s (5.93 s a pass) | **81 s** | 29.0 GB |
+| Mac, 1344x768, Qwen 2.1 Turbo | 11 s | 201 s (20.1 s a pass) | **212 s** | 33.0 GB |
+| DGX Spark, 864x480, FLUX3-K Fast | about 32 s (upsampler included) | 70 to 96 s | **102 to 128 s** | |
+| DGX Spark, 864x480, FLUX3-K Full | 53 s | 96 s | **149 s** | |
+
+Peak memory is the render process's macOS footprint, GPU memory included, sampled every second. The peak comes at the
+handover from the picture model. FastH3 itself holds 23 GB at 864x480 and 27 GB at 1344x768.
+
+![Memory of the render process during the two demo renders on the M5 Ultra](samples/demo_mac_280_memory.png)
+
+**The Studio's TensorFold work, submitted upstream.** At the TensorFold project's invitation, the engines behind
+this Studio are open as pull requests to [ashhart/TensorFold](https://github.com/ashhart/TensorFold/pulls?q=author%3Adrowzeys).
+Each lists what was tested and what was not:
+
+| Pull request | What |
+|---|---|
+| #949 #950 #959 #960 #961 | MiniMax H3 / FastH3 on Metal in bf16 (10.2 s a pass against 27.9 s for MLX bf16), from an image, any step count, re-voicing, Ref2VA |
+| #947 #958 #946 | MiniMax H3 / FastH3 on CUDA, one GPU or one pass split over several DGX Sparks (3 Sparks: 3.0 s a pass in int8, 5.0 s in bf16), and the runtime hook it uses |
+| #939 #956 | Fish Audio Drama 3 on CUDA (34 frames/s) and on Metal (84 frames/s, first audio 0.15 s, 9.5 GB) |
+| #948 | Qwen-Image 2.1 on Metal (0.74 s a step, 43 dB PSNR against mflux) |
+| #941 to #944 | This Studio: Slate, Motion Previs, FLUX3-K and Voice |
+
+These are proposals: this repository's install still pins the engines on the `drowzeys/TensorFold` fork.
 
 ## Speed: the first version on each machine, and 2.3
 
@@ -1005,12 +1080,13 @@ On a Mac the step runs mflux's Qwen-Image-2.1 edit pipeline in bfloat16 (43 GiB 
 the app asks for 8-bit weights (30 GiB at its peak in one run on a 256 GB Mac; not run on a smaller Mac). On a DGX
 Spark it is one more ComfyUI graph, with the LoRA merged at run time on the bfloat16 file.
 
-### Qwen image, then video
+### A scout image, then video
 
 ![Create: Qwen scout to video](samples/ui_create_qwen_h3.png)
 
-Choose *A Qwen scout image*. Step 2 makes as many candidates as you ask for (six take about half a minute) at the
-size the video model starts from; click the one you want. Either engine animates it. With FastH3 this is an
+Choose *A scout image*. Step 2 makes as many candidates as you ask for, at the size the video model starts from, with
+the picture model you pick: Qwen 2.1 Turbo (six take about half a minute), FLUX3-K Fast or FLUX3-K Full. Click the
+one you want. Either engine animates it. With FastH3 this is an
 untrained use that worked in our one test (see [FastH3](#fasth3-new-in-18)).
 
 ### Long videos, up to 30 minutes
