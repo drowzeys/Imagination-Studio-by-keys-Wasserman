@@ -917,7 +917,7 @@ def without_ffmpeg(kind: str, params: dict) -> str:
 
     if media_tools()["ffmpeg"]:
         return ""
-    what = ("joining the clips of a timeline" if kind == "export" else "joining the clips of a long video" if kind == "long"
+    what = ("joining the clips of a timeline" if kind == "export" else "laying a song under a clip" if kind == "soundtrack" else "joining the clips of a long video" if kind == "long"
             else "taking the last frame of the clip this one continues from" if params.get("first_frame_from")
             else "taking the first frame of the clip this one leads into" if params.get("last_frame_from")
             else "reading reference videos and audio" if params.get("reference_videos") or params.get("reference_audios")
@@ -1084,9 +1084,19 @@ def export(job: dict) -> None:
     if done.returncode:
         raise RuntimeError("ffmpeg failed")
     job["outputs"] = [relative(target)]
+    if params.get("soundtrack"):  # a song of the Music tab laid under the whole export (music.lay)
+        said = params["soundtrack"]
+        job["progress"] = {"stage": "laying the song under the export", "at": 0, "of": 1}
+        mixed = target.with_suffix(".music.mp4")
+        laid = music.lay(target, inside(said["song"]), mixed, float(said["music_db"]), log=lambda line: job.update(log=job["log"] + line))
+        mixed.replace(target)
+        job["soundtrack"] = laid
+        job["log"] += f"[tensorfold] soundtrack: {json.dumps(laid)}\n"
+        job["progress"] = None
 
 
-STEP = re.compile(r"\[tensorfold\] (step|voice) (\d+)/(\d+)")
+STEP = re.compile(r"\[tensorfold\] (step|voice|ar|dit) (\d+)/(\d+)")
+STEP_WORDS = {"step": "picture", "voice": "sound", "ar": "the model writes the song", "dit": "the sound"}  # MiniMax Music 3: ar, dit
 RAN_ON = re.compile(r"\[tensorfold\] engine: (\w+)")
 
 
@@ -1104,7 +1114,7 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
         found = STEP.search(line)
         if found:
             kind, at, total = found.group(1), int(found.group(2)), int(found.group(3))
-            job["progress"] = {"stage": label + ("picture" if kind == "step" else "sound"), "at": at, "of": total}
+            job["progress"] = {"stage": label + STEP_WORDS[kind], "at": at, "of": total}
     code = process.wait()
     running.update(process=None, id=None)
     if job["status"] == "cancelled":
@@ -1292,10 +1302,14 @@ def perform(job: dict, worker: dict | None = None) -> None:
     params = job["params"]
     asked = dict(params)
     try:
-        # a Drama 3 server kept loaded after a voice take (voice.py, the CUDA engine) never stands beside a render here
-        if job["kind"] not in ("voice", "export") and worker is None and not job.get("remote"):
+        # a Drama 3 server kept loaded after a voice take (voice.py) never stands beside a render here, nor MiniMax Music 3
+        # kept loaded after a song (music.py): each is unloaded before any other job of this machine's queue
+        if job["kind"] not in ("voice", "export", "soundtrack") and worker is None and not job.get("remote"):
             if voice.release(f"a {job['kind']} job needs the GPU"):
                 job["log"] += "[tensorfold] Drama 3 was unloaded to give this job its memory\n"
+        if job["kind"] not in ("music", "export", "soundtrack") and worker is None and not job.get("remote"):
+            if music.release(f"a {job['kind']} job needs the GPU"):
+                job["log"] += "[tensorfold] MiniMax Music 3 was unloaded to give this job its memory\n"
         if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
             source = inside(params["first_frame_from"])
             if not source.is_file():
@@ -1317,6 +1331,12 @@ def perform(job: dict, worker: dict | None = None) -> None:
                 return
         elif job["kind"] == "voice":  # Fish Audio Drama 3 text to speech (voice.py), under the GPU lock
             if not voice_perform(job):
+                return
+        elif job["kind"] == "music":  # MiniMax Music 3, a song from lyrics and a style (music.py), under the GPU lock
+            if not music_perform(job):
+                return
+        elif job["kind"] == "soundtrack":  # a song laid under a clip (music.lay): ffmpeg only
+            if not music_soundtrack(job):
                 return
         else:
             done, env, outputs = take(job, params)
@@ -1372,7 +1392,7 @@ threading.Thread(target=work, daemon=True).start()
 def public(job: dict) -> dict:
     out = {k: job.get(k) for k in ("id", "kind", "status", "title", "outputs", "progress", "error", "created",
                                     "started", "finished", "estimate", "engine", "qa", "passes", "pace", "source", "shot",
-                                    "negations", "sparks", "spark", "moved", "voice")}
+                                    "negations", "sparks", "spark", "moved", "voice", "music", "soundtrack")}
     # by this machine's clock: the page may be open on another one
     out["elapsed"] = (job.get("finished") or time.time()) - job["started"] if job.get("started") else None
     out["log"] = job["log"][-3000:]
@@ -1405,6 +1425,8 @@ def state() -> dict:
             "qa": qa.ready(),
             # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py): MLX on a Mac, CUDA on a DGX Spark
             "voice": voice.state(),
+            # Music: MiniMax Music 3 (MiniMax-Music3) on this machine (music.py): MLX on a Mac, ComfyUI on a DGX Spark
+            "music": music.state(),
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
 
 
@@ -1492,6 +1514,16 @@ def submit(body: dict) -> dict:
     missing = without_ffmpeg(kind, params)
     if missing:
         raise HTTPException(400, missing)
+    if kind == "export" and params.get("soundtrack"):  # a song under the export: {take, music_db?}
+        said = params["soundtrack"] if isinstance(params["soundtrack"], dict) else {"take": params["soundtrack"]}
+        song = music.one_take(str(said.get("take") or ""))
+        try:
+            level = float(said.get("music_db") if said.get("music_db") not in (None, "") else music.MUSIC_DB)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "music_db is a number")
+        if not -30 <= level <= 0:
+            raise HTTPException(400, "music_db is between -30 and 0")
+        params["soundtrack"] = {"take": song["id"], "song": song["path"], "music_db": level}
     found = references(params) if kind == "video" else {}
     referenced, ref_media = bool(found), bool(found and (found["videos"] or found["audios"]))
     if kind in ("video", "studio", "long") and not referenced and not str(params.get("quality", "standard")).startswith("fh") and not turbo_ready():
@@ -1845,6 +1877,9 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
 
 voice_router, voice_perform = voice.attach(HOME, run, enqueue, inside, relative, media_seconds, qa)
 app.include_router(voice_router)
+import music  # noqa: E402  (Music: MiniMax Music 3, songs from lyrics and a style, run locally, beside this file)
+music_router, music_perform, music_soundtrack = music.attach(HOME, run, enqueue, inside, relative, media_seconds, qa)
+app.include_router(music_router)
 
 
 

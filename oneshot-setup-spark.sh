@@ -14,6 +14,10 @@
 #                                             # FLUX3-K Fast (distilled, 16 steps) and Full (base, 50 steps), their text
 #                                             # encoder, BFL's prompt upsampler and the decoder. FLUX Kommunity License; the
 #                                             # Hugging Face repo is gated: accept its licence and `hf auth login` first
+#   bash oneshot-setup-spark.sh --music       # add MiniMax Music 3 for the Music tab, 22 GB more: its DiT (fp16), text encoder
+#                                             # (pruned, bf16) and decoder for ComfyUI. MiniMax-Music3 Community License:
+#                                             # commercial use allowed; a commercial UI shows "MiniMax-Music3"; above US$20M
+#                                             # yearly revenue needs MiniMax's written authorisation
 #   bash oneshot-setup-spark.sh --motion      # add the Motion Previs tab's analysis: pose, camera solve and AI depth (0.5 GB, own environment)
 #   bash oneshot-setup-spark.sh --no-loras    # skip the essential LoRA bundle (about 4 GB from the LoRAs' authors; --loras=camera,style
 #                                       # takes some groups, --lora-bundle=PATH installs from a bundle on disk with no other network)
@@ -38,10 +42,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 MODELS="${SPARK_MODELS:-$HOME/spark-studio-models}"
 COMFY_COMMIT=5a665890ded5020c282f63c4ea2dd9e083e025ff  # v0.41.0 and later: ComfyUI's FLUX 3 nodes
-IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0
+IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MUSIC=0
 for arg in "$@"; do
   case "$arg" in
-    --ref2va) REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
+    --ref2va) REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --music) MUSIC=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --no-workflows) WORKFLOWS=0;;
     --loras) LORAS=all;; --loras=*) LORAS="${arg#--loras=}";; --no-loras) LORAS=none;; --lora-bundle=*) LORA_BUNDLE="${arg#--lora-bundle=}";;
     *) echo "unknown option $arg" >&2; exit 2;;
@@ -64,6 +68,7 @@ if [ "$UPGRADE" = 1 ]; then
   [ -s "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" ] || IMAGE_ONLY=1
   [ ! -s "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" ] || REF2VA=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] || FLUX3=1
+  [ ! -s "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" ] || MUSIC=1
   ok "upgrade: installed $INSTALLED -> $(cat "$HERE/VERSION")$([ "$IMAGE_ONLY" = 0 ] || echo " (image-only install)")"
 else ok "version $(cat "$HERE/VERSION")$([ ! -f "$PREFIX/VERSION" ] || echo " (installed: $INSTALLED)")"; fi
 GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
@@ -118,14 +123,17 @@ studio:
     Qwen-Image-2.1-Comfy/diffusion_models
     MiniMax-H3-Comfy/diffusion_models
     FLUX3-K-Comfy/diffusion_models
+    MiniMax-Music3-Comfy/diffusion_models
   text_encoders: |
     FastH3-Comfy/text_encoders
     Qwen-Image-2.1-Comfy/text_encoders
     FLUX3-K-Comfy/text_encoders
+    MiniMax-Music3-Comfy/text_encoders
   vae: |
     FastH3-Comfy/vae
     Qwen-Image-2.1-Comfy/vae
     FLUX3-K-Comfy/vae
+    MiniMax-Music3-Comfy/vae
   loras: |
     loras
     MiniMax-H3-Comfy/loras
@@ -193,6 +201,18 @@ if [ "$FLUX3" = 1 ]; then
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
+if [ "$MUSIC" = 1 ]; then
+  say "MiniMax Music 3 for ComfyUI: DiT (fp16), text encoder (pruned, bf16), decoder (22 GB) -> $MODELS"
+  [ "$VERIFY" = 1 ] || { echo "  MiniMax Music 3 is under the MiniMax-Music3 Community License: commercial use is allowed; a commercial"
+    echo "  product must show \"MiniMax-Music3\" in its interface; above US\$20M yearly revenue you need MiniMax's written"
+    echo "  authorisation; a hosted service must keep misuse safeguards. Read it: https://huggingface.co/Comfy-Org/MiniMax-Music-3"; }
+  fetch Comfy-Org/MiniMax-Music-3 MiniMax-Music3-Comfy diffusion_models/minimax_music3_dit_fp16.safetensors \
+    text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors vae/minimax_music3_dav.safetensors
+  [ -f "$PREFIX/ComfyUI/comfy_extras/nodes_minimax_music.py" ] || die "this ComfyUI has no MiniMax Music 3 nodes: run without --verify to move it to ${COMFY_COMMIT:0:8}"
+  ok "MiniMax Music 3: the Music tab (MiniMax-Music3)"
+  if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
+fi
+
 if [ "$H3_BASE" = 1 ] && [ "$IMAGE_ONLY" = 0 ] && [ "$VERIFY" = 0 ]; then
   say "MiniMax H3's own first-and-last-frame transformer for ComfyUI (40 GB) -> $MODELS"
   fetch Comfy-Org/MiniMax-H3 MiniMax-H3-Comfy diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors
@@ -230,7 +250,7 @@ fi
 [ "$VERIFY" = 1 ] || cp "$HERE/VERSION" "$PREFIX/VERSION"
 if [ "$UPGRADE" = 1 ]; then
   say "Upgraded: $INSTALLED -> $(cat "$PREFIX/VERSION"). Checking the install (restart the app to serve the new pages: scripts/app.sh)"
-  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3)
+  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MUSIC" = 0 ] || echo --music)
 fi
 # The essential LoRA bundle: every preset of the LoRA hub, fetched once from its author's page into one folder laid out
 # by the hub's groups, then installed (oneshot-essential-bundle.sh). --loras=GROUPS takes some groups, --lora-bundle=PATH

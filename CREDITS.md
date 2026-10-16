@@ -126,6 +126,18 @@ speakers in one text, voice cloning from a short clip, and direction tags. The l
 Spark, TensorFold/MLX on the Mac) follow Fish Audio's and the SGLang-Omni team's reference implementation
 (Apache-2.0). Fish Audio Community License v1.0. **Built with Fish Audio.**
 
+## The music model: MiniMax (MiniMax-Music3)
+
+The **MiniMax team** made **MiniMax-Music3** (MiniMax Music 3), the model behind the Music tab: lyrics with section
+tags and a style caption to a whole song with sung vocals, up to five minutes, 44.1 kHz stereo. It has an
+autoregressive model that writes the acoustic tokens, a DiT that renders them, and the DAV decoder. The weights are
+Comfy-Org's repackaging of MiniMax's release (Comfy-Org/MiniMax-Music-3), under the **MiniMax-Music3 Community
+License**: commercial use is allowed, a commercial product shows "MiniMax-Music3" in its interface, a company above
+US$20 million of yearly revenue needs MiniMax's written authorisation, and a hosted service keeps safeguards against
+misuse. On a DGX Spark it runs on **ComfyUI**'s own MiniMax Music 3 nodes and blueprint (Comfy Org, GPL-3.0); on a Mac
+on TensorFold's MLX port (`music3-mlx` in the drowzeys/TensorFold fork), which follows ComfyUI's reference code. The
+pack ships no weights. **MiniMax-Music3.**
+
 ## The first native Mac engine: Salvatore Sanfilippo (antirez)
 
 **antirez** wrote **h3.c**, MiniMax H3 in C and Metal. It is the reference for what is possible on Apple

@@ -134,3 +134,32 @@ those nodes through ComfyUI's HTTP API as a separate program. The three LoRAs co
 - **Segment Anything Model 3.1** by Meta, in the single-file build `checkpoints/sam3.1_multiplex_fp16.safetensors`
   of `Comfy-Org/sam3.1` on Hugging Face, SHA-256
   `9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03`. SAM License. Run by ComfyUI's own SAM 3 nodes.
+
+# Third-party notices: the Music tab
+
+The Music tab (app/music.py, app/static/music.js) makes songs with MiniMax-Music3. Nothing of the model is in this
+pack: the weights are downloaded by `oneshot-setup.sh --music` / `oneshot-setup-spark.sh --music` from Hugging Face.
+
+## MiniMax-Music3 (MiniMax)
+
+MiniMax-Music3, by MiniMax, in Comfy-Org's single-file repackaging (Comfy-Org/MiniMax-Music-3: the DiT in fp16, the
+pruned text encoder in bf16, the DAV decoder). MiniMax-Music3 Community License:
+
+- commercial use is allowed; a commercial product or service must display "MiniMax-Music3" in its user interface
+  (the Music tab shows it in its title, and every song keeps `"credit": "MiniMax-Music3"`);
+- a licensee with more than US$20 million of yearly revenue needs MiniMax's prior written authorisation;
+- a hosted service built on it must keep safeguards against misuse;
+- the weights are not redistributed by this pack.
+
+Read the licence on the model's page before commercial use.
+
+## ComfyUI (Comfy Org)
+
+On a DGX Spark the song runs on ComfyUI's own MiniMax Music 3 nodes (`comfy_extras/nodes_minimax_music.py`,
+`comfy/ldm/minimax_music/`), following its blueprint "Text to Music (MiniMax Music 3)", in the ComfyUI the installer
+clones at a pinned commit (GPL-3.0). None of its code is copied into this pack.
+
+## TensorFold music3-mlx
+
+On a Mac the song runs on TensorFold's MLX port of MiniMax Music 3 (drowzeys/TensorFold, branch `music3-mlx`, commit
+71c7c1f8, Apache-2.0), installed into its own environment by `scripts/setup-music.sh`.

@@ -204,8 +204,20 @@ Rules:
   (ReferenceMultiLatent, upsampler with the i2i prompt) and `flux3_edit.py` on a Mac; LoRAs, angles and `base` are
   Qwen's and a FLUX3-K edit refuses them. FLUX Kommunity
   License: say so when asked about commercial use, and do not redistribute the weights.
-- mflux, minimax-h3-mlx and flux3-mlx are pinned by commit and used at run time. Do not unpin.
+- Music (`app/music.py`, `app/static/music.js`, README *Music (MiniMax Music 3)*): MiniMax-Music3 makes a song from
+  lyrics (section tags) and a style caption, on this machine only, never imported into the app's venv. The tab, every
+  song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a
+  Mac it is TensorFold's MLX port (`music3-mlx`, pinned in `scripts/setup-music.sh`, `oneshot-setup.sh --music`) as a
+  persistent `--serve` process (`music.Mlx`, voice's `Served`); on a DGX Spark ComfyUI's own nodes through
+  `spark_generate.py music` (`music_workflow`, the blueprint's layout), never standalone code. Either way it is loaded
+  on the first song, holds `~/studio-gpu.lock.d` while loaded, is unloaded after `MUSIC3_IDLE_S` (300) and **before any
+  other local job** (`music.release` at the top of `server.perform`), and Music, Drama 3 and H3 never run together; on a
+  Spark a song starts from a ComfyUI with nothing else loaded and its models are freed with ComfyUI's /free.
+  `memory_guard.music_check` (`MUSIC_ESTIMATE`, `MUSIC_MEASURED`) is a measurement: change it only with a new one.
+  Laying a song under a clip (`music.lay`: soundtrack jobs, the Editor's export) ducks it under the clip's speech and
+  keeps every peak under -1 dBFS: keep both. Not streamed; lyric accuracy is Whisper's rough count on sung words.
+- mflux, minimax-h3-mlx, flux3-mlx and TensorFold's music3-mlx are pinned by commit and used at run time. Do not unpin.
 
-**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), felix-ab (flux3-mlx), MiniMax (H3), Ash Hart (TensorFold), antirez (h3.c),
+**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),
 RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx / Phosphene), Filip Strand and mflux contributors, Viggle, speach1sdef178, LightX2V,
 NVIDIA Research, FastVideo, Sam Wasserman (Slate: the film workflow in Production; keep app/static/slate/NOTICE. Motion Previs Studio: the Motion Previs tab's analysis is a modified Python port of it; keep LICENSES/Motion-Previs-Studio-NOTICE, THIRD_PARTY_NOTICES.md and the headers of app/motion*.py, and keep the link to the original), Apple MLX. Authors only — no credit hyperlinks, except the link to Motion Previs Studio.

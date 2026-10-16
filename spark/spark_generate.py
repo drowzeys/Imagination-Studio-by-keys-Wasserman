@@ -1,15 +1,16 @@
-"""TensorFold Studio on a DGX Spark (CUDA): FastH3 video with sound and Qwen-Image-2.1 pictures through ComfyUI.
+"""TensorFold Studio on a DGX Spark (CUDA): FastH3 video with sound, Qwen-Image-2.1 pictures and MiniMax Music 3 songs through ComfyUI.
 
     spark_generate.py video --prompt "..." -o clip.mp4 [--first-frame photo.jpg] [--last-frame end.jpg] [--steps 8] [--frames 124]
     spark_generate.py video --prompt "Use <Picture 1> as the person. ..." --ref face.png -o clip.mp4
     spark_generate.py video --prompt "<Picture 1> moves as in <Video 1>. ..." --ref face.png --ref-video move.mp4 -o clip.mp4
     spark_generate.py image --prompt "..." -o picture.png [--seeds 1,2,3] [--base --steps 40]
+    spark_generate.py music --caption-file style.txt --lyrics-file lyrics.txt --seconds 60 --seed 7 -o song.wav
 
 It talks to a ComfyUI server that it starts on first use (spark/comfy.sh) and leaves running with the models
 loaded, so the next render skips the load. `bash spark/comfy.sh stop` frees the memory.
 
-Credit: FastVideo (Hao AI Lab) for FastH3 and its sparse attention, MiniMax for H3, the Qwen team for
-Qwen-Image-2.1-Turbo, ComfyUI for the runtime.
+Credit: FastVideo (Hao AI Lab) for FastH3 and its sparse attention, MiniMax for H3 and MiniMax-Music3, the Qwen
+team for Qwen-Image-2.1-Turbo, ComfyUI for the runtime.
 """
 import argparse
 import asyncio
@@ -156,8 +157,10 @@ def upload(image: str) -> str:
         return json.loads(reply.read())["name"]
 
 
-async def run(workflow: dict, sampler: str) -> str:
+async def run(workflow: dict, sampler: str, named: dict | None = None, stages: list | None = None) -> str:
     """Queue a workflow and print the sampler's progress as `[tensorfold] step i/n` until it ends; returns its id.
+    ``named`` maps nodes to the word their progress is printed with instead (`[tensorfold] dit i/n`); ``stages``
+    receives (node class, seconds) for each node that ran.
 
     The progress socket is opened before the job is queued, so a job that ends at once (ComfyUI had it cached) is
     not missed.
@@ -169,7 +172,7 @@ async def run(workflow: dict, sampler: str) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(URL.replace("http", "ws", 1) + f"/ws?clientId={client}", max_msg_size=0) as ws:
             prompt_id = call("/prompt", {"prompt": workflow, "client_id": client})["prompt_id"]
-            stages, running, since = [], None, time.time()
+            stages, running, since, said = [] if stages is None else stages, None, time.time(), {}
             async for message in ws:
                 if message.type != aiohttp.WSMsgType.TEXT:
                     continue
@@ -177,7 +180,13 @@ async def run(workflow: dict, sampler: str) -> str:
                 data = event.get("data", {})
                 if data.get("prompt_id") not in (None, prompt_id):
                     continue
-                if event["type"] == "progress" and str(data.get("node")) == sampler:
+                if event["type"] == "progress" and named and str(data.get("node")) in named:
+                    # at most fifty lines a stage: the autoregressive stage reports every frame (25 a second of song)
+                    node, share = str(data.get("node")), data["value"] / max(data["max"], 1)
+                    if share >= said.get(node, -1.0) + 0.02 or data["value"] >= data["max"]:
+                        said[node] = share
+                        print(f"[tensorfold] {named[node]} {data['value']}/{data['max']}", flush=True)
+                elif event["type"] == "progress" and str(data.get("node")) == sampler:
                     print(f"[tensorfold] step {data['value']}/{data['max']}", flush=True)
                 elif event["type"] == "executing":
                     # SPARK_TIMING=1: how long each node of the workflow ran
@@ -193,12 +202,12 @@ async def run(workflow: dict, sampler: str) -> str:
     return prompt_id
 
 
-def render(workflow: dict, sampler: str) -> tuple[dict, float]:
+def render(workflow: dict, sampler: str, named: dict | None = None, stages: list | None = None) -> tuple[dict, float]:
     """Run a workflow; returns (the saved file's record, seconds)."""
 
     started = time.time()
     try:
-        prompt_id = asyncio.run(run(workflow, sampler))
+        prompt_id = asyncio.run(run(workflow, sampler, named, stages))
     except KeyboardInterrupt:
         call("/interrupt", {})
         raise
@@ -218,6 +227,8 @@ def render(workflow: dict, sampler: str) -> tuple[dict, float]:
              and item.get("type", "output") == "output"]
     # the clip or the picture first, then the lossless sound track (save_sound) when the workflow has one
     found.sort(key=lambda item: item["filename"].endswith(".flac"))
+    if found and found[0]["filename"].endswith(".flac") and workflow.get("6", {}).get("class_type") == "EmptyMiniMaxMusic3LatentAudio":
+        return Saved(found[0]), time.time() - started  # a song: the sound file is the output
     if not found or found[0]["filename"].endswith(".flac"):
         sys.exit("ComfyUI finished without writing a file")
     return Saved(found[0], next((item for item in found if item["filename"].endswith(".flac")), None)), time.time() - started
@@ -811,6 +822,122 @@ def flux3_workflow(args, text: str, seed: int, caption: str = "") -> dict:
     return w
 
 
+# MiniMax Music 3 (lyrics and a style caption to a song with sung vocals, 44.1 kHz stereo) on ComfyUI's own nodes, the
+# layout of ComfyUI's blueprint "Text to Music (MiniMax Music 3)": the text encoder runs MiniMax's autoregressive
+# model (the acoustic conditioning, and where the song ends), the DiT fills it in over 30 Euler steps at CFG 1.7 against
+# the zeroed condition, the DAV decodes it in tiles. The weights are Comfy-Org/MiniMax-Music-3's single files
+# (oneshot-setup-spark.sh --music). MiniMax-Music3 Community License: a commercial product shows "MiniMax-Music3".
+MUSIC3_DIR = "MiniMax-Music3-Comfy"
+MUSIC3_DIT = "minimax_music3_dit_fp16.safetensors"
+MUSIC3_TEXT = "minimax_music3_text_encoder_pruned_bf16.safetensors"
+MUSIC3_VAE = "minimax_music3_dav.safetensors"
+MUSIC_RATE, MUSIC_SECONDS = 44100, (10.0, 300.0)  # the app's range; the model takes up to 360 s (9000 frames at 25 a second)
+MUSIC_STEPS, MUSIC_CFG, MUSIC_AR_CFG, MUSIC_TOP_K = 30, 1.7, 1.5, 50  # the blueprint's sampler; the encoder's own defaults
+
+
+def music_workflow(caption: str, lyrics: str, seconds: float, seed: int, steps: int = MUSIC_STEPS, cfg: float = MUSIC_CFG,
+                   ar_cfg: float = MUSIC_AR_CFG, top_k: int = MUSIC_TOP_K, prefix: str = "") -> dict:
+    """The workflow of one song. The encoder's second output is the length the autoregressive model chose (it may end
+    the song before ``seconds``): the empty latent takes it, so the DiT never fills silence after the end."""
+
+    prefix = prefix or f"studio/music_{uuid.uuid4().hex[:8]}"
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": MUSIC3_DIT, "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": MUSIC3_TEXT, "type": "minimax", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": MUSIC3_VAE}},
+        "5": {"class_type": "MiniMaxMusic3TextEncode", "inputs": {"clip": ["3", 0], "caption": caption, "lyrics": lyrics,
+                                                                  "seed": seed, "max_duration": round(seconds, 2),
+                                                                  "cfg_scale": ar_cfg, "top_k": top_k}},
+        "6": {"class_type": "EmptyMiniMaxMusic3LatentAudio", "inputs": {"seconds": ["5", 1], "batch_size": 1}},
+        "7": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}},
+        "12": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg,
+                                                    "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
+                                                    "negative": ["7", 0], "latent_image": ["6", 0], "denoise": 1.0}},
+        # tiled, as the blueprint's switch has it on: a five-minute song decodes in pieces
+        "13": {"class_type": "VAEDecodeAudioTiled", "inputs": {"samples": ["12", 0], "vae": ["4", 0], "tile_size": 1536, "overlap": 64}},
+        # HEADROOM_DB down before the lossless file, so nothing is cut off on the way; music_finish brings it back up
+        "17": {"class_type": "AudioAdjustVolume", "inputs": {"audio": ["13", 0], "volume": -HEADROOM_DB}},
+        "18": {"class_type": "SaveAudio", "inputs": {"audio": ["17", 0], "filename_prefix": prefix}},
+    }
+
+
+def music_finish(track: Path, target: Path) -> dict:
+    """The song as the app keeps it: a 44.1 kHz stereo 16-bit WAV at full level, no peak over PEAK_DBFS (measured
+    between the samples, at four times the rate; a limiter only where a peak would pass it)."""
+
+    import numpy as np
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        sys.exit("a song is levelled with ffmpeg, which is not installed on this machine (sudo apt install ffmpeg)")
+    raw = subprocess.run([ffmpeg, "-v", "error", "-i", str(track), "-ar", str(4 * MUSIC_RATE), "-f", "f32le", "pipe:1"],
+                         capture_output=True, timeout=600).stdout
+    wave = np.frombuffer(raw, np.float32)
+    if not len(wave) or not float(np.abs(wave).max()):
+        sys.exit("MiniMax Music 3 decoded a silent song")
+    peak = 20 * math.log10(float(np.abs(wave).max())) + HEADROOM_DB
+    chain = f"volume={HEADROOM_DB}dB"
+    if peak > PEAK_DBFS:
+        chain += (f",aresample={4 * MUSIC_RATE},alimiter=limit={10 ** ((PEAK_DBFS - 0.3) / 20):.4f}:level=disabled:attack=2:release=40,"
+                  f"aresample={MUSIC_RATE}")
+    done = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(track), "-af", chain, "-ar", str(MUSIC_RATE), "-ac", "2",
+                           "-c:a", "pcm_s16le", str(target)], capture_output=True, text=True, timeout=600)
+    if done.returncode or not target.is_file():
+        sys.exit("the song could not be written: " + done.stderr.strip()[-300:])
+    return {"peak_dbfs_decoded": round(peak, 2), "limited": peak > PEAK_DBFS}
+
+
+def music(args) -> None:
+    caption = (Path(args.caption_file).read_text() if args.caption_file else args.caption).strip()
+    lyrics = (Path(args.lyrics_file).read_text() if args.lyrics_file else args.lyrics).strip()
+    if not caption:
+        sys.exit("give --caption or --caption-file: the style of the song")
+    low, high = MUSIC_SECONDS
+    if not low <= args.seconds <= high:
+        sys.exit(f"--seconds is {low:g} to {high:g}, got {args.seconds:g}")
+    found = memory_guard.music_check(args.seconds)
+    if found.get("route") is not None:
+        print(f"[tensorfold] memory: about {found['need_mb'] / 1000:.0f} GB at the peak (give or take {found['error_mb'] / 1000:g}) of "
+              f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
+        if not found["fits"]:
+            sys.exit("refused before anything was loaded: " + found["reason"])
+    last = STATE.read_text().strip() if STATE.exists() else ""
+    if up() and last != "music":
+        # the song loads into a server with nothing else in it: what ComfyUI's own unloading leaves behind (TensorFold's
+        # H3 engine keeps its int8 weights) and the 22 GB of MiniMax Music 3 are not measured side by side
+        fresh_server("MiniMax Music 3 starts from a server with nothing else loaded")
+    ensure_server("music")
+    missing = [name for name, loader, field in ((MUSIC3_DIT, "UNETLoader", "unet_name"), (MUSIC3_TEXT, "CLIPLoader", "clip_name"),
+                                                (MUSIC3_VAE, "VAELoader", "vae_name"))
+               if name not in call(f"/object_info/{loader}")[loader]["input"]["required"][field][0]]
+    if missing:
+        sys.exit(f"not installed: {', '.join(missing)} (bash oneshot-setup-spark.sh --music; a ComfyUI that was running "
+                 "before the install needs bash spark/comfy.sh stop)")
+    w = music_workflow(caption, lyrics, args.seconds, args.seed, args.steps, args.cfg, args.ar_cfg, args.top_k)
+    print(f"[tensorfold] engine: cuda (ComfyUI, MiniMax Music 3: DiT fp16, text encoder bf16), up to {args.seconds:g} s, "
+          f"seed {args.seed}, {args.steps} steps", flush=True)
+    stages: list = []
+    item, seconds = render(w, "12", {"5": "ar", "12": "dit"}, stages)
+    target = Path(args.output)
+    with tempfile.TemporaryDirectory(prefix="studio-music-") as scratch:
+        track = Path(scratch) / "song.flac"
+        fetch(item, track)
+        (PREFIX / "ComfyUI" / "output" / item.get("subfolder", "") / item["filename"]).unlink(missing_ok=True)
+        level = music_finish(track, target)
+    import wave as wavefile
+
+    with wavefile.open(str(target)) as handle:
+        audio_s = handle.getnframes() / handle.getframerate()
+    took = dict(stages)
+    ar, dit = took.get("MiniMaxMusic3TextEncode", 0.0), took.get("KSampler", 0.0)
+    dav = took.get("VAEDecodeAudioTiled", 0.0)
+    print("[tensorfold] " + json.dumps({"output": str(target), "engine": "cuda", "model": "music3", "audio_s": round(audio_s, 2),
+                                        "asked_s": args.seconds, "seed": args.seed, "steps": args.steps,
+                                        "ar_s": round(ar, 1), "dit_s": round(dit, 1), "dav_s": round(dav, 1),
+                                        "load_s": round(sum(t for name, t in stages if name in ("UNETLoader", "CLIPLoader", "VAELoader")), 1),
+                                        "total_s": round(seconds, 1), "eos": audio_s < args.seconds - 0.5, **level}), flush=True)
+
+
 def image(args) -> None:
     for name, value in (("width", args.width), ("height", args.height)):
         if value % 16:
@@ -926,6 +1053,16 @@ def main() -> None:
     i.add_argument("--cfg", type=float, default=4.0, help="base model only")
     i.add_argument("--negative", default="")
     i.set_defaults(run=image)
+    m = kinds.add_parser("music", help="MiniMax Music 3: lyrics and a style caption to a song (oneshot-setup-spark.sh --music)")
+    m.add_argument("--caption", default=""); m.add_argument("--caption-file", default="")
+    m.add_argument("--lyrics", default="", help="with [Verse], [Chorus], [Bridge], [Instrumental] ... section tags; empty for an instrumental")
+    m.add_argument("--lyrics-file", default="")
+    m.add_argument("--seconds", type=float, default=60.0, help="the longest the song may be (10 to 300); the model may end it sooner")
+    m.add_argument("--seed", type=int, default=0)
+    m.add_argument("--steps", type=int, default=MUSIC_STEPS); m.add_argument("--cfg", type=float, default=MUSIC_CFG)
+    m.add_argument("--ar-cfg", type=float, default=MUSIC_AR_CFG); m.add_argument("--top-k", type=int, default=MUSIC_TOP_K)
+    m.add_argument("-o", "--output", required=True, help="the song, a .wav")
+    m.set_defaults(run=music)
     args = parser.parse_args()
     if getattr(args, "text_encoder", "regular") != "regular":
         global H3_TEXT, TEXT_TAG
