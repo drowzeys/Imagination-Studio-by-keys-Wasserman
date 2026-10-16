@@ -194,7 +194,7 @@ Rules:
   (`/api/voice/cut`). The weights are Fish Audio Materials (Fish Audio Community License v1.0): do not redistribute
   them, and say that a hosted TTS or cloning service needs Fish's own licence.
 - Picture models (`IMAGE_MODELS` in `app/server.py`, `image_model` on scout and studio jobs, `IMAGE_MODEL` to
-  `scripts/image.sh`): `qwen` (Qwen-Image-2.1-Turbo, every install), `flux3k-fast` and `flux3k-full` (Black Forest
+  `scripts/image.sh`): `qwen` (Qwen-Image-2.1-Turbo, every install), `qwen-full` (Qwen 2.1 Full: the 40-step base model at true CFG 4, where its weights are, `--image-edit`; on a Mac `qwen_image_generate.py --cfg`, never without guidance by default), `flux3k-fast` and `flux3k-full` (Black Forest
   Labs' FLUX 3 Image Klein, distilled 16 steps and base 50 steps at CFG 3.5, `oneshot-setup.sh --flux3`). Call them
   FLUX3-K in anything a person reads. FLUX3-K takes full scene captions: BFL's prompt upsampler always writes one
   first (`UPSAMPLE=0` only for a prompt that already is one). On a Spark it runs inside ComfyUI's workflow

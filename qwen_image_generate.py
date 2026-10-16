@@ -45,6 +45,32 @@ def encode_prompt(model_dir: str, prompt: str):
     return embeds
 
 
+def guided_denoise(dit, text, negative, width: int, height: int, steps: int, seed: int, cfg: float, on_step):
+    """The base model's Euler loop with true classifier-free guidance, as Qwen's own pipeline runs it: the prompt and
+    the negative prompt each step, mixed by ``cfg`` and brought back to the prompt prediction's norm."""
+
+    import mlx.core as mx
+    from tensorfold.families.qwen_image import sampler
+    from tensorfold.families.qwen_image.config import latent_grid
+    from tensorfold.families.qwen_image.schedule import sigmas as make_sigmas
+
+    rows, columns = latent_grid(width, height)
+    levels = make_sigmas(steps, width, height, None)
+    positive, opposite = dit.prefix(text, rows, columns), dit.prefix(negative, rows, columns)
+    x = sampler.start_noise(seed, width, height, dit.config.in_channels).astype(mx.float32)
+    total = len(levels) - 1
+    for index in range(total):
+        level = float(levels[index])
+        cond = dit(x, level, positive).astype(mx.float32)
+        uncond = dit(x, level, opposite).astype(mx.float32)
+        mixed = uncond + cfg * (cond - uncond)
+        mixed = mixed * (mx.linalg.norm(cond, axis=-1, keepdims=True) / mx.linalg.norm(mixed, axis=-1, keepdims=True))
+        x = x + mixed * float(levels[index + 1] - levels[index])
+        mx.eval(x)
+        on_step(index, total)
+    return x.reshape(1, rows, columns, -1).transpose(0, 3, 1, 2)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("model_dir")
@@ -61,6 +87,9 @@ def main() -> int:
     parser.add_argument("--no-int8", action="store_true", help="keep every projection in bfloat16")
     parser.add_argument("--vae-dtype", default="float32", choices=("float32", "bfloat16"))
     parser.add_argument("--save-latents")
+    parser.add_argument("--cfg", type=float, default=1.0,
+                        help="true classifier-free guidance for the base model (Qwen's pipeline: 4); 1 runs without it")
+    parser.add_argument("--negative", default=" ", help="the negative prompt for --cfg above 1")
     args = parser.parse_args()
     prompt = Path(args.prompt_file).read_text().strip() if args.prompt_file else args.prompt
     if not prompt:
@@ -74,6 +103,8 @@ def main() -> int:
 
     started = time.perf_counter()
     text = encode_prompt(args.model_dir, prompt)
+    guided = args.cfg > 1.0 and not args.nodes
+    negative = encode_prompt(args.model_dir, args.negative) if guided else None
     text_s = time.perf_counter() - started
 
     mark = time.perf_counter()
@@ -87,14 +118,17 @@ def main() -> int:
 
     mark = time.perf_counter()
     nodes = tuple(float(v) for v in args.nodes.split(",")) if args.nodes else None
-    forwards = len(nodes) if nodes else args.steps
+    forwards = (len(nodes) if nodes else args.steps) * (2 if guided else 1)
     seeds = [int(v) for v in args.seeds.split(",")] if args.seeds else [args.seed]
     target = Path(args.output)
     outputs = [target.with_name(f"{target.stem}_s{seed}{target.suffix}") for seed in seeds] if args.seeds else [target]
     drawn = []
     for seed in seeds:
-        latents = sampler.denoise(dit, text, args.width, args.height, args.steps, seed, nodes,
-                                  on_step=lambda i, n: print(f"[tensorfold] step {i + 1}/{n}", file=sys.stderr))
+        step = lambda i, n: print(f"[tensorfold] step {i + 1}/{n}", file=sys.stderr)  # noqa: E731
+        if guided:
+            latents = guided_denoise(dit, text, negative, args.width, args.height, args.steps, seed, args.cfg, step)
+        else:
+            latents = sampler.denoise(dit, text, args.width, args.height, args.steps, seed, nodes, on_step=step)
         mx.eval(latents)
         drawn.append(latents)
     denoise_s = time.perf_counter() - mark
@@ -113,7 +147,7 @@ def main() -> int:
     decode_s = time.perf_counter() - mark
     print("[tensorfold] " + json.dumps({
         "output": [str(path) for path in outputs] if args.seeds else args.output, "width": args.width,
-        "height": args.height, "text_tokens": int(text.shape[1]), "images": len(seeds), "forwards": forwards,
+        "height": args.height, "text_tokens": int(text.shape[1]), "cfg": args.cfg if guided else 1.0, "images": len(seeds), "forwards": forwards,
         "int8": changed, "text_s": round(text_s, 1), "load_s": round(load_s, 1), "denoise_s": round(denoise_s, 1),
         "per_forward_s": round(denoise_s / (forwards * len(seeds)), 3), "decode_s": round(decode_s, 1),
         "total_s": round(time.perf_counter() - started, 1), "peak_gib": round(mx.get_peak_memory() / 2**30, 1)}))

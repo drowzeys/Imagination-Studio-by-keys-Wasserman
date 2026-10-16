@@ -594,6 +594,7 @@ def turbo_ready() -> bool:
 # (flux3-mlx), Full 57.5 on a Spark and 53.6 on an M5 Ultra; BFL's prompt upsampler adds about 18 s on a Spark (8-bit,
 # ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt.
 IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Research License (non-commercial)"),
+                "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
                 "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast")}
 FLUX3_FILES = {"flux3k-fast": "flux3_image_klein_sd_bf16.safetensors", "flux3k-full": "flux3_image_klein_base_bf16.safetensors"}
@@ -603,7 +604,7 @@ def image_models() -> list[str]:
     """The picture models installed here, Qwen first: FLUX3-K's ComfyUI files on a Spark, its own venv and BFL's
     checkpoints on a Mac."""
 
-    found = ["qwen"]
+    found = ["qwen"] + (["qwen-full"] if qwen_base_ready() else [])
     for name, unet in FLUX3_FILES.items():
         if SPARK:
             folder = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "FLUX3-K-Comfy"
@@ -617,6 +618,17 @@ def image_models() -> list[str]:
     return found
 
 
+def qwen_base_ready() -> bool:
+    """Qwen-Image-2.1's 40-step base model, the same files Edit a picture's 40-step choice uses."""
+
+    if SPARK:
+        models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
+        return (models / "diffusion_models/qwen_image_2.1_bf16.safetensors").is_file()
+    turbo = Path(os.environ.get("QWEN_MODEL_DIR", Path.home() / "qwen-models/Qwen-Image-2.1-Turbo"))
+    base = Path(os.environ.get("QWEN_BASE_DIR", turbo.parent / "Qwen-Image-2.1"))
+    return (base / "transformer").is_dir() and (base / "processor").is_dir()
+
+
 def image_model_env(params: dict) -> dict:
     """IMAGE_MODEL for a job's picture, refused when that model is not installed here."""
 
@@ -624,7 +636,8 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
-        raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh --flux3 adds it")
+        how = "--image-edit" if name == "qwen-full" else "--flux3"
+        raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh {how} adds it")
     return {"IMAGE_MODEL": name}
 
 
