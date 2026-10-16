@@ -255,6 +255,11 @@ def test_what_a_worker_can_render_decides_what_it_is_given():
     assert "FastH3" in sparks.capable("video", {}, {}) and "only single clips and pictures" in sparks.capable("edit", {}, plain)
     # pictures need the image model there; a clip from a new picture needs it and FastH3
     assert "image model" in sparks.capable("scout", {}, plain) and sparks.capable("scout", {}, {"image": True}) == ""
+    # a FLUX3-K picture goes only to a worker that says it has that model (a 2.7 worker says nothing: Qwen only)
+    assert "flux3k-fast is not installed" in sparks.capable("scout", {"image_model": "flux3k-fast"}, {"image": True})
+    assert "flux3k-full is not installed" in sparks.capable("studio", {"image_model": "flux3k-full"}, {"image": True, "fasth3": True, "image_models": ["qwen", "flux3k-fast"]})
+    assert sparks.capable("scout", {"image_model": "flux3k-fast"}, {"image": True, "image_models": ["qwen", "flux3k-fast"]}) == ""
+    assert sparks.capable("scout", {"image_model": "qwen"}, {"image": True}) == ""
     assert "image model" in sparks.capable("studio", {}, plain) and "FastH3" in sparks.capable("studio", {}, {"image": True})
     assert sparks.capable("studio", {}, {**plain, "image": True}) == ""
     # what stays on this Spark whatever the number, and why

@@ -252,6 +252,10 @@ def capable(kind: str, params: dict, info: dict | None) -> str:
         return "only single clips and pictures are handed to another Spark"
     if kind in ("scout", "studio") and not info.get("image"):
         return "the image model (Qwen-Image-2.1) is not installed there"
+    model = str(params.get("image_model") or "qwen")
+    if kind in ("scout", "studio") and model != "qwen" and model not in (info.get("image_models") or []):
+        # a worker on 2.7 says nothing of its picture models: it has Qwen only
+        return f"the picture model {model} is not installed there"
     if kind == "scout":
         return ""
     if not info.get("fasth3"):
@@ -1106,7 +1110,8 @@ class Hub:
         return router
 
 
-def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, installed: dict) -> dict:
+def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, installed: dict,
+          image_models: list | None = None) -> dict:
     """What an app says of itself on /api/spark/self. ``installed``: {"fasth3", "image"}, found where this platform keeps
     the models (ComfyUI's folders on a Spark, FASTH3_DIR and QWEN_MODEL_DIR on a Mac)."""
 
@@ -1116,6 +1121,6 @@ def about(home: Path, code: dict, state: dict, loras: list, active: int, memory:
         disk = None
     return {"name": socket.gethostname(), "version": state["version"], "platform": state["platform"], "engine": state["engine"],
             "guard": bool(memory), "code": code, "active": active, "memory": memory, "disk_gb": disk,
-            "fasth3": bool(installed.get("fasth3")), "image": bool(installed.get("image")),
+            "fasth3": bool(installed.get("fasth3")), "image": bool(installed.get("image")), "image_models": list(image_models or ["qwen"]) if installed.get("image") else [],
             "ref2va": state["ref2va"], "ref2va_turbo": state["ref2va_turbo"], "ffmpeg": state["ffmpeg"],
             "loras": loras, "text_encoders": state["text_encoders"]}

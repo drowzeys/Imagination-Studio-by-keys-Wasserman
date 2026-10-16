@@ -1912,7 +1912,7 @@ def about_this_spark() -> dict:
               "floor_mb": memory_guard.floor_mb(info.get("MemTotal"))} if SPARK and info else {}
     with lock:
         active = sum(1 for job in jobs.values() if job["status"] in ("queued", "running"))
-    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, installed())
+    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, installed(), image_models())
 
 
 def installed() -> dict:
