@@ -1,0 +1,9 @@
+model,label,machine,pictures,per_picture_s_median,per_picture_s_min,per_picture_s_max,s_per_step_median,upsampler_s_median,job_s_median,job_s_min,job_s_max,warmup_job_s,peak_mem_gb,mem_kind,baseline_used_gb,peak_comfy_rss_gb,engine_peak_gib,failed_jobs
+qwen,Qwen Turbo 8,mac,16,4.65,4.6,4.65,0.5,,14.3,14.2,14.3,9.9,33.0,macOS footprint of render process (GPU incl.),,,15.3,0
+qwen-full,Qwen Full 40,mac,16,43.33,43.0,43.6,1.0,,92.5,91.8,93.0,46.4,33.0,macOS footprint of render process (GPU incl.),,,15.3,0
+flux3k-fast,FLUX3-K Fast 16,mac,16,9.8,9.6,10.4,0.502,5.15,25.5,24.6,28.9,17.5,38.0,macOS footprint of render process (GPU incl.),,,28.0,0
+flux3k-full,FLUX3-K Full 50,mac,16,59.85,59.0,68.5,1.0,5.15,126.1,123.4,143.0,64.7,40.0,macOS footprint of render process (GPU incl.),,,28.0,0
+qwen,Qwen Turbo 8,spark,16,8.55,8.5,8.8,1.002,,18.5,18.3,18.9,28.5,30.7,system used = MemTotal-MemAvailable (unified),5.2,2.8,,0
+qwen-full,Qwen Full 40,spark,16,80.05,78.7,81.0,2.01,,160.9,158.6,162.6,93.5,30.3,system used = MemTotal-MemAvailable (unified),5.4,2.7,,0
+flux3k-fast,FLUX3-K Fast 16,spark,16,10.5,10.2,10.7,0.505,12.45,33.6,29.2,42.2,42.9,37.2,system used = MemTotal-MemAvailable (unified),5.4,3.1,,0
+flux3k-full,FLUX3-K Full 50,spark,16,58.65,57.6,59.4,1.01,11.95,129.4,123.8,138.9,83.4,37.2,system used = MemTotal-MemAvailable (unified),5.3,3.1,,0

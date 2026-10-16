@@ -46,6 +46,8 @@ cores · a 2x video decoder for 2K finals on the Mac
   - **DGX Spark:** it runs ComfyUI's 40-step CFG-4 workflow.
   - **Times on an M5 Ultra at 1344x768:** Turbo 12 s, Full 47 s, both peaking at 15.3 GiB. Full run without guidance
     took 24 s and was barely better than Turbo, so guidance stays on.
+- **A shootout of all four picture models, Mac against DGX Spark**, with 128 pictures, says which to use for what:
+  see [Which picture model to use: the evidence](#which-picture-model-to-use-the-evidence).
 
 
 **[▶ Watch the 60 s demo](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v2.8.0/wasserman-studio-mac-demo.mp4)**:
@@ -119,6 +121,56 @@ Each lists what was tested and what was not:
 | #941 to #944 | This Studio: Slate, Motion Previs, FLUX3-K and Voice |
 
 These are proposals: this repository's install still pins the engines on the `drowzeys/TensorFold` fork.
+
+## Which picture model to use: the evidence
+
+**The test:** a shootout on 2026-10-16 with Studio 2.8.1, run on a Mac Studio M5 Ultra and one DGX Spark.
+- **Pictures:** 8 prompts × 2 seeds × 4 models × 2 machines = **128 pictures at 1344x768, 0 failed jobs**.
+- **Judging:** by eye, from the full-size pictures.
+- **Full report:** every grid, the raw numbers and the method are in
+  **[docs/picture-shootout.md](docs/picture-shootout.md)**.
+
+**Speed and memory**, per picture with the model loaded (median):
+
+| Model | Mac M5 Ultra | DGX Spark | Peak memory (Mac / Spark) |
+|---|---|---|---|
+| Qwen 2.1 Turbo, 8 steps | **4.7 s** | 8.6 s | 33 / 31 GB |
+| Qwen 2.1 Full, 40 steps at CFG 4 | 43.3 s | 80.1 s | 33 / 30 GB |
+| FLUX3-K Fast, 16 steps | 9.8 s | 10.5 s | 38 / 37 GB |
+| FLUX3-K Full, 50 steps | 59.9 s | 58.7 s | 40 / 37 GB |
+| FLUX3-K prompt upsampler, once per prompt | 5.2 s | 12.5 s | |
+
+- **Qwen:** runs about 2x faster a step on the M5 Ultra.
+- **FLUX3-K:** runs at the same speed on both machines.
+
+**Quality, the winner per prompt:**
+
+| Prompt | Winner | The evidence |
+|---|---|---|
+| Poster with title and tagline | Qwen 2.1 Full | Most coherent scene. All 32 posters, every model, spelled both lines exactly |
+| Photoreal portrait | Qwen 2.1 Full | Real skin and the whole face. FLUX3-K cropped off the mouth in 8 of 8 |
+| Character turnaround | Qwen 2.1 Full, narrowly | Gear consistent across views. FLUX3-K wins for a labelled line-art sheet |
+| Crowded night market | FLUX3-K Full | Lanterns, steam, mostly real words on signs. Qwen drew pseudo-script |
+| "Red cube on a blue sphere, left of a green pyramid" | FLUX3-K Fast | Right in **8 of 8**; Qwen 2 of 8 |
+| Food photography | FLUX3-K Fast | More professional styling. No model reliably drew the three pancakes asked for |
+| Watercolor | FLUX3-K Full | Truest washes and paper texture |
+| Hands at a piano | FLUX3-K Full | Five fingers on each hand in 8 of 8. Qwen drew a third hand 3 times |
+
+![The spatial prompt: rows are Mac s101, Mac s102, Spark s101, Spark s102; columns Qwen Turbo, Qwen Full, FLUX3-K Fast, FLUX3-K Full](docs/shootout/5-spatial.jpg)
+
+*The spatial prompt. Every FLUX3-K picture (right two columns) has the pyramid on the right, as asked. Six of the
+eight Qwen pictures put it on the left.*
+
+**Conclusion: which to pick**
+- **Drafts and scouts:** use **Qwen 2.1 Turbo**. It is the quickest, and its quality is visibly below the other three.
+- **The everyday default:** use **FLUX3-K Fast**. It is right on layout and good on hands and crowded scenes, at about
+  10 s on either machine.
+- **Faces, portraits, posters and character sheets:** use **Qwen 2.1 Full**. It is twice as fast on a Mac.
+- **Final frames of complex scenes, illustration and hands:** use **FLUX3-K Full**.
+- **Machine:** for Qwen, the Mac when you have the choice. For FLUX3-K, the machine does not matter.
+
+**Limits:** two seeds a prompt and one judge, by eye. These model times leave out the text encode, so they are lower
+than the whole-run times in the table above.
 
 ## Speed: the first version on each machine, and 2.3
 
