@@ -300,6 +300,23 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## What changed
 
+> **2.8.0 (2026-10-15): pick the picture model: Qwen 2.1 Turbo, FLUX3-K Fast or FLUX3-K Full.** Black Forest Labs'
+> FLUX 3 Image Klein ("FLUX3-K") joins Qwen-Image-2.1-Turbo wherever the Studio makes a picture from a prompt: *Image
+> only*, the scouts a clip starts from, and a last frame. **FLUX3-K Fast** is the distilled checkpoint (16 steps),
+> **FLUX3-K Full** the base one (50 steps at CFG 3.5); both get a full scene caption from BFL's prompt upsampler first.
+> On a DGX Spark they run on ComfyUI's own FLUX 3 nodes (ComfyUI moves to `5a665890`, v0.41.0 and later), upsampler
+> included, so the render stays under the memory guard; on a Mac on flux3-mlx (Apache-2.0, a port of BFL's reference
+> code) in an environment of its own. `oneshot-setup.sh --flux3` installs them (41 GB; the Hugging Face repos are gated:
+> accept the FLUX Kommunity License first). Measured at 1344x768 with the model loaded, bf16: Qwen Turbo 9.7 s on an
+> M5 Ultra; FLUX3-K Fast 10.3 to 10.7 s on a Spark (ComfyUI; diffusers took 15.5 s for the same picture) and 14.9 s on
+> an M5 Ultra; FLUX3-K Full 57.5 s on a Spark and 53.6 s on an M5 Ultra; the upsampler, once per prompt, about 18 s on
+> a Spark and 5 s on an M5 Ultra. Against Qwen on the same six prompts and two seeds, FLUX3-K spelled a poster's title and tagline
+> right where Qwen wrote "SOME ONE IS STOLL LISTENNING", drew whole figures for character sheets where Qwen cut them at
+> the waist, and kept two characters recognisable in a two-reference shot; Fast looked as good as Full. The same seed
+> draws a different picture on the two machines (the runtimes draw their noise differently). Edit a picture stays on
+> Qwen-Image-2.1. FLUX 3 Image Klein is under the FLUX Kommunity License: non-commercial use, and commercial use of the
+> outputs only for Qualifying Users (under US$5M revenue).
+
 > **2.7.8 (2026-10-15): no dropped lines on the Spark, a cloned voice at once on the Mac.** On a DGX Spark the app
 > now gives every take the Mac engine's end-of-text check (`app/wordcheck.py`, its rules copied from TensorFold's
 > `drama3-mlx`): Whisper hears the take, and when words are missing (under 85 % heard, three in a row, or the ending)
@@ -895,7 +912,10 @@ with the command that installs ffmpeg, not after its render. Single clips and pi
 ![Create: image only](samples/ui_create_image.png)
 
 Choose *Image only*, describe the picture, pick a size and how many takes. Each image has **Download** and
-**animate this**, which carries it into a video as the first frame.
+**animate this**, which carries it into a video as the first frame. Where FLUX3-K is installed (`--flux3`), *Picture
+model* chooses between **Qwen 2.1 Turbo** (the quickest), **FLUX3-K Fast** and **FLUX3-K Full**; the same choice is
+offered for scouts and for a last frame made from a prompt. FLUX3-K writes a full scene description from your prompt
+before the first picture (5 to 20 s, once per prompt), then about 10 to 15 s a picture for Fast and a minute for Full.
 
 ### Edit a picture
 
@@ -2073,6 +2093,9 @@ MiniMax's own image-to-video prompts use; `RAW_PROMPT=1` passes yours untouched.
 bash scripts/image.sh "A neon shop sign that reads OPEN LATE, rainy night, reflections on wet pavement" out.png
 TURBO=0 bash scripts/image.sh "..." out.png                 # 40 steps, base model
 WIDTH=2048 HEIGHT=2048 bash scripts/image.sh "..." out.png  # sizes in multiples of 16
+IMAGE_MODEL=flux3k-fast bash scripts/image.sh "..." out.png # FLUX3-K Fast, 16 steps (oneshot-setup.sh --flux3)
+IMAGE_MODEL=flux3k-full bash scripts/image.sh "..." out.png # FLUX3-K Full, 50 steps at CFG 3.5
+IMAGE_MODEL=flux3k-fast UPSAMPLE=0 bash scripts/image.sh "a full scene caption ..." out.png   # no prompt upsampler
 ```
 
 ### Edit a picture
@@ -2517,7 +2540,8 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 
 ## Credits
 
-Cite the original authors first: the Qwen team (Qwen-Image-2.1), the MiniMax team (MiniMax H3), Ash Hart and the
+Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
+picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
 [CREDITS.md](CREDITS.md). Pack: drowzeys / keys.
