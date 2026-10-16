@@ -323,7 +323,9 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 > The reference rows lengthen every step, so Full is slow for edits on a Mac (about four times its text-to-image
 > time): Fast is the FLUX3-K for edits. FLUX3-K follows "switch the neon off" where Qwen left the signs lit on the
 > Spark. FLUX 3 Image Klein is under the FLUX Kommunity License: non-commercial use, and commercial use of the
-> outputs only for Qualifying Users (under US$5M revenue).
+> outputs only for Qualifying Users (under US$5M revenue). The carrier image moves to
+> `ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0`: the same Mac payload, and the DGX Spark's prebuilt engine is now the
+> LoRA build of 2.7.1 (`h3-cuda-lora` `1f7ecc75`), so a Spark install takes it instead of building it from source.
 
 > **2.7.8 (2026-10-15): no dropped lines on the Spark, a cloned voice at once on the Mac.** On a DGX Spark the app
 > now gives every take the Mac engine's end-of-text check (`app/wordcheck.py`, its rules copied from TensorFold's
@@ -2484,14 +2486,15 @@ videos at once, and sound by ear (the figures above are measurements).
 ### GHCR prebuilt carrier
 
 ```bash
-docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.6.5
-# index digest: sha256:759aa57789223c4f63ecea950638b90d045a39d5c7452ff411fea5ecbcda8e0b (linux/arm64 + linux/amd64)
-docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.6.5 cp -a /payload/. /out/payload/
+docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0
+# index digest: sha256:44dba56cb8e316cdc35a3e227f1d5109901ad9209a0cdb408e3ef27e5a2265be (linux/arm64 + linux/amd64)
+docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0 cp -a /payload/. /out/payload/
 ```
 
 One image for both builds. For a Mac it holds the TensorFold wheel, `requirements.lock`, the render scripts, the
 prebuilt native FastH3 engine (`zig-engine/tf-h3-dit`, built for Apple Silicon at the pinned commit) and `SHA256SUMS`.
-For a DGX Spark it holds the prebuilt CUDA engine (`spark-engine/libtf_h3.so`, GB10, aarch64), which
+For a DGX Spark it holds the prebuilt CUDA engine (`spark-engine/libtf_h3.so`, GB10, aarch64; since 2.8.0 the
+`h3-cuda-lora` build at `1f7ecc75`, with LoRA support, so a Spark install no longer builds it from source), which
 `spark/build-engine.sh` takes when Docker is there and otherwise builds from source. **It is not a runtime**: neither
 Metal nor the Spark's models run in a container, so the setup installs natively. Rebuild it with
 `PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh`, to include its engine). Up to 2.2

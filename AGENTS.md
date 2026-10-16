@@ -1,7 +1,7 @@
 # Agent one-shot — Wasserman Slate AI Studio, powered by TensorFold: Qwen-Image-2.1 + MiniMax H3 (MLX, Apple Silicon)
 
 **Repo:** https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3  
-**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.5` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engine)  
+**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engine)  
 **Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2068c03`, own venv, int8 tensor-unit kernels
 
 ```bash
