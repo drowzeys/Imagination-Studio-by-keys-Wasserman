@@ -1,10 +1,15 @@
-"""Edit a picture: Qwen-Image-2.1 re-draws a picture you give it, from what the prompt says changes.
+"""Edit a picture: the picture model re-draws a picture you give it, from what the prompt says changes.
 
 The image model makes and edits pictures with one set of weights, so the step needs nothing the Studio does not
 already have: scripts/edit.sh hands the picture to the model as its reference (MLX on a Mac, ComfyUI on a DGX Spark).
 A job of kind "edit" carries `image` (a picture in the studio's folder) and either `prompt` (one result) or `angles`
 (a set of camera angles, one result each from one load of the model), with `loras` from the hub's image LoRAs.
 Results are written beside the scout images, so they are in the Library and can open or end a clip or be a reference.
+
+`image_model` picks the model (server.py IMAGE_MODELS): Qwen 2.1 Turbo, the default, or FLUX3-K Fast or Full where
+they are installed. FLUX3-K takes the same pictures as references (ten at most) and BFL's prompt upsampler writes the
+edit's caption from the prompt and the pictures; the hub's image LoRAs, the camera angles and Qwen's 40-step base
+model are Qwen's, so a FLUX3-K edit refuses them.
 
 `images` is a list of further pictures the prompt can draw on (nine at most): the model takes several pictures at
 once and knows them as image 1 (the edited one), image 2, ... in the order given. The result has the edited picture's
@@ -41,6 +46,7 @@ SETS = {
     "cover": ("Wide and close", [("front", "eye", False), ("front", "eye", True), ("front-right-quarter", "elevated", False), ("front-right-quarter", "elevated", True)]),
 }
 LIMIT = 12  # results from one job
+STEPS = {"qwen": "8 steps", "flux3k-fast": "16 steps", "flux3k-full": "50 steps"}
 PICTURES = edit_plan.PICTURES  # pictures in one edit: the edited one and nine beside it
 KINDS = (".png", ".jpg", ".jpeg", ".webp")
 ANGLE_LORA = "qwen-multiple-angles"
@@ -59,7 +65,9 @@ def label(direction: str, height: str, close: bool) -> str:
     return f"{direction}_{height}{'_close' if close else ''}"
 
 
-def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
+def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, models=lambda: []):
+    """``models``: the picture models installed here, [{"id", "label", "note"}, ...] with Qwen first (server.py)."""
+
     router = APIRouter()
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
 
@@ -67,9 +75,14 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
         turbo = Path(os.environ.get("QWEN_MODEL_DIR", Path.home() / "qwen-models/Qwen-Image-2.1-Turbo"))
         return turbo, Path(os.environ.get("QWEN_BASE_DIR", turbo.parent / "Qwen-Image-2.1"))
 
-    def ready() -> tuple[bool, str]:
-        """Whether a picture can be edited here, and if not, what is missing."""
+    def flux3() -> list[dict]:
+        return [m for m in models() if m["id"] != "qwen"]
 
+    def ready(model: str = "qwen") -> tuple[bool, str]:
+        """Whether a picture can be edited here with ``model``, and if not, what is missing."""
+
+        if model != "qwen":
+            return (True, "") if any(m["id"] == model for m in flux3()) else (False, "that FLUX3-K model is not installed here: oneshot-setup" + ("-spark" if spark else "") + ".sh --flux3")
         if spark:
             models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
             if not (models / "diffusion_models/qwen_image_2.1_turbo_bf16.safetensors").is_file():
@@ -100,8 +113,12 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
 
     @router.get("/api/edit/state")
     def state() -> dict:
-        ok, why = ready()
-        return {"ready": ok, "why": why, "base": base_ready(), "limit": LIMIT, "pictures": PICTURES, "angle_lora": ANGLE_LORA,
+        qwen, why = ready()
+        # the models an edit can go to: Qwen when its edit pipeline is here, and every installed FLUX3-K
+        offered = ([{"id": "qwen", "label": "Qwen 2.1 Turbo", "note": "8 steps; image LoRAs and camera angles"}] if qwen else []) \
+            + [{**m, "note": STEPS[m["id"]] + ", BFL's prompt upsampler writes the caption"} for m in flux3()]
+        return {"ready": bool(offered), "why": "" if offered else why, "models": offered, "qwen": qwen,
+                "base": qwen and base_ready(), "limit": LIMIT, "pictures": PICTURES, "angle_lora": ANGLE_LORA,
                 "directions": [{"id": key, "label": text.replace(" view", ""), "degrees": degrees} for key, text, degrees in DIRECTIONS],
                 "heights": [{"id": key, "label": text.replace(" shot", ""), "degrees": degrees} for key, text, degrees in HEIGHTS],
                 "sets": {key: {"label": name, "angles": [{"direction": d, "height": h, "close": c} for d, h, c in angles]} for key, (name, angles) in SETS.items()},
@@ -110,9 +127,14 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
     def build(params: dict, job_id: str) -> tuple[list[str], dict, list[str]]:
         """(command, environment, output paths) for one edit job."""
 
-        ok, why = ready()
+        model = str(params.get("image_model") or "qwen")
+        if model not in STEPS:
+            raise HTTPException(400, f"unknown picture model {model}: one of {', '.join(STEPS)}")
+        ok, why = ready(model)
         if not ok:
             raise HTTPException(400, why)
+        if model != "qwen" and (params.get("loras") or params.get("angles") or params.get("base")):
+            raise HTTPException(400, "image LoRAs, camera angles and the 40-step base model are Qwen 2.1 Turbo's: pick it for those, or leave them out for FLUX3-K")
         source = inside(str(params.get("image") or ""))
         if not source.is_file() or source.suffix.lower() not in KINDS:
             raise HTTPException(400, "pick the picture to edit: a png, jpg or webp in the studio's folder")
@@ -169,10 +191,10 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative):
         folder.mkdir(parents=True, exist_ok=True)
         plan = folder / "edits.json"
         plan.write_text(json.dumps([[text, str(folder / name)] for text, name in edits]))
-        env = {"SET_FILE": str(plan), "SEED": seed, "RESOLUTION": resolution, "SIZE": size, "BASE": "1" if base else "",
+        env = {"SET_FILE": str(plan), "IMAGE_MODEL": model, "SEED": seed, "RESOLUTION": resolution, "SIZE": size, "BASE": "1" if base else "",
                "LORA": "\n".join(f"{p['path']}:{p['strength']:g}" for p in picked),
                "IMAGES": "\n".join(str(path) for path in beside), **asked}
-        if not spark and 0 < memory_gib() < 96:
+        if not spark and model == "qwen" and 0 < memory_gib() < 96:
             env["QUANTIZE"] = "8"  # bfloat16 peaks at 43 GiB with the text encoder and the picture's rows
             # the memory grows with the pixels (bfloat16 on an M5 Ultra: 41 GiB at 1280x736, 58 GiB at 2016x1152), so
             # a large picture is edited at 1280x1280 pixels at most there; not measured on such a Mac

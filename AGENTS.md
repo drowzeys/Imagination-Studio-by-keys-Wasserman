@@ -199,7 +199,10 @@ Rules:
   FLUX3-K in anything a person reads. FLUX3-K takes full scene captions: BFL's prompt upsampler always writes one
   first (`UPSAMPLE=0` only for a prompt that already is one). On a Spark it runs inside ComfyUI's workflow
   (`TextGenerate` with their settings, `flux3_workflow` in `spark/spark_generate.py`), never as standalone code; on a
-  Mac on flux3-mlx in `$PREFIX/flux3-venv`, never in the Studio's venv. Edit a picture stays on Qwen. FLUX Kommunity
+  Mac on flux3-mlx in `$PREFIX/flux3-venv`, never in the Studio's venv. Edit a picture takes `image_model` too
+  (`app/picture_edit.py`, `IMAGE_MODEL` to `scripts/edit.sh`): FLUX3-K edits are `flux3_workflow` in `spark/spark_edit.py`
+  (ReferenceMultiLatent, upsampler with the i2i prompt) and `flux3_edit.py` on a Mac; LoRAs, angles and `base` are
+  Qwen's and a FLUX3-K edit refuses them. FLUX Kommunity
   License: say so when asked about commercial use, and do not redistribute the weights.
 - mflux, minimax-h3-mlx and flux3-mlx are pinned by commit and used at run time. Do not unpin.
 

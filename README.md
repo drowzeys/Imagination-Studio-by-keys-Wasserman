@@ -313,8 +313,16 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 > a Spark and 5 s on an M5 Ultra. Against Qwen on the same six prompts and two seeds, FLUX3-K spelled a poster's title and tagline
 > right where Qwen wrote "SOME ONE IS STOLL LISTENNING", drew whole figures for character sheets where Qwen cut them at
 > the waist, and kept two characters recognisable in a two-reference shot; Fast looked as good as Full. The same seed
-> draws a different picture on the two machines (the runtimes draw their noise differently). Edit a picture stays on
-> Qwen-Image-2.1. FLUX 3 Image Klein is under the FLUX Kommunity License: non-commercial use, and commercial use of the
+> draws a different picture on the two machines (the runtimes draw their noise differently). **Edit a picture** offers
+> the same choice: FLUX3-K takes the picture, and up to nine more beside it, as reference latents (BFL's edit layout:
+> every picture on the prompt and on the negative, the result at the first picture's size), and the upsampler sees the
+> pictures before it writes the caption of the result (its i2i system prompt). Image LoRAs, the camera ring and the
+> 40-step base model stay Qwen's. Measured with the job's own scripts, seed 7, 1344x768, upsampler included: an edit
+> took 24 s with Qwen, 37 s with FLUX3-K Fast and 139 s with Full on a DGX Spark, 10, 37 and 240 s on an M5 Ultra; two
+> pictures (a person from one put in the place of another) 23, 44 and 188 s on a Spark, 13, 42 and 427 s on the Mac.
+> The reference rows lengthen every step, so Full is slow for edits on a Mac (about four times its text-to-image
+> time): Fast is the FLUX3-K for edits. FLUX3-K follows "switch the neon off" where Qwen left the signs lit on the
+> Spark. FLUX 3 Image Klein is under the FLUX Kommunity License: non-commercial use, and commercial use of the
 > outputs only for Qualifying Users (under US$5M revenue).
 
 > **2.7.8 (2026-10-15): no dropped lines on the Spark, a cloned voice at once on the Mac.** On a DGX Spark the app
@@ -933,6 +941,11 @@ latents, and the model draws the picture again as the prompt describes it.
   Pick angles one by one or take a set (*Five views around*, *Full orbit*, *Four heights*, *Wide and close*): each
   angle is one picture from one load of the model, up to 12 a job. The ring writes the author's captions, such as
   `<mva> right side view, high-angle shot close-up`.
+- **Picture model.** Where FLUX3-K is installed, *Picture model* above the picture offers **Qwen 2.1 Turbo**,
+  **FLUX3-K Fast** and **FLUX3-K Full**. FLUX3-K edits from words, with further pictures too; BFL's upsampler looks
+  at the pictures and writes the caption of the result first, so a short request is enough. It follows "switch the
+  neon off" where Qwen left the signs lit, and is slower: an edit took 24 s with Qwen, 37 s with Fast and 139 s with
+  Full on a DGX Spark, and 10, 37 and 240 s on an M5 Ultra, where Full is too slow for edits (427 s with two pictures). The LoRAs, the camera ring and the 40-step choice are Qwen's and are hidden for FLUX3-K.
 - **Several pictures.** The model takes several pictures at once, so two references need no side-by-side montage
   made elsewhere. Under the picture, *Further pictures* adds up to nine more. The first picture is the one that is
   edited and is image 1 to the model; the others are image 2, image 3, … in the order listed. Name them that way:
@@ -2108,6 +2121,7 @@ SET_FILE=edits.json bash scripts/edit.sh photo.png          # [["prompt", "out.p
 BASE=1 bash scripts/edit.sh photo.png "..." out.png         # 40 steps, base model (--image-edit)
 IMAGES="person.png" bash scripts/edit.sh room.png "The person of image 2 sits on the sofa of image 1" out.png   # up to nine more, one a line
 SIZE=model RESOLUTION=1024 bash scripts/edit.sh photo.png "..." out.png   # the model's own size; the default is the picture's own
+IMAGE_MODEL=flux3k-fast IMAGES="person.png" bash scripts/edit.sh room.png "..." out.png   # FLUX3-K Fast (flux3k-full: Full), --flux3
 ```
 
 The result has the size of the first picture (`WIDTH` and `HEIGHT` ask for another). The noise is drawn for `SEED`

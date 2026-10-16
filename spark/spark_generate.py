@@ -767,12 +767,13 @@ def video(args) -> None:
                                         **({"cropped_to": args.crop} if args.crop else {})}), flush=True)
 
 
-def flux3_system_prompt() -> str:
-    """The text-to-image system prompt of BFL's prompt upsampler (system_prompts.json, downloaded with the model)."""
+def flux3_system_prompt(task: str = "t2i") -> str:
+    """A system prompt of BFL's prompt upsampler (system_prompts.json, downloaded with the model): t2i for a picture
+    from words, i2i for an edit, where it sees the pictures too."""
 
     path = MODELS / FLUX3_DIR / "system_prompts.json"
     try:
-        return json.loads(path.read_text())["t2i"]
+        return json.loads(path.read_text())[task]
     except (OSError, ValueError, KeyError):
         sys.exit(f"FLUX3-K's prompt upsampler has no system prompt at {path}: run oneshot-setup-spark.sh --flux3")
 
