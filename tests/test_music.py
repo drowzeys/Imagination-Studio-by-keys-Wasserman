@@ -27,18 +27,39 @@ voice.LOCK = Path(os.environ["STUDIO_GPU_LOCK"])
 
 # `python -I -m tensorfold.music3 --model M --serve`, stood in for: the protocol of TensorFold's music3-mlx (6844b413)
 MLX_SERVE = r"""
-import json, os, struct, sys, wave
+import json, os, struct, sys, time, wave
 args = sys.argv[1:]
 assert args[:3] == ["-I", "-m", "tensorfold.music3"] and args[-1] == "--serve" and "--model" in args
 log = open(os.environ["FAKE_MUSIC3_LOG"], "a")
+streams = os.environ.get("FAKE_MUSIC3_STREAM") == "1"
 print("[music3] MiniMax-Music3 runs locally", file=sys.stderr, flush=True)
 print(json.dumps({"ready": True, "engine": "tensorfold-music3-mlx", "load_s": 0.1, "sample_rate": 44100, "channels": 2,
-                  "license_display": "MiniMax-Music3"}), file=sys.stderr, flush=True)
+                  "license_display": "MiniMax-Music3", **({"stream": True, "quant": "int8", "dit_modes": ["averaged", "sequential"]} if streams else {})}),
+      file=sys.stderr, flush=True)
+FRAME = struct.pack("<hh", 100, -100)  # left and right told apart: a swapped side shows
 for line in sys.stdin:
     request = json.loads(line)
     log.write(line); log.flush()
     if "FAIL" in request["caption"]:
         print(json.dumps({"ok": False, "error": "ValueError: the prompt has 6000 tokens", "id": request.get("id")}), file=sys.stderr, flush=True)
+        continue
+    stream = bool(request.get("stream", request.get("pcm") is not None))
+    if stream:  # as 6844b413: a growing WAV at "wav" (open sizes until done) and raw stereo PCM at "pcm", a piece at a time
+        seconds, piece = 5.0, 0.5  # longer than the lead a 10 s cap asks (2.6 s), so the player is let go before the end
+        pcm, out = open(request["pcm"], "wb"), open(request["wav"], "wb")
+        out.write(b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 2, 44100, 176400, 4, 16) + b"data" + struct.pack("<I", 0xFFFFFFFF))
+        for i in range(int(seconds / piece)):
+            time.sleep(0.15)
+            data = FRAME * int(44100 * piece)
+            pcm.write(data); pcm.flush(); out.write(data); out.flush()
+            print(json.dumps({"id": request["id"], "progress": {"stage": "stream", "done": (i + 1) * piece, "total": request["seconds"]}}), file=sys.stderr, flush=True)
+        pcm.close()
+        size = int(44100 * seconds) * 4
+        out.seek(4); out.write(struct.pack("<I", 36 + size)); out.seek(40); out.write(struct.pack("<I", size)); out.close()
+        print(json.dumps({"ok": True, "id": request["id"], "wav": request["wav"], "audio_s": seconds, "frames": 75, "eos": True,
+                          "ar_ms": 1300.0, "dit_ms": 700.0, "dav_ms": 90.0, "total_ms": 1000.0, "rtf": 0.33, "first_audio_ms": 1500.0,
+                          "stream": True, "seed": request["seed"], "peak_memory_gb": 22.3, "pcm": request.get("pcm", ""),
+                          "dit_mode": "sequential", "windows": 2, "quant": "int8"}), file=sys.stderr, flush=True)
         continue
     if request.get("progress"):
         for stage, total in (("ar", 50), ("dit", 30), ("dav", 1)):
@@ -52,18 +73,19 @@ for line in sys.stdin:
 """
 
 
-def fake_mlx(folder: Path) -> "music.Mlx":
+def fake_mlx(folder: Path, streams: bool = False) -> "music.Mlx":
     python = folder / "venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.write_text(f"#!{sys.executable}\n" + MLX_SERVE)
     python.chmod(0o755)
     os.environ.update(MUSIC3_VENV=str(folder / "venv"), MUSIC3_MODEL=str(folder / "model"), FAKE_MUSIC3_LOG=str(folder / "requests.jsonl"))
+    os.environ["FAKE_MUSIC3_STREAM"] = "1" if streams else "0"
     try:
         one = music.Mlx()
     finally:
         for key in ("MUSIC3_VENV", "MUSIC3_MODEL"):
             os.environ.pop(key)
-    one.known, one.NEED_GB = (time.time(), ""), 0
+    one.known, one.NEED_GB, one.streams = (time.time(), ""), 0, streams
     return one
 
 
@@ -140,6 +162,9 @@ def test_a_song_runs_on_the_served_engine_holds_the_lock_and_is_unloaded_before_
         assert sent["caption"] == "Hip-hop anthem, 92 BPM" and sent["lyrics"] == "[Verse]\nRaise it up" and sent["seconds"] == 60.0
         assert sent["seed"] == 7 and sent["steps"] == 30 and sent["dit_cfg"] == 1.7 and sent["ar_cfg"] == 1.5 and sent["top_k"] == 50
         assert sent["progress"] is True and sent["wav"].endswith(f"{job['id']}.wav") and sent["id"] == job["id"]
+        # an engine that does not stream gets the request it always had, and the take keeps its old keys
+        assert "pcm" not in sent and "stream" not in sent and "dit_mode" not in sent and "overlap" not in sent
+        assert "streamed" not in take and "first_audio_s" not in take and client.get("/api/music/state").json()["stream"] is False
         assert (server.HOME / take["path"]).is_file() and client.get(f"/api/music/takes/{job['id']}/audio").status_code == 200
         assert [t["id"] for t in client.get("/api/music/takes").json()][0] == job["id"]
         # loaded after the song, under the GPU lock: the next song does not load again
@@ -169,6 +194,85 @@ def test_a_song_runs_on_the_served_engine_holds_the_lock_and_is_unloaded_before_
         server.build = built
         one.release("test over")
         music._engine, music.qa.ready = had, had_ready
+
+
+def test_a_song_plays_while_it_is_made_as_stereo_and_keeps_the_finished_wav():
+    folder = Path(tempfile.mkdtemp())
+    one = fake_mlx(folder, streams=True)
+    had, had_ready, had_start = music._engine, music.qa.ready, music.start_s
+    try:
+        music._engine = one
+        music.qa.ready = lambda: {"transcript": False, "runs": True, "missing": []}
+        music.start_s = lambda seconds: 0.3  # the stand-in makes its 5 s in 1.5 s: the measured hold would outlast it
+        assert client.get("/api/music/state").json()["stream"] is True
+        assert client.get("/api/music/takes/nobody/live").status_code == 404
+        job = client.post("/api/music/takes", json={"caption": "Hip-hop anthem", "lyrics": "[Verse]\nRaise it up", "seconds": 10, "seed": 7}).json()
+        assert job["params"]["live"] is True
+        with client.stream("GET", f"/api/music/takes/{job['id']}/live") as live:
+            assert live.status_code == 200 and live.headers["content-type"] == "audio/wav"
+            body = b"".join(live.iter_bytes())
+        # the header: PCM, two channels, 44.1 kHz, four bytes a frame, lengths left open
+        assert body[:4] == b"RIFF" and body[8:16] == b"WAVEfmt " and body[36:40] == b"data"
+        fmt, channels, rate, byte_rate, block, bits = struct.unpack("<HHIIHH", body[20:36])
+        assert (fmt, channels, rate, byte_rate, block, bits) == (1, 2, 44100, 176400, 4, 16)
+        sound = body[44:]
+        assert len(sound) == int(44100 * 5.0) * 4 and sound == struct.pack("<hh", 100, -100) * int(44100 * 5.0)  # whole, sides kept
+        done = wait(job["id"])
+        assert done["status"] == "done", done
+        take = done["music"]
+        assert take["streamed"] is True and take["first_audio_s"] == 1.5 and take["duration"] == 5.0 and take["play_s"] is not None
+        assert music.lead_s(10) - 0.01 <= take["lead_s"] < 5.0  # it was let play once the lead was made, before the end
+        sent = requests_of(folder)[-1]
+        assert sent["stream"] is True and sent["pcm"].endswith(f"{job['id']}.live/0.pcm")
+        with wave.open(str(server.HOME / take["path"])) as w:  # the kept song is the engine's finished WAV
+            assert (w.getnchannels(), w.getframerate(), w.getnframes()) == (2, 44100, int(44100 * 5.0))
+        # unticked: no stream asked, the old request
+        quiet = wait(client.post("/api/music/takes", json={"caption": "pop", "seconds": 10, "live": False, "asr": False}).json()["id"])
+        assert quiet["status"] == "done" and "pcm" not in requests_of(folder)[-1] and "streamed" not in quiet["music"]
+    finally:
+        one.release("test over")
+        music._engine, music.qa.ready, music.start_s = had, had_ready, had_start
+
+
+def test_the_lead_before_a_song_plays_grows_with_its_length_and_waits_for_the_sound():
+    assert abs(music.stream_rtf(60) - 1.06) < 1e-9 and abs(music.stream_rtf(300) - 1.15) < 1e-9 and music.stream_rtf(10) == 1.06
+    assert 5.0 < music.lead_s(60) < 6.0 and 40.0 < music.lead_s(300) < 42.0  # measured no-stall: 10.3 s and 52.7 s of wall time
+    assert music.lead_s(60, rate=0.5) == 32.0 and music.lead_s(60, rate=3.0) == music.lead_s(60)  # slower waits more, faster never less
+    assert music.lead_s(10, rate=0.01) == 10.0  # never more than the song
+    # the measured no-stall start (10.3 s for 60 s, 52.7 s for 300 s, from the request) and the margin
+    assert music.start_s(60) == 13.3 and music.start_s(300) == 55.7 and 7.9 < music.start_s(30) < 8.1 and music.start_s(10) >= 3.0
+    folder = Path(tempfile.mkdtemp())
+    pcm = folder / "0.pcm"
+    entry = {"parts": [pcm], "done": False, "finished": 0, "gap_s": 0, "seconds": 10.0, "played": None, "asked": time.time() - music.start_s(10)}
+    want = music.lead_s(10)
+
+    def grow():
+        with open(pcm, "wb") as out:
+            for _ in range(12):
+                out.write(b"\0" * (4 * 44100 // 2)); out.flush()  # half a second of song every 0.1 s
+                time.sleep(0.1)
+
+    import threading
+
+    began = time.time()
+    threading.Thread(target=grow, daemon=True).start()
+    music.hold(entry, poll=0.02)
+    assert entry["lead_s"] >= want - 0.01 and entry["played"] >= began
+    # not before the measured start, however much is made
+    early = {"parts": [pcm], "done": False, "finished": 0, "gap_s": 0, "seconds": 10.0, "played": None, "asked": time.time() - music.start_s(10) + 0.6}
+    began = time.time()
+    music.hold(early, poll=0.02)
+    assert time.time() - began >= 0.55 and early["lead_s"] >= want
+    # a song that is done is let go at once, whatever was made
+    empty = {"parts": [folder / "none.pcm"], "done": True, "finished": 1, "gap_s": 0, "seconds": 300.0, "played": None}
+    music.hold(empty)
+    assert empty["played"] is not None and "lead_s" not in empty
+
+
+def test_the_voice_live_header_stays_mono():
+    head = voice.live_header()
+    assert struct.unpack("<HHIIHH", head[20:36]) == (1, 1, 44100, 88200, 2, 16) and len(head) == 44
+    assert struct.unpack("<HHIIHH", voice.live_header(44100, 2)[20:36]) == (1, 2, 44100, 176400, 4, 16)
 
 
 def test_a_voice_take_and_a_song_never_stand_together():

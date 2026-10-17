@@ -675,15 +675,23 @@ def forget_live(job_id: str, folder: Path) -> None:
     shutil.rmtree(folder, ignore_errors=True)
 
 
-def live_wav(entry: dict, rate: int = 44100, poll: float = 0.05):
-    """A running take as one WAV, while it is made: the header (its length left open), then each part's raw PCM as the
-    engine writes it, the gap between parts. Ends when the take is done, or after 10 minutes without a byte."""
+def live_header(rate: int = 44100, channels: int = 1) -> bytes:
+    """A 16-bit PCM WAV header with its lengths left open (a stream): mono for a Drama 3 take, stereo for a song."""
 
     import struct
 
-    open_length = 0xFFFFFFFF - 36
-    yield (b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
-           + b"data" + struct.pack("<I", open_length))
+    block = 2 * channels
+    return (b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, channels, rate, rate * block, block, 16)
+            + b"data" + struct.pack("<I", 0xFFFFFFFF - 36))
+
+
+def live_wav(entry: dict, rate: int = 44100, poll: float = 0.05, channels: int = 1):
+    """A running take as one WAV, while it is made: the header (its length left open), then each part's raw PCM as the
+    engine writes it, the gap between parts. Ends when the take is done, or after 10 minutes without a byte. Sent in
+    whole sample frames (``channels`` x 16 bits), so a stereo stream never swaps its sides."""
+
+    block = 2 * channels
+    yield live_header(rate, channels)
     quiet = time.time()
     for index, part in enumerate(entry["parts"]):
         sent = 0
@@ -710,10 +718,10 @@ def live_wav(entry: dict, rate: int = 44100, poll: float = 0.05):
                     data = handle.read()
             except OSError:
                 data = b""
-            data = data[: len(data) - (len(data) % 2)] if entry["finished"] <= index else data
+            data = data[: len(data) - (len(data) % block)] if entry["finished"] <= index else data
             if data:
                 if index and sent == start:
-                    yield b"\0" * (int(rate * entry.get("gap_s", 0)) * 2)
+                    yield b"\0" * (int(rate * entry.get("gap_s", 0)) * block)
                 sent += len(data)
                 quiet = time.time()
                 yield data

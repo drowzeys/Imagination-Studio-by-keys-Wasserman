@@ -20,6 +20,11 @@ yearly revenue needs MiniMax's written authorisation, and a hosted service keeps
 
 A song can be laid under a long video or the Editor's export (``lay``): ffmpeg mixes it under the clip's own sound,
 ducked under the dialogue, with the app's sound finish (no hard clip, peaks under -1 dBFS).
+
+On a Mac a song can play while it is made (``live``): the engine's stream (``pcm`` in the request, as Drama 3's server)
+appends raw 16-bit stereo PCM to a file as each piece is decoded, and ``/api/music/takes/{id}/live`` serves it as one
+stereo WAV whose sound is held back until enough is made that playing never runs dry (``lead_s``). The kept take is the
+engine's finished WAV, as without streaming. ComfyUI's route on a Spark does not stream.
 """
 
 from __future__ import annotations
@@ -60,6 +65,18 @@ TAG = re.compile(r"\[([^\]\n]{1,40})\]")
 # the song under a clip (lay): the music's level against the clip's own sound, and the most it is lowered under speech
 MUSIC_DB, DUCK_DB = -10.0, 12.0
 PEAK_DBFS = -1.0  # no peak over this, measured between the samples (four times the rate)
+# Played while it is made (the Mac engine's stream, music3-mlx 6844b413, int8, overlap on), measured on a Mac Studio M5
+# Ultra (docs/recipes/minimax-music3-mlx.md there): seconds of making a second of song when streamed, by length; the
+# first sound came after 7.6 s (60 s song) and 8.0 s (300 s), and the earliest start that never ran dry (NO_STALL_S,
+# seconds from the request) was 10.3 s and 52.7 s. A stream is a little slower than real time and slows down as the
+# song gets longer (through the app, 60 s hip-hop: a 4 s piece every 4.2 s at the start, every 4.7 s near the end),
+# so the player waits longer the longer the song. Through the app a start at 10.7 s ran dry for 0.18 s at 53 s
+# (README, Music): hence the margin.
+STREAM_RTF = ((60.0, 1.06), (300.0, 1.15))
+NO_STALL_S = ((60.0, 10.3), (300.0, 52.7))
+HOLD_MARGIN_S = 3.0  # seconds after the measured no-stall start
+LEAD_MARGIN_S, LEAD_MIN_S = 2.0, 2.0  # seconds of song beyond the lead the rate asks for, and the least ever held
+RATE, CHANNELS = 44100, 2
 SPARK_COMFY_URL = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190"))
 
 
@@ -93,6 +110,9 @@ class Mlx(voice.Served):
         # int8 weights by default (measured: AR 40 -> 65 frames/s, peak 27.6 -> 20.5 GB, parity and lyrics within
         # noise of bf16; docs/recipes/minimax-music3-mlx.md on the engine branch). MUSIC3_QUANT=none runs bf16.
         self.quant = os.environ.get("MUSIC3_QUANT", "int8").strip() or "none"
+        # the engine plays a song while it is made (a "pcm" path in the request; its ready line says "stream": true):
+        # music3-mlx 6844b413 or later. Looked for in its source before it loads, then read from its ready line
+        self.streams = False
 
     def python(self) -> Path:
         return self.venv / "bin" / "python"
@@ -128,29 +148,46 @@ class Mlx(voice.Served):
             memory = 0
         if memory and memory < self.MEMORY_GB * 1024 ** 3:
             return f"This Mac has {memory / 1024 ** 3:.0f} GB of memory; MiniMax Music 3 takes about 33 GB, so {self.MEMORY_GB} GB or more."
-        probe = "import importlib.util as u; print(bool(u.find_spec('tensorfold.music3')))"
+        probe = ("import importlib.util as u; s = u.find_spec('tensorfold.music3'); "
+                 "print(bool(s), bool(s and s.origin and 'q.get(\"pcm\")' in open(s.origin).read()))")
         command = [str(self.python()), "-I", "-c", probe] if not self.src else \
             [str(self.python()), "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); " + probe, str(Path(self.src).expanduser())]
         try:
             done = subprocess.run(command, capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.TimeoutExpired) as error:
             return f"The MiniMax Music 3 environment did not answer: {error}"
-        if done.stdout.strip() != "True":
+        found = done.stdout.split()
+        if not found or found[0] != "True":
             return f"The environment at {self.venv} has no tensorfold.music3 (bash scripts/setup-music.sh installs TensorFold's music3-mlx branch into it)."
+        self.streams = found[1:2] == ["True"]
         return ""
+
+    def streaming(self) -> bool:
+        """Whether a song can play while it is made: the loaded engine's ready line, else what its source said."""
+
+        if self.loaded() and "stream" in self.ready:
+            return bool(self.ready["stream"])
+        return self.streams
 
     def estimate(self, seconds: float) -> int:
         return int((0 if self.loaded() else self.load_s) + seconds * self.RTF + 2)
 
     def make(self, job: dict, params: dict, wav: Path) -> dict | None:
-        """One song through the server: its measurements, or None when cancelled."""
+        """One song through the server: its measurements, or None when cancelled. Played while it is made (``live``
+        asked and the engine streams): the request carries a ``pcm`` path, which ``/live`` reads as it grows."""
 
         stats = wav.with_suffix(".stats.json")
         request = {"id": job["id"], "caption": params["caption"], "lyrics": params["lyrics"], "wav": str(wav),
                    "seconds": float(params["seconds"]), "seed": int(params["seed"]), "ar_cfg": params["ar_cfg"],
                    "top_k": int(params["top_k"]), "steps": int(params["steps"]), "dit_cfg": params["dit_cfg"],
                    "stats": str(stats), "progress": True}
-        words = {"ar": "the model writes the song", "dit": "the sound", "dav": "decoding"}
+        words = {"ar": "the model writes the song", "dit": "the sound", "dav": "decoding", "stream": "made so far (s)"}
+        live = bool(params.get("live", True)) and self.streaming()
+        folder = wav.with_suffix(".live")
+        if live:  # before the load, so a page that asks for /live meanwhile finds it (and waits for the sound)
+            folder.mkdir(parents=True, exist_ok=True)
+            LIVE[job["id"]] = {"parts": [folder / "0.pcm"], "done": False, "finished": 0, "gap_s": 0,
+                               "seconds": float(params["seconds"]), "asked": None, "played": None}
 
         def progress(said: dict) -> None:
             stage = str(said.get("stage") or "")
@@ -162,17 +199,108 @@ class Mlx(voice.Served):
                 if not self.start(job):
                     return None
                 loaded = time.time()
+                live = live and self.streaming()  # the ready line has the last word
+                if job["id"] in LIVE and not live:
+                    LIVE[job["id"]]["done"] = True
                 job["progress"] = {"stage": "music: the model writes the song", "at": 0, "of": 1}
+                if live:
+                    request.update(pcm=str(LIVE[job["id"]]["parts"][0]), stream=True)
+                    LIVE[job["id"]]["asked"] = time.time()
                 answer = self.ask(job, request, 600 + 15 * float(params["seconds"]), progress)
                 if answer is None:
                     return None
             finally:
                 self.last_used = time.time()
-        return {"audio_s": answer.get("audio_s"), "frames": answer.get("frames"), "eos": answer.get("eos"),
+                if job["id"] in LIVE:
+                    LIVE[job["id"]].update(finished=1, done=True)
+                    # the raw PCM goes a minute later: a page may still be playing the end of the song
+                    threading.Timer(60, forget_live, args=(job["id"], folder)).start()
+        entry = LIVE.get(job["id"]) or {}
+        played = entry.get("played")
+        streamed = {"stream": bool(answer.get("stream")), "first_audio_s": round(float(answer["first_audio_ms"]) / 1000, 1)
+                    if live and answer.get("first_audio_ms") is not None else None,
+                    "play_s": round(played - entry["asked"], 1) if live and played and entry.get("asked") else None,
+                    "lead_s": entry.get("lead_s") if live else None} if live else {}
+        return {**streamed, "audio_s": answer.get("audio_s"), "frames": answer.get("frames"), "eos": answer.get("eos"),
                 "ar_s": round(float(answer.get("ar_ms") or 0) / 1000, 1), "dit_s": round(float(answer.get("dit_ms") or 0) / 1000, 1),
                 "dav_s": round(float(answer.get("dav_ms") or 0) / 1000, 1), "engine_s": round(float(answer.get("total_ms") or 0) / 1000, 1),
                 "rtf": answer.get("rtf"), "peak_memory_gb": answer.get("peak_memory_gb"), "load_s": job.get("load_s"),
                 "total_s": round(time.time() - began, 1), "made_s": round(time.time() - loaded, 1)}
+
+
+# ---------- played while it is made ----------
+
+LIVE: dict[str, dict] = {}  # a running song's raw PCM, as the engine writes it (/live)
+
+
+def forget_live(job_id: str, folder: Path) -> None:
+    LIVE.pop(job_id, None)
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+def stream_rtf(seconds: float) -> float:
+    """The measured seconds of making a second of streamed song, between the two lengths measured (held beyond)."""
+
+    (a, ra), (b, rb) = STREAM_RTF
+    at = min(max(float(seconds), a), b)
+    return ra + (rb - ra) * (at - a) / (b - a)
+
+
+def start_s(seconds: float) -> float:
+    """Seconds from the request to the engine before a song of ``seconds`` is let play: the measured no-stall start,
+    along the line through the two lengths measured (beyond them too), and HOLD_MARGIN_S."""
+
+    (a, ta), (b, tb) = NO_STALL_S
+    return round(max(0.0, ta + (tb - ta) * (float(seconds) - a) / (b - a)) + HOLD_MARGIN_S, 2)
+
+
+def lead_s(seconds: float, rate: float | None = None) -> float:
+    """Seconds of song to have made before playing starts, for a song of ``seconds`` (its cap: one the model ends sooner
+    is waited for a little more than it needed). The engine makes ``r`` seconds of song a second (the measured rate
+    since the first sound when there is one, never more than STREAM_RTF says); played from the start, the end is the
+    tightest point, so the lead is the part of the song it cannot make while the rest plays, and a margin."""
+
+    r = 1 / stream_rtf(seconds)
+    if rate is not None and rate > 0:
+        r = min(r, rate)
+    return round(min(float(seconds), max(LEAD_MIN_S, seconds * (1 - r) + LEAD_MARGIN_S)), 2)
+
+
+def hold(entry: dict, poll: float = 0.1, limit_s: float = 900) -> None:
+    """Waits until the song may play without running dry, or is done: ``start_s`` after the request reached the engine
+    (the measured no-stall start), and the stream ``lead_s`` ahead at the rate it is going (a slower engine than the
+    one measured waits for more). The rate is the PCM file's growth from its first piece to its latest one (the engine
+    writes it a piece of a few seconds at a time, so the time since the latest piece is not counted)."""
+
+    pcm, first, latest, began = entry["parts"][0], None, None, time.time()
+    while not entry["done"] and time.time() - began < limit_s:
+        try:
+            made = pcm.stat().st_size / (2 * CHANNELS * RATE)
+        except OSError:
+            made = 0.0
+        now = time.time()
+        if made and first is None:
+            first = latest = (now, made)
+        elif made and made > latest[1]:
+            latest = (now, made)
+        asked = entry.get("asked")
+        if made and asked and now - asked >= start_s(entry["seconds"]):
+            rate = (latest[1] - first[1]) / (latest[0] - first[0]) if latest[0] - first[0] >= 3 else None
+            if made >= lead_s(entry["seconds"], rate):
+                entry.setdefault("lead_s", round(made, 1))
+                break
+        time.sleep(poll)
+    if entry.get("played") is None:
+        entry["played"] = time.time()
+
+
+def live_song(entry: dict):
+    """The song being made as one stereo 44.1 kHz WAV: the header at once, the sound once ``hold`` lets it go."""
+
+    stream = voice.live_wav(entry, rate=RATE, channels=CHANNELS)
+    yield next(stream)
+    hold(entry)
+    yield from stream
 
 
 WEIGHTS = ("diffusion_models/minimax_music3_dit_fp16.safetensors", "text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors",
@@ -370,7 +498,10 @@ def state() -> dict:
     return {"available": not why, "why": why, "route": one.name, "label": one.label, "credit": CREDIT, "licence": LICENCE,
             "seconds": SECONDS, "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
             "sections": SECTIONS, "caption_limit": CAPTION_LIMIT, "lyrics_limit": LYRICS_LIMIT, "rtf": one.RTF,
-            "music_db": MUSIC_DB, "duck_db": DUCK_DB, "server": one.status() if hasattr(one, "status") else None}
+            "music_db": MUSIC_DB, "duck_db": DUCK_DB, "server": one.status() if hasattr(one, "status") else None,
+            # played while it is made: the Mac engine only (ComfyUI's route on a Spark does not stream)
+            "stream": bool(not why and hasattr(one, "streaming") and one.streaming()),
+            "stream_lead": {"no_stall_s": dict(NO_STALL_S), "margin_s": HOLD_MARGIN_S, "first_audio_s": 7.6}}
 
 
 # ---------- text ----------
@@ -445,6 +576,7 @@ def checked(body: dict) -> dict:
         if not found["fits"]:
             raise HTTPException(400, found["reason"])
     params["asr"] = body.get("asr", True) is not False
+    params["live"] = body.get("live", True) is not False  # played while it is made, where the engine streams (a Mac)
     return params
 
 
@@ -467,6 +599,8 @@ def perform(job: dict) -> bool:
             "ar_s": measured.get("ar_s"), "dit_s": measured.get("dit_s"), "dav_s": measured.get("dav_s"), "load_s": measured.get("load_s"),
             "rtf": measured.get("rtf"), "total_s": measured.get("total_s"), "peak_memory_gb": measured.get("peak_memory_gb"),
             "credit": CREDIT}
+    if measured.get("stream"):  # played while it was made: when the first sound came and when the player was let start
+        take.update(streamed=True, first_audio_s=measured.get("first_audio_s"), play_s=measured.get("play_s"), lead_s=measured.get("lead_s"))
     if params.get("asr") and sung(params["lyrics"]) and qa.ready()["transcript"]:
         job["progress"] = {"stage": "Whisper hears the lyrics", "at": 0, "of": 1}
         try:
@@ -618,7 +752,7 @@ def music_state() -> dict:
 
 @router.post("/api/music/takes")
 def render(body: dict) -> dict:
-    """Queue a song: {caption, lyrics, seconds, seed?, steps?, dit_cfg?, ar_cfg?, top_k?, title?, asr?}."""
+    """Queue a song: {caption, lyrics, seconds, seed?, steps?, dit_cfg?, ar_cfg?, top_k?, title?, asr?, live?}."""
 
     params = checked(body)
     title = params["title"] or "Music: " + (sung(params["lyrics"])[:40] or params["caption"][:40])
@@ -642,6 +776,24 @@ def take_audio(take_id: str):
     if not target.is_file():
         raise HTTPException(404, "the song's file is gone (deleted to the trash folder?)")
     return FileResponse(target, media_type="audio/wav", filename=f"minimax-music3-{take_id}.wav")
+
+
+@router.get("/api/music/takes/{take_id}/live")
+def take_live(take_id: str):
+    """The song that is being made, as a stereo WAV that plays while it is made (the Mac engine's raw PCM as it comes),
+    its sound held back until playing it will not run dry."""
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", take_id):
+        raise HTTPException(400, "bad take id")
+    entry, began = LIVE.get(take_id), time.time()
+    while entry is None and time.time() - began < 10:  # the job has started and is not at the engine yet
+        time.sleep(0.2)
+        entry = LIVE.get(take_id)
+    if entry is None:
+        raise HTTPException(404, "no song is being made under that id")
+    from fastapi.responses import StreamingResponse
+
+    return StreamingResponse(live_song(entry), media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/api/music/soundtrack")

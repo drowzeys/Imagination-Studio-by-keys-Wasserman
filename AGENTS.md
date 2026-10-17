@@ -215,7 +215,11 @@ Rules:
   Spark a song starts from a ComfyUI with nothing else loaded and its models are freed with ComfyUI's /free.
   `memory_guard.music_check` (`MUSIC_ESTIMATE`, `MUSIC_MEASURED`) is a measurement: change it only with a new one.
   Laying a song under a clip (`music.lay`: soundtrack jobs, the Editor's export) ducks it under the clip's speech and
-  keeps every peak under -1 dBFS: keep both. Not streamed; lyric accuracy is Whisper's rough count on sung words.
+  keeps every peak under -1 dBFS: keep both. On a Mac a song plays while it is made (`pcm` to
+  `/api/music/takes/{id}/live`, a stereo 44.1 kHz WAV; Voice's live WAV stays mono): its sound is held back until
+  `start_s` (the measured no-stall start, `NO_STALL_S`, and `HOLD_MARGIN_S`) and `lead_s`; those are measurements, change
+  them only with new ones. The kept song is the engine's finished WAV. ComfyUI's route on a Spark does not stream.
+  Lyric accuracy is Whisper's rough count on sung words.
 - mflux, minimax-h3-mlx, flux3-mlx and TensorFold's music3-mlx are pinned by commit and used at run time. Do not unpin.
 
 **Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),

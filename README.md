@@ -1837,6 +1837,33 @@ called and the pack ships no weights.
 - **The lyrics check.** With faster-whisper installed, Whisper listens to the take and counts the lyrics' words it
   heard, in order, up to the last one it heard (`asr.score`), and how far into the lyrics the song got
   (`asr.reached`). Sung words are harder to hear than spoken ones: treat it as a rough count.
+- **Play while it's made** (a Mac). With the box ticked (the default when the engine streams), the song plays in the
+  tab while the engine makes it. The engine's stream appends raw 16-bit stereo PCM to a file as it decodes each piece
+  (`pcm` in the request, as Drama 3's server does), and `GET /api/music/takes/{id}/live` serves it as one WAV, two
+  channels at 44.1 kHz, its length left open. A stream is slightly slower than real time and gets slower as the song
+  grows (60 s hip-hop: a 4 s piece every 4.2 s at the start, every 4.7 s near the end). So the app holds the sound
+  back until playing will not run dry. It waits for the engine's measured no-stall start (10.3 s from the request for
+  60 s, 52.7 s for 300 s, a straight line between and beyond) plus 3 s. If the engine is running slower than that
+  measurement, it waits for a larger lead as well. The kept take is the engine's finished WAV, the same samples that
+  were played (checked byte for byte on two songs), and the lyrics check and *Use as soundtrack* work on it as before.
+  Untick the box to hear the song only when it is done.
+  Measured through the app on the Mac Studio M5 Ultra (int8, the hip-hop prompt; first sound is the engine's
+  `first_audio_ms`, the start is when the live route let the sound go, both counted from the request; the least
+  buffer is the smallest amount of song a player started at that moment had in hand, from the bytes as they
+  arrived):
+
+  | Song | First sound | Playing from | Least buffer | Made in |
+  |---|---|---|---|---|
+  | 60 s (seed 7, engine loaded for it, 1.0 s) | 7.6 s | 13.4 s | 4.0 s, at 49 s | 63.4 s |
+  | 60 s, ended by the model at 57.9 s (seed 11) | 6.4 s | 13.4 s | 4.0 s, at 45 s | 61.0 s |
+  | 30 s (seed 3) | 6.4 s | 8.1 s | 1.6 s, at 19 s | 30.0 s |
+
+  Before that margin was added, a start at the first piece (10.7 s) ran dry for 0.18 s at 53 s of a 60 s song, which
+  is why the margin is there. Limits: it works on a Mac only, because ComfyUI's route on a DGX Spark does not stream
+  and the box is not shown there. Only 30 s and 60 s songs were measured through the app; the 300 s figure is the
+  engine's own (no-stall 52.7 s). Starting about 13 s in is the price of a stream that runs slower than real time,
+  and the wait grows with the length (about 56 s for 300 s). The engine found no seams by measure, but nobody has
+  listened for them. A browser's own buffering comes on top.
 - **Use as soundtrack.** Under a song, *Use as soundtrack* lays it under a video: a long video (its card in Create has
   *Lay a song under it*), the Editor's export or any clip of the Library. In the Editor, *Song under the export* does
   it for the whole timeline. ffmpeg mixes the song at -10 dB (your choice, -30 to 0) under the clip's own sound; a
@@ -1887,7 +1914,8 @@ empty page cache with ComfyUI stopped, a 60 s song took 289.0 s and 29.3 GB (the
 Whisper heard 96 % of the words of the 60 s hip-hop song above (162 of 168).
 
 The API: `GET /api/music/state`, `POST /api/music/takes {caption, lyrics, seconds, seed?, steps?, dit_cfg?, ar_cfg?,
-top_k?, title?, asr?}` (a job of kind `music`), `GET /api/music/takes`, `GET /api/music/takes/{id}/audio`, `POST
+top_k?, title?, asr?, live?}` (a job of kind `music`; `live: false` does not stream), `GET /api/music/takes`, `GET
+/api/music/takes/{id}/audio`, `GET /api/music/takes/{id}/live` (the song being made, a stereo WAV), `POST
 /api/music/soundtrack {take, video, music_db?}` (a job of kind `soundtrack`), and an export job's `params.soundtrack
 {take, music_db?}`. Songs are kept in `~/TensorFoldStudio/music/` (the WAV and its settings and measurements).
 
