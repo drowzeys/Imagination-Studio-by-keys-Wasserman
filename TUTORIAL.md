@@ -1,10 +1,14 @@
 # Wasserman Slate AI Studio, powered by TensorFold: install it, click it, make things
 
-**Thank you first** to the Qwen team (Qwen-Image-2.1), MiniMax (H3), FastVideo / Hao AI Lab (FastH3), Ash Hart
-(TensorFold), mrbizarro, LightX2V, Viggle, speach1sdef178 and Apple's MLX team. Full list in [CREDITS.md](CREDITS.md).
+**Thank you first** to Sam Wasserman (Slate, the Sharp Spec, Motion Previs Studio), the Qwen team (Qwen-Image-2.1),
+Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx), MiniMax (H3 and MiniMax-Music3), FastVideo / Hao AI
+Lab (FastH3), Fish Audio (Drama 3), Ash Hart (TensorFold), mrbizarro, LightX2V, Viggle, speach1sdef178 and Apple's MLX
+team. Full list in [CREDITS.md](CREDITS.md). **Built with Fish Audio.**
 
-What you get: an app on your Mac that turns a prompt into an **image**, or into a **video with sound**, from 5
-seconds to 30 minutes, at 480p up to 2K.
+What you get: an app on your Mac or DGX Spark that turns a prompt into an **image**, an edited picture, or a **video
+with sound** from under a second to 30 minutes at 480p up to 2K; speech in cast voices (**Voice**); and whole songs with
+sung vocals (**Music**). The app's own **Tutorial** tab has a short lesson for each of these, with *Show me in the
+app* buttons that take you to the control.
 
 ## 1. Check your Mac
 
@@ -35,11 +39,25 @@ run again; downloads resume. Variants:
 | `bash oneshot-setup.sh --app` | images and FastH3 video (about 175 GB); needs 64 GB of memory on an M5 |
 | `bash oneshot-setup.sh --turbo --app` | also MiniMax H3 Turbo (about 240 GB); needs 128 GB of memory, and adds a second engine card |
 | `bash oneshot-setup.sh --image-only --app` | image model only (33 GB) |
+| add `--flux3` | the FLUX3-K Fast and Full picture models (41 GB; accept the FLUX Kommunity License on Hugging Face first) |
+| add `--image-edit` | Qwen's base weights: Qwen 2.1 Full and the 40-step choice in Edit a picture |
+| add `--ref2va` | reference pictures, videos and audio to video, MiniMax H3 Ref2VA (64 GB more; 128 GB of memory) |
+| add `--motion` | the Motion Previs analysis (0.5 GB) |
+| add `--voice` | Fish Audio Drama 3 for the Voice tab |
+| add `--music` | MiniMax-Music3 for the Music tab (22 GB of weights; on an M5 also TensorFold's Metal engine, built in a few minutes) |
 | `bash oneshot-setup.sh --verify` | checks an existing install, downloads nothing |
 | `git pull && bash oneshot-setup.sh --upgrade` | moves an existing install to the newest version: the engine and scripts, no model downloads, your clips and projects untouched |
 
 The models have their own licenses: Qwen-Image-2.1 is **non-commercial**; MiniMax H3 and FastH3 are under the
-MiniMax H3 Community License. The script prints the links before each download.
+MiniMax H3 Community License; FLUX3-K under the FLUX Kommunity License; Drama 3 under the Fish Audio Community License
+(a hosted voice or cloning service needs Fish Audio's own licence); MiniMax-Music3 under its Community License (a
+commercial product must show "MiniMax-Music3" in its interface). The script prints the links before each download.
+
+**On a DGX Spark** the same `bash oneshot-setup.sh` installs the CUDA build (it hands over to
+`oneshot-setup-spark.sh`). It passes on `--image-only`, `--no-render`, `--verify`, `--motion`, `--voice`, `--flux3`,
+`--music` and `--upgrade`; run `bash oneshot-setup-spark.sh --ref2va` (or `--image-edit`) directly for those. There is
+no `--turbo`, no `--app` and no 2x decoder there. The steps below are the same on both machines unless they
+say otherwise.
 
 **Prefer to let an agent do it?** Give Claude Code (or another coding agent) this:
 
@@ -72,37 +90,68 @@ any time to come back. Drag it to the Dock to keep it there.
 2. **Video engine:** FastH3 for speed. **Passes:** 8 (4 is faster and a little softer; 20 is slower and is the one to
    pick when the prompt has several distinct actions). The bar under the cards says which engine will run: FastH3
    uses the native Zig engine on an M5, from text or from an image.
-3. **Resolution:** 480p or 720p. Turn on **2x upscale** for 1728x960 or 2560x1440.
-4. **Length** and **Seed**, then describe the picture and what happens. *Next*.
+3. **Resolution:** 480p or 720p (Native 1344x768, Wasserman Sharp 1376x768 and Custom are there too). Turn on **2x
+   upscale** for 1728x960 or 2560x1440 (Mac).
+4. **Length** and **Seed**, then describe the picture and what happens. *Next*. Leave **Text encoder** on *Regular*.
 5. Step 3: add spoken lines and the soundscape if you want them. Step 4: read the prompt. Step 5: **Queue this clip**.
+   On a DGX Spark step 5 also shows how much memory the clip needs and the **Sparks** row (section 12).
 
 On the M5 Ultra with the native engine a 5 second clip takes 43 s (4 passes), 66 s (8) or 129 s (20) at 480p, and
 about 200 s at 720p with 8 passes; a 10 second 720p clip takes about 6½ minutes. 2x adds about 10 s.
 
 If a clip leaves out part of the action, render it again at 20 passes. If the model reads something into the
-prompt that you did not ask for, say so in the prompt ("unarmed hikers, no weapons").
+prompt that you did not ask for, describe what you want instead: the video model has no negative prompt, and the
+page lists anything a prompt forbids by name ("no weapons") before the job is queued, because a named thing can
+appear all the same.
+
+### 4.5 Wasserman Sharp Spec
+
+**Wasserman Sharp Spec**, at the top of the video settings, is Sam Wasserman's locked recipe in one click: 1376x768,
+FastH3 at 8 passes, seed 42, 8 or 10 seconds, one pass, no upscale. After the render his **QA gate** checks the
+clip: the spoken line by its transcript, then three frames by a vision model (Claude Code, Codex or a local model,
+under your own sign-in). A clip that fails is made once more at the next seed; the job card shows each take's result
+and a contact sheet. The same button is on the Production board and in a Slate film's Bible, where it sets every
+segment or shot.
 
 ## 5. Make an image only
 
 ![Image only](samples/ui_create_image.png)
 
-**The prompt goes to:** Image only. Describe it, pick a size and how many, **Make image**. A few seconds each.
+**The prompt goes to:** Image only. Describe it, pick the **Picture model**, a size and how many, **Make image**.
 *Download* saves one; *animate this* makes it the first frame of a video.
+
+The picture models offered are the ones installed. Times are per picture at 1344x768 with the model loaded, from a
+128-picture test (the README's *Which picture model to use*):
+
+| Model | Mac Studio M5 Ultra | DGX Spark | Use it for |
+|---|---|---|---|
+| Qwen 2.1 Turbo, 8 steps (every install) | 4.7 s | 8.6 s | drafts and scouts |
+| FLUX3-K Fast, 16 steps (`--flux3`) | 9.8 s | 10.5 s | the everyday choice: layout, hands, busy scenes |
+| Qwen 2.1 Full, 40 steps (`--image-edit`) | 43.3 s | 80.1 s | faces, portraits, posters, character sheets |
+| FLUX3-K Full, 50 steps (`--flux3`) | 59.9 s | 58.7 s | final frames of complex scenes, illustration, hands |
+
+FLUX3-K first writes a full scene description from your prompt (5 s on the Mac, about 12 s on a Spark, once per
+prompt), so a short prompt is enough. The same choice is offered for scouts and for a last frame.
 
 ## 5.5 Edit a picture
 
 ![Edit a picture: the camera ring](samples/ui_edit_camera.png)
 
-**The prompt goes to:** Edit a picture. The image model re-draws a picture you give it.
+**The prompt goes to:** Edit a picture. A picture model re-draws a picture you give it: Qwen-Image-2.1, or FLUX3-K
+Fast or Full where installed (**Picture model** at the top). Image LoRAs, the camera ring and the 40-step choice are
+Qwen's; FLUX3-K edits from words and pictures.
 
 1. **The picture.** Upload one, press *Pick from the Library*, or take a frame of a Library clip (first, last, or the
    frame at a time). In the Library, **edit** on a picture opens this step on it.
 2. **What changes.** *Change it in words*: describe the picture you want ("The same statue at night under a full moon,
    wet paving stones, a lantern on the wall behind it"). What you leave out is meant to stay.
-   *Move the camera* (with the Multiple Angles LoRA from the hub's Fun group): click directions on the ring, front at
+   *Further pictures the prompt can draw on*: up to nine more. Your picture is image 1 and is the one edited; the
+   others are image 2, image 3 and so on, in the order added ("the man of image 2 stands in the room of image 1").
+   *Move the camera* (Qwen, with the Multiple Angles LoRA from the hub's Fun group): click directions on the ring, front at
    the top, 30° a step. Choose a height first, tick *Close-up* for a tighter frame, or take a ready set such as *Five
    views around*. Each angle is one picture.
-3. **Make it.** About 10 seconds a picture on an M5 Ultra once the model is loaded. Under each result: *first frame*
+3. **Make it.** One edit, model load and all: Qwen 10 s, FLUX3-K Fast 37 s, FLUX3-K Full 240 s on an M5 Ultra (24,
+   37 and 139 s on a DGX Spark), so on a Mac use Fast for FLUX3-K edits. Under each result: *first frame*
    opens a clip on it, *last frame* ends a clip on it, *edit again* feeds it back in.
 
 A side or back view often comes back on a plain studio background: the LoRA was trained on single objects and
@@ -112,9 +161,19 @@ characters. If a result copies your picture instead of moving the camera, lower 
 
 ![Qwen scout to video](samples/ui_create_qwen_h3.png)
 
-**The clip starts from:** A Qwen scout image. In step 2, make several candidates and click the one you like; the
-video opens on exactly that picture. *Your own image* uploads one instead. Either engine works. With MiniMax H3 the
-standard quality (Turbo 5 passes, sound made again by the base model) is the one judged best by ear.
+**The clip starts from:** A scout image. In step 2, pick the picture model, make several candidates and click the
+one you like; the video opens on exactly that picture. *Your own image* uploads one instead, and *Or continue from a
+clip in the Library* takes a clip's last frame. Either engine works. With MiniMax H3 the standard quality (Turbo 5
+passes, sound made again by the base model) is the one judged best by ear.
+
+**A last frame.** Under the first frame, step 2 has *Last frame*: the clip ends on that picture. Upload one, pick one
+from the Library, take a frame of a clip, press *Same as the first frame* for a loop or an orbit, or make one from a
+prompt. A last frame alone works too, on a clip from text. Give both pictures the clip's shape, and say in *What
+happens* how the first becomes the last.
+
+**References** (`--ref2va`) are the other way to start: up to nine pictures of who or what must look the same, plus
+up to three reference videos and three audio clips, in a scene your words describe. A Voice take can be one of the
+audio clips (section 10). The app's *Tutorial → Create → References* lesson goes through it.
 
 ## 7. Make a long video
 
@@ -124,18 +183,34 @@ Pick a **Length** from 30 s to 30 min. The model makes 15 s at a time, so the st
 opening on the last frame of the one before, and joins them. Write **story beats**, one line per 15 s, to say what
 happens in each part.
 
-Be realistic: 30 minutes is roughly 7 to 11 hours of rendering at 480p (an estimate; the longest chain actually
-rendered is 18 s), the look drifts over many clips, and sound does not carry across joins. For a real story, plan
-it in **Production** instead.
+Be realistic: 30 minutes is roughly 7 to 11 hours of rendering at 480p (an estimate; the longest chain checked by
+eye is 18 s), the look drifts over many clips, and sound does not carry across joins. Each clip waits for the one
+before, so a long video renders on one machine whatever the Sparks setting says. For a real story, plan it in
+**Production** instead.
 
-## 8. Production, Editor, Library
+When it is done, **Lay a song under it** opens the Music tab with the video chosen (section 11).
 
-- **Production:** a project of shots, each with its own scene, action, line and length; a shot can continue from the
-  last frame of the one before. One button renders all that are not done.
-- **Editor:** put clips in order, trim them, preview, export one file.
-- **Library:** everything you have made. *use* turns an image into a first frame; *+ timeline* sends a clip to the editor.
-  Tick files and press **Delete selected** to delete several; **Restore last deletion** puts them back; **Empty trash**
-  erases what the trash holds and frees the space.
+## 8. Production, Editor, Library, Tutorial
+
+- **Production:** two ways to plan a film.
+  - The **Production board**: a project of segments, each with its own scene, action, line and length. A segment can
+    continue from the last frame of the one before. One button renders all that are not done, and the board has the
+    LoRA hub and the Sharp Spec for the whole project.
+  - **Wasserman Slate AI Studio**: Sam Wasserman's Slate, built in. A First AD sets up scenes and shots from a plain
+    description, the Bible and Studios hold the look and the cast, and every shot renders through the same queue. In
+    its Sound tab, *Cast voice* gives a character a Drama 3 voice that follows them into shots that open on cast
+    stills. The ✦ buttons need a "brain": your own Claude Code or Codex sign-in, or a local model.
+- **Editor:** put clips in order, trim them, preview, export one file. Once the Music tab has a song, *Song under the
+  export* lays it under the whole export, lowered while someone speaks.
+- **Library:** everything you have made.
+  - Under a picture: *use* (a first frame), *last frame* (end a clip on it), *edit* (Edit a picture), *new angle*
+    (with the Multiple Angles LoRA) and *Turnaround*.
+  - Under a clip: *continue* (a new clip on its last frame), *+ timeline*, *Upscale* and *Remove a person*.
+  - A clip made on another Spark shows that Spark's name and its seed.
+  - Tick files and press **Delete selected** to delete several; **Restore last deletion** puts them back; **Empty
+    trash** erases what the trash holds and frees the space.
+- **Tutorial:** short lessons for every tab, one step at a time. *Show me in the app* opens the tab and outlines the
+  control; a bar at the bottom carries the lesson on from there.
 - **Clearing:** every prompt form has **Clear** (with **Undo**). In the queue, 🗑 deletes a finished job and what it
   made, and **Clear failed** / **Delete all finished** tidy the list. Deleted files go to `~/TensorFoldStudio/trash`.
 
@@ -156,7 +231,8 @@ A LoRA is a small file that teaches the video model one thing: a camera move, a 
    stacked. If the LoRA needs something of the clip (a last frame, a source video, a picture), its row says
    **Needs:** with a button that takes you to the step, and step 5 will not queue the clip until it is there.
 4. Write the prompt the way the card's note says, then render as usual. A clip with a LoRA takes a slower path and
-   shows no time estimate.
+   shows no time estimate. On a Mac, FastH3 then runs on the MLX engine, not the native one. On a DGX Spark the
+   LoRA is merged into TensorFold's int8 engine (since 2.7.1), at the same memory as a clip without one.
 
 A slider LoRA such as *Anime Slider* has a track centred on 0: drag right for flat 2D anime (3 is plenty on a clip
 from text), left for a photographic look, or press *Off (0)*. On a Mac, a slider on a clip *from references* pulls
@@ -185,7 +261,8 @@ drawn as anime on the same outlines and timing.
 
 ## 8.6 Library actions: turn a picture round, make a clip larger, take a person out
 
-Three LoRAs of the hub have a job of their own, and the Library has a button for each. They are queued like any
+Three LoRAs of the hub have a job of their own, and the Library has a button for each. On a DGX Spark they come with
+`oneshot-setup-spark.sh --ref2va` (three node packs, SAM 3.1 and the H3 latent upscaler, 2.5 GB). They are queued like any
 render; the result lands in the Library.
 
 **Turnaround** (under a picture; Mac and DGX Spark). Five views of the picture's subject, turning from where it
@@ -360,7 +437,109 @@ valid for a clip where the check picked a different fighter than in the source.
 | Music nobody asked for | The model adds it by itself, even when told "No music" | *Flow* without music delivers the clip silent |
 | The layout of the place shifts | Depth with a picture of the *same* place pulled two ways (16.0 / 25.3 in our run) | For the same place send the source clip; keep depth for a new place |
 
-## 10. Without the app
+## 10. Voice: speech with Fish Audio Drama 3
+
+The **Voice** tab turns text into speech with Fish Audio Drama 3, on this machine, through TensorFold's port: MLX on a
+Mac (`bash oneshot-setup.sh --voice`), native CUDA on a DGX Spark (built by hand; the setup prints the steps). Nothing
+is sent to Fish Audio. **Built with Fish Audio.**
+
+1. **What is said.** Type the words. Speaker tags switch voices, `<|speaker:0|>` to `<|speaker:15|>`, one turn on each
+   line. Directions in square brackets steer the delivery: `[whispering]`, `[sighs]`, `[laughs]`, or a description
+   of the voice. *Two-speaker example* fills the box.
+2. **Seed, Temperature, Top-p, Top-k.** Leave the sampling on *Fish defaults* (1.0, 0.9, 30). The seed picks the take.
+3. **Voice to clone (optional).** A clean recording of one speaker, about 10 to 30 seconds, and what it says (left
+   empty, Whisper writes it). Tick **I have the speaker's consent to clone this voice**: the take will not render
+   without it. Without a clip, Drama 3 makes a voice of its own; describe it in a direction.
+4. **Render the take.** The take plays in the tab while it is made. Whisper checks the words; a part with missing
+   words is drawn again if it has not been played yet, or reported. On a Mac, untick *Play while it is made* to have
+   every short part drawn again before you hear it.
+5. **Takes.** Under each: *Download WAV*; *Clone this voice* (the same speaker for the next line); *Again, next seed*;
+   and **Use as Ref2VA voice reference**, which opens the create wizard with the take as reference audio (2 to 15 s; a
+   longer take is cut to its first 15).
+
+| | Mac Studio M5 Ultra | DGX Spark |
+|---|---|---|
+| Load, first take | about 5 s | about 18 s |
+| Memory while loaded | about 50 GB | about 42 GB |
+| Making the speech | about 0.35 s for each second of speech | about 0.7 s for each second |
+| First sound, model loaded | 0.2 to 0.3 s | about 0.3 s |
+
+The model stays loaded for five idle minutes and is unloaded at once when a video or picture job starts: Drama 3 and
+the video model never run together.
+
+## 11. Music: a song with MiniMax-Music3
+
+The **Music** tab makes a whole song with sung vocals from your lyrics and a style, on this machine: up to five
+minutes, 44.1 kHz stereo. Install it with `bash oneshot-setup.sh --music` (on either machine). The tab, and anything
+that plays a song, shows "MiniMax-Music3", as its licence asks.
+
+Which engine runs depends on the machine; the tab says which:
+
+| Machine | Engine | Plays while it is made | A 60 s song |
+|---|---|---|---|
+| Mac with an M5 or later | TensorFold's native Metal engine (Zig and Metal, since 2.9.2) | no, not yet: the song plays when it is done | 59.5 to 63.0 s on an M5 Ultra on TensorFold's command line, 17.8 GB at the peak; through the app a 33.4 s song took 35.2 s |
+| Mac with an M1 to M4, or `MUSIC3_BACKEND=mlx` | TensorFold's MLX port, int8 | yes: it starts once enough is made that it never stops, about 13 s into a 60 s song | about 63 s on an M5 Ultra, through the app |
+| DGX Spark | TensorFold's CUDA engine, int8 (ComfyUI's nodes where it is not built) | no | about 149 s on one GB10, through the app |
+
+1. **Lyrics.** Section tags on lines of their own, above the lines they hold; the buttons under the box add
+   `[Intro]`, `[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]`, `[Instrumental]` and `[Outro]`. Lines in
+   (parentheses) are backing vocals. Leave the box empty for an instrumental. A note says when there are no tags, or
+   a tag the model may sing as words. *Pop example* fills both boxes.
+2. **Style.** A caption: genre, tempo, key, mood, the voice that sings, the instruments. The **Style helper** has a
+   box for each; **Write the style** turns them into the caption.
+3. **Length (s)** is the longest the song may be, 10 to 300; the model may end it sooner. **Seed** picks the take.
+4. **Generate.** On a Mac with the MLX engine, leave **Play while it's made** ticked to hear it as it is made. Tick
+   *Have Whisper listen for the lyrics after* for a rough score: sung words are harder to hear than spoken ones.
+5. **Songs.** Under a song: *Download WAV*, *Again, next seed*, and **Use as soundtrack**. Choose a video (a long
+   video, the Editor's export or any Library clip), set the **Music level (dB)** and press **Lay it under**. The song
+   sits under the video's own sound, is lowered while someone speaks, and no peak goes over -1 dBFS. The result is a
+   new file in `exports/`.
+
+One song runs at a time, never beside a video or a voice take. The engine stays loaded for five idle minutes and is
+unloaded at once when another job starts. The Metal engine was measured on an M5 Ultra only.
+
+## 12. More than one DGX Spark
+
+On a DGX Spark a job may use more than one Spark. **Sparks**, a row of numbers from 1 to 8, is how many machines a
+job may use, this one counted. It is at the top of the queue on every tab, in step 5 of Create, on the Production
+board and on a Slate shot. Choose more than there are and the app uses what is there: *5 of 8 available*. Under the
+row it says what the number does for this job, and lists any Spark not used, with the reason.
+
+- **Several clips** (queued clips, a board's segments, a Slate scene's shots) render one per Spark, side by side, and
+  come back into this Spark's Library and project.
+- **One clip** renders on one Spark. A long video, pictures, edits, Library actions, voice takes and songs stay on
+  this Spark.
+- **The Sparks tab** lists the other Sparks. Under *Add a Spark*, type the address you would give `ssh` and press
+  **Add**. The other Spark needs the Studio installed once (`oneshot-setup-spark.sh`) and a key login from this one;
+  no password is asked and nothing runs as root. Per row: **Check** only looks; **Update and start** sends this
+  Spark's Studio code (not the models) and starts its app; **Stop** frees its memory; untick *use* to give it no
+  clips.
+- A worker that does not answer for 60 seconds during a job is marked down and its clip goes back to the queue. The
+  job card says *Taken back from* that Spark, with the reason. Press **Check** on it before it is used again.
+
+Measured through the app, eight 56-frame 864x480 FastH3 clips: 263 s on one Spark, 130 s on two, 98 s on three, 69 s
+on four, 65 s on five. Six to eight Sparks are not measured, and one clip split across several Sparks is not in the
+app. On a Mac the tab says there is one machine.
+
+## 13. Memory on a DGX Spark
+
+On a Spark the GPU and the system share one pool of memory, and a memory guard stands beside every render.
+
+- **Before you queue.** The estimate in step 1 and step 5 adds *about N GB of this machine's memory*, from measured
+  peaks. A clip that would leave the machine under its floor (a tenth of the memory, 12.4 GB) shows **This clip will
+  be refused: memory**, with the reason and the nearest size and length that fit. Choose those. Do not lower the
+  floor to make a clip fit.
+- **While it runs.** The guard reads the memory twenty times a second and stops the render server if memory falls
+  under the floor, falls too fast, or the kernel reports work stalled on memory. The job fails with that reason in
+  its error line and its **Log**. Close what else holds memory and queue it again.
+- **On other Sparks.** A clip sent to a worker passes that worker's own guard first; a worker that refuses is listed
+  as not used, with its reason.
+
+A LoRA on FastH3 is merged into TensorFold's int8 engine and takes what a clip without one takes, measured up to
+1376x768 at 10 seconds. A Spark whose engine predates 2.7.1 renders LoRA clips on ComfyUI's own blocks, and refuses
+them above 1280x736 at 124 frames.
+
+## 14. Without the app
 
 ```bash
 bash scripts/fast.sh "a prompt" out.mp4                          # FastH3: STEPS=4|8|20 RES=480p|720p UPSCALE=1
@@ -378,4 +557,8 @@ FIRST_FRAME=photo.jpg bash scripts/video.sh "what happens" out.mp4
 | The app says it did not start | read `~/Library/Logs/TensorFoldStudio.log`; often another program holds port 7870 (`PORT=7871 bash scripts/make-app.sh`) |
 | A job fails | open its **Log** in the queue; the last lines say why |
 | Very slow renders | check the chip is M5-family and nothing else is using the GPU |
-| The job says "MLX engine" for FastH3 | the native engine is not installed or the chip is older than M5: run `bash oneshot-setup.sh --verify` and look for the `tf-h3-dit` line |
+| The job says "MLX engine" for FastH3 | the native engine is not installed or the chip is older than M5, or the clip has a LoRA: run `bash oneshot-setup.sh --verify` and look for the `tf-h3-dit` line |
+| "This clip will be refused: memory" (DGX Spark) | choose the size or length the message names (section 13) |
+| A song does not play while it is made | on an M5 Mac the Metal engine does not stream yet, and a DGX Spark never does; `MUSIC3_BACKEND=mlx` runs the MLX engine on a Mac, which does |
+| The Voice or Music tab says "Not available here" | install it: `bash oneshot-setup.sh --voice` or `--music`; the tab says what is missing |
+| The Render the take button stays off with a clip to clone | tick the consent box |
