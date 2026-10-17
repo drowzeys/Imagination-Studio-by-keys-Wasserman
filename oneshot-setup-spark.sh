@@ -15,7 +15,8 @@
 #                                             # encoder, BFL's prompt upsampler and the decoder. FLUX Kommunity License; the
 #                                             # Hugging Face repo is gated: accept its licence and `hf auth login` first
 #   bash oneshot-setup-spark.sh --music       # add MiniMax Music 3 for the Music tab, 22 GB more: its DiT (fp16), text encoder
-#                                             # (pruned, bf16) and decoder for ComfyUI. MiniMax-Music3 Community License:
+#                                             # (pruned, bf16) and decoder, read by ComfyUI and by TensorFold's CUDA engine,
+#                                             # which it builds too (spark/build-music3.sh). MiniMax-Music3 Community License:
 #                                             # commercial use allowed; a commercial UI shows "MiniMax-Music3"; above US$20M
 #                                             # yearly revenue needs MiniMax's written authorisation
 #   bash oneshot-setup-spark.sh --motion      # add the Motion Previs tab's analysis: pose, camera solve and AI depth (0.5 GB, own environment)
@@ -211,6 +212,17 @@ if [ "$MUSIC" = 1 ]; then
   [ -f "$PREFIX/ComfyUI/comfy_extras/nodes_minimax_music.py" ] || die "this ComfyUI has no MiniMax Music 3 nodes: run without --verify to move it to ${COMFY_COMMIT:0:8}"
   ok "MiniMax Music 3: the Music tab (MiniMax-Music3)"
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
+  # TensorFold's CUDA engine for it (2.3x faster than ComfyUI's nodes, 18 GB instead of 29): the Music tab uses it
+  # where it is built, ComfyUI's nodes where it is not (MUSIC3_BACKEND=cuda|comfy chooses)
+  say "TensorFold's MiniMax Music 3 engine for CUDA -> $PREFIX/music3"
+  if [ "$VERIFY" = 1 ]; then
+    [ -x "$PREFIX/music3/bin/music3-generate" ] && ok "music3-generate at $(cut -c1-8 "$PREFIX/music3/commit" 2>/dev/null)" \
+      || echo "  not built: songs run on ComfyUI's nodes (slower). bash spark/build-music3.sh builds it"
+  elif PREFIX="$PREFIX" bash "$HERE/spark/build-music3.sh"; then
+    ok "music3-generate (int8 weights made on the GPU as it loads; MUSIC3_WEIGHTS=bf16 for the checkpoint's own)"
+  else
+    echo "  the engine did not build: songs will run on ComfyUI's nodes (slower). Fix and rerun spark/build-music3.sh"
+  fi
 fi
 
 if [ "$H3_BASE" = 1 ] && [ "$IMAGE_ONLY" = 0 ] && [ "$VERIFY" = 0 ]; then

@@ -295,11 +295,21 @@ MUSIC_ESTIMATE = (27_800, 11)
 MUSIC_MEASURED = ((30, 30.0, 28_070), (60, 60.0, 28_665), (120, 55.6, 28_617), (120, 120.0, 29_078),
                   (300, 189.8, 28_996), (60, 60.0, 29_299))  # the last: through the app, from an empty page cache
 MUSIC_LONGEST = 300  # the app's longest song
+# MiniMax Music 3 on TensorFold's CUDA engine (music3-generate, branch music3-cuda 6b714531), int8 and bf16 weights:
+# (MB, MB per second of song asked for), the same way, measured 2026-10-16 on worker .2 (5.1 GB in use before each
+# song, one process a song, MemTotal - MemAvailable twice a second, less those 5.1 GB; hiphop seed 7, and a 120 s
+# song of longer lyrics). The weights are on the GPU throughout; the length adds the AR cache and the DiT's windows.
+# Songs over 120 s are not measured: the line goes on at the same slope.
+MUSIC_CUDA_ESTIMATE = {"music-cuda-int8": (15_900, 30), "music-cuda-bf16": (23_200, 30)}
+MUSIC_CUDA_MEASURED = {"music-cuda-int8": ((30, 30.0, 16_632), (60, 60.0, 17_928), (120, 63.3, 18_885), (120, 120.0, 19_291),
+                                           (60, 55.2, 18_656)),  # the last: through the app (Studio 2.9.1), Whisper after it
+                       "music-cuda-bf16": ((30, 30.0, 24_012), (60, 60.0, 25_485), (120, 61.3, 25_683), (120, 120.0, 26_647))}
 
 
-def music_check(seconds: float, available_mb: int | None = None, total_mb: int | None = None) -> dict:
-    """Whether a MiniMax Music 3 song of up to ``seconds`` fits this machine, as ``check`` answers for a clip (route
-    "music"); everything fits where there is no /proc/meminfo."""
+def music_check(seconds: float, available_mb: int | None = None, total_mb: int | None = None, route: str = "music") -> dict:
+    """Whether a MiniMax Music 3 song of up to ``seconds`` fits this machine, as ``check`` answers for a clip:
+    ``route`` "music" (ComfyUI's nodes) or "music-cuda-int8" / "music-cuda-bf16" (TensorFold's CUDA engine);
+    everything fits where there is no /proc/meminfo."""
 
     if total_mb is None:
         total_mb = meminfo().get("MemTotal", 0)
@@ -308,11 +318,12 @@ def music_check(seconds: float, available_mb: int | None = None, total_mb: int |
     if available_mb is None:
         available_mb = room_mb() or total_mb - IDLE_MB
     floor = floor_mb(total_mb)
-    fixed, per_second = MUSIC_ESTIMATE
+    fixed, per_second = MUSIC_CUDA_ESTIMATE.get(route) or MUSIC_ESTIMATE
+    route = route if route in MUSIC_CUDA_ESTIMATE else "music"
     need = int(fixed + per_second * float(seconds))
     left = available_mb - need - ERROR_MB
     out = {"fits": left >= floor, "reason": "", "need_mb": need, "error_mb": ERROR_MB, "left_mb": left, "floor_mb": floor,
-           "available_mb": available_mb, "route": "music", "rows": None, "nearest": None}
+           "available_mb": available_mb, "route": route, "rows": None, "nearest": None}
     if not out["fits"]:
         out["reason"] = (f"a song of up to {seconds:g} s needs about {need / 1000:.0f} GB at its peak (give or take "
                          f"{ERROR_MB / 1000:g}); this machine has {available_mb / 1000:.0f} GB for it and keeps "

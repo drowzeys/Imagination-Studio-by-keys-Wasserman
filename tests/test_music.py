@@ -261,6 +261,214 @@ print("[tensorfold] " + json.dumps({"output": out, "audio_s": 3.0, "ar_s": 20.0,
         music._engine, voice.comfy_up = had, had_up
 
 
+# `music3-generate --model M --weights W --serve 1`, stood in for: TensorFold's CUDA engine (music3-cuda 6b714531)
+# speaks the Mac engine's protocol, with "engine":"tensorfold-music3-cuda" and "weights" on its ready line
+CUDA_SERVE = r"""
+import json, os, struct, sys, wave
+args = sys.argv[1:]
+assert args[-2:] == ["--serve", "1"] and "--model" in args and args[args.index("--weights") + 1] in ("int8", "bf16"), args
+log = open(os.environ["FAKE_MUSIC3_LOG"], "a")
+log.write(json.dumps({"argv": args, "ld": os.environ.get("LD_LIBRARY_PATH", "")}) + "\n"); log.flush()
+print("[music3] loading MiniMax-Music3 (int8 made on the GPU)", file=sys.stderr, flush=True)
+print(json.dumps({"ready": True, "engine": "tensorfold-music3-cuda", "load_s": 0.1, "sample_rate": 44100, "channels": 2,
+                  "license_display": "MiniMax-Music3", "weights": args[args.index("--weights") + 1]}), file=sys.stderr, flush=True)
+for line in sys.stdin:
+    if not line.startswith("{"):
+        print(json.dumps({"ok": False, "error": "bad json"}), file=sys.stderr, flush=True)
+        continue
+    request = json.loads(line)
+    log.write(line); log.flush()
+    if "FAIL" in request["caption"]:
+        print(json.dumps({"ok": False, "error": "the prompt has 6000 tokens", "id": request.get("id")}), file=sys.stderr, flush=True)
+        continue
+    for stage, total in (("ar", 1500), ("dit", 30), ("dav", 1)):
+        print(json.dumps({"id": request["id"], "progress": {"stage": stage, "done": total, "total": total}}), file=sys.stderr, flush=True)
+    seconds = 2.0
+    with wave.open(request["wav"], "wb") as w:
+        w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100); w.writeframes(struct.pack("<hh", 100, -100) * int(44100 * seconds))
+    open(request["stats"], "w").write(json.dumps({"engine": "tensorfold-music3-cuda", "ar_s": 3.0}))
+    print(json.dumps({"ok": True, "id": request["id"], "wav": request["wav"], "audio_s": seconds, "frames": 50, "eos": False,
+                      "ar_ms": 3000.0, "dit_ms": 1900.0, "dav_ms": 200.0, "total_ms": 5100.0, "rtf": 2.55, "first_audio_ms": 5100.0,
+                      "stream": False, "seed": request["seed"], "peak_memory_gb": 18.1}), file=sys.stderr, flush=True)
+"""
+
+
+def cuda_install(folder: Path, binary: bool = True, weights: bool = True) -> None:
+    """A Spark's install under ``folder``: $PREFIX/music3/bin/music3-generate (the stand-in) and the three weight files."""
+
+    if binary:
+        engine = folder / "prefix" / "music3" / "bin" / "music3-generate"
+        engine.parent.mkdir(parents=True, exist_ok=True)
+        engine.write_text(f"#!{sys.executable}\n" + CUDA_SERVE)
+        engine.chmod(0o755)
+    if weights:
+        for part in music.WEIGHTS:
+            (folder / "models" / "MiniMax-Music3-Comfy" / part).parent.mkdir(parents=True, exist_ok=True)
+            (folder / "models" / "MiniMax-Music3-Comfy" / part).write_bytes(b"w")
+
+
+class Spark:
+    """music.py as on a DGX Spark with its install under ``folder`` (PREFIX, SPARK_MODELS), the chosen engine reset."""
+
+    def __init__(self, folder: Path, **env):
+        self.folder, self.env = folder, {"SPARK_MODELS": str(folder / "models"), "FAKE_MUSIC3_LOG": str(folder / "requests.jsonl"), **env}
+
+    def __enter__(self):
+        self.had = (music.SPARK, music.PREFIX, music._engine, music._chosen_why, {k: os.environ.get(k) for k in self.env})
+        music.SPARK, music.PREFIX, music._engine = True, self.folder / "prefix", None
+        for key in ("MUSIC3_BACKEND", "MUSIC3_CUDA_BIN", "MUSIC3_MODEL", "MUSIC3_WEIGHTS"):
+            self.had[4].setdefault(key, os.environ.get(key))
+            os.environ.pop(key, None)
+        os.environ.update(self.env)
+        return self
+
+    def __exit__(self, *_):
+        if music._engine is not None and hasattr(music._engine, "release"):
+            music._engine.release("test over")
+        music.SPARK, music.PREFIX, music._engine, music._chosen_why, saved = self.had
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_a_spark_prefers_the_cuda_engine_and_falls_back_to_comfy():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    with Spark(folder):
+        one = music.engine()
+        assert isinstance(one, music.Cuda) and one.name == "cuda" and music._chosen_why == ""
+        assert one.bin == folder / "prefix" / "music3" / "bin" / "music3-generate"
+        assert one.model == folder / "models" / "MiniMax-Music3-Comfy" and one.present() == ""
+        argv = one.argv()
+        assert argv[0] == str(one.bin) and argv[argv.index("--weights") + 1] == "int8" and argv[-2:] == ["--serve", "1"]
+        assert one.guard_route == "music-cuda-int8" and one.RTF == 2.1 and one.NEED_GB == 30.0
+        assert one.estimate(60) == int(37 + 60 * 2.1 + 2)
+    with Spark(folder, MUSIC3_WEIGHTS="bf16"):
+        one = music.engine()
+        assert one.weights == "bf16" and one.argv()[one.argv().index("--weights") + 1] == "bf16" and one.RTF == 3.3
+        assert one.guard_route == "music-cuda-bf16"
+    with Spark(folder, MUSIC3_BACKEND="comfy"):  # told: ComfyUI's nodes, the engine built or not
+        assert isinstance(music.engine(), music.Comfy) and music._chosen_why == ""
+    other = Path(tempfile.mkdtemp())
+    with Spark(folder, MUSIC3_CUDA_BIN=str(other / "music3-generate")):  # no binary: ComfyUI, and the state says why
+        assert isinstance(music.engine(), music.Comfy) and "No MiniMax Music 3 engine" in music._chosen_why
+    cuda_install(other, binary=True, weights=False)
+    with Spark(other):  # the binary without the weights: ComfyUI too
+        assert isinstance(music.engine(), music.Comfy) and "weights" in music._chosen_why
+    with Spark(other, MUSIC3_BACKEND="cuda"):  # told cuda without the weights: the tab says what is missing
+        one = music.engine()
+        assert isinstance(one, music.Cuda) and "No MiniMax Music 3 weights" in one.check()
+        answer = client.post("/api/music/takes", json={"caption": "pop", "seconds": 10})
+        assert answer.status_code == 400 and "weights" in answer.json()["error"]
+    had = music.SPARK
+    try:
+        music.SPARK = False
+        assert music.choose()[0] is music.Mlx
+    finally:
+        music.SPARK = had
+
+
+def test_the_cuda_engine_makes_a_song_stops_comfy_first_and_is_unloaded_before_other_jobs():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    had_up, had_ready, built = voice.comfy_up, music.qa.ready, server.build
+    comfy = {"up": True, "stopped": 0}
+    with Spark(folder):
+        one = music.engine()
+        assert isinstance(one, music.Cuda)
+        one.NEED_GB, one.known = 0, (time.time(), "")
+        one.comfy_holds = lambda: "video" if comfy["up"] else ""
+
+        def stop_comfy():
+            comfy.update(up=False, stopped=comfy["stopped"] + 1)
+
+        one.stop_comfy = stop_comfy
+        try:
+            voice.comfy_up = lambda port=None: comfy["up"]
+            music.qa.ready = lambda: {"transcript": False, "runs": True, "missing": []}
+            state = client.get("/api/music/state").json()
+            assert state["route"] == "cuda" and state["label"].startswith("TensorFold CUDA") and state["weights"] == "int8"
+            assert state["fallback"] is None and state["rtf"] == 2.1 and state["credit"] == "MiniMax-Music3"
+            job = client.post("/api/music/takes", json={"caption": "Hip-hop anthem, 92 BPM", "lyrics": "[Verse]\nRaise it up", "seconds": 60, "seed": 7}).json()
+            assert job["kind"] == "music" and job["estimate"] >= int(37 + 60 * 2.1)
+            done = wait(job["id"])
+            assert done["status"] == "done", done
+            take = done["music"]
+            assert take["route"] == "cuda" and take["duration"] == 2.0 and take["ended"] is False and take["peak_memory_gb"] == 18.1
+            assert take["ar_s"] == 3.0 and take["dit_s"] == 1.9 and take["dav_s"] == 0.2 and take["load_s"] is not None
+            assert take["credit"] == "MiniMax-Music3" and (server.HOME / take["path"]).is_file()
+            # ComfyUI held the video models: stopped before the engine loaded, once
+            assert comfy["stopped"] == 1 and any(e["what"] == "stopped ComfyUI before loading" for e in one.events)
+            assert one.ready["engine"] == "tensorfold-music3-cuda" and one.ready["weights"] == "int8"
+            started, sent = requests_of(folder)[0], requests_of(folder)[-1]
+            assert started["argv"][started["argv"].index("--model") + 1] == str(folder / "models" / "MiniMax-Music3-Comfy")
+            if Path("/usr/local/cuda/lib64").is_dir():
+                assert "/usr/local/cuda/lib64" in started["ld"]
+            assert sent["caption"] == "Hip-hop anthem, 92 BPM" and sent["seconds"] == 60.0 and sent["seed"] == 7 and sent["progress"] is True
+            assert sent["steps"] == 30 and sent["dit_cfg"] == 1.7 and sent["ar_cfg"] == 1.5 and sent["top_k"] == 50
+            assert Path(sent["stats"]).is_file()
+            # loaded after the song, under the GPU lock; its memory counts as the next job's (music.room_mb)
+            assert one.loaded() and voice.lock_owner().startswith("studio-music music3-cuda")
+            assert music.room_mb() == int(one.before_gb * 1024)
+            pid = one.process.pid
+            again = wait(client.post("/api/music/takes", json={"caption": "pop", "seconds": 10}).json()["id"])
+            assert again["status"] == "done" and one.process.pid == pid and again["music"]["load_s"] is None and comfy["stopped"] == 1
+            failed = wait(client.post("/api/music/takes", json={"caption": "FAIL", "seconds": 10}).json()["id"])
+            assert failed["status"] == "failed" and "6000 tokens" in failed["error"] and one.loaded()
+            # any other job of this machine's queue unloads it first, and the lock goes back
+            seen = {}
+
+            def build(kind, params, job_id, room=True):
+                seen.update(loaded=one.loaded(), locked=voice.LOCK.exists())
+                out = server.HOME / "renders" / f"{job_id}.png"
+                return [sys.executable, "-c", f"open({str(out)!r}, 'wb').write(b'png')"], {}, [str(out)]
+
+            server.build = build
+            other = {"id": "test-music-cuda-yield", "kind": "image", "status": "running", "title": "t", "params": {}, "log": "",
+                     "outputs": [], "started": time.time(), "finished": None, "remote": None}
+            server.perform(other)
+            assert other["status"] == "done" and seen == {"loaded": False, "locked": False}
+            assert "MiniMax Music 3 was unloaded" in other["log"] and music.room_mb() is None
+        finally:
+            server.build, voice.comfy_up, music.qa.ready = built, had_up, had_ready
+
+
+def test_the_cuda_engine_unloads_when_idle_and_gives_the_lock_back():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    had_up = voice.comfy_up
+    with Spark(folder, MUSIC3_IDLE_S="1"):
+        one = music.engine()
+        one.NEED_GB, one.known = 0, (time.time(), "")
+        try:
+            voice.comfy_up = lambda port=None: False
+            done = wait(client.post("/api/music/takes", json={"caption": "lo-fi", "seconds": 10, "asr": False}).json()["id"])
+            assert done["status"] == "done" and done["music"]["route"] == "cuda"
+            assert not any(e["what"] == "stopped ComfyUI before loading" for e in one.events)  # nothing to stop
+            started = time.time()
+            while (one.loaded() or voice.LOCK.exists()) and time.time() - started < 20:
+                time.sleep(0.2)
+            assert not one.loaded() and not voice.LOCK.exists() and "idle" in one.events[-1]["why"]
+        finally:
+            voice.comfy_up = had_up
+
+
+def test_the_comfy_route_still_runs_where_the_engine_is_not_built():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder, binary=False)
+    with Spark(folder):
+        one = music.engine()
+        assert isinstance(one, music.Comfy)
+        state = client.get("/api/music/state").json()
+        assert state["route"] == "comfy" and "No MiniMax Music 3 engine" in state["fallback"] and state["rtf"] == 4.4
+        command = one.command({"seconds": 60, "seed": 7, "steps": 30, "dit_cfg": 1.7, "ar_cfg": 1.5, "top_k": 50},
+                              Path("c.txt"), Path("l.txt"), Path("o.wav"))
+        assert command[1].endswith("spark_generate.py") and command[2] == "music" and "--seconds" in command
+    test_the_spark_route_runs_comfy_holds_the_lock_while_loaded_and_frees_it()
+
+
 def test_the_comfy_workflow_is_the_blueprints():
     import spark_generate
 
@@ -289,6 +497,20 @@ def test_the_memory_guard_knows_a_song():
     for asked, _, peak in memory_guard.MUSIC_MEASURED:  # the line holds every measured song, ERROR_MB around it
         assert abs(fixed + per_second * asked - peak) <= memory_guard.ERROR_MB, (asked, peak)
     assert memory_guard.music_check(10, total_mb=0)["fits"]  # a Mac
+    # TensorFold's CUDA engine: its own line a weight kind, held to its measured songs the same way
+    for route, measured in memory_guard.MUSIC_CUDA_MEASURED.items():
+        fixed, per_second = memory_guard.MUSIC_CUDA_ESTIMATE[route]
+        for asked, _, peak in measured:
+            assert abs(fixed + per_second * asked - peak) <= memory_guard.ERROR_MB, (route, asked, peak)
+        found = memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route=route)
+        assert found["fits"] and found["route"] == route and found["need_mb"] == fixed + per_second * 60
+    int8 = memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route="music-cuda-int8")["need_mb"]
+    assert int8 < memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route="music-cuda-bf16")["need_mb"]
+    assert int8 < memory_guard.music_check(60, available_mb=118_000, total_mb=124_500)["need_mb"]  # less than ComfyUI's
+    # a tight machine: a 60 s song fits there, a 300 s one on 30 GB does not
+    tight = memory_guard.music_check(60, available_mb=50_000, total_mb=124_500, route="music-cuda-int8")
+    assert tight["fits"] and not memory_guard.music_check(300, available_mb=30_000, total_mb=124_500, route="music-cuda-int8")["fits"]
+    assert memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route="nonsense")["route"] == "music"
 
 
 def tone(path: Path, seconds: float, parts, rate: int = 48000, channels: int = 2) -> None:
