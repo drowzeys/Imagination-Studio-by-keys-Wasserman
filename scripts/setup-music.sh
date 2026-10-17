@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REPO="https://github.com/drowzeys/TensorFold.git"
-BRANCH="music3-mlx"; COMMIT="71c7c1f8"
+BRANCH="music3-mlx"; COMMIT="6844b413"
 HF_REPO="Comfy-Org/MiniMax-Music-3"
 FILES=(diffusion_models/minimax_music3_dit_fp16.safetensors text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors
        vae/minimax_music3_dav.safetensors)

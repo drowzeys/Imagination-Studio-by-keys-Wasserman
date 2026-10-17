@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 client = TestClient(server.app)
 voice.LOCK = Path(os.environ["STUDIO_GPU_LOCK"])
 
-# `python -I -m tensorfold.music3 --model M --serve`, stood in for: the protocol of TensorFold's music3-mlx (71c7c1f8)
+# `python -I -m tensorfold.music3 --model M --serve`, stood in for: the protocol of TensorFold's music3-mlx (6844b413)
 MLX_SERVE = r"""
 import json, os, struct, sys, wave
 args = sys.argv[1:]
@@ -80,6 +80,20 @@ def wait(job_id: str, timeout: float = 30) -> dict:
             return job
         time.sleep(0.1)
     raise AssertionError("the job did not finish")
+
+
+def test_the_mac_engine_runs_int8_weights_unless_told_otherwise():
+    old = os.environ.pop("MUSIC3_QUANT", None)
+    try:
+        argv = music.Mlx().argv()
+        assert argv[argv.index("--quant") + 1] == "int8" and argv[-1] == "--serve"
+        os.environ["MUSIC3_QUANT"] = "none"
+        argv = music.Mlx().argv()
+        assert argv[argv.index("--quant") + 1] == "none"
+    finally:
+        os.environ.pop("MUSIC3_QUANT", None)
+        if old is not None:
+            os.environ["MUSIC3_QUANT"] = old
 
 
 def test_a_song_is_checked_before_it_is_queued():

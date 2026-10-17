@@ -46,7 +46,7 @@ cores · a 2x video decoder for 2K finals on the Mac
   - **Style** is a caption: genre, tempo, key, mood, vocals, instruments. A helper writes one from those six boxes.
   - **Use as soundtrack:** a song can be laid under a long video, the Editor's export or any clip of the Library. It
     sits under the clip's own sound, is lowered up to 12 dB while someone speaks, and no peak passes -1 dBFS.
-  - **Mac:** TensorFold's MLX port (`music3-mlx`, pinned at 71c7c1f8), installed by `bash oneshot-setup.sh --music`
+  - **Mac:** TensorFold's MLX port (`music3-mlx`, pinned at 6844b413), installed by `bash oneshot-setup.sh --music`
     into its own environment, with the 22 GB of weights. **DGX Spark:** ComfyUI's own MiniMax Music 3 nodes,
     `bash oneshot-setup-spark.sh --music`.
   - **Measured through the app, one 60 s song on each machine** (the same pop lyrics and style, seed 7, 30 steps; one run
@@ -1845,7 +1845,7 @@ called and the pack ships no weights.
   under -1 dBFS, checked after the AAC encode (under the 48.6 s promo: -1.46 dBFS on the Mac, -2.0 on the Spark). The picture is copied;
   the result is a new file in `exports/`.
 
-**On a Mac** the song runs on TensorFold's MLX port of MiniMax Music 3 (fork branch `music3-mlx`, commit 71c7c1f8: the
+**On a Mac** the song runs on TensorFold's MLX port of MiniMax Music 3 (fork branch `music3-mlx`, commit 6844b413: the
 autoregressive model with its depth decoder, the DiT and the DAV decoder, in MLX), as a persistent process in its own
 environment (`python -m tensorfold.music3 --serve`, Drama 3's protocol), under a memory guard (8 GB of vm_stat's free
 pages, `MUSIC3_GUARD_GB`). `bash oneshot-setup.sh --music` (`scripts/setup-music.sh`) clones the branch at that commit
@@ -1855,6 +1855,13 @@ or more. Measured on a Mac Studio M5 Ultra 256 GB: the installer's test song, 10
 through the app, a 60 s song in 75.8 s (the autoregressive model 37.8 s, the DiT 34.6 s, the decoder 2.0 s), MLX's
 peak 27.6 GB. TensorFold's own run of the command line (the same hip-hop lyrics as the Spark's, seed 7): 30 s in
 61.2 s, 60 s in 82.5 s, both at 27.6 GB.
+
+**int8 weights by default.** The Studio starts the Mac engine with `--quant int8`: the autoregressive model,
+its code-0 head and the depth decoder at 8 bits. On the M5 Ultra the autoregressive model went from 40 to 65 frames a
+second and the peak from 27.6 to 20.5 GB, so a 60 s song takes about 1.1 times its length. Against ComfyUI's
+reference the code-0 logits keep cosine 0.99994 (bf16 0.99997) with 98.0 % greedy agreement, and Whisper's lyric
+scores over six same-seed songs stayed within their noise. Measured through the server as the app starts it: 10 s in
+10.1 s, 20.9 GB. `MUSIC3_QUANT=none` runs the bf16 weights.
 
 **On a DGX Spark** the song runs in the studio's ComfyUI (`spark_generate.py music`) on ComfyUI's own MiniMax Music 3
 nodes, laid out as ComfyUI's blueprint *Text to Music (MiniMax Music 3)*: the text encoder (pruned, bf16, 16.7 GB) runs

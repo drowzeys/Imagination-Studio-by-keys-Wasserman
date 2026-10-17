@@ -90,6 +90,9 @@ class Mlx(voice.Served):
         self.model = Path(os.environ.get("MUSIC3_MODEL", Path.home() / "music3-models" / "MiniMax-Music3-Comfy")).expanduser()
         # a TensorFold source tree to run from instead of the venv's own install (a checkout of music3-mlx)
         self.src = os.environ.get("MUSIC3_SRC", "")
+        # int8 weights by default (measured: AR 40 -> 65 frames/s, peak 27.6 -> 20.5 GB, parity and lyrics within
+        # noise of bf16; docs/recipes/minimax-music3-mlx.md on the engine branch). MUSIC3_QUANT=none runs bf16.
+        self.quant = os.environ.get("MUSIC3_QUANT", "int8").strip() or "none"
 
     def python(self) -> Path:
         return self.venv / "bin" / "python"
@@ -98,8 +101,9 @@ class Mlx(voice.Served):
         if self.src:
             return [str(self.python()), "-I", "-c", "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); "
                     "runpy.run_module('tensorfold.music3', run_name='__main__', alter_sys=True)",
-                    str(Path(self.src).expanduser()), "--model", str(self.model), "--serve"]
-        return [str(self.python()), "-I", "-m", "tensorfold.music3", "--model", str(self.model), "--serve"]
+                    str(Path(self.src).expanduser()), "--model", str(self.model), "--quant", self.quant, "--serve"]
+        return [str(self.python()), "-I", "-m", "tensorfold.music3", "--model", str(self.model), "--quant", self.quant,
+                "--serve"]
 
     def check(self) -> str:
         if self.loaded():
