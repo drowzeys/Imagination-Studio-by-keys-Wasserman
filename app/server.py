@@ -1655,7 +1655,8 @@ def library() -> list[dict]:
 
     found = []
     for folder, kinds in (("renders", (".mp4",)), ("exports", (".mp4",)), ("scouts", (".png",)),
-                          ("uploads", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")), ("projects", (".mp4",)), ("slate", (".mp4",))):
+                          ("uploads", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")), ("projects", (".mp4",)), ("slate", (".mp4",)),
+                          ("agent", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov"))):
         for path in (HOME / folder).rglob("*"):
             if path.suffix.lower() in kinds and path.is_file():
                 found.append({"path": relative(path), "kind": "video" if path.suffix.lower() in (".mp4", ".mov")
@@ -1920,6 +1921,8 @@ def slate_room(plan: dict, lora: bool) -> dict:
 
 app.include_router(slate.attach(HOME, DURATIONS, compose, compose_references, REFERENCE_LIMIT,
                                 lambda: {"ref2va": ref2va_ready(), "ref2va_turbo": ref2va_turbo_ready()}, slate_room))
+import agents  # noqa: E402  (Brains and agents: the user's own CLI sign-ins and MCP tools, beside this file)
+app.include_router(agents.attach(HOME))
 import motion  # noqa: E402  (Motion Previs: a Python port of Sam Wasserman's Motion Previs Studio analysis, beside this file)
 app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)
@@ -1972,6 +1975,21 @@ app.router.on_startup.append(updater.start)
 app.router.on_shutdown.append(updater.stop.set)
 if hasattr(app.router, "on_shutdown"):
     app.router.on_shutdown.append(hub.close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
+import telemetry  # noqa: E402  (this machine's readings for the status bar: GPU, memory, disk, queue, beside this file)
+app.include_router(telemetry.attach(HOME, jobs, order, lock, memory_guard))
+import suite  # noqa: E402  (the filmmaker suite's files in and out: imports, timeline, dailies, beside this file)
+app.include_router(suite.attach(HOME, jobs, lock, PRESETS, app))
+
+
+@app.middleware("http")
+async def fresh_pages(request, call_next):
+    """The page and its scripts are checked again on every load, so an update shows without a forced reload."""
+    response = await call_next(request)
+    if not request.url.path.startswith(("/api/", "/files/")):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 
 if not media_tools()["ffmpeg"]:

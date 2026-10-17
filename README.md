@@ -34,6 +34,39 @@ cores · a 2x video decoder for 2K finals on the Mac
   while it's made* is MLX-only (`MUSIC3_BACKEND=mlx`); an M1 to M4 keeps the MLX port; measured on an M5 Ultra only.
   See [Music](#music-minimax-music-3).
 
+## Backlot: the new studio layout (development branch)
+
+The web app is now **Backlot, your local creative studio**, by Keys and Wasserman, powered by TensorFold. Everything
+it did before is still here; it is arranged so that it is quicker to find and calmer to use.
+
+- **Five rooms.** Write (the film, the board, and files brought in from the suite), Shoot (Create, Motion Previs, Ask
+  your agent), Sound (Voice, Music), Cut (Library, Timeline) and Machine (telemetry, Sparks, brains and tools). The
+  Stage, the first screen, starts any of the common jobs in one click and shows recent takes. Old `#Create`-style links
+  still open the same views.
+- **Render bay.** The queue is docked along the bottom of every room: what is rolling, on which Spark, and how long is
+  left. Click it to open the full list.
+- **⌘K.** Search or run anything: start a clip, open a room, find a file in the Library, check for updates. `/` also
+  opens it, and ⌥1 to ⌥5 jump between rooms.
+- **Take sheet.** Beside Create, three recipes in plain words (Quick look, Sharp Spec, Final) set engine, passes and size
+  in one click, with the setup at a glance and one Roll button.
+- **Machine room.** Live GPU load, unified memory against the memory guard's floor, temperature, power, the GPU lock,
+  the renderer, the workload governor and the disk, with ten minutes of history. Storage shows which folders and models
+  use the disk. Readouts only: nothing here stops or deletes anything.
+- **Brains & tools.** Use the AI subscriptions you already have (Claude Code, Codex with a ChatGPT sign-in, Gemini CLI,
+  Grok CLI) or a local model server, for the Slate film planner and for agents. A DGX Spark without its own sign-ins
+  can run them on your Mac over SSH. No keys are stored.
+- **Ask your agent.** Describe a set, a camera and a lens; your own Claude Code or Codex builds it in Blender or
+  Blockout and can queue renders in this studio. What it makes lands in the Library, one click from a first frame, a
+  last frame or a reference. The studio's own MCP server is in `mcp/` for use from any agent.
+- **Bring in.** Drop a Fountain script, a ScriptBreak project, a Cork Board or Master Canvas file, a Storyboard
+  Reference export, a Blockout package or a Slate project, and get shots that open in Create with their words, stills
+  and motion in place, or a Slate film in one click.
+- **Send out.** The Timeline exports to DaVinci Resolve (FCPXML 1.11) and as a CMX 3600 EDL; picked takes go to Circle
+  Take as dailies with their prompt, seed, model and LoRAs.
+
+The app's typefaces (Bricolage Grotesque, Instrument Sans, Geist Mono) ship with it under the SIL Open Font License,
+in `app/static/fonts`.
+
 ## New in 2.9.1
 
 Three changes to Music (MiniMax-Music3), one for each machine and one for the Mac's player. Every figure is one run
