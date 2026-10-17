@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # MiniMax Music 3 for the Music tab, optional (oneshot-setup.sh --music runs this on a Mac). MiniMax-Music3.
 #
-#   bash scripts/setup-music.sh            # Mac: TensorFold's music3-mlx at a pinned commit in its own venv, the weights (22 GB)
+#   bash scripts/setup-music.sh            # Mac: TensorFold's music3-mlx at a pinned commit in its own venv, the weights (22 GB),
+#                                          # and on an M5 or later TensorFold's Metal engine (scripts/build-music3-metal.sh)
 #   bash scripts/setup-music.sh --verify   # check only: no clone, no install, no download
 #
 # The weights are Comfy-Org/MiniMax-Music-3's single files (DiT fp16 4.9 GB, text encoder pruned bf16 16.7 GB, DAV
@@ -92,6 +93,17 @@ else
   "$VENV/bin/hf" download "$HF_REPO" "${MISSING[@]}" --local-dir "$MODEL" >/dev/null
   for f in "${FILES[@]}"; do [ -s "$MODEL/$f" ] || die "$f did not download"; done
   ok "DiT fp16, text encoder pruned bf16, DAV decoder"
+fi
+
+step "TensorFold's Metal engine (Zig + Metal, M5 or later; the Music tab's first choice, MLX the fallback)"
+METAL_BIN="$PREFIX/music3/bin/music3-generate"
+if [ "$VERIFY" = 1 ]; then
+  if [ -x "$METAL_BIN" ]; then ok "$METAL_BIN ($(cut -c1-8 "$PREFIX/music3/commit" 2>/dev/null))"
+  else echo "  - not built: the Music tab runs the MLX engine (bash scripts/build-music3-metal.sh builds it)"; fi
+elif PREFIX="$PREFIX" bash "$(dirname "$0")/build-music3-metal.sh"; then
+  ok "$METAL_BIN"
+else
+  echo "  - not built (above): the Music tab runs the MLX engine"
 fi
 
 if [ "$VERIFY" = 0 ]; then

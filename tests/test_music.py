@@ -474,6 +474,79 @@ def test_a_spark_prefers_the_cuda_engine_and_falls_back_to_comfy():
         music.SPARK = had
 
 
+
+class Mac(Spark):
+    """music.py as on a Mac with TensorFold's Metal engine under ``folder`` (PREFIX, MUSIC3_MODEL), as an M``chip``."""
+
+    def __init__(self, folder: Path, chip: int | None = 5, **env):
+        super().__init__(folder, MUSIC3_MODEL=str(folder / "models" / "MiniMax-Music3-Comfy"), **env)
+        self.chip = chip
+
+    def __enter__(self):
+        super().__enter__()
+        os.environ.pop("MUSIC3_METAL_BIN", None)
+        os.environ.update({k: v for k, v in self.env.items() if k == "MUSIC3_METAL_BIN"})
+        self.mac, self.chip_of = music.MAC, music.Metal.chip
+        music.SPARK, music.MAC = False, True
+        music.Metal.chip = lambda one, chip=self.chip: chip
+        return self
+
+    def __exit__(self, *_):
+        super().__exit__()
+        music.MAC, music.Metal.chip = self.mac, self.chip_of
+
+
+def test_an_m5_mac_prefers_the_metal_engine_and_falls_back_to_mlx():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)  # the same binary's protocol: one music3-generate, built for Metal on a Mac
+    with Mac(folder):
+        one = music.engine()
+        assert isinstance(one, music.Metal) and one.name == "metal" and music._chosen_why == ""
+        assert one.bin == folder / "prefix" / "music3" / "bin" / "music3-generate" and one.present() == ""
+        argv = one.argv()
+        assert argv[0] == str(one.bin) and argv[argv.index("--weights") + 1] == "int8" and argv[-2:] == ["--serve", "1"]
+        assert not hasattr(one, "guard_route") and one.RTF == 1.1 and one.NEED_GB == 27.0 and one.estimate(60) == int(3 + 60 * 1.1 + 2)
+        assert "LD_LIBRARY_PATH" not in one.environment() or one.environment()["LD_LIBRARY_PATH"] == os.environ.get("LD_LIBRARY_PATH")
+    with Mac(folder, MUSIC3_WEIGHTS="bf16"):
+        assert music.engine().weights == "bf16" and music.engine().RTF == 1.35
+    with Mac(folder, chip=4):  # an M4: the MLX port, and the state says why
+        assert isinstance(music.engine(), music.Mlx) and "M5 or later" in music._chosen_why and "M4" in music._chosen_why
+    with Mac(folder, MUSIC3_BACKEND="mlx"):  # told: the MLX port (it streams), the Metal engine built or not
+        assert isinstance(music.engine(), music.Mlx) and music._chosen_why == ""
+    other = Path(tempfile.mkdtemp())
+    cuda_install(other, binary=False)
+    with Mac(other):  # not built: the MLX port
+        assert isinstance(music.engine(), music.Mlx) and "scripts/build-music3-metal.sh" in music._chosen_why
+    with Mac(folder, MUSIC3_METAL_BIN=str(other / "none")):
+        assert isinstance(music.engine(), music.Mlx) and "MUSIC3_METAL_BIN" in music._chosen_why
+
+
+def test_the_metal_engine_makes_a_song_under_the_lock_and_does_not_stream():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    had_ready = music.qa.ready
+    with Mac(folder):
+        one = music.engine()
+        assert isinstance(one, music.Metal)
+        one.NEED_GB, one.known = 0, (time.time(), "")
+        try:
+            music.qa.ready = lambda: {"transcript": False, "runs": True, "missing": []}
+            state = client.get("/api/music/state").json()
+            assert state["route"] == "metal" and state["label"].startswith("TensorFold Metal") and state["weights"] == "int8"
+            assert state["stream"] is False and state["fallback"] is None and state["rtf"] == 1.1
+            job = client.post("/api/music/takes", json={"caption": "Hip-hop anthem, 92 BPM", "lyrics": "[Verse]\nRaise it up", "seconds": 60, "seed": 7}).json()
+            done = wait(job["id"])
+            assert done["status"] == "done", done
+            take = done["music"]
+            assert take["route"] == "metal" and take["credit"] == "MiniMax-Music3" and (server.HOME / take["path"]).is_file()
+            assert not take.get("streamed")
+            sent = requests_of(folder)[-1]
+            assert "pcm" not in sent and sent["seconds"] == 60.0 and sent["seed"] == 7
+            assert one.loaded() and voice.lock_owner().startswith("studio-music music3-metal")
+            assert music.release("another job") and not one.loaded() and not voice.LOCK.exists()
+        finally:
+            music.qa.ready = had_ready
+
 def test_the_cuda_engine_makes_a_song_stops_comfy_first_and_is_unloaded_before_other_jobs():
     folder = Path(tempfile.mkdtemp())
     cuda_install(folder)
