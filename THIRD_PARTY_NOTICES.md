@@ -162,4 +162,4 @@ clones at a pinned commit (GPL-3.0). None of its code is copied into this pack.
 ## TensorFold music3-mlx
 
 On a Mac the song runs on TensorFold's MLX port of MiniMax Music 3 (drowzeys/TensorFold, branch `music3-mlx`, commit
-71c7c1f8, Apache-2.0), installed into its own environment by `scripts/setup-music.sh`.
+6844b413, Apache-2.0), installed into its own environment by `scripts/setup-music.sh`.

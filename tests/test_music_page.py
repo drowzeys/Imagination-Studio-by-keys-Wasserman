@@ -97,6 +97,39 @@ def test_generate_queues_a_song_and_a_take_can_go_under_a_video():
     assert "Song under the export (MiniMax-Music3)" in got["pick"] and "None" in got["pick"]
 
 
+def test_play_while_it_is_made_is_offered_where_the_engine_streams_and_on_by_default():
+    got = run("""
+      MU.takes = []; Object.assign(MU, { caption: "Lo-fi hip-hop", lyrics: "", seconds: 60, seed: 2 });
+      out.spark = text(viewMusic()); S.music.route = "comfy"; out.comfy = text(viewMusic()); S.music.route = "mlx";
+      answers["/api/music/takes"] = { id: "m0", status: "queued" }; await muRender(); out.sent_plain = calls.slice(-1)[0][1];
+      Object.assign(S.music, { stream: true, stream_lead: { no_stall_s: { 60: 10.3, 300: 52.7 }, margin_s: 3, first_audio_s: 7.6 } });
+      const view = viewMusic(); out.mac = text(view);
+      const box = find(view, n => n.tag === "input" && n.attrs.type === "checkbox" && n.attrs.checked === true && String(n.attrs.onchange).includes("MU.stream"));
+      out.checked = !!box;
+      out.start60 = muStart(60, S.music); out.start300 = muStart(300, S.music); out.start30 = muStart(30, S.music);
+      answers["/api/music/takes"] = { id: "m2", status: "running", params: { live: true } };
+      await muRender(); out.sent = calls.slice(-1)[0][1];
+      jobs = [MU.job]; const playing = viewMusic();
+      const audio = find(playing, n => n.tag === "audio" && String(n.attrs.src).includes("/live"));
+      out.src = audio && audio.attrs.src; out.autoplay = audio && audio.attrs.autoplay; out.playing = text(playing);
+      box.attrs.onchange({ target: { checked: false } }); out.off = text(viewMusic());
+      MU.job = { id: "m3", status: "queued" }; jobs = [MU.job]; await muRender(); out.sent_off = calls.slice(-1)[0][1];
+      MU.job = { id: "m4", status: "running", params: { live: false } }; jobs = [MU.job]; out.no_player = !find(viewMusic(), n => n.tag === "audio" && String(n.attrs.src).includes("/live"));
+      out.line = muLine({ seed: 1, streamed: true, first_audio_s: 7.6, play_s: 13.1 });
+    """)
+    if got is None:
+        return
+    # no stream from the engine (ComfyUI on a Spark, or an engine before 6844b413): no option, nothing asked
+    assert "Play while it's made" not in got["spark"] and "Not played while it is made" in got["spark"]
+    assert "ComfyUI's route on a DGX Spark does not stream" in got["comfy"] and "live" not in got["sent_plain"]
+    assert "Play while it's made" in got["mac"] and got["checked"] and "first sound comes after about 8 s" in got["mac"] and "plays from about 13 s" in got["mac"]
+    assert abs(got["start60"] - 13.3) < 1e-6 and abs(got["start300"] - 55.7) < 1e-6 and 7.9 < got["start30"] < 8.1
+    assert got["sent"]["live"] is True and got["src"] == "/api/music/takes/m2/live" and got["autoplay"] is True
+    assert "Playing while it is made" in got["playing"] and "MiniMax-Music3" in got["playing"]
+    assert "Played when it is done." in got["off"] and got["sent_off"]["live"] is False and got["no_player"]
+    assert "played while made: first sound after 7.6 s, playing from 13.1 s" in got["line"]
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
