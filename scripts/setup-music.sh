@@ -12,7 +12,8 @@
 # Mac (Apple silicon, 64 GB or more): the engine runs as its own process in $PREFIX/music3-venv, never in the Studio's
 # venv. Environment: PREFIX, MUSIC3_SRC (the TensorFold clone, default $PREFIX/music3-src; an existing clone that has
 # the pinned commit is used as it is), MUSIC3_VENV ($PREFIX/music3-venv), MUSIC3_MODEL (~/music3-models/MiniMax-Music3-Comfy).
-# On a DGX Spark the song runs in the studio's ComfyUI: oneshot-setup-spark.sh --music downloads the same files.
+# On a DGX Spark the song runs on TensorFold's CUDA engine (spark/build-music3.sh), else in the studio's ComfyUI:
+# oneshot-setup-spark.sh --music downloads the same files and builds the engine.
 set -euo pipefail
 
 REPO="https://github.com/drowzeys/TensorFold.git"
@@ -37,7 +38,7 @@ licence() {
 }
 
 if [ "$(uname -s)" = Linux ]; then
-  echo "On a DGX Spark MiniMax Music 3 runs in the studio's ComfyUI: bash oneshot-setup-spark.sh --music" >&2
+  echo "On a DGX Spark MiniMax Music 3 runs on TensorFold's CUDA engine (or the studio's ComfyUI): bash oneshot-setup-spark.sh --music" >&2
   exit 2
 fi
 [ "$(uname -m)" = arm64 ] || die "the MLX port of MiniMax Music 3 needs Apple silicon"

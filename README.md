@@ -36,6 +36,59 @@ runtime for FastH3 on Metal and on CUDA:
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
+## New in 2.9.1
+
+Three changes to Music (MiniMax-Music3), one for each machine and one for the Mac's player. Every figure is one run
+unless it says otherwise.
+
+- **Mac: int8 weights by default.** The Studio starts the MLX engine (`music3-mlx`, now pinned at 6844b413) with
+  `--quant int8`: the autoregressive model, its code-0 head and the depth decoder at 8 bits. On the Mac Studio M5
+  Ultra the autoregressive model went from 40 to 65 frames a second and the peak from 27.6 to 20.5 GB; a 60 s song
+  took about 63 s through the app (75.8 s in 2.9.0). Against ComfyUI's reference the code-0 logits keep cosine
+  0.99994 (bf16 0.99997), 98.0 % greedy agreement, and Whisper's lyric scores over six same-seed songs stayed within
+  their noise. `MUSIC3_QUANT=none` runs the bf16 weights. Limits: measured on an M5 Ultra only; other
+  M-series chips are not measured.
+- **Mac: play while it's made.** With the box ticked (the default where the engine streams) the song plays in the tab
+  while it is made, from `GET /api/music/takes/{id}/live`, one stereo 44.1 kHz WAV. The sound is held back until
+  playing will not run dry (the engine's measured no-stall start plus 3 s). Through the app, 60 s songs: first sound
+  at about 7 s (7.6 and 6.4 s), playing from about 13 s (13.4 s both), no stall (the least buffer 4.0 s), made in
+  63.4 and 61.0 s; a 30 s song played from 8.1 s. The kept take is the engine's finished WAV, the same samples that
+  were played. Limits: a Mac only (no route on a Spark streams); only 30 s and 60 s were measured through the app, and
+  the wait grows with the length (about 56 s for a 300 s song, from the engine's own figure); nobody has listened for
+  seams. Details in [Music](#music-minimax-music-3).
+- **Music on a DGX Spark: TensorFold's CUDA engine for MiniMax Music 3 (MiniMax-Music3).** The Music tab on a Spark now
+  runs `music3-generate`, TensorFold's native CUDA port (branch `music3-cuda`, 6b714531: Zig + CUDA, no Python at run
+  time), wherever it is built and the weights are there; otherwise it falls back to ComfyUI's nodes as in 2.9.0.
+  `MUSIC3_BACKEND=cuda|comfy` chooses; the tab's state says which route runs and, after a fall-back, why.
+  - **int8 weights by default**, made on the GPU as the engine loads (no cache file): the autoregressive model, its
+    head and the depth decoder at 8 bits. `MUSIC3_WEIGHTS=bf16` runs the checkpoint's own weights. It reads
+    Comfy-Org's three files as they are (`~/spark-studio-models/MiniMax-Music3-Comfy`, `MUSIC3_MODEL` names another).
+  - **Same lifecycle as the Mac engine:** a persistent server, loaded on the first song, holding
+    `~/studio-gpu.lock.d` while loaded, unloaded after five idle minutes and before any other job, under the
+    memory kill-guard; a studio ComfyUI that holds models is stopped before it loads. Never beside H3, Drama 3 or
+    ComfyUI's models.
+  - **Installed by** `bash oneshot-setup-spark.sh --music` (and `--upgrade` where the weights are): `spark/build-music3.sh`
+    takes the prebuilt binary from the carrier image, or builds it with nvcc 12.9+ and Zig 0.17 (50 s on a GB10).
+  - **Measured on one GB10** (int8, hip-hop lyrics, seed 7, 30 steps; one run each; memory is MemTotal - MemAvailable
+    above the idle machine):
+
+    | Song | TensorFold CUDA (int8) | ComfyUI's nodes (2.9.0) |
+    |---|---|---|
+    | 30 s, engine | 60.3 s | 131.0 s |
+    | 60 s, engine | **123.9 s** (AR 73.9 s at 20.4 frames/s, DiT 46.4 s, DAV 3.6 s) | 260.6 s |
+    | 120 s, engine | 252.0 s | 527.6 s |
+    | 60 s through the app | **149.2 s** for the song (load 37.3 s, AR 68.2 s, DiT 40.4 s, DAV 3.3 s; the model ended it at 55.2 s), 171.4 s with Whisper's check (97 %, 164 of 169 words) | 270.6 s for the song (ComfyUI started for it; AR 166.5 s, DiT 94.3 s, DAV 4.0 s; 59.99 s made), 297.0 s with Whisper (96 %, 162 of 169), 29.4 GB at the peak: the same run of the 2.9.1 app with `MUSIC3_BACKEND=comfy` |
+    | Peak memory, 60 s | 17.9 GB (18.7 GB through the app) | 29.3 GB |
+
+    bf16 weights: a 60 s song in 194.3 s and 25.5 GB. Parity against ComfyUI's nodes and Whisper's lyric count
+    passed on the engine branch (docs/recipes/minimax-music3-cuda.md there).
+  - **Honest limits.** No streaming on the Spark: a song is heard when it is done. Built and measured on a GB10
+    only (the build refuses another GPU unless `MUSIC3_ANY_GPU=1`; elsewhere use `MUSIC3_BACKEND=comfy`). Loading
+    takes about 37 s each time the engine starts (int8 is made at load), so the first song after five idle minutes
+    pays it again. Songs over 120 s are not measured on this engine; the memory estimate goes on at the measured slope.
+- **Carrier image** `ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1` adds the prebuilt Spark `music3-generate`
+  (`spark-music3/`) beside the H3 engine.
+
 ## New in 2.9.0
 
 - **Music: MiniMax Music 3 (MiniMax-Music3).** A new **Music** tab beside Voice makes a whole song with sung vocals
@@ -1859,8 +1912,8 @@ called and the pack ships no weights.
   | 30 s (seed 3) | 6.4 s | 8.1 s | 1.6 s, at 19 s | 30.0 s |
 
   Before that margin was added, a start at the first piece (10.7 s) ran dry for 0.18 s at 53 s of a 60 s song, which
-  is why the margin is there. Limits: it works on a Mac only, because ComfyUI's route on a DGX Spark does not stream
-  and the box is not shown there. Only 30 s and 60 s songs were measured through the app; the 300 s figure is the
+  is why the margin is there. Limits: it works on a Mac only, because neither route on a DGX Spark streams (the CUDA
+  engine and ComfyUI's nodes alike) and the box is not shown there. Only 30 s and 60 s songs were measured through the app; the 300 s figure is the
   engine's own (no-stall 52.7 s). Starting about 13 s in is the price of a stream that runs slower than real time,
   and the wait grows with the length (about 56 s for 300 s). The engine found no seams by measure, but nobody has
   listened for them. A browser's own buffering comes on top.
@@ -1890,7 +1943,28 @@ reference the code-0 logits keep cosine 0.99994 (bf16 0.99997) with 98.0 % greed
 scores over six same-seed songs stayed within their noise. Measured through the server as the app starts it: 10 s in
 10.1 s, 20.9 GB. `MUSIC3_QUANT=none` runs the bf16 weights.
 
-**On a DGX Spark** the song runs in the studio's ComfyUI (`spark_generate.py music`) on ComfyUI's own MiniMax Music 3
+**On a DGX Spark with TensorFold's CUDA engine** (since 2.9.1, the default where it is built) the song runs on
+`music3-generate --serve 1` (fork branch `music3-cuda`, commit 6b714531; `$PREFIX/music3/bin`, `MUSIC3_CUDA_BIN` names
+another), the Mac engine's protocol and lifecycle: loaded on the first song (about 37 s; int8 weights are made on the
+GPU as it loads, `MUSIC3_WEIGHTS=bf16` for the checkpoint's own), holding the GPU lock while loaded, unloaded after
+`MUSIC3_IDLE_S` and before any other job, under the kill-guard (`MUSIC3_GUARD_GB`, 8). A studio ComfyUI that holds
+models is stopped before it loads. `bash oneshot-setup-spark.sh --music` downloads the weights and installs the engine
+(`spark/build-music3.sh`: from the carrier image, or built with nvcc 12.9+ and Zig 0.17). Measured on one GB10, int8,
+the same hip-hop lyrics, seed 7 (one process a song, memory above the idle machine):
+
+| Asked for | Made | Whole run (load 36.6 to 37.4 s included) | Autoregressive model | DiT, 30 steps | Decoder | Peak memory taken |
+|---|---|---|---|---|---|---|
+| 30 s | 30.0 s | 60.3 s | 36.4 s (20.9 frames/s) | 22.0 s | 1.9 s | 16.6 GB |
+| 60 s | 60.0 s | 123.9 s | 73.9 s (20.4 frames/s) | 46.4 s | 3.6 s | 17.9 GB |
+| 120 s (hip-hop lyrics) | 63.3 s (the model ended it) | 128.2 s | 78.0 s | 46.3 s | 3.9 s | 18.9 GB |
+| 120 s (long lyrics, seed 5) | 120.0 s | 252.0 s | 151.7 s (19.9 frames/s) | 93.0 s | 7.3 s | 19.3 GB |
+| 60 s, bf16 weights | 60.0 s | 194.3 s | 144.4 s (10.4 frames/s) | 46.3 s | 3.6 s | 25.5 GB |
+
+Through the app on a worker Spark: a 60 s song in 149.2 s (load 37.3 s, then 111.9 s; the model ended it at 55.2 s),
+18.7 GB at the peak, Whisper 97 %; the engine unloaded after its idle time and gave the lock back. Not streamed;
+GB10 only. Without the binary or the weights the tab uses ComfyUI's nodes, below; `MUSIC3_BACKEND=comfy` forces them.
+
+**On a DGX Spark without it** the song runs in the studio's ComfyUI (`spark_generate.py music`) on ComfyUI's own MiniMax Music 3
 nodes, laid out as ComfyUI's blueprint *Text to Music (MiniMax Music 3)*: the text encoder (pruned, bf16, 16.7 GB) runs
 the autoregressive model, the DiT (fp16, 4.9 GB) the 30 steps, the DAV decoder works in tiles. A song starts from a
 ComfyUI with nothing else loaded (the server is restarted when it held the video or picture models); afterwards its
@@ -2787,18 +2861,19 @@ videos at once, and sound by ear (the figures above are measurements).
 ### GHCR prebuilt carrier
 
 ```bash
-docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0
-# index digest: sha256:44dba56cb8e316cdc35a3e227f1d5109901ad9209a0cdb408e3ef27e5a2265be (linux/arm64 + linux/amd64)
-docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0 cp -a /payload/. /out/payload/
+docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1
+docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1 cp -a /payload/. /out/payload/
 ```
 
 One image for both builds. For a Mac it holds the TensorFold wheel, `requirements.lock`, the render scripts, the
 prebuilt native FastH3 engine (`zig-engine/tf-h3-dit`, built for Apple Silicon at the pinned commit) and `SHA256SUMS`.
 For a DGX Spark it holds the prebuilt CUDA engine (`spark-engine/libtf_h3.so`, GB10, aarch64; since 2.8.0 the
 `h3-cuda-lora` build at `1f7ecc75`, with LoRA support, so a Spark install no longer builds it from source), which
-`spark/build-engine.sh` takes when Docker is there and otherwise builds from source. **It is not a runtime**: neither
+`spark/build-engine.sh` takes when Docker is there and otherwise builds from source; since 2.9.1 also MiniMax Music 3's
+`spark-music3/music3-generate` (`music3-cuda` at 6b714531), which `spark/build-music3.sh` takes the same way. The Mac's
+Drama 3 and Music engines are not in it: their installers clone TensorFold at the pinned commits. **It is not a runtime**: neither
 Metal nor the Spark's models run in a container, so the setup installs natively. Rebuild it with
-`PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh`, to include its engine). Up to 2.2
+`PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh` and `spark/build-music3.sh`, to include its engines). Up to 2.2
 the image was `ghcr.io/drowzeys/keys-mac-tensorfold-studio`; the Mac setup still falls back to it.
 
 ## Stack

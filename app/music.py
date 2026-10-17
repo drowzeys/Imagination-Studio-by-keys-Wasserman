@@ -13,6 +13,11 @@ app's own process:
   studio's ComfyUI server (spark/comfy.sh, whose memory guard stands beside it). The server keeps the song's models
   loaded after it, which counts as loaded here: the GPU lock is held, and they are freed (ComfyUI's /free) after the
   idle time and before any other job, as for Drama 3. A song starts from a server with nothing else loaded.
+- ``cuda`` (a DGX Spark, preferred there when built): TensorFold's CUDA port (fork branch ``music3-cuda``,
+  ``$PREFIX/music3/bin/music3-generate --serve 1``), the Mac engine's protocol and lifecycle (voice.Served), int8
+  weights made on the GPU as it loads (``MUSIC3_WEIGHTS=bf16`` for the checkpoint's own). A ComfyUI holding models is
+  stopped before it loads. Without the binary or the weights a Spark falls back to ``comfy``; ``MUSIC3_BACKEND``
+  chooses.
 
 The weights are Comfy-Org/MiniMax-Music-3's (MiniMax-Music3 Community License): commercial use is allowed, a
 commercial product shows "MiniMax-Music3" in its interface (the Music tab does), a company above US$20 million of
@@ -24,7 +29,7 @@ ducked under the dialogue, with the app's sound finish (no hard clip, peaks unde
 On a Mac a song can play while it is made (``live``): the engine's stream (``pcm`` in the request, as Drama 3's server)
 appends raw 16-bit stereo PCM to a file as each piece is decoded, and ``/api/music/takes/{id}/live`` serves it as one
 stereo WAV whose sound is held back until enough is made that playing never runs dry (``lead_s``). The kept take is the
-engine's finished WAV, as without streaming. ComfyUI's route on a Spark does not stream.
+engine's finished WAV, as without streaming. A Spark does not stream (its CUDA engine and ComfyUI's route alike).
 """
 
 from __future__ import annotations
@@ -472,16 +477,181 @@ class Comfy:
                 self.mutex.release()
 
 
-ROUTES = {"mlx": Mlx, "comfy": Comfy}
+class Cuda(voice.Served):
+    """TensorFold's CUDA port of MiniMax Music 3 on a DGX Spark (``music3-generate --serve 1``, Zig + CUDA, no Python;
+    fork branch ``music3-cuda``, built by ``spark/build-music3.sh`` into ``$PREFIX/music3``). It speaks the Mac
+    engine's protocol (one JSON request a line on stdin, one answer a line on stderr), so it is a ``voice.Served``
+    like the Mac route and Drama 3's CUDA engine: loaded on the first song, holding the GPU lock while loaded,
+    unloaded after ``MUSIC3_IDLE_S`` and before any other job (``release``), under the kill-guard
+    (``MUSIC3_GUARD_GB``). Before it loads, a ComfyUI of the studio's that holds models is stopped (``make_room``).
+    It reads Comfy-Org's three files as they are; int8 weights are made on the GPU as it loads (no cache file).
+    Measured on one GB10 (docs/recipes/minimax-music3-cuda.md on the engine branch): see ``load_s``, ``RTF``,
+    ``NEED_GB`` and memory_guard.MUSIC_CUDA_ESTIMATE."""
+
+    name, label = "cuda", "TensorFold CUDA · DGX Spark"
+    title, owner_tag, idle_env, guard_env = "MiniMax Music 3", "studio-music music3-cuda", "MUSIC3_IDLE_S", "MUSIC3_GUARD_GB"
+    load_s = 37.0  # measured: 36.6 to 37.4 s to ready, int8 made at load, the files in the page cache
+    # seconds of making a second of song, measured on a GB10, int8: 30 s in 60.3 s, 60 s in 123.9 s, 120 s in 252.0 s
+    # (bf16: 60 s in 194.3 s)
+    RTF_OF = {"int8": 2.1, "bf16": 3.3}
+    # free memory wanted before it loads: the song's peak above an idle machine (19.3 GB int8 at 120 s, 26.6 GB bf16)
+    # and the guard's 8 GB beside it
+    NEED_OF = {"int8": 30.0, "bf16": 38.0}
+
+    def __init__(self) -> None:
+        super().__init__()
+        here = PREFIX / "music3"
+        self.bin = Path(os.environ.get("MUSIC3_CUDA_BIN", here / "bin" / "music3-generate")).expanduser()
+        self.model = Path(os.environ.get("MUSIC3_MODEL", Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
+                                         / "MiniMax-Music3-Comfy")).expanduser()
+        weights = os.environ.get("MUSIC3_WEIGHTS", "int8").strip().lower() or "int8"
+        self.weights = weights if weights in self.RTF_OF else "int8"
+        self.RTF, self.NEED_GB = self.RTF_OF[self.weights], self.NEED_OF[self.weights]
+        self.guard_route = "music-cuda-" + self.weights
+
+    def environment(self) -> dict:
+        env = dict(os.environ)
+        # the engine opens cuBLAS 13 itself (dlopen): the toolkit's folder, where the loader may not look
+        cuda = [one for one in ("/usr/local/cuda/lib64", "/usr/local/cuda/targets/sbsa-linux/lib") if Path(one).is_dir()]
+        if cuda:
+            env["LD_LIBRARY_PATH"] = ":".join(cuda + ([env["LD_LIBRARY_PATH"]] if env.get("LD_LIBRARY_PATH") else []))
+        return env
+
+    def argv(self) -> list[str]:
+        return [str(self.bin), "--model", str(self.model), "--weights", self.weights, "--serve", "1"]
+
+    def check(self) -> str:
+        """Why it cannot run here ("" when it can): files looked at, then memory; at most every 10 s. No process."""
+
+        if self.loaded():
+            return ""
+        if self.known and time.time() - self.known[0] < 10:
+            return self.known[1]
+        why = self.look()
+        self.known = (time.time(), why)
+        return why
+
+    def present(self) -> str:
+        """What is missing for this route ("" when the engine and the weights are there): files only."""
+
+        if not SPARK:
+            return "The CUDA route runs on a DGX Spark (Linux, CUDA)."
+        if not os.access(self.bin, os.X_OK):
+            return (f"No MiniMax Music 3 engine at {self.bin} (bash spark/build-music3.sh, or oneshot-setup-spark.sh --music; "
+                    "MUSIC3_CUDA_BIN names another).")
+        missing = [part for part in WEIGHTS if not (self.model / part).is_file()]
+        if missing:
+            return f"No MiniMax Music 3 weights at {self.model} (bash oneshot-setup-spark.sh --music, 22 GB; MUSIC3_MODEL names another folder)."
+        return ""
+
+    def look(self) -> str:
+        why = self.present()
+        if why:
+            return why
+        free = voice.mem_available_gb()
+        if 0 <= free < self.NEED_GB and not voice.comfy_up():
+            return (f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this Spark has {free:.0f} GB available "
+                    "now (something outside the studio holds the rest).")
+        return ""
+
+    def make_room(self, job: dict) -> None:
+        """ComfyUI's models never stand beside the song: a studio ComfyUI that holds any (``comfy.kind``) is stopped
+        first, as Drama 3 does it (spark/comfy.sh stop; the next render starts it again), then the memory is checked."""
+
+        if self.comfy_holds() and voice.comfy_up():
+            job["progress"] = {"stage": "stopping ComfyUI to free its models' memory", "at": 0, "of": 1}
+            self.stop_comfy()
+            for _ in range(60):
+                if not voice.comfy_up():
+                    break
+                time.sleep(1)
+            voice.settle()
+            self.note("stopped ComfyUI before loading", available_gb=round(voice.mem_available_gb(), 1))
+        super().make_room(job)
+
+    def comfy_holds(self) -> str:
+        """What the studio's ComfyUI server has loaded (spark_generate.py writes it), "" for nothing."""
+
+        try:
+            return (PREFIX / "comfy.kind").read_text().strip()
+        except OSError:
+            return ""
+
+    def stop_comfy(self) -> None:
+        subprocess.run(["bash", str(PACK / "spark" / "comfy.sh"), "stop"], capture_output=True, text=True, timeout=30,
+                       env={**os.environ, "PREFIX": str(PREFIX)})
+
+    def estimate(self, seconds: float) -> int:
+        return int((0 if self.loaded() else self.load_s) + seconds * self.RTF + 2)
+
+    def make(self, job: dict, params: dict, wav: Path) -> dict | None:
+        """One song through the server: its measurements, or None when cancelled. Not streamed."""
+
+        stats = wav.with_suffix(".stats.json")
+        request = {"id": job["id"], "caption": params["caption"], "lyrics": params["lyrics"], "wav": str(wav),
+                   "seconds": float(params["seconds"]), "seed": int(params["seed"]), "ar_cfg": params["ar_cfg"],
+                   "top_k": int(params["top_k"]), "steps": int(params["steps"]), "dit_cfg": params["dit_cfg"],
+                   "stats": str(stats), "progress": True}
+        words = {"ar": "the model writes the song", "dit": "the sound", "dav": "decoding"}
+
+        def progress(said: dict) -> None:
+            stage = str(said.get("stage") or "")
+            job["progress"] = {"stage": "music: " + words.get(stage, stage), "at": int(said.get("done") or 0), "of": int(said.get("total") or 1)}
+
+        with self.mutex:
+            began = time.time()
+            try:
+                if not self.start(job):
+                    return None
+                loaded = time.time()
+                job["progress"] = {"stage": "music: the model writes the song", "at": 0, "of": 1}
+                answer = self.ask(job, request, 600 + 15 * float(params["seconds"]), progress)
+                if answer is None:
+                    return None
+            finally:
+                self.last_used = time.time()
+        return {"audio_s": answer.get("audio_s"), "frames": answer.get("frames"), "eos": answer.get("eos"),
+                "ar_s": round(float(answer.get("ar_ms") or 0) / 1000, 1), "dit_s": round(float(answer.get("dit_ms") or 0) / 1000, 1),
+                "dav_s": round(float(answer.get("dav_ms") or 0) / 1000, 1), "engine_s": round(float(answer.get("total_ms") or 0) / 1000, 1),
+                "rtf": answer.get("rtf"), "peak_memory_gb": answer.get("peak_memory_gb"), "load_s": job.get("load_s"),
+                "weights": self.ready.get("weights") or self.weights,
+                "total_s": round(time.time() - began, 1), "made_s": round(time.time() - loaded, 1)}
+
+
+ROUTES = {"mlx": Mlx, "comfy": Comfy, "cuda": Cuda}
 _engine = None
+_chosen_why = ""  # on a Spark left to choose, why the CUDA engine was not taken ("" when it was, or when told)
+
+
+def choose() -> tuple[type, str]:
+    """The route and, when a Spark falls back to ComfyUI, why: MUSIC3_BACKEND=mlx|cuda|comfy when set; else the Mac
+    engine on a Mac, and on a DGX Spark TensorFold's CUDA engine where its binary and the weights are, else ComfyUI."""
+
+    told = (os.environ.get("MUSIC3_BACKEND") or "").strip().lower()
+    if told in ROUTES:
+        return ROUTES[told], ""
+    if not SPARK:
+        return Mlx, ""
+    why = Cuda().present()
+    return (Comfy, why) if why else (Cuda, "")
 
 
 def engine():
-    global _engine
+    global _engine, _chosen_why
     if _engine is None:
-        chosen = os.environ.get("MUSIC3_BACKEND") or ("comfy" if SPARK else "mlx")
-        _engine = ROUTES.get(chosen, Comfy if SPARK else Mlx)()
+        route, _chosen_why = choose()
+        _engine = route()
     return _engine
+
+
+def room_mb() -> int | None:
+    """While the CUDA engine is loaded: the memory this machine had before it loaded (MB), which any other job of the
+    queue gets back, since a song's engine is unloaded before that job starts (as voice.room_mb). None otherwise."""
+
+    one = _engine
+    if not isinstance(one, Cuda) or not one.loaded() or one.before_gb < 0:
+        return None
+    return int(one.before_gb * 1024)
 
 
 def release(why: str) -> bool:
@@ -499,9 +669,10 @@ def state() -> dict:
             "seconds": SECONDS, "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
             "sections": SECTIONS, "caption_limit": CAPTION_LIMIT, "lyrics_limit": LYRICS_LIMIT, "rtf": one.RTF,
             "music_db": MUSIC_DB, "duck_db": DUCK_DB, "server": one.status() if hasattr(one, "status") else None,
-            # played while it is made: the Mac engine only (ComfyUI's route on a Spark does not stream)
+            # played while it is made: the Mac engine only (a Spark, on either route, does not stream)
             "stream": bool(not why and hasattr(one, "streaming") and one.streaming()),
-            "stream_lead": {"no_stall_s": dict(NO_STALL_S), "margin_s": HOLD_MARGIN_S, "first_audio_s": 7.6}}
+            "stream_lead": {"no_stall_s": dict(NO_STALL_S), "margin_s": HOLD_MARGIN_S, "first_audio_s": 7.6},
+            "fallback": _chosen_why or None, "weights": getattr(one, "weights", None)}
 
 
 # ---------- text ----------
@@ -570,9 +741,10 @@ def checked(body: dict) -> dict:
     if SPARK:
         import memory_guard
 
-        drama3 = voice.room_mb()
-        room = max(memory_guard.room_mb() or 0, drama3) if drama3 else None
-        found = memory_guard.music_check(seconds, available_mb=room)
+        # a loaded Drama 3 or MiniMax Music 3 server gives its memory back before the song loads (or is the song's)
+        held = [one for one in (voice.room_mb(), room_mb()) if one]
+        room = max([memory_guard.room_mb() or 0] + held) if held else None
+        found = memory_guard.music_check(seconds, available_mb=room, route=getattr(engine(), "guard_route", "music"))
         if not found["fits"]:
             raise HTTPException(400, found["reason"])
     params["asr"] = body.get("asr", True) is not False
