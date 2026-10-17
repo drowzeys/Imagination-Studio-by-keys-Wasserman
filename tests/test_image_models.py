@@ -48,6 +48,29 @@ def test_only_installed_models_are_offered_and_asked_for():
         server.image_models = had
 
 
+def test_a_spark_offers_flux3_under_either_of_bfls_file_names():
+    import server
+
+    had = server.SPARK, os.environ.get("SPARK_MODELS")
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            server.SPARK = True
+            os.environ["SPARK_MODELS"] = folder
+            files = Path(folder) / "FLUX3-K-Comfy"
+            (files / "diffusion_models").mkdir(parents=True)
+            (files / "system_prompts.json").write_text("{}")
+            (files / "diffusion_models" / "flux3_image_klein_sd_bf16.safetensors").write_bytes(b"x")  # before the rename
+            (files / "diffusion_models" / "flux3-image-klein-base-bf16.safetensors").write_bytes(b"x")  # after it
+            found = server.image_models()
+            assert "flux3k-fast" in found and "flux3k-full" in found, found
+        finally:
+            server.SPARK = had[0]
+            if had[1] is None:
+                os.environ.pop("SPARK_MODELS", None)
+            else:
+                os.environ["SPARK_MODELS"] = had[1]
+
+
 def test_the_flux3_workflow_follows_bfl():
     import spark_generate as G
 
@@ -67,7 +90,11 @@ def test_the_flux3_workflow_follows_bfl():
             assert w["3"]["inputs"]["type"] == "flux3" and w["20"]["inputs"]["clip_name"] == G.FLUX3_UPSAMPLER
             sampler = w["12"]["inputs"]
             assert (sampler["steps"], sampler["cfg"], sampler["seed"]) == (16, 1.0, 7)
-            assert w["1"]["inputs"]["unet_name"] == "flux3_image_klein_sd_bf16.safetensors"
+            assert w["1"]["inputs"]["unet_name"] == "flux3-image-klein-bf16.safetensors"
+            # an install from before BFL's rename keeps its old file name until the setup renames it
+            (Path(folder) / G.FLUX3_DIR / "diffusion_models").mkdir()
+            (Path(folder) / G.FLUX3_DIR / "diffusion_models" / "flux3_image_klein_sd_bf16.safetensors").write_bytes(b"x")
+            assert G.flux3_workflow(Args, "a lighthouse", 7)["1"]["inputs"]["unet_name"] == "flux3_image_klein_sd_bf16.safetensors"
             Args.model = "flux3k-full"
             w = G.flux3_workflow(Args, "a lighthouse", 7, caption="Full-color photograph of a lighthouse.")
             assert (w["12"]["inputs"]["steps"], w["12"]["inputs"]["cfg"]) == (50, 3.5)
