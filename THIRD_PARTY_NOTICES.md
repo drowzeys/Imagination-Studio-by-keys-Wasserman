@@ -159,7 +159,13 @@ On a DGX Spark the song runs on ComfyUI's own MiniMax Music 3 nodes (`comfy_extr
 `comfy/ldm/minimax_music/`), following its blueprint "Text to Music (MiniMax Music 3)", in the ComfyUI the installer
 clones at a pinned commit (GPL-3.0). None of its code is copied into this pack.
 
+## TensorFold music3 (Metal)
+
+On an M5 or later Mac the song runs on TensorFold's Metal port of MiniMax Music 3 (drowzeys/TensorFold, branch
+`upstream/music3-metal`, commit 8c9559da, Apache-2.0; pull request #987 to ashhart/TensorFold), built from source into
+`$PREFIX/music3` by `scripts/build-music3-metal.sh` (Zig 0.17.0, MIT, fetched from ziglang.org).
+
 ## TensorFold music3-mlx
 
-On a Mac the song runs on TensorFold's MLX port of MiniMax Music 3 (drowzeys/TensorFold, branch `music3-mlx`, commit
+On an older Mac, or with `MUSIC3_BACKEND=mlx`, the song runs on TensorFold's MLX port of MiniMax Music 3 (drowzeys/TensorFold, branch `music3-mlx`, commit
 6844b413, Apache-2.0), installed into its own environment by `scripts/setup-music.sh`.

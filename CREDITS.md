@@ -135,7 +135,8 @@ Comfy-Org's repackaging of MiniMax's release (Comfy-Org/MiniMax-Music-3), under 
 License**: commercial use is allowed, a commercial product shows "MiniMax-Music3" in its interface, a company above
 US$20 million of yearly revenue needs MiniMax's written authorisation, and a hosted service keeps safeguards against
 misuse. On a DGX Spark it runs on **ComfyUI**'s own MiniMax Music 3 nodes and blueprint (Comfy Org, GPL-3.0); on a Mac
-on TensorFold's MLX port (`music3-mlx` in the drowzeys/TensorFold fork), which follows ComfyUI's reference code. The
+on TensorFold's native Metal port (Zig and Metal, on an M5 or later) or its MLX port (`music3-mlx` in the
+drowzeys/TensorFold fork), both following ComfyUI's reference code. The
 pack ships no weights. **MiniMax-Music3.**
 
 ## The first native Mac engine: Salvatore Sanfilippo (antirez)

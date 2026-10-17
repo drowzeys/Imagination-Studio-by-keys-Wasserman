@@ -36,6 +36,17 @@ runtime for FastH3 on Metal and on CUDA:
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
+## New in 2.9.2
+
+- **Mac: Music runs on TensorFold's native Metal engine.** On an M5 or later the Music tab now runs MiniMax Music 3
+  on `music3-generate` built for Metal (Zig and Metal, no Python or MLX; TensorFold pull request #987, commit
+  8c9559da), when `oneshot-setup.sh --music` has built it (`scripts/build-music3-metal.sh`). On the Mac Studio M5
+  Ultra, against the MLX port int8, 60 s hip-hop, seed 7, three runs each: the autoregressive model 69 frames/s
+  against 65, the whole song 59.5 to 63.0 s against 62.3 to 63.9 s, peak 17.8 GB against 28.1 GB. Through the app a
+  song the model ended at 33.4 s took 35.2 s, load included, at 16.1 GB. Limits: it does not stream yet, so *Play
+  while it's made* is MLX-only (`MUSIC3_BACKEND=mlx`); an M1 to M4 keeps the MLX port; measured on an M5 Ultra only.
+  See [Music](#music-minimax-music-3).
+
 ## New in 2.9.1
 
 Three changes to Music (MiniMax-Music3), one for each machine and one for the Mac's player. Every figure is one run
@@ -1890,7 +1901,7 @@ called and the pack ships no weights.
 - **The lyrics check.** With faster-whisper installed, Whisper listens to the take and counts the lyrics' words it
   heard, in order, up to the last one it heard (`asr.score`), and how far into the lyrics the song got
   (`asr.reached`). Sung words are harder to hear than spoken ones: treat it as a rough count.
-- **Play while it's made** (a Mac). With the box ticked (the default when the engine streams), the song plays in the
+- **Play while it's made** (a Mac on the MLX port). With the box ticked (the default when the engine streams), the song plays in the
   tab while the engine makes it. The engine's stream appends raw 16-bit stereo PCM to a file as it decodes each piece
   (`pcm` in the request, as Drama 3's server does), and `GET /api/music/takes/{id}/live` serves it as one WAV, two
   channels at 44.1 kHz, its length left open. A stream is slightly slower than real time and gets slower as the song
@@ -1925,7 +1936,21 @@ called and the pack ships no weights.
   under -1 dBFS, checked after the AAC encode (under the 48.6 s promo: -1.46 dBFS on the Mac, -2.0 on the Spark). The picture is copied;
   the result is a new file in `exports/`.
 
-**On a Mac** the song runs on TensorFold's MLX port of MiniMax Music 3 (fork branch `music3-mlx`, commit 6844b413: the
+**On a Mac with an M5 or later and TensorFold's Metal engine** (since 2.9.2, the default where it is built) the song
+runs on `music3-generate --serve 1` built for Metal: Zig and Metal, no Python, MLX or PyTorch (fork branch
+`upstream/music3-metal`, commit 8c9559da, the code of TensorFold pull request #987; `$PREFIX/music3/bin`,
+`MUSIC3_METAL_BIN` names another). It has the CUDA engine's protocol and lifecycle, int8 weights by default
+(`MUSIC3_WEIGHTS=bf16` for the checkpoint's own) and the kill-guard. `bash oneshot-setup.sh --music` builds it
+(`scripts/build-music3-metal.sh`: Zig 0.17 and Xcode's Metal compiler, a few minutes) beside the MLX port. Without
+it, or on an M1 to M4 (its DiT, prompt rows and decoder need the M5's tensor units), the Mac runs the MLX port below,
+and `MUSIC3_BACKEND=mlx` chooses that port anyway. **It does not stream yet**, so *Play while it's made* is not shown;
+the MLX port keeps it. Measured on a Mac Studio M5 Ultra against the MLX port int8 (same prompt and seed, 60 s
+hip-hop, runs alternated, three each, TensorFold's command line): the autoregressive model 69 frames/s against 65,
+the whole song 59.5 to 63.0 s against 62.3 to 63.9 s, peak footprint 17.8 GB against 28.1 GB, byte-identical repeats.
+Its DiT and decoder match ComfyUI's reference more closely than MLX's (38.97 dB and 103.9 dB against 34.9 and 50.5).
+Through the app: a song the model ended at 33.4 s took 35.2 s, the load (2.9 s) included, with a 16.1 GB peak.
+
+**On an older Mac, or with `MUSIC3_BACKEND=mlx`,** the song runs on TensorFold's MLX port of MiniMax Music 3 (fork branch `music3-mlx`, commit 6844b413: the
 autoregressive model with its depth decoder, the DiT and the DAV decoder, in MLX), as a persistent process in its own
 environment (`python -m tensorfold.music3 --serve`, Drama 3's protocol), under a memory guard (8 GB of vm_stat's free
 pages, `MUSIC3_GUARD_GB`). `bash oneshot-setup.sh --music` (`scripts/setup-music.sh`) clones the branch at that commit

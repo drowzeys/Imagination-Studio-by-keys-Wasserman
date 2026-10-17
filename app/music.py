@@ -2,9 +2,13 @@
 
 Lyrics with section tags ([Verse], [Chorus], [Bridge], [Instrumental] ...) and a caption of the style (genre, tempo,
 key, mood, vocals, instruments) become a song of up to five minutes with sung vocals, 44.1 kHz stereo. A song is one
-job in the app's queue, so it never runs beside a MiniMax H3 render or a Drama 3 take. Two routes, both run outside the
+job in the app's queue, so it never runs beside a MiniMax H3 render or a Drama 3 take. Four routes, all run outside the
 app's own process:
 
+- ``metal`` (a Mac with an M5 or later, preferred there when built): TensorFold's Metal port (fork branch
+  ``upstream/music3-metal``, ``$PREFIX/music3/bin/music3-generate --serve 1``, Zig + Metal, no Python), the CUDA
+  route's binary protocol and lifecycle; int8 weights by default (``MUSIC3_WEIGHTS=bf16``). It does not stream yet.
+  Without the binary or the weights, or on an M1 to M4, a Mac falls back to ``mlx``.
 - ``mlx`` (a Mac): TensorFold's MLX port (fork branch ``music3-mlx``, ``python -m tensorfold.music3 --serve`` in its
   own venv), a persistent server that speaks Drama 3's protocol (voice.Served): loaded on the first song, holding the
   studio's GPU lock while loaded, unloaded after ``MUSIC3_IDLE_S`` idle seconds and at once before any other job of
@@ -29,7 +33,8 @@ ducked under the dialogue, with the app's sound finish (no hard clip, peaks unde
 On a Mac a song can play while it is made (``live``): the engine's stream (``pcm`` in the request, as Drama 3's server)
 appends raw 16-bit stereo PCM to a file as each piece is decoded, and ``/api/music/takes/{id}/live`` serves it as one
 stereo WAV whose sound is held back until enough is made that playing never runs dry (``lead_s``). The kept take is the
-engine's finished WAV, as without streaming. A Spark does not stream (its CUDA engine and ComfyUI's route alike).
+engine's finished WAV, as without streaming. The MLX route alone streams: not the Metal one yet, nor a Spark (its
+CUDA engine and ComfyUI's route alike).
 """
 
 from __future__ import annotations
@@ -56,6 +61,7 @@ router = APIRouter()
 HOME: Path = Path.home() / "TensorFoldStudio"
 PACK = Path(__file__).resolve().parent.parent
 SPARK = sys.platform.startswith("linux")
+MAC = sys.platform == "darwin"
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
 SECONDS = (10, 300)  # the longest a song may be, as the app offers it (the model takes up to 360 s)
 CAPTION_LIMIT, LYRICS_LIMIT = 2000, 6000  # characters (the model reads 5000 tokens of caption and lyrics in all)
@@ -618,20 +624,86 @@ class Cuda(voice.Served):
                 "total_s": round(time.time() - began, 1), "made_s": round(time.time() - loaded, 1)}
 
 
-ROUTES = {"mlx": Mlx, "comfy": Comfy, "cuda": Cuda}
+class Metal(Cuda):
+    """TensorFold's Metal port of MiniMax Music 3 on a Mac (``music3-generate --serve 1``, Zig + Metal, no Python;
+    fork branch ``upstream/music3-metal``, built by ``scripts/build-music3-metal.sh`` into ``$PREFIX/music3``). The
+    same binary's protocol and lifecycle as the CUDA route; it needs an M5 or later (the DiT, prompt rows and DAV run on
+    its tensor units), so an older Mac stays on ``mlx``. Not streamed. Measured on a Mac Studio M5 Ultra
+    (docs/recipes/minimax-music3-metal.md on the engine branch): see ``load_s``, ``RTF`` and ``NEED_GB``."""
+
+    name, label = "metal", "TensorFold Metal · Apple Silicon"
+    title, owner_tag, idle_env, guard_env = "MiniMax Music 3", "studio-music music3-metal", "MUSIC3_IDLE_S", "MUSIC3_GUARD_GB"
+    load_s = 3.0  # measured: about 3 s to ready, the files in the page cache
+    # seconds of making a second of song, measured on an M5 Ultra: int8 60 s in 59.5 to 63.0 s, 120 s in 123.7 s; bf16
+    # 60 s in 77.2 s
+    RTF_OF = {"int8": 1.1, "bf16": 1.35}
+    # free memory wanted before it loads: the song's peak footprint (17.9 GB int8 at 60 s, 18.4 GB at 120 s; bf16 not
+    # measured, taken as the CUDA engine's 26.6 GB) and the guard's 8 GB beside it
+    NEED_OF = {"int8": 27.0, "bf16": 35.0}
+    FIRST_CHIP = 5  # Apple M5
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bin = Path(os.environ.get("MUSIC3_METAL_BIN", PREFIX / "music3" / "bin" / "music3-generate")).expanduser()
+        self.model = Path(os.environ.get("MUSIC3_MODEL", Path.home() / "music3-models" / "MiniMax-Music3-Comfy")).expanduser()
+        del self.guard_route  # the Spark's memory table; a Mac checks its free memory before loading (make_room)
+
+    def environment(self) -> dict:
+        return dict(os.environ)
+
+    def chip(self) -> int | None:
+        """The Apple M generation of this Mac (5 for an M5 Ultra), None when it does not say."""
+
+        try:
+            said = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True, timeout=5).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        found = re.search(r"Apple M(\d+)", said)
+        return int(found.group(1)) if found else None
+
+    def present(self) -> str:
+        if not MAC:
+            return "The Metal route runs on a Mac (Apple Silicon)."
+        chip = self.chip()
+        if chip is not None and chip < self.FIRST_CHIP:
+            return f"TensorFold's Metal engine for MiniMax Music 3 needs an Apple M5 or later; this Mac is an M{chip}."
+        if not os.access(self.bin, os.X_OK):
+            return (f"No MiniMax Music 3 engine at {self.bin} (bash scripts/build-music3-metal.sh, or oneshot-setup.sh --music; "
+                    "MUSIC3_METAL_BIN names another).")
+        missing = [part for part in WEIGHTS if not (self.model / part).is_file()]
+        if missing:
+            return f"No MiniMax Music 3 weights at {self.model} (oneshot-setup.sh --music downloads them; MUSIC3_MODEL names another folder)."
+        return ""
+
+    def look(self) -> str:
+        why = self.present()
+        if why:
+            return why
+        free = voice.mem_available_gb()
+        if 0 <= free < self.NEED_GB:
+            return f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this Mac has {free:.0f} GB available now."
+        return ""
+
+    def make_room(self, job: dict) -> None:
+        voice.Served.make_room(self, job)  # no ComfyUI on a Mac
+
+
+ROUTES = {"mlx": Mlx, "metal": Metal, "comfy": Comfy, "cuda": Cuda}
 _engine = None
-_chosen_why = ""  # on a Spark left to choose, why the CUDA engine was not taken ("" when it was, or when told)
+_chosen_why = ""  # left to choose, why the native engine was not taken ("" when it was, or when told)
 
 
 def choose() -> tuple[type, str]:
-    """The route and, when a Spark falls back to ComfyUI, why: MUSIC3_BACKEND=mlx|cuda|comfy when set; else the Mac
-    engine on a Mac, and on a DGX Spark TensorFold's CUDA engine where its binary and the weights are, else ComfyUI."""
+    """The route and, when it falls back, why: MUSIC3_BACKEND=metal|mlx|cuda|comfy when set; else TensorFold's native
+    engine where its binary and the weights are (Metal on an M5 or later Mac, CUDA on a DGX Spark), else the MLX port on
+    a Mac and ComfyUI's nodes on a Spark."""
 
     told = (os.environ.get("MUSIC3_BACKEND") or "").strip().lower()
     if told in ROUTES:
         return ROUTES[told], ""
     if not SPARK:
-        return Mlx, ""
+        why = Metal().present()
+        return (Mlx, why) if why else (Metal, "")
     why = Cuda().present()
     return (Comfy, why) if why else (Cuda, "")
 
@@ -669,7 +741,7 @@ def state() -> dict:
             "seconds": SECONDS, "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
             "sections": SECTIONS, "caption_limit": CAPTION_LIMIT, "lyrics_limit": LYRICS_LIMIT, "rtf": one.RTF,
             "music_db": MUSIC_DB, "duck_db": DUCK_DB, "server": one.status() if hasattr(one, "status") else None,
-            # played while it is made: the Mac engine only (a Spark, on either route, does not stream)
+            # played while it is made: the Mac's MLX engine only (Metal does not stream yet, nor a Spark on either route)
             "stream": bool(not why and hasattr(one, "streaming") and one.streaming()),
             "stream_lead": {"no_stall_s": dict(NO_STALL_S), "margin_s": HOLD_MARGIN_S, "first_audio_s": 7.6},
             "fallback": _chosen_why or None, "weights": getattr(one, "weights", None)}
