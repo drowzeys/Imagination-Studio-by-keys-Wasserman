@@ -25,20 +25,41 @@ from fastapi.testclient import TestClient  # noqa: E402
 client = TestClient(server.app)
 voice.LOCK = Path(os.environ["STUDIO_GPU_LOCK"])
 
-# `python -I -m tensorfold.music3 --model M --serve`, stood in for: the protocol of TensorFold's music3-mlx (71c7c1f8)
+# `python -I -m tensorfold.music3 --model M --serve`, stood in for: the protocol of TensorFold's music3-mlx (6844b413)
 MLX_SERVE = r"""
-import json, os, struct, sys, wave
+import json, os, struct, sys, time, wave
 args = sys.argv[1:]
 assert args[:3] == ["-I", "-m", "tensorfold.music3"] and args[-1] == "--serve" and "--model" in args
 log = open(os.environ["FAKE_MUSIC3_LOG"], "a")
+streams = os.environ.get("FAKE_MUSIC3_STREAM") == "1"
 print("[music3] MiniMax-Music3 runs locally", file=sys.stderr, flush=True)
 print(json.dumps({"ready": True, "engine": "tensorfold-music3-mlx", "load_s": 0.1, "sample_rate": 44100, "channels": 2,
-                  "license_display": "MiniMax-Music3"}), file=sys.stderr, flush=True)
+                  "license_display": "MiniMax-Music3", **({"stream": True, "quant": "int8", "dit_modes": ["averaged", "sequential"]} if streams else {})}),
+      file=sys.stderr, flush=True)
+FRAME = struct.pack("<hh", 100, -100)  # left and right told apart: a swapped side shows
 for line in sys.stdin:
     request = json.loads(line)
     log.write(line); log.flush()
     if "FAIL" in request["caption"]:
         print(json.dumps({"ok": False, "error": "ValueError: the prompt has 6000 tokens", "id": request.get("id")}), file=sys.stderr, flush=True)
+        continue
+    stream = bool(request.get("stream", request.get("pcm") is not None))
+    if stream:  # as 6844b413: a growing WAV at "wav" (open sizes until done) and raw stereo PCM at "pcm", a piece at a time
+        seconds, piece = 5.0, 0.5  # longer than the lead a 10 s cap asks (2.6 s), so the player is let go before the end
+        pcm, out = open(request["pcm"], "wb"), open(request["wav"], "wb")
+        out.write(b"RIFF" + struct.pack("<I", 0xFFFFFFFF) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 2, 44100, 176400, 4, 16) + b"data" + struct.pack("<I", 0xFFFFFFFF))
+        for i in range(int(seconds / piece)):
+            time.sleep(0.15)
+            data = FRAME * int(44100 * piece)
+            pcm.write(data); pcm.flush(); out.write(data); out.flush()
+            print(json.dumps({"id": request["id"], "progress": {"stage": "stream", "done": (i + 1) * piece, "total": request["seconds"]}}), file=sys.stderr, flush=True)
+        pcm.close()
+        size = int(44100 * seconds) * 4
+        out.seek(4); out.write(struct.pack("<I", 36 + size)); out.seek(40); out.write(struct.pack("<I", size)); out.close()
+        print(json.dumps({"ok": True, "id": request["id"], "wav": request["wav"], "audio_s": seconds, "frames": 75, "eos": True,
+                          "ar_ms": 1300.0, "dit_ms": 700.0, "dav_ms": 90.0, "total_ms": 1000.0, "rtf": 0.33, "first_audio_ms": 1500.0,
+                          "stream": True, "seed": request["seed"], "peak_memory_gb": 22.3, "pcm": request.get("pcm", ""),
+                          "dit_mode": "sequential", "windows": 2, "quant": "int8"}), file=sys.stderr, flush=True)
         continue
     if request.get("progress"):
         for stage, total in (("ar", 50), ("dit", 30), ("dav", 1)):
@@ -52,18 +73,19 @@ for line in sys.stdin:
 """
 
 
-def fake_mlx(folder: Path) -> "music.Mlx":
+def fake_mlx(folder: Path, streams: bool = False) -> "music.Mlx":
     python = folder / "venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.write_text(f"#!{sys.executable}\n" + MLX_SERVE)
     python.chmod(0o755)
     os.environ.update(MUSIC3_VENV=str(folder / "venv"), MUSIC3_MODEL=str(folder / "model"), FAKE_MUSIC3_LOG=str(folder / "requests.jsonl"))
+    os.environ["FAKE_MUSIC3_STREAM"] = "1" if streams else "0"
     try:
         one = music.Mlx()
     finally:
         for key in ("MUSIC3_VENV", "MUSIC3_MODEL"):
             os.environ.pop(key)
-    one.known, one.NEED_GB = (time.time(), ""), 0
+    one.known, one.NEED_GB, one.streams = (time.time(), ""), 0, streams
     return one
 
 
@@ -80,6 +102,20 @@ def wait(job_id: str, timeout: float = 30) -> dict:
             return job
         time.sleep(0.1)
     raise AssertionError("the job did not finish")
+
+
+def test_the_mac_engine_runs_int8_weights_unless_told_otherwise():
+    old = os.environ.pop("MUSIC3_QUANT", None)
+    try:
+        argv = music.Mlx().argv()
+        assert argv[argv.index("--quant") + 1] == "int8" and argv[-1] == "--serve"
+        os.environ["MUSIC3_QUANT"] = "none"
+        argv = music.Mlx().argv()
+        assert argv[argv.index("--quant") + 1] == "none"
+    finally:
+        os.environ.pop("MUSIC3_QUANT", None)
+        if old is not None:
+            os.environ["MUSIC3_QUANT"] = old
 
 
 def test_a_song_is_checked_before_it_is_queued():
@@ -126,6 +162,9 @@ def test_a_song_runs_on_the_served_engine_holds_the_lock_and_is_unloaded_before_
         assert sent["caption"] == "Hip-hop anthem, 92 BPM" and sent["lyrics"] == "[Verse]\nRaise it up" and sent["seconds"] == 60.0
         assert sent["seed"] == 7 and sent["steps"] == 30 and sent["dit_cfg"] == 1.7 and sent["ar_cfg"] == 1.5 and sent["top_k"] == 50
         assert sent["progress"] is True and sent["wav"].endswith(f"{job['id']}.wav") and sent["id"] == job["id"]
+        # an engine that does not stream gets the request it always had, and the take keeps its old keys
+        assert "pcm" not in sent and "stream" not in sent and "dit_mode" not in sent and "overlap" not in sent
+        assert "streamed" not in take and "first_audio_s" not in take and client.get("/api/music/state").json()["stream"] is False
         assert (server.HOME / take["path"]).is_file() and client.get(f"/api/music/takes/{job['id']}/audio").status_code == 200
         assert [t["id"] for t in client.get("/api/music/takes").json()][0] == job["id"]
         # loaded after the song, under the GPU lock: the next song does not load again
@@ -155,6 +194,85 @@ def test_a_song_runs_on_the_served_engine_holds_the_lock_and_is_unloaded_before_
         server.build = built
         one.release("test over")
         music._engine, music.qa.ready = had, had_ready
+
+
+def test_a_song_plays_while_it_is_made_as_stereo_and_keeps_the_finished_wav():
+    folder = Path(tempfile.mkdtemp())
+    one = fake_mlx(folder, streams=True)
+    had, had_ready, had_start = music._engine, music.qa.ready, music.start_s
+    try:
+        music._engine = one
+        music.qa.ready = lambda: {"transcript": False, "runs": True, "missing": []}
+        music.start_s = lambda seconds: 0.3  # the stand-in makes its 5 s in 1.5 s: the measured hold would outlast it
+        assert client.get("/api/music/state").json()["stream"] is True
+        assert client.get("/api/music/takes/nobody/live").status_code == 404
+        job = client.post("/api/music/takes", json={"caption": "Hip-hop anthem", "lyrics": "[Verse]\nRaise it up", "seconds": 10, "seed": 7}).json()
+        assert job["params"]["live"] is True
+        with client.stream("GET", f"/api/music/takes/{job['id']}/live") as live:
+            assert live.status_code == 200 and live.headers["content-type"] == "audio/wav"
+            body = b"".join(live.iter_bytes())
+        # the header: PCM, two channels, 44.1 kHz, four bytes a frame, lengths left open
+        assert body[:4] == b"RIFF" and body[8:16] == b"WAVEfmt " and body[36:40] == b"data"
+        fmt, channels, rate, byte_rate, block, bits = struct.unpack("<HHIIHH", body[20:36])
+        assert (fmt, channels, rate, byte_rate, block, bits) == (1, 2, 44100, 176400, 4, 16)
+        sound = body[44:]
+        assert len(sound) == int(44100 * 5.0) * 4 and sound == struct.pack("<hh", 100, -100) * int(44100 * 5.0)  # whole, sides kept
+        done = wait(job["id"])
+        assert done["status"] == "done", done
+        take = done["music"]
+        assert take["streamed"] is True and take["first_audio_s"] == 1.5 and take["duration"] == 5.0 and take["play_s"] is not None
+        assert music.lead_s(10) - 0.01 <= take["lead_s"] < 5.0  # it was let play once the lead was made, before the end
+        sent = requests_of(folder)[-1]
+        assert sent["stream"] is True and sent["pcm"].endswith(f"{job['id']}.live/0.pcm")
+        with wave.open(str(server.HOME / take["path"])) as w:  # the kept song is the engine's finished WAV
+            assert (w.getnchannels(), w.getframerate(), w.getnframes()) == (2, 44100, int(44100 * 5.0))
+        # unticked: no stream asked, the old request
+        quiet = wait(client.post("/api/music/takes", json={"caption": "pop", "seconds": 10, "live": False, "asr": False}).json()["id"])
+        assert quiet["status"] == "done" and "pcm" not in requests_of(folder)[-1] and "streamed" not in quiet["music"]
+    finally:
+        one.release("test over")
+        music._engine, music.qa.ready, music.start_s = had, had_ready, had_start
+
+
+def test_the_lead_before_a_song_plays_grows_with_its_length_and_waits_for_the_sound():
+    assert abs(music.stream_rtf(60) - 1.06) < 1e-9 and abs(music.stream_rtf(300) - 1.15) < 1e-9 and music.stream_rtf(10) == 1.06
+    assert 5.0 < music.lead_s(60) < 6.0 and 40.0 < music.lead_s(300) < 42.0  # measured no-stall: 10.3 s and 52.7 s of wall time
+    assert music.lead_s(60, rate=0.5) == 32.0 and music.lead_s(60, rate=3.0) == music.lead_s(60)  # slower waits more, faster never less
+    assert music.lead_s(10, rate=0.01) == 10.0  # never more than the song
+    # the measured no-stall start (10.3 s for 60 s, 52.7 s for 300 s, from the request) and the margin
+    assert music.start_s(60) == 13.3 and music.start_s(300) == 55.7 and 7.9 < music.start_s(30) < 8.1 and music.start_s(10) >= 3.0
+    folder = Path(tempfile.mkdtemp())
+    pcm = folder / "0.pcm"
+    entry = {"parts": [pcm], "done": False, "finished": 0, "gap_s": 0, "seconds": 10.0, "played": None, "asked": time.time() - music.start_s(10)}
+    want = music.lead_s(10)
+
+    def grow():
+        with open(pcm, "wb") as out:
+            for _ in range(12):
+                out.write(b"\0" * (4 * 44100 // 2)); out.flush()  # half a second of song every 0.1 s
+                time.sleep(0.1)
+
+    import threading
+
+    began = time.time()
+    threading.Thread(target=grow, daemon=True).start()
+    music.hold(entry, poll=0.02)
+    assert entry["lead_s"] >= want - 0.01 and entry["played"] >= began
+    # not before the measured start, however much is made
+    early = {"parts": [pcm], "done": False, "finished": 0, "gap_s": 0, "seconds": 10.0, "played": None, "asked": time.time() - music.start_s(10) + 0.6}
+    began = time.time()
+    music.hold(early, poll=0.02)
+    assert time.time() - began >= 0.55 and early["lead_s"] >= want
+    # a song that is done is let go at once, whatever was made
+    empty = {"parts": [folder / "none.pcm"], "done": True, "finished": 1, "gap_s": 0, "seconds": 300.0, "played": None}
+    music.hold(empty)
+    assert empty["played"] is not None and "lead_s" not in empty
+
+
+def test_the_voice_live_header_stays_mono():
+    head = voice.live_header()
+    assert struct.unpack("<HHIIHH", head[20:36]) == (1, 1, 44100, 88200, 2, 16) and len(head) == 44
+    assert struct.unpack("<HHIIHH", voice.live_header(44100, 2)[20:36]) == (1, 2, 44100, 176400, 4, 16)
 
 
 def test_a_voice_take_and_a_song_never_stand_together():
@@ -247,6 +365,287 @@ print("[tensorfold] " + json.dumps({"output": out, "audio_s": 3.0, "ar_s": 20.0,
         music._engine, voice.comfy_up = had, had_up
 
 
+# `music3-generate --model M --weights W --serve 1`, stood in for: TensorFold's CUDA engine (music3-cuda 6b714531)
+# speaks the Mac engine's protocol, with "engine":"tensorfold-music3-cuda" and "weights" on its ready line
+CUDA_SERVE = r"""
+import json, os, struct, sys, wave
+args = sys.argv[1:]
+assert args[-2:] == ["--serve", "1"] and "--model" in args and args[args.index("--weights") + 1] in ("int8", "bf16"), args
+log = open(os.environ["FAKE_MUSIC3_LOG"], "a")
+log.write(json.dumps({"argv": args, "ld": os.environ.get("LD_LIBRARY_PATH", "")}) + "\n"); log.flush()
+print("[music3] loading MiniMax-Music3 (int8 made on the GPU)", file=sys.stderr, flush=True)
+print(json.dumps({"ready": True, "engine": "tensorfold-music3-cuda", "load_s": 0.1, "sample_rate": 44100, "channels": 2,
+                  "license_display": "MiniMax-Music3", "weights": args[args.index("--weights") + 1]}), file=sys.stderr, flush=True)
+for line in sys.stdin:
+    if not line.startswith("{"):
+        print(json.dumps({"ok": False, "error": "bad json"}), file=sys.stderr, flush=True)
+        continue
+    request = json.loads(line)
+    log.write(line); log.flush()
+    if "FAIL" in request["caption"]:
+        print(json.dumps({"ok": False, "error": "the prompt has 6000 tokens", "id": request.get("id")}), file=sys.stderr, flush=True)
+        continue
+    for stage, total in (("ar", 1500), ("dit", 30), ("dav", 1)):
+        print(json.dumps({"id": request["id"], "progress": {"stage": stage, "done": total, "total": total}}), file=sys.stderr, flush=True)
+    seconds = 2.0
+    with wave.open(request["wav"], "wb") as w:
+        w.setnchannels(2); w.setsampwidth(2); w.setframerate(44100); w.writeframes(struct.pack("<hh", 100, -100) * int(44100 * seconds))
+    open(request["stats"], "w").write(json.dumps({"engine": "tensorfold-music3-cuda", "ar_s": 3.0}))
+    print(json.dumps({"ok": True, "id": request["id"], "wav": request["wav"], "audio_s": seconds, "frames": 50, "eos": False,
+                      "ar_ms": 3000.0, "dit_ms": 1900.0, "dav_ms": 200.0, "total_ms": 5100.0, "rtf": 2.55, "first_audio_ms": 5100.0,
+                      "stream": False, "seed": request["seed"], "peak_memory_gb": 18.1}), file=sys.stderr, flush=True)
+"""
+
+
+def cuda_install(folder: Path, binary: bool = True, weights: bool = True) -> None:
+    """A Spark's install under ``folder``: $PREFIX/music3/bin/music3-generate (the stand-in) and the three weight files."""
+
+    if binary:
+        engine = folder / "prefix" / "music3" / "bin" / "music3-generate"
+        engine.parent.mkdir(parents=True, exist_ok=True)
+        engine.write_text(f"#!{sys.executable}\n" + CUDA_SERVE)
+        engine.chmod(0o755)
+    if weights:
+        for part in music.WEIGHTS:
+            (folder / "models" / "MiniMax-Music3-Comfy" / part).parent.mkdir(parents=True, exist_ok=True)
+            (folder / "models" / "MiniMax-Music3-Comfy" / part).write_bytes(b"w")
+
+
+class Spark:
+    """music.py as on a DGX Spark with its install under ``folder`` (PREFIX, SPARK_MODELS), the chosen engine reset."""
+
+    def __init__(self, folder: Path, **env):
+        self.folder, self.env = folder, {"SPARK_MODELS": str(folder / "models"), "FAKE_MUSIC3_LOG": str(folder / "requests.jsonl"), **env}
+
+    def __enter__(self):
+        self.had = (music.SPARK, music.PREFIX, music._engine, music._chosen_why, {k: os.environ.get(k) for k in self.env})
+        music.SPARK, music.PREFIX, music._engine = True, self.folder / "prefix", None
+        for key in ("MUSIC3_BACKEND", "MUSIC3_CUDA_BIN", "MUSIC3_MODEL", "MUSIC3_WEIGHTS"):
+            self.had[4].setdefault(key, os.environ.get(key))
+            os.environ.pop(key, None)
+        os.environ.update(self.env)
+        return self
+
+    def __exit__(self, *_):
+        if music._engine is not None and hasattr(music._engine, "release"):
+            music._engine.release("test over")
+        music.SPARK, music.PREFIX, music._engine, music._chosen_why, saved = self.had
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_a_spark_prefers_the_cuda_engine_and_falls_back_to_comfy():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    with Spark(folder):
+        one = music.engine()
+        assert isinstance(one, music.Cuda) and one.name == "cuda" and music._chosen_why == ""
+        assert one.bin == folder / "prefix" / "music3" / "bin" / "music3-generate"
+        assert one.model == folder / "models" / "MiniMax-Music3-Comfy" and one.present() == ""
+        argv = one.argv()
+        assert argv[0] == str(one.bin) and argv[argv.index("--weights") + 1] == "int8" and argv[-2:] == ["--serve", "1"]
+        assert one.guard_route == "music-cuda-int8" and one.RTF == 2.1 and one.NEED_GB == 30.0
+        assert one.estimate(60) == int(37 + 60 * 2.1 + 2)
+    with Spark(folder, MUSIC3_WEIGHTS="bf16"):
+        one = music.engine()
+        assert one.weights == "bf16" and one.argv()[one.argv().index("--weights") + 1] == "bf16" and one.RTF == 3.3
+        assert one.guard_route == "music-cuda-bf16"
+    with Spark(folder, MUSIC3_BACKEND="comfy"):  # told: ComfyUI's nodes, the engine built or not
+        assert isinstance(music.engine(), music.Comfy) and music._chosen_why == ""
+    other = Path(tempfile.mkdtemp())
+    with Spark(folder, MUSIC3_CUDA_BIN=str(other / "music3-generate")):  # no binary: ComfyUI, and the state says why
+        assert isinstance(music.engine(), music.Comfy) and "No MiniMax Music 3 engine" in music._chosen_why
+    cuda_install(other, binary=True, weights=False)
+    with Spark(other):  # the binary without the weights: ComfyUI too
+        assert isinstance(music.engine(), music.Comfy) and "weights" in music._chosen_why
+    with Spark(other, MUSIC3_BACKEND="cuda"):  # told cuda without the weights: the tab says what is missing
+        one = music.engine()
+        assert isinstance(one, music.Cuda) and "No MiniMax Music 3 weights" in one.check()
+        answer = client.post("/api/music/takes", json={"caption": "pop", "seconds": 10})
+        assert answer.status_code == 400 and "weights" in answer.json()["error"]
+    had = music.SPARK
+    try:
+        music.SPARK = False
+        assert music.choose()[0] is music.Mlx
+    finally:
+        music.SPARK = had
+
+
+
+class Mac(Spark):
+    """music.py as on a Mac with TensorFold's Metal engine under ``folder`` (PREFIX, MUSIC3_MODEL), as an M``chip``."""
+
+    def __init__(self, folder: Path, chip: int | None = 5, **env):
+        super().__init__(folder, MUSIC3_MODEL=str(folder / "models" / "MiniMax-Music3-Comfy"), **env)
+        self.chip = chip
+
+    def __enter__(self):
+        super().__enter__()
+        os.environ.pop("MUSIC3_METAL_BIN", None)
+        os.environ.update({k: v for k, v in self.env.items() if k == "MUSIC3_METAL_BIN"})
+        self.mac, self.chip_of = music.MAC, music.Metal.chip
+        music.SPARK, music.MAC = False, True
+        music.Metal.chip = lambda one, chip=self.chip: chip
+        return self
+
+    def __exit__(self, *_):
+        super().__exit__()
+        music.MAC, music.Metal.chip = self.mac, self.chip_of
+
+
+def test_an_m5_mac_prefers_the_metal_engine_and_falls_back_to_mlx():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)  # the same binary's protocol: one music3-generate, built for Metal on a Mac
+    with Mac(folder):
+        one = music.engine()
+        assert isinstance(one, music.Metal) and one.name == "metal" and music._chosen_why == ""
+        assert one.bin == folder / "prefix" / "music3" / "bin" / "music3-generate" and one.present() == ""
+        argv = one.argv()
+        assert argv[0] == str(one.bin) and argv[argv.index("--weights") + 1] == "int8" and argv[-2:] == ["--serve", "1"]
+        assert not hasattr(one, "guard_route") and one.RTF == 1.1 and one.NEED_GB == 27.0 and one.estimate(60) == int(3 + 60 * 1.1 + 2)
+        assert "LD_LIBRARY_PATH" not in one.environment() or one.environment()["LD_LIBRARY_PATH"] == os.environ.get("LD_LIBRARY_PATH")
+    with Mac(folder, MUSIC3_WEIGHTS="bf16"):
+        assert music.engine().weights == "bf16" and music.engine().RTF == 1.35
+    with Mac(folder, chip=4):  # an M4: the MLX port, and the state says why
+        assert isinstance(music.engine(), music.Mlx) and "M5 or later" in music._chosen_why and "M4" in music._chosen_why
+    with Mac(folder, MUSIC3_BACKEND="mlx"):  # told: the MLX port (it streams), the Metal engine built or not
+        assert isinstance(music.engine(), music.Mlx) and music._chosen_why == ""
+    other = Path(tempfile.mkdtemp())
+    cuda_install(other, binary=False)
+    with Mac(other):  # not built: the MLX port
+        assert isinstance(music.engine(), music.Mlx) and "scripts/build-music3-metal.sh" in music._chosen_why
+    with Mac(folder, MUSIC3_METAL_BIN=str(other / "none")):
+        assert isinstance(music.engine(), music.Mlx) and "MUSIC3_METAL_BIN" in music._chosen_why
+
+
+def test_the_metal_engine_makes_a_song_under_the_lock_and_does_not_stream():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    had_ready = music.qa.ready
+    with Mac(folder):
+        one = music.engine()
+        assert isinstance(one, music.Metal)
+        one.NEED_GB, one.known = 0, (time.time(), "")
+        try:
+            music.qa.ready = lambda: {"transcript": False, "runs": True, "missing": []}
+            state = client.get("/api/music/state").json()
+            assert state["route"] == "metal" and state["label"].startswith("TensorFold Metal") and state["weights"] == "int8"
+            assert state["stream"] is False and state["fallback"] is None and state["rtf"] == 1.1
+            job = client.post("/api/music/takes", json={"caption": "Hip-hop anthem, 92 BPM", "lyrics": "[Verse]\nRaise it up", "seconds": 60, "seed": 7}).json()
+            done = wait(job["id"])
+            assert done["status"] == "done", done
+            take = done["music"]
+            assert take["route"] == "metal" and take["credit"] == "MiniMax-Music3" and (server.HOME / take["path"]).is_file()
+            assert not take.get("streamed")
+            sent = requests_of(folder)[-1]
+            assert "pcm" not in sent and sent["seconds"] == 60.0 and sent["seed"] == 7
+            assert one.loaded() and voice.lock_owner().startswith("studio-music music3-metal")
+            assert music.release("another job") and not one.loaded() and not voice.LOCK.exists()
+        finally:
+            music.qa.ready = had_ready
+
+def test_the_cuda_engine_makes_a_song_stops_comfy_first_and_is_unloaded_before_other_jobs():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    had_up, had_ready, built = voice.comfy_up, music.qa.ready, server.build
+    comfy = {"up": True, "stopped": 0}
+    with Spark(folder):
+        one = music.engine()
+        assert isinstance(one, music.Cuda)
+        one.NEED_GB, one.known = 0, (time.time(), "")
+        one.comfy_holds = lambda: "video" if comfy["up"] else ""
+
+        def stop_comfy():
+            comfy.update(up=False, stopped=comfy["stopped"] + 1)
+
+        one.stop_comfy = stop_comfy
+        try:
+            voice.comfy_up = lambda port=None: comfy["up"]
+            music.qa.ready = lambda: {"transcript": False, "runs": True, "missing": []}
+            state = client.get("/api/music/state").json()
+            assert state["route"] == "cuda" and state["label"].startswith("TensorFold CUDA") and state["weights"] == "int8"
+            assert state["fallback"] is None and state["rtf"] == 2.1 and state["credit"] == "MiniMax-Music3"
+            job = client.post("/api/music/takes", json={"caption": "Hip-hop anthem, 92 BPM", "lyrics": "[Verse]\nRaise it up", "seconds": 60, "seed": 7}).json()
+            assert job["kind"] == "music" and job["estimate"] >= int(37 + 60 * 2.1)
+            done = wait(job["id"])
+            assert done["status"] == "done", done
+            take = done["music"]
+            assert take["route"] == "cuda" and take["duration"] == 2.0 and take["ended"] is False and take["peak_memory_gb"] == 18.1
+            assert take["ar_s"] == 3.0 and take["dit_s"] == 1.9 and take["dav_s"] == 0.2 and take["load_s"] is not None
+            assert take["credit"] == "MiniMax-Music3" and (server.HOME / take["path"]).is_file()
+            # ComfyUI held the video models: stopped before the engine loaded, once
+            assert comfy["stopped"] == 1 and any(e["what"] == "stopped ComfyUI before loading" for e in one.events)
+            assert one.ready["engine"] == "tensorfold-music3-cuda" and one.ready["weights"] == "int8"
+            started, sent = requests_of(folder)[0], requests_of(folder)[-1]
+            assert started["argv"][started["argv"].index("--model") + 1] == str(folder / "models" / "MiniMax-Music3-Comfy")
+            if Path("/usr/local/cuda/lib64").is_dir():
+                assert "/usr/local/cuda/lib64" in started["ld"]
+            assert sent["caption"] == "Hip-hop anthem, 92 BPM" and sent["seconds"] == 60.0 and sent["seed"] == 7 and sent["progress"] is True
+            assert sent["steps"] == 30 and sent["dit_cfg"] == 1.7 and sent["ar_cfg"] == 1.5 and sent["top_k"] == 50
+            assert Path(sent["stats"]).is_file()
+            # loaded after the song, under the GPU lock; its memory counts as the next job's (music.room_mb)
+            assert one.loaded() and voice.lock_owner().startswith("studio-music music3-cuda")
+            assert music.room_mb() == int(one.before_gb * 1024)
+            pid = one.process.pid
+            again = wait(client.post("/api/music/takes", json={"caption": "pop", "seconds": 10}).json()["id"])
+            assert again["status"] == "done" and one.process.pid == pid and again["music"]["load_s"] is None and comfy["stopped"] == 1
+            failed = wait(client.post("/api/music/takes", json={"caption": "FAIL", "seconds": 10}).json()["id"])
+            assert failed["status"] == "failed" and "6000 tokens" in failed["error"] and one.loaded()
+            # any other job of this machine's queue unloads it first, and the lock goes back
+            seen = {}
+
+            def build(kind, params, job_id, room=True):
+                seen.update(loaded=one.loaded(), locked=voice.LOCK.exists())
+                out = server.HOME / "renders" / f"{job_id}.png"
+                return [sys.executable, "-c", f"open({str(out)!r}, 'wb').write(b'png')"], {}, [str(out)]
+
+            server.build = build
+            other = {"id": "test-music-cuda-yield", "kind": "image", "status": "running", "title": "t", "params": {}, "log": "",
+                     "outputs": [], "started": time.time(), "finished": None, "remote": None}
+            server.perform(other)
+            assert other["status"] == "done" and seen == {"loaded": False, "locked": False}
+            assert "MiniMax Music 3 was unloaded" in other["log"] and music.room_mb() is None
+        finally:
+            server.build, voice.comfy_up, music.qa.ready = built, had_up, had_ready
+
+
+def test_the_cuda_engine_unloads_when_idle_and_gives_the_lock_back():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder)
+    had_up = voice.comfy_up
+    with Spark(folder, MUSIC3_IDLE_S="1"):
+        one = music.engine()
+        one.NEED_GB, one.known = 0, (time.time(), "")
+        try:
+            voice.comfy_up = lambda port=None: False
+            done = wait(client.post("/api/music/takes", json={"caption": "lo-fi", "seconds": 10, "asr": False}).json()["id"])
+            assert done["status"] == "done" and done["music"]["route"] == "cuda"
+            assert not any(e["what"] == "stopped ComfyUI before loading" for e in one.events)  # nothing to stop
+            started = time.time()
+            while (one.loaded() or voice.LOCK.exists()) and time.time() - started < 20:
+                time.sleep(0.2)
+            assert not one.loaded() and not voice.LOCK.exists() and "idle" in one.events[-1]["why"]
+        finally:
+            voice.comfy_up = had_up
+
+
+def test_the_comfy_route_still_runs_where_the_engine_is_not_built():
+    folder = Path(tempfile.mkdtemp())
+    cuda_install(folder, binary=False)
+    with Spark(folder):
+        one = music.engine()
+        assert isinstance(one, music.Comfy)
+        state = client.get("/api/music/state").json()
+        assert state["route"] == "comfy" and "No MiniMax Music 3 engine" in state["fallback"] and state["rtf"] == 4.4
+        command = one.command({"seconds": 60, "seed": 7, "steps": 30, "dit_cfg": 1.7, "ar_cfg": 1.5, "top_k": 50},
+                              Path("c.txt"), Path("l.txt"), Path("o.wav"))
+        assert command[1].endswith("spark_generate.py") and command[2] == "music" and "--seconds" in command
+    test_the_spark_route_runs_comfy_holds_the_lock_while_loaded_and_frees_it()
+
+
 def test_the_comfy_workflow_is_the_blueprints():
     import spark_generate
 
@@ -275,6 +674,20 @@ def test_the_memory_guard_knows_a_song():
     for asked, _, peak in memory_guard.MUSIC_MEASURED:  # the line holds every measured song, ERROR_MB around it
         assert abs(fixed + per_second * asked - peak) <= memory_guard.ERROR_MB, (asked, peak)
     assert memory_guard.music_check(10, total_mb=0)["fits"]  # a Mac
+    # TensorFold's CUDA engine: its own line a weight kind, held to its measured songs the same way
+    for route, measured in memory_guard.MUSIC_CUDA_MEASURED.items():
+        fixed, per_second = memory_guard.MUSIC_CUDA_ESTIMATE[route]
+        for asked, _, peak in measured:
+            assert abs(fixed + per_second * asked - peak) <= memory_guard.ERROR_MB, (route, asked, peak)
+        found = memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route=route)
+        assert found["fits"] and found["route"] == route and found["need_mb"] == fixed + per_second * 60
+    int8 = memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route="music-cuda-int8")["need_mb"]
+    assert int8 < memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route="music-cuda-bf16")["need_mb"]
+    assert int8 < memory_guard.music_check(60, available_mb=118_000, total_mb=124_500)["need_mb"]  # less than ComfyUI's
+    # a tight machine: a 60 s song fits there, a 300 s one on 30 GB does not
+    tight = memory_guard.music_check(60, available_mb=50_000, total_mb=124_500, route="music-cuda-int8")
+    assert tight["fits"] and not memory_guard.music_check(300, available_mb=30_000, total_mb=124_500, route="music-cuda-int8")["fits"]
+    assert memory_guard.music_check(60, available_mb=118_000, total_mb=124_500, route="nonsense")["route"] == "music"
 
 
 def tone(path: Path, seconds: float, parts, rate: int = 48000, channels: int = 2) -> None:

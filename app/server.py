@@ -912,9 +912,9 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
     lora = lora or bool(found and params.get("ref_turbo"))
     engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
     # a Drama 3 server kept loaded after a voice take is unloaded before this job starts (voice.release): its memory
-    # counts as this job's, like the ComfyUI server's own
-    drama3 = voice.room_mb()
-    room = max(memory_guard.room_mb() or 0, drama3) if drama3 else None
+    # counts as this job's, like the ComfyUI server's own; so does MiniMax Music 3's CUDA engine (music.release)
+    held = [one for one in (voice.room_mb(), music.room_mb()) if one]
+    room = max([memory_guard.room_mb() or 0] + held) if held else None
     return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room,
                               base=env.get("SPARK_BASE") == "h3", engine=engine,
                               pictures=len(found.get("pictures") or []),

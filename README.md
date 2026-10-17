@@ -13,28 +13,79 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 *Name, credits, colours and voice for anything public: the [brand guide](docs/BRAND.md).*
 
-## Big credit: Sam Wasserman (wassermanproductions.com)
+*Credit first: Sam Wasserman shaped the production side of this studio (Slate, the Sharp Spec, Motion Previs). See
+[Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes.*
 
-**Sam Wasserman shaped the production side of this studio: the AI film workflow and the ideas behind it.** Slate, his
-prompt studio for AI filmmaking, is the workflow inside the Wasserman Slate AI Studio tab. The Wasserman Sharp Spec,
-the QA gate that follows it, and the 80s Horror LoRA that opens the Keys and Wasserman LoRA Hub are his too. The Motion Previs tab's analysis is a
-Python port of his [Motion Previs Studio](https://github.com/wassermanproductions/motion-previs-studio). The aim
-we share is the best AI film studio there is, and this pack is where his planning tools meet a render engine. See
-[CREDITS.md](CREDITS.md).
-
-**Thank you to everyone this stands on:** the Qwen team at Alibaba (Qwen-Image-2.1, Qwen3-VL), the MiniMax team
-(MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
-Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
-decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
-contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
-[CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
-
-**2.9.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.9.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 2.9.2
+
+- **Mac: Music runs on TensorFold's native Metal engine.** On an M5 or later the Music tab now runs MiniMax Music 3
+  on `music3-generate` built for Metal (Zig and Metal, no Python or MLX; TensorFold pull request #987, commit
+  8c9559da), when `oneshot-setup.sh --music` has built it (`scripts/build-music3-metal.sh`). On the Mac Studio M5
+  Ultra, against the MLX port int8, 60 s hip-hop, seed 7, three runs each: the autoregressive model 69 frames/s
+  against 65, the whole song 59.5 to 63.0 s against 62.3 to 63.9 s, peak 17.8 GB against 28.1 GB. Through the app a
+  song the model ended at 33.4 s took 35.2 s, load included, at 16.1 GB. Limits: it does not stream yet, so *Play
+  while it's made* is MLX-only (`MUSIC3_BACKEND=mlx`); an M1 to M4 keeps the MLX port; measured on an M5 Ultra only.
+  See [Music](#music-minimax-music-3).
+
+## New in 2.9.1
+
+Three changes to Music (MiniMax-Music3), one for each machine and one for the Mac's player. Every figure is one run
+unless it says otherwise.
+
+- **Mac: int8 weights by default.** The Studio starts the MLX engine (`music3-mlx`, now pinned at 6844b413) with
+  `--quant int8`: the autoregressive model, its code-0 head and the depth decoder at 8 bits. On the Mac Studio M5
+  Ultra the autoregressive model went from 40 to 65 frames a second and the peak from 27.6 to 20.5 GB; a 60 s song
+  took about 63 s through the app (75.8 s in 2.9.0). Against ComfyUI's reference the code-0 logits keep cosine
+  0.99994 (bf16 0.99997), 98.0 % greedy agreement, and Whisper's lyric scores over six same-seed songs stayed within
+  their noise. `MUSIC3_QUANT=none` runs the bf16 weights. Limits: measured on an M5 Ultra only; other
+  M-series chips are not measured.
+- **Mac: play while it's made.** With the box ticked (the default where the engine streams) the song plays in the tab
+  while it is made, from `GET /api/music/takes/{id}/live`, one stereo 44.1 kHz WAV. The sound is held back until
+  playing will not run dry (the engine's measured no-stall start plus 3 s). Through the app, 60 s songs: first sound
+  at about 7 s (7.6 and 6.4 s), playing from about 13 s (13.4 s both), no stall (the least buffer 4.0 s), made in
+  63.4 and 61.0 s; a 30 s song played from 8.1 s. The kept take is the engine's finished WAV, the same samples that
+  were played. Limits: a Mac only (no route on a Spark streams); only 30 s and 60 s were measured through the app, and
+  the wait grows with the length (about 56 s for a 300 s song, from the engine's own figure); nobody has listened for
+  seams. Details in [Music](#music-minimax-music-3).
+- **Music on a DGX Spark: TensorFold's CUDA engine for MiniMax Music 3 (MiniMax-Music3).** The Music tab on a Spark now
+  runs `music3-generate`, TensorFold's native CUDA port (branch `music3-cuda`, 6b714531: Zig + CUDA, no Python at run
+  time), wherever it is built and the weights are there; otherwise it falls back to ComfyUI's nodes as in 2.9.0.
+  `MUSIC3_BACKEND=cuda|comfy` chooses; the tab's state says which route runs and, after a fall-back, why.
+  - **int8 weights by default**, made on the GPU as the engine loads (no cache file): the autoregressive model, its
+    head and the depth decoder at 8 bits. `MUSIC3_WEIGHTS=bf16` runs the checkpoint's own weights. It reads
+    Comfy-Org's three files as they are (`~/spark-studio-models/MiniMax-Music3-Comfy`, `MUSIC3_MODEL` names another).
+  - **Same lifecycle as the Mac engine:** a persistent server, loaded on the first song, holding
+    `~/studio-gpu.lock.d` while loaded, unloaded after five idle minutes and before any other job, under the
+    memory kill-guard; a studio ComfyUI that holds models is stopped before it loads. Never beside H3, Drama 3 or
+    ComfyUI's models.
+  - **Installed by** `bash oneshot-setup-spark.sh --music` (and `--upgrade` where the weights are): `spark/build-music3.sh`
+    takes the prebuilt binary from the carrier image, or builds it with nvcc 12.9+ and Zig 0.17 (50 s on a GB10).
+  - **Measured on one GB10** (int8, hip-hop lyrics, seed 7, 30 steps; one run each; memory is MemTotal - MemAvailable
+    above the idle machine):
+
+    | Song | TensorFold CUDA (int8) | ComfyUI's nodes (2.9.0) |
+    |---|---|---|
+    | 30 s, engine | 60.3 s | 131.0 s |
+    | 60 s, engine | **123.9 s** (AR 73.9 s at 20.4 frames/s, DiT 46.4 s, DAV 3.6 s) | 260.6 s |
+    | 120 s, engine | 252.0 s | 527.6 s |
+    | 60 s through the app | **149.2 s** for the song (load 37.3 s, AR 68.2 s, DiT 40.4 s, DAV 3.3 s; the model ended it at 55.2 s), 171.4 s with Whisper's check (97 %, 164 of 169 words) | 270.6 s for the song (ComfyUI started for it; AR 166.5 s, DiT 94.3 s, DAV 4.0 s; 59.99 s made), 297.0 s with Whisper (96 %, 162 of 169), 29.4 GB at the peak: the same run of the 2.9.1 app with `MUSIC3_BACKEND=comfy` |
+    | Peak memory, 60 s | 17.9 GB (18.7 GB through the app) | 29.3 GB |
+
+    bf16 weights: a 60 s song in 194.3 s and 25.5 GB. Parity against ComfyUI's nodes and Whisper's lyric count
+    passed on the engine branch (docs/recipes/minimax-music3-cuda.md there).
+  - **Honest limits.** No streaming on the Spark: a song is heard when it is done. Built and measured on a GB10
+    only (the build refuses another GPU unless `MUSIC3_ANY_GPU=1`; elsewhere use `MUSIC3_BACKEND=comfy`). Loading
+    takes about 37 s each time the engine starts (int8 is made at load), so the first song after five idle minutes
+    pays it again. Songs over 120 s are not measured on this engine; the memory estimate goes on at the measured slope.
+- **Carrier image** `ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1` adds the prebuilt Spark `music3-generate`
+  (`spark-music3/`) beside the H3 engine.
 
 ## New in 2.9.0
 
@@ -46,7 +97,7 @@ cores · a 2x video decoder for 2K finals on the Mac
   - **Style** is a caption: genre, tempo, key, mood, vocals, instruments. A helper writes one from those six boxes.
   - **Use as soundtrack:** a song can be laid under a long video, the Editor's export or any clip of the Library. It
     sits under the clip's own sound, is lowered up to 12 dB while someone speaks, and no peak passes -1 dBFS.
-  - **Mac:** TensorFold's MLX port (`music3-mlx`, pinned at 71c7c1f8), installed by `bash oneshot-setup.sh --music`
+  - **Mac:** TensorFold's MLX port (`music3-mlx`, pinned at 6844b413), installed by `bash oneshot-setup.sh --music`
     into its own environment, with the 22 GB of weights. **DGX Spark:** ComfyUI's own MiniMax Music 3 nodes,
     `bash oneshot-setup-spark.sh --music`.
   - **Measured through the app, one 60 s song on each machine** (the same pop lyrics and style, seed 7, 30 steps; one run
@@ -62,7 +113,8 @@ cores · a 2x video decoder for 2K finals on the Mac
     | Peak memory | 27.6 GB (MLX's own peak); the machine's in use rose 32.9 GB | 29.3 GB taken from the machine (MemTotal - MemAvailable, 5.1 GB before) |
     | Whisper on the take | 96 % of the words sung (128 of 134); the song reached 43 % of the lyrics at 60 s | 1 %: on this take Whisper heard only "We'll be right back" twice. A second take through the app (hip-hop lyrics, seed 11, 273.2 s): 98 % (166 of 169), all the lyrics reached |
 
-  - **Honest limits.** A song is not played while it is made (no streaming yet). Whisper's count on sung words is
+  - **Honest limits** (as of 2.9.0; 2.9.1 plays a song while it is made on a Mac and adds TensorFold's CUDA engine on
+    a Spark, above). A song is not played while it is made (no streaming yet). Whisper's count on sung words is
     rough, and one Spark take in three was barely heard by it (above). Lengths measured: on the Spark 30, 60, 120 and
     300 s asked (one run each; the 300 s one ended itself at 189.8 s, so no song over 120 s was made to its full length
     there); on the Mac songs of 10, 30 and 60 s. Other lengths are untested, and so is anything but the default
@@ -161,6 +213,22 @@ Each lists what was tested and what was not:
 | #941 to #944 | This Studio: Slate, Motion Previs, FLUX3-K and Voice |
 
 These are proposals: this repository's install still pins the engines on the `drowzeys/TensorFold` fork.
+
+## Big credit: Sam Wasserman (wassermanproductions.com)
+
+**Sam Wasserman shaped the production side of this studio: the AI film workflow and the ideas behind it.** Slate, his
+prompt studio for AI filmmaking, is the workflow inside the Wasserman Slate AI Studio tab. The Wasserman Sharp Spec,
+the QA gate that follows it, and the 80s Horror LoRA that opens the Keys and Wasserman LoRA Hub are his too. The Motion Previs tab's analysis is a
+Python port of his [Motion Previs Studio](https://github.com/wassermanproductions/motion-previs-studio). The aim
+we share is the best AI film studio there is, and this pack is where his planning tools meet a render engine. See
+[CREDITS.md](CREDITS.md).
+
+**Thank you to everyone this stands on:** the Qwen team at Alibaba (Qwen-Image-2.1, Qwen3-VL), the MiniMax team
+(MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
+Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
+decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
+contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
+[CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
 ## Which picture model to use: the evidence
 
@@ -479,6 +547,15 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.9.2 (2026-10-17): Music on TensorFold's native Metal engine on an M5 Mac.** No live playback there yet; an M1 to
+> M4, or `MUSIC3_BACKEND=mlx`, keeps the MLX port and its live playback. Details: [New in 2.9.2](#new-in-292).
+
+> **2.9.1 (2026-10-16): Music on both machines.** int8 weights and play while it's made on a Mac; TensorFold's CUDA
+> engine for MiniMax-Music3 on a DGX Spark. Details: [New in 2.9.1](#new-in-291).
+
+> **2.9.0 (2026-10-16): Music, MiniMax Music 3.** A Music tab: a song from lyrics and a style, laid under a video if
+> you like. Details: [New in 2.9.0](#new-in-290).
 
 > **2.8.1 (2026-10-16): Qwen 2.1 Full.** The picture-model choice adds Qwen-Image-2.1's 40-step base model as
 > **Qwen 2.1 Full**, beside **Qwen 2.1 Turbo**, as FLUX3-K has Fast and Full.
@@ -1027,12 +1104,13 @@ and roughly how long it takes.
 
 | Choice | What it does |
 |---|---|
-| **The prompt goes to** | *Video with sound*, or *Image only*: Qwen-Image-2.1 makes the pictures and stops there. |
-| **The clip starts from** | *Text only*; *a Qwen scout image* (step 2 makes several, you pick one); *your own image* (step 2 uploads it); or, with `--ref2va` installed, *reference pictures* (step 2 takes up to nine: who or what must look the same, in a scene the prompt describes; on a Mac whose engine packs them, also up to three reference videos and three audio clips: see [Reference videos and reference audio](#reference-videos-and-reference-audio-ref2va-mac-only-for-now)). |
+| **The prompt goes to** | *Video with sound*; *Image only*: the picture model makes the pictures and stops there; or *Edit a picture*: it re-draws a picture you give it. |
+| **Picture model** (where more than one is installed) | *Qwen 2.1 Turbo*, *Qwen 2.1 Full*, *FLUX3-K Fast* or *FLUX3-K Full*, for images, scouts, a last frame and edits: see [Which picture model to use](#which-picture-model-to-use-the-evidence). |
+| **The clip starts from** | *Text only*; *a scout image* (step 2 makes several with the picture model, you pick one); *your own image* (step 2 uploads it); or, with `--ref2va` installed, *references* (step 2 takes up to nine pictures: who or what must look the same, in a scene the prompt describes; where the engine packs them, also up to three reference videos and three audio clips: see [Reference videos and reference audio](#reference-videos-and-reference-audio-ref2va)). |
 | **Video engine** (shown only with `--turbo` installed) | *FastH3*: fastest; text to video runs on the native Zig engine, and the bar under the cards says which engine a clip will use. *MiniMax H3*: the Turbo adapter with the sound made again by the base model, or the full 20 steps. |
 | **Passes** (FastH3) | 4 (fastest, a little softer), 8 (what it was trained for), 20 (for prompts with several actions; slowest). |
 | **Quality** (MiniMax H3, with `--turbo`) | Turbo 5 + base sound (the standard), Turbo 3, 20 steps with the fast recipe, or plain 20 steps. |
-| **Resolution** | 480p (864x480), 720p (1280x720), or the fixed outputs Draft, 2K 2048x1152 and Native 1344x768. |
+| **Resolution** | 480p (864x480), 720p (1280x720), the fixed outputs Draft, 2K 2048x1152 (Mac) and Native 1344x768, Wasserman Sharp 1376x768, or Custom (your own width and height). |
 | **2x upscale** | For 480p and 720p: the 2x decoder turns 480p into 1728x960 and 720p into 2560x1440, for about 10 s more. |
 | **Length** | 5, 8, 10 or 15 s as one clip, or *Another length…* for any length the model takes (below); 30 s to 30 min as a chain of clips (further below). |
 | **Seed** | Same seed and settings give the same clip. |
@@ -1254,11 +1332,25 @@ length. A segment can open on the last frame of the one before; one button rende
 ![Editor](samples/ui_editor.png)
 
 **Editor** is a single-track timeline: order the clips, set in and out points, preview the sequence, export one file.
+Once the Music tab has a song, *Song under the export* lays it under the whole export.
 
 ![Library](samples/ui_library.png)
 
-**Library** lists every render, scout and export; *use* makes an image the first frame of a new clip, *+ timeline*
-sends a clip to the editor, and 🗑 moves a file to `~/TensorFoldStudio/trash`.
+**Library** lists every render, scout and export. Under a picture: *use* makes it the first frame of a new clip,
+*last frame* ends a clip on it, *edit* opens Edit a picture, and *Turnaround* makes five views. Under a clip: *continue*
+starts a new clip on its last frame, *+ timeline* sends it to the editor, *Upscale* and *Remove a person*. 🗑 moves a
+file to `~/TensorFoldStudio/trash`.
+
+![Tutorial (screenshot from 2.4; the tab now has a part for each tab of the app)](samples/ui_tutorial.png)
+
+**Tutorial** teaches the rest of the app in short lessons, one step on screen at a time, with an example and a tip
+where they help. They are grouped in eight parts, one per tab: Create, Production, Motion Previs, Voice, Music,
+Editor, Library and Sparks. A full install shows 22 lessons on a Mac and 23 on a DGX Spark (the memory guard has a
+lesson of its own there); lessons for parts that are not installed, such as Ref2VA or the Sharp Spec, are left out.
+Every feature through 2.9 has one: the picture models, Edit a picture, references and a last frame, long videos,
+the LoRA hub, the Sharp Spec, Voice, Music, the Library actions and the Sparks setting. *Show me in the app* opens
+the tab a step is about and outlines the control; a bar at the bottom then carries the lesson forward from inside
+the app. Finished lessons are remembered in the browser.
 
 ### Library actions: Turnaround sheet, Upscale, Remove a person
 
@@ -1339,8 +1431,6 @@ stays. Deleting never touches a project file, a LoRA or a model: only pictures, 
 studio folder of test clips: each Clear and Undo, one job deleted and put back, two ticked jobs, the failed ones,
 all finished, restore, two ticked Library files, and the trash emptied (25 checks). Not driven in a browser: the
 *Clear* above a Slate shot's prompt (it is the same control as a segment's).
-
-![Tutorial](samples/ui_tutorial.png)
 
 #### Wasserman Sharp Spec
 
@@ -1652,13 +1742,10 @@ Not ported from Slate: sequence chunks, alt takes, punch-ups, the tone dial, pic
 and audio analysis, the stills library, compiles for other generators, and its MCP server. The app has no sign-in of
 its own: anyone who can open it can use the brain, so keep it on a network you trust.
 
-**Tutorial** teaches the other four: eleven short lessons, one step on screen at a time, with an example and a tip
-where they help. *Show me in the app* opens the tab a step is about and outlines the control; a bar at the bottom
-then carries the lesson forward from inside the app. Finished lessons are remembered in the browser.
-
-The app drives the same scripts as the command line, one job at a time, and keeps projects, uploads and renders
-under `~/TensorFoldStudio`. What it is not: the editor has one video track with trims and ordering only (no
-transforms, text, transitions or audio mixing), and there is no assisted prompt writing. The workflow is modelled
+The app drives the same scripts as the command line, one job at a time on each machine, and keeps projects, uploads
+and renders under `~/TensorFoldStudio`. What it is not: the editor has one video track with trims and ordering only
+(no transforms, text or transitions; its only audio step is a song laid under the export), and outside Slate's ✦
+buttons there is no assisted prompt writing. The workflow is modelled
 on rookiestar28's ComfyUI-MiniMaxH3-Studio, which does far more; no code is shared with it.
 
 ## Voice (Fish Audio Drama 3)
@@ -1862,6 +1949,33 @@ called and the pack ships no weights.
 - **The lyrics check.** With faster-whisper installed, Whisper listens to the take and counts the lyrics' words it
   heard, in order, up to the last one it heard (`asr.score`), and how far into the lyrics the song got
   (`asr.reached`). Sung words are harder to hear than spoken ones: treat it as a rough count.
+- **Play while it's made** (a Mac on the MLX port). With the box ticked (the default when the engine streams), the song plays in the
+  tab while the engine makes it. The engine's stream appends raw 16-bit stereo PCM to a file as it decodes each piece
+  (`pcm` in the request, as Drama 3's server does), and `GET /api/music/takes/{id}/live` serves it as one WAV, two
+  channels at 44.1 kHz, its length left open. A stream is slightly slower than real time and gets slower as the song
+  grows (60 s hip-hop: a 4 s piece every 4.2 s at the start, every 4.7 s near the end). So the app holds the sound
+  back until playing will not run dry. It waits for the engine's measured no-stall start (10.3 s from the request for
+  60 s, 52.7 s for 300 s, a straight line between and beyond) plus 3 s. If the engine is running slower than that
+  measurement, it waits for a larger lead as well. The kept take is the engine's finished WAV, the same samples that
+  were played (checked byte for byte on two songs), and the lyrics check and *Use as soundtrack* work on it as before.
+  Untick the box to hear the song only when it is done.
+  Measured through the app on the Mac Studio M5 Ultra (int8, the hip-hop prompt; first sound is the engine's
+  `first_audio_ms`, the start is when the live route let the sound go, both counted from the request; the least
+  buffer is the smallest amount of song a player started at that moment had in hand, from the bytes as they
+  arrived):
+
+  | Song | First sound | Playing from | Least buffer | Made in |
+  |---|---|---|---|---|
+  | 60 s (seed 7, engine loaded for it, 1.0 s) | 7.6 s | 13.4 s | 4.0 s, at 49 s | 63.4 s |
+  | 60 s, ended by the model at 57.9 s (seed 11) | 6.4 s | 13.4 s | 4.0 s, at 45 s | 61.0 s |
+  | 30 s (seed 3) | 6.4 s | 8.1 s | 1.6 s, at 19 s | 30.0 s |
+
+  Before that margin was added, a start at the first piece (10.7 s) ran dry for 0.18 s at 53 s of a 60 s song, which
+  is why the margin is there. Limits: it works on a Mac only, because neither route on a DGX Spark streams (the CUDA
+  engine and ComfyUI's nodes alike) and the box is not shown there. Only 30 s and 60 s songs were measured through the app; the 300 s figure is the
+  engine's own (no-stall 52.7 s). Starting about 13 s in is the price of a stream that runs slower than real time,
+  and the wait grows with the length (about 56 s for 300 s). The engine found no seams by measure, but nobody has
+  listened for them. A browser's own buffering comes on top.
 - **Use as soundtrack.** Under a song, *Use as soundtrack* lays it under a video: a long video (its card in Create has
   *Lay a song under it*), the Editor's export or any clip of the Library. In the Editor, *Song under the export* does
   it for the whole timeline. ffmpeg mixes the song at -10 dB (your choice, -30 to 0) under the clip's own sound; a
@@ -1870,7 +1984,21 @@ called and the pack ships no weights.
   under -1 dBFS, checked after the AAC encode (under the 48.6 s promo: -1.46 dBFS on the Mac, -2.0 on the Spark). The picture is copied;
   the result is a new file in `exports/`.
 
-**On a Mac** the song runs on TensorFold's MLX port of MiniMax Music 3 (fork branch `music3-mlx`, commit 71c7c1f8: the
+**On a Mac with an M5 or later and TensorFold's Metal engine** (since 2.9.2, the default where it is built) the song
+runs on `music3-generate --serve 1` built for Metal: Zig and Metal, no Python, MLX or PyTorch (fork branch
+`upstream/music3-metal`, commit 8c9559da, the code of TensorFold pull request #987; `$PREFIX/music3/bin`,
+`MUSIC3_METAL_BIN` names another). It has the CUDA engine's protocol and lifecycle, int8 weights by default
+(`MUSIC3_WEIGHTS=bf16` for the checkpoint's own) and the kill-guard. `bash oneshot-setup.sh --music` builds it
+(`scripts/build-music3-metal.sh`: Zig 0.17 and Xcode's Metal compiler, a few minutes) beside the MLX port. Without
+it, or on an M1 to M4 (its DiT, prompt rows and decoder need the M5's tensor units), the Mac runs the MLX port below,
+and `MUSIC3_BACKEND=mlx` chooses that port anyway. **It does not stream yet**, so *Play while it's made* is not shown;
+the MLX port keeps it. Measured on a Mac Studio M5 Ultra against the MLX port int8 (same prompt and seed, 60 s
+hip-hop, runs alternated, three each, TensorFold's command line): the autoregressive model 69 frames/s against 65,
+the whole song 59.5 to 63.0 s against 62.3 to 63.9 s, peak footprint 17.8 GB against 28.1 GB, byte-identical repeats.
+Its DiT and decoder match ComfyUI's reference more closely than MLX's (38.97 dB and 103.9 dB against 34.9 and 50.5).
+Through the app: a song the model ended at 33.4 s took 35.2 s, the load (2.9 s) included, with a 16.1 GB peak.
+
+**On an older Mac, or with `MUSIC3_BACKEND=mlx`,** the song runs on TensorFold's MLX port of MiniMax Music 3 (fork branch `music3-mlx`, commit 6844b413: the
 autoregressive model with its depth decoder, the DiT and the DAV decoder, in MLX), as a persistent process in its own
 environment (`python -m tensorfold.music3 --serve`, Drama 3's protocol), under a memory guard (8 GB of vm_stat's free
 pages, `MUSIC3_GUARD_GB`). `bash oneshot-setup.sh --music` (`scripts/setup-music.sh`) clones the branch at that commit
@@ -1881,7 +2009,35 @@ through the app, a 60 s song in 75.8 s (the autoregressive model 37.8 s, the DiT
 peak 27.6 GB. TensorFold's own run of the command line (the same hip-hop lyrics as the Spark's, seed 7): 30 s in
 61.2 s, 60 s in 82.5 s, both at 27.6 GB.
 
-**On a DGX Spark** the song runs in the studio's ComfyUI (`spark_generate.py music`) on ComfyUI's own MiniMax Music 3
+**int8 weights by default.** The Studio starts the Mac engine with `--quant int8`: the autoregressive model,
+its code-0 head and the depth decoder at 8 bits. On the M5 Ultra the autoregressive model went from 40 to 65 frames a
+second and the peak from 27.6 to 20.5 GB, so a 60 s song takes about 1.1 times its length. Against ComfyUI's
+reference the code-0 logits keep cosine 0.99994 (bf16 0.99997) with 98.0 % greedy agreement, and Whisper's lyric
+scores over six same-seed songs stayed within their noise. Measured through the server as the app starts it: 10 s in
+10.1 s, 20.9 GB. `MUSIC3_QUANT=none` runs the bf16 weights.
+
+**On a DGX Spark with TensorFold's CUDA engine** (since 2.9.1, the default where it is built) the song runs on
+`music3-generate --serve 1` (fork branch `music3-cuda`, commit 6b714531; `$PREFIX/music3/bin`, `MUSIC3_CUDA_BIN` names
+another), the Mac engine's protocol and lifecycle: loaded on the first song (about 37 s; int8 weights are made on the
+GPU as it loads, `MUSIC3_WEIGHTS=bf16` for the checkpoint's own), holding the GPU lock while loaded, unloaded after
+`MUSIC3_IDLE_S` and before any other job, under the kill-guard (`MUSIC3_GUARD_GB`, 8). A studio ComfyUI that holds
+models is stopped before it loads. `bash oneshot-setup-spark.sh --music` downloads the weights and installs the engine
+(`spark/build-music3.sh`: from the carrier image, or built with nvcc 12.9+ and Zig 0.17). Measured on one GB10, int8,
+the same hip-hop lyrics, seed 7 (one process a song, memory above the idle machine):
+
+| Asked for | Made | Whole run (load 36.6 to 37.4 s included) | Autoregressive model | DiT, 30 steps | Decoder | Peak memory taken |
+|---|---|---|---|---|---|---|
+| 30 s | 30.0 s | 60.3 s | 36.4 s (20.9 frames/s) | 22.0 s | 1.9 s | 16.6 GB |
+| 60 s | 60.0 s | 123.9 s | 73.9 s (20.4 frames/s) | 46.4 s | 3.6 s | 17.9 GB |
+| 120 s (hip-hop lyrics) | 63.3 s (the model ended it) | 128.2 s | 78.0 s | 46.3 s | 3.9 s | 18.9 GB |
+| 120 s (long lyrics, seed 5) | 120.0 s | 252.0 s | 151.7 s (19.9 frames/s) | 93.0 s | 7.3 s | 19.3 GB |
+| 60 s, bf16 weights | 60.0 s | 194.3 s | 144.4 s (10.4 frames/s) | 46.3 s | 3.6 s | 25.5 GB |
+
+Through the app on a worker Spark: a 60 s song in 149.2 s (load 37.3 s, then 111.9 s; the model ended it at 55.2 s),
+18.7 GB at the peak, Whisper 97 %; the engine unloaded after its idle time and gave the lock back. Not streamed;
+GB10 only. Without the binary or the weights the tab uses ComfyUI's nodes, below; `MUSIC3_BACKEND=comfy` forces them.
+
+**On a DGX Spark without it** the song runs in the studio's ComfyUI (`spark_generate.py music`) on ComfyUI's own MiniMax Music 3
 nodes, laid out as ComfyUI's blueprint *Text to Music (MiniMax Music 3)*: the text encoder (pruned, bf16, 16.7 GB) runs
 the autoregressive model, the DiT (fp16, 4.9 GB) the 30 steps, the DAV decoder works in tiles. A song starts from a
 ComfyUI with nothing else loaded (the server is restarted when it held the video or picture models); afterwards its
@@ -1905,7 +2061,8 @@ empty page cache with ComfyUI stopped, a 60 s song took 289.0 s and 29.3 GB (the
 Whisper heard 96 % of the words of the 60 s hip-hop song above (162 of 168).
 
 The API: `GET /api/music/state`, `POST /api/music/takes {caption, lyrics, seconds, seed?, steps?, dit_cfg?, ar_cfg?,
-top_k?, title?, asr?}` (a job of kind `music`), `GET /api/music/takes`, `GET /api/music/takes/{id}/audio`, `POST
+top_k?, title?, asr?, live?}` (a job of kind `music`; `live: false` does not stream), `GET /api/music/takes`, `GET
+/api/music/takes/{id}/audio`, `GET /api/music/takes/{id}/live` (the song being made, a stereo WAV), `POST
 /api/music/soundtrack {take, video, music_db?}` (a job of kind `soundtrack`), and an export job's `params.soundtrack
 {take, music_db?}`. Songs are kept in `~/TensorFoldStudio/music/` (the WAV and its settings and measurements).
 
@@ -2777,18 +2934,19 @@ videos at once, and sound by ear (the figures above are measurements).
 ### GHCR prebuilt carrier
 
 ```bash
-docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0
-# index digest: sha256:44dba56cb8e316cdc35a3e227f1d5109901ad9209a0cdb408e3ef27e5a2265be (linux/arm64 + linux/amd64)
-docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0 cp -a /payload/. /out/payload/
+docker pull ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1
+docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1 cp -a /payload/. /out/payload/
 ```
 
 One image for both builds. For a Mac it holds the TensorFold wheel, `requirements.lock`, the render scripts, the
 prebuilt native FastH3 engine (`zig-engine/tf-h3-dit`, built for Apple Silicon at the pinned commit) and `SHA256SUMS`.
 For a DGX Spark it holds the prebuilt CUDA engine (`spark-engine/libtf_h3.so`, GB10, aarch64; since 2.8.0 the
 `h3-cuda-lora` build at `1f7ecc75`, with LoRA support, so a Spark install no longer builds it from source), which
-`spark/build-engine.sh` takes when Docker is there and otherwise builds from source. **It is not a runtime**: neither
+`spark/build-engine.sh` takes when Docker is there and otherwise builds from source; since 2.9.1 also MiniMax Music 3's
+`spark-music3/music3-generate` (`music3-cuda` at 6b714531), which `spark/build-music3.sh` takes the same way. The Mac's
+Drama 3 and Music engines are not in it: their installers clone TensorFold at the pinned commits. **It is not a runtime**: neither
 Metal nor the Spark's models run in a container, so the setup installs natively. Rebuild it with
-`PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh`, to include its engine). Up to 2.2
+`PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh` and `spark/build-music3.sh`, to include its engines). Up to 2.2
 the image was `ghcr.io/drowzeys/keys-mac-tensorfold-studio`; the Mac setup still falls back to it.
 
 ## Stack

@@ -1,7 +1,10 @@
 #!/bin/bash
 # Build and push the GHCR carrier image, one for both builds: for a Mac the TensorFold wheel at the pinned commit, the
-# dependency lock, the render scripts and the native Metal engine; for a DGX Spark the prebuilt CUDA engine
-# (payload/spark-engine, copied from $PREFIX/tf-h3 on a Spark where spark/build-engine.sh has run).
+# dependency lock, the render scripts and the native Metal engine; for a DGX Spark the prebuilt CUDA engines
+# (payload/spark-engine, copied from $PREFIX/tf-h3 on a Spark where spark/build-engine.sh has run, and
+# payload/spark-music3, MiniMax Music 3's, from $PREFIX/music3 where spark/build-music3.sh has run).
+# Build it on a worker DGX Spark (arm64 + CUDA) with both engines built; payload/zig-engine comes from a Mac, or from
+# the previous carrier when its commit is unchanged (docker run --rm -v "$PWD/payload":/out IMAGE:OLD cp -a /payload/zig-engine /out/).
 #   bash scripts/build-carrier.sh           # build only
 #   PUSH=1 bash scripts/build-carrier.sh    # build + push (needs `docker login ghcr.io` with write:packages)
 # The wheel is pure Python, so the carrier can be built on any machine with Docker and python3. The native engine
@@ -10,12 +13,15 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio}"
-TAG="${TAG:-2.8.0}"
+TAG="${TAG:-2.9.1}"
 TF_REPO="https://github.com/drowzeys/TensorFold.git"
 TF_COMMIT="a2b592fef5366bf16d4729651b6549094981d3fe"
 cd "$HERE"
 mkdir -p payload
-python3 -m pip wheel --no-deps -q -w payload "tensorfold @ git+$TF_REPO@$TF_COMMIT"
+# WHEEL_DIR: a folder holding the wheel already built at TF_COMMIT (for a worker Spark without network: build it on a
+# machine with network, `python3 -m pip wheel --no-deps -w DIR "tensorfold @ git+$TF_REPO@$TF_COMMIT"`, and copy it)
+if [ -n "${WHEEL_DIR:-}" ]; then cp "$WHEEL_DIR"/tensorfold-*.whl payload/
+else python3 -m pip wheel --no-deps -q -w payload "tensorfold @ git+$TF_REPO@$TF_COMMIT"; fi
 cp requirements.lock h3_generate.py qwen_image_generate.py zig_fasth3.py fasth3_q8.py payload/
 ( cd payload && sha256sum tensorfold-*.whl requirements.lock h3_generate.py qwen_image_generate.py zig_fasth3.py fasth3_q8.py > SHA256SUMS )
 if [ -x payload/zig-engine/tf-h3-dit ]; then ( cd payload/zig-engine && sha256sum -c SHA256SUMS ) || { echo "payload/zig-engine does not match its checksums" >&2; exit 1; }
@@ -28,6 +34,14 @@ if [ -s "$SPARK_ENGINE/libtf_h3.so" ]; then
   ( cd payload/spark-engine && sha256sum libtf_h3.so commit > SHA256SUMS )
   echo "spark-engine: libtf_h3.so at $(cut -c1-8 payload/spark-engine/commit) ($(uname -m), sm_121)"
 else echo "NOTE: no engine at $SPARK_ENGINE: this carrier will not hold the DGX Spark engine" >&2; fi
+# the DGX Spark's MiniMax Music 3 engine (music3-generate, branch music3-cuda), when this machine has built it
+SPARK_MUSIC3="${PREFIX:-$HOME/.local/opt/tensorfold-studio}/music3"
+if [ -x "$SPARK_MUSIC3/bin/music3-generate" ]; then
+  mkdir -p payload/spark-music3
+  cp "$SPARK_MUSIC3/bin/music3-generate" "$SPARK_MUSIC3/commit" payload/spark-music3/
+  ( cd payload/spark-music3 && sha256sum music3-generate commit > SHA256SUMS )
+  echo "spark-music3: music3-generate at $(cut -c1-8 payload/spark-music3/commit) ($(uname -m), sm_121)"
+else echo "NOTE: no engine at $SPARK_MUSIC3: this carrier will not hold the DGX Spark's music engine" >&2; fi
 cat payload/SHA256SUMS
 if [ "${PUSH:-0}" = 1 ]; then
   docker buildx build --platform linux/arm64,linux/amd64 -f Dockerfile.ghcr -t "$IMAGE:$TAG" -t "$IMAGE:latest" --push .

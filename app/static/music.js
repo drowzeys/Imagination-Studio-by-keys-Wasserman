@@ -2,8 +2,9 @@
 /* Music · MiniMax Music 3, a tab of its own (app/music.py). MiniMax-Music3.
    A song from lyrics (section tags such as [Verse] and [Chorus]) and a style caption, made on this machine: up to five
    minutes with sung vocals, 44.1 kHz stereo, one song per job in the render queue. A song can be laid under a long
-   video or the Editor's export as its soundtrack (ducked under the dialogue). */
-const MU = { takes: null, caption: "", lyrics: "", seconds: 60, seed: 1, job: null, asr: true, open: false,
+   video or the Editor's export as its soundtrack (ducked under the dialogue). On a Mac a song plays while it is made
+   (GET /api/music/takes/{id}/live, a stereo WAV whose sound the app holds back until playing it will not stop). */
+const MU = { takes: null, caption: "", lyrics: "", seconds: 60, seed: 1, job: null, asr: true, open: false, stream: true, player: null,
   style: { genre: "", bpm: "", key: "", mood: "", vocals: "", instruments: "" }, under: null, level: -10, lay: null, videos: null };
 const MU_TAGS = ["Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Instrumental", "Outro"];
 const MU_EXAMPLE = { caption: "Upbeat modern pop, 118 BPM, bright synths, punchy four-on-the-floor kick, clean electric guitar plucks, catchy sing-along chorus. Warm female lead vocal with layered harmonies.",
@@ -24,15 +25,29 @@ function muLyricsNotes(lyrics) {
   const odd = found.filter(t => !S.music.sections.some(s => s.toLowerCase() === t.toLowerCase().replace(/\s+\d+$/, "")));
   if (odd.length) notes.push("Tags the model may read as words: " + [...new Set(odd)].slice(0, 5).map(t => "[" + t + "]").join(", ") + ".");
   return notes; }
+// played while it is made (the Mac engine's stream; ComfyUI's route on a Spark cannot): on unless unticked
+const muStreams = st => !!(st && st.available && st.stream);
+// when a song of ``secs`` starts to play, in seconds from its request: music.py's start_s (the measured no-stall start
+// along the line through the lengths measured, and the margin)
+function muStart(secs, st) {
+  const lead = (st && st.stream_lead) || {}, pts = Object.entries(lead.no_stall_s || { 60: 10.3, 300: 52.7 }).map(([k, v]) => [Number(k), Number(v)]).sort((a, b) => a[0] - b[0]);
+  const [[a, ta], [b, tb]] = [pts[0], pts[pts.length - 1]];
+  return Math.max(0, b > a ? ta + (tb - ta) * (secs - a) / (b - a) : ta) + (lead.margin_s != null ? lead.margin_s : 3); }
+function muLive(job) {
+  if (!muStreams(S.music) || !job || job.status !== "running" || (job.params && job.params.live === false)) return null;
+  if (!MU.player || MU.player.id !== job.id) MU.player = { id: job.id, el: el("audio", { src: "/api/music/takes/" + encodeURIComponent(job.id) + "/live", controls: true, autoplay: true, preload: "auto", style: "width:100%;margin-top:8px" }) };
+  return el("div", {}, el("div", { class: "note", style: "margin:8px 0 0" }, "Playing while it is made (MiniMax-Music3): it starts once enough of the song is made that it never stops."), MU.player.el); }
 async function muLoad() { try { MU.takes = await api("/api/music/takes"); } catch { MU.takes = []; } if (tab === "Music") render(); }
 const muLine = t => [t.duration != null ? Number(t.duration).toFixed(1) + " s" + (t.ended ? " (the model ended it)" : "") : null,
   t.total_s ? "made in " + mmss(t.total_s) : null, t.rtf ? t.rtf + "× its length" : null, t.load_s ? "models loaded in " + Math.round(t.load_s) + " s" : null,
   t.peak_memory_gb ? t.peak_memory_gb + " GB at the peak" : null,
+  t.streamed ? "played while made" + (t.first_audio_s != null ? ": first sound after " + t.first_audio_s + " s" : "") + (t.play_s != null ? ", playing from " + t.play_s + " s" : "") : null,
   t.asr && t.asr.score != null ? "Whisper heard " + t.asr.score + " % of the words sung (" + t.asr.found + " of " + t.asr.words + ")" + (t.asr.reached != null && t.asr.reached < 100 ? ", the song got " + t.asr.reached + " % into the lyrics" : "") : t.asr && t.asr.skipped ? "no lyrics check: " + t.asr.skipped : null,
   "seed " + t.seed].filter(Boolean).join(" · ");
 async function muRender() {
   if (!MU.caption.trim()) return toast("Describe the style first (the helper below writes one)");
-  try { MU.job = await api("/api/music/takes", { caption: MU.caption, lyrics: MU.lyrics, seconds: Number(MU.seconds), seed: Number(MU.seed), asr: MU.asr }); }
+  try { MU.job = await api("/api/music/takes", { caption: MU.caption, lyrics: MU.lyrics, seconds: Number(MU.seconds), seed: Number(MU.seed), asr: MU.asr,
+    ...(muStreams(S.music) ? { live: !!MU.stream } : {}) }); }
   catch (e) { return toast(e.message); }
   await poll(); render(); }
 async function muLay(t) {
@@ -95,9 +110,13 @@ function viewMusic() {
     muHelper()));
   const secs = Math.min(Math.max(Number(MU.seconds) || 60, st.seconds[0]), st.seconds[1]);
   put(box, el("div", { class: "row", style: "margin-top:16px;align-items:center" }, el("div", { class: "fit" }, el("button", { class: "hot", disabled: !st.available || muActive(), onclick: muRender }, muActive() ? "Making the song…" : "Generate")),
-    el("div", { class: "note", style: "margin:0" }, st.available ? "One song at a time in the queue, never beside a video render or a voice take. About " + mmss(secs * (st.rtf || 1)) + " for " + secs + " s once the models are loaded (" + (st.route === "comfy" ? "they stay loaded in ComfyUI" : "the engine stays loaded") + " for " + Math.round(((st.server || {}).idle_unload_s || 300) / 60) + " minutes after a song, and is unloaded at once when another job starts). Not played while it is made." : "")),
+    el("div", { class: "note", style: "margin:0" }, st.available ? "One song at a time in the queue, never beside a video render or a voice take. About " + mmss(secs * (st.rtf || 1)) + " for " + secs + " s once the models are loaded (" + (st.route === "comfy" ? "they stay loaded in ComfyUI" : "the engine stays loaded") + " for " + Math.round(((st.server || {}).idle_unload_s || 300) / 60) + " minutes after a song, and is unloaded at once when another job starts). "
+      + (muStreams(st) ? (MU.stream ? "Played while it is made: the engine's first sound comes after about 8 s, and it plays from about " + Math.round(muStart(secs, st)) + " s, once enough of the song is made that it never stops." : "Played when it is done.") : "Not played while it is made" + (st.route === "comfy" ? " (ComfyUI's route on a DGX Spark does not stream)." : st.route === "metal" ? " (TensorFold's Metal engine does not stream yet; MUSIC3_BACKEND=mlx runs the MLX engine, which does)." : ".")) : "")),
+    muStreams(st) ? el("label", { class: "check", title: "The song plays from the app as the engine makes it; the kept song is the engine's finished WAV either way" },
+      el("input", { type: "checkbox", checked: MU.stream, onchange: e => { MU.stream = e.target.checked; render(); } }), el("span", {}, "Play while it's made")) : null,
     el("label", { class: "check" }, el("input", { type: "checkbox", checked: MU.asr, onchange: e => { MU.asr = e.target.checked; } }), el("span", {}, "Have Whisper listen for the lyrics after (a rough score: sung words are harder to hear than spoken ones)")));
   if (MU.job) put(box, MU.job.status === "failed" ? el("div", { class: "tip" }, el("b", {}, "The song failed. "), MU.job.error || "") : muActive() ? jobCard(MU.job) : null);
+  if (MU.job) put(box, muLive(MU.job));
   put(box, el("h3", { style: "margin-top:22px" }, "Songs"), MU.takes.length ? MU.takes.slice(0, 40).map(muTake) : el("div", { class: "note" }, "No songs yet."));
   return box; }
 // the Editor: a song of this tab under the whole export (POST /api/jobs, kind export, params.soundtrack)

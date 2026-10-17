@@ -1,7 +1,7 @@
 # Agent one-shot — Wasserman Slate AI Studio, powered by TensorFold: Qwen-Image-2.1 + MiniMax H3 (MLX, Apple Silicon)
 
 **Repo:** https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3  
-**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.8.0` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engine)  
+**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, and MiniMax Music 3's `music3-generate`)  
 **Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2068c03`, own venv, int8 tensor-unit kernels
 
 ```bash
@@ -208,14 +208,23 @@ Rules:
   lyrics (section tags) and a style caption, on this machine only, never imported into the app's venv. The tab, every
   song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a
   Mac it is TensorFold's MLX port (`music3-mlx`, pinned in `scripts/setup-music.sh`, `oneshot-setup.sh --music`) as a
-  persistent `--serve` process (`music.Mlx`, voice's `Served`); on a DGX Spark ComfyUI's own nodes through
-  `spark_generate.py music` (`music_workflow`, the blueprint's layout), never standalone code. Either way it is loaded
+  persistent `--serve` process (`music.Mlx`, voice's `Served`); on a DGX Spark TensorFold's CUDA port
+  (`music3-generate --serve 1`, branch `music3-cuda` 6b714531, `spark/build-music3.sh` into `$PREFIX/music3`, carried
+  prebuilt in the carrier's `spark-music3`; `music.Cuda`, the same `Served` protocol; int8 by default, `MUSIC3_WEIGHTS=bf16`;
+  `MUSIC3_CUDA_BIN`, `MUSIC3_MODEL`) where its binary and the weights are, else ComfyUI's own nodes through
+  `spark_generate.py music` (`music_workflow`, the blueprint's layout), never standalone code; `MUSIC3_BACKEND=cuda|comfy`
+  chooses. The CUDA engine stops a studio ComfyUI that holds models before it loads. Either way it is loaded
   on the first song, holds `~/studio-gpu.lock.d` while loaded, is unloaded after `MUSIC3_IDLE_S` (300) and **before any
   other local job** (`music.release` at the top of `server.perform`), and Music, Drama 3 and H3 never run together; on a
   Spark a song starts from a ComfyUI with nothing else loaded and its models are freed with ComfyUI's /free.
-  `memory_guard.music_check` (`MUSIC_ESTIMATE`, `MUSIC_MEASURED`) is a measurement: change it only with a new one.
+  `memory_guard.music_check` (`MUSIC_ESTIMATE`, `MUSIC_MEASURED`; the CUDA engine's `MUSIC_CUDA_ESTIMATE`,
+  `MUSIC_CUDA_MEASURED`) is a measurement: change it only with a new one.
   Laying a song under a clip (`music.lay`: soundtrack jobs, the Editor's export) ducks it under the clip's speech and
-  keeps every peak under -1 dBFS: keep both. Not streamed; lyric accuracy is Whisper's rough count on sung words.
+  keeps every peak under -1 dBFS: keep both. On a Mac a song plays while it is made (`pcm` to
+  `/api/music/takes/{id}/live`, a stereo 44.1 kHz WAV; Voice's live WAV stays mono): its sound is held back until
+  `start_s` (the measured no-stall start, `NO_STALL_S`, and `HOLD_MARGIN_S`) and `lead_s`; those are measurements, change
+  them only with new ones. The kept song is the engine's finished WAV. A Spark does not stream, on the CUDA engine or ComfyUI's route.
+  Lyric accuracy is Whisper's rough count on sung words.
 - mflux, minimax-h3-mlx, flux3-mlx and TensorFold's music3-mlx are pinned by commit and used at run time. Do not unpin.
 
 **Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),
