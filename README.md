@@ -16,7 +16,7 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 *Credit first: Sam Wasserman shaped the production side of this studio (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes.*
 
-**2.9.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.9.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
@@ -547,6 +547,9 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.9.2 (2026-10-17): Music on TensorFold's native Metal engine on an M5 Mac.** No live playback there yet; an M1 to
+> M4, or `MUSIC3_BACKEND=mlx`, keeps the MLX port and its live playback. Details: [New in 2.9.2](#new-in-292).
 
 > **2.9.1 (2026-10-16): Music on both machines.** int8 weights and play while it's made on a Mac; TensorFold's CUDA
 > engine for MiniMax-Music3 on a DGX Spark. Details: [New in 2.9.1](#new-in-291).
