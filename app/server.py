@@ -1984,7 +1984,9 @@ if __name__ == "__main__":
         Path(os.environ["STUDIO_PIDFILE"]).write_text(str(os.getpid()))
     hub.start()
 
+    # Update authorization needs the actual socket peer. Tailscale Serve forwards the browser's IP,
+    # but its authenticated local proxy is the peer allowed to manage this loopback installation.
     web_server = uvicorn.Server(uvicorn.Config(app, host=os.environ.get("HOST", "127.0.0.1"),
-                               port=int(os.environ.get("PORT", "7870")), log_level="warning"))
+                               port=int(os.environ.get("PORT", "7870")), log_level="warning", proxy_headers=False))
     updater.restart = lambda: setattr(web_server, "should_exit", True)
     web_server.run()
