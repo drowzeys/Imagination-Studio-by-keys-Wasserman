@@ -133,6 +133,21 @@ def test_a_timeline_as_fcpxml():
     assert client.get("/api/export/timeline/nope.fcpxml").status_code == 404
 
 
+def test_a_timeline_with_its_media_opens_where_it_is_unzipped():
+    project = make_timeline()
+    answer = client.get(f"/api/export/timeline/{project}.zip", params={"root": "/Users/me/Movies/Cuts"})
+    assert answer.status_code == 200
+    bundle = zipfile.ZipFile(io.BytesIO(answer.content))
+    names = set(bundle.namelist())
+    assert {f"{project}/{project}.fcpxml", f"{project}/README.txt", f"{project}/media/one.mp4", f"{project}/media/two.mp4"} <= names
+    sources = [rep.get("src") for rep in ET.fromstring(bundle.read(f"{project}/{project}.fcpxml")).iter("media-rep")]
+    assert sources == [f"file:///Users/me/Movies/Cuts/{project}/media/one.mp4", f"file:///Users/me/Movies/Cuts/{project}/media/two.mp4"]
+    # without a folder the clips are named beside the timeline, for relinking
+    loose = zipfile.ZipFile(io.BytesIO(client.get(f"/api/export/timeline/{project}.zip").content))
+    assert [rep.get("src") for rep in ET.fromstring(loose.read(f"{project}/{project}.fcpxml")).iter("media-rep")] == ["media/one.mp4", "media/two.mp4"]
+    assert client.get(f"/api/export/timeline/{project}.zip", params={"root": "relative/folder"}).status_code == 400
+
+
 def test_a_timeline_as_cmx_3600():
     project = make_timeline()
     text = client.get(f"/api/export/timeline/{project}.edl").text

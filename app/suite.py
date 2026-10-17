@@ -25,7 +25,7 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from xml.sax.saxutils import quoteattr
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
@@ -663,9 +663,12 @@ def clip_spans(clips: list[dict], rate: tuple[int, int]) -> list[dict]:
 
 
 def fcpxml(name: str, clips: list[dict], rate: tuple[int, int] = (FPS, 1), size: tuple[int, int] = (1920, 1080),
-           song: dict | None = None) -> str:
+           song: dict | None = None, where=None) -> str:
     """FCPXML 1.11, one sequence: every clip in order with its in point and length, its picture and sound, and a song
-    (``song``: path, seconds) under the whole of it. DaVinci Resolve and Final Cut Pro read it; media by file:// URL."""
+    (``song``: path, seconds) under the whole of it. DaVinci Resolve and Final Cut Pro read it; media by file:// URL,
+    this machine's own unless ``where`` gives each file's URL on the computer the editor works on."""
+
+    where = where or (lambda path: Path(path).resolve().as_uri())
 
     num, den = rate
     t = lambda frames: f"{frames * den}/{num}s" if frames else "0s"
@@ -682,14 +685,14 @@ def fcpxml(name: str, clips: list[dict], rate: tuple[int, int] = (FPS, 1), size:
             audio = ' hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000"' if one.get("audio", True) else ""
             out.append(f'    <asset id="{assets[key]}" name={quoteattr(Path(key).stem)} start="0s" duration="{t(length)}" hasVideo="1" '
                        f'format="r1"{audio}>')
-            out.append(f'      <media-rep kind="original-media" src={quoteattr(Path(key).resolve().as_uri())}/>')
+            out.append(f'      <media-rep kind="original-media" src={quoteattr(where(key))}/>')
             out.append("    </asset>")
         refs.append(assets[key])
     if song:
         song_frames = max(1, round(float(song.get("seconds") or total * den / num) * num / den))
         out.append(f'    <asset id="rs" name={quoteattr(Path(song["path"]).stem)} start="0s" duration="{t(song_frames)}" hasAudio="1" '
                    'audioSources="1" audioChannels="2" audioRate="48000">')
-        out.append(f'      <media-rep kind="original-media" src={quoteattr(Path(song["path"]).resolve().as_uri())}/>')
+        out.append(f'      <media-rep kind="original-media" src={quoteattr(where(song["path"]))}/>')
         out.append("    </asset>")
     out += ["  </resources>", "  <library>", f"    <event name={quoteattr(name)}>", f"      <project name={quoteattr(name)}>",
             f'        <sequence format="r1" duration="{t(total)}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">',
@@ -994,10 +997,12 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
         return {"pack": described["id"], "layers": described.get("layers"), "mode": described.get("mode")}
 
     @router.get("/api/export/timeline/{name}")
-    def timeline(name: str):
+    def timeline(name: str, root: str = ""):
         project_id, _, kind = name.rpartition(".")
-        if kind not in ("fcpxml", "edl") or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id):
-            raise HTTPException(404, "ask for <project>.fcpxml or <project>.edl")
+        if kind not in ("fcpxml", "edl", "zip") or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id):
+            raise HTTPException(404, "ask for <project>.fcpxml, <project>.edl or <project>.zip")
+        if kind == "zip" and root and not re.fullmatch(r"(/|[A-Za-z]:[\\/])[^\x00-\x1f]{0,400}", root):
+            raise HTTPException(400, "the folder is a full path on the editing computer, like /Users/you/Movies")
         file = home / "projects" / project_id / "project.json"
         if not file.is_file():
             raise HTTPException(404, "no such project")
@@ -1030,8 +1035,45 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
                     song = {"path": path, "seconds": probe(path).get("seconds") or meta.get("seconds")}
             except (OSError, ValueError, KeyError, TypeError):
                 pass
+        if kind == "zip":
+            return timeline_package(project_id, title, clips, rate or (FPS, 1), size or (1920, 1080), song, root)
         return Response(fcpxml(title, clips, rate or (FPS, 1), size or (1920, 1080), song), media_type="application/xml",
                         headers={"Content-Disposition": f'attachment; filename="{project_id}.fcpxml"'})
+
+    def timeline_package(project_id, title, clips, rate, size, song, root):
+        """The timeline with its media, for an editor on another computer: unzipped into ``root`` the FCPXML finds every
+        clip where it lands. Without a folder the clips are named relative to the FCPXML, for relinking by hand."""
+        names, used = {}, set()
+        for path in [one["path"] for one in clips] + ([song["path"]] if song else []):
+            key = str(Path(path))
+            if key in names:
+                continue
+            stem, suffix, n = Path(path).stem, Path(path).suffix, 1
+            name = stem + suffix
+            while name in used:
+                n += 1
+                name = f"{stem}-{n}{suffix}"
+            used.add(name)
+            names[key] = name
+        base = root.rstrip("/\\") + "/" + project_id if root else ""
+        def where(path):
+            name = names[str(Path(path))]
+            if not base:
+                return "media/" + name
+            if re.match(r"[A-Za-z]:", base):  # a Windows folder
+                return "file:///" + quote(base.replace("\\", "/") + "/media/" + name)
+            return "file://" + quote(base + "/media/" + name)
+        exports = home / "exports"
+        exports.mkdir(parents=True, exist_ok=True)
+        target = exports / f"{project_id}-with-media-{time.strftime('%m%d-%H%M%S')}.zip"
+        readme = (f"{title}\n\nUnzip this folder" + (f" into {root}" if root else "") + ", then in DaVinci Resolve choose File > Import > Timeline "
+                  f"and pick {project_id}.fcpxml.\n" + ("" if root else "The clips are in media/: if Resolve shows them offline, relink them to that folder.\n"))
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_STORED) as bundle:
+            bundle.writestr(f"{project_id}/{project_id}.fcpxml", fcpxml(title, clips, rate, size, song, where))
+            bundle.writestr(f"{project_id}/README.txt", readme)
+            for key, name in names.items():
+                bundle.write(key, f"{project_id}/media/{name}")
+        return FileResponse(target, media_type="application/zip", filename=f"{project_id}-with-media.zip")
 
     @router.get("/api/export/dailies.zip")
     def dailies(jobs_: str = Query("", alias="jobs")):

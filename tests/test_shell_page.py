@@ -122,7 +122,7 @@ def test_a_brought_in_shot_opens_in_create_and_brains_save_the_default():
     if out is None:
         return
     assert out["create"] == ["Create", "A garage at night.", "Maya turns.", "Slow push-in.", "Who's there?", "uploads/suite/x/12c.png", "own"]
-    assert "Make a Slate film" in out["importPage"] and "Timeline to Resolve (FCPXML)" in out["importPage"] and "Night Shift" in out["importPage"]
+    assert "Make a Slate film" in out["importPage"] and "Timeline with media for Resolve (ZIP)" in out["importPage"] and "Night Shift" in out["importPage"]
     assert "signed in on sam@mac" in out["brains"] and "1 models" in out["brains"]
     assert out["saved"] == "local"
 

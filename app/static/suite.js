@@ -2,6 +2,12 @@
 // Bring in: what the other apps of the filmmaker suite made (a screenplay, a board, a previs package, a storyboard)
 // becomes shots here. And out again: a timeline for Resolve, dailies for Circle Take.
 const SU = { apps: null, imports: null, cur: null, busy: false, said: "" };
+// the folder on the editing computer a timeline package is unzipped into, remembered in this browser
+const CUT_FOLDER = () => { try { return localStorage.getItem("cut-folder") || ""; } catch { return ""; } };
+let CUT_BOX = null;  // made on first use: this file loads before the page's helpers
+const cutFolder = () => CUT_BOX || (CUT_BOX = el("input", { placeholder: "/Users/you/Movies/Backlot", value: CUT_FOLDER(), "aria-label": "Folder on the editing computer" }));
+const saveCutFolder = () => { try { localStorage.setItem("cut-folder", cutFolder().value.trim()); } catch {} };
+const timelineZip = id => { const at = (CUT_BOX && CUT_BOX.value.trim()) || CUT_FOLDER(); return "/api/export/timeline/" + id + ".zip" + (at ? "?root=" + encodeURIComponent(at) : ""); };
 const suLoad = async () => { try { SU.apps = await api("/api/suite"); } catch { SU.apps = []; } try { SU.imports = await api("/api/suite/imports"); } catch { SU.imports = []; } };
 async function suiteUpload(files) { if (!files || !files.length) return; SU.busy = true; SU.said = ""; render();
   for (const one of files) { const data = new FormData(); data.append("file", one);
@@ -61,7 +67,10 @@ function viewImport() {
       el("div", { class: "stack" },
         el("div", { class: "panel stack" }, el("h2", {}, "Send out"),
           el("div", { class: "note", style: "margin:0" }, "Your timeline, cut list and dailies, in the formats the other tools read."),
-          el("button", { class: "primary", onclick: () => pid() ? location.assign("/api/export/timeline/" + pid() + ".fcpxml") : toast("Open the Timeline once first") }, "Timeline to Resolve (FCPXML)"),
+          field("Where you will unzip it, on the computer you edit on", cutFolder()),
+          el("button", { class: "primary", onclick: () => { if (!pid()) return toast("Open the Timeline once first"); saveCutFolder(); location.assign(timelineZip(pid())); } }, "Timeline with media for Resolve (ZIP)"),
+          el("div", { class: "note", style: "margin:0" }, "Unzip it in that folder and import the .fcpxml: every clip opens online. Leave the folder empty to relink by hand."),
+          el("button", { onclick: () => pid() ? location.assign("/api/export/timeline/" + pid() + ".fcpxml") : toast("Open the Timeline once first") }, "FCPXML only, for this machine's paths"),
           el("button", { onclick: () => pid() ? location.assign("/api/export/timeline/" + pid() + ".edl") : toast("Open the Timeline once first") }, "Cut list (EDL)"),
           el("button", { onclick: () => { const ids = picked(); if (!ids.length) return toast("Finish a take first"); location.assign("/api/export/dailies.zip?jobs=" + ids.join(",")); } }, "Dailies for Circle Take" + (PICK.size ? " (" + PICK.size + " picked)" : "")),
           el("div", { class: "note", style: "margin:0" }, "Dailies are the takes ticked in the render bay, or the latest finished ones. Each carries its prompt, seed, model and LoRAs, so Circle Take can gate it and a reshoot comes back with the same settings.")),
