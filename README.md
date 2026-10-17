@@ -993,6 +993,31 @@ stop the server: `"$HOME/Applications/Wasserman Slate AI Studio.app/Contents/Mac
 login**, and by default it listens on this Mac only; `HOST=0.0.0.0 bash scripts/make-app.sh` opens it to your
 network, which you should do only on a network you trust.
 
+### Updating Studio
+
+Open **Updates** in the header, choose **Check for updates**, then **Update and restart**. The page reconnects after
+the restart and offers **Reload Studio** when you have saved your work. The update source is the GitHub repository
+you installed, on its current default branch. Changes on a contributor's development branch reach users after they
+are merged into that default branch. A fork follows its own default branch; it does not automatically merge its parent.
+
+**Automatic updates** is off by default. Turn it on to check every six hours while Studio is open and install when
+its queue and render engine are idle. The setting is saved for this installation. Updates preserve projects, media,
+models and runtime environments. Local code changes, untracked files, separate development commits, a detached
+checkout or a development branch pause updates without discarding work. Updates requiring changes to installation
+dependencies show a message asking you to follow that version's setup instructions.
+
+Start Studio using `bash scripts/app.sh` or the existing Mac app launcher to support an update and restart. The launcher
+waits for its server to exit before changing source, saves the old commit under `refs/studio-backups/`, and checks the
+new server's startup. If startup fails, it restores the previous code and turns automatic updates off. It does not
+discard files changed by somebody during recovery. Git archive downloads and an app started directly with
+`python app/server.py` can still run; use a Git clone and `scripts/app.sh` for in-app installation of updates. Each
+checkout runs one launcher. Manage update controls on the local computer, through an SSH tunnel, or through its
+Tailscale address; an exposed LAN app cannot manage source updates.
+
+Worker Sparks keep the existing **Sparks → Update and start** workflow. They do not independently auto-update to
+different code while the head Studio is dispatching work. Model and engine installation remains a separate setup
+step; this updater never downloads weights, changes memory guards, or runs setup scripts.
+
 ## Using the studio
 
 ![Create: text to video with FastH3](samples/ui_create_fasth3.png)

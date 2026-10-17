@@ -166,9 +166,20 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
 <header>
   <span class="dot"></span><h1><b>Wasserman Slate</b> AI Studio <small class="by">powered by TensorFold · built with integrated Fish Audio Drama 3</small></h1><span id="plat" class="plat"></span>
   <button id="gohome" class="homebtn" title="Back to the first screen">⌂ Home</button>
+  <button id="studio-updates-open" class="small" type="button">Updates</button>
   <nav id="tabs"></nav>
   <small id="ver"></small>
 </header>
+<dialog id="studio-updates" aria-labelledby="studio-updates-title" style="position:fixed;top:50vh;left:50vw;right:auto;bottom:auto;margin:0;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:24px;background:var(--ink);color:var(--text);border:1px solid var(--line2);border-radius:16px">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px"><h2 id="studio-updates-title" style="margin:0">Studio updates</h2><button id="studio-updates-close" type="button" aria-label="Close updates">Close</button></div>
+  <p class="note">Get the latest Studio improvements. Updates wait until your jobs and render engine are idle.</p>
+  <p id="studio-updates-source" class="note" style="overflow-wrap:anywhere"></p>
+  <p id="studio-updates-status" role="status" aria-live="polite">Loading update settings…</p>
+  <p id="studio-updates-result" class="note"></p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0"><button id="studio-updates-check" type="button">Check for updates</button><button id="studio-updates-install" type="button" disabled>Update and restart</button></div>
+  <label class="switch"><input id="studio-updates-auto" type="checkbox"><span>Automatic updates<small>Check every six hours while Studio is open. Install when idle.</small></span></label>
+  <p class="note">Off by default. Projects, media and models stay in place. Local code changes pause updates. If an updated app cannot start, Studio restores the previous code and turns automatic updates off.</p>
+</dialog>
 <div id="warnbar" class="hide" role="status" style="margin:10px 22px 0;padding:9px 13px;border-radius:10px;border:1px solid rgba(245,193,92,.45);background:rgba(245,193,92,.08);color:var(--warn);font-size:13px"></div>
 <main>
   <div id="view"></div>
@@ -187,6 +198,7 @@ label.check { display:flex; gap:9px; align-items:flex-start; text-transform:none
 <script src="sparks.js"></script>
 <script src="voice.js"></script>
 <script src="music.js"></script>
+<script src="updates.js"></script>
 <script>
 "use strict";
 if (location.search.includes("shot")) document.write('<img src="/api/wait?ms=4000" style="display:none">');

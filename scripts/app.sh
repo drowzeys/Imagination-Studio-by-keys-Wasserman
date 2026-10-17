@@ -15,4 +15,8 @@ echo "Wasserman Slate AI Studio (powered by TensorFold) on http://${HOST:-127.0.
 for TOOL in ffmpeg ffprobe; do
   command -v "$TOOL" >/dev/null || echo "  ! $TOOL is not installed on this machine: $([ "$(uname -s)" = Linux ] && echo "sudo apt install ffmpeg" || echo "brew install ffmpeg")" >&2
 done
-exec "$PREFIX/venv/bin/python" "$HERE/app/server.py"
+# Worker Sparks keep their existing PID and lifecycle contract with the head Studio.
+if [ -n "${STUDIO_PIDFILE:-}" ] || ! command -v git >/dev/null || ! git -C "$HERE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  exec "$PREFIX/venv/bin/python" "$HERE/app/server.py"
+fi
+exec "$PREFIX/venv/bin/python" "$HERE/app/launcher.py"

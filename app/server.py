@@ -174,6 +174,30 @@ order: list[str] = []
 lock = threading.Lock()
 wake = threading.Event()
 running: dict = {"process": None, "id": None}
+update_writes = 0
+
+
+@app.middleware("http")
+async def update_maintenance(request, call_next):
+    global update_writes
+    writes = request.method not in ("GET", "HEAD", "OPTIONS") and not request.url.path.startswith("/api/updates")
+    with lock:
+        if writes and updater.maintenance.is_set():
+            return JSONResponse({"error": "Studio is restarting for an update. This page will reconnect shortly."}, status_code=503)
+        if writes:
+            update_writes += 1
+    try:
+        return await call_next(request)
+    finally:
+        if writes:
+            with lock:
+                update_writes -= 1
+
+
+def accepting_jobs():
+    """Called under the queue lock, shared with the updater's idle check."""
+    if updater.maintenance.is_set():
+        raise HTTPException(503, "Studio is restarting for an update. Try again after it reconnects.")
 
 
 def inside(path: str | Path) -> Path:
@@ -1550,6 +1574,7 @@ def submit(body: dict) -> dict:
     said = hub.plan({"sparks": chosen, "kind": kind, "params": params})
     job["sparks"] = {"chosen": chosen if SPARK else 1, "available": said["available"], "used": said["used"], "says": said["says"]}
     with lock:
+        accepting_jobs()
         jobs[job_id] = job
         order.append(job_id)
     wake.set()
@@ -1744,6 +1769,7 @@ def qa_gate(body: dict) -> dict:
            "params": params, "source": None, "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(),
            "started": time.time(), "finished": None, "estimate": None}
     with lock:
+        accepting_jobs()
         jobs[job_id] = job
         order.append(job_id)
     threading.Thread(target=qa_run, args=(job,), daemon=True).start()
@@ -1868,6 +1894,7 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
            "progress": None, "error": None, "log": "", "created": time.time(), "started": None, "finished": None,
            "estimate": estimate, "sparks": {"chosen": 1, "available": 1, "used": 1, "says": ""}}
     with lock:
+        accepting_jobs()
         jobs[job_id] = job
         order.append(job_id)
     wake.set()
@@ -1927,6 +1954,22 @@ def clip_time(kind: str, params: dict) -> int | None:
 
 hub = sparks.Hub(HOME, PACK, SPARK, jobs, order, lock, wake, about_this_spark, inside, perform, clip_time)
 app.include_router(hub.router())
+import updates  # noqa: E402  (Git source updates after an idle, graceful app shutdown)
+
+
+def update_busy():
+    with hub.mutex:
+        workers_active = any(worker.get("working") or worker.get("job") for worker in hub.live.values())
+    return (update_writes > 0 or workers_active
+            or any(job["status"] in ("queued", "running") for job in jobs.values())
+            or running.get("process") is not None
+            or Path(os.environ.get("STUDIO_GPU_LOCK", Path.home() / "studio-gpu.lock.d")).exists())
+
+
+updater = updates.Manager(PACK, HOME, lock, update_busy)
+app.include_router(updater.router())
+app.router.on_startup.append(updater.start)
+app.router.on_shutdown.append(updater.stop.set)
 if hasattr(app.router, "on_shutdown"):
     app.router.on_shutdown.append(hub.close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
@@ -1941,5 +1984,7 @@ if __name__ == "__main__":
         Path(os.environ["STUDIO_PIDFILE"]).write_text(str(os.getpid()))
     hub.start()
 
-    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "7870")),
-                log_level="warning")
+    web_server = uvicorn.Server(uvicorn.Config(app, host=os.environ.get("HOST", "127.0.0.1"),
+                               port=int(os.environ.get("PORT", "7870")), log_level="warning"))
+    updater.restart = lambda: setattr(web_server, "should_exit", True)
+    web_server.run()
