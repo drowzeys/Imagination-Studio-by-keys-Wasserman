@@ -13,7 +13,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 import urllib.request
 import uuid
@@ -305,51 +304,19 @@ def extract_json(text: str):
 
 
 def ask(backend: str, system: str, prompt: str, tier: str, endpoint: str = "", model: str = "") -> str:
-    if backend == "local":
-        base, models = find_local(endpoint)
-        if not base:
-            raise RuntimeError("no local model server answers: start Ollama, LM Studio, vLLM or llama.cpp, or set its address in the Bible")
-        body = json.dumps({"model": model or (models[0] if models else ""), "temperature": 0.7,
-                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}).encode()
-        request = urllib.request.Request(base + "/chat/completions", body, {"Content-Type": "application/json"})
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
-            return json.loads(answer.read())["choices"][0]["message"]["content"]
-    tool = cli(backend if backend in ("claude", "codex") else "claude")
-    if not tool:
-        raise RuntimeError(f"{backend} is not installed on this machine: install it and sign in, or pick another brain in the Bible")
-    env = {**os.environ, "PATH": os.pathsep.join([os.environ.get("PATH", ""), *CLI_DIRS])}
-    with tempfile.TemporaryDirectory() as scratch:  # an empty folder: the brain writes text, it has no files to act on
-        if backend == "codex":
-            last = Path(scratch) / "last.txt"
-            done = subprocess.run([tool, "exec", "--skip-git-repo-check", "--output-last-message", str(last), "-"],
-                                  input=f"{system}\n\n---\n\n{prompt}", capture_output=True, text=True, timeout=TIMEOUT, cwd=scratch, env=env)
-            if last.is_file() and last.read_text().strip():
-                return last.read_text().strip()
-            raise RuntimeError((done.stderr or done.stdout or "codex gave no answer").strip()[-400:])
-        args = [tool, "-p", "--output-format", "json", "--tools", "", "--append-system-prompt", system]
-        if TIER_MODEL.get(tier):
-            args += ["--model", TIER_MODEL[tier]]
-        done = subprocess.run(args, input=prompt, capture_output=True, text=True, timeout=TIMEOUT, cwd=scratch, env=env)
-    raw = done.stdout.strip()
-    try:
-        parsed = json.loads(raw)
-    except ValueError:
-        if raw:
-            return raw
-        raise RuntimeError((done.stderr or "Claude Code gave no answer").strip()[-400:])
-    result = parsed.get("result") if isinstance(parsed, dict) else None
-    if isinstance(parsed, dict) and parsed.get("is_error"):
-        message = result if isinstance(result, str) else "Claude Code returned an error"
-        if re.search(r"authenticat|oauth|401|logged? ?in|revoked", message, re.I):
-            message = "Claude Code's sign-in has expired: run `claude auth login` in a terminal on this machine, then retry. " + message
-        raise RuntimeError(message)
-    return result if isinstance(result, str) else raw
+    import agents  # the brains (agents.py): Claude Code, Codex, Gemini CLI, Grok CLI here or over ssh, or a local server
+
+    return agents.ask(backend if backend in agents.BACKENDS else "claude", system, prompt, tier, endpoint, model)
 
 
 @router.get("/api/slate/brain")
 def brain_status(endpoint: str = "") -> dict:
-    base, models = find_local(endpoint)
-    return {"claude": bool(cli("claude")), "codex": bool(cli("codex")), "local": bool(base), "endpoint": base, "models": models}
+    import agents
+
+    found = {b["id"]: b for b in agents.detect(endpoint=endpoint)}
+    local = found["local"]
+    return {**{name: found[name]["found"] for name in agents.CLIS}, "local": local["found"],
+            "endpoint": local["endpoint"] if local["found"] else None, "models": local["models"]}
 
 
 @router.post("/api/slate/brain")
