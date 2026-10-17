@@ -13,23 +13,10 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 *Name, credits, colours and voice for anything public: the [brand guide](docs/BRAND.md).*
 
-## Big credit: Sam Wasserman (wassermanproductions.com)
+*Credit first: Sam Wasserman shaped the production side of this studio (Slate, the Sharp Spec, Motion Previs). See
+[Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes.*
 
-**Sam Wasserman shaped the production side of this studio: the AI film workflow and the ideas behind it.** Slate, his
-prompt studio for AI filmmaking, is the workflow inside the Wasserman Slate AI Studio tab. The Wasserman Sharp Spec,
-the QA gate that follows it, and the 80s Horror LoRA that opens the Keys and Wasserman LoRA Hub are his too. The Motion Previs tab's analysis is a
-Python port of his [Motion Previs Studio](https://github.com/wassermanproductions/motion-previs-studio). The aim
-we share is the best AI film studio there is, and this pack is where his planning tools meet a render engine. See
-[CREDITS.md](CREDITS.md).
-
-**Thank you to everyone this stands on:** the Qwen team at Alibaba (Qwen-Image-2.1, Qwen3-VL), the MiniMax team
-(MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
-Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
-decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
-contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
-[CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
-
-**2.9.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**2.9.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
@@ -126,7 +113,8 @@ unless it says otherwise.
     | Peak memory | 27.6 GB (MLX's own peak); the machine's in use rose 32.9 GB | 29.3 GB taken from the machine (MemTotal - MemAvailable, 5.1 GB before) |
     | Whisper on the take | 96 % of the words sung (128 of 134); the song reached 43 % of the lyrics at 60 s | 1 %: on this take Whisper heard only "We'll be right back" twice. A second take through the app (hip-hop lyrics, seed 11, 273.2 s): 98 % (166 of 169), all the lyrics reached |
 
-  - **Honest limits.** A song is not played while it is made (no streaming yet). Whisper's count on sung words is
+  - **Honest limits** (as of 2.9.0; 2.9.1 plays a song while it is made on a Mac and adds TensorFold's CUDA engine on
+    a Spark, above). A song is not played while it is made (no streaming yet). Whisper's count on sung words is
     rough, and one Spark take in three was barely heard by it (above). Lengths measured: on the Spark 30, 60, 120 and
     300 s asked (one run each; the 300 s one ended itself at 189.8 s, so no song over 120 s was made to its full length
     there); on the Mac songs of 10, 30 and 60 s. Other lengths are untested, and so is anything but the default
@@ -225,6 +213,22 @@ Each lists what was tested and what was not:
 | #941 to #944 | This Studio: Slate, Motion Previs, FLUX3-K and Voice |
 
 These are proposals: this repository's install still pins the engines on the `drowzeys/TensorFold` fork.
+
+## Big credit: Sam Wasserman (wassermanproductions.com)
+
+**Sam Wasserman shaped the production side of this studio: the AI film workflow and the ideas behind it.** Slate, his
+prompt studio for AI filmmaking, is the workflow inside the Wasserman Slate AI Studio tab. The Wasserman Sharp Spec,
+the QA gate that follows it, and the 80s Horror LoRA that opens the Keys and Wasserman LoRA Hub are his too. The Motion Previs tab's analysis is a
+Python port of his [Motion Previs Studio](https://github.com/wassermanproductions/motion-previs-studio). The aim
+we share is the best AI film studio there is, and this pack is where his planning tools meet a render engine. See
+[CREDITS.md](CREDITS.md).
+
+**Thank you to everyone this stands on:** the Qwen team at Alibaba (Qwen-Image-2.1, Qwen3-VL), the MiniMax team
+(MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
+Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
+decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
+contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
+[CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
 ## Which picture model to use: the evidence
 
@@ -543,6 +547,12 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
 ## What changed
+
+> **2.9.1 (2026-10-16): Music on both machines.** int8 weights and play while it's made on a Mac; TensorFold's CUDA
+> engine for MiniMax-Music3 on a DGX Spark. Details: [New in 2.9.1](#new-in-291).
+
+> **2.9.0 (2026-10-16): Music, MiniMax Music 3.** A Music tab: a song from lyrics and a style, laid under a video if
+> you like. Details: [New in 2.9.0](#new-in-290).
 
 > **2.8.1 (2026-10-16): Qwen 2.1 Full.** The picture-model choice adds Qwen-Image-2.1's 40-step base model as
 > **Qwen 2.1 Full**, beside **Qwen 2.1 Turbo**, as FLUX3-K has Fast and Full.
@@ -1066,12 +1076,13 @@ and roughly how long it takes.
 
 | Choice | What it does |
 |---|---|
-| **The prompt goes to** | *Video with sound*, or *Image only*: Qwen-Image-2.1 makes the pictures and stops there. |
-| **The clip starts from** | *Text only*; *a Qwen scout image* (step 2 makes several, you pick one); *your own image* (step 2 uploads it); or, with `--ref2va` installed, *reference pictures* (step 2 takes up to nine: who or what must look the same, in a scene the prompt describes; on a Mac whose engine packs them, also up to three reference videos and three audio clips: see [Reference videos and reference audio](#reference-videos-and-reference-audio-ref2va-mac-only-for-now)). |
+| **The prompt goes to** | *Video with sound*; *Image only*: the picture model makes the pictures and stops there; or *Edit a picture*: it re-draws a picture you give it. |
+| **Picture model** (where more than one is installed) | *Qwen 2.1 Turbo*, *Qwen 2.1 Full*, *FLUX3-K Fast* or *FLUX3-K Full*, for images, scouts, a last frame and edits: see [Which picture model to use](#which-picture-model-to-use-the-evidence). |
+| **The clip starts from** | *Text only*; *a scout image* (step 2 makes several with the picture model, you pick one); *your own image* (step 2 uploads it); or, with `--ref2va` installed, *references* (step 2 takes up to nine pictures: who or what must look the same, in a scene the prompt describes; where the engine packs them, also up to three reference videos and three audio clips: see [Reference videos and reference audio](#reference-videos-and-reference-audio-ref2va)). |
 | **Video engine** (shown only with `--turbo` installed) | *FastH3*: fastest; text to video runs on the native Zig engine, and the bar under the cards says which engine a clip will use. *MiniMax H3*: the Turbo adapter with the sound made again by the base model, or the full 20 steps. |
 | **Passes** (FastH3) | 4 (fastest, a little softer), 8 (what it was trained for), 20 (for prompts with several actions; slowest). |
 | **Quality** (MiniMax H3, with `--turbo`) | Turbo 5 + base sound (the standard), Turbo 3, 20 steps with the fast recipe, or plain 20 steps. |
-| **Resolution** | 480p (864x480), 720p (1280x720), or the fixed outputs Draft, 2K 2048x1152 and Native 1344x768. |
+| **Resolution** | 480p (864x480), 720p (1280x720), the fixed outputs Draft, 2K 2048x1152 (Mac) and Native 1344x768, Wasserman Sharp 1376x768, or Custom (your own width and height). |
 | **2x upscale** | For 480p and 720p: the 2x decoder turns 480p into 1728x960 and 720p into 2560x1440, for about 10 s more. |
 | **Length** | 5, 8, 10 or 15 s as one clip, or *Another length…* for any length the model takes (below); 30 s to 30 min as a chain of clips (further below). |
 | **Seed** | Same seed and settings give the same clip. |
@@ -1293,11 +1304,25 @@ length. A segment can open on the last frame of the one before; one button rende
 ![Editor](samples/ui_editor.png)
 
 **Editor** is a single-track timeline: order the clips, set in and out points, preview the sequence, export one file.
+Once the Music tab has a song, *Song under the export* lays it under the whole export.
 
 ![Library](samples/ui_library.png)
 
-**Library** lists every render, scout and export; *use* makes an image the first frame of a new clip, *+ timeline*
-sends a clip to the editor, and 🗑 moves a file to `~/TensorFoldStudio/trash`.
+**Library** lists every render, scout and export. Under a picture: *use* makes it the first frame of a new clip,
+*last frame* ends a clip on it, *edit* opens Edit a picture, and *Turnaround* makes five views. Under a clip: *continue*
+starts a new clip on its last frame, *+ timeline* sends it to the editor, *Upscale* and *Remove a person*. 🗑 moves a
+file to `~/TensorFoldStudio/trash`.
+
+![Tutorial (screenshot from 2.4; the tab now has a part for each tab of the app)](samples/ui_tutorial.png)
+
+**Tutorial** teaches the rest of the app in short lessons, one step on screen at a time, with an example and a tip
+where they help. They are grouped in eight parts, one per tab: Create, Production, Motion Previs, Voice, Music,
+Editor, Library and Sparks. A full install shows 22 lessons on a Mac and 23 on a DGX Spark (the memory guard has a
+lesson of its own there); lessons for parts that are not installed, such as Ref2VA or the Sharp Spec, are left out.
+Every feature through 2.9 has one: the picture models, Edit a picture, references and a last frame, long videos,
+the LoRA hub, the Sharp Spec, Voice, Music, the Library actions and the Sparks setting. *Show me in the app* opens
+the tab a step is about and outlines the control; a bar at the bottom then carries the lesson forward from inside
+the app. Finished lessons are remembered in the browser.
 
 ### Library actions: Turnaround sheet, Upscale, Remove a person
 
@@ -1378,8 +1403,6 @@ stays. Deleting never touches a project file, a LoRA or a model: only pictures, 
 studio folder of test clips: each Clear and Undo, one job deleted and put back, two ticked jobs, the failed ones,
 all finished, restore, two ticked Library files, and the trash emptied (25 checks). Not driven in a browser: the
 *Clear* above a Slate shot's prompt (it is the same control as a segment's).
-
-![Tutorial](samples/ui_tutorial.png)
 
 #### Wasserman Sharp Spec
 
@@ -1691,13 +1714,10 @@ Not ported from Slate: sequence chunks, alt takes, punch-ups, the tone dial, pic
 and audio analysis, the stills library, compiles for other generators, and its MCP server. The app has no sign-in of
 its own: anyone who can open it can use the brain, so keep it on a network you trust.
 
-**Tutorial** teaches the other four: eleven short lessons, one step on screen at a time, with an example and a tip
-where they help. *Show me in the app* opens the tab a step is about and outlines the control; a bar at the bottom
-then carries the lesson forward from inside the app. Finished lessons are remembered in the browser.
-
-The app drives the same scripts as the command line, one job at a time, and keeps projects, uploads and renders
-under `~/TensorFoldStudio`. What it is not: the editor has one video track with trims and ordering only (no
-transforms, text, transitions or audio mixing), and there is no assisted prompt writing. The workflow is modelled
+The app drives the same scripts as the command line, one job at a time on each machine, and keeps projects, uploads
+and renders under `~/TensorFoldStudio`. What it is not: the editor has one video track with trims and ordering only
+(no transforms, text or transitions; its only audio step is a song laid under the export), and outside Slate's ✦
+buttons there is no assisted prompt writing. The workflow is modelled
 on rookiestar28's ComfyUI-MiniMaxH3-Studio, which does far more; no code is shared with it.
 
 ## Voice (Fish Audio Drama 3)
