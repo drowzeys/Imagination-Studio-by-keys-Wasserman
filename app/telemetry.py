@@ -141,6 +141,9 @@ def model_folders() -> list[tuple[str, str, Path]]:
     return out
 
 
+STOPPING = threading.Event()  # set when the app is going down (an update's restart): every event stream ends at once
+
+
 def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None, comfy_port: int | None = None) -> APIRouter:
     """``guard`` is spark/memory_guard.py (its floor and the ComfyUI server's pid); ``comfy_port`` the port of the
     studio's ComfyUI (spark/comfy.sh, SPARK_COMFY_PORT, 8190)."""
@@ -358,7 +361,8 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         async def stream():
             last_jobs, beat = None, time.monotonic()
             yield ": connected\n\n"
-            while not await request.is_disconnected():
+            # ends on its own when the app shuts down: an open stream would otherwise hold a graceful restart forever
+            while not STOPPING.is_set() and not await request.is_disconnected():
                 now = await asyncio.to_thread(snapshot)
                 yield "event: telemetry\ndata: " + json.dumps(now, default=str) + "\n\n"
                 listed = compact()
