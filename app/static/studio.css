@@ -170,7 +170,7 @@ pre { background:var(--bg2); border:1px solid var(--line); border-radius:var(--r
 .switch { display:flex; gap:12px; align-items:center; padding:10px 14px; border:1px solid var(--line); border-radius:var(--r2); background:var(--raise); cursor:pointer;
   text-transform:none; letter-spacing:0; font:500 13.5px var(--sans); color:var(--text); margin:0; min-height:48px; }
 .switch:hover { border-color:var(--line2); }
-.row .switch { height:42px; min-height:0; padding:0 13px; } input, select { height:42px; } textarea, input[type=checkbox], input[type=file], input[type=range], .clip input { height:auto; }
+.row .switch { min-height:42px; padding:6px 13px; } input, select { height:42px; } textarea, input[type=checkbox], input[type=file], input[type=range], .clip input { height:auto; }
 .switch input { appearance:none; -webkit-appearance:none; width:36px; height:20px; border-radius:999px; background:#2a2f3c; border:0; position:relative; padding:0; flex:none; cursor:pointer; transition:background var(--t1) var(--ease); }
 .switch input::after { content:""; position:absolute; top:3px; left:3px; width:14px; height:14px; border-radius:50%; background:#c9cdd6; transition:transform var(--t1) var(--ease); }
 .switch input:checked { background:var(--blue); } .switch input:checked::after { transform:translateX(16px); background:#fff; }
@@ -349,6 +349,7 @@ dialog::backdrop { background:rgba(5,6,9,.7); }
 
 /* ---------- home ---------- */
 .homehero { position:relative; border-radius:var(--r3); overflow:hidden; border:1px solid var(--line); background:var(--raise); }
+.homehero .art .ph { display:none; }
 .homehero .art { aspect-ratio:21/9; min-height:300px; max-height:460px; }
 .homehero .over { position:absolute; left:0; right:0; bottom:0; padding:32px; display:flex; align-items:flex-end; justify-content:space-between; gap:20px; flex-wrap:wrap; }
 .homehero.has-art .over { background:rgba(9,10,15,.55); border-top:1px solid var(--line); backdrop-filter:none; }
@@ -460,7 +461,7 @@ label.toggle { text-transform:none; letter-spacing:0; font:500 12.5px var(--sans
 @media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
 
 /* ---------- narrower screens ---------- */
-@media (max-width:1280px) { .cards.c4 { grid-template-columns:repeat(2,minmax(0,1fr)); } .mstrip { grid-template-columns:minmax(180px,1fr) repeat(2,minmax(0,1fr)) auto; } .mstrip .m.disk { display:none; } }
+@media (max-width:1280px) { .mstrip { grid-template-columns:minmax(180px,1fr) repeat(2,minmax(0,1fr)) auto; } .mstrip .m.disk { display:none; } }
 @media (max-width:1180px) { .recipes { grid-template-columns:repeat(2,minmax(0,1fr)); } .gauges { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 /* an icon rail */
 @media (max-width:1099px) {
@@ -474,7 +475,7 @@ label.toggle { text-transform:none; letter-spacing:0; font:500 12.5px var(--sans
   .sidefoot { align-items:center; padding:10px 6px; } .machinepill { width:44px; justify-content:center; padding:0; } .machinepill #plat, .machinepill .txt { display:none; }
   .verline { flex-direction:column; } #ver { display:none; } .verline button .t { display:none; } .verline button { width:44px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; }
   .verline button svg { width:16px; height:16px; }
-  .enghead { grid-template-columns:minmax(0,1fr); gap:20px; }
+  .enghead { grid-template-columns:minmax(0,1fr); gap:20px; } .cards.c4 { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .cols, .tut, .split { grid-template-columns:minmax(0,1fr); } .tut > :last-child { order:-1; }
   .mgrid { grid-template-columns:minmax(0,1fr) !important; } .tri, .quad, .cards.c3 { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .summary .chip, .pill { white-space:normal; }
