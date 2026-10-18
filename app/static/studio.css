@@ -525,7 +525,8 @@ button.primary:hover:not(:disabled), button.hot:hover:not(:disabled), button.pri
 /* the machine chip: green while ready, amber on a warning, red while rolling */
 .machinepill, .m-plat { --led:99,255,54; border-radius:999px; border:1px solid rgba(var(--led),.7); background:rgba(var(--led),.06);
   box-shadow:0 0 0 1px rgba(var(--led),.35),0 0 18px rgba(var(--led),.35); font:500 12px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--text); }
-.machinepill:has(.dotl.t) { --led:241,173,102; } .machinepill:has(.dotl.r) { --led:255,90,106; }
+.machinepill:has(.dotl.r) { --led:255,90,106; }
+.machinepill { position:relative; } .machinepill.warn::after { content:""; position:absolute; top:-3px; right:-3px; width:9px; height:9px; border-radius:50%; background:var(--amber); box-shadow:0 0 6px rgba(241,173,102,.9); }
 .machinepill:hover:not(:disabled) { border-color:rgba(var(--led),.9); background:rgba(var(--led),.1); }
 .machinepill .dotl { box-shadow:0 0 6px rgba(var(--led),.9); }
 .machinepill .txt { color:#cfd4df; }

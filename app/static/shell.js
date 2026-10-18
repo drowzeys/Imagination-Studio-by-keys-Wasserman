@@ -144,7 +144,9 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   if (SHELL.samples.length > 300) SHELL.samples.shift();
   const used = t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : 0, gpu = t.gpu && t.gpu.util_pct != null ? t.gpu.util_pct : null;
   const busy = t.jobs && t.jobs.running, warn = (t.warnings || []).length;
-  $("#mdot").className = "dotl" + (busy ? " r" : warn ? " t" : "");
+  // the chip is green when the machine is ready and red while it rolls; a warning (a full disk) is a small amber mark
+  // beside it and in the title, never the chip's own colour
+  $("#mdot").className = "dotl" + (busy ? " r" : ""); $("#mpill").classList.toggle("warn", !busy && warn > 0);
   $("#mtxt").textContent = gpu != null ? gpu + "% GPU" : t.memory ? Math.round(t.memory.available_mb / 1024) + " GB free" : "";
   const gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1);
   const say = [(S && S.platform_label) || platName(), busy ? "rolling" : "ready", "GPU " + (gpu == null ? "n/a" : gpu + "%" + (t.gpu && t.gpu.temp_c != null ? " at " + t.gpu.temp_c + "°C" : "")),
