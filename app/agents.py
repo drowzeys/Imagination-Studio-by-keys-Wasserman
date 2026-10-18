@@ -9,6 +9,18 @@ goes on stdin, the arguments are quoted for the remote shell, and nothing is lef
 in a working folder of its own, $STUDIO_HOME/agent/<id>, one task at a time. What it saves there is listed as the
 task's outputs and served by the Studio's /files route.
 
+The Agent room keeps conversations: a thread ($STUDIO_HOME/.studio-agents/threads/<id>.json) is a list of turns
+{role: user|agent|tool, text, attachments, at}, and each user turn is one agent task run in the thread's own working
+folder, $STUDIO_HOME/agent/<thread id>. The next turn continues the harness's own session: Claude Code with
+`--session-id` then `--resume`, Codex with `codex exec resume <thread id>`, Hermes with `chat --continue <name>` then
+`--resume <session id>`. Gemini, Grok and a local model have no session the Studio can name: they get the thread's
+recent turns ahead of the message. Only the session's id is kept, never a secret. An agent that ends its answer on a
+question (or the `[question]` marker its instructions ask for) is waiting on the user: the page shows a question card.
+
+Hermes (Nous Research's Hermes Agent CLI) takes its MCP servers only from its own config.yaml (`hermes mcp add`), not
+from a file the Studio hands it per task, so in the room it is a conversation: it plans and answers but does not drive
+the Studio's tools. Its profile is `hermes_profile` in the Studio's settings.json (Settings → Connections).
+
 Where a tool runs. A tool is a stdio MCP server: `command` (with `env`) run on this machine (`via` "here") or on
 `host` over ssh (`via` "ssh"). A harness that runs on this machine starts each tool that way. A harness that runs on
 another machine (remote) needs every command to be valid there, so a tool is resolved relative to the harness host:
@@ -65,9 +77,11 @@ CLIS = {
     "codex": ("Codex · ChatGPT sign-in", "codex", "Run `codex login` in a terminal on that machine and choose Sign in with ChatGPT."),
     "gemini": ("Gemini CLI", "gemini", "Run `gemini` once in a terminal on that machine and sign in with Google."),
     "grok": ("Grok CLI", "grok", "Run `grok login` in a terminal on that machine."),
+    "hermes": ("Hermes", "hermes", "Run `hermes setup` in a terminal on that machine to sign in to a provider (`hermes model` picks it)."),
 }
 BACKENDS = (*CLIS, "local")
-HARNESSES = ("claude", "codex")
+HARNESSES = ("claude", "codex")  # run with the Studio's MCP tools; every other brain is a conversation in the Agent room
+SESSIONS = ("claude", "codex", "hermes")  # keep a session of their own from one turn to the next
 # what a CLI says when its sign-in or install is the trouble, and what to tell the user
 HINTS = {
     "claude": [(r"authenticat|oauth|401|logged? ?in|revoked|/login", "Claude Code's sign-in has expired or was never made {where}: run `claude auth login` in a terminal there, then retry.")],
@@ -78,14 +92,43 @@ HINTS = {
                (r"authenticat|oauth|401|login|credentials", "Gemini CLI is not signed in {where}: run `gemini` in a terminal there and sign in, then retry.")],
     "grok": [(r"402|balance exhausted|payment required", "Grok's usage balance is used up {where}: top it up or pick another brain."),
              (r"401|unauthori[sz]ed|not logged in|login", "Grok CLI is not signed in {where}: run `grok login` in a terminal there, then retry.")],
+    "hermes": [(r"no (?:inference )?provider|no model (?:is )?configured|not logged in|401|unauthori[sz]ed|api key|hermes setup",
+                "Hermes has no provider signed in {where}: run `hermes setup` in a terminal there, then retry.")],
 }
-SYSTEM = ("You are working for a filmmaker inside Slate Studio. Save every deliverable (renders as .png, .jpg or .mp4, "
+SYSTEM = ("You are working for a filmmaker inside Imagination Studio. Save every deliverable (renders as .png, .jpg or .mp4, "
           "models as .glb or .blend, data as .json) into the current folder{folder}. When a tool saves a file itself, give it "
           "that folder's absolute path.{studio} Finish with a short plain summary that lists the files you made.")
+
+# what the Agent room adds: a conversation that may need the user, and the Studio's own tools by name
+STUDIO_TOOLS = ("studio_state (call first), list_library, queue_still, queue_clip, queue_voice, queue_song, job_status, "
+                "list_jobs, list_projects, add_to_timeline, export_timeline and upload_file")
+ROOM = (" This is a conversation with the filmmaker in the Studio's Agent room, and it continues over several turns."
+        "{tools} When anything is unclear or a choice matters (length, look, voice, which take), ask the filmmaker one "
+        "clear question and stop: write [question] on its own line, then the question, then up to four short choices "
+        "as lines starting with '- ' where there are obvious ones. Otherwise do the work, and finish with a short plain "
+        "summary that lists the files you made by their Library paths.")
+ROOM_TOOLS = (" The Studio's tools ({names}) make stills, clips with sound, voice lines and songs on this machine's GPU, "
+              "one job at a time: queue what is asked for, follow each job with job_status until it is done, and name its "
+              "outputs.")
+CHAT = ("You are the filmmaker's assistant inside Imagination Studio, a local AI film studio (stills, clips with sound, "
+        "voice lines, songs, a timeline). In this conversation you cannot run the Studio's tools: help plan (prompts, shot "
+        "lists, lines, lyrics), and when the filmmaker wants something made, give the exact prompt to paste into the "
+        "Studio, or say that Claude Code or Codex can make it here with the Studio's tools.")
+NO_STUDIO = (" The Studio's own tools are not connected in this conversation: for a still, a clip, a voice line or a song, "
+             "give the exact prompt to paste into the Studio, or say that Claude Code or Codex can make it here with them.")
+QUESTION = re.compile(r"\[question\]", re.I)
+LOST_SESSION = re.compile(r"no conversation found|no session found|session[^\n]{0,40}not found|could not find[^\n]{0,20}session|"
+                          r"thread[^\n]{0,40}not found|no rollout found", re.I)
+THREAD_ID = re.compile(r"th-[0-9]{4}-[0-9]{6}-[0-9a-f]{6}")
+PROFILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+HISTORY_CHARS = 8000  # the recent turns a brain without a session of its own reads ahead of the message
+STEP_LIMIT = 200
+TEXT_LIMIT = 20000
 
 lock = threading.RLock()
 probes: dict = {}  # (host or "", cli) -> (monotonic time, found)
 tasks: dict[str, dict] = {}
+threads: dict[str, dict] = {}
 pending: "queue.Queue[str]" = queue.Queue()
 running: dict = {"id": None, "process": None, "remote": None}
 worker: dict = {"thread": None}
@@ -221,7 +264,25 @@ def child_env(extra: dict | None = None) -> dict:
     return env
 
 
+def studio_settings() -> dict:
+    """The Studio's own settings.json (Settings): only the Hermes keys are read here, and only when they are well formed."""
+
+    saved = read_json(HOME / "settings.json" if HOME else None, {})
+    saved = saved if isinstance(saved, dict) else {}
+    profile = str(saved.get("hermes_profile") or "").strip()
+    command = str(saved.get("hermes_command") or "").strip()
+    return {"hermes_profile": profile if PROFILE.fullmatch(profile) else "",
+            "hermes_command": command if command.startswith("/") and os.access(command, os.X_OK) and not os.path.isdir(command) else ""}
+
+
+def profile_args() -> list[str]:
+    profile = studio_settings()["hermes_profile"]
+    return ["-p", profile] if profile else []
+
+
 def cli(name: str) -> str | None:
+    if name == "hermes" and studio_settings()["hermes_command"]:
+        return studio_settings()["hermes_command"]
     found = shutil.which(CLIS[name][1] if name in CLIS else name, path=search_path())
     if not found and name == "codex" and sys.platform == "darwin":
         found = next((p for p in MAC_CODEX if os.access(p, os.X_OK)), None)
@@ -296,7 +357,10 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
     out = []
     for name, (label, _, signin) in CLIS.items():
         item = {"id": name, "label": label, "kind": "cli", "found": False, "where": f"ssh:{host}" if name in remote else "here",
-                "path": None, "version": None, "signin": signin}
+                "path": None, "version": None, "signin": signin, "harness": name in HARNESSES, "session": name in SESSIONS}
+        if name == "hermes":
+            item.update(profile=studio_settings()["hermes_profile"] or None,
+                        note="A conversation here: Hermes reads its MCP servers from its own config, not from the Studio.")
         if name in remote:
             look = seen.get((host, "remote"))
             if look is None:
@@ -310,7 +374,7 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
             item.update(found=bool(path), path=path, version=version)
         out.append(item)
     base, models = seen.get(("local", "")) or (None, [])
-    out.append({"id": "local", "label": "Local model server", "kind": "http", "found": bool(base),
+    out.append({"id": "local", "label": "Local model server", "kind": "http", "found": bool(base), "harness": False, "session": False,
                 "endpoint": base or slate.endpoint_of(endpoint or config["local_endpoint"]) or None, "models": models or []})
     return out
 
@@ -377,6 +441,28 @@ def codex_events(stdout: str) -> tuple[list[dict], str, str]:
     return events, reply, error
 
 
+def hermes_events(stdout: str) -> tuple[list[dict], str, str, str]:
+    """(events, final text, session id, error) from `hermes chat --format stream-json`; its warnings are plain lines."""
+
+    events, reply, session, error = [], "", "", ""
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        events.append(event)
+        session = str(event.get("session_id") or session)
+        if event.get("type") == "result":
+            reply = str(event.get("text") or reply)
+            if event.get("exit_code") not in (None, 0):
+                error = str(event.get("error") or event.get("text") or f"Hermes stopped with code {event.get('exit_code')}")
+        elif event.get("type") == "error":
+            error = str(event.get("message") or event.get("error") or "Hermes reported an error")
+    return events, reply, session, error
+
+
 def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str = "", model: str = "",
         settings: dict | None = None, timeout: int | None = None) -> str:
     """One answer from a brain: a CLI here or over ssh, or a local OpenAI-compatible server."""
@@ -417,6 +503,17 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
             return raw
         error = (parsed or {}).get("error") if isinstance(parsed, dict) else None
         raise RuntimeError(hinted("gemini", (error or {}).get("message", "") if isinstance(error, dict) else str(error or done.stderr), host))
+    if backend == "hermes":
+        # -z prints only the answer; a prompt too long for one argument goes on stdin to `chat --query-file -` instead
+        if len(joined) < 100000:
+            done = run_cli([tool, *profile_args(), "-z", joined], "", host, timeout)
+            reply = done.stdout.strip()
+        else:
+            done = run_cli([tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json"], joined, host, timeout)
+            reply = hermes_events(done.stdout)[1].strip()
+        if reply and not done.returncode:
+            return reply
+        raise RuntimeError(hinted("hermes", done.stderr or done.stdout or f"Hermes stopped with code {done.returncode}", host))
     if backend == "grok":
         done = run_cli([tool, "--prompt-file", "/dev/stdin", "--output-format", "plain"], joined, host, timeout)
         if re.search(r"unexpected argument|unknown (?:option|flag|argument)|unrecognized", done.stderr, re.I):
@@ -665,6 +762,13 @@ def task_folder(task_id: str) -> Path:
     return HOME / "agent" / task_id
 
 
+def work_folder(task: dict) -> Path:
+    """Where the harness runs: the thread's own folder (the same one each turn, so its session is found again), or for a
+    task from before threads, the task's folder."""
+
+    return HOME / "agent" / task["thread"] if task.get("thread") else task_folder(task["id"])
+
+
 def save_task(task: dict) -> None:
     write_json(task_folder(task["id"]) / "task.json", {k: v for k, v in task.items() if not k.startswith("_")})
 
@@ -679,7 +783,8 @@ def log_tail(task: dict) -> str:
 
 def public(task: dict, log: bool = True) -> dict:
     out = {k: task.get(k) for k in ("id", "status", "prompt", "backend", "tools", "attach", "where", "created", "started",
-                                    "finished", "reply", "outputs", "error")}
+                                    "finished", "reply", "outputs", "error", "thread")}
+    out["steps"], out["jobs"] = task.get("steps") or [], task.get("jobs") or []
     if log:
         out["log"] = log_tail(task)
     return out
@@ -723,21 +828,216 @@ def work() -> None:
             task["finished"] = time.time()
             task["outputs"] = outputs_of(task)
             save_task(task)
+            finish_turn(task)
+
+
+# ---------- threads: the Agent room's conversations ----------
+
+def threads_folder() -> Path:
+    return folder() / "threads"
+
+
+def save_thread(thread: dict) -> None:
+    write_json(threads_folder() / f"{thread['id']}.json", thread)
+
+
+def turn(role: str, text: str, **more) -> dict:
+    return {"id": uuid.uuid4().hex[:8], "role": role, "text": text, "attachments": [], "at": time.time(), **more}
+
+
+def question_of(text: str) -> tuple[bool, str, list[str]]:
+    """(is it a question, the text to show, the choices it offers): the `[question]` marker the room's instructions ask
+    for, or an answer whose last line ends with a question mark."""
+
+    text = (text or "").strip()
+    marked = QUESTION.search(text)
+    if marked:
+        before, after = text[:marked.start()].rstrip(), text[marked.end():].strip()
+        lines = after.splitlines()
+        choices, kept = [], []
+        for line in lines:
+            item = re.match(r"\s*(?:[-*•]|\d{1,2}[.)])\s+(.+)", line)
+            if item and len(choices) < 6 and len(item.group(1)) <= 120:
+                choices.append(item.group(1).strip().strip("*").strip())
+            elif line.strip():
+                kept.append(line.rstrip())
+        shown = "\n\n".join(part for part in (before, "\n".join(kept).strip()) if part)
+        return True, shown or after, choices
+    last = next((line for line in reversed(text.splitlines()) if line.strip()), "")
+    last = re.sub(r"[*_`\"'”’)\]\s]+$", "", last)
+    return bool(last) and last.endswith("?"), text, []
+
+
+def recent(thread: dict, limit: int = HISTORY_CHARS) -> str:
+    """The thread's turns so far, newest last, as a brain without a session reads them ahead of the message."""
+
+    lines, size = [], 0
+    for item in reversed(thread.get("turns") or []):
+        if item["role"] not in ("user", "agent") or not (item.get("text") or "").strip():
+            continue
+        line = ("Filmmaker: " if item["role"] == "user" else "You: ") + item["text"].strip()
+        if size + len(line) > limit:
+            break
+        lines.append(line)
+        size += len(line)
+    return "\n\n".join(reversed(lines))
+
+
+def with_history(thread: dict | None, message: str, skip_last: bool = True) -> str:
+    """The message with the conversation so far ahead of it (the newest user turn is the message itself)."""
+
+    if not thread:
+        return message
+    earlier = dict(thread, turns=(thread.get("turns") or [])[:-1] if skip_last else thread.get("turns") or [])
+    said = recent(earlier)
+    return f"The conversation so far:\n\n{said}\n\n---\n\nThe filmmaker now says:\n\n{message}" if said else message
+
+
+def summary(thread: dict) -> dict:
+    """A thread as the list shows it."""
+
+    task = tasks.get(thread.get("pending") or "")
+    said = [t for t in thread.get("turns") or [] if t["role"] in ("user", "agent")]
+    last = said[-1] if said else None
+    return {k: thread.get(k) for k in ("id", "title", "backend", "tools", "created", "updated")} | {
+        "turns": len(said), "status": task["status"] if task and task["status"] in ("queued", "running") else "idle",
+        "waiting": bool(last and last["role"] == "agent" and last.get("question") and not thread.get("pending")),
+        "last": (last or {}).get("text", "")[:160], "delivered": sum(len(t.get("attachments") or []) for t in said if t["role"] == "agent")}
+
+
+def changed_files(task: dict) -> list[str]:
+    """The files of the work folder that this turn made or changed, as Library paths."""
+
+    here, before = work_folder(task), task.get("_before") or {}
+    skip = {"task.json", "mcp.json", "log.txt", "stream.jsonl", "stderr.txt", ".pid", *task.get("inputs", [])}
+    out = []
+    for name, seen in snapshot(here).items():
+        if name not in skip and before.get(name) != seen:
+            out.append(str((here / name).relative_to(HOME)))
+    return out[:500]
+
+
+def snapshot(here: Path) -> dict:
+    out = {}
+    for path in sorted(here.rglob("*")) if here.is_dir() else []:
+        name = str(path.relative_to(here))
+        if path.is_file() and not any(part.startswith(".") for part in Path(name).parts):
+            stat = path.stat()
+            out[name] = [stat.st_size, stat.st_mtime_ns]
+    return out
+
+
+def live_of(thread: dict) -> dict | None:
+    """The turn being worked on: its task's status, its working lines and what it has made so far."""
+
+    task = tasks.get(thread.get("pending") or "")
+    if not task:
+        return None
+    made = changed_files(task) if task["status"] == "running" and not task.get("_host") and task.get("_before") is not None else task.get("outputs") or []
+    return {"task": task["id"], "status": task["status"], "backend": task["backend"], "where": task.get("where"),
+            "started": task.get("started"), "steps": (task.get("steps") or [])[-60:], "jobs": task.get("jobs") or [],
+            "outputs": made[:60], "error": task.get("error")}
+
+
+def thread_public(thread: dict) -> dict:
+    return {**{k: v for k, v in thread.items() if k != "session"}, "session": bool(thread.get("session")),
+            "live": live_of(thread), **{k: v for k, v in summary(thread).items() if k in ("status", "waiting")}}
+
+
+def thread_of(thread_id: str) -> dict:
+    thread = threads.get(thread_id) if isinstance(thread_id, str) else None
+    if not thread:
+        raise HTTPException(404, "no such conversation")
+    return thread
+
+
+def finish_turn(task: dict) -> None:
+    """The agent's answer, its working lines and what it made, into its thread."""
+
+    with lock:
+        thread = threads.get(task.get("thread") or "")
+        if not thread or thread.get("pending") != task["id"] or task["status"] in ("queued", "running"):
+            return
+        stamp = task.get("finished") or time.time()
+        for step in [s for s in task.get("steps") or [] if not s.get("live")][-60:]:
+            thread["turns"].append(turn("tool", step["text"], at=step.get("at") or stamp, task=task["id"]))
+        asked, shown, choices = question_of(task.get("reply") or "") if task["status"] == "done" else (False, task.get("reply") or "", [])
+        thread["turns"].append(turn("agent", shown[:TEXT_LIMIT], at=stamp, task=task["id"], backend=task["backend"], status=task["status"],
+                                    question=asked, options=choices, jobs=task.get("jobs") or [], error=task.get("error"),
+                                    attachments=list(task.get("outputs") or [])))
+        if task.get("_session"):
+            thread["session"] = task["_session"]
+        thread.update(pending=None, updated=stamp)
+        save_thread(thread)
+
+
+def load_threads() -> None:
+    for file in sorted(threads_folder().glob("th-*.json")) if folder() and threads_folder().is_dir() else []:
+        thread = read_json(file, None)
+        if not isinstance(thread, dict) or thread.get("id") != file.stem or not THREAD_ID.fullmatch(file.stem):
+            continue
+        thread.setdefault("turns", [])
+        threads[thread["id"]] = thread
+        task = tasks.get(thread.get("pending") or "")
+        if thread.get("pending") and not task:
+            thread["pending"] = None
+            save_thread(thread)
+        elif task and task["status"] not in ("queued", "running"):
+            finish_turn(task)  # the Studio stopped while it ran: its answer (or why it failed) goes into the thread
+
+
+def new_thread(backend: str, tools_: list[str], title: str) -> dict:
+    now = time.time()
+    thread = {"id": time.strftime("th-%m%d-%H%M%S-") + uuid.uuid4().hex[:6], "title": " ".join(title.split())[:80] or "A conversation",
+              "backend": backend, "tools": tools_, "created": now, "updated": now, "session": None, "pending": None, "turns": []}
+    threads[thread["id"]] = thread
+    return thread
+
+
+def rename_thread(thread_id: str, body: dict) -> dict:
+    thread = thread_of(thread_id)
+    title = " ".join(str(body.get("title") or "").split())[:80]
+    if not title:
+        raise HTTPException(400, "a conversation's title is some words")
+    with lock:
+        thread.update(title=title)
+        save_thread(thread)
+    return thread_public(thread)
+
+
+def forget_thread(thread_id: str) -> dict:
+    """The conversation's record goes; what it made stays in the Library."""
+
+    thread = thread_of(thread_id)
+    if thread.get("pending"):
+        raise HTTPException(409, "the agent is still working on this conversation: stop it first")
+    with lock:
+        threads.pop(thread_id, None)
+        try:
+            (threads_folder() / f"{thread_id}.json").unlink()
+        except OSError:
+            pass
+    return {"id": thread_id, "removed": True}
 
 
 def submit(body: dict) -> dict:
-    prompt = str(body.get("prompt") or "").strip()
-    if not prompt or len(prompt) > 20000:
+    prompt = str(body.get("prompt") or body.get("text") or "").strip()
+    if not prompt or len(prompt) > TEXT_LIMIT:
         raise HTTPException(400, "a prompt is needed (up to 20,000 characters)")
-    backend = body.get("backend") or (saved_settings()["default"] if saved_settings()["default"] in HARNESSES else "claude")
-    if backend not in HARNESSES:
-        raise HTTPException(400, "an agent task runs on claude or codex")
+    thread = thread_of(body["thread"]) if body.get("thread") else None
+    if thread and thread.get("pending"):
+        raise HTTPException(409, "the agent is still working on this conversation: wait for it, or stop it")
+    backend = body.get("backend") or (thread or {}).get("backend") or (
+        saved_settings()["default"] if saved_settings()["default"] in HARNESSES else "claude")
+    if backend not in BACKENDS:
+        raise HTTPException(400, "an agent is one of " + ", ".join(BACKENDS))
     known = {t["id"]: t for t in tools()}
     chosen = body.get("tools") if body.get("tools") is not None else [t for t, v in known.items() if v["enabled"]]
     if not isinstance(chosen, list) or any(t not in known for t in chosen):
         raise HTTPException(400, "tools are ids from /api/agent/tools")
-    if any(not known[t]["enabled"] for t in chosen):
+    if backend in HARNESSES and any(not known[t]["enabled"] for t in chosen):
         raise HTTPException(400, "a chosen tool is turned off")
+    chosen = list(dict.fromkeys(chosen)) if backend in HARNESSES else []  # a conversation has no tools to run
     attach_ = body.get("attach") or []
     if not isinstance(attach_, list) or len(attach_) > 20:
         raise HTTPException(400, "attach is a list of up to 20 Library paths")
@@ -746,15 +1046,20 @@ def submit(body: dict) -> dict:
         if HOME.resolve() not in resolved.parents or not resolved.is_file():
             raise HTTPException(400, f"{path} is not a file in the studio folder")
     task_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
-    host = where_of(backend)
-    task = {"id": task_id, "status": "queued", "prompt": prompt, "backend": backend, "tools": list(dict.fromkeys(chosen)),
-            "attach": [str(p) for p in attach_], "where": f"ssh:{host}" if host else "here", "created": time.time(),
-            "started": None, "finished": None, "reply": "", "outputs": [], "error": None, "inputs": []}
-    task_folder(task_id).mkdir(parents=True, exist_ok=True)
-    (task_folder(task_id) / "log.txt").write_text("")
+    host = where_of(backend) if backend in CLIS else ""
     with lock:
+        thread = thread or new_thread(backend, chosen, prompt)
+        thread["turns"].append(turn("user", prompt, attachments=[str(p) for p in attach_], task=task_id))
+        thread.update(backend=backend, tools=chosen, pending=task_id, updated=time.time())
+        task = {"id": task_id, "status": "queued", "prompt": prompt, "backend": backend, "tools": chosen,
+                "attach": [str(p) for p in attach_], "where": f"ssh:{host}" if host else "here", "created": time.time(),
+                "started": None, "finished": None, "reply": "", "outputs": [], "error": None, "inputs": [], "thread": thread["id"],
+                "steps": [], "jobs": []}
+        task_folder(task_id).mkdir(parents=True, exist_ok=True)
+        (task_folder(task_id) / "log.txt").write_text("")
         tasks[task_id] = task
         save_task(task)
+        save_thread(thread)
     pending.put(task_id)
     ensure_worker()
     return public(task)
@@ -768,6 +1073,7 @@ def cancel(task_id: str) -> dict:
         if task["status"] == "queued":
             task.update(status="cancelled", finished=time.time())
             save_task(task)
+            finish_turn(task)
         elif task["status"] == "running":
             task["status"] = "cancelled"
             process = running["process"] if running["id"] == task_id else None
@@ -784,6 +1090,8 @@ def cancel(task_id: str) -> dict:
 
 
 def outputs_of(task: dict) -> list[str]:
+    if task.get("thread"):
+        return changed_files(task) if task.get("_before") is not None else list(task.get("outputs") or [])
     here = task_folder(task["id"])
     skip = {"task.json", "mcp.json", "log.txt", "stream.jsonl", "stderr.txt", ".pid", *task.get("inputs", [])}
     out = []
@@ -809,22 +1117,74 @@ def toml_value(value) -> str:
     return json.dumps(value)  # a JSON string or list of strings is TOML too
 
 
-def harness_args(task: dict, tool: str, config_path: str, servers: dict, system: str) -> list[str]:
+def harness_args(task: dict, tool: str, config_path: str, servers: dict, system: str, session: str | None = None) -> list[str]:
+    """The harness's command line; `session` is the id of the thread's session to continue, None for a first turn."""
+
     if task["backend"] == "claude":
         allowed = [f"mcp__{name}" for name in servers] + ["Read", "Write", "Glob"]
-        return [tool, "-p", "--output-format", "stream-json", "--verbose", "--mcp-config", config_path, "--strict-mcp-config",
+        args = [tool, "-p", "--output-format", "stream-json", "--verbose", "--mcp-config", config_path, "--strict-mcp-config",
                 "--tools", "Read,Write,Glob", "--allowedTools", ",".join(allowed), "--permission-mode", "acceptEdits",
                 "--append-system-prompt", system]
-    args = [tool, "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--json"]
+        if task.get("thread"):  # a session of its own, named by the Studio on the first turn and resumed after
+            args += ["--resume", session] if session else ["--session-id", task["_session"]["id"]]
+        return args
+    if task["backend"] == "hermes":
+        args = [tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json"]
+        return args + (["--resume", session] if session else ["--continue", "imagination-" + task["thread"], "--create-if-missing"])
+    # `codex exec resume` takes no --sandbox: the same sandbox goes as its config value
+    args = ([tool, "exec", "resume", "--skip-git-repo-check", "--json", "-c", 'sandbox_mode="workspace-write"'] if session
+            else [tool, "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--json"])
     for name, server in servers.items():
         for key in ("command", "args", "env"):
             if key in server:
                 args += ["-c", f"mcp_servers.{name}.{key}={toml_value(server[key])}"]
-    return args + ["-"]
+    return args + ([session] if session else []) + ["-"]
+
+
+def tool_name(name: str) -> str:
+    # mcp__studio__queue_clip -> studio · queue_clip
+    return " · ".join(part for part in str(name).removeprefix("mcp__").split("__") if part) or str(name)
+
+
+def results_in(value) -> list:
+    """The JSON values a tool answered with, wherever the harness put its text."""
+
+    found = []
+    if isinstance(value, str):
+        try:
+            found.append(json.loads(value))
+        except ValueError:
+            pass
+    elif isinstance(value, list):
+        for item in value:
+            found += results_in(item)
+    elif isinstance(value, dict):
+        for key in ("text", "content", "result", "structuredContent", "output"):
+            if key in value:
+                found += results_in(value[key])
+    return found
+
+
+def note_results(task: dict, value) -> list[str]:
+    """Jobs the agent queued in the Studio, from its tools' answers, and a working line for each change of state."""
+
+    out = []
+    for result in results_in(value):
+        if not (isinstance(result, dict) and isinstance(result.get("id"), str) and result.get("kind") and result.get("status")):
+            continue
+        jobs_ = task.setdefault("jobs", [])
+        if result["id"] not in jobs_:
+            jobs_.append(result["id"])
+        said = f"{result['kind']} {result['status']}" + (f": {result['title']}" if result.get("title") else "")
+        if result.get("outputs"):
+            said += " → " + ", ".join(str(p).split("/")[-1] for p in result["outputs"][:3])
+        if said not in [s["text"] for s in task.get("steps") or []][-8:]:
+            out.append(said)
+    return out
 
 
 def render(backend: str, line: str, task: dict) -> str:
-    """One line of the harness's stream as a person reads it."""
+    """One line of the harness's stream as a person reads it; working lines also go to the task's steps."""
 
     try:
         event = json.loads(line)
@@ -832,14 +1192,21 @@ def render(backend: str, line: str, task: dict) -> str:
         return line.rstrip("\n") + "\n" if line.strip() else ""
     if not isinstance(event, dict):
         return ""
-    out = []
+    out, steps = [], []
     if backend == "claude":
+        if event.get("session_id") and task.get("_session"):
+            task["_session"]["id"] = str(event["session_id"])
         if event.get("type") == "assistant":
             for block in (event.get("message") or {}).get("content") or []:
                 if block.get("type") == "text" and block.get("text", "").strip():
                     out.append(block["text"].strip())
                 elif block.get("type") == "tool_use":
                     out.append("→ " + str(block.get("name")))
+                    steps.append("→ " + tool_name(block.get("name")))
+        elif event.get("type") == "user":
+            for block in (event.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    steps += note_results(task, block.get("content"))
         elif event.get("type") == "result":
             if isinstance(event.get("result"), str):
                 task["reply"] = event["result"]
@@ -848,9 +1215,27 @@ def render(backend: str, line: str, task: dict) -> str:
         elif event.get("type") == "system" and event.get("subtype") == "init":
             ready = [s.get("name") + (" (" + s.get("status") + ")" if s.get("status") != "connected" else "") for s in event.get("mcp_servers") or []]
             out.append("tools: " + (", ".join(ready) or "none"))
+            steps.append("tools: " + (", ".join(ready) or "none"))
+    elif backend == "hermes":
+        _, reply, session, error = hermes_events(line)
+        if session and task.get("_session") is not None:
+            task["_session"]["id"] = session
+        kind = event.get("type")
+        if kind == "text" and str(event.get("text") or "").strip():
+            out.append(str(event["text"]).strip())
+        elif kind in ("tool", "tool_call", "tool_use", "tool_start") and (event.get("name") or event.get("tool")):
+            out.append("→ " + str(event.get("name") or event.get("tool")))
+            steps.append(out[-1])
+        elif kind == "result":
+            task["reply"] = reply or task.get("reply") or ""
+        if error:
+            task["_error"] = hinted("hermes", error, task["_host"])
+            out.append("error: " + error)
     else:
         _, reply, error = codex_events(line)
         item = event.get("item") or {}
+        if event.get("type") == "thread.started" and event.get("thread_id") and task.get("_session") is not None:
+            task["_session"]["id"] = str(event["thread_id"])
         if reply:
             task["reply"] = reply
             out.append(reply.strip())
@@ -859,95 +1244,176 @@ def render(backend: str, line: str, task: dict) -> str:
             out.append("error: " + error)
         elif event.get("type") == "item.started" and item.get("type") == "mcp_tool_call":
             out.append(f"→ {item.get('server')}.{item.get('tool')}")
+            steps.append(f"→ {item.get('server')} · {item.get('tool')}")
+        elif event.get("type") == "item.completed" and item.get("type") == "mcp_tool_call":
+            steps += note_results(task, item.get("result"))
         elif event.get("type") == "item.started" and item.get("type") == "command_execution":
             out.append("$ " + str(item.get("command"))[:300])
+            steps.append("$ " + str(item.get("command"))[:120])
+    if steps:
+        task.setdefault("steps", []).extend({"text": s[:300], "at": time.time()} for s in steps)
+        del task["steps"][:-STEP_LIMIT]
     return "".join(text + "\n" for text in out)
+
+
+def converse(task: dict, thread: dict | None, log) -> None:
+    """A brain with no session the Studio can name (Gemini, Grok, a local model): one answer, the thread's recent turns
+    read ahead of the message. Its call is not a process the Studio holds, so Stop leaves it to finish and drops it."""
+
+    log.write(f"[{task['backend']} {task['where']}] {task['prompt'][:200]}\n")
+    log.flush()
+    system = CHAT + ROOM.format(tools="")
+    answer: dict = {}
+
+    def run():
+        try:
+            answer["text"] = ask(task["backend"], system, with_history(thread, task["prompt"]))
+        except Exception as error:  # the reason goes to the page as it is
+            answer["error"] = str(error)[:800]
+    caller = threading.Thread(target=run, daemon=True)
+    caller.start()
+    task.setdefault("steps", []).append({"text": "thinking…", "at": time.time(), "live": True})  # shown while it runs, not kept
+    ends = time.time() + TASK_TIMEOUT
+    while caller.is_alive() and task["status"] != "cancelled" and time.time() < ends:
+        caller.join(0.25)
+    if task["status"] == "cancelled":
+        return
+    if caller.is_alive():
+        raise RuntimeError(f"stopped after {TASK_TIMEOUT // 3600} hours")
+    if "error" in answer:
+        raise RuntimeError(answer["error"])
+    task["reply"] = answer.get("text") or ""
+    log.write(task["reply"] + "\n")
+    task["status"] = "done"
+
+
+def stream(task: dict, argv: list[str], cwd: str | None, text: str, log) -> int:
+    """Run the harness, its stream to the log and the task's steps; the return code (None when cancelled first)."""
+
+    here = task_folder(task["id"])
+    with lock:
+        if task["status"] == "cancelled":
+            return None
+        process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(here / "stderr.txt", "w"),
+                                   text=True, cwd=cwd, env=child_env(), start_new_session=True)
+        running.update(id=task["id"], process=process)
+    process.stdin.write(text)
+    process.stdin.close()
+    timer = threading.Timer(TASK_TIMEOUT, lambda: (task.update(_error=f"stopped after {TASK_TIMEOUT // 3600} hours"), stop(process)))
+    timer.daemon = True
+    timer.start()
+    with open(here / "stream.jsonl", "a") as raw:
+        for line_ in process.stdout:
+            raw.write(line_)
+            shown = render(task["backend"], line_, task)
+            if shown:
+                log.write(shown)
+                log.flush()
+    process.wait()
+    timer.cancel()
+    return process.returncode
 
 
 def perform(task: dict) -> None:
     config = saved_settings()
-    host = where_of(task["backend"], config)
+    thread = threads.get(task.get("thread") or "")
+    host = where_of(task["backend"], config) if task["backend"] in CLIS else ""
     task.update(status="running", started=time.time(), _host=host)
     save_task(task)
-    here = task_folder(task["id"])
+    here, work_ = task_folder(task["id"]), work_folder(task)
+    work_.mkdir(parents=True, exist_ok=True)
     log = open(here / "log.txt", "a")
     try:
+        if task["backend"] not in SESSIONS:
+            return converse(task, thread, log)
         names = []
         for path in task["attach"]:  # the attachments, beside what the agent makes
             source = (HOME / path).resolve()
             name = source.name if source.name not in names else f"{len(names)}_{source.name}"
-            try:
-                os.link(source, here / name)
-            except OSError:
-                shutil.copy2(source, here / name)
+            if (work_ / name).exists() and not os.path.samefile(work_ / name, source):
+                name = f"{task['id']}_{name}"  # a different file of the same name from an earlier turn
+            if not (work_ / name).exists():
+                try:
+                    os.link(source, work_ / name)
+                except OSError:
+                    shutil.copy2(source, work_ / name)
             names.append(name)
         task["inputs"] = names
-        servers = mcp_servers(task, host, config)
-        write_json(here / "mcp.json", {"mcpServers": servers})
-        studio = "" if not host else f" Tools that run on the Studio's own machine (Blender, the Studio) save into {here} there."
+        task["_before"] = snapshot(work_)
+        servers = mcp_servers(task, host, config) if task["backend"] in HARNESSES else {}
+        if task["backend"] in HARNESSES:
+            write_json(work_ / "mcp.json", {"mcpServers": servers})
+        where_s = f"ssh:{host}" if host else "here"
+        session = (thread or {}).get("session") or {}
+        continuing = session.get("id") if thread and session.get("backend") == task["backend"] and session.get("where") == where_s else None
         if host:
             tool = remote_cli(host, task["backend"])
-            made = subprocess.run([*ssh_of(host), "mkdir -p ~/.slate-studio-agent && mktemp -d ~/.slate-studio-agent/" + task["id"] + ".XXXXXX"],
-                                  capture_output=True, text=True, timeout=PROBE_TIMEOUT + 4, stdin=subprocess.DEVNULL)
+            # a thread keeps one folder on the other machine, so its session is found there again; a task of its own gets a fresh one
+            line = ("mkdir -p ~/.slate-studio-agent/" + task["thread"] + " && cd ~/.slate-studio-agent/" + task["thread"] + " && pwd"
+                    if task.get("thread") else "mkdir -p ~/.slate-studio-agent && mktemp -d ~/.slate-studio-agent/" + task["id"] + ".XXXXXX")
+            made = subprocess.run([*ssh_of(host), line], capture_output=True, text=True, timeout=PROBE_TIMEOUT + 4, stdin=subprocess.DEVNULL)
             where = made.stdout.strip()
             if made.returncode or not where.startswith("/"):
                 raise RuntimeError(f"could not make a working folder on {host}: " + (made.stderr.strip()[-300:] or "no answer"))
             port, name = scp_target(host)
-            sent = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *port,
-                                   *[str(here / n) for n in ["mcp.json", *names]], f"{name}:{where}/"],
-                                  capture_output=True, text=True, timeout=600)
-            if sent.returncode:
-                raise RuntimeError(f"could not copy the task's files to {host}: " + sent.stderr.strip()[-300:])
-            system = SYSTEM.format(folder=f" ({where} on {host})", studio=studio)
-            args = harness_args(task, tool, f"{where}/mcp.json", servers, system)
-            line = REMOTE_PATH + f"cd {shlex.quote(where)} && echo $$ > .pid && exec " + remote_line(args)
-            argv, cwd = [*ssh_of(host), line], None
+            sending = [str(work_ / n) for n in (["mcp.json"] if task["backend"] in HARNESSES else []) + names]
+            if sending:
+                sent = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", *port, *sending, f"{name}:{where}/"],
+                                      capture_output=True, text=True, timeout=600)
+                if sent.returncode:
+                    raise RuntimeError(f"could not copy the task's files to {host}: " + sent.stderr.strip()[-300:])
+            studio = f" Tools that run on the Studio's own machine (Blender, the Studio) save into {work_} there."
+            folder_ = f" ({where} on {host})"
+            config_path = f"{where}/mcp.json"
             with lock:
                 running["remote"] = (host, where)
         else:
             tool = cli(task["backend"])
             if not tool:
                 raise RuntimeError(f"{CLIS[task['backend']][0]} is not installed on this machine: install it and sign in, or run it over ssh")
-            system = SYSTEM.format(folder=f" ({here})", studio="")
-            argv, cwd = harness_args(task, tool, str(here / "mcp.json"), servers, system), str(here)
-        log.write(f"[{task['backend']} {'on ' + host if host else 'here'}] {task['prompt'][:200]}\n")
+            studio, folder_, config_path, where = "", f" ({work_})", str(work_ / "mcp.json"), None
+        system = SYSTEM.format(folder=folder_, studio=studio)
+        if task.get("thread"):
+            system += ROOM.format(tools=ROOM_TOOLS.format(names=STUDIO_TOOLS) if "studio" in task["tools"] else "") \
+                if task["backend"] in HARNESSES else NO_STUDIO + ROOM.format(tools="")
+        log.write(f"[{task['backend']} {'on ' + host if host else 'here'}{' · continues its session' if continuing else ''}] {task['prompt'][:200]}\n")
         log.flush()
-        with lock:
-            if task["status"] == "cancelled":
-                return
-            process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(here / "stderr.txt", "w"),
-                                       text=True, cwd=cwd, env=child_env(), start_new_session=True)
-            running.update(id=task["id"], process=process)
-        # Claude Code takes the instruction as its system prompt; Codex has no such flag and reads it ahead of the task
-        process.stdin.write(task["prompt"] if task["backend"] == "claude" else f"{system}\n\n---\n\n{task['prompt']}")
-        process.stdin.close()
-        timer = threading.Timer(TASK_TIMEOUT, lambda: (task.update(_error=f"stopped after {TASK_TIMEOUT // 3600} hours"), stop(process)))
-        timer.daemon = True
-        timer.start()
-        with open(here / "stream.jsonl", "a") as raw:
-            for line_ in process.stdout:
-                raw.write(line_)
-                shown = render(task["backend"], line_, task)
-                if shown:
-                    log.write(shown)
-                    log.flush()
-        process.wait()
-        timer.cancel()
-        if host:  # what the agent made, back beside the task's record; nothing here is removed
+        for attempt in (0, 1):
+            task.update(reply="", _session={"backend": task["backend"], "id": continuing or (str(uuid.uuid4()) if task["backend"] == "claude" else ""),
+                                            "where": where_s} if task.get("thread") else None)
+            task.pop("_error", None)
+            message = task["prompt"] if continuing else with_history(thread, task["prompt"])
+            # Claude Code takes the instruction as its system prompt; Codex and Hermes read it ahead of a first turn
+            text = message if task["backend"] == "claude" or continuing else f"{system}\n\n---\n\n{message}"
+            args = harness_args(task, tool, config_path, servers, system, continuing)
+            argv, cwd = ([*ssh_of(host), REMOTE_PATH + f"cd {shlex.quote(where)} && echo $$ > .pid && exec " + remote_line(args)], None) if host \
+                else (args, str(work_))
+            code = stream(task, argv, cwd, text, log)
+            if code is None or task["status"] == "cancelled":
+                break
+            said = (here / "stderr.txt").read_text(errors="replace")
+            if continuing and (code or task.get("_error")) and LOST_SESSION.search(said + " " + str(task.get("_error") or "")):
+                log.write("[the agent's session was not found: starting it again with the conversation so far]\n")
+                continuing = None
+                continue
+            break
+        if host:  # what the agent made, back into the thread's folder; nothing here is removed
             shell = " ".join(ssh_of(host)[:-2])  # ssh with its options and port, as rsync runs it
-            back = subprocess.run(["rsync", "-a", "--exclude", ".pid", "-e", shell, f"{name}:{where}/", f"{here}/"]
-                                  if shutil.which("rsync") else ["scp", "-q", "-r", "-o", "BatchMode=yes", *port, f"{name}:{where}/.", str(here)],
+            back = subprocess.run(["rsync", "-a", "--exclude", ".pid", "--exclude", "mcp.json", "-e", shell, f"{name}:{where}/", f"{work_}/"]
+                                  if shutil.which("rsync") else ["scp", "-q", "-r", "-o", "BatchMode=yes", *port, f"{name}:{where}/.", str(work_)],
                                   capture_output=True, text=True, timeout=1800)
             if back.returncode:
                 log.write(f"could not copy the outputs back from {host}: {back.stderr.strip()[-300:]}\n")
-        if task["status"] == "cancelled":
+        if task["status"] == "cancelled" or code is None:
             return
         error = task.pop("_error", None)
-        if process.returncode or error:
+        if code or error:
             said = (here / "stderr.txt").read_text(errors="replace").strip()
-            task.update(status="failed", error=error or hinted(task["backend"], said or f"{task['backend']} stopped with code {process.returncode}", host))
+            task.update(status="failed", error=error or hinted(task["backend"], said or f"{task['backend']} stopped with code {code}", host))
         else:
             task["status"] = "done"
+        if task["status"] != "done" or not (task.get("_session") or {}).get("id"):
+            task["_session"] = None  # the thread keeps the session it had: only a finished turn names a new one
     finally:
         log.close()
         task.pop("_host", None)
@@ -975,9 +1441,11 @@ def attach(home: Path) -> APIRouter:
     (HOME / "agent").mkdir(parents=True, exist_ok=True)
     with lock:
         tasks.clear()
+        threads.clear()
         while not pending.empty():
             pending.get_nowait()
         load_tasks()
+        load_threads()
     if not pending.empty():
         ensure_worker()
     router = APIRouter()
@@ -1050,5 +1518,51 @@ def attach(home: Path) -> APIRouter:
     def cancel_task(task_id: str, request: Request):
         local(request, True)
         return cancel(task_id)
+
+    # the Agent room: conversations whose turns are tasks (POST /api/agent/tasks with a `thread` continues one too)
+    @router.get("/api/agent/threads")
+    def list_threads(request: Request):
+        local(request)
+        return {"threads": [summary(t) for t in sorted(threads.values(), key=lambda t: -t["updated"])]}
+
+    @router.post("/api/agent/threads")
+    def start_thread(body: dict, request: Request):
+        local(request, True)
+        if body.get("thread"):
+            raise HTTPException(400, "a new conversation has no thread yet: post to /api/agent/threads/{id}/messages")
+        task = submit(body)
+        return {"thread": thread_public(threads[task["thread"]]), "task": task}
+
+    @router.get("/api/agent/threads/{thread_id}")
+    def one_thread(thread_id: str, request: Request):
+        local(request)
+        return thread_public(thread_of(thread_id))
+
+    @router.post("/api/agent/threads/{thread_id}")
+    def change_thread(thread_id: str, body: dict, request: Request):
+        local(request, True)
+        return rename_thread(thread_id, body)
+
+    @router.delete("/api/agent/threads/{thread_id}")
+    def remove_thread(thread_id: str, request: Request):
+        local(request)
+        if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
+            raise HTTPException(403, "Open the Studio page to use brains and agents.")
+        return forget_thread(thread_id)
+
+    @router.post("/api/agent/threads/{thread_id}/messages")
+    def reply(thread_id: str, body: dict, request: Request):
+        local(request, True)
+        thread_of(thread_id)
+        task = submit({**body, "thread": thread_id})
+        return {"thread": thread_public(threads[thread_id]), "task": task}
+
+    @router.post("/api/agent/threads/{thread_id}/cancel")
+    def stop_thread(thread_id: str, request: Request):
+        local(request, True)
+        thread = thread_of(thread_id)
+        if thread.get("pending"):
+            cancel(thread["pending"])
+        return thread_public(thread)
 
     return router

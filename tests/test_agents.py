@@ -30,17 +30,23 @@ from pathlib import Path
 args = sys.argv[1:]
 if args == ["--version"]:
     print("9.9.9 (Claude Code)"); sys.exit(0)
-Path(os.environ["FAKE_LOG"]).open("a").write(json.dumps({"cli": "claude", "args": args, "cwd": os.getcwd()}) + "\n")
 prompt = sys.stdin.read()
+Path(os.environ["FAKE_LOG"]).open("a").write(json.dumps({"cli": "claude", "args": args, "cwd": os.getcwd(), "stdin": prompt}) + "\n")
 if os.environ.get("FAKE_MODE") == "expired":
     print(json.dumps({"type": "result", "is_error": True, "result": "Not logged in · Please run /login"})); sys.exit(1)
 if "stream-json" in args:
-    print(json.dumps({"type": "system", "subtype": "init", "mcp_servers": [{"name": "fake", "status": "connected"}]}), flush=True)
+    session = args[args.index("--session-id") + 1] if "--session-id" in args else args[args.index("--resume") + 1] if "--resume" in args else "s0"
+    if "--resume" in args and os.environ.get("FAKE_MODE") == "lost":
+        print(json.dumps({"type": "result", "is_error": True, "result": f"No conversation found with session ID: {session}"})); sys.exit(1)
+    print(json.dumps({"type": "system", "subtype": "init", "session_id": session, "mcp_servers": [{"name": "fake", "status": "connected"}]}), flush=True)
     print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Building the set."},
                       {"type": "tool_use", "name": "mcp__fake__make", "input": {}}]}}), flush=True)
+    print(json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": [{"type": "text", "text": json.dumps(
+        {"id": "job1", "kind": "video", "status": "queued", "title": "agent: clip", "outputs": []})}]}]}}), flush=True)
     time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
     Path("render.png").write_bytes(b"png")
-    print(json.dumps({"type": "result", "is_error": False, "result": "Made render.png"}), flush=True)
+    said = "Made render.png" if "ask me" not in prompt else "I can make it two ways.\n\n[question]\nHow long should the clip be?\n- 5 s\n- 10 s"
+    print(json.dumps({"type": "result", "is_error": False, "session_id": session, "result": said}), flush=True)
     sys.exit(0)
 print(json.dumps({"type": "result", "is_error": False, "result": "ready" if "ready" in prompt else "?"}))
 '''
@@ -55,10 +61,12 @@ Path(os.environ["FAKE_LOG"]).open("a").write(json.dumps({"cli": "codex", "args":
 if os.environ.get("FAKE_MODE") == "old":
     print(json.dumps({"type": "error", "message": json.dumps({"error": {"message": "The 'x' model is not supported when using Codex with a ChatGPT account."}})}))
     sys.exit(1)
-if "workspace-write" in args:
+if "workspace-write" in args or 'sandbox_mode="workspace-write"' in args:
     print(json.dumps({"type": "item.started", "item": {"type": "mcp_tool_call", "server": "fake", "tool": "make"}}))
+    print(json.dumps({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "fake", "tool": "make", "result": {
+        "content": [{"type": "text", "text": json.dumps({"id": "job2", "kind": "scout", "status": "done", "outputs": ["scouts/a/s1.png"]})}]}}}))
     Path("set.json").write_text("{}")
-print(json.dumps({"type": "thread.started"}))
+print(json.dumps({"type": "thread.started", "thread_id": "codex-thread-1"}))
 print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ready"}}))
 '''
 GEMINI = r'''
@@ -75,6 +83,24 @@ if args == ["--version"]:
     print("grok 1.0"); sys.exit(0)
 assert args[:2] == ["--prompt-file", "/dev/stdin"], args
 print("ready" if "ready" in open("/dev/stdin").read() else "?")
+'''
+HERMES = r'''
+import json, os, sys
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("Hermes Agent v0.21.5 (2026.9.24)"); sys.exit(0)
+prompt = "" if "-z" in args else sys.stdin.read()
+Path = __import__("pathlib").Path
+Path(os.environ["FAKE_LOG"]).open("a").write(json.dumps({"cli": "hermes", "args": args, "cwd": os.getcwd(), "stdin": prompt}) + "\n")
+if "-z" in args:
+    print("ready" if "ready" in args[args.index("-z") + 1] else "?"); sys.exit(0)
+if os.environ.get("FAKE_MODE") == "hermes-nologin":
+    sys.stderr.write("Error: no inference provider configured. Run hermes setup.\n"); sys.exit(1)
+session = args[args.index("--resume") + 1] if "--resume" in args else "20261018_120000_abcdef"
+print("Warning: Unknown toolsets: messaging")
+print(json.dumps({"type": "system", "subtype": "init", "model": "m", "session_id": session}))
+print(json.dumps({"type": "text", "text": "ready"}))
+print(json.dumps({"type": "result", "session_id": session, "exit_code": 0, "text": "ready" if "ready" in prompt else "Here is a plan."}))
 '''
 # ssh that runs the remote command here, in a home of its own: what a second machine would do
 SSH = r'''
@@ -145,7 +171,7 @@ def script(folder: Path, name: str, body: str) -> Path:
 def fake(tmp_path, monkeypatch):
     bin_ = tmp_path / "bin"
     bin_.mkdir()
-    for name, body in (("claude", CLAUDE), ("codex", CODEX), ("gemini", GEMINI), ("grok", GROK), ("ssh", SSH), ("scp", SCP)):
+    for name, body in (("claude", CLAUDE), ("codex", CODEX), ("gemini", GEMINI), ("grok", GROK), ("hermes", HERMES), ("ssh", SSH), ("scp", SCP)):
         script(bin_, name, body)
     script(tmp_path, "mcp.py", MCP)
     script(tmp_path, "listen.py", LISTENER)
@@ -159,9 +185,18 @@ def fake(tmp_path, monkeypatch):
     monkeypatch.setattr(agents, "MAC_CODEX", ())
     monkeypatch.setattr(agents.shutil, "which", lambda name, path=None, _w=agents.shutil.which: None if name == "rsync" else _w(name, path=path))
     shutil_rmtree(agents.HOME / ".studio-agents")
+    (agents.HOME / "settings.json").unlink(missing_ok=True)
     agents.probes.clear()
+    agents.threads.clear()
     yield {"bin": bin_, "log": log, "tmp": tmp_path, "calls": lambda: [json.loads(l) for l in log.read_text().splitlines()]}
+    for task in list(agents.tasks.values()):  # nothing of one test runs into the next
+        if task["status"] in ("queued", "running"):
+            agents.cancel(task["id"])
+    ends = time.time() + 10
+    while agents.running["id"] and time.time() < ends:
+        time.sleep(0.05)
     shutil_rmtree(agents.HOME / ".studio-agents")
+    (agents.HOME / "settings.json").unlink(missing_ok=True)
 
 
 def shutil_rmtree(path: Path):
@@ -187,7 +222,10 @@ def test_brains_are_found_with_their_versions(fake):
     (fake["bin"] / "grok").unlink()
     answer = client.get("/api/brains").json()
     found = {b["id"]: b for b in answer["backends"]}
-    assert list(found) == ["claude", "codex", "gemini", "grok", "local"]
+    assert list(found) == ["claude", "codex", "gemini", "grok", "hermes", "local"]
+    assert found["hermes"]["found"] and found["hermes"]["version"].startswith("Hermes Agent") and found["hermes"]["label"] == "Hermes"
+    assert found["hermes"]["harness"] is False and found["hermes"]["session"] and "hermes setup" in found["hermes"]["signin"]
+    assert found["claude"]["harness"] and found["codex"]["harness"] and not found["gemini"]["harness"] and found["local"]["harness"] is False
     assert found["claude"]["found"] and found["claude"]["version"] == "9.9.9 (Claude Code)" and found["claude"]["where"] == "here"
     assert found["claude"]["path"] == str(fake["bin"] / "claude") and "claude auth login" in found["claude"]["signin"]
     assert found["codex"]["label"] == "Codex · ChatGPT sign-in" and found["gemini"]["found"]
@@ -348,7 +386,8 @@ def test_the_studio_mcp_server_shakes_hands():
     tool = {"id": "studio", "label": "Studio", "command": [PY, str(ROOT / "mcp/studio-mcp.py")], "env": {"STUDIO_URL": "http://127.0.0.1:9"},
             "via": "here", "host": "", "enabled": True}
     check = agents.check_tool(tool)
-    assert check["ok"] and check["tools"] == ["studio_state", "list_library", "queue_still", "queue_clip", "job_status", "list_jobs", "upload_file"]
+    assert check["ok"] and check["tools"] == ["studio_state", "list_library", "queue_still", "queue_clip", "queue_voice", "queue_song", "list_projects",
+                                             "add_to_timeline", "export_timeline", "job_status", "list_jobs", "upload_file"]
 
 
 def test_blender_is_started_when_its_socket_is_closed(fake):
@@ -375,9 +414,9 @@ def test_a_task_runs_saves_its_files_and_lists_them(fake):
     assert made["status"] in ("queued", "running") and made["tools"] == ["fake"]
     done = wait_for(made["id"])
     assert done["status"] == "done", done
-    assert done["outputs"] == [f"agent/{made['id']}/render.png"] and done["reply"] == "Made render.png"
+    assert made["thread"] and done["outputs"] == [f"agent/{made['thread']}/render.png"] and done["reply"] == "Made render.png"
     assert "Building the set." in done["log"] and "→ mcp__fake__make" in done["log"] and "tools: fake" in done["log"]
-    folder = agents.HOME / "agent" / made["id"]
+    folder = agents.HOME / "agent" / made["thread"]  # the thread's own folder, the same one each turn
     assert (folder / "plate.png").read_bytes() == b"plate"
     config = json.loads((folder / "mcp.json").read_text())["mcpServers"]["fake"]
     assert config == {"command": PY, "args": [str(fake["tmp"] / "mcp.py")], "env": {"FAKE_X": "1"}}
@@ -385,10 +424,10 @@ def test_a_task_runs_saves_its_files_and_lists_them(fake):
     assert args[args.index("--allowedTools") + 1] == "mcp__fake,Read,Write,Glob" and args[args.index("--tools") + 1] == "Read,Write,Glob"
     assert args[args.index("--permission-mode") + 1] == "acceptEdits" and "Bash" not in " ".join(args)
     assert str(folder) in args[args.index("--append-system-prompt") + 1]
-    assert client.get(f"/files/agent/{made['id']}/render.png").content == b"png"
+    assert client.get(f"/files/agent/{made['thread']}/render.png").content == b"png"
     assert made["id"] in [t["id"] for t in client.get("/api/agent/tasks").json()["tasks"]]
     # the record outlives the app
-    record = json.loads((folder / "task.json").read_text())
+    record = json.loads((agents.HOME / "agent" / made["id"] / "task.json").read_text())
     assert record["status"] == "done" and record["outputs"] == done["outputs"]
     agents.tasks.clear()
     agents.load_tasks()
@@ -399,11 +438,11 @@ def test_a_codex_task_gets_its_tools_as_config(fake):
     post("/api/agent/tools", fake_tool(fake))
     made = post("/api/agent/tasks", {"prompt": "Lay out the scene", "backend": "codex", "tools": ["fake"]}).json()
     done = wait_for(made["id"])
-    assert done["status"] == "done" and done["reply"] == "ready" and done["outputs"] == [f"agent/{made['id']}/set.json"]
+    assert done["status"] == "done" and done["reply"] == "ready" and done["outputs"] == [f"agent/{made['thread']}/set.json"]
     assert "→ fake.make" in done["log"]
     call = [c for c in fake["calls"]() if c.get("cli") == "codex"][-1]
     args = call["args"]
-    assert call["stdin"].startswith("You are working for a filmmaker inside Slate Studio.") and call["stdin"].endswith("Lay out the scene")
+    assert call["stdin"].startswith("You are working for a filmmaker inside Imagination Studio.") and call["stdin"].endswith("Lay out the scene")
     assert args[:6] == ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--json", "-c"]
     assert f'mcp_servers.fake.command={json.dumps(PY)}' in args and 'mcp_servers.fake.env={FAKE_X = "1"}' in args
 
@@ -414,7 +453,7 @@ def test_a_task_over_ssh_brings_its_files_back(fake):
     made = post("/api/agent/tasks", {"prompt": "Build a set", "backend": "claude", "tools": ["fake"]}).json()
     done = wait_for(made["id"])
     assert done["status"] == "done", done
-    assert done["outputs"] == [f"agent/{made['id']}/render.png"]
+    assert done["outputs"] == [f"agent/{made['thread']}/render.png"]
     call = next(c for c in fake["calls"]() if c.get("cli") == "claude")
     assert ".slate-studio-agent" in call["cwd"] and str(fake["tmp"] / "remote-home") in call["cwd"]
     # the tool runs on the harness's own host, so it is started there directly
@@ -453,7 +492,8 @@ def test_a_task_is_cancelled(fake, monkeypatch):
 
 def test_tasks_are_checked(fake):
     assert post("/api/agent/tasks", {"prompt": "", "backend": "claude"}).status_code == 400
-    assert post("/api/agent/tasks", {"prompt": "x", "backend": "gemini"}).status_code == 400
+    assert post("/api/agent/tasks", {"prompt": "x", "backend": "nonsense"}).status_code == 400
+    assert post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": [], "thread": "th-0000-000000-000000"}).status_code == 404
     assert post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": ["nope"]}).status_code == 400
     assert post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": [], "attach": ["../../etc/passwd"]}).status_code == 400
 

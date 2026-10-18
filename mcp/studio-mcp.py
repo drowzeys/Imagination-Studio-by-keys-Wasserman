@@ -45,6 +45,29 @@ TOOLS = [
                                  "quality": {"type": "string", "description": "a quality from studio_state"},
                                  "seconds": {"type": "number", "description": "length, brought to the nearest the model takes (up to 15)"},
                                  "seed": {"type": "integer"}, "title": {"type": "string"}}, ("prompt",))},
+    {"name": "queue_voice", "description": "Queue a spoken line with Fish Audio Drama 3 (a voice take). Describe the voice and delivery in "
+                                           "brackets before the words, e.g. \"[a tired older man, quiet] We should go.\". No voice cloning here: "
+                                           "a take from a reference recording needs the consent box on the Voice tab.",
+     "inputSchema": text_schema({"text": {"type": "string", "description": "the line, with any [direction] in brackets"},
+                                 "seed": {"type": "integer"}, "title": {"type": "string"}}, ("text",))},
+    {"name": "queue_song", "description": "Queue a song with MiniMax-Music3: a style caption and lyrics with section tags ([Verse], [Chorus]); "
+                                          "no lyrics makes an instrumental.",
+     "inputSchema": text_schema({"caption": {"type": "string", "description": "genre, tempo, mood, vocals, instruments"},
+                                 "lyrics": {"type": "string", "description": "lyrics with [Verse] / [Chorus] tags, or empty for an instrumental"},
+                                 "seconds": {"type": "number", "description": "length in seconds (default 60)"},
+                                 "seed": {"type": "integer"}, "title": {"type": "string"}}, ("caption",))},
+    {"name": "list_projects", "description": "The Editor's projects (timelines), newest first.",
+     "inputSchema": text_schema({})},
+    {"name": "add_to_timeline", "description": "Put a finished clip (a Library path) at the end of an Editor timeline. Without a project, "
+                                               "the newest one is used, or a new one named 'Agent timeline' is made.",
+     "inputSchema": text_schema({"path": {"type": "string", "description": "Library path of the clip"},
+                                 "project": {"type": "string", "description": "a project id from list_projects"},
+                                 "in": {"type": "number", "description": "start in the clip, seconds"},
+                                 "out": {"type": "number", "description": "end in the clip, seconds (0 plays it to its end)"}}, ("path",))},
+    {"name": "export_timeline", "description": "Queue the export of an Editor timeline as one .mp4 (needs ffmpeg). Follow it with job_status.",
+     "inputSchema": text_schema({"project": {"type": "string", "description": "a project id (default: the newest)"},
+                                 "size": {"type": "string", "enum": ["1920x1080", "2560x1440", "2048x1152", "1344x768"],
+                                          "description": "default 1920x1080"}})},
     {"name": "job_status", "description": "One job: status (queued, running, done, failed, cancelled), progress, outputs, error.",
      "inputSchema": text_schema({"id": {"type": "string"}}, ("id",))},
     {"name": "list_jobs", "description": "The Studio's queue and finished jobs, newest first.",
@@ -79,6 +102,17 @@ def job_summary(job: dict) -> dict:
     return {k: job.get(k) for k in ("id", "kind", "status", "title", "progress", "outputs", "error", "elapsed", "estimate")}
 
 
+def project_of(given) -> dict:
+    """The project asked for, else the newest one; a first one is made when there is none."""
+
+    if given:
+        return call("GET", "/api/projects/" + urllib.request.quote(str(given), safe=""))
+    listed = call("GET", "/api/projects")
+    if listed:
+        return call("GET", "/api/projects/" + urllib.request.quote(listed[0]["id"], safe=""))
+    return call("POST", "/api/projects", {"name": "Agent timeline"})
+
+
 def run(name: str, args: dict):
     if name == "studio_state":
         state = call("GET", "/api/state")
@@ -101,6 +135,31 @@ def run(name: str, args: dict):
             if args.get("first_frame"):
                 params["image"] = args["first_frame"]
         return job_summary(call("POST", "/api/jobs", {"kind": kind, "title": args.get("title") or "agent: clip", "params": params}))
+    if name == "queue_voice":
+        body = {k: args[k] for k in ("text", "seed", "title") if args.get(k) not in (None, "")}
+        return job_summary(call("POST", "/api/voice/takes", body))
+    if name == "queue_song":
+        body = {k: args[k] for k in ("caption", "lyrics", "seconds", "seed", "title") if args.get(k) not in (None, "")}
+        return job_summary(call("POST", "/api/music/takes", body))
+    if name == "list_projects":
+        return call("GET", "/api/projects")
+    if name == "add_to_timeline":
+        project, path = project_of(args.get("project")), str(args["path"])
+        try:
+            duration = call("GET", "/api/probe?path=" + urllib.request.quote(path, safe="")).get("duration") or 5
+        except StudioError:
+            duration = 5
+        project.setdefault("timeline", []).append({"path": path, "in": float(args.get("in") or 0), "out": float(args.get("out") or 0),
+                                                   "duration": duration})
+        saved = call("PUT", "/api/projects/" + urllib.request.quote(project["id"], safe=""), project)
+        return {"project": saved["id"], "name": saved.get("name"), "clips": len(saved.get("timeline") or [])}
+    if name == "export_timeline":
+        project = project_of(args.get("project"))
+        if not project.get("timeline"):
+            raise StudioError(f"the timeline of {project.get('name') or project['id']} is empty: add clips with add_to_timeline first")
+        width, height = (int(n) for n in str(args.get("size") or "1920x1080").split("x"))
+        params = {"clips": project["timeline"], "width": width, "height": height, **({"soundtrack": project["soundtrack"]} if project.get("soundtrack") else {})}
+        return job_summary(call("POST", "/api/jobs", {"kind": "export", "title": "Export " + str(project.get("name") or project["id"]), "params": params}))
     if name == "job_status":
         return job_summary(call("GET", "/api/jobs/" + urllib.request.quote(str(args["id"]), safe="")))
     if name == "list_jobs":
