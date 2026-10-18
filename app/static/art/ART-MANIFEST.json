@@ -2,6 +2,14 @@
  "_how": "Each slot is a picture a card reads. Save it as webp (at most 250 KB) at 'file', then set \"ready\": true here; the page only asks for ready files. Invented content only: no real people, logos or text in the picture. List each file in ART-SOURCES.md.",
  "slots": [
   {
+   "name": "poster",
+   "file": "art/poster.webp",
+   "size": "1672x941",
+   "aspect": "16:9",
+   "purpose": "Home: the product poster, shown whole as the key art; nothing is laid over it",
+   "ready": true
+  },
+  {
    "name": "home-hero",
    "file": "art/home-hero.webp",
    "size": "2520x1080",

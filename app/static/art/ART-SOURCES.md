@@ -2,6 +2,7 @@
 
 Source: the collection notes. The master-canvas repo is MIT.
 
+- art/poster.webp: the product poster, Sam Wasserman's own art
 - art/suite/scriptbreak.webp: own art of Sam Wasserman's app scriptbreak (github.com/wassermanproductions/scriptbreak), Apache-2.0
 - art/suite/cork-board.webp: own art of Sam Wasserman's app cork-board (github.com/wassermanproductions/cork-board), Apache-2.0
 - art/suite/blockout.webp: own art of Sam Wasserman's app blockout (github.com/wassermanproductions/blockout), Apache-2.0

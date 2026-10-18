@@ -41,10 +41,12 @@ const STARTS = () => [
 function viewHome() {
   const [hello, line] = timeOfDay(), wrap = el("div");
   const tc = el("span", { class: "tc" }, timecode()); const tick = setInterval(() => { if (!tc.isConnected) return clearInterval(tick); tc.textContent = timecode(); }, 1000 / 24);
-  const hero = el("div", { class: "homehero" + (ART.ready.has("home-hero") ? " has-art" : "") }, artSlot("home-hero", "ar21", "home"),
+  // the product poster is the key art, shown whole; the greeting, the tagline and the actions sit below it
+  const hero = el("div", { class: "homehero" + (ART.ready.has("poster") ? " has-art" : "") }, artSlot("poster", "", "home"),
     el("div", { class: "over" },
       el("div", { class: "stack" }, el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap" }, el("span", { class: "eyebrow" }, new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })), tc),
-        el("h1", { class: "display" }, hello), el("p", { class: "sub", style: "margin:0" }, line + " Pictures, clips with sound, voices and score, made on your own machine.")),
+        el("h1", { class: "display" }, hello), el("p", { class: "tagline" }, "Local Creative ", el("em", {}, "All in One"), " Studio"),
+        el("p", { class: "sub", style: "margin:0" }, line + " Pictures, clips with sound, voices and score, made on your own machine.")),
       el("div", { class: "acts" }, el("button", { class: "primary", onclick: () => startCreate({ goes: "video", start: "text" }) }, "Roll a new clip"),
         el("button", { onclick: () => go("Production") }, "Plan a film"), el("button", { class: "ghost", onclick: palOpen }, "Search ", el("kbd", {}, "⌘K")))));
   put(wrap, hero);
