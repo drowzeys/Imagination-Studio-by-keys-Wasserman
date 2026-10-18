@@ -39,6 +39,7 @@ for name in ("projects", "uploads", "renders", "scouts", "exports"):
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
 import memory_guard  # noqa: E402  (a DGX Spark's memory: what a clip needs and whether this machine has it, in spark/)
+import settings  # noqa: E402  (Settings: looks, layout, presets, settings.json, beside this file)
 
 FPS = 24
 # seconds -> frames (17n + 5): the four lengths the app has always offered. A job may ask for any count the model takes
@@ -968,6 +969,8 @@ def estimate(preset: str, quality: str, seconds: float, text_only: bool = False,
 
 def environment(extra: dict) -> dict:
     env = dict(os.environ)
+    for key, value in settings.job_env().items():  # Settings → Presets (the delivery sound rate); the environment's own wins
+        env.setdefault(key, value)
     env.update({key: str(value) for key, value in extra.items() if value not in (None, "")})
     env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
     return env
@@ -2158,6 +2161,13 @@ import telemetry  # noqa: E402  (this machine's readings for the status bar: GPU
 app.include_router(telemetry.attach(HOME, jobs, order, lock, memory_guard))
 import suite  # noqa: E402  (the filmmaker suite's files in and out: imports, timeline, dailies, beside this file)
 app.include_router(suite.attach(HOME, jobs, lock, PRESETS, app))
+app.include_router(settings.attach(HOME))
+try:
+    import nodes  # noqa: E402  (Nodes: a canvas of the studio's own jobs, run in order, beside this file)
+except ImportError:  # an install without it keeps the rest of the app
+    nodes = None
+if nodes is not None:
+    app.include_router(nodes.attach(HOME, enqueue, jobs, lock, inside, relative))
 
 
 @app.middleware("http")
