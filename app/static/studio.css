@@ -811,7 +811,7 @@ html.motion-reduce *, html.motion-reduce *::before, html.motion-reduce *::after 
 .m-setlink { margin:12px 0 4px; }
 
 /* ---------- Home: the composer ---------- */
-.homehero.slim { grid-template-columns:minmax(0,1fr) clamp(260px,28%,400px); } .homehero.slim .display { font-size:48px; } .homehero.slim .over { gap:16px; }
+.homehero.slim { grid-template-columns:minmax(0,1fr) clamp(440px,50%,780px); } .homehero.slim .display { font-size:48px; } .homehero.slim .over { gap:16px; }
 .homehero.no-art { grid-template-columns:minmax(0,1fr); }
 .composer { margin-top:28px; padding:20px 22px 18px; border-radius:var(--r3); border:1px solid var(--line2); background:var(--raise); display:flex; flex-direction:column; gap:12px; box-shadow:var(--sh-card); }
 .cmp-modes { display:flex; gap:8px; flex-wrap:wrap; }
