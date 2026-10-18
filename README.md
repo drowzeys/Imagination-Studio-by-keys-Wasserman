@@ -1136,13 +1136,20 @@ network, which you should do only on a network you trust.
 
 Open **Updates** in the header, choose **Check for updates**, then **Update and restart**. The page reconnects after
 the restart and offers **Reload Studio** when you have saved your work. The update source is the GitHub repository
-you installed, on its current default branch. Changes on a contributor's development branch reach users after they
-are merged into that default branch. A fork follows its own default branch; it does not automatically merge its parent.
+you installed (`origin`), and Studio follows the branch you have checked out: the branch it tracks on `origin`, or the
+repository's default branch when it tracks none. The Updates panel shows the installed version and commit, the branch
+it follows, and the newest GitHub release of that repository for information; what is installed is always the latest
+commit of the followed branch. A fork follows its own branches; it does not automatically merge its parent.
+
+A development checkout updates the same way: check out the development branch so that it tracks `origin` (for
+example `git switch --track origin/<branch>`), and the panel follows that branch. To follow a particular branch
+whatever is tracked, start Studio with `STUDIO_UPDATE_BRANCH=<branch>`; the checkout must be on that branch. A branch
+that tracks another remote, or a local branch, is not updated from the app.
 
 **Automatic updates** is off by default. Turn it on to check every six hours while Studio is open and install when
 its queue and render engine are idle. The setting is saved for this installation. Updates preserve projects, media,
-models and runtime environments. Local code changes, untracked files, separate development commits, a detached
-checkout or a development branch pause updates without discarding work. Updates requiring changes to installation
+models and runtime environments. Updates only move the branch forward: local code changes, untracked files, commits
+of your own that are not on GitHub, or a detached checkout pause updates without discarding work. Updates requiring changes to installation
 dependencies show a message asking you to follow that version's setup instructions.
 
 Start Studio using `bash scripts/app.sh` or the existing Mac app launcher to support an update and restart. The launcher

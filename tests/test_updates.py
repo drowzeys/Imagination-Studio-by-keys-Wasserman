@@ -1,4 +1,5 @@
 """Exercise real temporary Git histories and the update API without touching an installed Studio."""
+import io
 import json
 import os
 import subprocess
@@ -20,6 +21,15 @@ def command(folder, *args):
     result = subprocess.run(["git", "-C", str(folder), *args], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
+
+
+@pytest.fixture(autouse=True)
+def no_github_api(monkeypatch):
+    # The release lookup is best-effort; tests never reach api.github.com.
+    def offline(*args, **kwargs):
+        raise OSError("no network in tests")
+    monkeypatch.setattr(updates.urllib.request, "urlopen", offline)
+    monkeypatch.delenv("STUDIO_UPDATE_BRANCH", raising=False)
 
 
 @pytest.fixture
@@ -121,14 +131,119 @@ def test_a_new_upstream_commit_requires_a_fresh_check(history):
     assert command(clone, "rev-parse", "HEAD") == asked["current"]
 
 
-def test_default_branch_is_read_fresh_from_origin(history):
+def test_default_branch_is_read_fresh_from_origin_when_nothing_is_tracked(history):
     upstream, clone = history
     publish(upstream)
     command(upstream, "checkout", "-b", "stable")
+    command(clone, "branch", "--unset-upstream")
     assert command(clone, "symbolic-ref", "refs/remotes/origin/HEAD") == "refs/remotes/origin/main"
-    with pytest.raises(updates.UpdateError, match="default branch \\(stable\\)"):
+    with pytest.raises(updates.UpdateError, match="default branch \\(stable\\)") as error:
         updates.inspect(clone, fetch=True)
+    assert error.value.info["following"] == "stable" and error.value.info["source"] == "test-owner/studio"
     assert command(clone, "symbolic-ref", "--short", "HEAD") == "main"
+
+
+def test_untracked_default_branch_still_updates(history):
+    upstream, clone = history
+    target = publish(upstream)
+    command(clone, "branch", "--unset-upstream")
+    found = updates.inspect(clone, fetch=True)
+    assert found["available"] and found["target"] == target
+    assert found["following"] == found["default_branch"] == "main"
+
+
+def feature(upstream, clone, name="development/feature"):
+    command(upstream, "switch", "-c", name)
+    target = publish(upstream, "print('feature')\n")
+    command(upstream, "switch", "main")
+    command(clone, "fetch", "origin")
+    command(clone, "switch", "-c", name, "--track", "origin/" + name)
+    command(upstream, "switch", name)
+    target = publish(upstream, "print('newer feature')\n")
+    command(upstream, "switch", "main")
+    return target
+
+
+def test_tracked_feature_branch_fast_forwards(history):
+    upstream, clone = history
+    target = feature(upstream, clone)
+    old = command(clone, "rev-parse", "HEAD")
+    found = updates.inspect(clone, fetch=True)
+    assert found["available"] and found["target"] == target
+    assert found["following"] == found["branch"] == "development/feature" and found["default_branch"] == "main"
+    assert updates.inspect(clone)["following"] == "development/feature"
+    assert updates.apply_stopped(clone, {**found, "following": "development/feature"})[0] == old
+    assert command(clone, "rev-parse", "HEAD") == target and command(clone, "symbolic-ref", "--short", "HEAD") == "development/feature"
+
+
+def test_tracked_branch_with_own_commits_is_still_refused(history):
+    upstream, clone = history
+    feature(upstream, clone)
+    (clone / "custom.txt").write_text("custom")
+    command(clone, "add", ".")
+    command(clone, "commit", "-m", "custom")
+    with pytest.raises(updates.UpdateError, match="own commits"):
+        updates.inspect(clone, fetch=True)
+
+
+def test_an_upstream_on_another_remote_is_refused(history, tmp_path):
+    upstream, clone = history
+    command(clone, "remote", "add", "elsewhere", str(upstream))
+    command(clone, "fetch", "elsewhere")
+    command(clone, "branch", "--set-upstream-to", "elsewhere/main")
+    with pytest.raises(updates.UpdateError, match="tracks elsewhere, not a branch on origin"):
+        updates.inspect(clone, fetch=True)
+    command(clone, "switch", "-c", "local-tracking", "--track", "main")
+    with pytest.raises(updates.UpdateError, match="tracks a local branch"):
+        updates.inspect(clone)
+
+
+def test_studio_update_branch_overrides_the_upstream(history, monkeypatch):
+    upstream, clone = history
+    target = feature(upstream, clone, "release/next")
+    command(clone, "branch", "--unset-upstream")
+    monkeypatch.setenv("STUDIO_UPDATE_BRANCH", "release/next")
+    found = updates.inspect(clone, fetch=True)
+    assert found["available"] and found["target"] == target and found["following"] == "release/next"
+    command(clone, "switch", "main")
+    with pytest.raises(updates.UpdateError, match="STUDIO_UPDATE_BRANCH"):
+        updates.inspect(clone, fetch=True)
+    monkeypatch.setenv("STUDIO_UPDATE_BRANCH", "-bad..name")
+    with pytest.raises(updates.UpdateError, match="not a valid branch"):
+        updates.inspect(clone)
+
+
+def test_a_check_reports_release_and_installed_version(history, tmp_path, monkeypatch):
+    upstream, clone = history
+    publish(upstream)
+    asked = []
+    def github(request, timeout):
+        asked.append((request.full_url, request.get_header("User-agent"), timeout))
+        return io.BytesIO(json.dumps({"tag_name": "v1.1", "name": "Studio 1.1", "published_at": "2026-10-01T00:00:00Z",
+                                      "html_url": "https://github.com/test-owner/studio/releases/tag/v1.1"}).encode())
+    monkeypatch.setattr(updates.urllib.request, "urlopen", github)
+    manager = updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False)
+    status = checked(manager)
+    assert asked == [("https://api.github.com/repos/test-owner/studio/releases/latest", "Studio-updater", 10)]
+    assert status["latest_release"] == {"tag": "v1.1", "name": "Studio 1.1", "published_at": "2026-10-01T00:00:00Z",
+                                        "url": "https://github.com/test-owner/studio/releases/tag/v1.1"}
+    assert status["available"] and status["following"] == "main" and status["latest_version"] == "1.1"
+    assert status["installed_version"] == "1.0" and status["installed_commit"] == command(clone, "rev-parse", "--short", "HEAD")
+
+
+def test_a_failed_release_lookup_is_left_out(history, tmp_path):
+    upstream, clone = history
+    publish(upstream)
+    status = checked(updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False))
+    assert status["available"] and "latest_release" not in status
+
+
+def test_a_failed_check_keeps_source_and_branch(history, tmp_path):
+    _, clone = history
+    (clone / "mine.txt").write_text("mine")
+    status = checked(updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False))
+    assert not status["available"] and "Local code changes" in status["message"]
+    assert status["source"] == "test-owner/studio" and status["following"] == status["branch"] == "main"
 
 
 def test_recovery_never_discards_changes_made_during_restart(history):

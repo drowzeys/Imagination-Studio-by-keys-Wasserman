@@ -12,8 +12,9 @@ import subprocess
 import threading
 import time
 import uuid
+import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -52,30 +53,91 @@ def repository(url: str) -> str:
     return match[1]
 
 
-def inspect(pack: Path, fetch: bool = False) -> dict:
-    """Fetch into a private ref; never change the user's branch or working files while the app runs."""
-    if git(pack, "rev-parse", "--show-toplevel") != str(pack.resolve()):
-        raise UpdateError("This folder is not a Git installation. Install a Git copy to use updates.")
-    source = repository(git(pack, "config", "--get", "remote.origin.url"))
+def branch_name(pack: Path, name: str) -> str:
+    try:
+        valid = bool(name) and not name.startswith("-") and git(pack, "check-ref-format", "--branch", name, timeout=10) == name
+    except UpdateError:
+        valid = False
+    if not valid:
+        raise UpdateError("The branch to follow (" + name[:80] + ") is not a valid branch name.")
+    return name
+
+
+def default_branch(pack: Path, fetch: bool) -> str:
     if fetch:
         remote_head = git(pack, "ls-remote", "--symref", "origin", "HEAD")
         match = re.search(r"^ref: refs/heads/(.+)\tHEAD$", remote_head, re.M)
-        if not match:
-            raise UpdateError("The repository's default branch could not be identified.")
-        branch = match[1]
+        branch = match[1] if match else ""
     else:
-        remote_head = git(pack, "symbolic-ref", "refs/remotes/origin/HEAD")
-        branch = remote_head.removeprefix("refs/remotes/origin/")
+        branch = git(pack, "symbolic-ref", "refs/remotes/origin/HEAD").removeprefix("refs/remotes/origin/")
     if not branch or branch.startswith("-") or git(pack, "check-ref-format", "--branch", branch) != branch:
         raise UpdateError("The repository's default branch could not be identified.")
-    current = git(pack, "rev-parse", "HEAD")
+    return branch
+
+
+def upstream_of(pack: Path, attached: str) -> tuple[str, str] | None:
+    """The checked-out branch's upstream as (remote, branch), or None when it tracks nothing."""
+    try:
+        remote = git(pack, "config", "--get", "branch." + attached + ".remote", timeout=10)
+        merge = git(pack, "config", "--get", "branch." + attached + ".merge", timeout=10)
+    except UpdateError:
+        return None
+    return remote, merge.removeprefix("refs/heads/") if merge.startswith("refs/heads/") else ""
+
+
+def resolve(pack: Path, attached: str, fetch: bool, known: dict) -> str:
+    """The branch on origin to follow: STUDIO_UPDATE_BRANCH, else the checkout's origin upstream, else the default."""
+    override = os.environ.get("STUDIO_UPDATE_BRANCH", "").strip()
+    if override:
+        known["following"] = branch = branch_name(pack, override)
+        if attached != branch:
+            raise UpdateError("Updates follow " + branch + " (set by STUDIO_UPDATE_BRANCH). This checkout is on "
+                              + attached + "; your branch is kept.")
+        return branch
+    tracked = upstream_of(pack, attached)
+    if tracked:
+        remote, branch = tracked
+        if remote != "origin" or not branch:
+            raise UpdateError("This branch (" + attached + ") tracks " + (remote if remote != "." else "a local branch")
+                              + ", not a branch on origin. Updates come only from origin; set the branch to track origin to update it.")
+        known["following"] = branch = branch_name(pack, branch)
+        return branch
+    known["following"] = branch = known["default_branch"] = default_branch(pack, fetch)
+    if attached != branch:
+        raise UpdateError("Updates follow the repository's default branch (" + branch + ") or the branch this checkout tracks on origin. "
+                          "This checkout is on " + attached + ", which tracks no branch on origin; your branch is kept.")
+    return branch
+
+
+def inspect(pack: Path, fetch: bool = False) -> dict:
+    """Fetch into a private ref; never change the user's branch or working files while the app runs."""
+    known = {}
+    try:
+        return _inspect(pack, fetch, known)
+    except UpdateError as error:
+        error.info = known
+        raise
+
+
+def _inspect(pack: Path, fetch: bool, known: dict) -> dict:
+    if git(pack, "rev-parse", "--show-toplevel") != str(pack.resolve()):
+        raise UpdateError("This folder is not a Git installation. Install a Git copy to use updates.")
+    known["source"] = source = repository(git(pack, "config", "--get", "remote.origin.url"))
+    known["current"] = current = git(pack, "rev-parse", "HEAD")
     try:
         attached = git(pack, "symbolic-ref", "--quiet", "--short", "HEAD")
     except UpdateError as error:
-        raise UpdateError("Updates are paused on a detached checkout. Use the installed default branch for updates.") from error
-    base = {"source": source, "branch": branch, "current": current, "available": False, "target": None}
-    if attached != branch:
-        raise UpdateError("Updates follow the repository's default branch (" + branch + "). This checkout is on " + attached + "; your branch is kept.")
+        raise UpdateError("Updates are paused on a detached checkout. Check out the branch you installed to update.") from error
+    branch = resolve(pack, attached, fetch, known)
+    if "default_branch" not in known:
+        # Informational when a tracked or chosen branch is followed: its absence never blocks an update.
+        try:
+            known["default_branch"] = default_branch(pack, fetch)
+        except UpdateError:
+            known["default_branch"] = None
+    base = {"source": source, "branch": branch, "following": branch, "default_branch": known["default_branch"],
+            "current": current, "available": False, "target": None}
+    known.update(base)
     if git(pack, "status", "--porcelain", "--untracked-files=all"):
         raise UpdateError("Local code changes were found. Save or review them before updating; they will be kept.")
     # An interrupted operation must be resolved by its owner, even if its index happens to be clean.
@@ -105,6 +167,24 @@ def inspect(pack: Path, fetch: bool = False) -> dict:
     return {**base, "target": target, "available": True, "latest_version": version}
 
 
+def latest_release(source: str) -> dict | None:
+    """The newest GitHub release, for information only: installing is always a fast-forward of the followed branch."""
+    request = urllib.request.Request("https://api.github.com/repos/" + quote(source, safe="/") + "/releases/latest",
+                                     headers={"Accept": "application/vnd.github+json", "User-Agent": "Studio-updater"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            found = json.loads(response.read(1_000_000))
+        release = {"tag": found["tag_name"], "name": found.get("name") or found["tag_name"],
+                   "published_at": found.get("published_at"), "url": found.get("html_url")}
+    except Exception:
+        return None
+    if not all(value is None or isinstance(value, str) for value in release.values()) or not isinstance(release["tag"], str):
+        return None
+    if release["url"] and not release["url"].startswith("https://github.com/"):
+        release["url"] = None
+    return {key: value[:200] if isinstance(value, str) else value for key, value in release.items()}
+
+
 class Manager:
     def __init__(self, pack: Path, home: Path, queue_lock, busy, restart=None):
         self.pack, self.queue_lock, self.busy, self.restart = pack.resolve(), queue_lock, busy, restart
@@ -132,12 +212,23 @@ class Manager:
     def status(self) -> dict:
         with self.mutex:
             result = {**self.info, "automatic": self.automatic(), "updating": self.maintenance.is_set(),
-                      "managed": self.managed(), "session": os.environ.get("STUDIO_UPDATE_SESSION", "")}
+                      "managed": self.managed(), "session": os.environ.get("STUDIO_UPDATE_SESSION", ""), **self.installed()}
             try:
                 result["last_result"] = json.loads(self.result_path.read_text())
             except (OSError, ValueError):
                 result["last_result"] = None
             return result
+
+    def installed(self) -> dict:
+        try:
+            version = (self.pack / "VERSION").read_text().strip()[:80] or None
+        except OSError:
+            version = None
+        try:
+            commit = git(self.pack, "rev-parse", "--short", "HEAD", timeout=5)
+        except UpdateError:
+            commit = None
+        return {"installed_version": version, "installed_commit": commit}
 
     def check(self) -> dict:
         with self.mutex:
@@ -149,12 +240,21 @@ class Manager:
 
     def _check(self):
         try:
-            found = inspect(self.pack, fetch=True)
+            try:
+                found = inspect(self.pack, fetch=True)
+                found = {**found, "message": "An update is ready." if found["available"] else "Studio is up to date."}
+            except UpdateError as error:
+                # Keep what was learned (source, followed branch) so the page can say what failed where.
+                known = {key: value for key, value in getattr(error, "info", {}).items()
+                         if key in ("source", "following", "default_branch", "current")}
+                if "following" in known:
+                    known["branch"] = known["following"]
+                found = {**known, "available": False, "target": None, "message": str(error)}
+            release = latest_release(found["source"]) if found.get("source") else None
+            if release:
+                found["latest_release"] = release
             with self.mutex:
-                self.info = {**found, "message": "An update is ready." if found["available"] else "Studio is up to date."}
-        except UpdateError as error:
-            with self.mutex:
-                self.info = {"available": False, "message": str(error)}
+                self.info = found
         finally:
             with self.mutex:
                 self.info.update(checking=False, checked_at=time.time())
@@ -184,12 +284,13 @@ class Manager:
                 if self.busy():
                     raise UpdateError("Waiting for Studio jobs and the render engine to finish. Try again when Studio is idle.")
                 current = inspect(self.pack)
-                if current["current"] != self.info["current"]:
+                if current["current"] != self.info["current"] or current["following"] != self.info.get("following"):
                     raise UpdateError("The installed code changed. Check for updates again.")
                 self.maintenance.set()
             try:
                 write_json(self.request_path, {"session": os.environ["STUDIO_UPDATE_SESSION"],
-                           "current": self.info["current"], "target": self.info["target"]})
+                           "current": self.info["current"], "target": self.info["target"],
+                           "following": self.info["following"]})
                 self.info["message"] = "Installing update. Studio will restart and this page will reconnect."
                 # Called after the response can be sent; Uvicorn drains HTTP requests before the launcher changes code.
                 timer = threading.Timer(1, self.restart)
@@ -266,7 +367,8 @@ class Manager:
 def apply_stopped(pack: Path, request: dict) -> tuple[str, str]:
     """Only called by the launcher after its own server child has exited."""
     found = inspect(pack, fetch=True)
-    if found["current"] != request["current"] or found["target"] != request["target"] or not found["available"]:
+    if (found["current"] != request["current"] or found["target"] != request["target"] or not found["available"]
+            or found["following"] != request.get("following", found["following"])):
         raise UpdateError("The available update changed. Start Studio and check again.")
     backup = "refs/studio-backups/" + time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
     git(pack, "update-ref", backup, found["current"])
