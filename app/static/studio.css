@@ -45,12 +45,16 @@ img { max-width:100%; }
 
 /* ---------- the sidebar ---------- */
 aside#side { position:fixed; left:0; top:0; bottom:0; width:var(--side); z-index:40; display:flex; flex-direction:column; background:var(--bg2); border-right:1px solid var(--line); }
-/* the kit's outlined lettering, never type: the aperture mark over the title-only stacked logo at 240px (its minimum),
-   with at least half a cap height clear around it (the SVG's own margin plus this padding) */
-.brand { display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:16px 10px 8px; text-decoration:none; color:inherit; cursor:pointer; min-width:0; }
+/* the kit's film ribbon as a flourish over the outlined title-only logo at 240px (its minimum), then the creator credit
+   at the sidebar's usable width (230px: under the kit's 320px minimum, at Sam's request; BRAND-KIT.md), with half a
+   cap height clear around them (the SVGs' own margin plus this padding) */
+.brand { display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:14px 10px 8px; text-decoration:none; color:inherit; cursor:pointer; min-width:0; }
 .brand:hover { text-decoration:none; }
-.brand .mark { width:24px; height:24px; flex:none; display:block; margin-left:9px; }
+.brand .ribbon { width:230px; height:auto; max-width:none; display:block; flex:none; margin:0 0 -6px 5px; }
 .brand .title { width:240px; max-width:none; height:auto; display:block; flex:none; }
+.brand .byline { display:flex; align-items:center; gap:8px; width:230px; margin:2px 0 4px 5px; }
+.brand .byline .by { font:italic 400 15px/1 var(--display); color:var(--text); flex:none; }
+.brand .creator { width:206px; height:auto; max-width:none; display:block; flex:none; filter:drop-shadow(0 0 8px rgba(99,255,54,.2)); }
 nav#rooms { flex:1; overflow-y:auto; padding:4px 10px 12px; display:flex; flex-direction:column; gap:1px; scrollbar-width:none; }
 nav#rooms::-webkit-scrollbar { display:none; }
 nav#rooms .grp { font:500 12px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); padding:18px 10px 8px; white-space:nowrap; }
@@ -585,7 +589,8 @@ nav#rooms button.on, #subtabs button.on { animation:tally-pill 7s ease-in-out in
 /* an icon rail */
 @media (max-width:1099px) {
   :root { --side:64px; --gut:24px; }
-  .brand { align-items:center; padding:18px 0 14px; } .brand .mark { width:28px; height:28px; margin:0; } .brand .title, .credit { display:none; }
+  .brand { align-items:center; padding:16px 0 12px; } .brand .title, .brand .byline, .credit { display:none; }
+  .brand .ribbon { width:44px; height:44px; margin:0; object-fit:cover; object-position:88% 46%; }
   nav#rooms { padding:4px 8px 12px; align-items:center; }
   nav#rooms .grp { font-size:0; padding:12px 0 8px; width:32px; } nav#rooms .grp::after { content:""; display:block; height:1px; background:var(--line2); }
   nav#rooms button { width:44px; height:40px; justify-content:center; padding:0; } nav#rooms button .lbl, nav#rooms button .kbd { display:none; }
@@ -608,7 +613,7 @@ nav#rooms button.on, #subtabs button.on { animation:tally-pill 7s ease-in-out in
   aside#side { top:auto; right:0; width:auto; height:calc(var(--rail) + env(safe-area-inset-bottom,0px)); border-right:0; border-top:1px solid var(--line2); flex-direction:row; padding-bottom:env(safe-area-inset-bottom,0px); }
   .brand, .sidefoot { display:none; }
   nav#rooms { flex-direction:row; overflow:hidden; padding:6px 6px; gap:2px; align-items:stretch; }
-  nav#rooms .grp, nav#rooms button[data-group="vaults"] { display:none; }
+  nav#rooms .grp, nav#rooms button[data-group="vaults"], nav#rooms button[data-group="agent"] { display:none; }
   nav#rooms button, nav#rooms button.more { display:flex; flex:1 1 0; min-width:0; width:auto; height:48px; flex-direction:column; gap:4px; justify-content:center; padding:0; font-size:11.5px; }
   nav#rooms button .lbl { display:block; flex:none; }
   nav#rooms button.on::before { display:block; left:18px; right:18px; top:auto; bottom:-6px; width:auto; height:2px; }
@@ -621,6 +626,9 @@ nav#rooms button.on, #subtabs button.on { animation:tally-pill 7s ease-in-out in
   header#top:has(#subtabs button) .mhome .mark { display:block; }
   header#top:has(#subtabs button) .mhome .hlogo { display:none; }
   #roomname { display:none; } .kbtn { display:none; }
+  .navpill { width:36px; padding:0; justify-content:center; } .navpill .t { display:none; } #helpbtn { display:none; }
+  .homehero.slim .art, .homehero.slim .sub { display:none; }
+  header#top:has(#homebtn:not(.hide)) .mhome .mark { display:block; } header#top:has(#homebtn:not(.hide)) .mhome .hlogo { display:none; }
   aside#bay { left:0; bottom:calc(var(--rail) + env(safe-area-inset-bottom,0px)); }
   .bayhead { padding:0 12px; gap:10px; } .baycount { display:none; } .lane:not(:first-child) { display:none; } .lane .mini { display:none; }
   #coach, .toast { left:50% !important; bottom:calc(var(--bay) + var(--rail) + 12px) !important; } #coach { width:calc(100vw - 24px); }
@@ -744,3 +752,88 @@ label.toggle.m-flat .mk img, .toggle .mk img, .tag2 .mk img { width:14px; height
 @media (max-width:720px) { .su-apps { grid-template-columns:minmax(0,1fr); } .m-plat { margin-top:-8px; } }
 
 /* ---------- end suite, machine, brains ---------- */
+
+/* ---------- Back and Home in the top bar, on every page ---------- */
+.navpill { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 13px 0 9px; flex:none; font:500 14px var(--sans); color:var(--dim); background:var(--raise); border:1px solid var(--line2); border-radius:999px; box-shadow:none; }
+.navpill:hover:not(:disabled) { color:var(--text); background:var(--raise2); }
+.navpill:disabled { opacity:.4; cursor:default; }
+.navpill .ic svg, .navpill svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; display:block; }
+.navpill.hide { display:none; }
+#homebtn { margin-right:10px; } #backbtn { margin-right:4px; }
+header#top:has(#homebtn.hide) #backbtn { margin-right:10px; }
+
+/* ---------- Settings → Appearance, as classes on <html> (settings.js prefsApply; the first paint in index.html) ---------- */
+html.type-large #view, html.type-large aside#bay { zoom:1.097; }   /* 17 px against 15.5 */
+html.type-largest #view, html.type-largest aside#bay { zoom:1.194; } /* 18.5 px */
+html.no-glow nav#rooms button.on, html.no-glow #subtabs button.on { animation:none; box-shadow:inset 0 0 0 1px rgba(241,173,102,.7); }
+html.no-glow .machinepill, html.no-glow .m-plat { animation:none; box-shadow:none; }
+html.no-glow button.primary:hover:not(:disabled), html.no-glow button.hot:hover:not(:disabled) { box-shadow:none; }
+html.no-poster .homehero .art { display:none; } html.no-poster .homehero { grid-template-columns:minmax(0,1fr); }
+html.accent-cobalt { --amber:#3d84ff; --amber-ink:#ffffff; --amber-wash:rgba(61,132,255,.12); --tungsten:var(--amber); --hot:var(--amber); }
+html.accent-cobalt button.primary, html.accent-cobalt button.hot { border-bottom-color:#2456b8; }
+html.accent-cobalt nav#rooms button.on, html.accent-cobalt #subtabs button.on { box-shadow:inset 0 0 0 1px rgba(61,132,255,.75),0 0 14px rgba(61,132,255,.35); animation:none; }
+html.accent-cobalt nav#rooms button.on svg { stroke:var(--amber); }
+html.motion-reduce *, html.motion-reduce *::before, html.motion-reduce *::after { animation:none !important; transition:none !important; }
+
+/* ---------- Settings ---------- */
+.st-wrap { display:grid; grid-template-columns:240px minmax(0,1fr); gap:28px; align-items:start; }
+.st-rail { position:sticky; top:calc(var(--head) + 18px); display:flex; flex-direction:column; gap:4px; }
+.st-rail button { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:left; padding:10px 14px; border-radius:var(--r2); border:1px solid transparent; background:transparent; box-shadow:none; color:var(--dim); }
+.st-rail button b { font:600 15px var(--sans); color:inherit; } .st-rail button span { font-size:13px; color:var(--faint); }
+.st-rail button:hover:not(.on) { background:rgba(255,255,255,.04); color:var(--text); }
+.st-rail button.on { color:var(--text); background:var(--raise); border-color:rgba(241,173,102,.6); }
+.st-body { display:flex; flex-direction:column; gap:18px; min-width:0; }
+.st-panel { display:flex; flex-direction:column; gap:4px; }
+.st-ph h2 { margin:0 0 4px; font:600 20px/1.25 var(--sans); } .st-ph p { margin:0 0 10px; }
+.st-row, .st-room { display:flex; align-items:center; gap:16px; padding:12px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+.st-what { flex:1 1 240px; min-width:0; display:flex; flex-direction:column; gap:2px; } .st-what b { font:600 15px var(--sans); } .st-what span { color:var(--dim); font-size:13.5px; }
+.st-ctl { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; max-width:100%; } .st-ctl select { min-width:200px; }
+.st-room .ic svg { width:22px; height:22px; stroke:var(--dim); } .st-room.off { opacity:.55; }
+.st-room .iconish { width:32px; height:32px; padding:0; justify-content:center; }
+.st-group { margin-top:10px; } .st-group .eyebrow { display:block; margin:6px 0 4px; }
+.st-switch { position:relative; width:46px; height:26px; padding:0; border-radius:999px; background:var(--bg2); border:1px solid var(--line2); box-shadow:none; flex:none; }
+.st-switch i { position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:var(--dim); transition:transform var(--t1,160ms) var(--ease,ease-out),background var(--t1,160ms); }
+.st-switch.on { background:var(--blue-wash); border-color:var(--blue); } .st-switch.on i { transform:translateX(20px); background:var(--text); }
+.st-chips { margin-top:6px; }
+.st-path { font:500 13px var(--mono); color:var(--dim); background:var(--bg2); padding:6px 10px; border-radius:var(--r1); overflow-wrap:anywhere; }
+.st-hermes { display:flex; gap:6px; flex-wrap:wrap; } .st-hermes input { flex:1 1 140px; min-width:0; }
+.st-about { display:flex; flex-direction:column; gap:8px; margin:4px 0 14px; } .st-about img { width:240px; height:auto; } .st-about .st-credit { width:320px; filter:drop-shadow(0 0 8px rgba(99,255,54,.2)); }
+.st-kv { padding:8px 0; border-top:1px solid var(--line); }
+.st-credits { margin:4px 0 0; padding-left:18px; color:var(--dim); line-height:1.7; }
+/* the Local models card: on Settings → Connections and at the top of Brains & tools */
+.st-local { display:flex; flex-direction:column; gap:12px; border-color:rgba(99,255,54,.35); }
+.st-lh { display:flex; align-items:center; gap:14px; } .st-lh h2 { margin:0; font:600 20px/1.25 var(--sans); }
+.st-lh .logo { width:40px; height:40px; border-radius:var(--r2); background:var(--green-wash); display:flex; align-items:center; justify-content:center; flex:none; color:var(--green); }
+.st-lh .logo svg { width:22px; height:22px; } .st-lh .tag2 { margin-left:auto; }
+.st-line { margin:2px 0 0; font:400 19px/1.3 var(--display); color:var(--text); }
+.st-lrow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } .st-lrow input { flex:1 1 280px; min-width:0; } .st-lrow select { min-width:220px; }
+.m-setlink { margin:12px 0 4px; }
+
+/* ---------- Home: the composer ---------- */
+.homehero.slim { grid-template-columns:minmax(0,1fr) clamp(260px,28%,400px); } .homehero.slim .display { font-size:48px; } .homehero.slim .over { gap:16px; }
+.homehero.no-art { grid-template-columns:minmax(0,1fr); }
+.composer { margin-top:28px; padding:20px 22px 18px; border-radius:var(--r3); border:1px solid var(--line2); background:var(--raise); display:flex; flex-direction:column; gap:12px; box-shadow:var(--sh-card); }
+.cmp-modes { display:flex; gap:8px; flex-wrap:wrap; }
+.cmp-mode { display:inline-flex; align-items:center; gap:10px; height:40px; padding:0 14px; border-radius:999px; background:var(--bg2); border:1px solid var(--line2); color:var(--dim); box-shadow:none; }
+.cmp-mode b { font:600 14.5px var(--sans); color:inherit; } .cmp-mode .mk { font:500 12px var(--mono); color:var(--faint); letter-spacing:.02em; } .cmp-mode .mk img { width:16px; height:16px; }
+.cmp-mode:hover:not(.on) { color:var(--text); }
+.cmp-mode.on { color:var(--text); border-color:var(--blue); background:var(--blue-wash); } .cmp-mode.on .mk { color:var(--dim); }
+.cmp-text { width:100%; min-height:110px; resize:vertical; font:400 19px/1.45 var(--sans); padding:14px 16px; border-radius:var(--r2); background:var(--bg2); }
+.cmp-text::placeholder { font:400 26px/1.3 var(--display); color:var(--faint); }
+.cmp-hint { color:var(--dim); font-size:14px; margin-top:-4px; }
+.cmp-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.cmp-go { height:52px; padding:0 30px; font-size:18px; display:inline-flex; align-items:center; gap:12px; }
+.cmp-go kbd { border-color:currentColor; color:inherit; background:transparent; opacity:.6; }
+.cmp-recipe { display:inline-flex; align-items:center; gap:8px; } .cmp-recipe .eyebrow { font-size:11px; }
+.cmp-more { color:var(--blue-text); font-weight:500; white-space:nowrap; }
+.cmp-made { display:flex; flex-direction:column; gap:8px; margin-top:6px; padding-top:12px; border-top:1px solid var(--line); }
+.cmp-made .strip2 { grid-auto-columns:minmax(220px,260px); }
+.cmp-wait { aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; background:var(--bg2); }
+.cards.startrow { grid-template-columns:repeat(6,minmax(0,1fr)); gap:14px; }
+.cards.startrow .pcard b { font-size:15px; } .cards.startrow .pcard span.one { font-size:13px; } .cards.startrow .pcard .txt { padding:12px 14px; }
+@media (max-width:1380px) { .cards.startrow .pcard span.one { display:none; } }
+@media (max-width:1099px) { .st-wrap { grid-template-columns:minmax(0,1fr); } .st-rail { position:static; flex-direction:row; overflow-x:auto; } .st-rail button span { display:none; } .st-rail button { flex:none; }
+  .cards.startrow { grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:minmax(200px,1fr); overflow-x:auto; padding-bottom:8px; } }
+@media (max-width:720px) { .composer { padding:16px 14px; } .cmp-text::placeholder { font-size:21px; } .cmp-go { flex:1 1 100%; justify-content:center; } .cmp-mode { height:36px; padding:0 11px; } .cmp-mode .mk span, .cmp-mode .mk { font-size:0; gap:0; }
+  .cards.startrow { grid-auto-columns:minmax(160px,46%); } .homehero.slim .display { font-size:40px; } }
+

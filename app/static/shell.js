@@ -1,24 +1,28 @@
 "use strict";
-// The studio's frame: a sidebar of two groups (Creative Engines, Studio Vaults), each room with its own tabs, the
-// render bay docked along the bottom, the ⌘K palette and the machine chip. Every view is still drawn by its own
-// module; this file only decides where it sits.
-const GROUPS = [{ id: "engines", name: "Creative Engines" }, { id: "vaults", name: "Studio Vaults" }];
+// The studio's frame: a sidebar of two groups (Creative Engines, Studio Vaults) with the Agent between them, each room
+// with its own tabs, Back and Home in the top bar, the render bay docked along the bottom, the ⌘K palette and the
+// machine chip. Every view is still drawn by its own module; this file only decides where it sits. Settings → Studio
+// layout hides and orders the rooms (settings.js roomsShown); a hidden room stays in ⌘K.
+const GROUPS = [{ id: "engines", name: "Creative Engines" }, { id: "agent", name: "" }, { id: "vaults", name: "Studio Vaults" }];
 const ROOMS = [
   { id: "story", group: "engines", name: "Story", key: "1", tabs: ["Story", "Production"], says: "the film: board, Wasserman Slate, First AD" },
   { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create"], says: "stills, scouts, edit a picture" },
   { id: "video", group: "engines", name: "Video", key: "3", tabs: ["Video", "Create"], says: "clips with sound, long takes, references" },
-  { id: "previs", group: "engines", name: "Previs", key: "4", tabs: ["Previs", "Motion Previs", "Agent"], says: "motion from a clip, sets built by your agent" },
+  { id: "previs", group: "engines", name: "Previs", key: "4", tabs: ["Previs", "Motion Previs"], says: "motion from a clip, previs to guide a shot" },
   { id: "sound", group: "engines", name: "Sound", key: "5", tabs: ["Sound", "Voice", "Music"], says: "voices and score" },
   { id: "edit", group: "engines", name: "Edit", key: "6", tabs: ["Edit", "Editor"], says: "the timeline and what goes to Resolve" },
+  { id: "agent", group: "agent", name: "Agent", key: "", tabs: ["Agent"], says: "ask your agent; it makes it with the studio" },
   { id: "library", group: "vaults", name: "Library", key: "7", tabs: ["Library"], says: "every take" },
   { id: "looks", group: "vaults", name: "Looks", key: "8", tabs: ["Looks"], says: "LoRA styles for pictures and clips" },
   { id: "suite", group: "vaults", name: "Suite", key: "9", tabs: ["Import"], says: "bring in from the filmmaker suite, send out" },
+  { id: "nodes", group: "vaults", name: "Nodes", key: "", tabs: ["Nodes"], says: "a canvas of jobs, words to pictures to clips" },
   { id: "machine", group: "vaults", name: "Machine", key: "0", tabs: ["Machine", "Sparks", "Brains", "Updates"], says: "telemetry, Sparks, brains and updates" },
   { id: "learn", group: "vaults", name: "Learn", key: "", tabs: ["Tutorial"], says: "lessons, step by step" },
+  { id: "settings", group: "vaults", name: "Settings", key: ",", tabs: ["Settings"], says: "looks, layout, presets and connections" },
 ];
 const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", Previs: "Overview", "Motion Previs": "Motion Previs",
   Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Edit: "Overview", Editor: "Timeline", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
-  Machine: "Telemetry", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn" };
+  Machine: "Telemetry", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn", Nodes: "Nodes", Settings: "Settings" };
 // Create is shared by Image and Video: it sits in the room of what the prompt goes to
 const roomOf = t => t === "Create" ? ROOMS.find(r => r.id === (typeof C !== "undefined" && C.goes === "video" ? "video" : "image"))
   : ROOMS.find(r => r.tabs.includes(t)) || null;
@@ -38,6 +42,9 @@ const ICON = {
   looks: KIT("M28 8L33.4 22.6L48 28L33.4 33.4L28 48L22.6 33.4L8 28L22.6 22.6Z"),
   suite: KIT("M18 8V40 M9 31L18 40L27 31 M38 48V16 M29 25L38 16L47 25"),
   machine: KIT("M14 14H42V42H14Z M21 21H35V35H21Z M20 6V14 M36 6V14 M20 42V50 M36 42V50 M6 20H14 M6 36H14 M42 20H50 M42 36H50"),
+  agent: KIT("M10 12H46V36H26L16 44V36H10Z M19 24H19.1 M28 24H28.1 M37 24H37.1"),
+  nodes: KIT("M8 10H22V22H8Z M34 34H48V46H34Z M34 8H48V20H34Z M22 16C30 16 26 40 34 40 M22 16H34 M15 22V40H34"),
+  settings: KIT("M28 20A8 8 0 1 1 28 36A8 8 0 1 1 28 20Z M28 6V12 M28 44V50 M6 28H12 M44 28H50 M12.4 12.4L16.7 16.7 M39.3 39.3L43.6 43.6 M12.4 43.6L16.7 39.3 M39.3 16.7L43.6 12.4"),
   learn: KIT("M48 28A20 20 0 1 1 8 28A20 20 0 1 1 48 28Z M22.2 21.5A6.1 6.1 0 0 1 33.9 23.6C33.9 27.8 28.1 28.7 28.1 32.7 M28 40H28.1"),
   doc: SVG('<path d="M6 3.5h8.5L18 7v13.5H6z"/><path d="M14.5 3.5V7H18"/><path d="M9 11h6M9 14h6M9 17h4"/>'),
   update: SVG('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>'),
@@ -45,6 +52,7 @@ const ICON = {
   queue: SVG('<path d="M4 6h16M4 12h16M4 18h10"/>'),
   chev: SVG('<path d="M6 15l6-6 6 6"/>'),
   go: SVG('<path d="M9 6l6 6-6 6"/>'),
+  back: SVG('<path d="M15 6l-6 6 6 6"/>'),
   more: SVG('<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>'),
 };
 const icon = (name, cls) => { const n = el("span", { class: cls || "ico" }); n.innerHTML = ICON[name] || ICON.home; return n; };
@@ -53,34 +61,52 @@ const MARKS = { qwen: ["brand/qwen.svg", "Qwen"], flux: ["brand/bfl-white.svg", 
   fish: ["brand/fish-audio.svg", "Fish Audio Drama 3"], comfy: ["brand/comfyui.svg", "ComfyUI"], tensorfold: ["brand/tensorfold.webp", "TensorFold"],
   claude: ["brand/claude.svg", "Claude"], openai: ["brand/openai.svg", "ChatGPT"], codex: ["brand/codex.svg", "Codex"], gemini: ["brand/gemini.svg", "Gemini"], grok: ["brand/grok.svg", "Grok"] };
 const mark = (id, label, big) => { const m = MARKS[id]; if (!m) return label || null; return el("span", { class: "mk" + (big ? " big" : "") }, el("img", { src: m[0], alt: "", width: big ? 40 : 18, height: big ? 40 : 18 }), label === "" ? null : label || m[1]); };
-function go(t, opts = {}) { if (!TABS.includes(t)) return; moreClose(); tab = t; history.replaceState(null, "", "#" + t); if (!opts.keepScroll) window.scrollTo(0, 0); render(); }
+// every change of page goes on the app's own stack (Back) and the browser's (its Back and Forward); a page reached
+// by the browser's Back (hashchange, opts.fromHash) is taken off the stack, not pushed again
+const PAGES_KEPT = 50;
+function go(t, opts = {}) { if (!TABS.includes(t)) return; moreClose(); const was = tab, h = SHELL.history;
+  if (t !== was) { if (opts.fromHash && h[h.length - 1] === t) h.pop();
+    else if (!opts.back && h[h.length - 1] !== was) { h.push(was); if (h.length > PAGES_KEPT) h.splice(0, h.length - PAGES_KEPT); } }
+  tab = t;
+  if (!opts.fromHash) { try { if (t !== was && history.pushState) history.pushState(null, "", "#" + t); else history.replaceState(null, "", "#" + t); } catch {} }
+  if (!opts.keepScroll) window.scrollTo(0, 0); render(); }
+function goBack() { const h = SHELL.history; while (h.length && (h[h.length - 1] === tab || !TABS.includes(h[h.length - 1]))) h.pop();
+  const prev = h.pop(); if (prev) go(prev, { back: true }); }
+function goHome() { if (tab !== "Home") go("Home"); }
 function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
 
+const shown = list => typeof roomsShown === "function" ? roomsShown(list) : list;
 function renderShell() {
   const now = tab === "Home" ? null : roomOf(tab), live = jobs.some(j => j.status === "running");
   const nav = [];
-  for (const g of GROUPS) { nav.push(el("div", { class: "grp", role: "presentation" }, g.name));
-    for (const r of ROOMS.filter(x => x.group === g.id)) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, "data-group": r.group, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
+  for (const g of GROUPS) { const rooms = shown(ROOMS.filter(x => x.group === g.id)); if (!rooms.length) continue;
+    if (g.name) nav.push(el("div", { class: "grp", role: "presentation" }, g.name));
+    for (const r of rooms) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, "data-group": r.group, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
       icon(r.id, "ic"), el("span", { class: "lbl" }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
       if (r.id === "video" && live && now !== r) b.prepend(el("span", { class: "live", "aria-label": "rendering" }));
       nav.push(b); } }
   // phones only (studio.css): the bar keeps the engines and folds the vaults, search and updates into More
-  nav.push(el("button", { class: "more" + (now && now.group === "vaults" ? " on" : ""), "data-room": "more", type: "button", title: "More: the Studio Vaults, search and updates", "aria-haspopup": "dialog", onclick: moreOpen },
+  nav.push(el("button", { class: "more" + (now && now.group !== "engines" ? " on" : ""), "data-room": "more", type: "button", title: "More: the Agent, the Studio Vaults, search and updates", "aria-haspopup": "dialog", onclick: moreOpen },
     icon("more", "ic"), el("span", { class: "lbl" }, "More")));
   $("#rooms").replaceChildren(...nav);
   $("#roomname").textContent = now ? now.name : "Home";
+  const back = $("#backbtn"), home = $("#homebtn"), prev = SHELL.history.filter(t => t !== tab).slice(-1)[0];
+  if (back) { back.disabled = !prev; back.setAttribute("aria-disabled", prev ? "false" : "true"); back.title = prev ? "Back to " + (TAB_NAMES[prev] || prev) + " (⌥←)" : "Nothing to go back to yet"; }
+  if (home) home.classList.toggle("hide", tab === "Home");
   const tabs = now && now.tabs.length > 1 ? now.tabs : [];
   $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", "aria-current": t === tab ? "page" : false, onclick: () => go(t) }, TAB_NAMES[t] || t)));
   document.body.classList.toggle("quiet", SHELL.lastTab === tab); SHELL.lastTab = tab;
 }
-const SHELL = { lastTab: null, tel: null, history: [], es: null, telAt: 0, libCache: null, telWait: 2000, telPoll: null };
+const SHELL = { lastTab: null, tel: null, history: [], samples: [], es: null, telAt: 0, libCache: null, telWait: 2000, telPoll: null };
 // the More sheet on phones: the Studio Vaults, ⌘K search and Updates, which the bottom bar has no room for
 function moreOpen() { if ($("#moresheet")) return moreClose(); const now = tab === "Home" ? null : roomOf(tab), fresh = typeof UPD !== "undefined" && UPD.data && UPD.data.available;
   const row = (ico, label, hint, run, on, kbd) => el("button", { class: "it" + (on ? " on" : ""), type: "button", "aria-current": on ? "page" : false, onclick: () => { moreClose(); run(); } },
     icon(ico, "ico"), el("span", { class: "t" }, el("b", {}, label, kbd ? el("kbd", {}, kbd) : null), el("small", {}, hint)));
   const sheet = el("div", { id: "moresheet", onclick: e => { if (e.target.id === "moresheet") moreClose(); } },
-    el("div", { class: "box", role: "dialog", "aria-label": "More" }, el("div", { class: "grp" }, "Studio Vaults"),
-      ROOMS.filter(r => r.group === "vaults").map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
+    el("div", { class: "box", role: "dialog", "aria-label": "More" },
+      shown(ROOMS.filter(r => r.group === "agent")).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
+      el("div", { class: "grp" }, "Studio Vaults"),
+      shown(ROOMS.filter(r => r.group === "vaults")).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r, r.key ? "⌥" + r.key : null)),
       el("div", { class: "grp" }, "Studio"), row("search", "Search", "takes, settings and actions", palOpen, false, "⌘K"),
       row("update", "Updates", fresh ? "an update is ready to install" : (S && S.version ? "Studio " + S.version + " · " : "") + "check for a new version", () => go("Updates"), tab === "Updates")));
   document.body.append(sheet); const first = sheet.querySelector && sheet.querySelector("button"); if (first) first.focus(); return sheet; }
@@ -114,8 +140,8 @@ function renderRoomsLive(live) { const b = document.querySelector('#rooms button
 const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
 const platName = () => !S ? "" : S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : S.platform_label;
 function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
-  SHELL.history.push({ t: Date.now(), gpu: t.gpu ? t.gpu.util_pct : null, mem: t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : null, temp: t.gpu ? t.gpu.temp_c : null, power: t.gpu ? t.gpu.power_w : null });
-  if (SHELL.history.length > 300) SHELL.history.shift();
+  SHELL.samples.push({ t: Date.now(), gpu: t.gpu ? t.gpu.util_pct : null, mem: t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : null, temp: t.gpu ? t.gpu.temp_c : null, power: t.gpu ? t.gpu.power_w : null });
+  if (SHELL.samples.length > 300) SHELL.samples.shift();
   const used = t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : 0, gpu = t.gpu && t.gpu.util_pct != null ? t.gpu.util_pct : null;
   const busy = t.jobs && t.jobs.running, warn = (t.warnings || []).length;
   $("#mdot").className = "dotl" + (busy ? " r" : warn ? " t" : "");
@@ -150,7 +176,13 @@ function palActions() { const a = (ico, label, hint, run, words = "") => ({ ico,
     a("image", "Edit a picture", "Image", create({ goes: "edit" }), "re-draw"),
     a("video", "Long take, up to 30 minutes", "Video", () => { C.goes = "video"; C.start = "text"; if (S && S.long) C.seconds = Object.keys(S.long)[0]; sync(); go("Create"); }, "long video chain"),
     a("video", "Wasserman Sharp Spec", "Video", () => { if (typeof sharpCreate === "function") { sharpCreate(); go("Create"); } }, "sam locked recipe"),
-    a("previs", "Ask your agent", "Previs · Blender · Blockout", () => go("Agent"), "claude codex blender blockout mcp"),
+    a("agent", "Ask your agent", "Agent · Claude, Codex, Hermes", () => go("Agent"), "claude codex hermes blender blockout mcp chat"),
+    a("back", "Back", "the last page · ⌥←", goBack, "previous return"),
+    a("home", "Home", "the main screen · ⌥H", goHome, "start generate composer"),
+    a("settings", "Settings", "looks, layout, presets · ⌥,", () => typeof goSettings === "function" ? goSettings("appearance") : go("Settings"), "preferences appearance type size glow poster accent"),
+    a("settings", "Studio layout", "Settings · show, hide, order rooms", () => typeof goSettings === "function" ? goSettings("layout") : go("Settings"), "sidebar rooms hide show order"),
+    a("settings", "Connections", "Settings · subscriptions, local models", () => typeof goSettings === "function" ? goSettings("connections") : go("Settings"), "local model ollama lm studio vllm llama hermes oauth sign in"),
+    a("nodes", "Nodes", "a canvas of jobs", () => go("Nodes"), "graph comfyui canvas pipeline"),
     a("previs", "Motion Previs", "Previs", () => go("Motion Previs"), "pose depth skeleton motion reference"),
     a("sound", "Record a voice line", "Sound · Fish Audio Drama 3", () => go("Voice"), "fish drama speech"),
     a("sound", "Write a song", "Sound · MiniMax-Music3", () => go("Music"), "minimax music score"),
@@ -165,6 +197,8 @@ function palActions() { const a = (ico, label, hint, run, words = "") => ({ ico,
     a("update", "Check for updates", "Machine", () => go("Updates"), "update version release"),
     a("queue", "Open the render bay", "Queue", () => bayOpen(true), "queue jobs"),
     a("learn", "Learn Imagination Studio", lessonCount() + " lessons", () => go("Tutorial"), "tutorial help"),
+    // a room hidden from the sidebar (Settings → Studio layout) is still here
+    ...ROOMS.filter(r => !shown([r]).length).map(r => a(r.id, r.name, "hidden from the sidebar", () => goRoom(r.id), r.says)),
   ]; }
 async function palOpen() { if ($("#palette")) return; PAL.q = ""; PAL.at = 0;
   const input = el("input", { placeholder: "Search takes, settings and actions…", "aria-label": "Search", autocomplete: "off", spellcheck: "false" });
@@ -199,18 +233,24 @@ const roomForKey = d => ROOMS.find(r => r.key === d) || null;
 function shellStart() {
   const up = $("#studio-updates-open"); up.replaceChildren(icon("update", "ic"), el("span", { class: "t" }, "Updates")); up.onclick = () => go("Updates");
   $("#helpbtn").innerHTML = ICON.learn; $("#baychev").innerHTML = ICON.chev;
-  $("#helpbtn").onclick = () => go("Tutorial"); $("#kbtn").onclick = palOpen; $("#mpill").onclick = () => go("Machine");
+  $("#helpbtn").onclick = () => go("Tutorial");
+  const back = $("#backbtn"), home = $("#homebtn");
+  if (back) { back.replaceChildren(icon("back", "ic"), el("span", { class: "t" }, "Back")); back.onclick = goBack; }
+  if (home) { home.replaceChildren(icon("home", "ic"), el("span", { class: "t" }, "Home")); home.onclick = goHome; } $("#kbtn").onclick = palOpen; $("#mpill").onclick = () => go("Machine");
   $("#bayhead").onclick = e => { if (!e.target.closest("button:not(.chev)")) bayOpen(!$("#bay").classList.contains("open")); };
   try { if (localStorage.getItem("bay-open")) bayOpen(true); } catch {}
   document.addEventListener("keydown", e => { const typing = e.target.matches && e.target.matches("input,textarea,select,[contenteditable]");
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#palette") ? palClose() : palOpen(); return; }
     if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[0-9]$/.test(e.code)) { const r = roomForKey(e.code.slice(5)); if (r) { e.preventDefault(); goRoom(r.id); } return; }
+    if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === "Comma") { e.preventDefault(); go("Settings"); return; }
+    if (e.altKey && !e.metaKey && !e.ctrlKey && !typing && e.code === "ArrowLeft") { e.preventDefault(); goBack(); return; }
+    if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === "KeyH") { e.preventDefault(); goHome(); return; }
     if (e.key === "Escape" && $("#moresheet")) { moreClose(); return; }
     if (!typing && e.key === "/" && !$("#palette")) { e.preventDefault(); palOpen(); } });
   // a player that leaves the page any other way (a list redrawn in place) is let go of too
   if (typeof MutationObserver === "function") new MutationObserver(list => { for (const m of list) for (const n of m.removedNodes) if (n.nodeType === 1 && !n.isConnected) releaseMedia(n); })
     .observe($("#view"), { childList: true, subtree: true });
-  window.addEventListener("hashchange", () => { palClose(); const t = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(t) && t !== tab) go(t); });
+  window.addEventListener("hashchange", () => { palClose(); const t = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(t) && t !== tab) go(t, { fromHash: true }); });
   if (S) { $("#plat").textContent = platName(); $("#mpill").title = (S.platform_label || platName()) + " · open the Machine room"; }
   if (typeof updatesWatch === "function") updatesWatch();
   telStart(); }

@@ -12,10 +12,17 @@
 <link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/instrument-serif.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="studio.css">
+<link rel="stylesheet" href="nodes.css">
+<script>
+// Settings → Appearance, kept in this browser by settings.js: applied before the first paint
+try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = document.documentElement.classList;
+  if (a) { if (a.type_size === "large" || a.type_size === "largest") c.add("type-" + a.type_size); if (a.glow === false) c.add("no-glow"); if (a.poster === false) c.add("no-poster");
+    if (a.accent === "cobalt") c.add("accent-cobalt"); if (a.motion === "reduce") c.add("motion-reduce"); } } catch (e) {}
+</script>
 </head>
 <body>
 <aside id="side" aria-label="Studio">
-  <a class="brand" id="gohome" href="#Home" title="Home: start something, see what is rolling" aria-label="Imagination Studio: Home"><img class="mark" src="brand/aperture-mark-color.svg" alt="Imagination Studio aperture mark" width="24" height="24"><img class="title" src="brand/ribbon-title-only-color.svg" alt="Imagination Studio" width="240" height="83"></a>
+  <a class="brand" id="gohome" href="#Home" title="Home: start something, see what is rolling" aria-label="Imagination Studio: Home"><img class="ribbon" src="brand/film-ribbon.webp" alt="" width="230" height="92"><img class="title" src="brand/ribbon-title-only-color.svg" alt="Imagination Studio" width="240" height="83"><span class="byline"><span class="by">by</span><img class="creator" src="brand/keys-wasserman-neon.svg" alt="Keys + Wasserman" width="206" height="24"></span></a>
   <nav id="rooms" aria-label="Rooms"></nav>
   <div class="sidefoot">
     <button class="machinepill" id="mpill" type="button" title="Machine"><span class="dotl" id="mdot"></span><span id="plat"></span><span class="txt" id="mtxt"></span><span class="meter" aria-hidden="true"><i id="mgpu"></i><i id="mmem"></i></span></button>
@@ -25,6 +32,7 @@
 </aside>
 <header id="top">
   <a class="mhome" href="#Home" id="mhome" aria-label="Imagination Studio: Home"><img class="mark" src="brand/aperture-mark-color.svg" alt="Imagination Studio aperture mark" width="24" height="24"><img class="hlogo" src="brand/ribbon-horizontal-color.svg" alt="Imagination Studio" width="280" height="26"></a>
+  <button class="navpill" id="backbtn" type="button" aria-label="Back" disabled></button><button class="navpill" id="homebtn" type="button" aria-label="Home" title="Home (⌥H)"></button>
   <span id="roomname"></span><div id="subtabs"></div><span class="fill"></span>
   <button class="kbtn" id="kbtn" type="button" title="Search or run anything (⌘K)"><span>Search or run</span><kbd>⌘K</kbd></button>
   <button id="helpbtn" class="iconbtn" type="button" title="Learn" aria-label="Learn"></button>
@@ -57,6 +65,8 @@
 <script src="voice.js"></script>
 <script src="music.js"></script>
 <script src="updates.js"></script>
+<script src="settings.js"></script>
+<script src="nodes.js"></script>
 <script>
 "use strict";
 if (location.search.includes("shot")) document.write('<img src="/api/wait?ms=4000" style="display:none">');
@@ -104,7 +114,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Home", project = null;
-const TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Editor", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial"];
+const TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Editor", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
   dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
@@ -703,7 +713,7 @@ function viewCreate() {
       // how many Sparks this job may use, and what that means for it, before it is queued (sparks.js)
       el("div", { style: "margin-top:10px" }, sparksPick({ kind: isLong() ? "long" : "video", clips: 1, params: { loras: lorasOf(C), ...(isRef() ? { references: C.refs, reference_videos: C.refVideos, reference_audios: C.refAudios, ref_turbo: C.refPasses === "4" } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) } })),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !ready, onclick: async () => { try {
-        const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
+        const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
         const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
           : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
         C.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Queue this clip"),
@@ -1143,13 +1153,15 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
 
 function render() { renderShell(); releaseMedia($("#view"));
   $("#view").replaceChildren({ Home: viewHome, Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Editor: viewEditor, Library: viewLibrary,
-    Machine: viewMachine, Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial }[tab]()); coach(); bayUpdate();
+    Machine: viewMachine, Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial, Settings: viewSettings,
+    // Nodes is its own module (nodes.js): a page without it says so quietly
+    Nodes: typeof viewNodes === "function" ? viewNodes : () => el("div", { class: "panel" }, el("h2", {}, "Nodes"), el("div", { class: "note m-flat" }, "The node canvas is not part of this install yet.")) }[tab]()); coach(); bayUpdate();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
   if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true); }
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
   // links can preset the Create form: ?goes=image, ?engine=h3&res=720p&up=1&step=4 ...
   for (const [k, v] of new URLSearchParams(location.search)) if (k in C && k !== "mode") C[k] = k === "up" ? v === "1" : (k === "step" || k === "count" ? Number(v) : v);
-  S = await api("/api/state"); await loadLoras(); if (!S.turbo) C.engine = "fasth3"; sync(); for (const h of ["#gohome", "#mhome"]) $(h).onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = S.platform_label; if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Imagination Studio · " + (S.platform === "spark" ? "DGX Spark" : "Mac"); $("#ver").textContent = "Studio " + S.version; shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
+  S = await api("/api/state"); await loadLoras(); if (typeof settingsLoad === "function") await settingsLoad().catch(() => {}); if (!S.turbo) C.engine = "fasth3"; sync(); for (const h of ["#gohome", "#mhome"]) $(h).onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = S.platform_label; if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Imagination Studio · " + (S.platform === "spark" ? "DGX Spark" : "Mac"); $("#ver").textContent = "Studio " + S.version; shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
   // ?motionref opens the create wizard on the motion reference stored by the Motion Previs tab
   if (new URLSearchParams(location.search).has("motionref")) { try { const r = (await api("/api/motion/handoff")).reference; if (r) useMotionReference(r, await api("/api/motion/packs/" + r.pack).catch(() => null)); } catch {} } })();
 </script>

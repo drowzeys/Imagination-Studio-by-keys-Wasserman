@@ -47,9 +47,10 @@ Text on the amber primary is `#140c03` (10:1).
 | File | Where |
 |---|---|
 | `ribbon-title-only-color.svg` | Sidebar header, 240px wide (its minimum) in a 260px sidebar |
-| `aperture-mark-color.svg` | Above the title in the sidebar; alone on the icon rail and in the phone bar when sub-tabs need the room; the Studio's own tile in Brains & tools |
+| `film-ribbon.webp` | Sidebar header above the title, 230px wide, as a flourish read left to right (from the kit's `01-Ribbon/alpha/film-ribbon-cutout.png`, 720px wide WebP with its alpha); on the icon rail cropped to its aperture end at 44px |
+| `aperture-mark-color.svg` | In the phone bar when the sub-tabs or Back and Home need the room; the Studio's own tile in Brains & tools |
 | `ribbon-horizontal-color.svg` | Phone top bar, 280px, where there are no sub-tabs |
-| `keys-wasserman-neon.svg` | Home, under the tagline, 320px, after an ivory "by" |
+| `keys-wasserman-neon.svg` | Sidebar header under the title on every page: an italic "by" and the credit at 206px, 230px in all (see the exception below); Home under the tagline and Settings → About, 320px |
 | `app-icon.svg` | SVG favicon; manifest icon |
 | `favicon.ico` | Favicon |
 | `app-icon-192.png`, `app-icon-512.png` | Web app manifest icons |
@@ -59,6 +60,9 @@ Text on the amber primary is `#140c03` (10:1).
 | `module-machine.svg` | Machine (inline in `shell.js`) |
 | `grid-texture.svg` | Behind the main area only, at a line opacity under 5% |
 | `tensorfold-symbol.webp`, `tensorfold-wordmark.webp` | Sidebar footer beside POWERED BY, then "for NVIDIA Sparks or Apple Silicon" as text |
+
+**Exception, at Sam's request:** the creator credit sits in the 260px sidebar at its usable width, 230px, under the
+kit's 320px minimum. It keeps its faint green glow and is shown at 320px on Home and About.
 
 Looks, Suite and Learn keep the Studio's own glyphs, redrawn on the kit's 56-unit box with its 2.5 rounded stroke.
 

@@ -32,7 +32,7 @@ function machineLive(t) {
   foot("mem", mem.total_mb ? Math.round((mem.total_mb - mem.available_mb) / 1024) + " of " + Math.round(mem.total_mb / 1024) + " GB" + (mem.floor_mb ? " · guard floor " + Math.round(mem.floor_mb / 1024) + " GB" : "") : "–");
   const noGpu = !t.gpu; if (noGpu) foot("gpu", "no GPU readings on this machine");
   foot("temp", noGpu ? "reported on a DGX Spark" : g.temp_c > 85 ? "hot: renders may slow" : "GPU temperature"); foot("power", noGpu ? "reported on a DGX Spark" : "power draw");
-  const hist = [...(M.history || []), ...SHELL.history.map(s => ({ gpu: s.gpu, mem: s.mem }))].slice(-300);
+  const hist = [...(M.history || []), ...SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem }))].slice(-300);
   sparkSet("gpu", hist.map(s => s.gpu), 100); sparkSet("mem", hist.map(s => s.mem), 100);
   const st = document.querySelector("#machstatus"); if (st) st.replaceChildren(...statusRows(t));
   const w = document.querySelector("#machwarn"); if (w) w.replaceChildren(...(t.warnings || []).map(x => el("div", { class: "warnline" }, el("span", { class: "dotl r m-dot" }), el("div", {}, x))));
@@ -99,9 +99,11 @@ function viewBrains() {
   if (!BR.data) { brainsLoad(); return el("div", {}, head(), el("div", { class: "note" }, "Looking for your sign-ins…")); }
   if (BR.data.error) return el("div", {}, head(), el("div", { class: "note" }, "This Studio server does not offer brains yet (" + BR.data.error + ")."));
   const d = BR.data, set = d.settings || {}, remote = set.remote || {};
-  const host = el("input", { value: remote.host || "", placeholder: "you@your-mac" }), studioHost = el("input", { value: remote.studio_host || "", placeholder: "you@this-machine (optional)" }), endpoint = el("input", { value: set.local_endpoint || "", placeholder: "http://127.0.0.1:11434 (Ollama), :1234 (LM Studio), :8000 (vLLM)" });
+  const host = el("input", { value: remote.host || "", placeholder: "you@your-mac" }), studioHost = el("input", { value: remote.studio_host || "", placeholder: "you@this-machine (optional)" });
   const save = async patch => { try { await api("/api/brains/settings", { ...set, ...patch }); toast("Saved"); BR.data = null; brainsLoad(); } catch (e) { toast(e.message); } };
-  put(wrap, head(), el("details", { class: "fold m-fold" }, el("summary", {}, "What is kept, and who pays"),
+  put(wrap, head(), typeof localModelsCard === "function" ? localModelsCard() : null,
+    el("p", { class: "note m-flat m-setlink" }, "Sign-in help, the Hermes profile and every connection in one place: ", el("a", { href: "#Settings", onclick: e => { e.preventDefault(); typeof goSettings === "function" ? goSettings("connections") : go("Settings"); } }, "Settings → Connections"), "."),
+    el("details", { class: "fold m-fold" }, el("summary", {}, "What is kept, and who pays"),
     el("div", { class: "note m-flat" }, "Studio uses the AI subscriptions you already pay for. Nothing is stored but which one you prefer: each answer is billed to your own sign-in, and a local model never leaves your network.")));
   put(wrap, el("div", { class: "tri" }, (d.backends || []).map(b => { const on = d.default === b.id;
     return el("div", { class: "brain" + (on ? " on" : "") },
@@ -113,16 +115,14 @@ function viewBrains() {
       el("div", { class: "m-acts" }, el("button", { class: "small", disabled: !b.found || BR.testing[b.id], onclick: async () => { BR.testing[b.id] = true; render();
           try { BR.said[b.id] = await api("/api/brains/test", { backend: b.id }); } catch (e) { BR.said[b.id] = { ok: false, error: e.message }; } BR.testing[b.id] = false; render(); } }, BR.testing[b.id] ? "Asking…" : "Test"),
         on ? null : el("button", { class: "small", disabled: !b.found, onclick: () => save({ default: b.id }) }, "Make default"))); })));
-  put(wrap, el("div", { class: "split m-gap" },
+  put(wrap, el("div", { class: "m-gap" },
     el("div", { class: "panel stack" }, el("h2", {}, "Use the sign-ins on another computer"),
       el("div", { class: "note m-flat" }, "Studio runs the CLI there over SSH, with key login only."),
       el("details", { class: "fold" }, el("summary", {}, "When to use this"), el("div", { class: "note m-flat" }, "A DGX Spark usually has no Claude or Codex sign-in of its own. Name the Mac (or any machine) where you are signed in, and Studio runs the CLI there over SSH. The Spark needs key login to it; no password is ever typed or kept here.")),
-      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "gemini", "grok"].map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
+      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "gemini", "grok", "hermes"].filter(id => id !== "hermes" || (d.backends || []).some(b => b.id === "hermes")).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
         el("input", { type: "checkbox", checked: (remote.backends || []).includes(id), class: "hide", onchange: e => { const list = new Set(remote.backends || []); e.target.checked ? list.add(id) : list.delete(id); remote.backends = [...list]; e.target.parentNode.classList.toggle("on", e.target.checked); } }),
-        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), mark(id, ""), ({ claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", grok: "Grok CLI" })[id]))),
-      el("div", {}, el("button", { class: "primary", onclick: () => save({ remote: { host: host.value.trim(), backends: remote.backends || [], studio_host: studioHost.value.trim() } }) }, "Save"))),
-    el("div", { class: "panel stack" }, el("h2", {}, "A local model"), el("div", { class: "note m-flat" }, "Any OpenAI-compatible server: Ollama, LM Studio, vLLM or llama.cpp. Left empty, Studio looks on the usual ports."),
-      field("Address", endpoint), el("div", {}, el("button", { onclick: () => save({ local_endpoint: endpoint.value.trim() }) }, "Save")))));
+        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
+      el("div", {}, el("button", { class: "primary", onclick: () => save({ remote: { host: host.value.trim(), backends: remote.backends || [], studio_host: studioHost.value.trim() } }) }, "Save")))));
   const tools = BR.tools;
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Tools your agent can use"), el("button", { class: "small", onclick: () => go("Agent") }, "Ask your agent →")),
     !tools ? el("div", { class: "note" }, "This Studio server does not list agent tools yet.") : el("div", { class: "tri" }, (tools.tools || tools || []).map(t => {
