@@ -10,6 +10,7 @@ Projects, uploads and renders live under $STUDIO_HOME (default ~/TensorFoldStudi
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -19,8 +20,11 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -192,6 +196,110 @@ async def update_maintenance(request, call_next):
         if writes:
             with lock:
                 update_writes -= 1
+
+
+# ---------- requests that change something: from the Studio's own page, and not too large ----------
+
+WRITES = ("POST", "PUT", "PATCH", "DELETE")
+JSON_LIMIT = int(float(os.environ.get("STUDIO_JSON_MB", "1")) * (1 << 20))       # a JSON body
+UPLOAD_LIMIT = int(float(os.environ.get("STUDIO_UPLOAD_MB", "512")) * (1 << 20))  # one file sent to /api/upload
+
+
+def trusted_host(host: str) -> bool:
+    """Whether a request's Host is one a page from elsewhere cannot point at this app (DNS rebinding): this computer's
+    names, an address written as numbers, a Tailscale name, a name of this network (one word, or .local), or one
+    named in STUDIO_ALLOWED_HOSTS (comma-separated). The app is opened to a LAN with HOST=0.0.0.0, so a LAN address
+    stays allowed; a public name that could resolve to this machine is not."""
+
+    try:
+        name = (urlsplit("//" + host).hostname or "").rstrip(".")
+    except ValueError:
+        return False
+    if not name:
+        return False
+    if name in ("localhost", "testserver") or name.endswith((".ts.net", ".local", ".localhost")) or "." not in name:
+        return True
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    return name in {one.strip().lower() for one in os.environ.get("STUDIO_ALLOWED_HOSTS", "").split(",") if one.strip()}
+
+
+def refused(request_headers: dict) -> str:
+    """Why a request that changes something is refused ("" when it is not): sent by a page of another site."""
+
+    host = request_headers.get("host", "")
+    origin = request_headers.get("origin")
+    if not trusted_host(host):
+        return "Open the Studio by this computer's name, its address or its Tailscale name (STUDIO_ALLOWED_HOSTS adds another)."
+    try:
+        elsewhere = origin is not None and urlsplit(origin).netloc.lower() != host.lower()
+    except ValueError:  # an Origin that is not a URL
+        elsewhere = True
+    if request_headers.get("sec-fetch-site") == "cross-site" or elsewhere:
+        return "Do this from the Studio page."
+    return ""
+
+
+class TooLarge(Exception):
+    pass
+
+
+class WriteGuard:
+    """Every POST, PUT, PATCH and DELETE under /api/: refused (403) when a page of another site sent it, and refused
+    (413) when its body is over the limit: JSON_LIMIT for JSON, UPLOAD_LIMIT for /api/upload. A request without an
+    Origin (curl, scripts, the workers' own calls) passes the Origin test; /api/updates keeps its own, stricter one."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] not in WRITES or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+        headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope["headers"]}
+        why = refused(headers)
+        if why:
+            return await JSONResponse({"error": why}, status_code=403)(scope, receive, send)
+        kind = headers.get("content-type", "").split(";")[0].strip().lower()
+        limit = UPLOAD_LIMIT if scope["path"] == "/api/upload" else JSON_LIMIT if kind == "application/json" else None
+        if limit is None:
+            return await self.app(scope, receive, send)
+        too_large = JSONResponse({"error": f"this is over the {limit / (1 << 20):g} MB a request may carry here"}, status_code=413)
+        try:
+            if int(headers.get("content-length") or 0) > limit:
+                return await too_large(scope, receive, send)
+        except ValueError:
+            return await JSONResponse({"error": "Content-Length is a number"}, status_code=400)(scope, receive, send)
+        seen, over, started = 0, False, False
+
+        async def counted():  # a body sent without a length (chunked) is counted as it comes
+            nonlocal seen, over
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    over = True
+                    raise TooLarge()
+            return message
+
+        async def guarded(message):
+            nonlocal started
+            if over:
+                return  # whatever the route made of a cut-off body, the answer is 413 (below)
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, counted, guarded)
+        except TooLarge:
+            pass
+        if over and not started:
+            await too_large(scope, receive, send)
+
+
+app.add_middleware(WriteGuard)
 
 
 def accepting_jobs():
@@ -411,6 +519,17 @@ def said_quiet(sound: str) -> bool:
     return "no speech" in low or "only ambient sound" in low
 
 
+STOPS = ".!?…:;,\"”’')"
+
+
+def joined(*parts) -> str:
+    """The wizard's parts as one shot: each but the last ends on a full stop where it has no stop of its own, so the
+    scene and the action read as two sentences ("…from a window. The lamp turns…", not "…from a window The lamp…")."""
+
+    parts = [part.strip() for part in parts if part and part.strip()]
+    return " ".join([part if part[-1] in STOPS else part + "." for part in parts[:-1]] + parts[-1:])
+
+
 def compose_references(fields: dict, count: int) -> str:
     """The Ref2VA model's own prompt form: who each picture is, what is kept of it, then the shot.
 
@@ -493,8 +612,7 @@ def compose_references(fields: dict, count: int) -> str:
                     else f"<Audio {sounds}>: reference - the target audio references the sound of <Audio {sounds}>.")
         voices.append(f"<Audio {sounds}>")
     scene = (fields.get("scene") or "").strip()
-    shot = " ".join(part.strip() for part in (scene, fields.get("camera", ""), fields.get("action", ""), *follow)
-                    if part and part.strip())
+    shot = joined(scene, fields.get("camera", ""), fields.get("action", ""), *follow)
     spoken = []
     for index, line in enumerate(fields.get("dialogue") or [], start=1):
         text = (line.get("text") or "").strip()
@@ -544,8 +662,7 @@ def compose_references(fields: dict, count: int) -> str:
 def compose(fields: dict, first_frame: bool, last_frame: bool = False, seconds: float = 5, frames: int | None = None) -> str:
     """MiniMax H3's three-field prompt from the wizard's parts."""
 
-    shot = " ".join(part.strip() for part in (fields.get("scene", ""), fields.get("camera", ""),
-                                               fields.get("action", "")) if part and part.strip())
+    shot = joined(fields.get("scene", ""), fields.get("camera", ""), fields.get("action", ""))
     spoken = []
     for index, line in enumerate(fields.get("dialogue") or [], start=1):
         text = (line.get("text") or "").strip()
@@ -1515,9 +1632,38 @@ def clip_estimate(kind: str, params: dict, referenced: bool = False, ref_media: 
                     bool(params.get("ref_turbo")), ref_media)
 
 
+WRONG_TYPE = "a setting of this job has the wrong kind of value: a number is a number, a list is a list"
+
+
+def export_clips(params: dict) -> None:
+    """An export's clips, checked when it is queued: a list of {path, in?, out?, duration?} inside the studio folder."""
+
+    clips = params.get("clips")
+    if not isinstance(clips, list) or not all(isinstance(clip, dict) and isinstance(clip.get("path"), str) for clip in clips):
+        raise HTTPException(400, "an export's clips are a list of clips, each with the path of a file in the studio's folder")
+    for clip in clips:
+        inside(clip["path"])
+        for key in ("in", "out", "duration"):
+            if clip.get(key) is not None and (isinstance(clip[key], bool) or not isinstance(clip[key], (int, float))):
+                raise HTTPException(400, f"a clip's {key} is a number of seconds")
+
+
 @app.post("/api/jobs")
 def submit(body: dict) -> dict:
+    try:
+        return queue_job(body)
+    except (TypeError, ValueError, AttributeError, KeyError) as error:
+        # a setting sent as the wrong type (text for a number, a list for an object): said plainly, not a 500
+        print(f"[studio] a job was refused: {type(error).__name__}: {error}", flush=True)
+        raise HTTPException(400, WRONG_TYPE) from None
+
+
+def queue_job(body: dict) -> dict:
     kind = body.get("kind")
+    if body.get("params") is not None and not isinstance(body.get("params"), dict):
+        raise HTTPException(400, "params is an object of the job's settings")
+    if body.get("title") is not None and not isinstance(body.get("title"), str):
+        raise HTTPException(400, "title is text")
     params = dict(body.get("params") or {})
     if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS:
         raise HTTPException(400, "unknown job kind")
@@ -1535,6 +1681,8 @@ def submit(body: dict) -> dict:
         raise HTTPException(400, "reference pictures are for single clips")
     if kind != "video" and (params.get("reference_videos") or params.get("reference_audios")):
         raise HTTPException(400, "reference videos and audio are for single clips")
+    if kind == "export":
+        export_clips(params)
     missing = without_ffmpeg(kind, params)
     if missing:
         raise HTTPException(400, missing)
@@ -1603,9 +1751,40 @@ def cancel(job_id: str) -> dict:
         job["status"] = "cancelled"
         process = running["process"] if running["id"] == job_id else None
         if process is not None:
-            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # it ended on its own meanwhile
+            if SPARK and job["kind"] not in NOT_ON_COMFY:
+                stop_comfy(job)
         hub.kick.set()  # a clip on another Spark is cancelled there by the thread that follows it
     return public(job)
+
+
+NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa")  # jobs a Spark runs without its ComfyUI server
+
+
+def stop_comfy(job: dict) -> bool:
+    """On a DGX Spark the render runs inside the ComfyUI server (spark/comfy.sh), not in the script the job started:
+    killing the script leaves the prompt it queued running on the GPU. Ask the server to stop its current prompt
+    (its /interrupt, 2 s, best effort) and say in the job's log what it answered.
+
+    The prompt id is not known here (spark_generate.py keeps it to itself and does not print it), so a prompt still
+    waiting in ComfyUI's queue is not deleted: the script is stopped before it queues another, and the runner only
+    queues one prompt at a time, so the one that runs is this job's."""
+
+    url = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190")) + "/interrupt"
+    try:
+        request = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(request, timeout=2) as answer:
+            said = f"ComfyUI stopped the prompt it was running (it answered {answer.status})"
+            stopped = True
+    except urllib.error.HTTPError as error:
+        said, stopped = f"ComfyUI did not stop the prompt: it answered {error.code}", False
+    except (OSError, ValueError) as error:
+        said, stopped = f"ComfyUI did not answer the stop ({getattr(error, 'reason', error)}): it may still be rendering", False
+    job["log"] = (job["log"] + f"[studio] cancelled: {said}\n")[-20000:]
+    return stopped
 
 
 @app.post("/api/upload")

@@ -7,6 +7,7 @@ Claude Code or Codex sign-in, or a local OpenAI-compatible server), and what Sla
 a shot to MiniMax H3's prompt form and the plan of the render that the Studio's queue then runs.
 """
 
+import ipaddress
 import json
 import math
 import os
@@ -14,11 +15,12 @@ import re
 import shutil
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 import lengths  # which frame counts the model takes, beside this file
 import remote  # another machine's Studio app, read over its own API, beside this file
@@ -312,10 +314,41 @@ def ask(backend: str, system: str, prompt: str, tier: str, endpoint: str = "", m
     return agents.ask(backend if backend in agents.BACKENDS else "claude", system, prompt, tier, endpoint, model)
 
 
+NEARBY = [ipaddress.ip_network(net) for net in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                                                 "100.64.0.0/10", "::1/128", "fc00::/7")]  # 100.64/10, fd7a:…: a tailnet
+
+
+def nearby_endpoint(given: str) -> str:
+    """A local model server's address as typed, when it is on this computer, this network or the tailnet: http(s) to
+    localhost, a loopback, private-LAN or Tailscale address (100.64.0.0/10, fd7a:…), a *.ts.net or *.local name or a
+    one-word LAN name. Anything else (a public site, a cloud's metadata address at 169.254.x) is a 400: the server
+    fetches what is named here, and the page that names it need not be the Studio's."""
+
+    text = (given or "").strip()
+    if not text:
+        return ""
+    parts = urllib.parse.urlsplit(text if "://" in text else "http://" + text)
+    try:
+        name = (parts.hostname or "").rstrip(".").lower()
+    except ValueError:
+        name = ""
+    if parts.scheme in ("http", "https") and name and not parts.username and not parts.password:
+        if name == "localhost" or name.endswith((".ts.net", ".local", ".localhost")) or "." not in name and ":" not in name:
+            return text
+        try:
+            address = ipaddress.ip_address(name)
+        except ValueError:
+            address = None
+        if address is not None and any(address in net for net in NEARBY if net.version == address.version):
+            return text
+    raise HTTPException(400, "a local model server is on this computer, this network or the tailnet: http://host:port")
+
+
 @router.get("/api/slate/brain")
 def brain_status(endpoint: str = "") -> dict:
     import agents
 
+    endpoint = nearby_endpoint(endpoint)
     found = {b["id"]: b for b in agents.detect(endpoint=endpoint)}
     local = found["local"]
     return {**{name: found[name]["found"] for name in agents.CLIS}, "local": local["found"],
@@ -323,7 +356,10 @@ def brain_status(endpoint: str = "") -> dict:
 
 
 @router.post("/api/slate/brain")
-def brain(body: dict) -> dict:
+def brain(body: dict, request: Request) -> dict:
+    import agents
+
+    agents.local(request, True)  # runs the user's CLI sign-ins: the same check as the brains and agents routes
     started = time.time()
     try:
         text = ask(body.get("backend") or "claude", body.get("system") or "", body.get("prompt") or "", body.get("tier") or "top",
