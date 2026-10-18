@@ -208,6 +208,83 @@ def test_a_brought_in_shot_opens_in_create_and_brains_save_the_default():
     assert out["saved"] == "local"
 
 
+def test_the_phone_bar_folds_the_vaults_search_and_updates_into_more():
+    out = run("""for (const k of ["#rooms", "#roomname", "#subtabs"]) NODES[k] = el("div", {});
+      let sheet = null; document.body.append = n => { sheet = n; }; globalThis.palOpen = () => { out.palette = true; };
+      go("Looks"); renderShell(); const nav = NODES["#rooms"].kids, more = nav[nav.length - 1];
+      out.more = [more.attrs["data-room"], more.attrs.class, text(more)];
+      out.vaults = nav.filter(n => n.attrs && n.attrs["data-group"] === "vaults").map(n => n.attrs["data-room"]);
+      more.attrs.onclick(); out.sheet = text(sheet);
+      out.on = find(sheet, n => n.tag === "button" && /on/.test(n.attrs.class || "")) ? text(find(sheet, n => n.tag === "button" && /on/.test(n.attrs.class || ""))) : "";
+      button(sheet, "Updates").attrs.onclick(); out.updates = tab; button(sheet, "Search").attrs.onclick();
+      button(sheet, "Machine").attrs.onclick(); out.machine = tab;
+      go("Story"); renderShell(); out.engineMore = NODES["#rooms"].kids.slice(-1)[0].attrs.class;""")
+    if out is None:
+        return
+    assert out["more"][0] == "more" and out["more"][1] == "more on" and "More" in out["more"][2]  # a vault is open: More is the lit item
+    assert out["vaults"] == ["library", "looks", "suite", "machine", "learn"]  # hidden from the phone bar by studio.css
+    for words in ("Studio Vaults", "Library", "Looks", "Suite", "Machine", "Learn", "Search", "⌘K", "Updates"):
+        assert words in out["sheet"], words
+    assert "Looks" in out["on"]
+    assert out["updates"] == "Updates" and out["palette"] and out["machine"] == "Machine" and out["engineMore"] == "more"
+
+
+def test_a_lost_event_stream_polls_then_reconnects_with_backoff():
+    out = run("""const streams = [], waits = [], timers = new Map(); let tid = 0;
+      class FakeES { constructor(u) { this.url = u; this.closed = false; this.on = {}; streams.push(this); } addEventListener(k, f) { this.on[k] = f; } close() { this.closed = true; } }
+      window.EventSource = FakeES; globalThis.EventSource = FakeES;
+      globalThis.setTimeout = (f, ms) => { waits.push([ms, f]); return 0; };
+      globalThis.setInterval = (f, ms) => { timers.set(++tid, ms); return tid; }; globalThis.clearInterval = id => timers.delete(id);
+      globalThis.telApply = t => { out.applied = (out.applied || 0) + 1; }; answers["/api/telemetry"] = { memory: null };
+      telStart(); out.opened = streams.length;
+      streams[0].on.telemetry({ data: "{}" });
+      const fail = i => { streams[i].onerror(); return [streams[i].closed, SHELL.telPoll != null, waits[waits.length - 1][0]]; };
+      out.first = fail(0); waits[0][1](); out.second = fail(1); waits[1][1](); out.third = fail(2);
+      out.pollers = timers.size; out.telCalls = calls.filter(c => c[0] === "/api/telemetry").length;
+      for (let i = 0; i < 6; i++) { waits[waits.length - 1][1](); fail(streams.length - 1); } out.cap = waits[waits.length - 1][0];
+      waits[waits.length - 1][1](); streams[streams.length - 1].onopen(); out.back = [SHELL.telPoll, timers.size, SHELL.telWait, SHELL.es === streams[streams.length - 1]];""")
+    if out is None:
+        return
+    assert out["opened"] == 1 and out["applied"] >= 1
+    assert out["first"] == [True, True, 2000] and out["second"] == [True, True, 4000] and out["third"] == [True, True, 8000]
+    assert out["pollers"] == 1 and out["telCalls"] == 1  # one 3 s poll while down, not one per failure
+    assert out["cap"] == 30000
+    assert out["back"] == [None, 0, 2000, True]  # the stream is back: the poll stops and the backoff starts over
+
+
+def test_paths_are_shown_from_the_studio_folder_and_dropped_players_let_go():
+    out = run("""S.home = "/data/studio"; out.rel = [relHome("/data/studio/renders/a.mp4"), relHome("/data/studio"), relHome("log: /data/studio/logs/comfy.log and /data/studio/x"),
+        relHome("/data/studio-old/a"), relHome("/elsewhere/b"), relHome(null)];
+      const seen = []; const player = n => ({ pause() { seen.push(n + ":pause"); }, removeAttribute(a) { seen.push(n + ":-" + a); }, load() { seen.push(n + ":load"); } });
+      releaseMedia({ querySelectorAll: () => [player("v1"), player("a1")], matches: () => false }); out.seen = seen;""")
+    if out is None:
+        return
+    assert out["rel"] == ["renders/a.mp4", "the studio folder", "log: logs/comfy.log and x", "/data/studio-old/a", "/elsewhere/b", None]
+    assert out["seen"] == ["v1:pause", "v1:-src", "v1:load", "a1:pause", "a1:-src", "a1:load"]
+
+
+def test_a_brain_that_is_not_set_up_is_greyed_and_links_to_brains_and_tools():
+    out = run("""BR.data = { default: "claude", backends: [{ id: "claude", label: "Claude Code", found: false, where: "here" }, { id: "codex", label: "Codex", found: false, where: "ssh:mac" }], settings: {} };
+      BR.tools = { tools: [] }; AG.tasks = []; AG.backend = "claude"; answers["/api/agent/tasks"] = [];
+      let page = viewAgent(); out.backend = AG.backend; out.claudeOff = !!button(page, "Claude Code").attrs.disabled; out.codexOn = !button(page, "Codex").attrs.disabled;
+      out.hint = text(find(page, n => /ag-hint/.test(n.attrs && n.attrs.class || "")));
+      find(page, n => n.tag === "a" && n.attrs.class === "ag-setup").attrs.onclick({}); out.link = tab;
+      BR.data.backends[1] = { id: "codex", label: "Codex", found: false, where: "here" }; AG.backend = null; page = viewAgent();
+      out.sendOff = !!button(page, "Send").attrs.disabled; AG.prompt = "a room"; await button(page, "Send").attrs.onclick();
+      out.sent = calls.some(c => c[0] === "/api/agent/tasks" && c[1]); out.toast = toasts.slice(-1)[0];
+      S.home = "/data/studio"; const card = taskCard({ id: "t1", status: "failed", prompt: "a room", backend: "claude", error: "Claude Code is not installed on this machine: install it and sign in, or run it over ssh", log: "[claude here] wrote /data/studio/agent/t1/log.txt" });
+      AG.open.t1 = true; const open = taskCard({ id: "t1", status: "failed", prompt: "a room", backend: "claude", error: "boom", log: "wrote /data/studio/agent/t1/out.png" });
+      out.card = text(card); out.cardLink = !!find(card, n => n.tag === "a" && n.attrs.class === "ag-setup"); out.plain = !!find(open, n => n.tag === "a" && n.attrs.class === "ag-setup"); out.log = text(open);""")
+    if out is None:
+        return
+    assert out["backend"] == "codex"  # Claude Code is missing here, Codex runs over SSH: the page picks Codex
+    assert out["claudeOff"] and out["codexOn"]
+    assert "Claude Code is not on this machine" in out["hint"] and "Set up on Machine → Brains & tools" in out["hint"] and out["link"] == "Brains"
+    assert out["sendOff"] and not out["sent"] and "not set up here" in out["toast"]
+    assert "Set up on Machine → Brains & tools" in out["card"] and out["cardLink"] and not out["plain"]
+    assert "agent/t1/out.png" in out["log"] and "/data/studio" not in out["log"]
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):

@@ -58,6 +58,7 @@ nav#rooms button.on svg { stroke:var(--amber); }
 nav#rooms button .lbl { flex:1; overflow:hidden; text-overflow:ellipsis; }
 nav#rooms button .kbd { font:500 10.5px var(--mono); color:var(--faint); opacity:0; transition:opacity var(--t1) var(--ease); }
 nav#rooms:hover button .kbd { opacity:1; }
+nav#rooms button.more { display:none; }
 nav#rooms button .live { position:absolute; left:22px; top:7px; width:6px; height:6px; border-radius:50%; background:var(--red); animation:tally 1.6s ease-in-out infinite; }
 .sidefoot { border-top:1px solid var(--line); padding:12px 10px 14px; display:flex; flex-direction:column; gap:8px; }
 .machinepill { display:flex; align-items:center; gap:9px; width:100%; height:36px; padding:0 10px; border-radius:var(--r1); border:1px solid var(--line); background:var(--panel);
@@ -443,6 +444,20 @@ label.toggle { text-transform:none; letter-spacing:0; font:500 12.5px var(--sans
 .shot .body b { font:600 13.5px/1.25 var(--sans); }
 .shot .body span { color:var(--dim); line-height:1.4; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 
+/* the More sheet on phones: the vaults, search and updates, over the bottom bar */
+#moresheet { position:fixed; inset:0; z-index:70; display:flex; align-items:flex-end; background:rgba(5,6,9,.7); }
+#moresheet .box { width:100%; max-height:calc(100vh - 80px); overflow:auto; background:var(--raise); border-top:1px solid var(--line2); border-radius:var(--r3) var(--r3) 0 0;
+  padding:6px 8px calc(var(--rail,60px) + 8px + env(safe-area-inset-bottom,0px)); }
+#moresheet .grp { font:500 10.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); padding:12px 12px 6px; }
+#moresheet .it { display:flex; align-items:center; gap:12px; width:100%; min-height:48px; border:0; background:transparent; text-align:left; padding:8px 12px; border-radius:var(--r1); color:var(--text); }
+#moresheet .it.on { background:var(--raise2); box-shadow:inset 2px 0 0 var(--amber); }
+#moresheet .it .ico { width:30px; height:30px; border-radius:var(--r1); background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; flex:none; color:var(--dim); }
+#moresheet .it.on .ico { color:var(--amber); }
+#moresheet .it svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+#moresheet .it .t { display:flex; flex-direction:column; min-width:0; }
+#moresheet .it b { font:500 14px var(--sans); display:flex; align-items:center; gap:8px; }
+#moresheet .it small { color:var(--dim); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
 /* command palette */
 #palette { position:fixed; inset:0; z-index:80; display:flex; justify-content:center; align-items:flex-start; padding:12vh 16px 16px; background:rgba(5,6,9,.7); }
 #palette .box { width:min(640px,100%); border-radius:var(--r3); background:var(--raise); border:1px solid var(--line2); overflow:hidden; }
@@ -488,9 +503,9 @@ label.toggle { text-transform:none; letter-spacing:0; font:500 12.5px var(--sans
   body { padding-bottom:calc(var(--bay) + var(--rail) + 24px + env(safe-area-inset-bottom,0px)); }
   aside#side { top:auto; right:0; width:auto; height:calc(var(--rail) + env(safe-area-inset-bottom,0px)); border-right:0; border-top:1px solid var(--line2); flex-direction:row; padding-bottom:env(safe-area-inset-bottom,0px); }
   .brand, .sidefoot { display:none; }
-  nav#rooms { flex-direction:row; overflow-x:auto; overflow-y:hidden; padding:6px 8px; gap:2px; align-items:stretch; }
-  nav#rooms .grp { display:none; }
-  nav#rooms button { flex:0 0 auto; width:62px; height:48px; flex-direction:column; gap:4px; justify-content:center; padding:0; font-size:10.5px; }
+  nav#rooms { flex-direction:row; overflow:hidden; padding:6px 6px; gap:2px; align-items:stretch; }
+  nav#rooms .grp, nav#rooms button[data-group="vaults"] { display:none; }
+  nav#rooms button, nav#rooms button.more { display:flex; flex:1 1 0; min-width:0; width:auto; height:48px; flex-direction:column; gap:4px; justify-content:center; padding:0; font-size:10.5px; }
   nav#rooms button .lbl { display:block; flex:none; }
   nav#rooms button.on::before { left:18px; right:18px; top:auto; bottom:-6px; width:auto; height:2px; }
   nav#rooms button .live { right:14px; top:4px; }
@@ -611,6 +626,8 @@ label.toggle.m-flat .mk img, .toggle .mk img, .tag2 .mk img { width:14px; height
 .ag-audio { aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; color:var(--dim); }
 .ag-audio svg { width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; }
 .ag-attached { padding:0 14px 10px; } .ag-x { margin-left:4px; }
+.toggle.off { opacity:.45; cursor:not-allowed; }
+.ag-hint { margin:10px 0 0; }
 .ag-sep { width:1px; height:22px; background:var(--line2); margin:0 4px; }
 .ag-kbd { border-color:currentColor; color:inherit; background:transparent; opacity:.6; }
 .ag-empty { text-align:center; padding:34px; }

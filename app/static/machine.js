@@ -58,7 +58,7 @@ function storagePanel() {
       el("div", { class: "gaugebar m-tall" }, el("i", { style: "width:" + s.used_pct + "%;--c:" + (s.used_pct >= 90 ? "var(--red)" : "var(--blue)") })),
       el("h3", {}, "What Studio keeps"),
       el("div", { class: "buckets" }, sorted.map((b, i) => el("i", { class: bucketTone(i), title: b.label + " · " + b.gb.toFixed(1) + " GB", style: "flex:" + b.gb }))),
-      el("div", { class: "legend" }, sorted.map((b, i) => el("div", { title: b.path }, el("s", { class: bucketTone(i) }), b.label, el("b", {}, b.gb >= 100 ? Math.round(b.gb) + " GB" : b.gb.toFixed(1) + " GB")))),
+      el("div", { class: "legend" }, sorted.map((b, i) => el("div", { title: relHome(b.path) }, el("s", { class: bucketTone(i) }), b.label, el("b", {}, b.gb >= 100 ? Math.round(b.gb) + " GB" : b.gb.toFixed(1) + " GB")))),
       el("div", { class: "note" }, "Measured " + (s.computed_at ? new Date(s.computed_at * 1000).toLocaleTimeString() : "just now") + ". Nothing here is deleted for you: files leave only through the Library's trash.")); };
   draw(); loadStorage(draw); return box; }
 async function loadStorage(draw) { M.loading = true; try { M.storage = await api("/api/storage"); } catch { M.storage = null; } M.loading = false; draw();

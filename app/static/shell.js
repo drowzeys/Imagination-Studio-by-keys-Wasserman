@@ -42,6 +42,7 @@ const ICON = {
   queue: SVG('<path d="M4 6h16M4 12h16M4 18h10"/>'),
   chev: SVG('<path d="M6 15l6-6 6 6"/>'),
   go: SVG('<path d="M9 6l6 6-6 6"/>'),
+  more: SVG('<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>'),
 };
 const icon = (name, cls) => { const n = el("span", { class: cls || "ico" }); n.innerHTML = ICON[name] || ICON.home; return n; };
 // the marks of the models and tools the Studio runs (app/static/brand, THIRD-PARTY-MARKS.md): identification only
@@ -49,24 +50,45 @@ const MARKS = { qwen: ["brand/qwen.svg", "Qwen"], flux: ["brand/bfl-white.svg", 
   fish: ["brand/fish-audio.svg", "Fish Audio Drama 3"], comfy: ["brand/comfyui.svg", "ComfyUI"], tensorfold: ["brand/tensorfold.webp", "TensorFold"],
   claude: ["brand/claude.svg", "Claude"], openai: ["brand/openai.svg", "ChatGPT"], codex: ["brand/codex.svg", "Codex"], gemini: ["brand/gemini.svg", "Gemini"], grok: ["brand/grok.svg", "Grok"] };
 const mark = (id, label, big) => { const m = MARKS[id]; if (!m) return label || null; return el("span", { class: "mk" + (big ? " big" : "") }, el("img", { src: m[0], alt: "", width: big ? 40 : 18, height: big ? 40 : 18 }), label === "" ? null : label || m[1]); };
-function go(t, opts = {}) { if (!TABS.includes(t)) return; tab = t; history.replaceState(null, "", "#" + t); if (!opts.keepScroll) window.scrollTo(0, 0); render(); }
+function go(t, opts = {}) { if (!TABS.includes(t)) return; moreClose(); tab = t; history.replaceState(null, "", "#" + t); if (!opts.keepScroll) window.scrollTo(0, 0); render(); }
 function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
 
 function renderShell() {
   const now = tab === "Home" ? null : roomOf(tab), live = jobs.some(j => j.status === "running");
   const nav = [];
   for (const g of GROUPS) { nav.push(el("div", { class: "grp", role: "presentation" }, g.name));
-    for (const r of ROOMS.filter(x => x.group === g.id)) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
+    for (const r of ROOMS.filter(x => x.group === g.id)) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, "data-group": r.group, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
       icon(r.id, "ic"), el("span", { class: "lbl" }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
       if (r.id === "video" && live && now !== r) b.prepend(el("span", { class: "live", "aria-label": "rendering" }));
       nav.push(b); } }
+  // phones only (studio.css): the bar keeps the engines and folds the vaults, search and updates into More
+  nav.push(el("button", { class: "more" + (now && now.group === "vaults" ? " on" : ""), "data-room": "more", type: "button", title: "More: the Studio Vaults, search and updates", "aria-haspopup": "dialog", onclick: moreOpen },
+    icon("more", "ic"), el("span", { class: "lbl" }, "More")));
   $("#rooms").replaceChildren(...nav);
   $("#roomname").textContent = now ? now.name : "Home";
   const tabs = now && now.tabs.length > 1 ? now.tabs : [];
   $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", "aria-current": t === tab ? "page" : false, onclick: () => go(t) }, TAB_NAMES[t] || t)));
   document.body.classList.toggle("quiet", SHELL.lastTab === tab); SHELL.lastTab = tab;
 }
-const SHELL = { lastTab: null, tel: null, history: [], es: null, telAt: 0, libCache: null };
+const SHELL = { lastTab: null, tel: null, history: [], es: null, telAt: 0, libCache: null, telWait: 2000, telPoll: null };
+// the More sheet on phones: the Studio Vaults, ⌘K search and Updates, which the bottom bar has no room for
+function moreOpen() { if ($("#moresheet")) return moreClose(); const now = tab === "Home" ? null : roomOf(tab), fresh = typeof UPD !== "undefined" && UPD.data && UPD.data.available;
+  const row = (ico, label, hint, run, on, kbd) => el("button", { class: "it" + (on ? " on" : ""), type: "button", "aria-current": on ? "page" : false, onclick: () => { moreClose(); run(); } },
+    icon(ico, "ico"), el("span", { class: "t" }, el("b", {}, label, kbd ? el("kbd", {}, kbd) : null), el("small", {}, hint)));
+  const sheet = el("div", { id: "moresheet", onclick: e => { if (e.target.id === "moresheet") moreClose(); } },
+    el("div", { class: "box", role: "dialog", "aria-label": "More" }, el("div", { class: "grp" }, "Studio Vaults"),
+      ROOMS.filter(r => r.group === "vaults").map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
+      el("div", { class: "grp" }, "Studio"), row("search", "Search", "takes, settings and actions", palOpen, false, "⌘K"),
+      row("update", "Updates", fresh ? "an update is ready to install" : (S && S.version ? "Studio " + S.version + " · " : "") + "check for a new version", () => go("Updates"), tab === "Updates")));
+  document.body.append(sheet); const first = sheet.querySelector && sheet.querySelector("button"); if (first) first.focus(); return sheet; }
+function moreClose() { const s = $("#moresheet"); if (s) s.remove(); }
+// a path under the studio folder, said from that folder: the server keeps answering absolute paths (the suite and the
+// Sparks need them); what the page shows of them, a readout, a log or a tooltip, drops the folder in front
+const relHome = s => { const h = S && S.home ? String(S.home).replace(/\/+$/, "") : ""; if (!h || typeof s !== "string") return s; return s === h ? "the studio folder" : s.split(h + "/").join(""); };
+// a view that is torn down lets go of its players: Chrome caps the media players a page may hold
+function releaseMedia(root) { if (!root || !root.querySelectorAll) return;
+  for (const m of [...(root.matches && root.matches("video,audio") ? [root] : []), ...root.querySelectorAll("video,audio")]) {
+    try { m.pause(); m.removeAttribute("src"); m.load(); } catch {} } }
 
 /* ---------- the render bay ---------- */
 function bayOpen(open) { const bay = $("#bay"); if (!bay) return; bay.classList.toggle("open", open); try { localStorage.setItem("bay-open", open ? "1" : ""); } catch {} }
@@ -102,13 +124,17 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   $("#mpill").title = say + " · open the Machine room"; $("#mpill").setAttribute("aria-label", say);
   if (tab === "Machine" && typeof machineLive === "function") machineLive(t);
   if (tab === "Home" && typeof homeLive === "function") homeLive(t); }
+// the event stream, and while it is down a poll every 3 s; a lost stream is opened again after 2, 4, 8 … 30 s
 function telStart() {
   const poll = async () => { try { telApply(await api("/api/telemetry")); } catch { SHELL.tel = null; } };
-  if ("EventSource" in window) { try { const es = new EventSource("/api/events"); SHELL.es = es;
+  const polling = on => { if (on && !SHELL.telPoll) { poll(); SHELL.telPoll = setInterval(poll, 3000); } else if (!on && SHELL.telPoll) { clearInterval(SHELL.telPoll); SHELL.telPoll = null; } };
+  if (!("EventSource" in window)) return polling(true);
+  const open = () => { let es; try { es = new EventSource("/api/events"); } catch { return polling(true); } SHELL.es = es;
     es.addEventListener("telemetry", e => { try { telApply(JSON.parse(e.data)); } catch {} });
-    es.onerror = () => { es.close(); SHELL.es = null; poll(); setInterval(() => { if (!SHELL.es && Date.now() - SHELL.telAt > 2500) poll(); }, 3000); };
-    return; } catch {} }
-  poll(); setInterval(poll, 3000); }
+    es.onopen = () => { SHELL.telWait = 2000; polling(false); };
+    es.onerror = () => { es.close(); if (SHELL.es === es) SHELL.es = null; polling(true);
+      setTimeout(open, SHELL.telWait); SHELL.telWait = Math.min(30000, SHELL.telWait * 2); }; };
+  open(); }
 
 /* ---------- ⌘K ---------- */
 const PAL = { q: "", at: 0, items: [] };
@@ -157,13 +183,13 @@ async function palOpen() { if ($("#palette")) return; PAL.q = ""; PAL.at = 0;
     if (js.length) out.push(el("div", { class: "grp" }, "Queue"), ...js.map(x => row(x, i++)));
     if (files.length) out.push(el("div", { class: "grp" }, "Library"), ...files.map(x => row(x, i++)));
     if (!out.length) out.push(el("div", { class: "note", style: "padding:14px" }, "Nothing matches “" + PAL.q + "”."));
-    res.replaceChildren(...out); const on = res.querySelector(".it.on"); if (on) on.scrollIntoView({ block: "nearest" }); };
+    releaseMedia(res); res.replaceChildren(...out); const on = res.querySelector(".it.on"); if (on) on.scrollIntoView({ block: "nearest" }); };
   input.addEventListener("input", () => { PAL.q = input.value; PAL.at = 0; draw(); });
   input.addEventListener("keydown", e => { if (e.key === "ArrowDown") { PAL.at = Math.min(PAL.items.length - 1, PAL.at + 1); draw(); e.preventDefault(); }
     else if (e.key === "ArrowUp") { PAL.at = Math.max(0, PAL.at - 1); draw(); e.preventDefault(); }
     else if (e.key === "Enter") { const x = PAL.items[PAL.at]; if (x) { palClose(); x.run(); } } else if (e.key === "Escape") palClose(); });
   draw(); api("/api/library").then(list => { SHELL.libCache = list; if ($("#palette")) draw(); }).catch(() => {}); }
-function palClose() { const p = $("#palette"); if (p) p.remove(); }
+function palClose() { const p = $("#palette"); if (p) { p.remove(); releaseMedia(p); } }
 
 // ⌥1 to ⌥9 and ⌥0: the rooms that carry a key, in the sidebar's order
 const roomForKey = d => ROOMS.find(r => r.key === d) || null;
@@ -176,7 +202,11 @@ function shellStart() {
   document.addEventListener("keydown", e => { const typing = e.target.matches && e.target.matches("input,textarea,select,[contenteditable]");
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#palette") ? palClose() : palOpen(); return; }
     if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[0-9]$/.test(e.code)) { const r = roomForKey(e.code.slice(5)); if (r) { e.preventDefault(); goRoom(r.id); } return; }
+    if (e.key === "Escape" && $("#moresheet")) { moreClose(); return; }
     if (!typing && e.key === "/" && !$("#palette")) { e.preventDefault(); palOpen(); } });
+  // a player that leaves the page any other way (a list redrawn in place) is let go of too
+  if (typeof MutationObserver === "function") new MutationObserver(list => { for (const m of list) for (const n of m.removedNodes) if (n.nodeType === 1 && !n.isConnected) releaseMedia(n); })
+    .observe($("#view"), { childList: true, subtree: true });
   window.addEventListener("hashchange", () => { palClose(); const t = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(t) && t !== tab) go(t); });
   if (S) { $("#plat").textContent = platName(); $("#mpill").title = (S.platform_label || platName()) + " · open the Machine room"; }
   if (typeof updatesWatch === "function") updatesWatch();

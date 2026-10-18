@@ -827,25 +827,23 @@ function viewEditor() {
 const LIBF = { kind: "all", q: "" };
 function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
   Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
-    // what the filter row shows: a kind, and words in the file name or folder
-    const words = LIBF.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const list = all_.filter(m => (LIBF.kind === "all" || m.kind === LIBF.kind) && words.every(w => (m.path + " " + (m.spark || "")).toLowerCase().includes(w)));
+    // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
+    const kindList = all_.filter(m => LIBF.kind === "all" || m.kind === LIBF.kind);
+    const hits = () => { const words = LIBF.q.trim().toLowerCase().split(/\s+/).filter(Boolean); return kindList.filter(m => words.every(w => (m.path + " " + (m.spark || "")).toLowerCase().includes(w))); };
+    let list = hits();
     const kinds = { all: "Everything", video: "Clips", image: "Stills" }, n = k => k === "all" ? all_.length : all_.filter(m => m.kind === k).length;
     const find = el("input", { type: "search", placeholder: "Find by name, folder or Spark", value: LIBF.q, style: "max-width:320px", "aria-label": "Find in the Library" });
-    find.addEventListener("change", () => { LIBF.q = find.value; render(); });
+    let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits(); const on = new Set(list.map(m => m.path));
+      for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none"; tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
+    find.addEventListener("input", () => { clearTimeout(wait); wait = setTimeout(apply, 150); }); find.addEventListener("change", apply);
+    find.addEventListener("keydown", e => { if (e.key === "Enter") apply(); });
     put(box, el("div", { class: "row", style: "align-items:center;margin-bottom:6px" }, el("div", { class: "chips fit" }, Object.entries(kinds).map(([k, t]) => el("button", { class: "small" + (LIBF.kind === k ? " on" : ""), onclick: () => { LIBF.kind = k; render(); } }, t + " · " + n(k)))), el("span"), el("div", { class: "fit" }, find)));
     const many = el("button", { class: "fit", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
     const all = el("button", { class: "fit", onclick: () => { const every = LIBPICK.size === list.length; LIBPICK.clear(); if (!every) for (const m of list) LIBPICK.add(m.path); render(); } }, LIBPICK.size && LIBPICK.size === list.length ? "Select none" : "Select all");
-    const show = () => { many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; }; show();
-    if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
-    put(box, el("div", { class: "note" }, list.length + (list.length === all_.length ? "" : " of " + all_.length) + " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale and Remove a person. Under a picture: Turnaround."), actPanel(),
-      el("div", { class: "row", style: "margin-top:10px" }, all, many, el("span"),
-        bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,
-        bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
-        bin && bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + bin.folder + "\nThis cannot be undone.")) return;
-          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
-      el("div", { class: "grid", style: "margin-top:10px" }, list.map(m =>
-    el("div", { class: "tile" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
+    const show = () => { many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = LIBPICK.size && LIBPICK.size === list.length ? "Select none" : "Select all"; }; show();
+    const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
+    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m =>
+    el("div", { class: "tile", "data-path": m.path, style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
       el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + m.spark + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
       m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, m.spark + (m.seed != null ? " · s" + m.seed : "")) : null),
       // the buttons on a row of their own: a long file name no longer pushes them out of the tile
@@ -855,7 +853,16 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
       m.kind === "video" ? null : el("button", { class: "small", title: "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
       m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),
       // out of the library: the server moves the file to the studio's trash folder
-      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))))); });
+      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))));
+    if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
+    put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale and Remove a person. Under a picture: Turnaround."), actPanel(),
+      el("div", { class: "row", style: "margin-top:10px" }, all, many, el("span"),
+        bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,
+        bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
+        bin && bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
+          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
+      grid); })
+  .catch(e => put(box, el("div", { class: "note" }, e.message)));
   return box; }
 
 /* ---------- Tutorial ---------- */
@@ -1106,7 +1113,7 @@ function negNote() { if (C.negFor !== C.prompt) { negShow(null).then(() => { if 
 function jobCard(job) { const p = job.progress; const elapsed = job.elapsed != null ? job.elapsed : (job.started ? ((job.finished || Date.now() / 1000) - job.started) : null);
   // the bar follows the time against the estimate (a job has several stages, each with its own step count)
   const share = job.estimate && elapsed != null ? Math.min(99, Math.max(3, Math.round(100 * elapsed / job.estimate))) : (p ? Math.round(100 * p.at / p.of) : 3);
-  const pre = el("pre", { class: "hide" }, job.log || "");
+  const pre = el("pre", { class: "hide" }, relHome(job.log || ""));
   return el("div", { class: "job" }, el("div", { class: "seghead" }, el("b", {}, job.title), el("span", { class: "pill " + job.status }, job.status), el("span", { style: "flex:1" }),
       ["queued", "running"].includes(job.status) ? el("button", { class: "small", onclick: async () => { await api("/api/jobs/" + job.id + "/cancel", {}); poll(); } }, "Cancel")
         : [el("input", { type: "checkbox", title: "Select this job", "aria-label": "Select " + job.title, checked: PICK.has(job.id), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) PICK.add(job.id); else PICK.delete(job.id); jobTools(); } }),
@@ -1117,7 +1124,7 @@ function jobCard(job) { const p = job.progress; const elapsed = job.elapsed != n
     job.spark && S.sparks && S.sparks.supported && job.sparks && (job.sparks.chosen > 1 || (job.moved || []).length) ? el("div", { class: "note" }, (job.status === "running" ? "Rendering on " : job.status === "done" ? "Rendered on " : "Was on ") + job.spark + " · Sparks " + job.sparks.chosen) : null,
     job.status === "queued" && job.sparks && job.sparks.chosen > 1 ? el("div", { class: "note" }, "Sparks " + job.sparks.chosen + (job.sparks.available < job.sparks.chosen ? " (" + job.sparks.available + " available)" : "") + " · " + job.sparks.says) : null,
     (job.moved || []).map(m => el("div", { class: "note", style: "color:var(--warn)" }, "Taken back from " + m.from + ": " + m.why)),
-    job.status === "done" && elapsed ? el("div", { class: "note" }, "Took " + mmss(elapsed) + (job.passes ? " · " + job.passes + " passes" : "") + (job.engine ? " · " + (job.engine === "zig" ? "native Zig engine" : job.engine === "cuda" ? "CUDA" : "MLX engine") : "")) : null, job.error ? el("div", { class: "note", style: "color:var(--bad)" }, job.error) : null, qaLines(job), shotLines(job), negLines(job), paceLine(job), pre); }
+    job.status === "done" && elapsed ? el("div", { class: "note" }, "Took " + mmss(elapsed) + (job.passes ? " · " + job.passes + " passes" : "") + (job.engine ? " · " + (job.engine === "zig" ? "native Zig engine" : job.engine === "cuda" ? "CUDA" : "MLX engine") : "")) : null, job.error ? el("div", { class: "note", style: "color:var(--bad)" }, relHome(job.error)) : null, qaLines(job), shotLines(job), negLines(job), paceLine(job), pre); }
 function jobTools() { const done = jobs.filter(j => ["done", "cancelled"].includes(j.status)).length, failed = jobs.filter(j => j.status === "failed").length;
   for (const id of [...PICK]) if (!jobs.some(j => j.id === id && !["queued", "running"].includes(j.status))) PICK.delete(id);
   $("#jobtools").replaceChildren(...(done || failed ? [
@@ -1133,7 +1140,7 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
     if (JSON.stringify(fresh.timeline) !== JSON.stringify(project.timeline)) { project = fresh; render(); } } catch {} }
   const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig) { const had = lastSig; lastSig = sig; if (had && !document.activeElement.matches("input,textarea,select")) render(); } }
 
-function render() { renderShell();
+function render() { renderShell(); releaseMedia($("#view"));
   $("#view").replaceChildren({ Home: viewHome, Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Editor: viewEditor, Library: viewLibrary,
     Machine: viewMachine, Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial }[tab]()); coach(); bayUpdate();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
