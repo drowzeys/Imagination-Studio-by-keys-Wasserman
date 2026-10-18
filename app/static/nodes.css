@@ -1,0 +1,116 @@
+/* Nodes (nodes.js): the canvas, its cards, ports and links, in the studio's tokens. Hairlines, a catch-light and a
+   soft drop for depth, amber for the one action, cobalt for what is selected, green for what is done. A card's head
+   is 38px and each port row 26px under a 1px border: nodes.js draws the links to those numbers (ND_HEAD, ND_ROW). */
+.nodes { display:flex; flex-direction:column; min-height:calc(100vh - var(--head) - var(--bay) - 64px); }
+.nodes .pagehead { margin-bottom:18px; }
+.nd-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.nd-bar .fill { flex:1; }
+.nd-bar select.nd-open { width:auto; min-width:160px; padding:6px 32px 6px 12px; font-size:14px; }
+.nd-bar input.nd-name { width:240px; padding:6px 12px; font-size:14.5px; }
+.nd-bar button.primary { padding:7px 22px; }
+.nd-chip { font:500 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--amber); border:1px solid var(--line2); border-radius:999px; padding:3px 9px; }
+.nd-status { display:inline-flex; align-items:center; gap:8px; font:500 12.5px var(--mono); color:var(--dim); }
+
+/* the stage: a dot grid (a tiled SVG, --line2's ivory) that pans and zooms with the cards */
+.nd-stage { position:relative; flex:1; min-height:560px; overflow:hidden; border:1px solid var(--line); border-radius:var(--r3); background-color:var(--bg2);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='1' cy='1' r='1' fill='%23F5EFDF' fill-opacity='.12'/></svg>"); background-size:24px 24px; box-shadow:inset 0 1px 2px rgba(0,0,0,.35);
+  cursor:default; touch-action:none; user-select:none; -webkit-user-select:none; outline:none; }
+.nd-stage.panning, .nd-stage.grab { cursor:grabbing; }
+.nd-stage.grab .nd-node { cursor:grabbing; }
+.nd-layer { position:absolute; left:0; top:0; width:1px; height:1px; transform-origin:0 0; }
+svg.nd-wires { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
+.nd-wire { fill:none; stroke:var(--dim); stroke-width:2; opacity:.85; pointer-events:none; }
+.nd-wire.sel { stroke:var(--blue); stroke-width:3; opacity:1; }
+.nd-wire.live { stroke-dasharray:6 5; opacity:1; }
+.nd-hit { fill:none; stroke:transparent; stroke-width:14; pointer-events:stroke; cursor:pointer; }
+
+/* the type colours, for ports and the links out of them */
+.t-text { --tc:var(--dim); } .t-image, .t-images { --tc:var(--blue-text); } .t-video { --tc:var(--amber); }
+.t-audio { --tc:var(--green); } .t-timeline { --tc:var(--amber-muted); } .t-file { --tc:var(--text); }
+.nd-wire[class*="t-"] { stroke:var(--tc); }
+.nd-wire.sel[class*="t-"] { stroke:var(--blue); }
+
+/* a card */
+.nd-node { position:absolute; box-sizing:border-box; border:1px solid var(--line2); border-radius:var(--r2); background:var(--raise); box-shadow:var(--sh-card); color:var(--text);
+  transition:border-color var(--t1) var(--ease),box-shadow var(--t1) var(--ease); }
+.nd-node:hover { border-color:var(--line3); }
+.nd-node.sel { border-color:var(--blue); box-shadow:0 0 0 1px var(--blue),var(--sh-lift); }
+.nd-node.bad { border-color:var(--red); }
+.nd-head { height:38px; display:flex; align-items:center; gap:8px; padding:0 12px; border-bottom:1px solid var(--line); cursor:grab; border-radius:var(--r2) var(--r2) 0 0; }
+.nd-head b { flex:1; min-width:0; font:600 14px/1 var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nd-kind { font:500 10.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
+.nd-dot { width:7px; height:7px; border-radius:50%; background:var(--line3); flex:none; display:inline-block; }
+.s-waiting .nd-dot { background:var(--dim); }
+.s-running .nd-dot, .nd-status.s-running .nd-dot, .nd-status.s-queued .nd-dot { background:var(--amber); animation:nd-pulse 1.4s ease-in-out infinite; }
+.s-done .nd-dot { background:var(--green); box-shadow:var(--creator-glow); }
+.s-failed .nd-dot, .s-skipped .nd-dot { background:var(--red); } .s-cancelled .nd-dot { background:var(--faint); }
+.nd-node.s-running { border-color:var(--amber); }
+.nd-node.s-failed { border-color:rgba(255,90,106,.55); }
+@keyframes nd-pulse { 50% { opacity:.35; } }
+
+/* ports: a row of 26px each, inputs left, outputs right */
+.nd-ports { padding:0; }
+.nd-row { height:26px; display:flex; align-items:center; justify-content:space-between; font:500 11.5px var(--mono); color:var(--dim); text-transform:lowercase; position:relative; }
+.nd-in, .nd-out { display:flex; align-items:center; gap:8px; position:relative; height:100%; }
+.nd-in { padding-left:12px; } .nd-out { padding-right:12px; }
+.nd-port { position:absolute; top:50%; width:12px; height:12px; margin-top:-6px; border-radius:50%; background:var(--bg2); border:2px solid var(--tc,var(--dim)); cursor:crosshair; }
+.nd-port::before { content:""; position:absolute; inset:-9px; border-radius:50%; }  /* a 30px target round a 12px dot */
+.nd-port.in { left:-7px; } .nd-port.out { right:-7px; background:var(--tc,var(--dim)); }
+.nd-port.in.on { background:var(--tc,var(--dim)); }
+.nd-port:hover { transform:scale(1.25); }
+.linking .nd-port.in { opacity:.25; }
+.linking .nd-port.in.ok { opacity:1; transform:scale(1.35); box-shadow:0 0 0 3px var(--blue-wash); }
+.linking, .linking .nd-node, .linking .nd-head { cursor:crosshair; }
+
+/* settings and what the card made */
+.nd-body { display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; padding:8px 12px 10px; }
+.nd-body:empty { display:none; }
+.nd-f { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.nd-f.wide { grid-column:1 / -1; }
+.nd-f > span { font:500 10.5px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
+.nd-f input, .nd-f select, .nd-f textarea { padding:5px 8px; font-size:13px; border-radius:var(--r1); min-height:0; }
+.nd-f select { padding-right:26px; background-position:right 8px center; }
+.nd-f textarea { min-height:58px; resize:vertical; line-height:1.4; user-select:text; -webkit-user-select:text; }
+.nd-f input[type=number] { font-size:13px; }
+.nd-res { padding:0 12px; display:flex; flex-direction:column; gap:6px; }
+.nd-res:not(:empty) { padding-bottom:10px; }
+.nd-thumb { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:var(--r1); border:1px solid var(--line); background:var(--bg); }
+.nd-res audio { width:100%; height:32px; }
+.nd-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; }
+.nd-strip img { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:4px; border:1px solid var(--line); }
+.nd-meta { font:500 11.5px var(--mono); color:var(--dim); }
+.nd-meta.live { color:var(--amber); }
+.nd-err { font-size:12.5px; line-height:1.4; color:var(--red); }
+.k-note { background:var(--teal-wash); border-color:var(--line); }
+.k-note .nd-head { cursor:grab; }
+
+/* an empty canvas, and the palette of cards */
+.nd-empty { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(560px,90%); text-align:center; color:var(--dim); pointer-events:none; }
+.nd-empty b { display:block; font:400 30px/1.1 var(--display); color:var(--text); }
+.nd-empty p { margin:8px 0 16px; font-size:14.5px; }
+.nd-temps { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; pointer-events:auto; }
+.nd-temp { display:flex; flex-direction:column; gap:4px; text-align:left; padding:12px 14px; border-radius:var(--r2); box-shadow:var(--sh-card); }
+.nd-temp b { font:600 14px var(--sans); color:var(--text); display:block; }
+.nd-temp span { font-size:12.5px; color:var(--dim); line-height:1.35; }
+.nd-palette { position:absolute; z-index:5; width:280px; padding:8px; border:1px solid var(--line2); border-radius:var(--r2); background:var(--raise2); box-shadow:var(--sh-lift); }
+.nd-palette input { padding:7px 10px; font-size:14px; margin-bottom:6px; }
+.nd-plist { display:flex; flex-direction:column; max-height:320px; overflow-y:auto; }
+.nd-pitem { display:grid; grid-template-columns:10px 1fr; grid-template-rows:auto auto; column-gap:10px; text-align:left; border:0; box-shadow:none; background:transparent; padding:7px 8px; border-radius:var(--r1); }
+.nd-pitem:hover:not(:disabled), .nd-pitem:focus-visible { background:var(--blue-wash); }
+.nd-pitem .nd-sw { grid-row:1 / 3; align-self:center; width:8px; height:8px; border-radius:50%; background:var(--line3); }
+.nd-pitem b { font:600 13.5px var(--sans); }
+.nd-pitem span { font-size:12px; color:var(--dim); }
+.nd-pitem.k-picture .nd-sw, .nd-pitem.k-edit .nd-sw, .nd-pitem.k-pick .nd-sw { background:var(--blue); }
+.nd-pitem.k-clip .nd-sw, .nd-pitem.k-export .nd-sw { background:var(--amber); }
+.nd-pitem.k-voice .nd-sw, .nd-pitem.k-song .nd-sw { background:var(--green); }
+.nd-help { margin-top:10px; font:500 11.5px var(--mono); color:var(--faint); letter-spacing:.02em; }
+
+@media (max-width:760px) {
+  .nd-stage { min-height:70vh; }
+  .nd-bar input.nd-name { width:100%; }
+  .nd-temps { grid-template-columns:1fr; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .nd-dot { animation:none !important; }
+  .nd-node, .nd-port { transition:none; }
+}
