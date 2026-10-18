@@ -226,9 +226,41 @@ def test_a_check_reports_release_and_installed_version(history, tmp_path, monkey
     status = checked(manager)
     assert asked == [("https://api.github.com/repos/test-owner/studio/releases/latest", "Studio-updater", 10)]
     assert status["latest_release"] == {"tag": "v1.1", "name": "Studio 1.1", "published_at": "2026-10-01T00:00:00Z",
-                                        "url": "https://github.com/test-owner/studio/releases/tag/v1.1"}
+                                        "url": "https://github.com/test-owner/studio/releases/tag/v1.1",
+                                        "repository": "test-owner/studio"}
     assert status["available"] and status["following"] == "main" and status["latest_version"] == "1.1"
     assert status["installed_version"] == "1.0" and status["installed_commit"] == command(clone, "rev-parse", "--short", "HEAD")
+
+
+def answers(monkeypatch, replies):
+    asked = []
+    def github(request, timeout):
+        asked.append(request.full_url.removeprefix("https://api.github.com/repos/"))
+        reply = replies.get(asked[-1])
+        if reply is None:
+            raise updates.urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO(b"{}"))
+        return io.BytesIO(json.dumps(reply).encode())
+    monkeypatch.setattr(updates.urllib.request, "urlopen", github)
+    return asked
+
+
+def test_a_fork_without_releases_shows_its_parents(monkeypatch):
+    asked = answers(monkeypatch, {"fork-owner/studio": {"fork": True, "parent": {"full_name": "test-owner/studio"}},
+                                  "test-owner/studio/releases/latest": {"tag_name": "v2.9.3", "name": "2.9.3",
+                                      "published_at": "2026-10-01T00:00:00Z",
+                                      "html_url": "https://github.com/test-owner/studio/releases/tag/v2.9.3"}})
+    assert updates.latest_release("fork-owner/studio") == {
+        "tag": "v2.9.3", "name": "2.9.3", "published_at": "2026-10-01T00:00:00Z",
+        "url": "https://github.com/test-owner/studio/releases/tag/v2.9.3", "repository": "test-owner/studio"}
+    assert asked == ["fork-owner/studio/releases/latest", "fork-owner/studio", "test-owner/studio/releases/latest"]
+
+
+def test_no_releases_and_no_parent_is_left_out(monkeypatch):
+    asked = answers(monkeypatch, {"solo-owner/studio": {"fork": False}})
+    assert updates.latest_release("solo-owner/studio") is None
+    assert asked == ["solo-owner/studio/releases/latest", "solo-owner/studio"]
+    answers(monkeypatch, {"fork-owner/studio": {"parent": {"full_name": "../../evil"}}})
+    assert updates.latest_release("fork-owner/studio") is None
 
 
 def test_a_failed_release_lookup_is_left_out(history, tmp_path):

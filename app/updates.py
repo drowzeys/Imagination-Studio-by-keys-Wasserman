@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 import uuid
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -167,15 +168,29 @@ def _inspect(pack: Path, fetch: bool, known: dict) -> dict:
     return {**base, "target": target, "available": True, "latest_version": version}
 
 
-def latest_release(source: str) -> dict | None:
-    """The newest GitHub release, for information only: installing is always a fast-forward of the followed branch."""
-    request = urllib.request.Request("https://api.github.com/repos/" + quote(source, safe="/") + "/releases/latest",
+def github_api(path: str) -> dict:
+    request = urllib.request.Request("https://api.github.com/repos/" + path,
                                      headers={"Accept": "application/vnd.github+json", "User-Agent": "Studio-updater"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read(1_000_000))
+
+
+def latest_release(source: str) -> dict | None:
+    """The newest GitHub release, for information only: installing is always a fast-forward of the followed branch.
+
+    A fork without releases of its own shows its parent's, named by "repository"."""
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            found = json.loads(response.read(1_000_000))
+        repo = quote(source, safe="/")
+        try:
+            found = github_api(repo + "/releases/latest")
+        except urllib.error.HTTPError as error:
+            parent = github_api(repo).get("parent") if error.code == 404 else None
+            repo = parent.get("full_name") if isinstance(parent, dict) else None
+            if not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+                return None
+            found = github_api(repo + "/releases/latest")
         release = {"tag": found["tag_name"], "name": found.get("name") or found["tag_name"],
-                   "published_at": found.get("published_at"), "url": found.get("html_url")}
+                   "published_at": found.get("published_at"), "url": found.get("html_url"), "repository": repo}
     except Exception:
         return None
     if not all(value is None or isinstance(value, str) for value in release.values()) or not isinstance(release["tag"], str):
