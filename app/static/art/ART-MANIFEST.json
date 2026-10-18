@@ -408,6 +408,46 @@
    "aspect": "1:1",
    "purpose": "cover for the Multiple Angles (image) look card",
    "ready": true
+  },
+  {
+   "name": "vault-library",
+   "file": "art/vault-library.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Library vault",
+   "ready": true
+  },
+  {
+   "name": "vault-looks",
+   "file": "art/vault-looks.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Looks vault",
+   "ready": true
+  },
+  {
+   "name": "vault-suite",
+   "file": "art/vault-suite.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of Wasserman's Filmmaker Suite",
+   "ready": true
+  },
+  {
+   "name": "vault-nodes",
+   "file": "art/vault-nodes.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Nodes vault",
+   "ready": false
+  },
+  {
+   "name": "vault-agent",
+   "file": "art/vault-agent.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Agent room",
+   "ready": false
   }
  ]
 }

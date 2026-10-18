@@ -407,7 +407,7 @@ function viewNodes() {
       if (head) { const node = ndNode(head.parentNode.dataset.node), name = prompt("Name this card", ndTitle(node)); if (name != null) { node.title = name.trim().slice(0, 60); ndTouch(); ndPaint(); } return; }
       if (e.target.closest(".nd-node,.nd-palette")) return; const r = ND.stage.getBoundingClientRect(); ndPalette([e.clientX - r.left, e.clientY - r.top]); } });
   ND.layer = el("div", { class: "nd-layer" }); ND.stage.append(ND.layer);
-  const head = typeof pageHead === "function" ? pageHead("Studio Vault", "Nodes", "A graph of the studio's own jobs: words to pictures to clips, run in order.")
+  const head = typeof vaultHead === "function" ? vaultHead("nodes", "Nodes", "A graph of the studio's own jobs: words to pictures to clips, run in order.")
     : el("div", { class: "pagehead" }, el("h1", { class: "display" }, "Nodes"));
   ND.root = el("div", { class: "nodes" + (ro ? " ro" : "") }, head,
     ro ? el("div", { class: "note nd-phone" }, "Best on a desktop: on a phone the graph is read-only. Open one to see what it made.") : null,

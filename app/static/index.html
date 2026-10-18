@@ -837,6 +837,7 @@ function viewEditor() {
 /* ---------- Library ---------- */
 const LIBF = { kind: "all", q: "" };
 function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
+  const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
   Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
     // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
     const kindList = all_.filter(m => LIBF.kind === "all" || m.kind === LIBF.kind);
@@ -874,7 +875,7 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
           try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
       grid); })
   .catch(e => put(box, el("div", { class: "note" }, e.message)));
-  return box; }
+  return head ? el("div", {}, head, box) : box; }
 
 /* ---------- Tutorial ---------- */
 // lessons per tab, one step on screen at a time; a step can point at the control it describes ("go"), and the coach bar then follows into that tab

@@ -82,7 +82,7 @@ function viewLooks() {
   const search = el("input", { type: "search", class: "looksearch", placeholder: "Search looks: horror, anime, orbit…", value: HUB.q, "aria-label": "Search looks",
     oninput: e => { HUB.q = e.target.value; const at = e.target.selectionStart; render(); const again = document.querySelector(".looks input[type=search]"); if (again) { again.focus(); again.setSelectionRange(at, at); } } });
   return el("div", { class: "looks" },
-    pageHead("Studio Vault", "Looks", "Styles for pictures and clips, one LoRA a card.",
+    vaultHead("looks", "Looks", "Styles for pictures and clips, one LoRA a card.",
       el("button", { type: "button", class: "small" + (LK.open ? " on" : ""), onclick: () => { LK.open = !LK.open; render(); } }, "+ Add your own")),
     el("div", { class: "note looktally" }, LORAS.length ? lookTally() : "Loading the hub…"),
     LK.open ? lookForm() : null,

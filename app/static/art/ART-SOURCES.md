@@ -85,3 +85,7 @@ Rendered for this app on 2026-10-18 with the studio's own Image Engine (FLUX3-K 
 ## Custom art set (2026-10-18)
 
 Sam Wasserman's own custom artwork for the engines, the start and action cards and the look swatches (his Imagination-Studio-Custom-Art set, made with his image tool from his own briefs; masters kept outside the repo). These replace the earlier generated covers for every slot except act-previs-motion (act-story-slate came separately from Sam). Decorative card art, not output samples.
+
+## Vault covers (2026-10-18)
+
+Sam Wasserman's own art: art/vault-library.webp, art/vault-looks.webp, art/vault-suite.webp (vault-nodes and vault-agent to follow).

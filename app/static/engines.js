@@ -16,6 +16,11 @@ function pcard({ art, sign, title, one, run, k, off, src }) {
   const pic = src ? el("div", { class: "art" }, el("img", { src, alt: "", loading: "lazy" })) : artSlot(art, "", sign);
   return el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "" }, pic, k ? el("span", { class: "k" }, k) : null,
     el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, off || one) : null), icon("go", "go"))); }
+// a vault page's head with its cover, like an engine's; without a ready cover it is the plain head
+function vaultHead(id, title, line, right) {
+  if (!ART.ready.has("vault-" + id)) return pageHead("Studio Vault", title, line, right);
+  return el("div", { class: "enghead vault" }, artSlot("vault-" + id, "", id),
+    el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Studio Vault"), el("h1", { class: "display" }, title), line ? el("p", { class: "sub" }, line) : null, right || null)); }
 function pageHead(eyebrow, title, line, right) {
   return el("div", { class: "pagehead" }, el("div", { class: "stack" }, el("span", { class: "eyebrow" }, eyebrow), el("h1", { class: "display" }, title), line ? el("p", { class: "sub" }, line) : null), right || null); }
 
