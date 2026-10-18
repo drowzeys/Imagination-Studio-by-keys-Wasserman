@@ -77,7 +77,7 @@ function viewImport() {
   const dailies = () => { const ids = picked(); if (!ids.length) return toast("Finish a take first"); location.assign("/api/export/dailies.zip?jobs=" + ids.join(",")); };
   const act = { bring: () => input.click(), dailies };
   return el("div", {},
-    pageHead("Studio Vault", "Suite", "Wasserman Filmmaker Suite: bring work in, send the cut out."),
+    pageHead("Studio Vault", "Wasserman's Filmmaker Suite", "The entire Wasserman Filmmaker Suite of apps, built in: bring work in, send the cut out."),
     el("div", { class: "su-apps" }, suApps().map(a => suAppCard(a, act))),
     el("div", { class: "su-gap" }, zone),
     el("details", { class: "fold" }, el("summary", {}, "What it reads"),

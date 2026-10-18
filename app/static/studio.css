@@ -837,4 +837,4 @@ html.motion-reduce *, html.motion-reduce *::before, html.motion-reduce *::after 
   .cards.startrow { grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:minmax(200px,1fr); overflow-x:auto; padding-bottom:8px; } }
 @media (max-width:720px) { .composer { padding:16px 14px; } .cmp-text::placeholder { font-size:21px; } .cmp-go { flex:1 1 100%; justify-content:center; } .cmp-mode { height:36px; padding:0 11px; } .cmp-mode .mk span, .cmp-mode .mk { font-size:0; gap:0; }
   .cards.startrow { grid-auto-columns:minmax(160px,46%); } .homehero.slim .display { font-size:40px; } }
-
+nav#rooms .lbl.long { white-space:normal; line-height:1.12; font-size:14.5px; }

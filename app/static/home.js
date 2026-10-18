@@ -132,7 +132,7 @@ function viewHome() {
         : el("button", { class: "small", onclick: () => startCreate({ image: m.path, goes: "video", start: "own" }, 1) }, "animate"))))
       : [el("div", { class: "note" }, "Nothing rendered yet. Your takes will line up here.")])); }).catch(() => recent.replaceChildren(el("div", { class: "note" }, "The Library could not be read.")));
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Machine")), machineStrip());
-  put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "The suite"), el("button", { class: "small", onclick: () => go("Import") }, "Suite")),
+  put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Wasserman's Filmmaker Suite"), el("button", { class: "small", onclick: () => go("Import") }, "The whole suite, built in →")),
     el("div", { class: "suiteRow" }, SUITE_APPS.map(([n, s]) => el("button", { class: "app", type: "button", title: s, onclick: () => go("Import") },
       el("img", { src: "art/suite/" + SUITE_SLUG[n] + ".webp", alt: "", width: 32, height: 32, loading: "lazy" }), el("b", {}, n)))));
   return wrap;

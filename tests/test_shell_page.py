@@ -61,7 +61,7 @@ def test_every_tab_has_one_room_and_old_links_still_work():
       out.keys = ROOMS.map(r => r.key);""")
     if out is None:
         return
-    assert out["rooms"] == ["Story", "Image", "Video", "Previs", "Sound", "Edit", "Agent", "Library", "Looks", "Suite", "Nodes", "Machine", "Learn", "Settings"]
+    assert out["rooms"] == ["Story", "Image", "Video", "Previs", "Sound", "Edit", "Agent", "Library", "Looks", "Wasserman's Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings"]
     assert out["groups"] == ["Creative Engines:Story,Image,Video,Previs,Sound,Edit", ":Agent", "Studio Vaults:Library,Looks,Suite,Nodes,Machine,Learn,Settings"]
     assert out["homeless"] == ["Home", "Create"]  # home sits outside the rooms; Create is in Image and in Video
     assert (out["createVideo"], out["createEdit"], out["createImage"]) == ("video", "image", "image")
@@ -223,7 +223,7 @@ def test_the_phone_bar_folds_the_vaults_search_and_updates_into_more():
         return
     assert out["more"][0] == "more" and out["more"][1] == "more on" and "More" in out["more"][2]  # a vault is open: More is the lit item
     assert out["vaults"] == ["library", "looks", "suite", "nodes", "machine", "learn", "settings"]  # hidden from the phone bar by studio.css
-    for words in ("Agent", "Studio Vaults", "Library", "Looks", "Suite", "Nodes", "Machine", "Learn", "Settings", "Search", "⌘K", "Updates"):
+    for words in ("Agent", "Studio Vaults", "Library", "Looks", "Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings", "Search", "⌘K", "Updates"):
         assert words in out["sheet"], words
     assert "Looks" in out["on"]
     assert out["updates"] == "Updates" and out["palette"] and out["machine"] == "Machine" and out["engineMore"] == "more"

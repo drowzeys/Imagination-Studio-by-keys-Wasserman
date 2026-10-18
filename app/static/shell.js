@@ -14,7 +14,7 @@ const ROOMS = [
   { id: "agent", group: "agent", name: "Agent", key: "", tabs: ["Agent"], says: "ask your agent; it makes it with the studio" },
   { id: "library", group: "vaults", name: "Library", key: "7", tabs: ["Library"], says: "every take" },
   { id: "looks", group: "vaults", name: "Looks", key: "8", tabs: ["Looks"], says: "LoRA styles for pictures and clips" },
-  { id: "suite", group: "vaults", name: "Suite", key: "9", tabs: ["Import"], says: "bring in from the filmmaker suite, send out" },
+  { id: "suite", group: "vaults", name: "Wasserman's Filmmaker Suite", short: "Filmmaker Suite", key: "9", tabs: ["Import"], says: "the entire Wasserman Filmmaker Suite of apps, built in" },
   { id: "nodes", group: "vaults", name: "Nodes", key: "", tabs: ["Nodes"], says: "a canvas of jobs, words to pictures to clips" },
   { id: "machine", group: "vaults", name: "Machine", key: "0", tabs: ["Machine", "Sparks", "Brains", "Updates"], says: "telemetry, Sparks, brains and updates" },
   { id: "learn", group: "vaults", name: "Learn", key: "", tabs: ["Tutorial"], says: "lessons, step by step" },
@@ -82,7 +82,7 @@ function renderShell() {
   for (const g of GROUPS) { const rooms = shown(ROOMS.filter(x => x.group === g.id)); if (!rooms.length) continue;
     if (g.name) nav.push(el("div", { class: "grp", role: "presentation" }, g.name));
     for (const r of rooms) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, "data-group": r.group, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
-      icon(r.id, "ic"), el("span", { class: "lbl" }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
+      icon(r.id, "ic"), el("span", { class: "lbl" + (r.name.length > 18 ? " long" : "") }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
       if (r.id === "video" && live && now !== r) b.prepend(el("span", { class: "live", "aria-label": "rendering" }));
       nav.push(b); } }
   // phones only (studio.css): the bar keeps the engines and folds the vaults, search and updates into More
@@ -189,7 +189,7 @@ function palActions() { const a = (ico, label, hint, run, words = "") => ({ ico,
     a("sound", "Record a voice line", "Sound · Fish Audio Drama 3", () => go("Voice"), "fish drama speech"),
     a("sound", "Write a song", "Sound · MiniMax-Music3", () => go("Music"), "minimax music score"),
     a("story", "Plan a film", "Story", () => go("Production"), "slate bible shots first ad"),
-    a("suite", "Bring in from the suite", "ScriptBreak · Cork Board · Blockout …", () => go("Import"), "import storyboard master canvas fountain suite send out"),
+    a("suite", "Wasserman's Filmmaker Suite", "ScriptBreak · Cork Board · Blockout … built in", () => go("Import"), "import storyboard master canvas fountain suite send out"),
     a("library", "Library", "Studio Vaults", () => go("Library"), "files renders takes"),
     a("looks", "Looks", "LoRA styles", () => go("Looks"), "lora hub style horror"),
     a("edit", "Timeline", "Edit · Resolve export", () => go("Editor"), "editor fcpxml edl resolve"),
