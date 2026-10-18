@@ -27,6 +27,7 @@ async function updAct(name, body) { if (UPD.acting) return; UPD.acting = true; u
 function updShow() { const b = document.getElementById("studio-updates-open"); if (b && b.classList) b.classList.toggle("has", !!(UPD.data && UPD.data.available));
   if (tab === "Updates") render(); }
 function updatesWatch() { updRefresh(); }
+const updDay = iso => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; };
 const updWhen = t => { if (!t) return "never"; const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : new Date(t * 1000).toLocaleDateString(); };
 function viewUpdates() {
   if (!UPD.data && !UPD.said && !UPD.timer) updRefresh();
@@ -41,7 +42,8 @@ function viewUpdates() {
         el("div", {}, row("Installed", [d.installed_version, d.installed_commit].filter(Boolean).join(" · ") || "unknown"),
           row("Following", follow ? (d.source ? d.source + " · " : "") + follow : ""),
           row("Ready to install", d.available ? d.latest_version || (d.target || "").slice(0, 8) : ""),
-          rel ? el("div", { class: "kv updrow" }, el("span", {}, "Latest on GitHub"), rel.url ? el("a", { href: rel.url, target: "_blank", rel: "noopener" }, rel.tag) : el("b", {}, rel.tag)) : null,
+          rel && rel.tag ? el("div", { class: "kv updrow" }, el("span", {}, "Latest on GitHub: ", rel.url ? el("a", { href: rel.url, target: "_blank", rel: "noopener" }, rel.tag) : el("b", {}, rel.tag),
+            updDay(rel.published_at) ? " · " + updDay(rel.published_at) : "")) : null,
           row("Last checked", updWhen(d.checked_at))),
         el("p", { class: "updstatus", role: "status", "aria-live": "polite" }, status),
         UPD.back ? el("button", { class: "primary", onclick: () => location.reload() }, "Reload Studio") :

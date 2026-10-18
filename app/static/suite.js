@@ -47,7 +47,7 @@ function importView(imp) {
    working alongside. The server's list (/api/suite) is used when it answers, home.js's SUITE_APPS when it does not. */
 const SU_ICON = { scriptbreak: "scriptbreak", "cork-board": "cork-board", blockout: "blockout", "storyboard-reference": "storyboard-reference", "master-canvas": "master-canvas",
   slate: "slate", "circle-take": "circle-take", "stem-studio": "stem-studio", "call-sheet": "call-sheet", "motion-previs-studio": "motion-previs-studio", "davinci-mcp": "davinci-mcp",
-  fountain: "filmmaker-suite", editor: "davinci-mcp" };
+  editor: "davinci-mcp" };
 const SU_ROLE = { scriptbreak: "in", "cork-board": "in", blockout: "in", "storyboard-reference": "in", "master-canvas": "in", slate: "in", fountain: "in",
   "circle-take": "dailies", editor: "timeline", "motion-previs-studio": "previs", "stem-studio": "info", "call-sheet": "info", "davinci-mcp": "info" };
 const SU_MORE = [{ id: "call-sheet", name: "Call Sheet", what: "The suite's launcher and dashboard." }, { id: "motion-previs-studio", name: "Motion Previs Studio", what: "Pose, depth and camera from a clip." },
@@ -60,7 +60,7 @@ const suSendout = () => { const n = typeof document !== "undefined" && document.
 function suAppCard(a, act) { const role = SU_ROLE[a.id] || "info", slug = SU_ICON[a.id];
   const [tag, cls, run] = role === "in" ? ["Bring in", "t", act.bring] : role === "dailies" ? ["Send out · dailies", "", act.dailies] : role === "timeline" ? ["Send out · timeline", "", suSendout]
     : role === "previs" ? ["Open in Previs", "", () => go("Motion Previs")] : ["Works alongside", "", null];
-  const pic = slug ? el("img", { class: "su-icon", src: "art/suite/" + slug + ".webp", alt: "", loading: "lazy", decoding: "async" }) : el("span", { class: "su-icon blank" }, icon("suite"));
+  const pic = slug ? el("img", { class: "su-icon", src: "art/suite/" + slug + ".webp", alt: "", loading: "lazy", decoding: "async" }) : el("span", { class: "su-icon blank" }, icon(a.id === "fountain" ? "doc" : "suite"));
   const kids = [pic, el("div", { class: "su-txt" }, el("b", {}, a.name), el("span", {}, a.what || "")), el("span", { class: "tag2 " + cls }, tag)];
   return run ? el("button", { class: "su-app", type: "button", title: tag + ": " + a.name, onclick: run }, ...kids) : el("div", { class: "su-app still" }, ...kids); }
 function viewImport() {
@@ -77,7 +77,7 @@ function viewImport() {
   const dailies = () => { const ids = picked(); if (!ids.length) return toast("Finish a take first"); location.assign("/api/export/dailies.zip?jobs=" + ids.join(",")); };
   const act = { bring: () => input.click(), dailies };
   return el("div", {},
-    pageHead("Studio Vault", "Suite", "Wasserman Filmmaker Suite: bring work in, send the cut out.", el("img", { class: "su-badge", src: "art/suite/filmmaker-suite.webp", alt: "" })),
+    pageHead("Studio Vault", "Suite", "Wasserman Filmmaker Suite: bring work in, send the cut out."),
     el("div", { class: "su-apps" }, suApps().map(a => suAppCard(a, act))),
     el("div", { class: "su-gap" }, zone),
     el("details", { class: "fold" }, el("summary", {}, "What it reads"),

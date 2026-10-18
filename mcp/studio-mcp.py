@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Slate Studio MCP: drive a running Wasserman Slate AI Studio from an MCP client (stdio, no dependencies).
+"""Imagination Studio MCP: drive a running Imagination Studio from an MCP client (stdio, no dependencies).
 
     STUDIO_URL=http://127.0.0.1:7870 python3 mcp/studio-mcp.py
 

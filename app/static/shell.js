@@ -36,6 +36,7 @@ const ICON = {
   suite: SVG('<path d="M7.5 4v12M3.5 12l4 4 4-4"/><path d="M16.5 20V8M12.5 12l4-4 4 4"/>'),
   machine: SVG('<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 2.5V6M14.5 2.5V6M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/>'),
   learn: SVG('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9"/><path d="M12 17.2v.1"/>'),
+  doc: SVG('<path d="M6 3.5h8.5L18 7v13.5H6z"/><path d="M14.5 3.5V7H18"/><path d="M9 11h6M9 14h6M9 17h4"/>'),
   update: SVG('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>'),
   search: SVG('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
   queue: SVG('<path d="M4 6h16M4 12h16M4 18h10"/>'),
@@ -94,7 +95,11 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   const busy = t.jobs && t.jobs.running, warn = (t.warnings || []).length;
   $("#mdot").className = "dotl" + (busy ? " r" : warn ? " t" : "");
   $("#mtxt").textContent = gpu != null ? gpu + "% GPU" : t.memory ? Math.round(t.memory.available_mb / 1024) + " GB free" : "";
-  $("#mpill").title = platName() + " · GPU " + (gpu == null ? "n/a" : gpu + "%") + " · memory " + used + "% used · open the Machine room";
+  const gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1);
+  const say = [(S && S.platform_label) || platName(), busy ? "rolling" : "ready", "GPU " + (gpu == null ? "n/a" : gpu + "%" + (t.gpu && t.gpu.temp_c != null ? " at " + t.gpu.temp_c + "°C" : "")),
+    t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : "", t.disk ? Math.round(t.disk.free_gb) + " GB disk free" : "",
+    warn ? t.warnings[0] : ""].filter(Boolean).join(" · ");
+  $("#mpill").title = say + " · open the Machine room"; $("#mpill").setAttribute("aria-label", say);
   if (tab === "Machine" && typeof machineLive === "function") machineLive(t);
   if (tab === "Home" && typeof homeLive === "function") homeLive(t); }
 function telStart() {

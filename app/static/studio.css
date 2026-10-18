@@ -555,7 +555,6 @@ label.toggle { text-transform:none; letter-spacing:0; font:500 12.5px var(--sans
 .su-flat, .m-flat { margin:0; } .su-grow { flex:1; } .su-gap { margin-top:16px; } .su-tight { gap:4px; }
 
 /* Suite: the filmmaker suite's apps, each with its own icon and what it does here */
-.su-badge { width:56px; height:56px; border-radius:var(--r3); border:1px solid var(--line); display:block; object-fit:cover; }
 .su-apps { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; margin-bottom:16px; }
 .su-app { display:grid; grid-template-columns:56px minmax(0,1fr); grid-template-rows:auto auto; column-gap:14px; row-gap:8px; align-items:center; text-align:left;
   padding:14px 16px; border-radius:var(--r3); border:1px solid var(--line); background:var(--raise); color:var(--text); min-width:0;

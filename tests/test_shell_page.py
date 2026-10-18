@@ -123,9 +123,9 @@ def test_create_carries_what_the_prompt_goes_to_as_one_small_control():
 def test_the_updates_panel_shows_the_followed_branch_and_the_latest_release():
     out = run("""UPD.data = { message: "Studio is up to date.", source: "drowzeys/studio", branch: "development/wasserman-studio", following: "development/wasserman-studio",
         installed_version: "2.9.2", installed_commit: "189a988", available: false, managed: true, automatic: false, checking: false, updating: false, session: "s1",
-        checked_at: Date.now() / 1000 - 120, latest_release: { tag: "v2.9.3", name: "2.9.3", url: "https://github.com/drowzeys/studio/releases/tag/v2.9.3" }, last_result: null };
+        checked_at: Date.now() / 1000 - 120, latest_release: { tag: "v2.9.3", name: "2.9.3", published_at: "2026-10-16T12:00:00Z", url: "https://github.com/drowzeys/studio/releases/tag/v2.9.3" }, last_result: null };
       let page = viewUpdates(); out.page = text(page); out.install = !!button(page, "Update and restart").attrs.disabled; out.busy = updBusy();
-      UPD.data = { ...UPD.data, available: true, latest_version: "2.9.4", target: "abcdef123" }; page = viewUpdates(); out.ready = text(page); out.install2 = !!button(page, "Update and restart").attrs.disabled;
+      out.day = updDay("2026-10-16T12:00:00Z"); UPD.data = { ...UPD.data, available: true, latest_version: "2.9.4", target: "abcdef123" }; page = viewUpdates(); out.ready = text(page); out.install2 = !!button(page, "Update and restart").attrs.disabled;
       UPD.data = { message: "Local code changes were found.", source: "drowzeys/studio", following: "main", available: false, managed: false, session: "s1" };
       page = viewUpdates(); out.err = text(page);
       // after Update and restart: waiting until a new session answers, then a Reload button and no more polling
@@ -133,7 +133,8 @@ def test_the_updates_panel_shows_the_followed_branch_and_the_latest_release():
       updTake({ updating: false, session: "s2", message: "Studio is up to date." }); out.after = [UPD.back, updBusy()]; out.back = text(viewUpdates());""")
     if out is None:
         return
-    assert "drowzeys/studio · development/wasserman-studio" in out["page"] and "Latest on GitHub" in out["page"] and "v2.9.3" in out["page"]
+    assert "drowzeys/studio · development/wasserman-studio" in out["page"] and "Latest on GitHub: v2.9.3 · " + out["day"] in " ".join(out["page"].split()) and out["day"]
+    assert "Latest on GitHub" not in out["err"]  # no release in the answer: nothing is said about one
     assert "2.9.2 · 189a988" in out["page"] and "2 min ago" in out["page"]
     assert out["install"] and not out["busy"]  # nothing to install; nothing is happening, so nothing polls
     assert "Ready to install" in out["ready"] and "2.9.4" in out["ready"] and not out["install2"]
