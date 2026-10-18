@@ -92,7 +92,8 @@ def upsampler_pictures(paths: list[str], folder: Path) -> list[Path]:
 def flux3_workflow(args, pictures: list[str], shown: list[str], prompt: str, seed: int, made: tuple[int, int] | None = None) -> dict:
     """FLUX3-K's edit on ComfyUI's FLUX 3 nodes: the pictures as reference latents, the caption from BFL's upsampler."""
 
-    unet, steps, cfg = sg.FLUX3[args.model]
+    _, steps, cfg = sg.FLUX3[args.model]
+    unet = sg.flux3_unet(args.model)
     w = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.FLUX3_TEXT, "type": "flux3", "device": "default"}},
@@ -223,7 +224,7 @@ def main() -> None:
             time.sleep(1)
         time.sleep(5)
     sg.ensure_server("flux3" if flux3 else "image")
-    if flux3 and not sg.installed("unet", sg.FLUX3[args.model][0]):
+    if flux3 and not sg.installed("unet", sg.flux3_unet(args.model)):
         sys.exit(f"{args.model} is not installed: oneshot-setup-spark.sh --flux3")
     if args.base and not sg.installed("unet", sg.QWEN_BASE):
         sys.exit("the base model is not installed: oneshot-setup-spark.sh --image-edit fetches Qwen-Image-2.1 (14 GB; Qwen Research License, non-commercial)")
