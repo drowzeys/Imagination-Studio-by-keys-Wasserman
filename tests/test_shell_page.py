@@ -62,7 +62,7 @@ def test_every_tab_has_one_room_and_old_links_still_work():
     if out is None:
         return
     assert out["rooms"] == ["Story", "Image", "Video", "Previs", "Sound", "Edit", "Agent", "Library", "Looks", "Wasserman's Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings"]
-    assert out["groups"] == ["Creative Engines:Story,Image,Video,Previs,Sound,Edit", ":Agent", "Studio Vaults:Library,Looks,Suite,Nodes,Machine,Learn,Settings"]
+    assert out["groups"] == ["Creative Engines:Story,Image,Video,Previs,Sound,Edit", ":Agent", "Studio Vaults:Library,Looks,Wasserman's Filmmaker Suite,Nodes,Machine,Learn,Settings"]
     assert out["homeless"] == ["Home", "Create"]  # home sits outside the rooms; Create is in Image and in Video
     assert (out["createVideo"], out["createEdit"], out["createImage"]) == ("video", "image", "image")
     assert out["voice"] == "Voice" and out["edit"] == "Edit" and out["lib"] == "Library" and out["still"] == "Library"
@@ -150,7 +150,7 @@ def test_the_palette_finds_actions_and_runs_them():
       out.lessons = acts.find(a => a.label.startsWith("Learn")).hint; acts.find(a => a.label === "Check for updates").run(); out.updates = tab;""")
     if out is None:
         return
-    for label in ("New clip with sound", "Ask your agent", "Bring in from the suite", "Brains & tools", "Telemetry", "Check for updates", "Looks", "Motion Previs"):
+    for label in ("New clip with sound", "Ask your agent", "Wasserman's Filmmaker Suite", "Brains & tools", "Telemetry", "Check for updates", "Looks", "Motion Previs"):
         assert label in out["labels"], label
     assert out["lessons"] == "23 lessons"
     assert out["agent"] == "Agent" and out["still"] == ["Create", "image"]
