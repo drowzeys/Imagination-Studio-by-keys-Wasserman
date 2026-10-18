@@ -88,4 +88,4 @@ Sam Wasserman's own custom artwork for the engines, the start and action cards a
 
 ## Vault covers (2026-10-18)
 
-Sam Wasserman's own art: art/vault-library.webp, art/vault-looks.webp, art/vault-suite.webp (vault-nodes and vault-agent to follow).
+Sam Wasserman's own art: art/vault-library.webp, art/vault-looks.webp, art/vault-suite.webp, art/vault-nodes.webp, art/vault-agent.webp.

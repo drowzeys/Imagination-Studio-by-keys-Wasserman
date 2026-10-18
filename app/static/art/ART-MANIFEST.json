@@ -439,7 +439,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Nodes vault",
-   "ready": false
+   "ready": true
   },
   {
    "name": "vault-agent",
@@ -447,7 +447,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Agent room",
-   "ready": false
+   "ready": true
   }
  ]
 }

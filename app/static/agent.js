@@ -324,7 +324,9 @@ function viewAgent() {
   const count = thread ? (thread.turns || []).length + (thread.live ? 1 : 0) : 0;
   if (thread && count !== AG.seen && typeof requestAnimationFrame === "function") { AG.seen = count; requestAnimationFrame(() => { const end = document.querySelector(".agr-end"); if (end && end.scrollIntoView) end.scrollIntoView({ block: "end", behavior: "smooth" }); }); }
   return el("div", {},
-    el("div", { class: "pagehead" }, el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Agent · your own subscription"),
+    el("div", { class: "pagehead" + (typeof ART !== "undefined" && ART.ready.has("vault-agent") ? " enghead vault" : "") },
+      typeof ART !== "undefined" && ART.ready.has("vault-agent") ? artSlot("vault-agent", "", "agent") : null,
+      el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Agent · your own subscription"),
       el("h1", { class: "display" }, "Ask your agent. ", el("em", {}, "It makes it in the Studio.")),
       el("p", { class: "sub" }, "Pick the agent you already use. Say what you want; it works through the Studio and asks when a choice matters. Describe the shot, the scene or the whole film."))),
     el("div", { class: "sectionhead" }, el("h2", {}, "Choose your agent"), agSetup()),
