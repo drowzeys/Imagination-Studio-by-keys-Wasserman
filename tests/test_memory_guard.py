@@ -190,6 +190,11 @@ def test_what_a_stopped_render_says():
 def test_every_start_of_the_server_has_the_guard_beside_it():
     script = (ROOT / "spark/comfy.sh").read_text()
     assert 'memory_guard.py" watch --pid "$pid"' in script
+    # with a workload governor, `run` hands the same command to the managed wrapper, which starts the same guard
+    assert 'exec python3 "$HERE/managed_comfy.py" run "$PREFIX/venv/bin/python" main.py --listen' in script
+    managed = (ROOT / "spark/managed_comfy.py").read_text()
+    assert '"memory_guard.py"), "watch", "--pid", str(pid)' in managed and "guard(server.pid, pythons)" in managed
+    assert "holding {floor_mb()} MB with a plain loop" in managed  # and the same plain floor when no Python can run it
     # the only places a server is started are comfy.sh's own `start`, which runs `run`
     for path in list((ROOT / "spark").glob("*.py")) + list((ROOT / "spark").glob("*.sh")) + list((ROOT / "scripts").glob("*.sh")) + list((ROOT / "app").glob("*.py")):
         text = path.read_text()

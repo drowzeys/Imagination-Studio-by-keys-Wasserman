@@ -112,13 +112,34 @@ def read_json(path: Path | None, fallback):
         return fallback
 
 
+def environment_defaults() -> dict:
+    """What the studio's environment says about the brain, for an install with nothing saved yet:
+    ``STUDIO_DEFAULT_BRAIN`` (one of BACKENDS), ``STUDIO_LOCAL_ENDPOINT``, ``STUDIO_LOCAL_MODEL``."""
+
+    brain = os.environ.get("STUDIO_DEFAULT_BRAIN", "").strip()
+    return {"default": brain if brain in BACKENDS else "claude",
+            "local_endpoint": os.environ.get("STUDIO_LOCAL_ENDPOINT", "").strip(),
+            "local_model": os.environ.get("STUDIO_LOCAL_MODEL", "").strip()}
+
+
 def saved_settings() -> dict:
+    """The saved settings; a setting never saved takes the environment's value (``environment_defaults``)."""
+
     saved = read_json(folder() / "settings.json" if folder() else None, {})
     remote = saved.get("remote") if isinstance(saved.get("remote"), dict) else {}
-    return {"default": saved.get("default") if saved.get("default") in BACKENDS else "claude",
+    env = environment_defaults()
+    return {"default": saved["default"] if saved.get("default") in BACKENDS else env["default"],
             "remote": {"host": remote.get("host") or "", "backends": [b for b in remote.get("backends") or [] if b in CLIS],
                        "studio_host": remote.get("studio_host") or ""},
-            "local_endpoint": saved.get("local_endpoint") or "", "local_model": saved.get("local_model") or ""}
+            "local_endpoint": str(saved.get("local_endpoint") or "") if "local_endpoint" in saved else env["local_endpoint"],
+            "local_model": str(saved.get("local_model") or "") if "local_model" in saved else env["local_model"]}
+
+
+def default_brain() -> dict:
+    """The brain a new film and a QA look start from: {backend, endpoint, model}."""
+
+    now = saved_settings()
+    return {"backend": now["default"], "endpoint": now["local_endpoint"], "model": now["local_model"]}
 
 
 def valid_host(value, what: str = "host") -> str:

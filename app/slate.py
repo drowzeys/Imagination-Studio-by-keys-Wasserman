@@ -77,9 +77,12 @@ def now() -> str:
 
 
 def blank(name: str) -> dict:
+    import agents  # the brain saved in Brains & tools, or the environment's when nothing is saved
+
+    brain = agents.default_brain()
     return {"id": new_id(), "name": name, "logline": "", "world": "",
-            "defaults": {"aspectRatio": "16:9", "fps": 24, "durationSec": 8, "targetModel": "minimax-h3", "brain": "claude",
-                         "localEndpoint": "", "localModel": ""},
+            "defaults": {"aspectRatio": "16:9", "fps": 24, "durationSec": 8, "targetModel": "minimax-h3", "brain": brain["backend"],
+                         "localEndpoint": brain["endpoint"], "localModel": brain["model"]},
             "scenes": [], "characters": [], "artDept": [], "locations": [], "lookbook": [], "references": [], "mySetups": [],
             "music": [], "voices": [], "copilot": [], "createdAt": now(), "updatedAt": now()}
 

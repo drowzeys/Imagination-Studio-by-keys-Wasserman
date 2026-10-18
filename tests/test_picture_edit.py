@@ -68,6 +68,28 @@ def with_env(env, call):
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
 
+def test_edit_state_with_qwen_full_and_flux_full_installed():
+    """The editor opens when both Full models are installed: Qwen's Full model is its base switch, not a FLUX3-K edit."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    home = Path(tempfile.mkdtemp())
+    env = models(home)
+    (Path(env["SPARK_MODELS"]) / "Qwen-Image-2.1-Comfy/diffusion_models/qwen_image_2.1_bf16.safetensors").write_bytes(b"x")
+    offered = [{"id": name, "label": name, "note": ""} for name in ("qwen", "qwen-full", "flux3k-full")]
+    router, _ = E.attach(home, ROOT, True, lambda *args: [], lambda path: home / path,
+                         lambda path: str(path.relative_to(home)), lambda: offered)
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app, raise_server_exceptions=False)
+    reply = with_env(env, lambda: client.get("/api/edit/state"))
+    assert reply.status_code == 200, reply.text
+    state = reply.json()
+    assert state["ready"] and state["qwen"] and state["base"]
+    assert [m["id"] for m in state["models"]] == ["qwen", "flux3k-full"]
+    assert state["models"][1]["note"].startswith("50 steps")
+
+
 def test_a_set_of_angles_becomes_one_job_with_a_picture_each():
     home, build = studio(picked=[ANGLES])
     env = models(home)

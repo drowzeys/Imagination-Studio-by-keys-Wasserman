@@ -47,6 +47,7 @@ SETS = {
 }
 LIMIT = 12  # results from one job
 STEPS = {"qwen": "8 steps", "flux3k-fast": "16 steps", "flux3k-full": "50 steps"}
+FLUX3 = ("flux3k-fast", "flux3k-full")  # the picture models that edit through FLUX3-K's own workflow
 PICTURES = edit_plan.PICTURES  # pictures in one edit: the edited one and nine beside it
 KINDS = (".png", ".jpg", ".jpeg", ".webp")
 ANGLE_LORA = "qwen-multiple-angles"
@@ -76,7 +77,7 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         return turbo, Path(os.environ.get("QWEN_BASE_DIR", turbo.parent / "Qwen-Image-2.1"))
 
     def flux3() -> list[dict]:
-        return [m for m in models() if m["id"] != "qwen"]
+        return [m for m in models() if m["id"] in FLUX3]  # never Qwen's own (qwen, qwen-full: the base switch)
 
     def ready(model: str = "qwen") -> tuple[bool, str]:
         """Whether a picture can be edited here with ``model``, and if not, what is missing."""

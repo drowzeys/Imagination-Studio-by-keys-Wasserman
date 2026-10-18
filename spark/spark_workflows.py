@@ -130,6 +130,7 @@ async def follow(workflow: dict, sampler: str, parts: int) -> str:
     A node that expands into a graph of its own (the remover: one sampler a window) reports its inner nodes as
     `sampler.x.y`: with `parts` such samplers expected, their steps are counted as one run."""
 
+    sg.gate()
     import aiohttp
 
     client = uuid.uuid4().hex

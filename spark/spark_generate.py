@@ -157,6 +157,16 @@ def upload(image: str) -> str:
         return json.loads(reply.read())["name"]
 
 
+def gate() -> None:
+    """On a machine with a workload governor (``SPARK_GOVERNOR``): the start gate before every submission
+    (``start_gate.py``: the server's own reservation, memory, pressure, a cool start). Without one, nothing."""
+
+    if os.environ.get("SPARK_GOVERNOR"):
+        done = subprocess.run(["python3", str(HERE / "start_gate.py"), "comfy"], timeout=240)
+        if done.returncode:
+            sys.exit("the job was not submitted: the machine's start checks refused it (above)")
+
+
 async def run(workflow: dict, sampler: str, named: dict | None = None, stages: list | None = None) -> str:
     """Queue a workflow and print the sampler's progress as `[tensorfold] step i/n` until it ends; returns its id.
     ``named`` maps nodes to the word their progress is printed with instead (`[tensorfold] dit i/n`); ``stages``
@@ -166,6 +176,7 @@ async def run(workflow: dict, sampler: str, named: dict | None = None, stages: l
     not missed.
     """
 
+    gate()
     import aiohttp
 
     client = uuid.uuid4().hex
@@ -1068,7 +1079,10 @@ def main() -> None:
         global H3_TEXT, TEXT_TAG
         H3_TEXT, TEXT_TAG = args.text_encoder, "+" + args.text_encoder
         ensure_server("video")
-        if H3_TEXT not in call("/object_info/CLIPLoader")["CLIPLoader"]["input"]["required"]["clip_name"][0]:
+        listed = call("/object_info/CLIPLoader")["CLIPLoader"]["input"]["required"]["clip_name"][0]
+        if H3_TEXT not in listed and f"H3/{H3_TEXT}" in listed:
+            H3_TEXT = f"H3/{H3_TEXT}"  # an install that keeps MiniMax H3's text encoders in their own H3 folder
+        if H3_TEXT not in listed:
             sys.exit(f"ComfyUI does not list the text encoder {H3_TEXT}")
     try:
         args.run(args)
@@ -1090,6 +1104,9 @@ def stopped() -> str:
         if "stopping ComfyUI" in line and ("memory floor:" in line or "free memory is" in line):
             return ("the render was stopped to protect the machine: " + line.split("] ", 1)[-1].replace("memory floor: ", "").strip()
                     + ". Use a shorter clip, a shorter or fewer reference videos, or a smaller size; a LoRA clip needs more memory than one without.")
+        if "stopping the managed server:" in line:
+            return ("the render was stopped by this machine's workload limits: " + line.split("managed server: ", 1)[-1].strip()
+                    + ". Wait for the machine to cool or for other work on it to finish, then try again.")
     return ""
 
 

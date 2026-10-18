@@ -579,6 +579,35 @@ for the same prompt; a 30 second chained clip at 864x480 (two 15 second parts) t
 Not tested: clips longer than 15 seconds in one piece, chains longer than 30 seconds, a download of the models from nothing
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
+### A Spark shared with other work: the workload governor (optional)
+
+A Spark that also runs other model servers can have a machine-wide workload governor: a small service that hands
+out memory reservations through an admission socket, so two heavy jobs never start on the same memory. Point the
+studio at its folder with `SPARK_GOVERNOR` and the studio takes part (`spark/workload.py`); leave it unset and nothing
+changes.
+
+- **The renderer starts inside a reservation of its own** (`spark/managed_comfy.py`, used by `spark/comfy.sh`). It
+  first releases its own reservations whose servers have ended, waits for the governor to allow the start, then
+  starts ComfyUI with the same memory guard beside it and the governor's telemetry as well: memory under the floor, a
+  GPU at 90 C or throttling, a platform zone near its trip point or a minute of memory pressure stop the server, and
+  the render says why. `bash spark/comfy.sh stop` ends that server only (each port has its own
+  `$PREFIX/managed-comfy-<port>.json`).
+- **Every job waits for a cool, calm start** (`spark/start_gate.py`, before each submission): the server must still
+  hold its reservation, the GPU must be under 80 C and memory not under pressure. It waits up to three minutes, then
+  the job fails with the reasons.
+- **Drama 3 too**, with `DRAMA3_MANAGED_GUARD=1` (`spark/managed_voice.py`): the engine starts in its own
+  reservation, after the studio's renderer is stopped when idle (never while it renders), keeps its own 8 GB
+  kill-guard, and each part of a take waits for the same start checks.
+
+`SPARK_GOVERNOR_MIN_FREE_GIB` (12, never lower), `SPARK_GOVERNOR_RESERVE_GIB` (85 for a render),
+`SPARK_GOVERNOR_VOICE_GIB` (55), `SPARK_GOVERNOR_OWNER` and `SPARK_GOVERNOR_VOICE_OWNER` (the names it reserves
+under), `SPARK_GOVERNOR_SOCKET`, `SPARK_GOVERNOR_FREE_URL` (another ComfyUI on the machine whose idle model cache is
+freed before a reservation; a busy one is never touched) and `SPARK_THERMAL_ZONES` adjust it. `spark/workload.py`
+says what the governor folder must hold.
+
+`DELIVERY_AUDIO_RATE=48000` (also 44100 or 96000) delivers a Spark clip's sound as stereo AAC at that rate for an
+editor's timeline; ComfyUI's H3 decoder makes 32 kHz. The picture is copied unchanged, and resampling adds no detail.
+
 ## What changed
 
 > **2.9.2 (2026-10-17): Music on TensorFold's native Metal engine on an M5 Mac.** No live playback there yet; an M1 to
@@ -1742,7 +1771,11 @@ copying anything anywhere.
 | **Deliver** | Render a whole scene in order, a continuity check, the shot list as Markdown or CSV, and the film's takes to the Editor's timeline. |
 
 The brain is Slate's: your own Claude Code or Codex sign-in on the machine that runs the app, or a local
-OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). Everything without a ✦ works with no brain. Films are
+OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). Everything without a ✦ works with no brain. A new film
+starts from the brain chosen in Brains & tools; an install with nothing chosen there yet takes `STUDIO_DEFAULT_BRAIN`
+(`local`, `claude`, `codex`, ...), `STUDIO_LOCAL_ENDPOINT` and `STUDIO_LOCAL_MODEL` from its environment. When a film's
+brain is the local model, its frames are only ever shown to that model: the QA look is skipped rather than sent to a
+cloud CLI when the local server is not set. Films are
 Slate's own `project.json` under `~/TensorFoldStudio/slate/`: a project made in Slate opens here, and one made here
 downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at any length
 the model takes (their seconds, or their slot in bars) and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
