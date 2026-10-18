@@ -26,7 +26,7 @@ function renderShell() {
   $("#rooms").replaceChildren(...ROOMS.map(r => el("button", { class: now === r ? "on" : "", title: r.name + ": " + r.says + " (⌥" + r.key + ")", onclick: () => goRoom(r.id) },
     r.id === "shoot" && live && now !== r ? el("span", { class: "live", "aria-label": "rendering" }) : null, r.name, el("span", { class: "kbd" }, "⌥" + r.key))));
   $("#roomname").textContent = now ? now.name : tab === "Tutorial" ? "Learn" : "Home";
-  const tabs = now ? now.tabs.filter(t => t !== "Sparks" || !S || (S.sparks && S.sparks.supported) || tab === "Sparks") : tab === "Tutorial" ? [tab] : [];
+  const tabs = now ? now.tabs : tab === "Tutorial" ? [tab] : [];  // every tab stays visible, as before: Sparks explains itself on a Mac
   $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", onclick: () => go(t) }, TAB_NAMES[t] || t)),
     ...(tabs.length ? [] : [el("span", { class: "note", style: "margin:0;font-size:12.5px" }, "Pick a room, or press ", el("kbd", {}, "⌘K"), " to search or run anything.")]));
   document.body.classList.toggle("quiet", SHELL.lastTab === tab); SHELL.lastTab = tab;
