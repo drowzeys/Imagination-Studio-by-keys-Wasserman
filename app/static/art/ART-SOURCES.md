@@ -81,3 +81,7 @@ Rendered for this app on 2026-10-18 with the studio's own Image Engine (FLUX3-K 
 - art/look-video-upscaler.webp
 - art/look-weapon-combat.webp
 - art/look-wushu-action.webp
+
+## Custom art set (2026-10-18)
+
+Sam Wasserman's own custom artwork for the engines, the start and action cards and the look swatches (his Imagination-Studio-Custom-Art set, made with his image tool from his own briefs; masters kept outside the repo). These replace the earlier generated covers for every slot except act-story-slate and act-previs-motion. Decorative card art, not output samples.
