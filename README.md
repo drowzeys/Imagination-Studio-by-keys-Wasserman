@@ -34,7 +34,7 @@ cores · a 2x video decoder for 2K finals on the Mac
   while it's made* is MLX-only (`MUSIC3_BACKEND=mlx`); an M1 to M4 keeps the MLX port; measured on an M5 Ultra only.
   See [Music](#music-minimax-music-3).
 
-## Imagination Studio (development branch)
+## Imagination Studio 3.0 (development branch)
 
 The web app is **Imagination Studio**, by Keys + Wasserman, powered by TensorFold and built with Fish Audio Drama 3.
 Everything it did before is still here, arranged to be quicker to find and calmer to use.
