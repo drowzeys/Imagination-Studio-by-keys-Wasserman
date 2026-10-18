@@ -1,5 +1,6 @@
 "use strict";
-// Home: where the studio opens. Start something in one click, see what the machine is doing, pick up recent takes.
+// Home: where the studio opens. One composer to generate straight away, then the ways in, recent takes, the machine
+// and the suite.
 const SUITE_SLUG = { ScriptBreak: "scriptbreak", "Cork Board": "cork-board", Blockout: "blockout", "Storyboard Reference": "storyboard-reference", "Master Canvas": "master-canvas", Slate: "slate", "Circle Take": "circle-take", "Stem Studio": "stem-studio" };
 const SUITE_APPS = [
   ["ScriptBreak", "a screenplay into scenes, bibles and a shot list"], ["Cork Board", "index cards, acts and arcs"], ["Blockout", "3D previs: marks, lenses, camera moves"],
@@ -27,33 +28,102 @@ function machineStrip() {
 }
 function homeLive() { const box = $("#homemachine"); if (box) box.replaceWith(machineStrip()); }
 
-// the eight ways in, each a picture card (art/start-*.webp)
+// the eight ways in, each a picture card (art/start-*.webp); Settings → Appearance picks which show (six fill a row)
 const STARTS = () => [
-  { art: "start-clip", sign: "video", k: "VIDEO", title: "A clip with sound", one: "Text to video, with lines and a soundscape", run: () => startCreate({ goes: "video", start: "text" }) },
-  { art: "start-scout", sign: "video", k: "VIDEO", title: "Scout, then animate", one: "First frames in one load; pick one, then roll", run: () => startCreate({ goes: "video", start: "scout" }, 1) },
-  { art: "start-still", sign: "image", k: "IMAGE", title: "A still", one: "Qwen 2.1 or FLUX3-K, any size", run: () => startCreate({ goes: "image" }) },
-  { art: "start-sharp", sign: "video", k: "RECIPE", title: "Sharp Spec", one: "Sam's locked recipe: 1376 × 768, 8 passes", run: () => { if (typeof sharpCreate === "function") sharpCreate(); go("Create"); } },
-  { art: "start-long", sign: "video", k: "VIDEO", title: "A long take", one: "Chained clips, 30 seconds and up", run: () => { const k = S && S.long ? Object.keys(S.long)[0] : null; startCreate({ goes: "video", start: "text", ...(k ? { seconds: k } : {}) }); } },
-  { art: "start-voice", sign: "sound", k: "SOUND", title: "A voice line", one: "Fish Audio Drama 3: cast or clone a voice", run: () => go("Voice") },
-  { art: "start-song", sign: "sound", k: "SOUND", title: "A song", one: "MiniMax-Music3: lyrics and a style", run: () => go("Music") },
-  { art: "start-agent", sign: "previs", k: "PREVIS", title: "Ask your agent", one: "Claude or Codex build it in Blender or Blockout", run: () => go("Agent") },
+  { id: "clip", art: "start-clip", sign: "video", k: "VIDEO", title: "A clip with sound", one: "Text to video, with lines and a soundscape", run: () => startCreate({ goes: "video", start: "text" }) },
+  { id: "scout", art: "start-scout", sign: "video", k: "VIDEO", title: "Scout, then animate", one: "First frames in one load; pick one, then roll", run: () => startCreate({ goes: "video", start: "scout" }, 1) },
+  { id: "still", art: "start-still", sign: "image", k: "IMAGE", title: "A still", one: "Qwen 2.1 or FLUX3-K, any size", run: () => startCreate({ goes: "image" }) },
+  { id: "sharp", art: "start-sharp", sign: "video", k: "RECIPE", title: "Sharp Spec", one: "Sam's locked recipe: 1376 × 768, 8 passes", run: () => { if (typeof sharpCreate === "function") sharpCreate(); go("Create"); } },
+  { id: "long", art: "start-long", sign: "video", k: "VIDEO", title: "A long take", one: "Chained clips, 30 seconds and up", run: () => { const k = S && S.long ? Object.keys(S.long)[0] : null; startCreate({ goes: "video", start: "text", ...(k ? { seconds: k } : {}) }); } },
+  { id: "voice", art: "start-voice", sign: "sound", k: "SOUND", title: "A voice line", one: "Fish Audio Drama 3: cast or clone a voice", run: () => go("Voice") },
+  { id: "song", art: "start-song", sign: "sound", k: "SOUND", title: "A song", one: "MiniMax-Music3: lyrics and a style", run: () => go("Music") },
+  { id: "agent", art: "start-agent", sign: "previs", k: "AGENT", title: "Ask your agent", one: "Claude, Codex or Hermes make it with the studio", run: () => go("Agent") },
 ];
+const homePrefs = () => typeof prefs === "function" ? prefs() : { appearance: { start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], poster: true }, presets: { recipe: "quick", mode: "clip", seconds: 5, seed: "fixed", qa_gate: true, image_model: "qwen" } };
+
+/* ---------- the composer: one box, four kinds of take, one Generate ---------- */
+const HC = { text: "", mode: null, recipe: null, made: [], busy: false };
+const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe the shot: who is there, what happens, what is heard."],
+  picture: ["Picture", "qwen", "Qwen 2.1", "Describe the picture: the subject, the place, the light, the lens."],
+  voice: ["Voice", "fish", "Drama 3", "Write the line as it is said. A [direction] in brackets sets the voice."],
+  song: ["Song", "music3", "Music 3", "A style (genre, tempo, mood), or lyrics with [Verse] and [Chorus] tags."] };
+const HC_RECIPES = () => ({ quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K" });
+const hcMode = () => HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
+const hcRecipe = () => { const r = HC.recipe || homePrefs().presets.recipe; return HC_RECIPES()[r] ? r : "quick"; };
+const hcPictureModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"]; return have.includes(want) ? want : "qwen"; };
+const hcSeed = () => typeof prefSeed === "function" ? prefSeed() : 1;
+const hcTitle = t => t.replace(/\s+/g, " ").trim().slice(0, 48);
+// what Generate sends for each kind of take: the same endpoints and bodies the tabs use
+async function hcRequest(mode, text, seed, retake) {
+  const p = homePrefs().presets;
+  if (mode === "clip") { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" };
+    const seconds = r.seconds || p.seconds || 5;
+    const composed = await api("/api/compose", { fields: { scene: text, action: "", camera: "", dialogue: [], soundscape: "", music: "N/A" }, first_frame: false, last_frame: false, seconds });
+    return ["/api/jobs", { kind: "video", title: hcTitle(text), params: { prompt: composed.prompt, image: null, preset: r.preset, quality: r.quality, seed: r.seed && !retake ? r.seed : seed, seconds, ...(p.qa_gate ? {} : { qa: false }) } }]; }
+  if (mode === "picture") return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40), params: { prompt: text, count: 1, seed, preset: "2k", image_model: hcPictureModel() } }];
+  if (mode === "voice") return ["/api/voice/takes", { text, seed }];
+  const lyrics = /\[(intro|verse|pre-chorus|chorus|bridge|instrumental|outro)\]/i.test(text);
+  return ["/api/music/takes", lyrics ? { caption: "A warm, cinematic song with a clear lead vocal.", lyrics: text, seconds: 60, seed } : { caption: text, lyrics: "", seconds: 60, seed }]; }
+async function hcGenerate(again) {
+  const mode = again ? again.mode : hcMode(), text = (again ? again.text : HC.text).trim();
+  if (!text) return toast("Say what you want to make first");
+  if (HC.busy) return; HC.busy = true; render();
+  try { const [path, body] = await hcRequest(mode, text, again ? again.seed + 1 : hcSeed(), !!again);
+    const job = await api(path, body), seed = (body.params ? body.params.seed : body.seed) || 1;
+    HC.made.unshift({ id: job.id, mode, text, seed, title: job.title || hcTitle(text) }); HC.made = HC.made.slice(0, 12);
+    toast("Queued: " + (job.title || hcTitle(text))); if (typeof poll === "function") await poll(); }
+  catch (e) { toast(e.message, 6000); }
+  HC.busy = false; render(); }
+// the full form for this kind of take, with the words carried over
+function hcMore() { const mode = hcMode(), text = HC.text.trim();
+  if (mode === "voice") { if (typeof VO !== "undefined") VO.text = text; return go("Voice"); }
+  if (mode === "song") { if (typeof MU !== "undefined") { if (/\[[A-Za-z-]+\]/.test(text)) MU.lyrics = text; else MU.caption = text; } return go("Music"); }
+  Object.assign(C, mode === "clip" ? { goes: "video", start: "text" } : { goes: "image", imageModel: hcPictureModel() }); C.step = 0; C.scene = text; sync(); C.prompt = text; go("Create"); }
+function hcAgent() { const text = HC.text.trim(); if (typeof AG !== "undefined") { AG.prompt = text; AG.draft = text; } if (typeof window !== "undefined") window.AGENT_DRAFT = text; go("Agent"); }
+function hcMade() { if (!HC.made.length) return null;
+  return el("div", { class: "cmp-made" }, el("span", { class: "eyebrow" }, "Just made"), el("div", { class: "strip2" }, HC.made.map(m => { const j = jobs.find(x => x.id === m.id) || { status: "queued" };
+    const out = (j.outputs || []).find(o => !/sheet\.jpg$/.test(o));
+    return el("div", { class: "tile", "data-made": m.id }, out ? media(out, /\.(mp4|mov)$/i.test(out) ? { controls: true, muted: true, playsinline: true } : {}) : el("div", { class: "cmp-wait" }, el("span", { class: "pill " + j.status }, j.status)),
+      el("div", { class: "cap" }, el("span", {}, m.title), out ? el("button", { class: "small", onclick: () => go("Library") }, "Open") : null,
+        el("button", { class: "small", disabled: !["done", "failed", "cancelled"].includes(j.status), onclick: () => hcGenerate(m) }, "Retake"))); }))); }
+function homeComposer() {
+  const mode = hcMode(), [, , , hint] = HC_MODES[mode];
+  const area = el("textarea", { rows: 3, class: "cmp-text", placeholder: "What do you want to make?", "aria-label": "What do you want to make?" });
+  area.value = HC.text;
+  const grow = () => { if (area.style && area.scrollHeight) { area.style.height = "auto"; area.style.height = Math.min(360, area.scrollHeight + 2) + "px"; } };
+  area.addEventListener("input", () => { HC.text = area.value; grow(); });
+  area.addEventListener("keydown", e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); hcGenerate(); } });
+  const recipes = HC_RECIPES(), ids = Object.keys(recipes), rec = hcRecipe();
+  return el("section", { class: "composer", id: "composer" },
+    el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).map(([id, [label, mk, model]]) =>
+      el("button", { type: "button", role: "tab", "data-mode": id, "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
+        el("b", {}, label), typeof mark === "function" ? mark(id === "picture" && /^flux/.test(hcPictureModel()) ? "flux" : mk, id === "picture" && /^flux/.test(hcPictureModel()) ? "FLUX3-K" : model) : model))),
+    area, el("div", { class: "cmp-hint" }, hint),
+    el("div", { class: "cmp-bar" },
+      el("button", { type: "button", class: "primary cmp-go", disabled: HC.busy, onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
+      mode === "clip" ? el("button", { type: "button", class: "small cmp-recipe", title: "The render recipe: click for the next one (Settings → Presets sets the default)",
+        onclick: () => { HC.recipe = ids[(ids.indexOf(rec) + 1) % ids.length]; render(); } }, el("span", { class: "eyebrow" }, "Recipe"), recipes[rec]) : null,
+      el("button", { type: "button", class: "ghost cmp-agent", onclick: hcAgent }, "Ask your agent instead"),
+      el("span", { class: "su-grow" }),
+      el("a", { href: "#Create", class: "cmp-more", onclick: e => { if (e.preventDefault) e.preventDefault(); hcMore(); } }, "More options →")),
+    hcMade()); }
+
 function viewHome() {
-  const [hello, line] = timeOfDay(), wrap = el("div");
+  const [hello, line] = timeOfDay(), wrap = el("div", { class: "home" }), look = homePrefs().appearance;
   const tc = el("span", { class: "tc" }, timecode()); const tick = setInterval(() => { if (!tc.isConnected) return clearInterval(tick); tc.textContent = timecode(); }, 1000 / 24);
-  // the product poster is the key art, shown whole beside the greeting, the tagline, the creator credit and the actions
-  const hero = el("div", { class: "homehero" + (ART.ready.has("poster") ? " has-art" : "") }, artSlot("poster", "", "home"),
+  // the greeting beside the poster (smaller now: the composer under it leads the screen); Settings can take the poster off
+  const poster = look.poster !== false;
+  const hero = el("div", { class: "homehero slim" + (poster && ART.ready.has("poster") ? " has-art" : "") + (poster ? "" : " no-art") }, poster ? artSlot("poster", "", "home") : null,
     el("div", { class: "over" },
       el("div", { class: "stack" }, el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap" }, el("span", { class: "eyebrow" }, new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })), tc),
         el("h1", { class: "display" }, hello), el("p", { class: "tagline" }, "Local Creative ", el("em", {}, "All in One"), " Studio"),
-        // the creator credit from the brand kit, at its 320px minimum, with the kit's faint green glow
         el("p", { class: "creator" }, el("span", { class: "by" }, "by"), el("img", { src: "brand/keys-wasserman-neon.svg", alt: "Keys + Wasserman", width: 320, height: 37 })),
         el("p", { class: "sub", style: "margin:0" }, line + " Pictures, clips with sound, voices and score, made on your own machine.")),
-      el("div", { class: "acts" }, el("button", { class: "primary", onclick: () => startCreate({ goes: "video", start: "text" }) }, "Roll a new clip"),
-        el("button", { onclick: () => go("Production") }, "Plan a film"), el("button", { class: "ghost", onclick: palOpen }, "Search ", el("kbd", {}, "⌘K")))));
-  put(wrap, hero);
-  put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Start something"), el("span", { class: "note" }, "Each opens with sensible settings.")),
-    el("div", { class: "cards c4 two-up" }, STARTS().map(pcard)));
+      el("div", { class: "acts" }, el("button", { onclick: () => go("Production") }, "Plan a film"), el("button", { class: "ghost", onclick: palOpen }, "Search ", el("kbd", {}, "⌘K")))));
+  put(wrap, hero, homeComposer());
+  const starts = STARTS().filter(s => (look.start_cards || []).includes(s.id));
+  if (starts.length) put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Start something"), el("span", { class: "note" }, "Each opens the full form with sensible settings.")),
+    el("div", { class: "cards startrow" }, starts.map(pcard)));
   const recent = el("div", { class: "strip2" }, el("div", { class: "note" }, "Loading recent takes…"));
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Recent takes"), el("button", { class: "small", onclick: () => go("Library") }, "Library")), recent);
   api("/api/library").then(list => { SHELL.libCache = list; const pick = list.filter(m => m.kind !== "audio").slice(0, 12);

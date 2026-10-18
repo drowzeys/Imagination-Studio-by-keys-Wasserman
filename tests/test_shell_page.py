@@ -7,18 +7,18 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FILES = ["shell.js", "home.js", "engines.js", "machine.js", "agent.js", "suite.js", "updates.js"]
+FILES = ["shell.js", "home.js", "engines.js", "machine.js", "agent.js", "suite.js", "updates.js", "settings.js"]
 HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
 globalThis.S = { platform: "spark", platform_label: "DGX SPARK · NVIDIA GB10 · H3-CUDA", presets: { small: { size: [864, 480] }, p720: { size: [1280, 720] }, sharp: { size: [1376, 768] } },
   sharp: { seed: 42, seconds: [8, 10], quality: "fh8" }, long: { 30: "30 s" }, ref2va: true, ref_media: true, reference_total: 12, sparks: { supported: true } };
-globalThis.TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Editor", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial"];
+globalThis.TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Editor", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
 globalThis.tab = "Home"; globalThis.renders = 0; globalThis.render = () => { renders++; };
 globalThis.toasts = []; globalThis.toast = t => toasts.push(String(t));
 globalThis.calls = []; globalThis.answers = {};
 globalThis.api = async (path, body) => { calls.push([path, body]); if (path in answers) { const a = answers[path]; if (a instanceof Error) throw a; return a; } return {}; };
 globalThis.jobs = []; globalThis.poll = async () => {}; globalThis.PICK = new Set(); globalThis.project = { id: "p1" };
-globalThis.window = { scrollTo() {} }; globalThis.history = { replaceState() {} }; globalThis.localStorage = { getItem() { return null; }, setItem() {} };
+globalThis.window = { scrollTo() {} }; globalThis.pushed = []; globalThis.history = { replaceState() {}, pushState(a, b, u) { pushed.push(u); } }; globalThis.localStorage = { getItem() { return null; }, setItem() {} };
 globalThis.document = { querySelector() { return null; }, querySelectorAll() { return []; }, getElementById() { return null; }, body: { classList: { toggle() {} } }, activeElement: { matches() { return false; } } };
 globalThis.NODES = {}; globalThis.$ = sel => NODES[sel] || null; globalThis.location = { assign(u) { calls.push(["assign", u]); } };
 globalThis.C = { step: 0, goes: "video", start: "text", engine: "fasth3", passes: "8", res: "480p", up: false, steps: "", seed: 1, refs: [], subjects: [], refVideos: [], video_subjects: [], dialogue: [], loras: [], imageSize: "1344x768" };
@@ -61,13 +61,13 @@ def test_every_tab_has_one_room_and_old_links_still_work():
       out.keys = ROOMS.map(r => r.key);""")
     if out is None:
         return
-    assert out["rooms"] == ["Story", "Image", "Video", "Previs", "Sound", "Edit", "Library", "Looks", "Suite", "Machine", "Learn"]
-    assert out["groups"] == ["Creative Engines:Story,Image,Video,Previs,Sound,Edit", "Studio Vaults:Library,Looks,Suite,Machine,Learn"]
+    assert out["rooms"] == ["Story", "Image", "Video", "Previs", "Sound", "Edit", "Agent", "Library", "Looks", "Suite", "Nodes", "Machine", "Learn", "Settings"]
+    assert out["groups"] == ["Creative Engines:Story,Image,Video,Previs,Sound,Edit", ":Agent", "Studio Vaults:Library,Looks,Suite,Nodes,Machine,Learn,Settings"]
     assert out["homeless"] == ["Home", "Create"]  # home sits outside the rooms; Create is in Image and in Video
     assert (out["createVideo"], out["createEdit"], out["createImage"]) == ("video", "image", "image")
     assert out["voice"] == "Voice" and out["edit"] == "Edit" and out["lib"] == "Library" and out["still"] == "Library"
     assert all(out["names"])
-    assert out["keys"] == ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", ""]  # ⌥1 to ⌥9 and ⌥0
+    assert out["keys"] == ["1", "2", "3", "4", "5", "6", "", "7", "8", "9", "", "0", "", ","]  # ⌥1 to ⌥9, ⌥0 and ⌥, for Settings
 
 
 def test_the_sidebar_shows_both_groups_and_marks_the_room():
@@ -166,7 +166,7 @@ def test_the_stage_offers_every_recipe_and_the_take_sheet_sets_one():
       button(sheet, "Quick look").attrs.onclick(); out.quick = [C.passes, C.res];""")
     if out is None:
         return
-    for words in ("A clip with sound", "Scout, then animate", "A still", "Sharp Spec", "A long take", "A voice line", "A song", "Ask your agent", "ScriptBreak", "Blockout", "Start something", "Recent takes"):
+    for words in ("A clip with sound", "Scout, then animate", "A still", "Sharp Spec", "A long take", "A voice line", "Song", "Ask your agent", "ScriptBreak", "Blockout", "Start something", "Recent takes"):
         assert words in out["home"], words
     assert out["voice"] == "Voice"
     assert "Take sheet" in out["sheet"] and "Final 720p" in out["sheet"] and "Go to Render" in out["sheet"]
@@ -222,8 +222,8 @@ def test_the_phone_bar_folds_the_vaults_search_and_updates_into_more():
     if out is None:
         return
     assert out["more"][0] == "more" and out["more"][1] == "more on" and "More" in out["more"][2]  # a vault is open: More is the lit item
-    assert out["vaults"] == ["library", "looks", "suite", "machine", "learn"]  # hidden from the phone bar by studio.css
-    for words in ("Studio Vaults", "Library", "Looks", "Suite", "Machine", "Learn", "Search", "⌘K", "Updates"):
+    assert out["vaults"] == ["library", "looks", "suite", "nodes", "machine", "learn", "settings"]  # hidden from the phone bar by studio.css
+    for words in ("Agent", "Studio Vaults", "Library", "Looks", "Suite", "Nodes", "Machine", "Learn", "Settings", "Search", "⌘K", "Updates"):
         assert words in out["sheet"], words
     assert "Looks" in out["on"]
     assert out["updates"] == "Updates" and out["palette"] and out["machine"] == "Machine" and out["engineMore"] == "more"
@@ -279,9 +279,10 @@ def test_a_brain_that_is_not_set_up_is_greyed_and_links_to_brains_and_tools():
         return
     assert out["backend"] == "codex"  # Claude Code is missing here, Codex runs over SSH: the page picks Codex
     assert out["claudeOff"] and out["codexOn"]
-    assert "Claude Code is not on this machine" in out["hint"] and "Set up on Machine → Brains & tools" in out["hint"] and out["link"] == "Brains"
+    # the set-up link names Settings → Connections, or Brains & tools on an Agent room that predates Settings
+    assert "Claude Code is not on this machine" in out["hint"] and "Set up" in out["hint"] and out["link"] in ("Settings", "Brains")
     assert out["sendOff"] and not out["sent"] and "not set up here" in out["toast"]
-    assert "Set up on Machine → Brains & tools" in out["card"] and out["cardLink"] and not out["plain"]
+    assert "Set up" in out["card"] and out["cardLink"] and not out["plain"]
     assert "agent/t1/out.png" in out["log"] and "/data/studio" not in out["log"]
 
 
@@ -290,6 +291,119 @@ def test_the_tally_lights_breathe_in_css_and_stop_when_motion_is_reduced():
     for name in ("tally-glow", "tally-led", "tally-pill", "tally-sheen"):
         assert "@keyframes " + name + " {" in css, name
     assert "@media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important;" in css
+
+
+
+# ---------- Back and Home, Settings, the Home composer (2026-10-18) ----------
+
+def test_back_returns_to_the_last_page_home_goes_home_and_the_stack_is_bounded():
+    out = run("""for (const k of ["#rooms", "#roomname", "#subtabs"]) NODES[k] = el("div", {});
+      const back = el("button", {}), home = el("button", {}); back.setAttribute = () => {}; home.classList = { on: null, toggle(c, v) { home.hidden = v; } };
+      NODES["#backbtn"] = back; NODES["#homebtn"] = home;
+      go("Home"); renderShell(); out.homeHidden = home.hidden; out.backOff = back.disabled;
+      go("Voice"); go("Library"); go("Library"); renderShell(); out.homeShown = !home.hidden; out.backOn = !back.disabled; out.stack = [...SHELL.history]; out.pushed = [...pushed];
+      goBack(); out.back1 = tab; goBack(); out.back2 = tab; goBack(); out.back3 = tab;
+      go("Music"); goHome(); out.home = tab;
+      for (let i = 0; i < 80; i++) go(i % 2 ? "Voice" : "Looks"); out.bounded = SHELL.history.length;
+      // the browser's Back: the hash changes, go() runs with fromHash, takes the page off the stack and pushes nothing
+      SHELL.history.length = 0; pushed.length = 0; go("Story"); go("Video"); const before = pushed.length;
+      go("Story", { fromHash: true }); out.hash = [tab, SHELL.history.slice(-1)[0] || null, pushed.length - before];
+      const acts = palActions(); out.pal = ["Back", "Home", "Settings", "Nodes", "Ask your agent"].map(l => !!acts.find(a => a.label === l));""")
+    if out is None:
+        return
+    assert out["homeHidden"] and out["backOff"]  # on Home with nowhere to go back to
+    assert out["homeShown"] and out["backOn"] and out["stack"] == ["Home", "Voice"]  # the same tab twice is one entry
+    assert out["pushed"] == ["#Voice", "#Library"]  # the browser's history moves with the app
+    assert (out["back1"], out["back2"], out["back3"]) == ("Voice", "Home", "Home")
+    assert out["home"] == "Home" and out["bounded"] == 50
+    assert out["hash"] == ["Story", "Voice", 0]  # back on Story; what was before it is next
+    assert all(out["pal"])
+
+
+def test_settings_shows_its_five_sections_and_the_look_saves():
+    out = run("""answers["/api/settings"] = { settings: { appearance: { type_size: "large", glow: false, poster: true, accent: "amber", motion: "system", start_cards: ["clip"] } } };
+      BR.data = { default: "claude", settings: { remote: { host: "", backends: [] }, local_endpoint: "" }, backends: [
+        { id: "claude", label: "Claude Code", kind: "cli", found: true, where: "here", harness: true }, { id: "hermes", label: "Hermes", kind: "cli", found: false, where: "here", signin: "Run `hermes setup`" },
+        { id: "gemini", label: "Gemini CLI", kind: "cli", found: true, where: "ssh:mac" }, { id: "local", label: "Local model server", kind: "http", found: true, endpoint: "http://127.0.0.1:11434/v1", models: ["qwen3"] }] };
+      BR.tools = { tools: [{ id: "blender", label: "Blender" }] }; globalThis.updRequest = async () => ({ installed_commit: "abc1234" });
+      await settingsLoad(); out.prefs = prefs().appearance;
+      go("Settings"); SET.section = "about"; viewSettings(); await new Promise(r => setTimeout(r, 0)); const pages = {};
+      for (const [id] of SET_SECTIONS) { SET.section = id; pages[id] = text(viewSettings()); } out.pages = pages;
+      SET.section = "appearance"; let page = viewSettings();
+      out.rail = find(page, n => n.attrs && n.attrs.class === "st-rail").kids.map(text);
+      await button(page, "Largest").attrs.onclick(); out.sent = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];
+      SET.section = "connections"; page = viewSettings();
+      await button(find(page, n => n.attrs && n.attrs["data-brain"] === "claude"), "Test").attrs.onclick(); out.test = calls.filter(c => c[0] === "/api/brains/test").slice(-1)[0][1];
+      await button(find(page, n => n.attrs && n.attrs["data-tool"] === "blender"), "Test").attrs.onclick(); out.check = calls.some(c => c[0] === "/api/agent/tools/blender/check");
+      out.brains = text(viewBrains());""")
+    if out is None:
+        return
+    assert out["prefs"]["type_size"] == "large" and out["prefs"]["glow"] is False and out["prefs"]["start_cards"] == ["clip"]
+    for words in ("Appearance", "Studio layout", "Presets & preferences", "Connections", "About"):
+        assert any(words in r for r in out["rail"]), words
+    assert "Type size" in out["pages"]["appearance"] and "Poster on Home" in out["pages"]["appearance"] and "Cobalt" in out["pages"]["appearance"]
+    assert "Settings" in out["pages"]["layout"] and "stays" in out["pages"]["layout"] and "⌘K" in out["pages"]["layout"]
+    assert "Render recipe" in out["pages"]["presets"] and "48 kHz stereo" in out["pages"]["presets"] and "QA gate" in out["pages"]["presets"]
+    c = out["pages"]["connections"]
+    assert "Any local model works here — nothing leaves your machine." in c and "Ollama" in c and "LM Studio" in c and "vLLM" in c and "llama.cpp" in c and "Hermes proxy" in c
+    assert "Hermes" in c and "not found" in c and "hermes setup" in c and "remote" in c and "Blender" in c
+    a = out["pages"]["about"]
+    assert "Fish Audio" in a and "MiniMax-Music3" in a and "abc1234" in a
+    assert out["sent"] == {"appearance": {"type_size": "largest"}}
+    assert out["test"] == {"backend": "claude"} and out["check"]
+    assert "Any local model works here" in out["brains"] and "Settings → Connections" in out["brains"]
+
+
+def test_layout_hides_and_orders_rooms_and_a_hidden_room_stays_in_the_palette():
+    out = run("""for (const k of ["#rooms", "#roomname", "#subtabs"]) NODES[k] = el("div", {});
+      SET.data = { layout: { hidden: ["looks", "learn"], order: [] } };
+      renderShell(); out.nav = NODES["#rooms"].kids.filter(n => n.attrs && n.attrs["data-room"]).map(n => n.attrs["data-room"]);
+      out.pal = palActions().filter(a => a.hint === "hidden from the sidebar").map(a => a.label);
+      SET.section = "layout"; const page = viewSettings();
+      await find(page, n => n.attrs && n.attrs["aria-label"] === "Move Sound up").attrs.onclick(); out.order = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1].layout.order;
+      out.machineSwitch = !!find(find(page, n => n.attrs && n.attrs["data-room"] === "machine"), n => n.attrs && n.attrs.role === "switch");
+      SET.data = { layout: { hidden: [], order: ["sound", "story"] } }; renderShell();
+      out.reordered = NODES["#rooms"].kids.filter(n => n.attrs && n.attrs["data-group"] === "engines").map(n => n.attrs["data-room"]);""")
+    if out is None:
+        return
+    assert "looks" not in out["nav"] and "learn" not in out["nav"] and "machine" in out["nav"] and "settings" in out["nav"] and "agent" in out["nav"]
+    assert out["pal"] == ["Looks", "Learn"]
+    assert out["order"].index("sound") < out["order"].index("previs")
+    assert not out["machineSwitch"]  # Machine always stays: no switch to hide it
+    assert out["reordered"][:2] == ["sound", "story"]
+
+
+def test_the_home_composer_queues_each_kind_and_carries_the_words():
+    out = run("""answers["/api/library"] = []; answers["/api/compose"] = { prompt: "integrated_multimodal_description: [Shot 1] A lighthouse." };
+      answers["/api/jobs"] = { id: "j1", title: "A lighthouse" }; answers["/api/voice/takes"] = { id: "v1" }; answers["/api/music/takes"] = { id: "m1" };
+      let page = viewHome(); out.page = text(page);
+      out.primaries = (function count(n) { return !n || typeof n !== "object" ? 0 : Array.isArray(n) ? n.reduce((a, k) => a + count(k), 0) : (/\\bprimary\\b/.test(n.attrs && n.attrs.class || "") ? 1 : 0) + count(n.kids); })(page);
+      HC.text = "A lighthouse at dusk"; await button(page, "Generate").attrs.onclick();
+      out.clip = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1];
+      HC.mode = "picture"; await hcGenerate(); out.picture = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1];
+      HC.mode = "voice"; await hcGenerate(); out.voice = calls.filter(c => c[0] === "/api/voice/takes").slice(-1)[0][1];
+      HC.mode = "song"; HC.text = "[Verse] light on the water"; await hcGenerate(); out.song = calls.filter(c => c[0] === "/api/music/takes").slice(-1)[0][1];
+      out.made = HC.made.map(m => m.mode);
+      // ⌘Enter in the box generates, the chips switch the kind
+      HC.mode = null; HC.text = "A gull"; page = viewHome(); const box = find(page, n => n.tag === "textarea");
+      const keys = []; box.addEventListener = (k, f) => keys.push([k, f]); page = viewHome();
+      const area = find(page, n => n.tag === "textarea"); out.placeholder = area.attrs.placeholder;
+      const chip = find(page, n => n.attrs && n.attrs["data-mode"] === "voice"); chip.attrs.onclick(); out.chip = hcMode();
+      HC.mode = "clip"; HC.text = "A lighthouse at dusk"; hcMore(); out.more = [tab, C.prompt, C.goes];
+      HC.text = "Plan a short"; hcAgent(); out.agent = [tab, AG.prompt];""")
+    if out is None:
+        return
+    assert "What do you want to make?" in out["page"] and "Clip with sound" in out["page"] and "MiniMax H3" in out["page"] and "Drama 3" in out["page"] and "Music 3" in out["page"]
+    assert "Ask your agent instead" in out["page"] and "More options" in out["page"] and "Quick look" in out["page"]
+    assert out["primaries"] == 1  # Generate is the one primary on Home
+    assert out["clip"]["kind"] == "video" and out["clip"]["params"]["preset"] == "small" and out["clip"]["params"]["quality"] == "fh4" and out["clip"]["params"]["prompt"].startswith("integrated")
+    assert out["picture"]["kind"] == "scout" and out["picture"]["params"]["count"] == 1 and out["picture"]["params"]["preset"] == "2k"
+    assert out["voice"]["text"] == "A lighthouse at dusk"
+    assert out["song"]["lyrics"] == "[Verse] light on the water" and out["song"]["caption"]
+    assert out["made"] == ["song", "voice", "picture", "clip"]
+    assert out["placeholder"] == "What do you want to make?" and out["chip"] == "voice"
+    assert out["more"] == ["Create", "A lighthouse at dusk", "video"]
+    assert out["agent"] == ["Agent", "Plan a short"]
 
 
 if __name__ == "__main__":
