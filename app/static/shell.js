@@ -23,19 +23,22 @@ const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: 
 const roomOf = t => t === "Create" ? ROOMS.find(r => r.id === (typeof C !== "undefined" && C.goes === "video" ? "video" : "image"))
   : ROOMS.find(r => r.tabs.includes(t)) || null;
 const SVG = d => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + "</svg>";
+// the brand kit's module icons (brand/module-*.svg: 56-unit box, 2.5 rounded stroke), drawn inline so they take the
+// colour of where they sit; Looks, Suite and Learn are the Studio's own glyphs redrawn on the same box and stroke
+const KIT = d => '<svg viewBox="0 0 56 56" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" style="stroke-width:2.5"><path d="' + d + '"/></svg>';
 const ICON = {
   home: SVG('<path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-5h4v5"/>'),
-  story: SVG('<path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 11.5h6.5M9 15h4.5"/>'),
-  image: SVG('<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-5 4 4 2.5-2.5 4.5 4.5"/>'),
-  video: SVG('<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/>'),
-  previs: SVG('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'),
-  sound: SVG('<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3"/>'),
-  edit: SVG('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h18M9 5v7M15 12v7"/>'),
-  library: SVG('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),
-  looks: SVG('<path d="M12 3.5l2.3 6.2 6.2 2.3-6.2 2.3L12 20.5l-2.3-6.2L3.5 12l6.2-2.3z"/>'),
-  suite: SVG('<path d="M7.5 4v12M3.5 12l4 4 4-4"/><path d="M16.5 20V8M12.5 12l4-4 4 4"/>'),
-  machine: SVG('<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 2.5V6M14.5 2.5V6M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/>'),
-  learn: SVG('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9"/><path d="M12 17.2v.1"/>'),
+  story: KIT("M12 8H40V48H12Z M18 18H34 M18 26H34 M18 34H30"),
+  image: KIT("M8 12H48V44H8Z M8 38L20 26L30 36L38 28L48 38 M35 20H35.1"),
+  video: KIT("M8 12H48V44H8Z M23 21L37 28L23 35Z"),
+  previs: KIT("M28 6L48 17V39L28 50L8 39V17Z M8 17L28 28L48 17 M28 28V50"),
+  sound: KIT("M8 24V32 M16 16V40 M24 8V48 M32 18V38 M40 12V44 M48 24V32"),
+  edit: KIT("M8 14H48 M8 28H48 M8 42H48 M17 8V20 M37 22V34 M24 36V48"),
+  library: KIT("M8 12H48V46H8Z M8 22H48 M22 32H34"),
+  looks: KIT("M28 8L33.4 22.6L48 28L33.4 33.4L28 48L22.6 33.4L8 28L22.6 22.6Z"),
+  suite: KIT("M18 8V40 M9 31L18 40L27 31 M38 48V16 M29 25L38 16L47 25"),
+  machine: KIT("M14 14H42V42H14Z M21 21H35V35H21Z M20 6V14 M36 6V14 M20 42V50 M36 42V50 M6 20H14 M6 36H14 M42 20H50 M42 36H50"),
+  learn: KIT("M48 28A20 20 0 1 1 8 28A20 20 0 1 1 48 28Z M22.2 21.5A6.1 6.1 0 0 1 33.9 23.6C33.9 27.8 28.1 28.7 28.1 32.7 M28 40H28.1"),
   doc: SVG('<path d="M6 3.5h8.5L18 7v13.5H6z"/><path d="M14.5 3.5V7H18"/><path d="M9 11h6M9 14h6M9 17h4"/>'),
   update: SVG('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>'),
   search: SVG('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),

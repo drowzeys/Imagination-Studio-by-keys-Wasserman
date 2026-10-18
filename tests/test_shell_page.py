@@ -285,8 +285,16 @@ def test_a_brain_that_is_not_set_up_is_greyed_and_links_to_brains_and_tools():
     assert "agent/t1/out.png" in out["log"] and "/data/studio" not in out["log"]
 
 
+def test_the_tally_lights_breathe_in_css_and_stop_when_motion_is_reduced():
+    css = (ROOT / "app" / "static" / "studio.css").read_text()
+    for name in ("tally-glow", "tally-led", "tally-pill", "tally-sheen"):
+        assert "@keyframes " + name + " {" in css, name
+    assert "@media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important;" in css
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
             test()
             print("ok", name)
+

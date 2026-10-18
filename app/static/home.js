@@ -41,11 +41,13 @@ const STARTS = () => [
 function viewHome() {
   const [hello, line] = timeOfDay(), wrap = el("div");
   const tc = el("span", { class: "tc" }, timecode()); const tick = setInterval(() => { if (!tc.isConnected) return clearInterval(tick); tc.textContent = timecode(); }, 1000 / 24);
-  // the product poster is the key art, shown whole; the greeting, the tagline and the actions sit below it
+  // the product poster is the key art, shown whole beside the greeting, the tagline, the creator credit and the actions
   const hero = el("div", { class: "homehero" + (ART.ready.has("poster") ? " has-art" : "") }, artSlot("poster", "", "home"),
     el("div", { class: "over" },
       el("div", { class: "stack" }, el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap" }, el("span", { class: "eyebrow" }, new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })), tc),
         el("h1", { class: "display" }, hello), el("p", { class: "tagline" }, "Local Creative ", el("em", {}, "All in One"), " Studio"),
+        // the creator credit from the brand kit, at its 320px minimum, with the kit's faint green glow
+        el("p", { class: "creator" }, el("span", { class: "by" }, "by"), el("img", { src: "brand/keys-wasserman-neon.svg", alt: "Keys + Wasserman", width: 320, height: 37 })),
         el("p", { class: "sub", style: "margin:0" }, line + " Pictures, clips with sound, voices and score, made on your own machine.")),
       el("div", { class: "acts" }, el("button", { class: "primary", onclick: () => startCreate({ goes: "video", start: "text" }) }, "Roll a new clip"),
         el("button", { onclick: () => go("Production") }, "Plan a film"), el("button", { class: "ghost", onclick: palOpen }, "Search ", el("kbd", {}, "⌘K")))));

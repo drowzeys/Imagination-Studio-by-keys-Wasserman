@@ -63,7 +63,7 @@ const ENGINE_PAGES = {
 function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_PAGES[id]();
   return el("div", {},
     el("div", { class: "enghead" }, artSlot("engine-" + id, "", id),
-      el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Creative Engine"), el("h1", { class: "display" }, r.name), el("p", { class: "sub", style: "margin:0" }, e.line),
+      el("div", { class: "stack" }, el("span", { class: "eyebrow engmark" }, el("img", { src: "brand/module-" + id + ".svg", alt: "", width: 22, height: 22 }), "Creative Engine"), el("h1", { class: "display" }, r.name), el("p", { class: "sub", style: "margin:0" }, e.line),
         e.marks.filter(Boolean).length ? el("div", { class: "marks" }, e.marks) : null,
         el("div", { class: "acts" }, el("button", { class: "primary", onclick: e.primary[1] }, e.primary[0])))),
     el("div", { class: "cards" + (e.cards.length >= 4 ? " c4" : e.cards.length === 3 ? " c3" : "") }, e.cards.map(pcard))); }

@@ -13,6 +13,8 @@
 | openai.svg | OpenAI | https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/openai.svg | LobeHub icons, MIT, unofficial; fill set to #e7e9ef | Identification only. Not an official asset. |
 | codex.svg | OpenAI | https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/codex.svg | LobeHub icons, MIT, unofficial; fill set to #e7e9ef | Identification only. Not an official asset. |
 | grok.svg | xAI | https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/grok.svg | LobeHub icons, MIT, unofficial; fill set to #e7e9ef | Identification only. Not an official asset. |
-| mark.svg | Imagination Studio (Keys + Wasserman) | Drawn for this app | Own work | The Studio's own mark. |
+| tensorfold-symbol.webp, tensorfold-wordmark.webp | TensorFold project | Sam Wasserman's Imagination Studio Brand Kit, 03-Shared/partners (transparent reproductions prepared from the TensorFold reference) | Brand kit | Trimmed and resized from the kit's alpha PNGs; beside POWERED BY in the sidebar footer only. Not official masters. |
 
 These marks identify the models and tools the Studio runs. They are trademarks of their owners and are used for identification only.
+
+The Studio's own logos, icons and texture come from the brand kit: see BRAND-KIT.md.

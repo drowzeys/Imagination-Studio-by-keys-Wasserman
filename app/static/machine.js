@@ -91,7 +91,7 @@ const BR = { data: null, tools: null, testing: {}, said: {}, checking: {}, check
 // each brain shows its own mark (brand/, THIRD-PARTY-MARKS.md); a local model server and the tools show a plain sign
 const BRAIN_MARK = { claude: "claude", codex: "codex", gemini: "gemini", grok: "grok", openai: "openai", chatgpt: "openai" };
 const brainLogo = id => el("span", { class: "logo" }, BRAIN_MARK[id] ? mark(BRAIN_MARK[id], "") : icon("machine"));
-const toolLogo = id => el("span", { class: "logo" }, id === "studio" ? el("img", { src: "brand/mark.svg", alt: "", width: 20, height: 20 }) : icon(id === "blockout" ? "library" : id === "blender" ? "previs" : "suite"));
+const toolLogo = id => el("span", { class: "logo" }, id === "studio" ? el("img", { src: "brand/aperture-mark-color.svg", alt: "Imagination Studio", width: 20, height: 20 }) : icon(id === "blockout" ? "library" : id === "blender" ? "previs" : "suite"));
 async function brainsLoad() { try { BR.data = await api("/api/brains"); } catch (e) { BR.data = { error: e.message }; } try { BR.tools = await api("/api/agent/tools"); } catch { BR.tools = null; } if (tab === "Brains") render(); }
 function viewBrains() {
   const wrap = el("div");
