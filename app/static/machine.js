@@ -66,8 +66,7 @@ async function loadStorage(draw) { M.loading = true; try { M.storage = await api
 function viewMachine() {
   const wrap = el("div");
   const where = S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : "This machine";
-  put(wrap, pageHead("Studio Vault", "Machine", where + ": live readings. Read only, nothing here changes the machine.",
-      el("div", { class: "chips" }, el("button", { onclick: () => go("Sparks") }, "Sparks"), el("button", { onclick: () => go("Brains") }, "Brains & tools"), el("button", { onclick: () => { const u = $("#studio-updates-open"); if (u) u.click(); } }, "Updates"))),
+  put(wrap, pageHead("Studio Vault", "Machine", where + ": live readings. Read only, nothing here changes the machine."),
     S.platform_label ? el("div", { class: "m-plat" }, S.platform_label) : null,
     el("div", { id: "machwarn", class: "stack m-warns" }),
     el("div", { class: "gauges" },

@@ -172,7 +172,7 @@ function shellStart() {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#palette") ? palClose() : palOpen(); return; }
     if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[0-9]$/.test(e.code)) { const r = roomForKey(e.code.slice(5)); if (r) { e.preventDefault(); goRoom(r.id); } return; }
     if (!typing && e.key === "/" && !$("#palette")) { e.preventDefault(); palOpen(); } });
-  window.addEventListener("hashchange", () => { const t = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(t) && t !== tab) go(t); });
+  window.addEventListener("hashchange", () => { palClose(); const t = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(t) && t !== tab) go(t); });
   if (S) { $("#plat").textContent = platName(); $("#mpill").title = (S.platform_label || platName()) + " · open the Machine room"; }
   if (typeof updatesWatch === "function") updatesWatch();
   telStart(); }

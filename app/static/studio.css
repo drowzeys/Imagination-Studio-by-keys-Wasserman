@@ -286,8 +286,7 @@ label.check input { margin-top:3px; flex:none; } label.check.off { opacity:.55; 
 .sparks button.on { border-color:var(--blue); background:var(--blue-wash); } .sparks button.far:not(.on) { opacity:.5; }
 .mgrid { display:grid; grid-template-columns:minmax(180px,260px) minmax(0,1fr); gap:16px; align-items:start; margin-top:12px; }
 .toast { position:fixed !important; left:calc(var(--side) + (100vw - var(--side)) / 2) !important; bottom:calc(var(--bay) + 16px) !important; transform:translateX(-50%); background:var(--raise2) !important; border:1px solid var(--line2) !important;
-  padding:10px 16px !important; border-radius:var(--r2) !important; z-index:60 !important; font-size:13.5px; display:flex; gap:10px; align-items:center; animation:rise var(--t2) var(--ease); max-width:calc(100vw - 32px); }
-@keyframes rise { from { opacity:0; transform:translate(-50%,6px); } }
+  padding:10px 16px !important; border-radius:var(--r2) !important; z-index:60 !important; font-size:13.5px; display:flex; gap:10px; align-items:center; max-width:calc(100vw - 32px); }
 dialog { color:var(--text); background:var(--raise); border:1px solid var(--line2); border-radius:var(--r3); }
 dialog::backdrop { background:rgba(5,6,9,.7); }
 #warnbar { margin:14px var(--gut) 0; padding:9px 13px; border-radius:var(--r2); border:1px solid rgba(240,198,116,.35); background:rgba(240,198,116,.05); color:var(--warn); font-size:13px; }
@@ -444,8 +443,7 @@ label.toggle { text-transform:none; letter-spacing:0; font:500 12.5px var(--sans
 .shot .body span { color:var(--dim); line-height:1.4; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 
 /* command palette */
-#palette { position:fixed; inset:0; z-index:80; display:flex; justify-content:center; align-items:flex-start; padding:12vh 16px 16px; background:rgba(5,6,9,.7); animation:fade var(--t2) var(--ease); }
-@keyframes fade { from { opacity:0; } }
+#palette { position:fixed; inset:0; z-index:80; display:flex; justify-content:center; align-items:flex-start; padding:12vh 16px 16px; background:rgba(5,6,9,.7); }
 #palette .box { width:min(640px,100%); border-radius:var(--r3); background:var(--raise); border:1px solid var(--line2); overflow:hidden; }
 #palette input { border:0; border-bottom:1px solid var(--line); border-radius:0; height:54px; font-size:16px; padding:0 18px; background:transparent; }
 #palette .res { max-height:min(56vh,480px); overflow:auto; padding:6px; }

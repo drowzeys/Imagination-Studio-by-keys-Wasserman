@@ -1,5 +1,5 @@
 "use strict";
-/* Wasserman Slate AI Studio, inside the Production tab.
+/* Wasserman Slate, inside Story's Film tab.
    A port of the workflow of Slate, the prompt studio for AI filmmaking, by Sam Wasserman (wassermanproductions.com),
    Apache-2.0: its NOTICE is at slate/NOTICE and its data files beside it, unchanged. The project files are Slate's
    own project.json, the brain prompts are Slate's, and the coverage plans and setups are read from its data. What is
