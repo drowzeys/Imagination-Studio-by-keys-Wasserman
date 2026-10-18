@@ -2,41 +2,38 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backlot</title>
-<meta name="theme-color" content="#08080b">
-<link rel="preload" href="fonts/bricolage-grotesque.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="fonts/instrument-sans.woff2" as="font" type="font/woff2" crossorigin>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Imagination Studio</title>
+<meta name="theme-color" content="#090a0f">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/instrument-serif.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="studio.css">
 </head>
 <body>
-<header id="top">
-  <a class="brand" id="gohome" href="#Home" title="The stage: start something, see what is rolling"><span class="mark" aria-hidden="true"></span><span class="wordmark"><b><i>Backlot</i></b><small>Your Local Creative Studio</small><small>By Keys/Wasserman · Powered by TensorFold</small></span></a>
+<aside id="side" aria-label="Studio">
+  <a class="brand" id="gohome" href="#Home" title="Home: start something, see what is rolling"><img class="mark" src="brand/mark.svg" alt=""><span class="wordmark"><b>Imagination Studio</b><small>By Keys + Wasserman</small></span></a>
   <nav id="rooms" aria-label="Rooms"></nav>
-  <div class="tools">
+  <div class="sidefoot">
     <button class="machinepill" id="mpill" type="button" title="Machine"><span class="dotl" id="mdot"></span><span id="plat"></span><span class="txt" id="mtxt"></span><span class="meter" aria-hidden="true"><i id="mgpu"></i><i id="mmem"></i></span></button>
-    <button class="kbtn" id="kbtn" type="button" title="Search or run anything (⌘K)"><span>Search or run</span><kbd>⌘K</kbd></button>
-    <button id="studio-updates-open" class="iconbtn" type="button" title="Updates" aria-label="Updates"></button>
-    <button id="helpbtn" class="iconbtn" type="button" title="Learn Studio" aria-label="Learn Studio"></button>
+    <div class="verline"><span id="ver"></span><button id="studio-updates-open" type="button" title="Updates" aria-label="Updates"></button></div>
+    <div class="credit">Powered by TensorFold · Built with Fish Audio Drama 3</div>
   </div>
+</aside>
+<header id="top">
+  <a class="mhome" href="#Home" id="mhome" aria-label="Home"><img src="brand/mark.svg" alt=""></a>
+  <span id="roomname"></span><div id="subtabs"></div><span class="fill"></span>
+  <button class="kbtn" id="kbtn" type="button" title="Search or run anything (⌘K)"><span>Search or run</span><kbd>⌘K</kbd></button>
+  <button id="helpbtn" class="iconbtn" type="button" title="Learn" aria-label="Learn"></button>
 </header>
-<div id="subnav"><span class="room" id="roomname"></span><div id="subtabs" style="display:flex;gap:4px"></div><span class="fill"></span><span id="ver"></span></div>
-<dialog id="studio-updates" aria-labelledby="studio-updates-title" style="position:fixed;top:50vh;left:50vw;right:auto;bottom:auto;margin:0;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:24px;background:var(--ink);color:var(--text);border:1px solid var(--line2);border-radius:16px">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px"><h2 id="studio-updates-title" style="margin:0">Studio updates</h2><button id="studio-updates-close" type="button" aria-label="Close updates">Close</button></div>
-  <p class="note">Get the latest Studio improvements. Updates wait until your jobs and render engine are idle.</p>
-  <p id="studio-updates-source" class="note" style="overflow-wrap:anywhere"></p>
-  <p id="studio-updates-status" role="status" aria-live="polite">Loading update settings…</p>
-  <p id="studio-updates-result" class="note"></p>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0"><button id="studio-updates-check" type="button">Check for updates</button><button id="studio-updates-install" type="button" disabled>Update and restart</button></div>
-  <label class="switch"><input id="studio-updates-auto" type="checkbox"><span>Automatic updates<small>Check every six hours while Studio is open. Install when idle.</small></span></label>
-  <p class="note">Off by default. Projects, media and models stay in place. Local code changes pause updates. If an updated app cannot start, Studio restores the previous code and turns automatic updates off.</p>
-</dialog>
-<div id="warnbar" class="hide" role="status" style="margin:10px 22px 0;padding:9px 13px;border-radius:10px;border:1px solid rgba(245,193,92,.45);background:rgba(245,193,92,.08);color:var(--warn);font-size:13px"></div>
+<div id="warnbar" class="hide" role="status"></div>
 <main>
   <div id="view"></div>
 </main>
 <aside id="bay" aria-label="Queue">
-  <div class="bayhead" id="bayhead"><h2>Queue <small>Render bay</small></h2><div id="baysum"></div><span class="baycount" id="baycount"></span><span class="chev" id="baychev" aria-hidden="true"></span></div>
+  <div class="bayhead" id="bayhead"><h2>Queue</h2><div id="baysum"></div><span class="baycount" id="baycount"></span><span class="chev" id="baychev" aria-hidden="true"></span></div>
   <div class="baybody">
     <div class="note">One job at a time on a machine, in order. Renders are written under <span id="home"></span>.</div>
     <div id="sparks" style="margin-top:8px"></div>
@@ -46,6 +43,8 @@
 </aside>
 <script src="shell.js"></script>
 <script src="home.js"></script>
+<script src="engines.js"></script>
+<script src="looks.js"></script>
 <script src="machine.js"></script>
 <script src="agent.js"></script>
 <script src="suite.js"></script>
@@ -74,7 +73,7 @@ const api = async (path, body, method) => {
 const file = path => "/files/" + path.split("/").map(encodeURIComponent).join("/");
 const mmss = s => s == null ? "" : s >= 3600 ? Math.floor(s / 3600) + " h " + Math.round(s % 3600 / 60) + " min" : (s >= 60 ? Math.floor(s / 60) + " min " : "") + Math.round(s % 60) + " s";
 const put = (node, ...kids) => node.append(...kids.flat().filter(k => k != null && k !== false));
-const toast = (text, ms = 3500) => { for (const old of document.querySelectorAll(".toast")) old.remove(); const n = el("div", { class: "toast", style: "position:fixed;bottom:18px;left:18px;background:#2b3050;border:1px solid var(--accent);padding:9px 14px;border-radius:8px;z-index:9" }, text); document.body.append(n); setTimeout(() => n.remove(), ms); };
+const toast = (text, ms = 3500) => { for (const old of document.querySelectorAll(".toast")) old.remove(); const n = el("div", { class: "toast", role: "status" }, text); document.body.append(n); setTimeout(() => n.remove(), ms); };
 // Clear and Undo for a form's text. A form is a node marked data-clear="key"; fields under data-keep stay as they
 // are, and data-clear-to names what a field goes back to. The last clear is kept until the page is left.
 let CLEARED = null;
@@ -104,7 +103,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Home", project = null;
-const TABS = ["Home", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Editor", "Library", "Machine", "Sparks", "Brains", "Tutorial"];
+const TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Editor", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
   dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
@@ -239,7 +238,7 @@ const imageModels = () => (S.image_models && S.image_models.length ? S.image_mod
 const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : "qwen");
 const imageModelName = () => imageModels().find(m => m.id === imageModel()).label;
 const imageModelPick = after => imageModels().length < 2 ? null : el("div", {}, el("label", {}, "Picture model"),
-  choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [m.label, m.note]])), after || render, true));
+  choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), after || render, true));
 const choice = (obj, key, options, after, tight) => el("div", { class: "choice" + (tight ? " tight" : ""), role: "radiogroup" }, Object.entries(options).map(([v, [title, sub]]) =>
   el("button", { type: "button", role: "radio", "aria-checked": String(obj[key]) === v ? "true" : "false", class: String(obj[key]) === v ? "on" : "", onclick: () => { obj[key] = v; if (after) after(); } }, el("b", {}, title), sub ? el("span", {}, sub) : null)));
 // A number of passes of your own is the Custom card of each passes chooser, right after its 20-pass card. C.steps
@@ -410,7 +409,7 @@ function videoControls(after) {
     isRef() ? passChooser("refPasses", S.ref2va_turbo ? { 20: ["20 passes", "the model as released, its own sound"], 4: ["Turbo 4 passes", S.platform === "spark" ? "LightX2V adapter and its own sound: about 3x faster" : "LightX2V adapter, then base-model sound: about 2.5x faster"] } : { 20: ["20 passes", "the model as released, its own sound"] },
       () => C.refPasses, after, C.refPasses === "4" ? "With the Turbo adapter, which was trained for 4 passes; pick 20 passes first for a count without it." : "Without the Turbo adapter.") : null,
     isRef() ? null :
-    S.turbo ? el("label", {}, "Video engine") : null, isRef() ? null : S.turbo ? choice(C, "engine", { fasth3: ["FastH3", S.zig ? "FastVideo's distilled H3 on the native Zig engine: fastest" : "FastVideo's distilled H3 on the sparse tile kernel: fastest"], h3: ["MiniMax H3", "Turbo adapter with base-model sound, or the full 20 steps"] }, changed) : null,
+    S.turbo ? el("label", {}, "Video engine") : null, isRef() ? null : S.turbo ? choice(C, "engine", { fasth3: [mark("minimax", "FastH3"), S.zig ? "FastVideo's distilled H3 on the native Zig engine: fastest" : "FastVideo's distilled H3 on the sparse tile kernel: fastest"], h3: [mark("minimax", "MiniMax H3"), "Turbo adapter with base-model sound, or the full 20 steps"] }, changed) : null,
     isRef() ? null : el("label", {}, C.engine === "fasth3" ? "Passes" : "Quality"), isRef() ? null : C.engine === "fasth3" ? passChooser("passes", PASSES, () => C.passes, after)
       // a quality of MiniMax H3 is a recipe: Custom keeps the one that was chosen and changes only its count
       : passChooser("h3quality", H3Q, () => H3_PASSES[C.h3quality], after, "Inside “" + H3Q[C.h3quality][0] + "”, the quality that was chosen: it keeps its adapter and its sound, and only the number of passes changes."),
@@ -572,14 +571,14 @@ function viewCreate() {
     C.step < 4 ? el("button", { class: "primary fit", onclick: () => { C.step++; render(); } }, "Next") : null);
   body.setAttribute("data-clear", "create-" + C.step);
   sync();
-  const goes = el("div", {}, el("label", {}, "The prompt goes to"), choice(C, "goes", { video: ["Video with sound", S.turbo ? "FastH3 or MiniMax H3" : "FastH3"], image: ["Image only", imageModels().map(m => m.label).join(", ")], edit: ["Edit a picture", imageModels().map(m => m.label).join(", ") + " on a picture you give it"] }, changed));
+  const goes = null;  // what the prompt goes to is chosen over the form (intentBar in shell.js)
   const picture = field("Describe the scene / condition where it takes place", bind(C, "scene", el("textarea", { placeholder: isRef() ? "The woman with red hair sits at a wooden desk in a small radio studio at night, medium close-up, a warm lamp on the left." : "A middle-aged baker in a cream shirt and green apron behind a wooden counter in a small bakery at dawn, warm window light from the left…" })));
   if (C.mode === "edit") return viewEdit(goes);  // a picture re-drawn by the image model (edit.js)
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
     const [w, h] = C.imageSize.split("x").map(Number);
-    put(body, el("h2", {}, "What are you making?"), goes, picture, imageModelPick(),
+    put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
       el("label", {}, "Size"), choice(C, "imageSize", { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
       el("div", { class: "row" },
         el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
@@ -597,7 +596,7 @@ function viewCreate() {
   }
   if (C.step === 0) {
     const est = el("span", { class: "eta" });
-    put(body, el("h2", {}, "What are you making?"), goes,
+    put(body, el("h2", {}, "The shot"), goes,
       el("label", {}, "The clip starts from"), choice(C, "start", { text: ["Text only", "no first frame"], scout: ["A scout image", "make several with " + imageModels().map(m => m.label).join(" or ") + ", pick one"], own: ["Your own image", "upload a picture"],
         ...(S.ref2va ? { refs: S.ref_media ? ["References", "pictures, videos or audio: keep a face, a motion or a voice"] : ["Reference pictures", "keep a face or a thing, in a new scene"] } : {}) }, changed),
       isRef() ? el("div", { class: "note", style: "margin:8px 0" }, "You add them on the next screen: ", el("a", { href: "#", onclick: e => { e.preventDefault(); C.step = 1; render(); } }, "2. " + refWord()), ".") : null,
@@ -1135,14 +1134,14 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig) { const had = lastSig; lastSig = sig; if (had && !document.activeElement.matches("input,textarea,select")) render(); } }
 
 function render() { renderShell();
-  $("#view").replaceChildren({ Home: viewHome, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Editor: viewEditor, Library: viewLibrary,
+  $("#view").replaceChildren({ Home: viewHome, Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Editor: viewEditor, Library: viewLibrary,
     Machine: viewMachine, Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial }[tab]()); coach(); bayUpdate();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
   if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true); }
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
   // links can preset the Create form: ?goes=image, ?engine=h3&res=720p&up=1&step=4 ...
   for (const [k, v] of new URLSearchParams(location.search)) if (k in C && k !== "mode") C[k] = k === "up" ? v === "1" : (k === "step" || k === "count" ? Number(v) : v);
-  S = await api("/api/state"); await loadLoras(); if (!S.turbo) C.engine = "fasth3"; sync(); $("#gohome").onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = S.platform_label; if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Backlot · " + (S.platform === "spark" ? "DGX Spark" : "Mac"); $("#ver").textContent = "Studio " + S.version; shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
+  S = await api("/api/state"); await loadLoras(); if (!S.turbo) C.engine = "fasth3"; sync(); for (const h of ["#gohome", "#mhome"]) $(h).onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = S.platform_label; if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Imagination Studio · " + (S.platform === "spark" ? "DGX Spark" : "Mac"); $("#ver").textContent = "Studio " + S.version; shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
   // ?motionref opens the create wizard on the motion reference stored by the Motion Previs tab
   if (new URLSearchParams(location.search).has("motionref")) { try { const r = (await api("/api/motion/handoff")).reference; if (r) useMotionReference(r, await api("/api/motion/packs/" + r.pack).catch(() => null)); } catch {} } })();
 </script>

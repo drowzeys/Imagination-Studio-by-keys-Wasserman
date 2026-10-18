@@ -802,7 +802,7 @@ def as_slate(found: dict, home: Path, blank) -> dict:
 
 # ---------- dailies for Circle Take, an entry for Call Sheet ----------
 
-GENERATOR = "Backlot"
+GENERATOR = "Imagination Studio"
 SHOT_CODE = re.compile(r"^(?:shot[-_ ]?|sh(?=\d)|s(?=\d))?(\d{1,4}[a-zA-Z]?)(?:[-_ .:]|$)", re.I)  # Circle Take's own (types.ts)
 
 
@@ -870,7 +870,7 @@ def callsheet_entry() -> dict:
     """One element of Call Sheet's data/apps.json (its SuiteApp type): the Studio is not a release of
     wassermanproductions, so it has no repo for Call Sheet's update check, and no recents reader."""
 
-    return {"id": "backlot-studio", "name": "Backlot", "bundle": "Wasserman Slate AI Studio", "repo": None,
+    return {"id": "backlot-studio", "name": "Imagination Studio", "bundle": "Wasserman Slate AI Studio", "repo": None,
             "stage": "Generate", "tagline": "Pictures, clips, voices and songs rendered on this machine"}
 
 

@@ -1,34 +1,68 @@
 "use strict";
-// The studio's frame: five rooms with their own tabs, the render bay docked along the bottom, the ⌘K palette and the
-// machine pill. Every view is still drawn by its own module; this file only decides where it sits.
+// The studio's frame: a sidebar of two groups (Creative Engines, Studio Vaults), each room with its own tabs, the
+// render bay docked along the bottom, the ⌘K palette and the machine chip. Every view is still drawn by its own
+// module; this file only decides where it sits.
+const GROUPS = [{ id: "engines", name: "Creative Engines" }, { id: "vaults", name: "Studio Vaults" }];
 const ROOMS = [
-  { id: "write", name: "Write", key: "1", tabs: ["Production", "Import"], says: "the film: scenes, cast, shots" },
-  { id: "shoot", name: "Shoot", key: "2", tabs: ["Create", "Motion Previs", "Agent"], says: "one take at a time" },
-  { id: "sound", name: "Sound", key: "3", tabs: ["Voice", "Music"], says: "voices and score" },
-  { id: "cut", name: "Cut", key: "4", tabs: ["Library", "Editor"], says: "pick takes, put them in order" },
-  { id: "machine", name: "Machine", key: "5", tabs: ["Machine", "Sparks", "Brains"], says: "the Sparks, models and connections" },
+  { id: "story", group: "engines", name: "Story", key: "1", tabs: ["Story", "Production"], says: "the film: board, Wasserman Slate, First AD" },
+  { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create"], says: "stills, scouts, edit a picture" },
+  { id: "video", group: "engines", name: "Video", key: "3", tabs: ["Video", "Create"], says: "clips with sound, long takes, references" },
+  { id: "previs", group: "engines", name: "Previs", key: "4", tabs: ["Previs", "Motion Previs", "Agent"], says: "motion from a clip, sets built by your agent" },
+  { id: "sound", group: "engines", name: "Sound", key: "5", tabs: ["Sound", "Voice", "Music"], says: "voices and score" },
+  { id: "edit", group: "engines", name: "Edit", key: "6", tabs: ["Edit", "Editor"], says: "the timeline and what goes to Resolve" },
+  { id: "library", group: "vaults", name: "Library", key: "7", tabs: ["Library"], says: "every take" },
+  { id: "looks", group: "vaults", name: "Looks", key: "8", tabs: ["Looks"], says: "LoRA styles for pictures and clips" },
+  { id: "suite", group: "vaults", name: "Suite", key: "9", tabs: ["Import"], says: "bring in from the filmmaker suite, send out" },
+  { id: "machine", group: "vaults", name: "Machine", key: "0", tabs: ["Machine", "Sparks", "Brains", "Updates"], says: "telemetry, Sparks, brains and updates" },
+  { id: "learn", group: "vaults", name: "Learn", key: "", tabs: ["Tutorial"], says: "lessons, step by step" },
 ];
-const TAB_NAMES = { Home: "Stage", Production: "Film", Import: "Bring in", Create: "Create", "Motion Previs": "Motion Previs", Agent: "Ask your agent", Voice: "Voice",
-  Music: "Music", Library: "Library", Editor: "Timeline", Machine: "Telemetry", Sparks: "Sparks", Brains: "Brains & tools", Tutorial: "Learn" };
-const roomOf = t => ROOMS.find(r => r.tabs.includes(t)) || null;
-const LAST_TAB = (() => { try { return JSON.parse(localStorage.getItem("room-tabs") || "{}"); } catch { return {}; } })();
+const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", Previs: "Overview", "Motion Previs": "Motion Previs",
+  Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Edit: "Overview", Editor: "Timeline", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
+  Machine: "Telemetry", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn" };
+// Create is shared by Image and Video: it sits in the room of what the prompt goes to
+const roomOf = t => t === "Create" ? ROOMS.find(r => r.id === (typeof C !== "undefined" && C.goes === "video" ? "video" : "image"))
+  : ROOMS.find(r => r.tabs.includes(t)) || null;
+const SVG = d => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + "</svg>";
 const ICON = {
-  update: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>',
-  help: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9"/><path d="M12 17.2v.1"/></svg>',
-  chev: '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>',
+  home: SVG('<path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-5h4v5"/>'),
+  story: SVG('<path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 11.5h6.5M9 15h4.5"/>'),
+  image: SVG('<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-5 4 4 2.5-2.5 4.5 4.5"/>'),
+  video: SVG('<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/>'),
+  previs: SVG('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'),
+  sound: SVG('<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3"/>'),
+  edit: SVG('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h18M9 5v7M15 12v7"/>'),
+  library: SVG('<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'),
+  looks: SVG('<path d="M12 3.5l2.3 6.2 6.2 2.3-6.2 2.3L12 20.5l-2.3-6.2L3.5 12l6.2-2.3z"/>'),
+  suite: SVG('<path d="M7.5 4v12M3.5 12l4 4 4-4"/><path d="M16.5 20V8M12.5 12l4-4 4 4"/>'),
+  machine: SVG('<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 2.5V6M14.5 2.5V6M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/>'),
+  learn: SVG('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9"/><path d="M12 17.2v.1"/>'),
+  update: SVG('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>'),
+  search: SVG('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
+  queue: SVG('<path d="M4 6h16M4 12h16M4 18h10"/>'),
+  chev: SVG('<path d="M6 15l6-6 6 6"/>'),
+  go: SVG('<path d="M9 6l6 6-6 6"/>'),
 };
-function go(t, opts = {}) { if (!TABS.includes(t)) return; tab = t; const r = roomOf(t); if (r) { LAST_TAB[r.id] = t; try { localStorage.setItem("room-tabs", JSON.stringify(LAST_TAB)); } catch {} }
-  history.replaceState(null, "", "#" + t); if (!opts.keepScroll) window.scrollTo(0, 0); render(); }
-function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(LAST_TAB[r.id] && r.tabs.includes(LAST_TAB[r.id]) ? LAST_TAB[r.id] : r.tabs[0]); }
+const icon = (name, cls) => { const n = el("span", { class: cls || "ico" }); n.innerHTML = ICON[name] || ICON.home; return n; };
+// the marks of the models and tools the Studio runs (app/static/brand, THIRD-PARTY-MARKS.md): identification only
+const MARKS = { qwen: ["brand/qwen.svg", "Qwen"], flux: ["brand/bfl-white.svg", "FLUX3-K"], minimax: ["brand/minimax.svg", "MiniMax H3"], music3: ["brand/minimax.svg", "MiniMax-Music3"],
+  fish: ["brand/fish-audio.svg", "Fish Audio Drama 3"], comfy: ["brand/comfyui.svg", "ComfyUI"], tensorfold: ["brand/tensorfold.webp", "TensorFold"],
+  claude: ["brand/claude.svg", "Claude"], openai: ["brand/openai.svg", "ChatGPT"], codex: ["brand/codex.svg", "Codex"], gemini: ["brand/gemini.svg", "Gemini"], grok: ["brand/grok.svg", "Grok"] };
+const mark = (id, label, big) => { const m = MARKS[id]; if (!m) return label || null; return el("span", { class: "mk" + (big ? " big" : "") }, el("img", { src: m[0], alt: "", width: big ? 40 : 18, height: big ? 40 : 18 }), label === "" ? null : label || m[1]); };
+function go(t, opts = {}) { if (!TABS.includes(t)) return; tab = t; history.replaceState(null, "", "#" + t); if (!opts.keepScroll) window.scrollTo(0, 0); render(); }
+function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
 
 function renderShell() {
-  const now = roomOf(tab), live = jobs.some(j => j.status === "running");
-  $("#rooms").replaceChildren(...ROOMS.map(r => el("button", { class: now === r ? "on" : "", title: r.name + ": " + r.says + " (⌥" + r.key + ")", onclick: () => goRoom(r.id) },
-    r.id === "shoot" && live && now !== r ? el("span", { class: "live", "aria-label": "rendering" }) : null, r.name, el("span", { class: "kbd" }, "⌥" + r.key))));
-  $("#roomname").textContent = now ? now.name : tab === "Tutorial" ? "Learn" : "Home";
-  const tabs = now ? now.tabs : tab === "Tutorial" ? [tab] : [];  // every tab stays visible, as before: Sparks explains itself on a Mac
-  $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", onclick: () => go(t) }, TAB_NAMES[t] || t)),
-    ...(tabs.length ? [] : [el("span", { class: "note", style: "margin:0;font-size:12.5px" }, "Pick a room, or press ", el("kbd", {}, "⌘K"), " to search or run anything.")]));
+  const now = tab === "Home" ? null : roomOf(tab), live = jobs.some(j => j.status === "running");
+  const nav = [];
+  for (const g of GROUPS) { nav.push(el("div", { class: "grp", role: "presentation" }, g.name));
+    for (const r of ROOMS.filter(x => x.group === g.id)) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
+      icon(r.id, "ic"), el("span", { class: "lbl" }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
+      if (r.id === "video" && live && now !== r) b.prepend(el("span", { class: "live", "aria-label": "rendering" }));
+      nav.push(b); } }
+  $("#rooms").replaceChildren(...nav);
+  $("#roomname").textContent = now ? now.name : "Home";
+  const tabs = now && now.tabs.length > 1 ? now.tabs : [];
+  $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", "aria-current": t === tab ? "page" : false, onclick: () => go(t) }, TAB_NAMES[t] || t)));
   document.body.classList.toggle("quiet", SHELL.lastTab === tab); SHELL.lastTab = tab;
 }
 const SHELL = { lastTab: null, tel: null, history: [], es: null, telAt: 0, libCache: null };
@@ -45,22 +79,22 @@ function bayUpdate() { const sum = $("#baysum"); if (!sum) return;
       el("span", { class: "mini" }, el("i", { style: "width:" + share + "%" })), el("span", { class: "tcode" }, left == null ? share + "%" : left > 5 ? mmss(left) : "almost")); });
   if (!lanes.length) lanes.push(el("div", { class: "lane" }, el("span", { class: "dotl" + (queued.length ? " t" : "") }), el("span", { class: "tcode" }, queued.length ? "Next up: " + queued[0].title : "Ready. Nothing rolling.")));
   sum.replaceChildren(...lanes);
-  $("#baycount").textContent = [queued.length ? queued.length + " queued" : "", done ? done + " done" : "", failed ? failed + " failed" : ""].filter(Boolean).join(" · ");
+  $("#baycount").replaceChildren(...[queued.length ? queued.length + " queued" : "", done ? done + " done" : "", failed ? failed + " failed" : ""].filter(Boolean).map(t => el("span", {}, t)));
   renderRoomsLive(running.length > 0); }
-function renderRoomsLive(live) { const b = [...document.querySelectorAll("#rooms button")][1]; if (!b) return; const has = b.querySelector(".live");
+function renderRoomsLive(live) { const b = document.querySelector('#rooms button[data-room="video"]'); if (!b) return; const has = b.querySelector(".live");
   if (live && !has && !b.classList.contains("on")) b.prepend(el("span", { class: "live" })); else if ((!live || b.classList.contains("on")) && has) has.remove(); }
 
-/* ---------- the machine pill and telemetry ---------- */
+/* ---------- the machine chip and telemetry ---------- */
 const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
+const platName = () => !S ? "" : S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : S.platform_label;
 function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   SHELL.history.push({ t: Date.now(), gpu: t.gpu ? t.gpu.util_pct : null, mem: t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : null, temp: t.gpu ? t.gpu.temp_c : null, power: t.gpu ? t.gpu.power_w : null });
   if (SHELL.history.length > 300) SHELL.history.shift();
   const used = t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : 0, gpu = t.gpu && t.gpu.util_pct != null ? t.gpu.util_pct : null;
-  const g = $("#mgpu"), m = $("#mmem"); if (g) { g.style.setProperty("--v", (gpu || 0) + "%"); g.style.setProperty("--c", gpu > 60 ? "var(--onair)" : "var(--ok)"); g.parentNode.title = "GPU " + (gpu == null ? "n/a" : gpu + "%") + " · memory " + used + "% used"; }
-  if (m) { m.style.setProperty("--v", used + "%"); m.style.setProperty("--c", used > 85 ? "var(--onair)" : used > 65 ? "var(--warn)" : "var(--accent)"); }
   const busy = t.jobs && t.jobs.running, warn = (t.warnings || []).length;
   $("#mdot").className = "dotl" + (busy ? " r" : warn ? " t" : "");
   $("#mtxt").textContent = gpu != null ? gpu + "% GPU" : t.memory ? Math.round(t.memory.available_mb / 1024) + " GB free" : "";
+  $("#mpill").title = platName() + " · GPU " + (gpu == null ? "n/a" : gpu + "%") + " · memory " + used + "% used · open the Machine room";
   if (tab === "Machine" && typeof machineLive === "function") machineLive(t);
   if (tab === "Home" && typeof homeLive === "function") homeLive(t); }
 function telStart() {
@@ -73,27 +107,30 @@ function telStart() {
 
 /* ---------- ⌘K ---------- */
 const PAL = { q: "", at: 0, items: [] };
+const lessonCount = () => { try { return lessons().length; } catch { return 23; } };
 function palActions() { const a = (ico, label, hint, run, words = "") => ({ ico, label, hint, run, words: (label + " " + hint + " " + words).toLowerCase() });
   const create = (set, step = 0) => () => { Object.assign(C, set); C.step = step; sync(); C.prompt = ""; go("Create"); };
   return [
-    a("▶", "New clip with sound", "Shoot", create({ goes: "video", start: "text" }), "video h3 fasth3 text"),
-    a("◐", "New still or scouts", "Shoot", create({ goes: "image" }), "image picture qwen flux"),
-    a("✎", "Edit a picture", "Shoot", create({ goes: "edit" }), "re-draw"),
-    a("∞", "Long take, up to 30 minutes", "Shoot", () => { C.goes = "video"; C.start = "text"; if (S && S.long) C.seconds = Object.keys(S.long)[0]; sync(); go("Create"); }, "long video chain"),
-    a("◎", "Wasserman Sharp Spec", "Shoot", () => { if (typeof sharpCreate === "function") { sharpCreate(); go("Create"); } }, "sam locked recipe"),
-    a("✦", "Ask your agent", "Blender · Blockout · Studio", () => go("Agent"), "claude codex blender blockout mcp"),
-    a("◉", "Record a voice line", "Sound", () => go("Voice"), "fish drama speech"),
-    a("♪", "Write a song", "Sound", () => go("Music"), "minimax music score"),
-    a("▤", "Plan a film", "Write", () => go("Production"), "slate bible shots first ad"),
-    a("⇣", "Bring in from the suite", "ScriptBreak · Cork Board · Blockout …", () => go("Import"), "import storyboard master canvas fountain"),
-    a("▦", "Library", "Cut", () => go("Library"), "files renders"),
-    a("▭", "Timeline", "Cut · Resolve export", () => go("Editor"), "editor fcpxml edl resolve"),
-    a("≋", "Telemetry", "Machine", () => go("Machine"), "gpu memory temperature disk storage"),
-    a("⌁", "Sparks", "Machine", () => go("Sparks"), "workers multi spark"),
-    a("⚙", "Brains & tools", "subscriptions, MCP", () => go("Brains"), "claude codex gemini grok local llm blender blockout"),
-    a("↻", "Check for updates", "Studio", () => $("#studio-updates-open").click(), "update"),
-    a("☰", "Open the render bay", "Queue", () => bayOpen(true), "queue jobs"),
-    a("?", "Learn Studio", "17 lessons", () => go("Tutorial"), "tutorial help"),
+    a("video", "New clip with sound", "Video", create({ goes: "video", start: "text" }), "video h3 fasth3 text"),
+    a("image", "New still or scouts", "Image", create({ goes: "image" }), "image picture qwen flux"),
+    a("image", "Edit a picture", "Image", create({ goes: "edit" }), "re-draw"),
+    a("video", "Long take, up to 30 minutes", "Video", () => { C.goes = "video"; C.start = "text"; if (S && S.long) C.seconds = Object.keys(S.long)[0]; sync(); go("Create"); }, "long video chain"),
+    a("video", "Wasserman Sharp Spec", "Video", () => { if (typeof sharpCreate === "function") { sharpCreate(); go("Create"); } }, "sam locked recipe"),
+    a("previs", "Ask your agent", "Previs · Blender · Blockout", () => go("Agent"), "claude codex blender blockout mcp"),
+    a("previs", "Motion Previs", "Previs", () => go("Motion Previs"), "pose depth skeleton motion reference"),
+    a("sound", "Record a voice line", "Sound · Fish Audio Drama 3", () => go("Voice"), "fish drama speech"),
+    a("sound", "Write a song", "Sound · MiniMax-Music3", () => go("Music"), "minimax music score"),
+    a("story", "Plan a film", "Story", () => go("Production"), "slate bible shots first ad"),
+    a("suite", "Bring in from the suite", "ScriptBreak · Cork Board · Blockout …", () => go("Import"), "import storyboard master canvas fountain suite send out"),
+    a("library", "Library", "Studio Vaults", () => go("Library"), "files renders takes"),
+    a("looks", "Looks", "LoRA styles", () => go("Looks"), "lora hub style horror"),
+    a("edit", "Timeline", "Edit · Resolve export", () => go("Editor"), "editor fcpxml edl resolve"),
+    a("machine", "Telemetry", "Machine", () => go("Machine"), "gpu memory temperature disk storage"),
+    a("machine", "Sparks", "Machine", () => go("Sparks"), "workers multi spark"),
+    a("machine", "Brains & tools", "subscriptions, MCP", () => go("Brains"), "claude codex gemini grok local llm blender blockout"),
+    a("update", "Check for updates", "Machine", () => go("Updates"), "update version release"),
+    a("queue", "Open the render bay", "Queue", () => bayOpen(true), "queue jobs"),
+    a("learn", "Learn Imagination Studio", lessonCount() + " lessons", () => go("Tutorial"), "tutorial help"),
   ]; }
 async function palOpen() { if ($("#palette")) return; PAL.q = ""; PAL.at = 0;
   const input = el("input", { placeholder: "Search takes, settings and actions…", "aria-label": "Search", autocomplete: "off", spellcheck: "false" });
@@ -105,10 +142,10 @@ async function palOpen() { if ($("#palette")) return; PAL.q = ""; PAL.at = 0;
     const acts = palActions().filter(x => !q || hit(x.words));
     const files = (SHELL.libCache || []).filter(m => q && hit(m.path.toLowerCase())).slice(0, 6).map(m => ({ ico: m, label: m.path.split("/").pop(), hint: m.folder || m.kind,
       run: () => { go("Library"); setTimeout(() => toast("Opened the Library: " + m.path.split("/").pop()), 50); } }));
-    const js = jobs.filter(j => q && hit((j.title + " " + j.kind + " " + j.status).toLowerCase())).slice(0, 5).map(j => ({ ico: "■", label: j.title, hint: j.status, run: () => bayOpen(true) }));
+    const js = jobs.filter(j => q && hit((j.title + " " + j.kind + " " + j.status).toLowerCase())).slice(0, 5).map(j => ({ ico: "queue", label: j.title, hint: j.status, run: () => bayOpen(true) }));
     PAL.items = [...acts, ...js, ...files]; PAL.at = Math.min(PAL.at, Math.max(0, PAL.items.length - 1));
     const row = (x, i) => el("button", { class: "it" + (i === PAL.at ? " on" : ""), role: "option", onmouseenter: () => { PAL.at = i; [...res.querySelectorAll(".it")].forEach((n, k) => n.classList.toggle("on", k === i)); }, onclick: () => { palClose(); x.run(); } },
-      el("span", { class: "ico" }, typeof x.ico === "object" ? (x.ico.kind === "video" ? el("video", { src: file(x.ico.path) + "#t=0.5", muted: true, preload: "metadata" }) : x.ico.kind === "image" ? el("img", { src: file(x.ico.path), loading: "lazy" }) : "♪") : x.ico),
+      typeof x.ico === "object" ? el("span", { class: "ico" }, x.ico.kind === "video" ? el("video", { src: file(x.ico.path) + "#t=0.5", muted: true, preload: "metadata" }) : x.ico.kind === "image" ? el("img", { src: file(x.ico.path), loading: "lazy" }) : icon("sound", "ic")) : icon(x.ico, "ico"),
       el("span", {}, x.label), el("small", {}, x.hint));
     let i = 0; const out = [];
     if (acts.length) out.push(el("div", { class: "grp" }, q ? "Actions" : "Go to or start"), ...acts.map(x => row(x, i++)));
@@ -123,17 +160,21 @@ async function palOpen() { if ($("#palette")) return; PAL.q = ""; PAL.at = 0;
   draw(); api("/api/library").then(list => { SHELL.libCache = list; if ($("#palette")) draw(); }).catch(() => {}); }
 function palClose() { const p = $("#palette"); if (p) p.remove(); }
 
+// ⌥1 to ⌥9 and ⌥0: the rooms that carry a key, in the sidebar's order
+const roomForKey = d => ROOMS.find(r => r.key === d) || null;
 function shellStart() {
-  $("#studio-updates-open").innerHTML = ICON.update; $("#helpbtn").innerHTML = ICON.help; $("#baychev").innerHTML = ICON.chev;
+  const up = $("#studio-updates-open"); up.replaceChildren(icon("update", "ic"), el("span", { class: "t" }, "Updates")); up.onclick = () => go("Updates");
+  $("#helpbtn").innerHTML = ICON.learn; $("#baychev").innerHTML = ICON.chev;
   $("#helpbtn").onclick = () => go("Tutorial"); $("#kbtn").onclick = palOpen; $("#mpill").onclick = () => go("Machine");
   $("#bayhead").onclick = e => { if (!e.target.closest("button:not(.chev)")) bayOpen(!$("#bay").classList.contains("open")); };
   try { if (localStorage.getItem("bay-open")) bayOpen(true); } catch {}
   document.addEventListener("keydown", e => { const typing = e.target.matches && e.target.matches("input,textarea,select,[contenteditable]");
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#palette") ? palClose() : palOpen(); return; }
-    if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); goRoom(ROOMS[Number(e.code.slice(5)) - 1].id); return; }
+    if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[0-9]$/.test(e.code)) { const r = roomForKey(e.code.slice(5)); if (r) { e.preventDefault(); goRoom(r.id); } return; }
     if (!typing && e.key === "/" && !$("#palette")) { e.preventDefault(); palOpen(); } });
   window.addEventListener("hashchange", () => { const t = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(t) && t !== tab) go(t); });
-  if (S) { $("#plat").textContent = S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : S.platform_label; $("#mpill").title = S.platform_label + " · open the Machine room"; }
+  if (S) { $("#plat").textContent = platName(); $("#mpill").title = (S.platform_label || platName()) + " · open the Machine room"; }
+  if (typeof updatesWatch === "function") updatesWatch();
   telStart(); }
 
 /* ---------- the take sheet beside Create: recipes in plain words, the setup at a glance, one Roll button ---------- */
@@ -163,4 +204,12 @@ function takeSheet() {
     video ? el("button", { class: "hot", style: "width:100%", onclick: roll }, C.step === 4 ? "Roll this take" : "Go to Render →") : null,
     el("div", { class: "note", style: "margin:0;font-size:12px" }, "The full controls stay on the left. A recipe only sets engine, passes and size."));
 }
-function createLayout(node) { if (C.goes === "edit") return node; return el("div", { class: "split", style: "grid-template-columns:minmax(0,1fr) 330px" }, node, takeSheet()); }
+// what the prompt goes to, as one small control over Create: the Image and Video rooms open it already set
+function intentBar() { const opts = { video: "Video with sound", image: "Image", edit: "Edit a picture" };
+  const marks = C.goes === "video" ? [mark("minimax"), S && S.platform === "spark" ? mark("comfy") : null, mark("tensorfold")] : [mark("qwen", "Qwen 2.1"), mark("flux")];
+  return el("div", { class: "createbar" }, el("span", { class: "eyebrow" }, "The prompt goes to"),
+    el("div", { class: "seg-ctl", role: "tablist", "aria-label": "The prompt goes to" }, Object.entries(opts).map(([k, label]) => el("button", { type: "button", role: "tab", "aria-selected": C.goes === k ? "true" : "false", class: C.goes === k ? "on" : "",
+      onclick: () => { if (C.goes === k) return; C.goes = k; C.step = 0; changed(); } }, label))),
+    el("div", { class: "marks" }, marks)); }
+function createLayout(node) { const bar = intentBar(); if (C.goes === "edit") return el("div", {}, bar, node);
+  return el("div", {}, bar, el("div", { class: "split", style: "grid-template-columns:minmax(0,1fr) 330px" }, node, takeSheet())); }

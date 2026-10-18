@@ -175,6 +175,12 @@ On an older Mac, or with `MUSIC3_BACKEND=mlx`, the song runs on TensorFold's MLX
 The web app ships three typefaces in `app/static/fonts`, each under the SIL Open Font License 1.1 (full text beside
 each file):
 
-- Bricolage Grotesque, Copyright 2022 The Bricolage Grotesque Project Authors (`OFL-bricolage.txt`)
-- Instrument Sans, Copyright 2022 The Instrument Sans Project Authors (`OFL-instrument-sans.txt`)
-- Geist Mono, Copyright 2024 The Geist Project Authors (`OFL-geist.txt`)
+- Geist and Geist Mono, Copyright 2024 The Geist Project Authors (`OFL-geist.txt`)
+- Instrument Serif, Copyright 2022 The Instrument Serif Project Authors (`OFL-instrument-serif.txt`)
+
+## Marks of other projects
+
+`app/static/brand` holds the marks of the models and tools the web app runs (Qwen, MiniMax, Black Forest Labs, Fish
+Audio, ComfyUI, TensorFold, and the agent brains), shown beside their names to identify them. They are trademarks of
+their owners; sources, licences of the drawings and each owner's usage notes are in
+`app/static/brand/THIRD-PARTY-MARKS.md`.

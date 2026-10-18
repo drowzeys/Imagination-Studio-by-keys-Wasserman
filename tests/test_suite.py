@@ -352,7 +352,7 @@ def test_dailies_for_circle_take():
         names = set(bundle.namelist())
         assert {"dailies/12A_take01.mp4", "dailies/12A_take01.json", "dailies/take_1017-120001-bbbbbb.mp4"} <= names
         side = json.loads(bundle.read("dailies/12A_take01.json"))
-        assert (side["prompt"], side["seed"], side["model"], side["generator"]) == ("A hero enters.", 42, "fasth3", "Backlot")
+        assert (side["prompt"], side["seed"], side["model"], side["generator"]) == ("A hero enters.", 42, "fasth3", "Imagination Studio")
         assert side["shot"] == "12A" and side["job"] == "1017-120000-aaaaaa" and side["resolution"] == "1376x768" and side["passes"] == 8
         assert client.get("/api/export/dailies.zip?jobs=1017-120002-cccccc").status_code == 400
         assert client.get("/api/export/dailies.zip?jobs=nope").status_code == 404

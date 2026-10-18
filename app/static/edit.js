@@ -87,15 +87,15 @@ function edLoras() { const list = edImageLoras(); if (!list.length || !edQwen())
         p ? el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Strength"), bind(p, "strength", el("input", { type: "number", step: 0.05, min: 0.1, max: 2, title: "Made for " + (r.strength || 1) + "; the author's range is " + range[0] + " to " + range[1] + ". Lower it if the result copies your picture instead of moving the camera." }))) : null,
         el("span")); })); }
 function viewEdit(goes) { const body = el("div"), st = ED.state;
-  if (!st) { edLoad(); put(body, el("h2", {}, "What are you making?"), goes, el("div", { class: "note" }, "Looking at what is installed…")); return el("section", { class: "card" }, body); }
+  if (!st) { edLoad(); put(body, el("h2", {}, "Edit a picture"), goes, el("div", { class: "note" }, "Looking at what is installed…")); return el("section", { class: "card" }, body); }
   const made = ED.job && jobs.find(j => j.id === ED.job), angle = edAngleLora(), wants = edWants();
-  put(body, el("h2", {}, "What are you making?"), goes);
+  put(body, el("h2", {}, "Edit a picture"), goes);
   if (!st.ready) { put(body, el("div", { class: "note", style: "color:var(--warn)" }, el("b", {}, "Edit a picture is not set up on this machine. "), st.why)); return el("section", { class: "card" }, body); }
   const ways = { words: ["Change it in words", "Say what is different"] }, qwen = edQwen();
   if (!qwen) ED.way = "words";  // the camera is Qwen's Multiple Angles LoRA
   ED.model = edModel();
   const models = edModels().length > 1 ? el("div", { id: "editmodel" }, el("label", {}, "Picture model"),
-    choice(ED, "model", Object.fromEntries(edModels().map(m => [m.id, [m.label, m.note]])), render, true)) : null;
+    choice(ED, "model", Object.fromEntries(edModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), render, true)) : null;
   if (angle && qwen) ways.angles = ["Move the camera", "Multiple Angles LoRA" + (angle.installed ? "" : ": not installed yet")];
   if (ED.way === "angles" && angle && angle.installed && !edHas(angle.id)) ED.loras.push({ id: angle.id, strength: angle.strength || 1 });
   put(body, models, edPicture(),

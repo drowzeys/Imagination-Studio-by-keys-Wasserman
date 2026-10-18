@@ -168,7 +168,7 @@ def machine() -> tuple[str, str]:
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
 
-app = FastAPI(title="Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3")
+app = FastAPI(title="Imagination Studio, by Keys + Wasserman, powered by TensorFold, built with Fish Audio Drama 3")
 jobs: dict[str, dict] = {}
 order: list[str] = []
 lock = threading.Lock()
