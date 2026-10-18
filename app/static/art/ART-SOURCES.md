@@ -40,3 +40,43 @@ originals are kept outside the repo.
 - art/look-noir.webp: venetian-blind shadows on a wall
 - art/look-golden.webp: backlit dust in a golden beam
 - art/look-analog.webp: the sprocketed edge of a film frame
+
+## Engine action covers and look swatches
+
+Rendered for this app on 2026-10-18 with the studio's own Image Engine (FLUX3-K Full and Qwen 2.1 Full on a DGX Spark) from invented prompts in the same art direction. Invented content only: no real people, places, logos or text.
+
+- art/act-edit-dailies.webp
+- art/act-edit-library.webp
+- art/act-edit-resolve.webp
+- art/act-edit-timeline.webp
+- art/act-image-edit.webp
+- art/act-image-looks.webp
+- art/act-image-scouts.webp
+- art/act-previs-motion.webp
+- art/act-story-board.webp
+- art/act-story-firstad.webp
+- art/act-story-import.webp
+- art/act-story-slate.webp
+- art/act-video-own.webp
+- art/act-video-refs.webp
+- art/look-3d-animation-style.webp
+- art/look-anime-slider.webp
+- art/look-camera-motion.webp
+- art/look-character-swap.webp
+- art/look-combat-base-v2.webp
+- art/look-equi360.webp
+- art/look-headmounted-fpv.webp
+- art/look-keyframe-animation.webp
+- art/look-lineart-anime.webp
+- art/look-motion-continuity-repair.webp
+- art/look-natural-face-speech.webp
+- art/look-orbit-360.webp
+- art/look-person-remover.webp
+- art/look-qwen-multiple-angles.webp
+- art/look-spatial-physics.webp
+- art/look-transformation.webp
+- art/look-turnaround.webp
+- art/look-vh5tape-vhs.webp
+- art/look-video-upscaler.webp
+- art/look-weapon-combat.webp
+- art/look-wushu-action.webp

@@ -7,7 +7,7 @@
    "size": "2520x1080",
    "aspect": "21:9",
    "purpose": "Home: key art behind the greeting; the lower third carries text, keep it calm there",
-   "ready": false
+   "ready": true
   },
   {
    "name": "engine-story",
@@ -15,7 +15,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Story: films, boards and shots engine page",
-   "ready": false
+   "ready": true
   },
   {
    "name": "engine-image",
@@ -23,7 +23,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Image: stills and picture edits engine page",
-   "ready": false
+   "ready": true
   },
   {
    "name": "engine-video",
@@ -31,7 +31,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Video: clips with sound engine page",
-   "ready": false
+   "ready": true
   },
   {
    "name": "engine-previs",
@@ -39,7 +39,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Previs: motion and 3D sets engine page",
-   "ready": false
+   "ready": true
   },
   {
    "name": "engine-sound",
@@ -47,7 +47,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Sound: voices and score engine page",
-   "ready": false
+   "ready": true
   },
   {
    "name": "engine-edit",
@@ -55,7 +55,7 @@
    "size": "1600x900",
    "aspect": "16:9",
    "purpose": "cover of the Edit: the timeline and the cut engine page",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-clip",
@@ -63,7 +63,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: A clip with sound",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-scout",
@@ -71,7 +71,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: Scout, then animate",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-still",
@@ -79,7 +79,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: A still",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-sharp",
@@ -87,7 +87,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: Sharp Spec recipe",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-long",
@@ -95,7 +95,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: A long take",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-voice",
@@ -103,7 +103,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: A voice line",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-song",
@@ -111,7 +111,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: A song",
-   "ready": false
+   "ready": true
   },
   {
    "name": "start-agent",
@@ -119,7 +119,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "Home start card: Ask your agent (3D set in Blender/Blockout)",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-story-board",
@@ -127,7 +127,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Story: film board",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-story-slate",
@@ -135,7 +135,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Story: Wasserman Slate",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-story-firstad",
@@ -143,7 +143,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Story: First AD",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-story-import",
@@ -151,7 +151,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Story: bring in a script",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-image-scouts",
@@ -159,7 +159,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Image: scouts",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-image-edit",
@@ -167,7 +167,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Image: edit a picture",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-image-looks",
@@ -175,7 +175,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Image: looks",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-video-own",
@@ -183,7 +183,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Video: from your picture",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-video-refs",
@@ -191,7 +191,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Video: references",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-previs-motion",
@@ -199,7 +199,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Previs: Motion Previs",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-edit-timeline",
@@ -207,7 +207,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Edit: timeline",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-edit-resolve",
@@ -215,7 +215,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Edit: to Resolve",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-edit-dailies",
@@ -223,7 +223,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Edit: dailies",
-   "ready": false
+   "ready": true
   },
   {
    "name": "act-edit-library",
@@ -231,7 +231,7 @@
    "size": "1280x720",
    "aspect": "16:9",
    "purpose": "engine page card: Edit: library",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-camera-motion",
@@ -239,7 +239,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Camera Motion look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-headmounted-fpv",
@@ -247,7 +247,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Head-mounted FPV look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-equi360",
@@ -255,7 +255,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Equirectangular 360\u00b0 look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-orbit-360",
@@ -263,7 +263,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the 360\u00b0 Orbit look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-transformation",
@@ -271,7 +271,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Transformation look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-turnaround",
@@ -279,7 +279,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Turnaround look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-keyframe-animation",
@@ -287,7 +287,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Keyframe Animation look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-character-swap",
@@ -295,7 +295,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Character Swap look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-person-remover",
@@ -303,7 +303,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Person Remover look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-natural-face-speech",
@@ -311,7 +311,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Natural Face Speech look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-motion-continuity-repair",
@@ -319,7 +319,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Motion Continuity Repair look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-combat-base-v2",
@@ -327,7 +327,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Combat Base V2 look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-weapon-combat",
@@ -335,7 +335,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Weapon Combat look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-spatial-physics",
@@ -343,7 +343,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Spatial Physics look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-anime-slider",
@@ -351,7 +351,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Anime Slider look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-lineart-anime",
@@ -359,7 +359,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Lineart Anime look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-3d-animation-style",
@@ -367,7 +367,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the 3D Animation Style look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-video-upscaler",
@@ -375,7 +375,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Video Upscaler LoRA look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-vh5tape-vhs",
@@ -383,7 +383,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the VH5 Tape (VHS) look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-wushu-action",
@@ -391,7 +391,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Wushu Action look card",
-   "ready": false
+   "ready": true
   },
   {
    "name": "look-qwen-multiple-angles",
@@ -399,7 +399,7 @@
    "size": "1024x1024",
    "aspect": "1:1",
    "purpose": "cover for the Multiple Angles (image) look card",
-   "ready": false
+   "ready": true
   }
  ]
 }
