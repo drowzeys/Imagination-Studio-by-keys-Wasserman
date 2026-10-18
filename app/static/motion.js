@@ -64,7 +64,7 @@ function moRail() {
     moActive() ? el("button", { class: "small", onclick: async () => { MO.job = await api("/api/motion/jobs/" + job.id + "/cancel", {}); render(); } }, "Cancel") : null));
   put(box, el("div", { style: "display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px" }, Object.entries(MO_STAGES).map(([key, label]) => { const s = job.stages[key] || {};
     const share = s.state === "done" ? 100 : s.state === "running" ? Math.max(2, Math.min(100, Math.round(100 * (s.at || 0) / (s.of || 1)))) : 0;
-    return el("div", { style: "opacity:" + (s.state === "waiting" ? .45 : 1) }, el("div", { style: "display:flex;justify-content:space-between;font:600 10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:" + (s.state === "running" ? "var(--warn)" : s.state === "done" ? "var(--ok)" : "var(--dim)") },
+    return el("div", { style: "opacity:" + (s.state === "waiting" ? .45 : 1) }, el("div", { style: "display:flex;justify-content:space-between;font:600 12px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:" + (s.state === "running" ? "var(--warn)" : s.state === "done" ? "var(--ok)" : "var(--dim)") },
       el("span", {}, label), el("span", {}, s.state === "done" && s.seconds != null ? s.seconds.toFixed(1) + " s" : s.state === "running" ? share + "%" : "")), el("div", { class: "bar" }, el("i", { style: "width:" + share + "%" }))); })));
   const now = job.stages[job.stage] || {};
   put(box, el("div", { class: "note" }, job.status === "failed" ? "Failed: " + (job.error || "") : job.status === "cancelled" ? "Cancelled: nothing was kept." : moActive() ? (now.message || "Waiting for its turn…") :
@@ -130,7 +130,7 @@ function moReview(pack) {
     pack.zip ? el("a", { href: file(pack.zip), download: pack.id + ".zip" }, "Download the pack (ZIP)") : null));
   put(box, moCamera(pack));
   put(box, el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px" }, views.map(([label, path]) => { const v = path ? el("video", { src: file(path), controls: true, muted: true, loop: true, preload: "metadata", playsinline: true }) : null; if (v) players.push(v);
-    return el("div", { class: "tile" }, v || el("div", { style: "aspect-ratio:16/9;display:grid;place-items:center;color:var(--dim);font-size:12px;background:#000" }, "not in this pack"), el("div", { class: "cap" }, el("span", {}, label))); })));
+    return el("div", { class: "tile" }, v || el("div", { style: "aspect-ratio:16/9;display:grid;place-items:center;color:var(--dim);font-size:13.5px;background:#000" }, "not in this pack"), el("div", { class: "cap" }, el("span", {}, label))); })));
   const more = [["Line art", "lineart.mp4"], ["Motion mask", "motion_mask.mp4"], ["Depth proxy", "depth.mp4"], ["Normals proxy", "normals_proxy.mp4"], ["Pose, high contrast", "pose_high_contrast.mp4"], ["Review plate", "combined_reference_depth_pose.mp4"], ["Animatic", "animatic.mp4"],
     ["camera_motion.json", "camera_motion.json"], ["openpose_keypoints.json", "openpose_keypoints.json"], ["pose_landmarks.json", "pose_landmarks.json"], ["prompt_pack.md", "prompt_pack.md"], ["shot_bible.json", "shot_bible.json"], ["bundle_manifest.json", "bundle_manifest.json"]].filter(([, n]) => f[n]);
   put(box, el("details", { class: "fold" }, el("summary", {}, "The rest of the pack (" + Object.keys(f).length + " files)"), f["contact_sheet.jpg"] ? el("img", { src: file(f["contact_sheet.jpg"]), style: "width:100%;border-radius:10px;border:1px solid var(--line)", loading: "lazy" }) : null,
