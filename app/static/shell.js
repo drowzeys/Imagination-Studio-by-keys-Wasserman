@@ -83,9 +83,11 @@ function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0
 const shown = list => typeof roomsShown === "function" ? roomsShown(list) : list;
 function renderShell() {
   const now = tab === "Home" ? null : roomOf(tab), live = jobs.some(j => j.status === "running");
-  const nav = [];
+  // Home first, under the brand and above the engines (phones keep Home in the top bar: studio.css)
+  const nav = [el("button", { class: "home" + (tab === "Home" ? " on" : ""), "data-room": "home", type: "button", title: "Home: start something, see what is rolling",
+    "aria-current": tab === "Home" ? "page" : false, onclick: () => go("Home") }, icon("home", "ic"), el("span", { class: "lbl" }, "Home"))];
   for (const g of GROUPS) { const rooms = shown(ROOMS.filter(x => x.group === g.id)); if (!rooms.length) continue;
-    if (g.name) nav.push(el("div", { class: "grp", role: "presentation" }, g.name));
+    if (g.name) nav.push(el("div", { class: "grp g-" + g.id, role: "presentation" }, g.name));
     for (const r of rooms) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, "data-group": r.group, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
       icon(r.id, "ic"), el("span", { class: "lbl" + (r.name.length > 18 ? " long" : "") }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
       if (r.id === "video" && live && now !== r) b.prepend(el("span", { class: "live", "aria-label": "rendering" }));
