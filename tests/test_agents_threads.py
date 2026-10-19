@@ -1,6 +1,7 @@
 """The Agent room's conversations (app/agents.py threads): python3 -m pytest tests/test_agents_threads.py. The CLIs are the
 stand-ins of tests/test_agents.py, which log every call: no sign-ins, no network."""
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -143,10 +144,10 @@ def test_hermes_as_a_brain(fake, monkeypatch):
     assert failed["status"] == "failed" and "hermes setup" in failed["error"]
     # over ssh, like the other CLIs
     monkeypatch.delenv("FAKE_MODE")
-    post("/api/brains/settings", {"remote": {"host": "sam@mac", "backends": ["hermes"]}})
+    post("/api/brains/settings", {"remote": {"host": "user@workstation", "backends": ["hermes"]}})
     found = {b["id"]: b for b in client.get("/api/brains").json()["backends"]}
-    assert found["hermes"]["where"] == "ssh:sam@mac" and found["hermes"]["found"]
-    assert agents.ask("hermes", "", "ready") == "ready" and any(c.get("ssh") == "sam@mac" for c in fake["calls"]())
+    assert found["hermes"]["where"] == "ssh:user@workstation" and found["hermes"]["found"]
+    assert agents.ask("hermes", "", "ready") == "ready" and any(c.get("ssh") == "user@workstation" for c in fake["calls"]())
 
 
 def test_gemini_reads_the_recent_turns_ahead_of_the_message(fake, monkeypatch):
@@ -190,7 +191,11 @@ def test_question_detection(text, asked, shown, options):
 def test_one_turn_at_a_time_and_stop(fake, monkeypatch):
     monkeypatch.setenv("FAKE_SLEEP", "30")
     thread = start("Take your time", "claude")["thread"]
-    assert post(f"/api/agent/threads/{thread['id']}/messages", {"text": "and another"}).status_code == 409
+    queued = say(thread["id"], "and another")  # waits behind the running turn (test_a_second_message_waits_its_turn)
+    assert [q["text"] for q in queued["thread"]["queued"]] == ["and another"]
+    for _ in range(2):
+        say(thread["id"], "more")
+    assert post(f"/api/agent/threads/{thread['id']}/messages", {"text": "too many"}).status_code == 409
     assert client.delete(f"/api/agent/threads/{thread['id']}").status_code == 409
     ends = time.time() + 10
     while not client.get(f"/api/agent/threads/{thread['id']}").json()["live"]["steps"] and time.time() < ends:
@@ -201,7 +206,69 @@ def test_one_turn_at_a_time_and_stop(fake, monkeypatch):
     post(f"/api/agent/threads/{thread['id']}/cancel")
     done = settled(thread["id"])
     assert time.time() - started < 10 and done["turns"][-1]["status"] == "cancelled"
+    assert done["queued"] == [] and [t["text"] for t in done["turns"] if t["role"] == "user"] == ["Take your time"]  # Stop stops what waits
     assert post(f"/api/agent/threads/{thread['id']}/messages", {"text": ""}).status_code == 400
+
+
+def test_a_follow_up_keeps_the_conversations_own_tools(fake):
+    # as on a DGX Spark: an enabled tool that cannot launch here (over ssh, no host set), which a follow-up must not pick up
+    post("/api/agent/tools", {"tools": [*agents.default_tools(), {"id": "fake", "label": "Fake", "command": [sys.executable, "-c", "pass"],
+                                                                  "via": "ssh", "enabled": True}]})
+    thread = start("Just talk", "claude")["thread"]  # started with no tools
+    settled(thread["id"])
+    say(thread["id"], "And now?")  # the page sends no tools with a reply
+    done = settled(thread["id"])
+    assert done["tools"] == [] and done["turns"][-1]["status"] == "done", done["turns"][-1]
+    second = calls_of(fake, "claude")[-1]
+    assert "--resume" in second["args"]  # the same session, so the turn did not fail on a tool it was never given
+    assert json.loads((agents.HOME / "agent" / thread["id"] / "mcp.json").read_text())["mcpServers"] == {}
+    # a thread with a tool keeps that one, and a tool turned off since is left out rather than failing the turn
+    post("/api/agent/tools", {"tools": [*agents.default_tools(), {"id": "fake", "label": "Fake", "command": [sys.executable, "-c", "pass"],
+                                                                  "enabled": True}]})
+    with_tool = start("Use it", "claude", tools=["fake"])["thread"]
+    settled(with_tool["id"])
+    tools = agents.tools()
+    for tool in tools:
+        tool["enabled"] = tool["id"] != "fake"
+    agents.save_tools({"tools": tools})
+    say(with_tool["id"], "Again")
+    assert settled(with_tool["id"])["tools"] == []
+
+
+def test_a_thread_stays_with_its_own_agent(fake):
+    thread = start("Build a set", "claude")["thread"]
+    settled(thread["id"])
+    refused = post(f"/api/agent/threads/{thread['id']}/messages", {"text": "Now you, Codex", "backend": "codex"})
+    assert refused.status_code == 409 and "Claude Code" in refused.json()["error"]
+    say(thread["id"], "Carry on", backend="claude")
+    done = settled(thread["id"])
+    assert done["backend"] == "claude" and not calls_of(fake, "codex") and calls_of(fake, "claude")[-1]["stdin"] == "Carry on"
+
+
+def test_a_second_message_waits_its_turn(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_SLEEP", "1.5")
+    thread = start("Build a set", "claude")["thread"]
+    said = say(thread["id"], "Then light it")
+    assert said["task"]["status"] == "queued" and said["thread"]["queued"][0]["text"] == "Then light it"
+    assert [t["text"] for t in said["thread"]["turns"] if t["role"] == "user"] == ["Build a set"]  # it joins when its turn comes
+    ends = time.time() + 30
+    while time.time() < ends:
+        done = client.get(f"/api/agent/threads/{thread['id']}").json()
+        if not done["live"] and not done["queued"]:
+            break
+        time.sleep(0.1)
+    said = [(t["role"], t["text"]) for t in done["turns"] if t["role"] in ("user", "agent")]
+    assert said == [("user", "Build a set"), ("agent", "Made render.png"), ("user", "Then light it"), ("agent", "Made render.png")]
+    second = calls_of(fake, "claude")[-1]
+    assert "--resume" in second["args"] and second["stdin"] == "Then light it"  # the first answer was kept, and its session
+
+
+def test_a_failed_turn_says_the_clis_words_once(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_MODE", "expired")
+    thread = start("Build a set", "claude")["thread"]
+    last = settled(thread["id"])["turns"][-1]
+    assert last["status"] == "failed" and "claude auth login" in last["error"] and "Not logged in" in last["error"]
+    assert last["text"] == ""  # not the same words again above the error
 
 
 def test_threads_are_for_this_computer_only(fake):

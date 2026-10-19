@@ -237,9 +237,9 @@ def test_brains_are_found_with_their_versions(fake):
 
 
 def test_a_brain_over_ssh_is_looked_for_on_that_machine(fake):
-    assert post("/api/brains/settings", {"remote": {"host": "sam@mac-studio", "backends": ["claude", "codex"]}}).status_code == 200
+    assert post("/api/brains/settings", {"remote": {"host": "user@workstation-2", "backends": ["claude", "codex"]}}).status_code == 200
     found = {b["id"]: b for b in client.get("/api/brains").json()["backends"]}
-    assert found["claude"]["where"] == "ssh:sam@mac-studio" and found["claude"]["found"] and found["claude"]["version"] == "9.9.9 (Claude Code)"
+    assert found["claude"]["where"] == "ssh:user@workstation-2" and found["claude"]["found"] and found["claude"]["version"] == "9.9.9 (Claude Code)"
     assert found["gemini"]["where"] == "here"
     assert sum(1 for c in fake["calls"]() if c.get("ssh")) == 1  # both CLIs in one ssh call
     client.get("/api/brains")
@@ -248,9 +248,10 @@ def test_a_brain_over_ssh_is_looked_for_on_that_machine(fake):
     post("/api/brains/settings", {"remote": {"host": "down-host"}})
     found = {b["id"]: b for b in client.get("/api/brains").json()["backends"]}
     assert found["claude"]["found"] is False and "ssh to down-host failed" in found["claude"]["error"]
+    assert "`ssh down-host true`" in found["claude"]["error"] and "Settings → Connections" in found["claude"]["error"]  # what to do about it
 
 
-@pytest.mark.parametrize("host", ["mac; rm -rf ~", "a b", "-oProxyCommand=x", "host$(id)", "user@@host", "h:port", "x" * 400, "`id`", 5])
+@pytest.mark.parametrize("host", ["mac; rm -rf ~", "a b", "-oProxyCommand=x", "host$(id)", "user@@host", "-Jevil@jump", "-oProxyCommand=x@host", "h:port", "x" * 400, "`id`", 5])
 def test_bad_hosts_are_refused(fake, host):
     answer = post("/api/brains/settings", {"remote": {"host": host, "backends": ["claude"]}})
     assert answer.status_code == 400 and "host" in answer.json()["error"]
@@ -258,17 +259,17 @@ def test_bad_hosts_are_refused(fake, host):
 
 
 def test_settings_are_saved_privately_and_checked(fake):
-    good = post("/api/brains/settings", {"default": "gemini", "remote": {"host": "sam@mac.local:2222", "backends": ["claude"],
-                                                                        "studio_host": "sam@dgx-spark-2"},
+    good = post("/api/brains/settings", {"default": "gemini", "remote": {"host": "user@workstation.local:2222", "backends": ["claude"],
+                                                                        "studio_host": "user@studio-box"},
                                          "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b"}).json()["settings"]
-    assert good == {"default": "gemini", "remote": {"host": "sam@mac.local:2222", "backends": ["claude"], "studio_host": "sam@dgx-spark-2"},
+    assert good == {"default": "gemini", "remote": {"host": "user@workstation.local:2222", "backends": ["claude"], "studio_host": "user@studio-box"},
                     "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b"}
     file = agents.HOME / ".studio-agents/settings.json"
     assert json.loads(file.read_text()) == good and (file.stat().st_mode & 0o777) == 0o600
     assert post("/api/brains/settings", {"default": "gpt"}).status_code == 400
     assert post("/api/brains/settings", {"remote": {"backends": ["local"]}}).status_code == 400
     assert post("/api/brains/settings", {"local_endpoint": "http://x; rm"}).status_code == 400
-    assert agents.ssh_of("sam@mac.local:2222")[-3:] == ["-p", "2222", "sam@mac.local", "--"][-3:] and "-p" in agents.ssh_of("sam@mac.local:2222")
+    assert agents.ssh_of("user@workstation.local:2222")[-3:] == ["-p", "2222", "user@workstation.local", "--"][-3:] and "-p" in agents.ssh_of("user@workstation.local:2222")
 
 
 def test_ask_each_brain(fake):
@@ -298,14 +299,14 @@ def test_sign_in_trouble_says_what_to_do(fake, monkeypatch):
 
 
 def test_a_brain_over_ssh_answers(fake):
-    post("/api/brains/settings", {"remote": {"host": "sam@mac", "backends": ["claude", "codex"]}})
+    post("/api/brains/settings", {"remote": {"host": "user@workstation", "backends": ["claude", "codex"]}})
     assert agents.ask("claude", "It's a system prompt with 'quotes' and $HOME", "ready") == "ready"
     assert agents.ask("codex", "", "ready") == "ready"
     calls = fake["calls"]()
     claude = next(c for c in calls if c.get("cli") == "claude" and "-p" in c["args"])
     assert claude["args"][6] == "It's a system prompt with 'quotes' and $HOME"  # quoted for the remote shell, unchanged
     assert claude["cwd"].startswith("/") and not Path(claude["cwd"]).exists()  # an empty folder there, removed after
-    assert any(c.get("ssh") == "sam@mac" for c in calls)
+    assert any(c.get("ssh") == "user@workstation" for c in calls)
 
 
 def test_the_local_server(fake, monkeypatch):
@@ -347,9 +348,9 @@ def test_slate_brain_goes_through_agents(fake):
     assert answer["ok"] and answer["text"] == "ready"
     assert post("/api/slate/brain", {"backend": "grok", "prompt": "ready"}).json()["text"] == "ready"
     assert post("/api/slate/brain", {"backend": "nonsense", "prompt": "ready", "expectJson": False}).json()["text"] == "ready"  # Claude, as before
-    post("/api/brains/settings", {"remote": {"host": "sam@mac", "backends": ["claude"]}})
+    post("/api/brains/settings", {"remote": {"host": "user@workstation", "backends": ["claude"]}})
     assert post("/api/slate/brain", {"backend": "claude", "prompt": "ready"}).json()["text"] == "ready"
-    assert any(c.get("ssh") == "sam@mac" for c in fake["calls"]())
+    assert any(c.get("ssh") == "user@workstation" for c in fake["calls"]())
 
 
 def fake_tool(fake, **more) -> dict:
@@ -371,7 +372,7 @@ def test_tools_are_listed_saved_and_checked(fake, monkeypatch):
     check = post("/api/agent/tools/fake/check").json()
     assert check["ok"] and check["tools"] == ["get_scene_info", "execute_blender_code"] and check["server"]["name"] == "fake"
     # the same server on another machine, over ssh
-    post("/api/agent/tools", fake_tool(fake, via="ssh", host="sam@spark"))
+    post("/api/agent/tools", fake_tool(fake, via="ssh", host="user@studio-box"))
     assert post("/api/agent/tools/fake/check").json()["tools"] == ["get_scene_info", "execute_blender_code"]
     # one that never answers is stopped, and says so
     monkeypatch.setattr(agents, "CHECK_TIMEOUT", 1)
@@ -417,7 +418,14 @@ def test_a_task_runs_saves_its_files_and_lists_them(fake):
     assert made["thread"] and done["outputs"] == [f"agent/{made['thread']}/render.png"] and done["reply"] == "Made render.png"
     assert "Building the set." in done["log"] and "→ mcp__fake__make" in done["log"] and "tools: fake" in done["log"]
     folder = agents.HOME / "agent" / made["thread"]  # the thread's own folder, the same one each turn
-    assert (folder / "plate.png").read_bytes() == b"plate"
+    # the attachment is a copy in a dot folder of its own (never a link to the take, never a second Library item), named to the agent
+    copy = folder / ".inputs/plate.png"
+    assert copy.read_bytes() == b"plate" and copy.stat().st_ino != upload.stat().st_ino
+    copy.write_bytes(b"changed by the agent")
+    assert upload.read_bytes() == b"plate"
+    said = next(c for c in fake["calls"]() if c.get("cli") == "claude")["stdin"]
+    assert said.startswith("Build a set") and ".inputs/plate.png (in the Library: uploads/plate.png)" in said
+    assert ".inputs/plate.png" not in done["outputs"] and not any("plate" in p for p in done["outputs"])
     config = json.loads((folder / "mcp.json").read_text())["mcpServers"]["fake"]
     assert config == {"command": PY, "args": [str(fake["tmp"] / "mcp.py")], "env": {"FAKE_X": "1"}}
     args = next(c for c in fake["calls"]() if c.get("cli") == "claude")["args"]
@@ -445,11 +453,14 @@ def test_a_codex_task_gets_its_tools_as_config(fake):
     assert call["stdin"].startswith("You are working for a filmmaker inside Imagination Studio.") and call["stdin"].endswith("Lay out the scene")
     assert args[:6] == ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--json", "-c"]
     assert f'mcp_servers.fake.command={json.dumps(PY)}' in args and 'mcp_servers.fake.env={FAKE_X = "1"}' in args
+    # codex exec never asks: without this a Studio tool call is refused ("approval policy is never")
+    assert args[args.index('mcp_servers.fake.default_tools_approval_mode="approve"') - 1] == "-c"
+    assert sum("default_tools_approval_mode" in a for a in args) == 1  # one per tool server, and only the chosen ones
 
 
 def test_a_task_over_ssh_brings_its_files_back(fake):
-    post("/api/agent/tools", fake_tool(fake, via="ssh", host="sam@mac"))
-    post("/api/brains/settings", {"remote": {"host": "sam@mac", "backends": ["claude"]}})
+    post("/api/agent/tools", fake_tool(fake, via="ssh", host="user@workstation"))
+    post("/api/brains/settings", {"remote": {"host": "user@workstation", "backends": ["claude"]}})
     made = post("/api/agent/tasks", {"prompt": "Build a set", "backend": "claude", "tools": ["fake"]}).json()
     done = wait_for(made["id"])
     assert done["status"] == "done", done
@@ -463,10 +474,10 @@ def test_a_task_over_ssh_brings_its_files_back(fake):
     post("/api/agent/tools", fake_tool(fake))
     failed = wait_for(post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": ["fake"]}).json()["id"])
     assert failed["status"] == "failed" and "studio_host" in failed["error"]
-    post("/api/brains/settings", {"remote": {"studio_host": "sam@spark"}})
+    post("/api/brains/settings", {"remote": {"studio_host": "user@studio-box"}})
     agents.save_tools({"tools": [fake_tool(fake)]})
-    wrapped = agents.mcp_servers({"tools": ["fake"]}, "sam@mac", agents.saved_settings())["fake"]
-    assert wrapped["command"] == "ssh" and "sam@spark" in wrapped["args"] and "FAKE_X=1" in wrapped["args"][-1]
+    wrapped = agents.mcp_servers({"tools": ["fake"]}, "user@workstation", agents.saved_settings())["fake"]
+    assert wrapped["command"] == "ssh" and "user@studio-box" in wrapped["args"] and "FAKE_X=1" in wrapped["args"][-1]
 
 
 def test_a_task_is_cancelled(fake, monkeypatch):
@@ -496,6 +507,29 @@ def test_tasks_are_checked(fake):
     assert post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": [], "thread": "th-0000-000000-000000"}).status_code == 404
     assert post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": ["nope"]}).status_code == 400
     assert post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": [], "attach": ["../../etc/passwd"]}).status_code == 400
+    agents.save_tools({"tools": agents.default_tools()})  # the Studio's own records are never attachments
+    for inside in (".studio-agents/tools.json", "settings.json"):
+        (agents.HOME / inside).write_text("{}")
+    assert post("/api/agent/tasks", {"prompt": "x", "backend": "claude", "tools": [], "attach": [".studio-agents/tools.json"]}).status_code == 400
+
+
+def test_the_time_limit_runs_while_the_prompt_is_written(fake, monkeypatch):
+    # a CLI that never reads its stdin, with a prompt larger than a pipe holds: the write must not hang past the limit
+    monkeypatch.setattr(agents, "TASK_TIMEOUT", 1)
+    task = {"id": "0101-000000-feed00", "backend": "claude", "status": "running", "_host": ""}
+    agents.task_folder(task["id"]).mkdir(parents=True, exist_ok=True)
+    started = time.time()
+    with open(agents.task_folder(task["id"]) / "log.txt", "w") as log:
+        code = agents.stream(task, [PY, "-c", "import time; time.sleep(60)"], None, "x" * (1 << 20), log)
+    assert time.time() - started < 10 and code is not None and "stopped after" in task["_error"]
+    agents.running.update(id=None, process=None)
+
+
+def test_a_streamed_message_is_one_line_of_the_log():
+    task = {"id": "t", "backend": "hermes", "_host": "", "steps": []}
+    shown = [agents.render("hermes", json.dumps({"type": "text", "text": word}), task) for word in ("A ", "lighthouse ", "at dusk.")]
+    assert shown == ["", "", ""]
+    assert agents.render("hermes", json.dumps({"type": "result", "text": "A lighthouse at dusk."}), task) == "A lighthouse at dusk.\n"
 
 
 def test_only_this_computer_may_use_them(fake):

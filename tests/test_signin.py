@@ -153,6 +153,27 @@ def test_claude_asks_for_the_code_the_page_shows_and_signs_in(fake):
     assert not any("good#code-123" in line for line in done["lines"])  # the pasted code never comes back
 
 
+def test_two_sign_ins_at_once_one_is_refused(fake, monkeypatch):
+    # the place is taken before the CLI starts: a second start in that gap is refused, not run beside the first
+    import threading
+    opened, real = [], agents.open_signin
+
+    def slow(*args):
+        opened.append(args[0])
+        time.sleep(0.5)
+        return real(*args)
+    monkeypatch.setattr(agents, "open_signin", slow)
+    answers = []
+    starts = [threading.Thread(target=lambda: answers.append(post("/api/brains/claude/signin").status_code)) for _ in range(2)]
+    for start in starts:
+        start.start()
+    for start in starts:
+        start.join(10)
+    assert sorted(answers) == [200, 409] and opened == ["claude"]
+    post("/api/brains/claude/signin/cancel")
+    until("claude", ("failed",))
+
+
 def test_a_wrong_code_fails_with_the_clis_reason(fake):
     post("/api/brains/claude/signin")
     until("claude", ("needs_code",))
