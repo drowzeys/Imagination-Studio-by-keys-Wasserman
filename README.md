@@ -39,7 +39,9 @@ cores · a 2x video decoder for 2K finals on the Mac
   the machine in one line.
 - **Settings**: the look, which rooms show, what a new take starts from, every connection, and Models & weights,
   Sparks, Brains & tools and Updates in one place.
-- **Phones**: a bottom bar, a More sheet for the vaults, search and updates.
+- **Made for phones too**: the whole studio works from a phone's browser. The six engines sit along a bottom bar,
+  a **More** sheet holds the Agent, the vaults, Settings, search and updates, the queue folds into one line above it,
+  and *Add to Home Screen* opens it full screen like an app. See [Using it on your phone](#using-it-on-your-phone).
 
 **Agents and your own sign-ins**
 - **The Agent room**: pick Claude Code, Codex, Hermes, Gemini, Grok or a local model and talk it through; it keeps
@@ -88,6 +90,40 @@ cores · a 2x video decoder for 2K finals on the Mac
 | **Looks** | **Looks, the cards** |
 | ![Wasserman's Filmmaker Suite, built in](docs/screenshots/filmmaker-suite.webp) | ![Machine: live readings and storage on a DGX Spark](docs/screenshots/machine.png) |
 | **Wasserman's Filmmaker Suite** | **Machine** |
+
+## Using it on your phone
+
+The models run on your Mac or DGX Spark; the phone is only the screen and the remote. Everything works from it:
+write a prompt, roll a clip, watch the queue, play takes from the Library, plan in Story, talk to your agent.
+
+1. **Put the computer and the phone on the same [Tailscale](https://tailscale.com) network** (free for personal use):
+   install Tailscale on both and sign in with the same account.
+2. **Share the studio on that network**, once, on the computer running it:
+
+   ```bash
+   tailscale serve --bg 7870
+   ```
+
+   Tailscale prints the address, `https://<computer>.<your-tailnet>.ts.net`. Only devices on your own tailnet can
+   open it, over HTTPS, and the studio accepts its Tailscale name by itself. (On a trusted home network,
+   `HOST=0.0.0.0 bash scripts/app.sh` and `http://<computer's address>:7870` work too; there is no login, so never on
+   a shared or public network.)
+3. **Open that address on the phone** in Safari or Chrome, then *Share → Add to Home Screen* (iPhone) or *⋮ → Add to
+   Home screen* (Android). The studio then opens full screen from its own icon.
+
+On the phone:
+
+- **Bottom bar**: Story, Image, Video, Previs, Sound and Edit, one tap each. **More** opens the Agent, the Library,
+  Looks, Wasserman's Filmmaker Suite, Nodes, Machine, Learn, Settings, search and updates.
+- **Home** keeps the composer on top: pick *Clip with sound*, *Picture*, *Voice* or *Song*, describe it, *Generate*.
+- **The queue** is the line above the bar; tap the arrow to see what is rolling and what is next. Renders keep going
+  on the computer when the phone sleeps or leaves.
+- **Connect an agent from the phone**: *Connect* shows the sign-in code in large type with *Copy code* and *Copy
+  link*, and a QR code; sign in on the phone itself, or scan the QR with another device.
+
+| ![Home on a phone: the composer, the queue line and the bottom bar](docs/screenshots/phone-home.webp) | ![The More sheet: the Agent, the vaults, Settings, search and updates](docs/screenshots/phone-more.webp) | ![The Video engine on a phone](docs/screenshots/phone-video.webp) |
+| :---: | :---: | :---: |
+| **Home** | **More** | **An engine: Video** |
 
 ## License & credits
 
