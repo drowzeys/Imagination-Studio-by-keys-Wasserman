@@ -77,6 +77,7 @@ QUALITIES = {
     "fh4": ("FastH3: 4 passes, fastest and softer", {"ENGINE": "fasth3", "STEPS": "4"}),
     "fh20": ("FastH3: 20 passes, for prompts with several actions", {"ENGINE": "fasth3", "STEPS": "20"}),
 }
+API_QUALITY = "fh4"  # a clip asked for over the API without a quality: FastH3 at 4 passes, the page's default (settings.js recipeParams)
 SCOUT_SIZES = {"draft": (1344, 768), "2k": (1024, 576), "qhd": (1280, 736), "small": (864, 480),
                "native": (1344, 768), "p720": (1280, 736), "p960": (864, 480), "sharp": (1376, 768)}
 # measured on a Mac Studio M5 Ultra, 8 second clips, standard quality, image step included (README)
@@ -1856,6 +1857,8 @@ def queue_job(body: dict) -> dict:
         params["soundtrack"] = {"take": song["id"], "song": song["path"], "music_db": level}
     found = references(params) if kind == "video" else {}
     referenced, ref_media = bool(found), bool(found and (found["videos"] or found["audios"]))
+    if kind in ("video", "studio", "long") and not referenced and not params.get("quality"):
+        params["quality"] = API_QUALITY  # a job that names no quality gets the page's own default, as Home sends it
     if kind in ("video", "studio", "long") and not referenced and not str(params.get("quality", "standard")).startswith("fh") and not turbo_ready():
         raise HTTPException(400, "MiniMax H3 Turbo is not installed here (oneshot-setup.sh --turbo adds it): use FastH3, quality fh4, fh8 or fh20")
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
