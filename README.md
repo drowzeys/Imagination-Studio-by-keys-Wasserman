@@ -123,9 +123,12 @@ MiniMax-Music3: its licence asks for its name in a commercial UI · FLUX3-K: FLU
 Stability AI Community License (free under US$1 million of yearly revenue) · MMAudio's weights: CC-BY-NC 4.0,
 non-commercial · Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT).
 
-**Links.** [wassermanproductions.com](https://wassermanproductions.com) ·
-[Wasserman Productions on GitHub](https://github.com/wassermanproductions) · [Keys on GitHub](https://github.com/drowzeys) ·
-[Sam Wasserman on X](https://x.com/SamJWasserman) · [Keys on X](https://x.com/u1tra_instinct)
+**Links.** Keys: [X](https://x.com/u1tra_instinct) · [GitHub](https://github.com/drowzeys).
+Sam Wasserman / Wasserman Productions: [wassermanproductions.com](https://wassermanproductions.com) ·
+[X](https://x.com/SamJWasserman) · [GitHub](https://github.com/wassermanproductions).
+
+**Powered by** TensorFold (Ash Hart and the TensorFold contributors) · built with integrated Fish Audio Drama 3 · Built
+with Qwen · Built with Fish Audio · MiniMax-Music3.
 
 ## New in 2.9.3
 

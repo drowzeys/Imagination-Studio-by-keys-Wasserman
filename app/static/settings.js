@@ -165,14 +165,15 @@ function setConnections() {
 
 /* ---------- 5. About ---------- */
 // Keys and Wasserman Productions: their sites and code
-const ABOUT_LINKS = [["wassermanproductions.com", "https://wassermanproductions.com"], ["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"],
-  ["Keys on GitHub", "https://github.com/drowzeys"], ["Sam Wasserman on X", "https://x.com/SamJWasserman"], ["Keys on X", "https://x.com/u1tra_instinct"]];
+const ABOUT_LINKS = [["Keys", [["X", "https://x.com/u1tra_instinct"], ["GitHub", "https://github.com/drowzeys"]]],
+  ["Sam Wasserman / Wasserman Productions", [["wassermanproductions.com", "https://wassermanproductions.com"], ["X", "https://x.com/SamJWasserman"], ["GitHub", "https://github.com/wassermanproductions"]]]];
 function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.about = { loading: true }; updRequest().then(d => { SET.about = d; if (tab === "Settings") render(); }, () => { SET.about = { error: true }; }); }
   const u = SET.about || {}, row = (k, v) => el("div", { class: "kv st-kv" }, el("span", {}, k), el("b", {}, v));
   return [setPanel("About", null,
     el("div", { class: "st-about" }, el("img", { src: "brand/ribbon-title-only-color.svg", alt: "Imagination Studio", width: 240, height: 83 }),
       el("img", { class: "st-credit", src: "brand/keys-wasserman-neon.svg", alt: "by Keys + Wasserman", width: 320, height: 37 })),
-    el("div", { class: "st-links" }, ABOUT_LINKS.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label))),
+    ABOUT_LINKS.map(([who, links]) => el("div", { class: "st-links" }, el("b", {}, who), links.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label)))),
+    el("p", { class: "note m-flat st-powered" }, "Powered by TensorFold (Ash Hart and the TensorFold contributors) · built with integrated Fish Audio Drama 3 · Built with Qwen · Built with Fish Audio · MiniMax-Music3"),
     row("Version", "Studio " + ((S && S.version) || "")), row("Commit", u.installed_commit || (u.loading ? "…" : "unknown")), row("Follows", [u.source, u.following || u.branch].filter(Boolean).join(" · ") || "—"),
     el("div", {}, el("button", { type: "button", onclick: () => go("Updates") }, u.available ? "An update is ready: Machine → Updates" : "Check for updates"))),
   setPanel("Credits", "The authors whose work the studio runs.",

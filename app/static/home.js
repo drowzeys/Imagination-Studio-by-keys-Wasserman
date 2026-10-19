@@ -11,7 +11,7 @@ function timeOfDay() { const h = new Date().getHours(); return h < 5 ? ["Night s
   : h < 17 ? ["Afternoon shoot", "Plenty of day left for coverage."] : h < 21 ? ["Golden hour", "Make something that glows."] : ["Tonight's slate", "Queue it up and let the Sparks work."]; }
 function timecode(d = new Date()) { const p = n => String(n).padStart(2, "0"); return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + ":" + p(Math.floor(d.getMilliseconds() / 41.67)); }
 // where Keys and Wasserman Productions publish (Home under the credit; Settings → About lists them with the rest)
-const HOME_LINKS = [["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"], ["Keys on GitHub", "https://github.com/drowzeys"]];
+const HOME_LINKS = [["Keys on GitHub", "https://github.com/drowzeys"], ["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"]];
 const startCreate = (set, step = 0) => { Object.assign(C, set); C.step = step; C.prompt = ""; sync(); go("Create"); };
 
 // the machine, in one line: LED, name, GPU, memory against the guard's floor, disk
