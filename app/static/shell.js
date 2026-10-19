@@ -68,10 +68,15 @@ function go(t, opts = {}) { if (!TABS.includes(t)) return; moreClose(); const wa
   if (t !== was) { if (opts.fromHash && h[h.length - 1] === t) h.pop();
     else if (!opts.back && h[h.length - 1] !== was) { h.push(was); if (h.length > PAGES_KEPT) h.splice(0, h.length - PAGES_KEPT); } }
   tab = t;
-  if (!opts.fromHash) { try { if (t !== was && history.pushState) history.pushState(null, "", "#" + t); else history.replaceState(null, "", "#" + t); } catch {} }
+  if (!opts.fromHash) { try { if (t !== was && history.pushState) history.pushState({ from: was }, "", "#" + t); else history.replaceState(history.state, "", "#" + t); } catch {} }
   if (!opts.keepScroll) window.scrollTo(0, 0); render(); }
+// Back is the browser's Back when the page before this one in the browser is the app's last page (the hashchange
+// then takes it off the stack): Back never adds a page the browser's Forward would have to walk through
 function goBack() { const h = SHELL.history; while (h.length && (h[h.length - 1] === tab || !TABS.includes(h[h.length - 1]))) h.pop();
-  const prev = h.pop(); if (prev) go(prev, { back: true }); }
+  const prev = h[h.length - 1]; if (!prev) return;
+  let state = null; try { state = history.state; } catch {}
+  if (state && state.from === prev && typeof history.back === "function") return history.back();
+  h.pop(); go(prev, { back: true }); }
 function goHome() { if (tab !== "Home") go("Home"); }
 function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
 
@@ -97,7 +102,7 @@ function renderShell() {
   $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", "aria-current": t === tab ? "page" : false, onclick: () => go(t) }, TAB_NAMES[t] || t)));
   document.body.classList.toggle("quiet", SHELL.lastTab === tab); SHELL.lastTab = tab;
 }
-const SHELL = { lastTab: null, tel: null, history: [], samples: [], es: null, telAt: 0, libCache: null, telWait: 2000, telPoll: null };
+const SHELL = { lastTab: null, tel: null, history: [], samples: [], es: null, telAt: 0, libCache: null, telWait: 2000, telPoll: null, telDog: null };
 // the More sheet on phones: the Studio Vaults, ⌘K search and Updates, which the bottom bar has no room for
 function moreOpen() { if ($("#moresheet")) return moreClose(); const now = tab === "Home" ? null : roomOf(tab), fresh = typeof UPD !== "undefined" && UPD.data && UPD.data.available;
   const row = (ico, label, hint, run, on, kbd) => el("button", { class: "it" + (on ? " on" : ""), type: "button", "aria-current": on ? "page" : false, onclick: () => { moreClose(); run(); } },
@@ -155,7 +160,10 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   $("#mpill").title = say + " · open the Machine room"; $("#mpill").setAttribute("aria-label", say);
   if (tab === "Machine" && typeof machineLive === "function") machineLive(t);
   if (tab === "Home" && typeof homeLive === "function") homeLive(t); }
-// the event stream, and while it is down a poll every 3 s; a lost stream is opened again after 2, 4, 8 … 30 s
+// the event stream, and while it is down a poll every 3 s; a lost stream is opened again after 2, 4, 8 … 30 s. A
+// stream that goes quiet without an error (closed, or a half-open tunnel: no telemetry for 15 s, where it comes every
+// 2 s) is treated as lost too, by a watchdog every 5 s
+const TEL_QUIET = 15000;
 function telStart() {
   const poll = async () => { try { telApply(await api("/api/telemetry")); } catch { SHELL.tel = null; } };
   const polling = on => { if (on && !SHELL.telPoll) { poll(); SHELL.telPoll = setInterval(poll, 3000); } else if (!on && SHELL.telPoll) { clearInterval(SHELL.telPoll); SHELL.telPoll = null; } };
@@ -163,9 +171,12 @@ function telStart() {
   const open = () => { let es; try { es = new EventSource("/api/events"); } catch { return polling(true); } SHELL.es = es;
     es.addEventListener("telemetry", e => { try { telApply(JSON.parse(e.data)); } catch {} });
     es.onopen = () => { SHELL.telWait = 2000; polling(false); };
-    es.onerror = () => { es.close(); if (SHELL.es === es) SHELL.es = null; polling(true);
-      setTimeout(open, SHELL.telWait); SHELL.telWait = Math.min(30000, SHELL.telWait * 2); }; };
-  open(); }
+    es.onerror = () => lost(es); };
+  const lost = es => { es.close(); if (SHELL.es === es) SHELL.es = null; polling(true);
+    setTimeout(open, SHELL.telWait); SHELL.telWait = Math.min(30000, SHELL.telWait * 2); };
+  open();
+  if (!SHELL.telDog) SHELL.telDog = setInterval(() => { const es = SHELL.es;
+    if (es && (es.readyState === 2 || (es.readyState === 1 && SHELL.telAt && Date.now() - SHELL.telAt > TEL_QUIET))) lost(es); }, 5000); }
 
 /* ---------- ⌘K ---------- */
 const PAL = { q: "", at: 0, items: [] };

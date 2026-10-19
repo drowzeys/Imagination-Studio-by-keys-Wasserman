@@ -175,29 +175,81 @@ def github_api(path: str) -> dict:
         return json.loads(response.read(1_000_000))
 
 
-def latest_release(source: str) -> dict | None:
-    """The newest GitHub release, for information only: installing is always a fast-forward of the followed branch.
+RELEASE_CACHE_S = 3600   # a release answer is kept an hour: GitHub allows 60 unauthenticated calls an hour per address
+RATE_LIMITED = (403, 429)  # GitHub's answer when that allowance is used up
+RATE_NOTE = "GitHub didn't answer the release lookup (rate limit); it is asked again within the hour."
+releases: dict = {}        # source -> (time.monotonic() when asked, release or None, note or None)
+releases_lock = threading.Lock()
 
-    A fork without releases of its own shows its parent's, named by "repository"."""
+
+def release_lookup(source: str) -> tuple[dict | None, str | None]:
+    """The newest GitHub release and, when there is none to show because GitHub refused (rate limit), a note saying
+    so. For information only: installing is always a fast-forward of the followed branch.
+
+    A fork without releases of its own shows its parent's, named by "repository"; a rate-limited answer for the fork
+    is treated the same way (its parent is asked), so whatever can still be shown is. An answer, a refusal included,
+    is kept for an hour; a lookup that did not reach GitHub at all is tried again at the next check."""
+
+    with releases_lock:
+        kept = releases.get(source)
+        if kept and time.monotonic() - kept[0] < RELEASE_CACHE_S:
+            return kept[1], kept[2]
+    limited, reached = False, True
     try:
-        repo = quote(source, safe="/")
+        release = find_release(quote(source, safe="/"))
+    except urllib.error.HTTPError as error:
+        release, limited = None, error.code in RATE_LIMITED
+    except RateLimited:
+        release, limited = None, True
+    except OSError:
+        release, reached = None, False
+    except Exception:  # noqa: BLE001 - an answer that is not a release is no release
+        release = None
+    note = RATE_NOTE if limited and not release else None
+    if reached:
+        with releases_lock:
+            releases[source] = (time.monotonic(), release, note)
+    return release, note
+
+
+class RateLimited(Exception):
+    pass
+
+
+def find_release(repo: str) -> dict | None:
+    limited = False
+    try:
+        found = github_api(repo + "/releases/latest")
+    except urllib.error.HTTPError as error:
+        if error.code not in (404, *RATE_LIMITED):
+            raise
+        limited = error.code in RATE_LIMITED
+        try:
+            parent = github_api(repo).get("parent")
+        except urllib.error.HTTPError as again:
+            raise RateLimited() if limited or again.code in RATE_LIMITED else again
+        repo = parent.get("full_name") if isinstance(parent, dict) else None
+        if not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+            if limited:
+                raise RateLimited()
+            return None
         try:
             found = github_api(repo + "/releases/latest")
-        except urllib.error.HTTPError as error:
-            parent = github_api(repo).get("parent") if error.code == 404 else None
-            repo = parent.get("full_name") if isinstance(parent, dict) else None
-            if not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-                return None
-            found = github_api(repo + "/releases/latest")
-        release = {"tag": found["tag_name"], "name": found.get("name") or found["tag_name"],
-                   "published_at": found.get("published_at"), "url": found.get("html_url"), "repository": repo}
-    except Exception:
-        return None
+        except urllib.error.HTTPError as again:
+            raise RateLimited() if limited or again.code in RATE_LIMITED else again
+    release = {"tag": found["tag_name"], "name": found.get("name") or found["tag_name"],
+               "published_at": found.get("published_at"), "url": found.get("html_url"), "repository": repo}
     if not all(value is None or isinstance(value, str) for value in release.values()) or not isinstance(release["tag"], str):
         return None
     if release["url"] and not release["url"].startswith("https://github.com/"):
         release["url"] = None
     return {key: value[:200] if isinstance(value, str) else value for key, value in release.items()}
+
+
+def latest_release(source: str) -> dict | None:
+    """The newest GitHub release (release_lookup), or None."""
+
+    return release_lookup(source)[0]
 
 
 class Manager:
@@ -265,9 +317,12 @@ class Manager:
                 if "following" in known:
                     known["branch"] = known["following"]
                 found = {**known, "available": False, "target": None, "message": str(error)}
-            release = latest_release(found["source"]) if found.get("source") else None
+            release, note = release_lookup(found["source"]) if found.get("source") else (None, None)
             if release:
                 found["latest_release"] = release
+            elif note:  # said where the page shows the check's outcome: nothing is shown otherwise
+                found["release_note"] = note
+                found["message"] = (found.get("message") or "").rstrip() + " " + note
             with self.mutex:
                 self.info = found
         finally:

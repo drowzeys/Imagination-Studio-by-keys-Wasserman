@@ -30,6 +30,7 @@ def no_github_api(monkeypatch):
         raise OSError("no network in tests")
     monkeypatch.setattr(updates.urllib.request, "urlopen", offline)
     monkeypatch.delenv("STUDIO_UPDATE_BRANCH", raising=False)
+    updates.releases.clear()  # each test asks GitHub afresh (the answers are kept an hour)
 
 
 @pytest.fixture
@@ -261,6 +262,61 @@ def test_no_releases_and_no_parent_is_left_out(monkeypatch):
     assert asked == ["solo-owner/studio/releases/latest", "solo-owner/studio"]
     answers(monkeypatch, {"fork-owner/studio": {"parent": {"full_name": "../../evil"}}})
     assert updates.latest_release("fork-owner/studio") is None
+
+
+def limited(monkeypatch, replies, refused):
+    """GitHub's answers, with the paths in ``refused`` answered 403 (the hourly allowance used up)."""
+    asked = []
+    def github(request, timeout):
+        asked.append(request.full_url.removeprefix("https://api.github.com/repos/"))
+        if asked[-1] in refused:
+            raise updates.urllib.error.HTTPError(request.full_url, 403, "rate limit exceeded", {}, io.BytesIO(b"{}"))
+        reply = replies.get(asked[-1])
+        if reply is None:
+            raise updates.urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO(b"{}"))
+        return io.BytesIO(json.dumps(reply).encode())
+    monkeypatch.setattr(updates.urllib.request, "urlopen", github)
+    return asked
+
+
+PARENT = {"test-owner/studio/releases/latest": {"tag_name": "v2.9.3", "name": "2.9.3", "published_at": "2026-10-01T00:00:00Z",
+                                                 "html_url": "https://github.com/test-owner/studio/releases/tag/v2.9.3"},
+          "fork-owner/studio": {"fork": True, "parent": {"full_name": "test-owner/studio"}}}
+
+
+def test_a_rate_limited_release_lookup_falls_back_to_the_parent(monkeypatch):
+    asked = limited(monkeypatch, PARENT, {"fork-owner/studio/releases/latest"})
+    release, note = updates.release_lookup("fork-owner/studio")
+    assert release["tag"] == "v2.9.3" and release["repository"] == "test-owner/studio" and note is None
+    assert asked == ["fork-owner/studio/releases/latest", "fork-owner/studio", "test-owner/studio/releases/latest"]
+
+
+def test_when_github_refuses_every_lookup_the_page_is_told_why(history, tmp_path, monkeypatch):
+    upstream, clone = history
+    publish(upstream)
+    refused = {"test-owner/studio/releases/latest", "test-owner/studio"}
+    asked = limited(monkeypatch, {}, refused)
+    status = checked(updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False))
+    assert "latest_release" not in status and "rate limit" in status["release_note"]
+    assert status["message"].startswith("An update is ready.") and "rate limit" in status["message"]
+    asked.clear()
+    assert updates.release_lookup("test-owner/studio") == (None, updates.RATE_NOTE) and asked == []  # kept: GitHub is not asked again
+
+
+def test_a_release_answer_is_kept_for_an_hour(monkeypatch):
+    asked = limited(monkeypatch, PARENT, set())
+    first = updates.release_lookup("test-owner/studio")
+    assert updates.release_lookup("test-owner/studio") == first and len(asked) == 1
+    kept_at, release, note = updates.releases["test-owner/studio"]
+    updates.releases["test-owner/studio"] = (kept_at - updates.RELEASE_CACHE_S - 1, release, note)
+    updates.release_lookup("test-owner/studio")
+    assert len(asked) == 2
+
+
+def test_a_lookup_that_never_reached_github_is_tried_again(monkeypatch):
+    assert updates.release_lookup("test-owner/studio") == (None, None)  # offline (the fixture)
+    asked = limited(monkeypatch, PARENT, set())
+    assert updates.release_lookup("test-owner/studio")[0]["tag"] == "v2.9.3" and len(asked) == 1
 
 
 def test_a_failed_release_lookup_is_left_out(history, tmp_path):

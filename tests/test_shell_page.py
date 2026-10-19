@@ -197,14 +197,14 @@ def test_a_brought_in_shot_opens_in_create_and_brains_save_the_default():
       out.create = [tab, C.scene, C.action, C.camera, C.dialogue[0].text, C.image, C.start];
       SU.apps = []; SU.cur = { id: "i1", app: "ScriptBreak", title: "Night Shift", shots: [{ id: "1", title: "Wide", scene: "Garage", action: "Enters" }] };
       out.importPage = text(viewImport());
-      BR.data = { default: "claude", settings: { remote: { host: "", backends: [] } }, backends: [{ id: "claude", label: "Claude Code", found: true, where: "ssh:sam@mac" }, { id: "local", label: "Local model server", kind: "http", found: true, models: ["qwen3"] }] };
+      BR.data = { default: "claude", settings: { remote: { host: "", backends: [] } }, backends: [{ id: "claude", label: "Claude Code", found: true, where: "ssh:user@workstation" }, { id: "local", label: "Local model server", kind: "http", found: true, models: ["qwen3"] }] };
       BR.tools = { tools: [] }; const page = viewBrains(); out.brains = text(page);
       await button(page, "Make default").attrs.onclick(); out.saved = calls.find(c => c[0] === "/api/brains/settings")[1].default;""")
     if out is None:
         return
     assert out["create"] == ["Create", "A garage at night.", "Maya turns.", "Slow push-in.", "Who's there?", "uploads/suite/x/12c.png", "own"]
     assert "Make a Slate film" in out["importPage"] and "Timeline with media for Resolve (ZIP)" in out["importPage"] and "Night Shift" in out["importPage"]
-    assert "signed in on sam@mac" in out["brains"] and "1 models" in out["brains"]
+    assert "signed in on user@workstation" in out["brains"] and "1 models" in out["brains"]
     assert out["saved"] == "local"
 
 
@@ -240,14 +240,16 @@ def test_a_lost_event_stream_polls_then_reconnects_with_backoff():
       streams[0].on.telemetry({ data: "{}" });
       const fail = i => { streams[i].onerror(); return [streams[i].closed, SHELL.telPoll != null, waits[waits.length - 1][0]]; };
       out.first = fail(0); waits[0][1](); out.second = fail(1); waits[1][1](); out.third = fail(2);
-      out.pollers = timers.size; out.telCalls = calls.filter(c => c[0] === "/api/telemetry").length;
+      const polls = () => [...timers.values()].filter(ms => ms === 3000).length;
+      out.pollers = polls(); out.dog = [...timers.values()].filter(ms => ms === 5000).length; out.telCalls = calls.filter(c => c[0] === "/api/telemetry").length;
       for (let i = 0; i < 6; i++) { waits[waits.length - 1][1](); fail(streams.length - 1); } out.cap = waits[waits.length - 1][0];
-      waits[waits.length - 1][1](); streams[streams.length - 1].onopen(); out.back = [SHELL.telPoll, timers.size, SHELL.telWait, SHELL.es === streams[streams.length - 1]];""")
+      waits[waits.length - 1][1](); streams[streams.length - 1].onopen(); out.back = [SHELL.telPoll, polls(), SHELL.telWait, SHELL.es === streams[streams.length - 1]];""")
     if out is None:
         return
     assert out["opened"] == 1 and out["applied"] >= 1
     assert out["first"] == [True, True, 2000] and out["second"] == [True, True, 4000] and out["third"] == [True, True, 8000]
     assert out["pollers"] == 1 and out["telCalls"] == 1  # one 3 s poll while down, not one per failure
+    assert out["dog"] == 1  # one watchdog, however often the stream is opened again
     assert out["cap"] == 30000
     assert out["back"] == [None, 0, 2000, True]  # the stream is back: the poll stops and the backoff starts over
 
@@ -476,6 +478,42 @@ def test_a_brain_card_signs_in_and_out_and_the_panel_follows_the_sign_in():
     assert out["signedOut"]
     assert "Sign in to each CLI right here" in out["settings"] and out["settingsButton"]
     assert "unknown variant `priority`" in out["broken"] and "brew upgrade codex" in out["broken"]
+
+
+def test_a_stream_that_goes_quiet_without_an_error_is_opened_again():
+    """A half-open tunnel: the EventSource neither errors nor delivers. The watchdog treats it as lost."""
+    out = run("""const streams = [], waits = [], dogs = []; let now = 1000000;
+      class FakeES { constructor(u) { this.readyState = 1; this.on = {}; streams.push(this); } addEventListener(k, f) { this.on[k] = f; } close() { this.readyState = 2; } }
+      window.EventSource = FakeES; globalThis.EventSource = FakeES; Date.now = () => now;
+      globalThis.setTimeout = (f, ms) => { waits.push([ms, f]); return 0; };
+      globalThis.setInterval = (f, ms) => { if (ms === 5000) dogs.push(f); return dogs.length; }; globalThis.clearInterval = () => {};
+      globalThis.telApply = t => { SHELL.telAt = now; }; answers["/api/telemetry"] = {};
+      SHELL.telDog = null; telStart(); streams[0].on.telemetry({ data: "{}" });
+      now += 4000; dogs[0](); out.fresh = [streams.length, streams[0].readyState, waits.length];
+      now += 16000; dogs[0](); out.quiet = [streams[0].readyState, SHELL.es, SHELL.telPoll != null, waits.length];
+      waits[0][1](); out.reopened = [streams.length, SHELL.es === streams[1]];
+      streams[1].readyState = 2; dogs[0](); out.closed = [SHELL.es, waits.length];
+      telStart(); out.oneDog = dogs.length;""")
+    if out is None:
+        return
+    assert out["fresh"] == [1, 1, 0]  # telemetry 4 s ago: left alone
+    assert out["quiet"] == [2, None, True, 1]  # 20 s without telemetry: closed, polled, and opened again after a wait
+    assert out["reopened"] == [2, True]
+    assert out["closed"] == [None, 2]  # closed without an error: the same
+    assert out["oneDog"] == 1
+
+
+def test_the_back_pill_takes_the_browsers_back_and_adds_no_page():
+    """Nodes → Looks → Back: the browser's own Back, so its Forward leads to Looks and its Back does not return to Looks."""
+    out = run("""const stack = [{ state: null, hash: "#Home" }]; let at = 0, backs = 0;
+      globalThis.history = { get state() { return stack[at].state; }, pushState(s, t, u) { stack.splice(at + 1); stack.push({ state: s, hash: u }); at++; },
+        replaceState(s, t, u) { stack[at] = { state: s, hash: u }; }, back() { backs++; at--; go(stack[at].hash.slice(1), { fromHash: true }); } };
+      go("Nodes"); go("Looks"); goBack(); out.after = [tab, at, stack.length, backs, [...SHELL.history]];
+      go("Voice"); history.replaceState(null, "", "#Voice"); goBack(); out.fallback = [tab, backs];""")
+    if out is None:
+        return
+    assert out["after"] == ["Nodes", 1, 3, 1, ["Home"]]  # back on Nodes, one entry back, nothing pushed; Forward still holds Looks
+    assert out["fallback"] == ["Nodes", 1]  # where the browser's entry is not the app's last page, Back still goes there
 
 
 if __name__ == "__main__":
