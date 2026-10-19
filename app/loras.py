@@ -30,6 +30,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import hf_gate
 from studio_home import studio_home
 
 from fastapi import APIRouter, HTTPException
@@ -94,9 +95,7 @@ def hosted(lora_id: str, platform: str) -> dict | None:
 def token() -> str:
     """The user's own Hugging Face token, for a file its author gates. Sent to huggingface.co only."""
 
-    found = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
-    saved = Path.home() / ".cache/huggingface/token"
-    return found.strip() or (saved.read_text().strip() if saved.is_file() else "")
+    return hf_gate.token()
 
 
 def check(path: Path, target: str = "video") -> int:
@@ -183,7 +182,7 @@ def download(recipe: dict, target: Path, state: dict) -> None:
 
     part = target.with_name(target.name + ".part")
     headers = {"User-Agent": "TensorFoldStudio"}
-    if recipe.get("status") == "gated" and "huggingface.co/" in recipe["url"] and token():
+    if hf_gate.repo_of(recipe["url"]) and token():  # the person's own token, to huggingface.co only: a gated file opens with it
         headers["Authorization"] = "Bearer " + token()
     try:
         digest = hashlib.sha256()
@@ -435,6 +434,10 @@ def attach(home: Path, pack: Path, spark: bool):
             if not ready(lora_id).is_file() and (state is None or state["stage"] == "failed"):
                 if not recipe.get("url") and not source(lora_id).is_file():
                     raise HTTPException(400, "this recipe has no download address")
+                if not source(lora_id).is_file() and not bundled(recipe) and not hosted(recipe["id"], "spark") and os.environ.get("LORA_OFFLINE") != "1":
+                    gate = hf_gate.gate_of(recipe["url"])  # a file its author gates: the page walks the person through it
+                    if gate["access"] not in ("open", "granted"):
+                        return {**public(recipe), "gate": gate}
                 busy[lora_id] = {"stage": "downloading", "done": 0, "of": 0}
                 threading.Thread(target=fetch, args=(recipe,), daemon=True).start()
         return public(recipe)

@@ -895,3 +895,9 @@ nav#rooms .lbl.long { white-space:normal; line-height:1.12; font-size:14.5px; }
 .lib-sound-top { display:flex; flex-direction:column; gap:4px; min-height:64px; }
 .lib-sound-top b { font:500 14px/1.35 var(--sans); color:var(--text); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .tile.lib-sound audio { width:100%; }
+
+/* a gated LoRA: the guide over the page (looks.js gateDraw) */
+.gate-wrap { position:fixed; inset:0; z-index:90; display:grid; place-items:center; padding:16px; background:rgba(4,7,12,.66); }
+.gate-sheet { width:min(560px, 100%); max-height:calc(100vh - 32px); overflow:auto; display:flex; flex-direction:column; gap:14px; padding:20px;
+  border-radius:var(--r3); border:1px solid var(--line2); background:var(--panel); box-shadow:var(--sh-lift); }
+.gate-sheet .signin-paste input { font-family:var(--mono); }

@@ -336,7 +336,7 @@ function loraHub(obj, save = () => {}, redraw = render) { if (!obj.loras) obj.lo
     return el("button", { type: "button", class: "small lora" + (on ? " on" : ""), title: (r.author ? "By " + r.author + ". " : "") + (r.notes || "") + (r.installed ? "" : " Click to download it to this machine."), onclick: async () => {
       if (st && st.stage !== "failed") return;
       if (!r.installed) { if (!confirm("Download “" + r.name + "”" + (r.author ? " by " + r.author : "") + " to this machine?\n\n" + (r.licence || "The file is the author's, under its own licence: read it on the LoRA's page first.") + (r.page ? "\n\n" + r.page : ""))) return;
-        try { await api("/api/loras/" + r.id + "/install", {}); await loadLoras(); if (!on) obj.loras.push({ id: r.id, strength: r.strength || 1, style: Object.keys(r.styles || {})[0] || "" }); hubWatch(redraw); done(); } catch (e) { toast(e.message); } return; }
+        try { const got = typeof loraInstallOne === "function" ? await loraInstallOne(r) : await api("/api/loras/" + r.id + "/install", {}); if (got && got.gate) return; await loadLoras(); if (!on) obj.loras.push({ id: r.id, strength: r.strength || 1, style: Object.keys(r.styles || {})[0] || "" }); hubWatch(redraw); done(); } catch (e) { toast(e.message); } return; }
       if (on) obj.loras = obj.loras.filter(p => p.id !== r.id); else obj.loras.push({ id: r.id, strength: r.strength || 1, style: Object.keys(r.styles || {})[0] || "" }); done(); } }, label); };
   const row = p => { const r = LORAS.find(x => x.id === p.id); if (!r) return null; const range = r.range || [0.1, 2];
     return el("div", { class: "row lorarow" }, el("div", { class: "fit", style: "min-width:210px" }, el("b", {}, r.name), el("div", { class: "note" }, (r.author ? "by " + r.author : "") + (r.trigger ? " · trigger " + r.trigger + ", added to the prompt for you" : "") + (r.installed ? "" : " · not installed yet: it is left out of the render"))),
@@ -361,7 +361,7 @@ function loraHub(obj, save = () => {}, redraw = render) { if (!obj.loras) obj.lo
   const terms = r => "“" + r.name + "”" + (r.author ? " by " + r.author : "") + (r.size ? " (" + sizeText(r.size) + ")" : "") + "\n" + (r.licence || "The file is the author's, under its own licence: read it on the LoRA's page first.") + (r.page ? "\n" + r.page : "");
   const install = async list => { if (!list.length) return toast("Nothing to download here");
     if (!confirm("Install on this machine?\n\n" + list.map(terms).join("\n\n"))) return;
-    for (const r of list) { try { await api("/api/loras/" + r.id + "/install", {}); } catch (e) { toast(e.message); } }
+    for (const r of list) { try { typeof loraInstallOne === "function" ? await loraInstallOne(r) : await api("/api/loras/" + r.id + "/install", {}); } catch (e) { toast(e.message); } }
     await loadLoras(); hubWatch(redraw); redraw(); };
   const inTab = r => HUB.tab === "all" || (r.category || ["mine"]).includes(HUB.tab);
   const words = HUB.q.trim().toLowerCase(), hit = r => !words || [r.name, r.author, r.what, r.notes, r.trigger].join(" ").toLowerCase().includes(words);

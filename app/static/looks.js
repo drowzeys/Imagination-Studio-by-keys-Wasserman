@@ -8,9 +8,56 @@ const LOOK_COVERS = { "wasserman-80s-horror": "art/looks/80s-horror.webp" };  //
 const lookFirstStyle = r => Object.keys(r.styles || {})[0] || "";
 const lookBusy = r => !!(r.installing && r.installing.stage !== "failed");
 const lookTerms = r => "“" + r.name + "”" + (r.author ? " by " + r.author : "") + (r.size ? " (" + sizeText(r.size) + ")" : "") + "\n" + (r.licence || "The file is the author's, under its own licence: read it on the LoRA's page first.") + (r.page ? "\n" + r.page : "");
+/* ---------- a file its author gates on Hugging Face (app/hf_gate.py): the one step the person takes, the rest by itself ----------
+   Install answers {gate} instead of starting: sign in to Hugging Face once (a read token, kept where Hugging Face's own
+   tools keep it), accept the licence on the model's page (opened in a new tab), and the download starts as soon as the
+   hub says access is granted. Hugging Face lets nobody accept a licence for someone else. */
+const GATE = { r: null, g: null, node: null, timer: null, token: "", busy: false, said: "" };
+async function loraInstallOne(r) { const out = await api("/api/loras/" + r.id + "/install", {}); if (out && out.gate) gateOpen(r, out.gate); return out; }
+const gateInstall = r => typeof loraInstallOne === "function" ? loraInstallOne(r) : api("/api/loras/" + r.id + "/install", {});
+function gateOpen(r, g) { GATE.r = r; GATE.g = g; GATE.said = ""; GATE.token = ""; gateDraw(); gateWatch(); }
+function gateClose() { clearInterval(GATE.timer); GATE.timer = null; GATE.r = null; if (GATE.node) { GATE.node.remove(); GATE.node = null; } }
+// while the person is on the licence page, the hub is asked every few seconds; access granted starts the download
+function gateWatch() { clearInterval(GATE.timer); GATE.timer = null; if (!GATE.r || !["accept", "pending"].includes(GATE.g.access)) return;
+  GATE.timer = setInterval(gateCheck, GATE.g.gated === "manual" ? 15000 : 4000); }
+async function gateCheck() { const r = GATE.r; if (!r) return;
+  let out; try { out = await api("/api/loras/" + r.id + "/install", {}); } catch (e) { GATE.said = e.message; gateDraw(); return; }
+  if (out && out.gate) { const was = GATE.g.access; GATE.g = out.gate; if (was !== GATE.g.access) { gateWatch(); gateDraw(); } return; }
+  gateClose(); toast("Access granted: “" + r.name + "” is downloading"); await loadLoras(); hubWatch(render); render(); }
+async function gateSaveToken() { const value = (GATE.token || "").trim(); if (!value) return toast("Paste the token first");
+  GATE.busy = true; GATE.said = ""; gateDraw();
+  try { const who = await api("/api/hf/token", { token: value }); GATE.token = ""; toast("Signed in to Hugging Face as " + who.user); await gateCheck(); }
+  catch (e) { GATE.said = e.message; } GATE.busy = false; if (GATE.r) gateDraw(); }
+function gateOpenPage() { const g = GATE.g; try { window.open(g.page, "_blank", "noopener"); } catch {} GATE.opened = true; gateWatch(); gateDraw(); }
+function gateDraw() { if (typeof document === "undefined" || !document.body) return; const r = GATE.r, g = GATE.g; if (!r) return;
+  const signed = g.access !== "sign_in", granted = g.access === "granted";
+  const step = (n, title, state, ...kids) => el("li", { class: "cn-step " + state, "data-step": "gate-" + n, "data-state": state },
+    el("span", { class: "cn-tick", "aria-hidden": "true" }, state === "done" ? "✓" : ""), el("div", { class: "cn-body" }, el("b", {}, title), ...kids.flat()));
+  const manual = g.gated === "manual";
+  const field = el("input", { type: "password", value: GATE.token, placeholder: "hf_…", "aria-label": "Hugging Face read token", autocomplete: "off", spellcheck: "false",
+    oninput: e => { GATE.token = e.target.value; }, onkeydown: e => { if (e.key === "Enter") gateSaveToken(); } });
+  const box = el("div", { class: "gate-sheet", role: "dialog", "aria-modal": "true", "aria-label": "Get access to " + r.name },
+    el("div", { class: "signin-head" }, el("b", {}, "“" + r.name + "” is gated by its author"), el("button", { type: "button", class: "small", onclick: gateClose }, "Close")),
+    el("p", { class: "note m-flat" }, manual ? "Its author approves each download on Hugging Face. Ask once; the studio installs it by itself when they say yes."
+      : "Accept its licence on Hugging Face once; the studio installs it by itself the moment you do."),
+    el("ol", { class: "cn-steps" },
+      step(1, "Sign in to Hugging Face", signed ? "done" : "wait", signed ? el("span", { class: "cn-said" }, "Signed in" + (g.user ? " as " + g.user : "") + ".")
+        : [el("span", { class: "cn-said" }, g.detail || "Make a read token on Hugging Face (free account), copy it and paste it here. It is kept where Hugging Face's own tools keep it, so model installs use it too."),
+          el("div", { class: "chips" }, el("button", { type: "button", class: "small", onclick: () => { try { window.open(g.token_page, "_blank", "noopener"); } catch {} } }, "Make a read token")),
+          el("div", { class: "signin-paste" }, field, el("button", { type: "button", class: "primary", disabled: GATE.busy, onclick: gateSaveToken }, GATE.busy ? "Checking…" : "Sign in"))]),
+      step(2, manual ? "Ask the author for access" : "Accept the licence", granted ? "done" : signed ? "wait" : "todo",
+        el("span", { class: "cn-said" }, g.access === "pending" ? "Requested: waiting for the author to approve. You can close this; Install again later, or keep it open and it installs by itself."
+          : manual ? "On the model's page, fill in the short form and press Submit. Read its licence there: it is the author's." : "On the model's page, read the licence and press “Agree and access repository”."),
+        signed && !granted ? el("div", {}, el("button", { type: "button", class: "primary", onclick: gateOpenPage }, GATE.opened ? "Open the page again" : "Open " + (g.repo || "the page"))) : null,
+        GATE.opened && g.access === "accept" ? el("span", { class: "note m-flat" }, "Checking every few seconds…") : null),
+      step(3, "Download", granted ? "done" : "todo", el("span", { class: "cn-said" }, "Starts by itself."))),
+    GATE.said ? el("div", { class: "note m-flat vt-bad" }, GATE.said) : null);
+  const node = el("div", { class: "gate-wrap", onclick: e => { if (e.target === node) gateClose(); } }, box);
+  if (GATE.node) GATE.node.replaceWith(node); else document.body.append(node); GATE.node = node;
+  if (!signed && document.activeElement !== field && field.focus) setTimeout(() => field.focus(), 0); }
 async function lookInstall(list) { if (!list.length) return toast("Nothing to download here");
   if (!confirm("Install on this machine?\n\n" + list.map(lookTerms).join("\n\n"))) return;
-  for (const r of list) { try { await api("/api/loras/" + r.id + "/install", {}); } catch (e) { toast(e.message); } }
+  for (const r of list) { try { await gateInstall(r); } catch (e) { toast(e.message); } }
   await loadLoras(); hubWatch(render); render(); }
 async function lookRemove(r) { if (!confirm("Remove the file of “" + r.name + "” from this machine?")) return;
   try { await api("/api/loras/" + r.id, undefined, "DELETE"); C.loras = (C.loras || []).filter(x => x.id !== r.id); await loadLoras(); render(); } catch (e) { toast(e.message); } }

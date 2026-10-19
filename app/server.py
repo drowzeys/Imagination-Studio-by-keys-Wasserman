@@ -2226,6 +2226,8 @@ import lora_flows  # noqa: E402  (what a hub LoRA needs of a clip)
 import loras  # noqa: E402  (Keys and Wasserman LoRA Hub, beside this file)
 lora_router, lora_resolve, lora_lead = loras.attach(HOME, PACK, SPARK)
 app.include_router(lora_router)
+import hf_gate  # noqa: E402  (gated weights: the person's Hugging Face sign-in and the licence they accept, beside this file)
+app.include_router(hf_gate.attach(lambda request: agents.local(request, True)))
 app.include_router(lineart.attach(HOME))
 import picture_edit  # noqa: E402  (a picture re-drawn by the image model, with the hub's image LoRAs)
 edit_router, edit_build = picture_edit.attach(HOME, PACK, SPARK, lora_resolve, inside, relative,
