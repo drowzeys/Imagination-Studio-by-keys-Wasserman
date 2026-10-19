@@ -2161,8 +2161,28 @@ or `oneshot-setup.sh --sound`; about 13 GB of weights in `$PREFIX/sound-models` 
 Both land in `~/ImaginationStudio/sound/` with a take file each, and in the Library under **Sound effects** (foley
 clips under Clips). `POST /api/jobs {kind: "sfx", params: {prompt, seconds, negative?, seed?, steps?, cfg?}}` or
 `{kind: "foley", params: {video, prompt?, negative?, keep_sound?, foley_db?, seed?}}`; `GET /api/sound/state`,
-`GET /api/sound/takes`. On a DGX Spark they are not run yet: the Spark runs models through ComfyUI with a measured
-memory estimate, and neither has one.
+`GET /api/sound/takes`.
+
+**On a DGX Spark** (`bash oneshot-setup-spark.sh --sound`, about 11 GB in `$SPARK_MODELS/Sound-Comfy`) both run through
+the studio's ComfyUI server (`spark/comfy.sh`, with its memory guard beside it) as `spark/spark_generate.py sfx` and
+`foley`, never as standalone model code:
+
+- **A sound effect** runs on ComfyUI's own Stable Audio nodes (the checkpoint, its T5-base encoder, the seconds as
+  conditioning, KSampler with dpmpp_3m_sde_gpu on the exponential schedule), the files from Stability's gated repo
+  with your own Hugging Face sign-in.
+- **Foley** runs on kijai's ComfyUI-MMAudio (MIT, pinned at `8eaeb72e`) with the Studio's own sampler node
+  (`spark/studio_mmaudio`, put beside it by `comfy.sh`): kijai's sampler reads one stream of frames as both CLIP's
+  8 a second and Synchformer's 25 a second, so a 24 fps clip would land a little early; the Studio's node takes the
+  clip's own rate and picks the frame on screen at each of MMAudio's times. The clip is brought to 384 rows before
+  ComfyUI decodes it (a 15 s clip at 1376x768 would be 4.6 GB of frames in memory, at 384 rows 1.1 GB). The weights
+  are Kijai/MMAudio_safetensors (fp16, run in bf16) and NVIDIA's BigVGAN v2, fetched by the install so nothing is
+  downloaded at the first take.
+
+Each starts from a ComfyUI server with nothing else loaded, as a song does. A kind renders on a Spark only once
+`spark/memory_guard.py` has its measured estimate (`SOUND_ESTIMATE`, `python3 spark/memory_guard.py sound`): it is
+asked before the job is queued and again before anything loads, and a kind with no measurement is refused with that
+reason. The WAV is levelled the way a song is (full level, peaks under -1 dBFS) and foley is laid under the clip by
+the same ffmpeg step as on a Mac.
 
 **Licences.** Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue); its
 Hugging Face page is gated, so accept the licence there first (the studio's Install guide signs you in to Hugging

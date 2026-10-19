@@ -1,16 +1,19 @@
-"""TensorFold Studio on a DGX Spark (CUDA): FastH3 video with sound, Qwen-Image-2.1 pictures and MiniMax Music 3 songs through ComfyUI.
+"""TensorFold Studio on a DGX Spark (CUDA): FastH3 video with sound, Qwen-Image-2.1 pictures, MiniMax Music 3 songs, sound effects and foley through ComfyUI.
 
     spark_generate.py video --prompt "..." -o clip.mp4 [--first-frame photo.jpg] [--last-frame end.jpg] [--steps 8] [--frames 124]
     spark_generate.py video --prompt "Use <Picture 1> as the person. ..." --ref face.png -o clip.mp4
     spark_generate.py video --prompt "<Picture 1> moves as in <Video 1>. ..." --ref face.png --ref-video move.mp4 -o clip.mp4
     spark_generate.py image --prompt "..." -o picture.png [--seeds 1,2,3] [--base --steps 40]
     spark_generate.py music --caption-file style.txt --lyrics-file lyrics.txt --seconds 60 --seed 7 -o song.wav
+    spark_generate.py sfx --prompt "rain on a tin roof" --seconds 8 -o rain.wav [--take rain.take.json --home STUDIO]
+    spark_generate.py foley --video clip.mp4 [--prompt "footsteps on gravel"] -o clip.wav --clip-out clip.foley.mp4
 
 It talks to a ComfyUI server that it starts on first use (spark/comfy.sh) and leaves running with the models
 loaded, so the next render skips the load. `bash spark/comfy.sh stop` frees the memory.
 
 Credit: FastVideo (Hao AI Lab) for FastH3 and its sparse attention, MiniMax for H3 and MiniMax-Music3, the Qwen
-team for Qwen-Image-2.1-Turbo, ComfyUI for the runtime.
+team for Qwen-Image-2.1-Turbo, Stability AI for Stable Audio Open, Ho Kei Cheng et al. for MMAudio and kijai for its
+ComfyUI nodes, ComfyUI for the runtime.
 """
 import argparse
 import asyncio
@@ -238,8 +241,8 @@ def render(workflow: dict, sampler: str, named: dict | None = None, stages: list
              and item.get("type", "output") == "output"]
     # the clip or the picture first, then the lossless sound track (save_sound) when the workflow has one
     found.sort(key=lambda item: item["filename"].endswith(".flac"))
-    if found and found[0]["filename"].endswith(".flac") and workflow.get("6", {}).get("class_type") == "EmptyMiniMaxMusic3LatentAudio":
-        return Saved(found[0]), time.time() - started  # a song: the sound file is the output
+    if found and found[0]["filename"].endswith(".flac") and any(node.get("class_type") in SOUND_ONLY for node in workflow.values()):
+        return Saved(found[0]), time.time() - started  # a song or a sound effect: the sound file is the output
     if not found or found[0]["filename"].endswith(".flac"):
         sys.exit("ComfyUI finished without writing a file")
     return Saved(found[0], next((item for item in found if item["filename"].endswith(".flac")), None)), time.time() - started
@@ -872,29 +875,29 @@ def music_workflow(caption: str, lyrics: str, seconds: float, seed: int, steps: 
     }
 
 
-def music_finish(track: Path, target: Path) -> dict:
-    """The song as the app keeps it: a 44.1 kHz stereo 16-bit WAV at full level, no peak over PEAK_DBFS (measured
-    between the samples, at four times the rate; a limiter only where a peak would pass it)."""
+def music_finish(track: Path, target: Path, what: str = "song", channels: int = 2) -> dict:
+    """The song (or sound effect, or foley) as the app keeps it: a 44.1 kHz 16-bit WAV at full level, no peak over
+    PEAK_DBFS (measured between the samples, at four times the rate; a limiter only where a peak would pass it)."""
 
     import numpy as np
 
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
-        sys.exit("a song is levelled with ffmpeg, which is not installed on this machine (sudo apt install ffmpeg)")
+        sys.exit(f"a {what} is levelled with ffmpeg, which is not installed on this machine (sudo apt install ffmpeg)")
     raw = subprocess.run([ffmpeg, "-v", "error", "-i", str(track), "-ar", str(4 * MUSIC_RATE), "-f", "f32le", "pipe:1"],
                          capture_output=True, timeout=600).stdout
     wave = np.frombuffer(raw, np.float32)
     if not len(wave) or not float(np.abs(wave).max()):
-        sys.exit("MiniMax Music 3 decoded a silent song")
+        sys.exit(f"the {what} came out silent")
     peak = 20 * math.log10(float(np.abs(wave).max())) + HEADROOM_DB
     chain = f"volume={HEADROOM_DB}dB"
     if peak > PEAK_DBFS:
         chain += (f",aresample={4 * MUSIC_RATE},alimiter=limit={10 ** ((PEAK_DBFS - 0.3) / 20):.4f}:level=disabled:attack=2:release=40,"
                   f"aresample={MUSIC_RATE}")
-    done = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(track), "-af", chain, "-ar", str(MUSIC_RATE), "-ac", "2",
+    done = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(track), "-af", chain, "-ar", str(MUSIC_RATE), "-ac", str(channels),
                            "-c:a", "pcm_s16le", str(target)], capture_output=True, text=True, timeout=600)
     if done.returncode or not target.is_file():
-        sys.exit("the song could not be written: " + done.stderr.strip()[-300:])
+        sys.exit(f"the {what} could not be written: " + done.stderr.strip()[-300:])
     return {"peak_dbfs_decoded": round(peak, 2), "limited": peak > PEAK_DBFS}
 
 
@@ -947,6 +950,155 @@ def music(args) -> None:
                                         "ar_s": round(ar, 1), "dit_s": round(dit, 1), "dav_s": round(dav, 1),
                                         "load_s": round(sum(t for name, t in stages if name in ("UNETLoader", "CLIPLoader", "VAELoader")), 1),
                                         "total_s": round(seconds, 1), "eos": audio_s < args.seconds - 0.5, **level}), flush=True)
+
+
+# Sound effects and foley (app/sound.py's jobs on a Spark; on a Mac sound_generate.py runs them in their own environment).
+#   sfx    Stability AI's Stable Audio Open 1.0 on ComfyUI's own Stable Audio nodes, the layout of ComfyUI's audio
+#          example: the checkpoint (DiT and VAE), its T5-base encoder, the seconds as conditioning, KSampler with
+#          dpmpp_3m_sde_gpu on the exponential schedule. 44.1 kHz stereo, up to 47 s. Stability AI Community License.
+#   foley  MMAudio large_44k_v2 (Ho Kei Cheng et al.) on kijai's ComfyUI-MMAudio loaders and the Studio's sampler node
+#          (spark/studio_mmaudio: the clip's frames at the times MMAudio reads them). 44.1 kHz mono. Weights CC-BY-NC 4.0.
+# The weights are under $SPARK_MODELS/Sound-Comfy (oneshot-setup-spark.sh --sound). Each starts from a ComfyUI server
+# with nothing else loaded, as a song does: they are measured on their own (memory_guard.sound_check).
+SOUND_DIR = "Sound-Comfy"
+SAO_CHECKPOINT = "stable_audio_open_1.0.safetensors"
+SAO_TEXT = "stable_audio_open_t5_base.safetensors"
+MMAUDIO = {"model": "mmaudio_large_44k_v2_fp16.safetensors", "vae": "mmaudio_vae_44k_fp16.safetensors",
+           "synchformer": "mmaudio_synchformer_fp16.safetensors", "clip": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors"}
+SFX_STEPS, SFX_CFG, SFX_SECONDS = 100, 7.0, (1.0, 47.0)        # the app's card (app/sound.py)
+FOLEY_STEPS, FOLEY_CFG, FOLEY_SECONDS = 25, 4.5, (1.0, 15.0)   # MMAudio's own; the studio's longest clip
+FOLEY_ROWS = 384  # the clip is brought to 384 rows before ComfyUI decodes it: MMAudio looks at 384x384 and 224x224
+SOUND_ONLY = {"EmptyMiniMaxMusic3LatentAudio", "EmptyLatentAudio", "StudioMMAudioSampler"}
+
+
+def sfx_workflow(prompt: str, negative: str, seconds: float, seed: int, steps: int = SFX_STEPS, cfg: float = SFX_CFG,
+                 prefix: str = "") -> dict:
+    prefix = prefix or f"studio/sfx_{uuid.uuid4().hex[:8]}"
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": SAO_CHECKPOINT}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": SAO_TEXT, "type": "stable_audio", "device": "default"}},
+        "3": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": negative}},
+        "5": {"class_type": "ConditioningStableAudio", "inputs": {"positive": ["3", 0], "negative": ["4", 0],
+                                                                  "seconds_start": 0.0, "seconds_total": round(seconds, 2)}},
+        "6": {"class_type": "EmptyLatentAudio", "inputs": {"seconds": round(seconds, 2), "batch_size": 1}},
+        "12": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": steps, "cfg": cfg,
+                                                    "sampler_name": "dpmpp_3m_sde_gpu", "scheduler": "exponential",
+                                                    "positive": ["5", 0], "negative": ["5", 1], "latent_image": ["6", 0],
+                                                    "denoise": 1.0}},
+        "13": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["12", 0], "vae": ["1", 2]}},
+        # HEADROOM_DB down before the lossless file, as a song; music_finish brings it back up
+        "17": {"class_type": "AudioAdjustVolume", "inputs": {"audio": ["13", 0], "volume": -HEADROOM_DB}},
+        "18": {"class_type": "SaveAudio", "inputs": {"audio": ["17", 0], "filename_prefix": prefix}},
+    }
+
+
+def foley_workflow(video: str, prompt: str, negative: str, seconds: float, seed: int, steps: int = FOLEY_STEPS,
+                   cfg: float = FOLEY_CFG, prefix: str = "") -> dict:
+    """``video`` is the name of the prepared clip in ComfyUI's input folder (prepared_clip, upload)."""
+
+    prefix = prefix or f"studio/foley_{uuid.uuid4().hex[:8]}"
+    return {
+        "1": {"class_type": "MMAudioModelLoader", "inputs": {"mmaudio_model": MMAUDIO["model"], "base_precision": "bf16"}},
+        "2": {"class_type": "MMAudioFeatureUtilsLoader", "inputs": {"vae_model": MMAUDIO["vae"], "synchformer_model": MMAUDIO["synchformer"],
+                                                                    "clip_model": MMAUDIO["clip"], "mode": "44k", "precision": "bf16"}},
+        "3": {"class_type": "LoadVideo", "inputs": {"file": video}},
+        "4": {"class_type": "GetVideoComponents", "inputs": {"video": ["3", 0]}},
+        "12": {"class_type": "StudioMMAudioSampler", "inputs": {"mmaudio_model": ["1", 0], "feature_utils": ["2", 0],
+                                                                "images": ["4", 0], "fps": ["4", 2], "duration": round(seconds, 3),
+                                                                "steps": steps, "cfg": cfg, "seed": seed, "prompt": prompt,
+                                                                "negative_prompt": negative}},
+        "17": {"class_type": "AudioAdjustVolume", "inputs": {"audio": ["12", 0], "volume": -HEADROOM_DB}},
+        "18": {"class_type": "SaveAudio", "inputs": {"audio": ["17", 0], "filename_prefix": prefix}},
+    }
+
+
+def prepared_clip(path, seconds: float, folder: Path) -> Path:
+    """The clip as ComfyUI is to decode it for foley: FOLEY_ROWS rows, its own frame rate, at most ``seconds``, no
+    sound, stored without loss. ComfyUI holds every decoded frame in memory as floats: at the clip's own size a 15 s
+    clip at 1376x768 would be 4.6 GB of them, at 384 rows 1.1 GB."""
+
+    target = folder / f"foley_{uuid.uuid4().hex[:8]}.mp4"
+    done = subprocess.run([_tool("ffmpeg"), "-v", "error", "-y", "-i", str(path), "-map", "0:v:0", "-an", "-t", f"{seconds:.3f}",
+                           "-vf", f"scale=-2:{FOLEY_ROWS}:flags=lanczos,setsar=1", "-c:v", "libx264rgb", "-qp", "0",
+                           "-preset", "veryfast", "-pix_fmt", "rgb24", str(target)], capture_output=True, text=True)
+    if done.returncode or not target.is_file():
+        sys.exit(f"cannot read frames from {path}: {done.stderr.strip()[-300:]}")
+    return target
+
+
+def sound(args) -> None:
+    """A sound effect (sfx) or a clip's foley through ComfyUI, then the WAV, the clip with it (foley) and the take file,
+    as sound_generate.py writes them on a Mac."""
+
+    sys.path.insert(0, str(HERE.parent))
+    import sound_generate  # the Mac runner's ffmpeg laying and take file; nothing of its models is imported
+
+    started, foley = time.time(), args.kind == "foley"
+    args.steps = args.steps or (FOLEY_STEPS if foley else SFX_STEPS)
+    args.cfg = args.cfg if args.cfg is not None else (FOLEY_CFG if foley else SFX_CFG)
+    if foley:
+        if not (args.video and args.clip_out):
+            sys.exit("foley takes --video and --clip-out")
+        clip = probe_media(args.video)
+        if clip["video"] is None:
+            sys.exit(f"{args.video} has no picture")
+        seconds = min(clip["seconds"], args.max_seconds, FOLEY_SECONDS[1])
+        if seconds < FOLEY_SECONDS[0]:
+            sys.exit("the clip is shorter than a second")
+    else:
+        seconds = args.seconds
+        if not args.prompt.strip():
+            sys.exit("say what is heard: --prompt")
+        if not SFX_SECONDS[0] <= seconds <= SFX_SECONDS[1]:
+            sys.exit(f"--seconds is {SFX_SECONDS[0]:g} to {SFX_SECONDS[1]:g}, got {seconds:g}")
+    found = memory_guard.sound_check(args.kind, seconds)
+    if found.get("route") is not None:
+        if found.get("need_mb"):
+            print(f"[tensorfold] memory: about {found['need_mb'] / 1000:.0f} GB at the peak (give or take {found['error_mb'] / 1000:g}) of "
+                  f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
+        if not found["fits"]:
+            sys.exit("refused before anything was loaded: " + found["reason"])
+    last = STATE.read_text().strip() if STATE.exists() else ""
+    if up() and last != args.kind:
+        fresh_server(("Stable Audio Open" if args.kind == "sfx" else "MMAudio") + " starts from a server with nothing else loaded")
+    ensure_server(args.kind)
+    if foley:
+        listed = call("/object_info/MMAudioModelLoader").get("MMAudioModelLoader", {}).get("input", {}).get("required", {})
+        names = listed.get("mmaudio_model", [[]])[0]
+        missing = [name for name in MMAUDIO.values() if name not in names]
+        if not listed or "StudioMMAudioSampler" not in call("/object_info/StudioMMAudioSampler"):
+            missing.insert(0, "ComfyUI-MMAudio and the Studio's sampler node")
+    else:
+        missing = [name for name, loader, field in ((SAO_CHECKPOINT, "CheckpointLoaderSimple", "ckpt_name"), (SAO_TEXT, "CLIPLoader", "clip_name"))
+                   if name not in call(f"/object_info/{loader}")[loader]["input"]["required"][field][0]]
+    if missing:
+        sys.exit(f"not installed: {', '.join(missing)} (bash oneshot-setup-spark.sh --sound; a ComfyUI that was running "
+                 "before the install needs bash spark/comfy.sh stop)")
+    target = Path(args.output)
+    with tempfile.TemporaryDirectory(prefix="studio-sound-") as scratch:
+        if foley:
+            name = upload(str(prepared_clip(args.video, seconds, Path(scratch))))
+            w = foley_workflow(name, args.prompt, args.negative, seconds, args.seed, args.steps, args.cfg)
+            print(f"[tensorfold] engine: cuda (ComfyUI, MMAudio large_44k_v2, bf16), {seconds:.2f} s of the clip, seed {args.seed}, "
+                  f"{args.steps} steps", flush=True)
+        else:
+            w = sfx_workflow(args.prompt, args.negative, seconds, args.seed, args.steps, args.cfg)
+            print(f"[tensorfold] engine: cuda (ComfyUI, Stable Audio Open 1.0), {seconds:g} s, seed {args.seed}, {args.steps} steps", flush=True)
+        try:
+            item, took = render(w, "12")
+        finally:
+            forget_uploads()
+        track = Path(scratch) / "sound.flac"
+        fetch(item, track)
+        (PREFIX / "ComfyUI" / "output" / item.get("subfolder", "") / item["filename"]).unlink(missing_ok=True)
+        level = music_finish(track, target, "foley track" if foley else "sound effect", 1 if foley else 2)
+    if foley:
+        sound_generate.lay(Path(args.video), target, Path(args.clip_out), args.replace, args.foley_db)
+    made = {"model": "MMAudio large_44k_v2" if foley else "Stable Audio Open 1.0", "rate": MUSIC_RATE,
+            "seconds": round(seconds, 3), "engine": "cuda", "render_s": round(took, 1), **level}
+    sound_generate.write_take(args, made, started)
+    print("[tensorfold] " + json.dumps({"output": str(target), **made}), flush=True)
 
 
 def image(args) -> None:
@@ -1074,6 +1226,18 @@ def main() -> None:
     m.add_argument("--ar-cfg", type=float, default=MUSIC_AR_CFG); m.add_argument("--top-k", type=int, default=MUSIC_TOP_K)
     m.add_argument("-o", "--output", required=True, help="the song, a .wav")
     m.set_defaults(run=music)
+    for kind, said in (("sfx", "Stable Audio Open 1.0: a sound effect from words (oneshot-setup-spark.sh --sound)"),
+                       ("foley", "MMAudio: a clip's sound made for its picture (oneshot-setup-spark.sh --sound)")):
+        f = kinds.add_parser(kind, help=said)  # the flags of sound_generate.py, which app/sound.py gives either runner
+        f.add_argument("--prompt", default=""); f.add_argument("--negative", default="")
+        f.add_argument("--seed", type=int, default=1)
+        f.add_argument("--steps", type=int); f.add_argument("--cfg", type=float)
+        f.add_argument("--seconds", type=float, default=6.0, help="sfx: 1 to 47")
+        f.add_argument("--video", help="foley: the clip"); f.add_argument("--max-seconds", type=float, default=FOLEY_SECONDS[1])
+        f.add_argument("--foley-db", type=float, default=-6.0); f.add_argument("--replace", action="store_true")
+        f.add_argument("--clip-out"); f.add_argument("--take"); f.add_argument("--home")
+        f.add_argument("-o", "--output", required=True, help="the sound, a .wav")
+        f.set_defaults(run=sound, kind=kind)
     args = parser.parse_args()
     if getattr(args, "text_encoder", "regular") != "regular":
         global H3_TEXT, TEXT_TAG

@@ -115,7 +115,7 @@ def test_each_setting_is_checked_before_the_job_is_queued(ready):
         assert words in answer.json()["error"], (kind, params, answer.json())
 
 
-def test_what_is_missing_is_said_and_a_spark_does_not_start_them(ready, monkeypatch, tmp_path):
+def test_what_is_missing_is_said(ready, monkeypatch, tmp_path):
     (ready["models"] / "stable-audio-open-1.0" / "model_index.json").unlink()
     state = sound.attach(server.HOME, ROOT, False, server.inside, server.relative)[0]
     said = client.get("/api/sound/state").json()  # the app's own router: what it sees with these settings
@@ -127,10 +127,6 @@ def test_what_is_missing_is_said_and_a_spark_does_not_start_them(ready, monkeypa
     with pytest.raises(Exception) as error:
         build("foley", {"video": "renders/walk.mp4"}, "x")
     assert "setup-sound.sh" in str(error.value.detail)
-    _, build, _, _ = sound.attach(server.HOME, ROOT, True, server.inside, server.relative)
-    with pytest.raises(Exception) as error:
-        build("sfx", {"prompt": "rain"}, "x")
-    assert "DGX Spark" in str(error.value.detail)
     assert set(said["kinds"]) == {"sfx", "foley"} and "CC-BY-NC" in said["kinds"]["foley"]["licence"] and state
 
 
@@ -140,3 +136,147 @@ def test_the_runner_names_its_licences_and_lays_foley_under_the_speech():
     assert "amix=inputs=2" in text and "limit=0.891" in text  # under the clip's own sound, peaks under -1 dBFS
     setup = (ROOT / "scripts/setup-sound.sh").read_text()
     assert "MMAUDIO_COMMIT=\"974010a026c731054592d8f777218bd9d85a6c24\"" in setup and "sudo" not in setup
+
+
+
+# ---------- a DGX Spark: ComfyUI's workflows, the memory guard, the commands ----------
+
+@pytest.fixture
+def spark(tmp_path, monkeypatch):
+    """A Spark install as app/sound.py looks for it: the studio's venv and ComfyUI, kijai's nodes, the weights."""
+
+    import memory_guard
+    prefix, models = tmp_path / "prefix", tmp_path / "spark-models"
+    for path in ("venv/bin/python", "ComfyUI/main.py", "ComfyUI/custom_nodes/ComfyUI-MMAudio/nodes.py"):
+        (prefix / path).parent.mkdir(parents=True, exist_ok=True)
+        (prefix / path).write_text("")
+    for kind in sound.SPARK_FILES:
+        for name in sound.SPARK_FILES[kind]:
+            (models / "Sound-Comfy" / name).parent.mkdir(parents=True, exist_ok=True)
+            (models / "Sound-Comfy" / name).write_bytes(b"w")
+    monkeypatch.setenv("PREFIX", str(prefix))
+    monkeypatch.setenv("SPARK_MODELS", str(models))
+    monkeypatch.delenv("SOUND_PYTHON", raising=False)
+    monkeypatch.setattr(memory_guard, "meminfo", lambda text=None: {"MemTotal": 124_500, "MemAvailable": 118_000, "MemFree": 100_000})
+    monkeypatch.setattr(memory_guard, "SOUND_ESTIMATE", {"sfx": (8_000, 10), "foley": (9_000, 50)})
+    clip = server.HOME / "renders" / "walk.mp4"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    clip.write_bytes(b"not really a clip")
+    return {"prefix": prefix, "models": models, "guard": memory_guard, "attach": lambda: sound.attach(server.HOME, ROOT, True, server.inside, server.relative)}
+
+
+def test_a_spark_runs_both_kinds_through_spark_generate_with_the_macs_flags(spark):
+    router, build, _, _ = spark["attach"]()
+    command, env, outputs = build("sfx", {"prompt": "rain on a tin roof", "seconds": 8, "seed": 3}, "j1")
+    assert command[0] == str(spark["prefix"] / "venv/bin/python") and command[1] == str(ROOT / "spark/spark_generate.py")
+    assert command[2] == "sfx" and "--models" not in command and command[command.index("--seconds") + 1] == "8"
+    assert outputs == [str(server.HOME / "sound/sfx/j1.wav")] and "--take" in command and "--home" in command
+    command, _, outputs = build("foley", {"video": "renders/walk.mp4", "keep_sound": True}, "j2")
+    assert command[2] == "foley" and "--clip-out" in command and "--replace" not in command and outputs[0].endswith("j2.mp4")
+    # every flag app/sound.py passes is one spark_generate.py's sfx and foley take
+    import spark_generate
+    parser_flags = {"--prompt", "--negative", "--seed", "--steps", "--cfg", "--seconds", "--video", "--max-seconds",
+                    "--foley-db", "--replace", "--clip-out", "--take", "--home", "-o"}
+    assert {a for a in command if a.startswith("--") or a == "-o"} <= parser_flags
+    text = (ROOT / "spark/spark_generate.py").read_text()
+    assert all(f'"{flag}"' in text for flag in parser_flags)
+    state = TestClient(_app(router)).get("/api/sound/state").json()
+    assert state["spark"] and state["kinds"]["sfx"]["ready"] and state["kinds"]["foley"]["ready"]
+
+
+def _app(router):
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(router)
+    return app
+
+
+def test_a_spark_refuses_a_kind_the_guard_has_not_measured_or_that_does_not_fit(spark, monkeypatch):
+    monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (8_000, 10)})
+    router, build, _, _ = spark["attach"]()
+    state = TestClient(_app(router)).get("/api/sound/state").json()
+    assert state["kinds"]["sfx"]["ready"] and not state["kinds"]["foley"]["ready"]
+    assert "not been measured on a DGX Spark" in state["kinds"]["foley"]["why"]
+    with pytest.raises(Exception) as error:
+        build("foley", {"video": "renders/walk.mp4"}, "x")
+    assert "measured memory estimate" in error.value.detail
+    monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (110_000, 10), "foley": (9_000, 50)})
+    with pytest.raises(Exception) as error:
+        build("sfx", {"prompt": "rain", "seconds": 40}, "x")
+    assert "refused" in error.value.detail and "floor" in error.value.detail
+    # what the Studio's own engines hold counts as room (server.held_room)
+    _, build, _, _ = sound.attach(server.HOME, ROOT, True, server.inside, server.relative, lambda: 124_000)
+    monkeypatch.setattr(spark["guard"], "meminfo", lambda text=None: {"MemTotal": 124_500, "MemAvailable": 20_000})
+    monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (8_000, 10), "foley": (9_000, 50)})
+    assert build("sfx", {"prompt": "rain"}, "x")[0][2] == "sfx"
+
+
+def test_a_spark_says_what_is_not_installed(spark):
+    (spark["prefix"] / "ComfyUI/custom_nodes/ComfyUI-MMAudio/nodes.py").unlink()
+    (spark["models"] / "Sound-Comfy" / sound.SPARK_FILES["sfx"][0]).unlink()
+    router, build, _, _ = spark["attach"]()
+    kinds = TestClient(_app(router)).get("/api/sound/state").json()["kinds"]
+    assert "gated" in kinds["sfx"]["why"] and "--sound" in kinds["sfx"]["why"]
+    assert "ComfyUI-MMAudio" in kinds["foley"]["why"] and "oneshot-setup-spark.sh --sound" in kinds["foley"]["why"]
+
+
+def test_the_sound_guard_is_measured_or_refuses():
+    import memory_guard
+    for kind, (fixed, per_second) in memory_guard.SOUND_ESTIMATE.items():  # each line holds its measured runs
+        assert memory_guard.SOUND_MEASURED.get(kind), kind
+        for asked, peak in memory_guard.SOUND_MEASURED[kind]:
+            assert abs(fixed + per_second * asked - peak) <= memory_guard.ERROR_MB, (kind, asked, peak)
+            assert asked <= memory_guard.SOUND_LONGEST[kind]
+    assert set(memory_guard.SOUND_LONGEST) == set(sound.KINDS)
+    assert memory_guard.SOUND_LONGEST["sfx"] == sound.SFX_SECONDS[1] and memory_guard.SOUND_LONGEST["foley"] == sound.FOLEY_SECONDS[1]
+    assert memory_guard.sound_check("sfx", 10, total_mb=0)["fits"]  # a Mac
+    unknown = memory_guard.sound_check("nothing", 5, available_mb=118_000, total_mb=124_500)
+    assert not unknown["fits"] and "not been measured" in unknown["reason"]
+
+
+def test_the_comfy_workflows(monkeypatch):
+    import spark_generate
+    w = spark_generate.sfx_workflow("rain on a tin roof", "music", 8, 3, 100, 7.0)
+    classes = {k: v["class_type"] for k, v in w.items()}
+    assert classes == {"1": "CheckpointLoaderSimple", "2": "CLIPLoader", "3": "CLIPTextEncode", "4": "CLIPTextEncode",
+                       "5": "ConditioningStableAudio", "6": "EmptyLatentAudio", "12": "KSampler", "13": "VAEDecodeAudio",
+                       "17": "AudioAdjustVolume", "18": "SaveAudio"}
+    assert w["2"]["inputs"]["type"] == "stable_audio" and w["5"]["inputs"]["seconds_total"] == 8 and w["6"]["inputs"]["seconds"] == 8
+    k = w["12"]["inputs"]
+    assert (k["steps"], k["cfg"], k["sampler_name"], k["scheduler"], k["seed"]) == (100, 7.0, "dpmpp_3m_sde_gpu", "exponential", 3)
+    assert k["positive"] == ["5", 0] and k["negative"] == ["5", 1] and w["13"]["inputs"]["vae"] == ["1", 2]
+    f = spark_generate.foley_workflow("studio_x.mp4", "gravel", "", 5.04, 9)
+    assert f["3"] == {"class_type": "LoadVideo", "inputs": {"file": "studio_x.mp4"}}
+    s = f["12"]["inputs"]
+    assert f["12"]["class_type"] == "StudioMMAudioSampler" and s["images"] == ["4", 0] and s["fps"] == ["4", 2]
+    assert (s["steps"], s["cfg"], s["duration"], s["seed"]) == (25, 4.5, 5.04, 9)
+    assert f["1"]["inputs"]["mmaudio_model"] == spark_generate.MMAUDIO["model"] and f["2"]["inputs"]["mode"] == "44k"
+    # the file names the app checks are the ones the workflows load
+    files = {Path(name).name for names in sound.SPARK_FILES.values() for name in names}
+    assert {spark_generate.SAO_CHECKPOINT, spark_generate.SAO_TEXT, *spark_generate.MMAUDIO.values()} <= files
+    # a sound-only workflow returns its flac (render's SOUND_ONLY)
+    assert {"EmptyLatentAudio", "StudioMMAudioSampler"} <= spark_generate.SOUND_ONLY
+
+
+def test_the_studio_sampler_takes_frames_at_mmaudios_times():
+    sys.path.insert(0, str(ROOT / "spark"))
+    import studio_mmaudio
+    clip = studio_mmaudio.times(120, 24.0, 8.0, 5.0)   # 5 s of a 24 fps clip, CLIP's 8 a second
+    assert len(clip) == 40 and clip[:4] == [0, 3, 6, 9] and clip[-1] == 117
+    sync = studio_mmaudio.times(120, 24.0, 25.0, 5.0)  # Synchformer's 25 a second
+    assert len(sync) == 125 and sync[:3] == [0, 0, 1] and sync[-1] == 119
+    assert max(studio_mmaudio.times(30, 30.0, 25.0, 2.0)) == 29  # never past the last frame
+    assert "StudioMMAudioSampler" in studio_mmaudio.NODE_CLASS_MAPPINGS
+
+
+def test_the_spark_install_pins_the_nodes_and_starts_the_sampler_beside_them():
+    setup = (ROOT / "oneshot-setup-spark.sh").read_text()
+    assert "--sound) SOUND=1" in setup and "MMA_COMMIT=8eaeb72edc3aaf2059b57f2d96a1f6f689f19ae2" in setup
+    assert "Sound-Comfy/mmaudio" in setup and "Sound-Comfy/checkpoints" in setup and "Sound-Comfy/text_encoders" in setup
+    assert "hf_gate" in setup and "CC-BY-NC 4.0" in setup and "Stability AI Community License" in setup
+    section = setup[setup.index('if [ "$SOUND" = 1 ]'):setup.index('if [ "$H3_BASE" = 1 ]')]
+    assert "sudo" not in section and "--constraint" in section
+    comfy = (ROOT / "spark/comfy.sh").read_text()
+    assert "studio_mmaudio" in comfy and "ComfyUI-MMAudio/nodes.py" in comfy
+    import sparks
+    assert "spark/studio_mmaudio/*.py" in sparks.CODE

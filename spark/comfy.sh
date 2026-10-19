@@ -38,6 +38,12 @@ case "${1:-start}" in
       mkdir -p "$NODE" && cp "$HERE/tensorfold_h3/__init__.py" "$NODE/"
       export TF_H3_LIB="$PREFIX/tf-h3/libtf_h3.so"
     fi
+    # the Studio's MMAudio sampler (foley), beside kijai's ComfyUI-MMAudio when oneshot-setup-spark.sh --sound put it there
+    NODE="$PREFIX/ComfyUI/custom_nodes/studio_mmaudio"
+    rm -rf "$NODE"
+    if [ -f "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio/nodes.py" ] && [ -f "$HERE/studio_mmaudio/__init__.py" ]; then
+      mkdir -p "$NODE" && cp "$HERE/studio_mmaudio/__init__.py" "$NODE/"
+    fi
     cd "$PREFIX/ComfyUI"
     # --use-ck-attention: ComfyUI's own flash-attention kernel, 12% faster a pass than PyTorch's on a GB10
     if [ -n "${SPARK_GOVERNOR:-}" ]; then

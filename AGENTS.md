@@ -233,10 +233,16 @@ Rules:
   `sfx` (Stable Audio Open 1.0, Stability AI Community License, gated on Hugging Face) and `foley` (MMAudio large_44k_v2,
   weights CC-BY-NC 4.0: non-commercial; say so when asked about commercial use) in `$PREFIX/sound-venv`, never the
   Studio's venv. Foley is laid under the clip's own sound (speech stays, peaks under -1 dBFS) unless asked to replace
-  it. A DGX Spark refuses both until they run through ComfyUI with a measured memory estimate: do not run them there
-  as standalone model code.
-- mflux, minimax-h3-mlx, flux3-mlx and TensorFold's music3-mlx and MMAudio are pinned by commit and used at run time. Do not unpin.
+  it. On a DGX Spark (`oneshot-setup-spark.sh --sound`) both go through the ComfyUI server of `spark/comfy.sh` as
+  `spark_generate.py sfx|foley` (the same flags as `sound_generate.py`): ComfyUI's own Stable Audio nodes
+  (`sfx_workflow`), and kijai's ComfyUI-MMAudio (pinned `MMA_COMMIT`) with the Studio's `StudioMMAudioSampler`
+  (`spark/studio_mmaudio`, `foley_workflow`): kijai's own sampler reads one frame stream as both 8 and 25 fps, so keep
+  the Studio's node, which picks frames by the clip's own rate. Never run either as standalone model code there. A
+  kind renders on a Spark only when `memory_guard.SOUND_ESTIMATE` has its measured line (`sound_check`, asked when
+  the job is queued and in `spark_generate.py` before anything loads); `SOUND_ESTIMATE` and `SOUND_MEASURED` are
+  measurements, added only from runs on a worker Spark under the DGX Spark memory rules above.
+- mflux, minimax-h3-mlx, flux3-mlx, TensorFold's music3-mlx, MMAudio and ComfyUI-MMAudio are pinned by commit and used at run time. Do not unpin.
 
-**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), Stability AI (Stable Audio Open), Ho Kei Cheng et al. (MMAudio), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),
+**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), Stability AI (Stable Audio Open), Ho Kei Cheng et al. (MMAudio), kijai (ComfyUI-MMAudio), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),
 RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx / Phosphene), Filip Strand and mflux contributors, Viggle, speach1sdef178, LightX2V,
 NVIDIA Research, FastVideo, Sam Wasserman (Slate: the film workflow in Production; keep app/static/slate/NOTICE. Motion Previs Studio: the Motion Previs tab's analysis is a modified Python port of it; keep LICENSES/Motion-Previs-Studio-NOTICE, THIRD_PARTY_NOTICES.md and the headers of app/motion*.py, and keep the link to the original), Apple MLX. Authors only — no credit hyperlinks, except the link to Motion Previs Studio.

@@ -1096,6 +1096,14 @@ def clip_seconds(params: dict) -> float:
     return {count: named for named, count in DURATIONS.items()}.get(frames) or min(frames / FPS * 120 / 124, float(LONGEST))
 
 
+def held_room() -> int | None:
+    """What this machine has for a render while Drama 3 or MiniMax Music 3's CUDA engine is loaded (both are unloaded
+    before any other job starts, so their memory counts as that job's, like the ComfyUI server's own); None otherwise."""
+
+    held = [one for one in (voice.room_mb(), music.room_mb()) if one]
+    return max([memory_guard.room_mb() or 0] + held) if held else None
+
+
 def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | None = None) -> dict:
     """Whether a clip fits this machine's memory (spark/memory_guard.py; a DGX Spark only, everything fits on a Mac):
     the size it is generated at, its frames, whether references put it on ComfyUI's own bfloat16 blocks and whether a
@@ -1113,8 +1121,7 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
     engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
     # a Drama 3 server kept loaded after a voice take is unloaded before this job starts (voice.release): its memory
     # counts as this job's, like the ComfyUI server's own; so does MiniMax Music 3's CUDA engine (music.release)
-    held = [one for one in (voice.room_mb(), music.room_mb()) if one]
-    room = max([memory_guard.room_mb() or 0] + held) if held else None
+    room = held_room()
     return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room,
                               base=env.get("SPARK_BASE") == "h3", engine=engine,
                               pictures=len(found.get("pictures") or []),
@@ -2291,7 +2298,7 @@ app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)
 action_router, action_build, action_title, action_source = actions.attach(HOME, PACK, SPARK, inside, relative)
 import sound  # noqa: E402  (sound effects and foley: Stable Audio Open and MMAudio, run locally, beside this file)
-sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative)
+sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative, held_room)
 app.include_router(action_router)
 app.include_router(sound_router)
 import clear  # noqa: E402  (finished jobs and their files into the trash folder, and back, beside this file)

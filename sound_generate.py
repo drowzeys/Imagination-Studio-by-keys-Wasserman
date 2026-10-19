@@ -163,15 +163,23 @@ def main() -> int:
         parser.error("foley takes --video and --clip-out")
     started = time.time()
     made = sfx(args) if args.kind == "sfx" else foley(args)
-    if args.take:
-        home = Path(args.home) if args.home else None
-        rel = lambda p: str(Path(p).resolve().relative_to(home.resolve())) if home and p else (str(p) if p else None)
-        Path(args.take).write_text(json.dumps({"id": Path(args.output).stem, "kind": args.kind, "prompt": args.prompt, "negative": args.negative,
-                                               "seed": args.seed, "steps": args.steps, "cfg": args.cfg, "path": rel(args.output),
-                                               "clip": rel(args.clip_out), "source": rel(args.video), "created": time.time(),
-                                               "elapsed": round(time.time() - started, 1), **made}, indent=1))
+    write_take(args, made, started)
     say(f"done in {time.time() - started:.1f} s")
     return 0
+
+
+def write_take(args, made: dict, started: float) -> None:
+    """The take file beside the sound (--take), paths relative to the studio folder (--home); spark_generate.py's sfx
+    and foley write the same one."""
+
+    if not args.take:
+        return
+    home = Path(args.home) if args.home else None
+    rel = lambda p: str(Path(p).resolve().relative_to(home.resolve())) if home and p else (str(p) if p else None)
+    Path(args.take).write_text(json.dumps({"id": Path(args.output).stem, "kind": args.kind, "prompt": args.prompt, "negative": args.negative,
+                                           "seed": args.seed, "steps": args.steps, "cfg": args.cfg, "path": rel(args.output),
+                                           "clip": rel(args.clip_out), "source": rel(args.video), "created": time.time(),
+                                           "elapsed": round(time.time() - started, 1), **made}, indent=1))
 
 
 if __name__ == "__main__":

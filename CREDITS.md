@@ -153,6 +153,11 @@ reads the words, so the sound lands on what is seen. Its code is MIT (Sony Resea
 BigVGAN v2 vocoder (Sang-gil Lee et al.). The studio installs it from its repository at a pinned commit, in an
 environment of its own; the pack ships none of its code or weights.
 
+**kijai** (Jukka Seppänen) wrote **ComfyUI-MMAudio** (MIT), the ComfyUI nodes foley runs on on a DGX Spark, and its
+safetensors copies of MMAudio's weights. The studio clones it at a pinned commit; its own sampler node beside it
+(`spark/studio_mmaudio`) calls kijai's loaders' models and generate. On a Spark a sound effect runs on **ComfyUI**'s
+own Stable Audio nodes.
+
 ## The first native Mac engine: Salvatore Sanfilippo (antirez)
 
 **antirez** wrote **h3.c**, MiniMax H3 in C and Metal. It is the reference for what is possible on Apple
