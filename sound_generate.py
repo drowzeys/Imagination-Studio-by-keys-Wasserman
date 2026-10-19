@@ -62,12 +62,34 @@ def has_sound(video: Path) -> bool:
     return bool(done.stdout.strip())
 
 
+def gaussian_noise_on_metal() -> None:
+    """Stable Audio Open's solver (sde-dpmsolver++) draws its noise from a torchsde Brownian tree. On Metal the tree's
+    interval search never ends inside the pipeline (RecursionError, measured on an M4 Max with torch 2.14), so there it
+    draws plain seeded Gaussian noise each step instead: k-diffusion's own default for this solver. The tree only
+    makes the noise agree across step sizes; a take is still repeatable from its seed."""
+
+    import torch
+    import diffusers.schedulers.scheduling_cosine_dpmsolver_multistep as cosine
+
+    class GaussianNoise:
+        def __init__(self, x, sigma_min=None, sigma_max=None, seed=None, transform=None):
+            first = seed[0] if isinstance(seed, list) else seed
+            self.shape, self.generator = x.shape, torch.Generator("cpu").manual_seed(int(first or 0))
+
+        def __call__(self, sigma, sigma_next):
+            return torch.randn(self.shape, generator=self.generator, dtype=torch.float32)
+
+    cosine.BrownianTreeNoiseSampler = GaussianNoise
+
+
 def sfx(args) -> dict:
     import torch
     from diffusers import StableAudioPipeline
     device, dtype = device_of()
     folder = Path(args.models) / "stable-audio-open-1.0"
     say(f"Stable Audio Open on {device}: loading")
+    if device == "mps":
+        gaussian_noise_on_metal()
     pipe = StableAudioPipeline.from_pretrained(str(folder), torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
     generator = torch.Generator("cpu").manual_seed(args.seed)
     say(f"{args.steps} passes for {args.seconds:g} s")

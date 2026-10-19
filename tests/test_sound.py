@@ -133,6 +133,7 @@ def test_what_is_missing_is_said(ready, monkeypatch, tmp_path):
 def test_the_runner_names_its_licences_and_lays_foley_under_the_speech():
     text = (ROOT / "sound_generate.py").read_text()
     assert "StableAudioPipeline" in text and "large_44k_v2" in text and "CC-BY-NC 4.0" in text
+    assert "gaussian_noise_on_metal" in text  # Stable Audio Open on Metal: the Brownian tree never ends there (measured)
     assert "amix=inputs=2" in text and "limit=0.84" in text  # under the clip's own sound, peaks under -1 dBFS
     setup = (ROOT / "scripts/setup-sound.sh").read_text()
     assert "MMAUDIO_COMMIT=\"974010a026c731054592d8f777218bd9d85a6c24\"" in setup and "sudo" not in setup
