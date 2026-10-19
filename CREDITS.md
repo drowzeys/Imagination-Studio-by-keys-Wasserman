@@ -13,7 +13,7 @@ Studio M5 Ultra. Cite the authors first.
 **Keys (drowzeys)** built this studio: the app and its scripts, the Mac and the DGX Spark builds and the carrier
 image, the TensorFold families for Qwen-Image and MiniMax H3 with their int8 tensor-unit kernels, the native and CUDA
 engines the studio runs (FastH3 on Metal, H3, Drama 3 and MiniMax Music 3 on CUDA, and Music 3 on Metal), and the
-measurements every setting here is held to. Imagination Studio is **by Keys + Wasserman**.
+measurements every setting here is held to. Imagination Studio is **by keys+Wasserman**.
 
 ## The studio's design and Wasserman's Filmmaker Suite: Sam Wasserman and Wasserman Productions
 

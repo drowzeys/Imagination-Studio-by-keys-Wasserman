@@ -126,7 +126,7 @@ function viewHome() {
     el("div", { class: "over" },
       el("div", { class: "stack" }, el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap" }, el("span", { class: "eyebrow" }, new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })), tc),
         el("h1", { class: "display" }, hello), el("p", { class: "tagline" }, "Local Creative ", el("em", {}, "All in One"), " Studio"),
-        el("p", { class: "creator" }, el("span", { class: "by" }, "by"), el("img", { src: "brand/keys-wasserman-neon.svg", alt: "Keys + Wasserman", width: 320, height: 37 })),
+        el("p", { class: "creator" }, el("span", { class: "by" }, "by"), el("img", { src: "brand/keys-wasserman-neon.svg", alt: "keys+Wasserman", width: 320, height: 37 })),
         el("p", { class: "home-links" }, HOME_LINKS.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label))),
         el("p", { class: "sub", style: "margin:0" }, line + " Pictures, clips with sound, voices and score, made on your own machine.")),
       el("div", { class: "acts" }, el("button", { onclick: () => go("Production") }, "Plan a film"), el("button", { class: "ghost", onclick: palOpen }, "Search ", el("kbd", {}, "⌘K")))));
