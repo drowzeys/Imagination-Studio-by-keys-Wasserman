@@ -1,11 +1,12 @@
 """The Nodes page (app/static/nodes.js), run in node with the page's helpers stood in for: python3 -m pytest
 tests/test_nodes_page.py. Skipped where node is not installed."""
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from test_shell_page import need_node
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "app"))
@@ -52,8 +53,7 @@ vm.runInThisContext(`(async () => { const out = {}; ${fs.readFileSync(process.ar
 
 
 def run(code: str) -> dict:
-    if not shutil.which("node"):
-        return None
+    need_node()
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "harness.js").write_text(HARNESS)
         (Path(scratch) / "test.js").write_text(code)
@@ -65,8 +65,6 @@ def run(code: str) -> dict:
 
 def test_the_page_knows_the_same_cards_as_the_server():
     out = run("out.types = ND_TYPES; out.ready = window.NODES_READY;")
-    if out is None:
-        return
     assert out["ready"] is True
     page = {k: {"inputs": v["inputs"], "outputs": v["outputs"], "params": v["params"]} for k, v in out["types"].items()}
     server = {k: {"inputs": v["inputs"], "outputs": v["outputs"], "params": v["params"]} for k, v in nodes.NODE_TYPES.items()}
@@ -88,8 +86,6 @@ def test_add_connect_and_serialize():
       ndConnect(v.id, "audio", c.id, "refs");
       const s = ndSerialize(); out.graph = s; out.ids = ND.graph.nodes.map(n => n.id);
       ND.sel = { node: p.id }; ndRemove(); out.afterRemove = ND.graph.edges.filter(x => x.from === p.id || x.to === p.id).length; out.dirty = ND.dirty;""")
-    if out is None:
-        return
     assert out["ok"] == "" and out["ok2"] == ""
     assert out["wrong"] == "Voice gives audio, and the prompt of Clip takes text"
     assert out["self"] == "a card cannot feed itself"
@@ -112,8 +108,6 @@ def test_a_reference_card_gives_the_kind_of_file_it_holds():
       out.first = ndConnect(r.id, "file", c.id, "first_frame");
       r.params.kind = "audio"; ndRetype(r); out.left = ND.graph.edges.length;
       out.now = ndConnect(r.id, "file", c.id, "first_frame"); out.refs = ndConnect(r.id, "file", c.id, "refs");""")
-    if out is None:
-        return
     assert out["first"] == "" and out["left"] == 0
     assert out["now"] == "Reference gives audio, and the first frame of Clip takes image" and out["refs"] == ""
 
@@ -132,8 +126,6 @@ def test_the_view_draws_cards_ports_and_links_and_the_palette_filters():
       ND.palette.link = { type: "audio" }; out.forAudio = ndPaletteTypes().map(x => x[0]);
       ND.palette = { screen: [0, 0], world: [500, 300], link: null, q: "music" }; out.search = ndPaletteTypes().map(x => x[0]);
       ndPick("song"); out.added = ND.graph.nodes[ND.graph.nodes.length - 1].type;""")
-    if out is None:
-        return
     assert out["empty"] and out["open"]
     assert out["cards"] == 2 and out["ports"] == 5  # the text's output; the clip's prompt, first frame and refs, and its video
     assert out["wires"] == 1 and "t-text" in out["wireClass"]
@@ -160,8 +152,6 @@ def test_run_checks_then_asks_the_memory_guard_then_queues():
       answers["/api/nodes/runs/r1/cancel"] = { ...ND.run, status: "cancelled" }; await ndCancel(); out.cancel = calls.pop();
       answers["/api/nodes/check"] = { ok: false, problems: [{ node: c.id, message: "Clip needs its prompt: join a card that gives text" }] };
       calls.length = 0; await ndRun(); out.calls3 = calls.map(c => c[0]); out.problem = toasts.pop(); out.bad = ND.cards[c.id].attrs.class;""")
-    if out is None:
-        return
     assert out["calls1"] == ["/api/nodes/check", "/api/estimate"] and "this clip needs 96 GB" in out["refused"]
     assert "Does not fit" in out["card"]
     assert out["calls2"] == ["/api/nodes/check", "/api/estimate", "/api/nodes/run"]
@@ -181,8 +171,6 @@ def test_save_open_and_a_template_load():
       const n = ndAdd("note", 0, 0); out.next = n.id;
       answers["/api/nodes/graphs/g9"] = { id: "g9", name: "Back", nodes: [{ id: "n7", type: "song", x: 0, y: 0, params: { seconds: 20 } }], edges: [] };
       await ndOpen("g9"); out.reopened = ndSerialize(); out.seq = ndAdd("text", 0, 0).id;""")
-    if out is None:
-        return
     assert out["dirty"] is True and out["loaded"]["name"] == "Still → Clip" and "id" not in out["loaded"]
     assert out["loaded"]["nodes"][1]["params"] == nodes.NODE_TYPES["clip"]["params"]  # the card's defaults filled in
     assert out["id"] == "g9" and out["saved"] == "Saved Still → Clip" and out["post"][1]["edges"] == [{"from": "t1", "out": "text", "to": "c1", "in": "prompt"}]
@@ -194,8 +182,6 @@ def test_a_phone_sees_the_graph_read_only():
     out = run("""globalThis.PHONE = true; ndLoad({ id: "g1", name: "Mine", nodes: [{ id: "t1", type: "text", x: 0, y: 0, params: { text: "a" } }], edges: [] });
       const view = viewNodes(); out.text = text(view); out.run = !!button(view, "Run"); out.save = !!button(view, "Save");
       out.disabled = find(view, n => n.tag === "textarea").attrs.disabled; calls.length = 0; await ndRun(); await ndSave(); out.calls = calls.length;""")
-    if out is None:
-        return
     assert "Best on a desktop" in out["text"] and not out["run"] and not out["save"]
     assert out["disabled"] is True and out["calls"] == 0
 
@@ -214,8 +200,6 @@ def test_a_double_click_on_run_starts_one_run():
       answers["/api/nodes/run"] = new Error("a graph is running: cancel it or let it finish first");
       ND.run.status = "done"; calls.length = 0; answers["/api/nodes/check"] = { ok: true, problems: [], order: [] };
       await ndRun(); out.refused = toasts.pop(); out.again = text(ND.root.querySelector("nd-bar"));""")
-    if out is None:
-        return
     assert "Starting" in out["during"] and out["disabled"]
     assert out["runs"] == 1 and out["checks"] == 1
     assert "Cancel run" in out["after"] and "Starting" not in out["after"]
@@ -234,8 +218,6 @@ def test_the_canvas_maths_follows_the_type_size_zoom():
       out.right = 1400 + 248; out.inside = (out.right * ND.view.k + ND.view.x) <= 1000;
       ND.view = { x: 10, y: 20, k: 1 }; ND.space = true; ndDown({ button: 0, target: ND.stage, clientX: 0, clientY: 0, preventDefault() {} });
       ndMove({ clientX: 119.4, clientY: 59.7 }); out.pan = [Math.round(ND.view.x), Math.round(ND.view.y)]; ndUp({}); ND.space = false;""")
-    if out is None:
-        return
     assert abs(out["zoom"] - 1.194) < 1e-9 and out["native"] == 1.5
     assert [round(v, 6) for v in out["world"]] == [300, 200]  # the point under the pointer, in the canvas's own units
     assert out["inside"]  # Fit keeps the whole graph inside the stage's own width

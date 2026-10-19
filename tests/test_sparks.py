@@ -4,7 +4,6 @@ that answers the calls this app makes to one (its page's own API), and ssh, rsyn
 import ast
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +11,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from test_shell_page import need_node
 
 ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp()) / "TensorFoldStudio"))
@@ -558,8 +559,7 @@ vm.runInThisContext(`(async () => { const out = {};
 
 
 def test_the_page_draws_the_chooser_and_the_list():
-    if not shutil.which("node"):
-        return
+    need_node()
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "harness.js").write_text(PAGE)
         done = subprocess.run(["node", str(Path(scratch) / "harness.js"), str(ROOT / "app/static/sparks.js")], capture_output=True, text=True, timeout=60)

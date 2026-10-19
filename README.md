@@ -3335,6 +3335,8 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
   ashhart/TensorFold as draft pull requests (#384, #393, #405) and closed on 2026-10-07: the engine is built around
   token lanes with exact output, it does not trade precision as the int8 kernels do, its Python engine is frozen and
   its new Zig engine drives Metal without MLX. This code lives in the `drowzeys/TensorFold` fork, on 0.6.5.
+- **Tests.** `python -m pytest -q tests`, no GPU or weights; the page tests run the app's JavaScript and need Node 20 or
+  newer (skipped without it). GitHub Actions runs the suite on every pull request (`.github/workflows/tests.yml`).
 
 ## Credits
 
