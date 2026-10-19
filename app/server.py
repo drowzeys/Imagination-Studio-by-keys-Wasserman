@@ -1156,6 +1156,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     scripts = PACK / "scripts"
     if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove
         return action_build(kind, params, job_id)
+    if kind in sound.KINDS:  # a sound effect or a clip's foley (sound.py)
+        return sound_build(kind, params, job_id)
     seed = str(int(params.get("seed", 0)))
     if kind == "scout":
         folder = HOME / "scouts" / job_id
@@ -1784,7 +1786,7 @@ def queue_job(body: dict) -> dict:
     if body.get("title") is not None and not isinstance(body.get("title"), str):
         raise HTTPException(400, "title is text")
     params = dict(body.get("params") or {})
-    if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS:
+    if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS + sound.KINDS:
         raise HTTPException(400, "unknown job kind")
     if kind == "long" and (params.get("last_image") or params.get("last_same") or params.get("last_frame_from")):
         raise HTTPException(400, "a last frame is for single clips: a long video is a chain of clips")
@@ -1794,7 +1796,7 @@ def queue_job(body: dict) -> dict:
             raise HTTPException(400, f"a long video is over {LONGEST} seconds and at most {max(LONG) // 60} minutes")
         pieces = plan(total, int(params.get("segment_seconds", LONGEST)))
         build("video", {**params, "seconds": pieces[0], "output": None}, "check")
-    if kind not in ("export", "edit") + actions.KINDS and not (params.get("prompt") or "").strip():
+    if kind not in ("export", "edit", "foley") + actions.KINDS and not (params.get("prompt") or "").strip():
         raise HTTPException(400, "a prompt is needed")
     if kind != "video" and params.get("references"):
         raise HTTPException(400, "reference pictures are for single clips")
@@ -1822,8 +1824,8 @@ def queue_job(body: dict) -> dict:
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     if kind not in ("export", "long"):
         build(kind, params, job_id)  # reject bad settings now, not when the job's turn comes
-    job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else kind), "params": params,
-           "source": action_source(kind, params) if kind in actions.KINDS else None,
+    job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else sound_title(kind, params) if kind in sound.KINDS else kind), "params": params,
+           "source": action_source(kind, params) if kind in actions.KINDS else sound_source(kind, params) if kind in sound.KINDS else None,
            "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(), "started": None,
            "finished": None, "estimate": clip_estimate(kind, params, referenced, ref_media)}
     if referenced:  # the passes a reference clip runs: the number set by hand, or the model's 20, or the adapter's 4
@@ -1961,7 +1963,7 @@ def library() -> list[dict]:
     """Every clip, still, voice line, song and sound effect under the studio folder, newest first."""
 
     found = []
-    for folder, kinds in (("renders", (".mp4",)), ("exports", (".mp4",)), ("scouts", (".png",)),
+    for folder, kinds in (("renders", (".mp4",)), ("exports", (".mp4",)), ("scouts", (".png",)), ("sound", (".mp4",)),
                           ("uploads", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")), ("projects", (".mp4",)), ("slate", (".mp4",)),
                           ("agent", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov"))):
         for path in (HOME / folder).rglob("*"):
@@ -1999,7 +2001,13 @@ def library_sounds() -> list[dict]:
                             "modified": path.stat().st_mtime, "size": path.stat().st_size})
     for path in (HOME / "sound").rglob("*") if (HOME / "sound").is_dir() else []:
         if path.suffix.lower() in SOUND_FILES and path.is_file() and not hidden(path.relative_to(HOME)) and relative(path) not in seen:
-            out.append({"path": relative(path), "kind": "audio", "sound": "sfx", "folder": "sound", "modified": path.stat().st_mtime, "size": path.stat().st_size})
+            try:  # a sound effect's or a foley's words, from its take file (sound.py)
+                said = json.loads(path.with_name(path.stem + ".take.json").read_text())
+                words = str(said.get("prompt") or ("Foley for " + Path(str(said.get("source") or "")).name if said.get("kind") == "foley" else ""))
+            except (OSError, ValueError, AttributeError):
+                words = ""
+            out.append({"path": relative(path), "kind": "audio", "sound": "sfx", "folder": "sound", "title": " ".join(words.split())[:80],
+                        "modified": path.stat().st_mtime, "size": path.stat().st_size})
     return out
 
 
@@ -2282,7 +2290,10 @@ import motion  # noqa: E402  (Motion Previs: a Python port of Sam Wasserman's Mo
 app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)
 action_router, action_build, action_title, action_source = actions.attach(HOME, PACK, SPARK, inside, relative)
+import sound  # noqa: E402  (sound effects and foley: Stable Audio Open and MMAudio, run locally, beside this file)
+sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative)
 app.include_router(action_router)
+app.include_router(sound_router)
 import clear  # noqa: E402  (finished jobs and their files into the trash folder, and back, beside this file)
 app.include_router(clear.attach(HOME, jobs, order, lock)[0])
 import sparks  # noqa: E402  (worker Sparks behind this queue: a job's "sparks" number, beside this file)

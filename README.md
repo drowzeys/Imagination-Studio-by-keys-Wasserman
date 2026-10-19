@@ -2148,6 +2148,26 @@ product or service must display "MiniMax-Music3" in its user interface; a licens
 revenue needs MiniMax's prior written authorisation; a hosted service must keep safeguards against misuse. Do not
 redistribute the weights.
 
+## Sound effects and foley (Stable Audio Open, MMAudio)
+
+Sound → **Sound effects** makes two kinds of take, each a job of the queue, on a Mac (`bash scripts/setup-sound.sh`,
+or `oneshot-setup.sh --sound`; about 13 GB of weights in `$PREFIX/sound-models` and Hugging Face's cache):
+
+- **Foley for a clip** (MMAudio large_44k_v2): pick a Library clip; MMAudio watches its frames and makes its sound,
+  steps on the footfalls. Words are optional. The result is a WAV and the clip with it, laid under the clip's own
+  sound at -6 dB (its speech stays on top; peaks under -1 dBFS) or in place of it. Up to 15 s, the studio's longest clip.
+- **A sound effect** (Stable Audio Open 1.0): words to 1 to 47 s of 44.1 kHz stereo.
+
+Both land in `~/ImaginationStudio/sound/` with a take file each, and in the Library under **Sound effects** (foley
+clips under Clips). `POST /api/jobs {kind: "sfx", params: {prompt, seconds, negative?, seed?, steps?, cfg?}}` or
+`{kind: "foley", params: {video, prompt?, negative?, keep_sound?, foley_db?, seed?}}`; `GET /api/sound/state`,
+`GET /api/sound/takes`. On a DGX Spark they are not run yet: the Spark runs models through ComfyUI with a measured
+memory estimate, and neither has one.
+
+**Licences.** Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue); its
+Hugging Face page is gated, so accept the licence there first (the studio's Install guide signs you in to Hugging
+Face). MMAudio's weights are **CC-BY-NC 4.0: non-commercial**; its code is MIT. Do not redistribute either's weights.
+
 ## Motion Previs: a shot into control layers and a camera move
 
 **New to it? Start with the walkthrough:** [TUTORIAL.md, section 9](TUTORIAL.md#9-motion-previs-make-a-clip-that-moves-like-another)

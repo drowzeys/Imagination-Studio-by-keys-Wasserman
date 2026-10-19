@@ -139,6 +139,20 @@ on TensorFold's native Metal port (Zig and Metal, on an M5 or later) or its MLX 
 drowzeys/TensorFold fork), both following ComfyUI's reference code. The
 pack ships no weights. **MiniMax-Music3.**
 
+## Sound effects and foley: Stability AI, and Ho Kei Cheng and the MMAudio authors
+
+**Stability AI** made **Stable Audio Open 1.0**, the model behind a sound effect from words (44.1 kHz stereo, up to
+47 seconds), run through diffusers' StableAudioPipeline (Hugging Face). Its weights are under the **Stability AI
+Community License**: free for research and for a business under US$1 million of yearly revenue; above that,
+Stability's own licence. Its page on Hugging Face is gated.
+
+**Ho Kei Cheng, Masato Ishii, Akio Hayakawa, Takashi Shibuya, Alexander Schwing and Yuki Mitsufuji** (University of
+Illinois Urbana-Champaign and Sony AI) made **MMAudio**, the model behind foley for a clip: it watches the frames and
+reads the words, so the sound lands on what is seen. Its code is MIT (Sony Research Inc.) and its weights are
+**CC-BY-NC 4.0, non-commercial**. It loads Apple's DFN5B CLIP, Synchformer (Vladimir Iashin et al.) and NVIDIA's
+BigVGAN v2 vocoder (Sang-gil Lee et al.). The studio installs it from its repository at a pinned commit, in an
+environment of its own; the pack ships none of its code or weights.
+
 ## The first native Mac engine: Salvatore Sanfilippo (antirez)
 
 **antirez** wrote **h3.c**, MiniMax H3 in C and Metal. It is the reference for what is possible on Apple

@@ -9,7 +9,7 @@ const ROOMS = [
   { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create"], says: "stills, scouts, edit a picture" },
   { id: "video", group: "engines", name: "Video", key: "3", tabs: ["Video", "Create"], says: "clips with sound, long takes, references" },
   { id: "previs", group: "engines", name: "Previs", key: "4", tabs: ["Previs", "Motion Previs"], says: "motion from a clip, previs to guide a shot" },
-  { id: "sound", group: "engines", name: "Sound", key: "5", tabs: ["Sound", "Voice", "Music"], says: "voices and score" },
+  { id: "sound", group: "engines", name: "Sound", key: "5", tabs: ["Sound", "Voice", "Music", "Foley"], says: "voices, score and sound effects" },
   { id: "edit", group: "engines", name: "Edit", key: "6", tabs: ["Edit", "Editor"], says: "the timeline and what goes to Resolve" },
   { id: "agent", group: "agent", name: "Agent", key: "", tabs: ["Agent"], says: "ask your agent; it makes it with the studio" },
   { id: "library", group: "vaults", name: "Library", key: "7", tabs: ["Library"], says: "every take" },
@@ -21,7 +21,7 @@ const ROOMS = [
   { id: "settings", group: "vaults", name: "Settings", key: ",", tabs: ["Settings"], says: "looks, layout, presets and connections" },
 ];
 const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", Previs: "Overview", "Motion Previs": "Motion Previs",
-  Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Edit: "Overview", Editor: "Timeline", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
+  Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Foley: "Sound effects", Edit: "Overview", Editor: "Timeline", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
   Machine: "Telemetry", Models: "Models & weights", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn", Nodes: "Nodes", Settings: "Settings" };
 // Create is shared by Image and Video: it sits in the room of what the prompt goes to
 const roomOf = t => t === "Create" ? ROOMS.find(r => r.id === (typeof C !== "undefined" && C.goes === "video" ? "video" : "image"))
