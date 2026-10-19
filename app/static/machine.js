@@ -398,7 +398,8 @@ function connectCard(b, extra) { const [word, action, label] = brainWord(b), whe
 async function linkLoad() { try { CN.link = await api("/api/brains/link"); } catch (e) { CN.link = { error: e.message }; } if (CN.linkHost === null) CN.linkHost = (CN.link && CN.link.host) || ""; cnRedraw(); }
 async function linkDo(path, body) { CN.linkBusy = true; render();
   try { const r = await api(path, body); if (path.endsWith("/key")) CN.link = r; else if (path.endsWith("/test")) CN.linkSaid = r;
-    else { CN.link = r; CN.linkSaid = { ...CN.linkSaid, saved: r.found }; BR.data = null; BR.status = {}; await brainsLoad(); } }
+    else if (path.endsWith("/back")) { CN.linkBack = r; if (r.ok) { CN.link = { ...CN.link, studio_host: r.studio_host }; BR.data = null; await brainsLoad(); } }
+    else { CN.link = r; CN.linkSaid = { ...CN.linkSaid, saved: r.found }; CN.linkBack = r.back || null; BR.data = null; BR.status = {}; await brainsLoad(); } }
   catch (e) { CN.linkSaid = { ok: false, state: "error", detail: e.message }; } CN.linkBusy = false; render(); }
 function linkPanel() { if (!CN.link) { linkLoad(); return el("section", { class: "panel st-panel cn-link" }, el("h2", {}, "Link another computer"), el("div", { class: "note m-flat" }, "Looking for this studio's key…")); }
   const L = CN.link, said = CN.linkSaid, host = CN.linkHost || "", tested = said && said.ok && said.host === host;
@@ -420,7 +421,18 @@ function linkPanel() { if (!CN.link) { linkLoad(); return el("section", { class:
       step(4, "Use its agents", found ? "done" : tested ? "wait" : "todo", tested && !found ? el("div", {}, el("button", { type: "button", class: "primary", disabled: CN.linkBusy, onclick: () => linkDo("/api/brains/link/save", { host: CN.linkHost }) }, "Use " + host + " for its agents")) : null,
         found ? [el("span", { class: "cn-said" }, found.length ? "Its agents now run there: connect each one, and the studio installs, signs in and checks it over SSH." : "No agent is installed there yet."),
           el("div", { class: "chips" }, agents.map(b => el("button", { type: "button", class: "small", onclick: () => connectStart(b) }, "Connect " + b.label)))] : null,
-        L.host && !found ? el("span", { class: "note m-flat" }, "Now: " + L.host + " runs " + ((L.backends || []).join(", ") || "nothing") + ".") : null))); }
+        L.host && !found ? el("span", { class: "note m-flat" }, "Now: " + L.host + " runs " + ((L.backends || []).join(", ") || "nothing") + ".") : null),
+      linkBackStep(L, step))); }
+// 5: the way back, so an agent there can start the tools that run here (Blender, the Studio's own)
+function linkBackStep(L, step) { const host = L.host || CN.linkHost, back = CN.linkBack, set = L.studio_host || (back && back.ok && back.studio_host);
+  if (!host) return step(5, "Let it reach this studio", "todo", el("span", { class: "cn-said" }, "After it is linked."));
+  if (set) return step(5, "Let it reach this studio", "done", el("span", { class: "cn-said" }, host + " reaches this computer as " + set + ": its agents can use Blender and the Studio's tools."));
+  return step(5, "Let it reach this studio", back && !back.ok ? (back.state === "allow" || back.state === "no_sshd" ? "wait" : "failed") : "wait",
+    el("span", { class: "cn-said" }, back && !back.ok ? back.detail : "An agent on " + host + " starts Blender and the Studio's tools over SSH back to this computer. The studio finds the way."),
+    el("div", { class: "chips" },
+      el("button", { type: "button", class: back && back.state === "allow" ? "small" : "small on", disabled: CN.linkBusy, onclick: () => linkDo("/api/brains/link/back", { host }) }, CN.linkBusy ? "Looking…" : back ? "Check again" : "Find the way back"),
+      back && back.state === "allow" ? el("button", { type: "button", class: "primary", disabled: CN.linkBusy, title: "Adds " + host + "'s public key to this computer's ~/.ssh/authorized_keys and has it trust this computer's host key once",
+        onclick: () => linkDo("/api/brains/link/back", { host, allow: true }) }, "Allow " + host) : null)); }
 
 /* ---------- "Connect your agent": on Home and in the Agent room while no agent is signed in ---------- */
 const CN_DISMISS = "studio-connect-dismissed";

@@ -340,6 +340,11 @@ function viewAgent() {
   const missing = harnesses.filter(b => !agReady(b));
   const toolList = BR.tools ? (BR.tools.tools || BR.tools) : [{ id: "blender", label: "Blender" }, { id: "blockout", label: "Blockout" }, { id: "studio", label: "Studio" }];
   const harness = AG_HARNESS.includes(AG.backend), chosen = agChosen();
+  // a tool that runs on this computer cannot be started by an agent on another one until that one can reach back here
+  const far = !!(chosen && /^ssh:./.test(chosen.where || "")), unreach = (BR.tools && BR.tools.unreachable) || {};
+  AG.dropped = AG.dropped || new Set();
+  for (const id of [...AG.tools]) if (far && unreach[id]) { AG.tools.delete(id); AG.dropped.add(id); }
+  for (const id of [...AG.dropped]) if (!(far && unreach[id])) { AG.tools.add(id); AG.dropped.delete(id); }  // reachable again: back as it was
   const thread = AG.cur && AG.thread && AG.thread.id === AG.cur ? AG.thread : null;
   const earlier = (AG.tasks || []).filter(t => !t.thread);
   // after a send or a new turn, the newest turn is brought into view
@@ -355,8 +360,12 @@ function viewAgent() {
     el("div", { class: "sectionhead" }, el("h2", {}, "Choose your agent"), agSetup()),
     agChooser(found),
     el("div", { class: "agr-under" },
-      harness ? [el("span", {}, "It may use"), el("div", { class: "chips" }, toolList.map(t => el("button", { class: "toggle" + (AG.tools.has(t.id) ? " on" : ""), "aria-pressed": AG.tools.has(t.id) ? "true" : "false", onclick: () => { AG.tools.has(t.id) ? AG.tools.delete(t.id) : AG.tools.add(t.id); render(); } },
-        el("span", { class: "dotl" + (AG.tools.has(t.id) ? "" : " o") }), t.label || t.id)))]
+      harness ? [el("span", {}, "It may use"), el("div", { class: "chips" }, toolList.map(t => { const why = far && unreach[t.id], on = AG.tools.has(t.id) && !why;
+        return el("button", { class: "toggle" + (on ? " on" : "") + (why ? " off" : ""), "aria-pressed": on ? "true" : "false", "aria-disabled": why ? "true" : false, title: why || "",
+          onclick: () => { if (why) return toast(why, 7000); AG.tools.has(t.id) ? AG.tools.delete(t.id) : AG.tools.add(t.id); render(); } },
+        el("span", { class: "dotl" + (on ? "" : " o") }), t.label || t.id); })),
+        far && Object.keys(unreach).length ? el("span", { class: "note m-flat ag-back" }, "Some tools need " + chosen.where.slice(4) + " to reach this computer: ",
+          el("a", { href: "#Settings", onclick: e => { if (e && e.preventDefault) e.preventDefault(); if (typeof SET !== "undefined") SET.section = "connections"; if (typeof CN !== "undefined") CN.linkOpen = true; go("Settings"); } }, "let it reach this studio"), ".") : null]
         : el("span", {}, AG.backend === "hermes" ? "Hermes is a conversation here: it reads its MCP servers from its own config, not from the Studio, so it plans and answers but does not drive the Studio's tools. Pick Claude Code or Codex for that."
           : (chosen ? chosen.label : agName(AG.backend)) + " is a conversation here: it plans, writes prompts and answers; Claude Code or Codex make things with the Studio's tools."),
       chosen && chosen.where && /^ssh:/.test(chosen.where) ? el("span", { class: "note m-flat" }, "Runs on " + chosen.where.slice(4) + " over SSH") : null),

@@ -2447,7 +2447,128 @@ def save_link(body: dict) -> dict:
     if "studio_host" in body:
         remote["studio_host"] = body["studio_host"] or ""
     settings = save_settings({"remote": remote})
-    return {"settings": settings, "found": named, **link_of()}
+    back = None
+    if not settings["remote"]["studio_host"] and body.get("reach", True):
+        back = reach_back(host)  # the way back too, when it already works: the tools that run here need it
+        settings = saved_settings()
+    return {"settings": settings, "found": named, "back": back, **link_of()}
+
+
+# the way back: how the other computer reaches this one, so the tools that run here (Blender, the Studio's own) can be
+# started by an agent that runs there (remote_launch). Found by asking the other computer to ssh here by each name this
+# machine has (its own ~/.ssh/config aliases first), proved by the hostname that answers; "allow" adds the other
+# computer's public key to this machine's authorized_keys (only on the person's click) and trusts this machine's host
+# key there once.
+BACK_TIMEOUT = 40
+
+
+def my_names() -> list[str]:
+    """The names and addresses this machine answers to: its Tailscale name and addresses, its hostname, hostname.local."""
+
+    names = []
+    try:
+        done = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=8, stdin=subprocess.DEVNULL,
+                              env=child_env({"PATH": search_path() + ":/Applications/Tailscale.app/Contents/MacOS"}))
+        me = json.loads(done.stdout).get("Self") or {} if done.returncode == 0 else {}
+        full = str(me.get("DNSName") or "").rstrip(".")
+        names += [full.split(".")[0], full, *[str(ip) for ip in me.get("TailscaleIPs") or []]]  # MagicDNS's short name first
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        pass
+    host = socket.gethostname()
+    names += [host, host.split(".")[0] + ".local" if not host.endswith(".local") else host]
+    return [n for n in dict.fromkeys(names) if n and HOST.fullmatch(n)]
+
+
+def reach_back(host: str, allow: bool = False) -> dict:
+    """{ok, studio_host} once the other computer can ssh to this one; else {ok: False, state, detail}."""
+
+    host = valid_host(host or saved_settings()["remote"]["host"])
+    if not host:
+        raise HTTPException(400, "link a computer first")
+    names, me, user = my_names(), socket.gethostname().split(".")[0].lower(), os.environ.get("USER") or ""
+    want = {n.lower() for n in names}
+    if allow:
+        key = remote_key(host)
+        if not key:
+            return {"ok": False, "state": "no_key", "detail": f"{host} has no SSH key to allow, and could not make one."}
+        authorize_here(key)
+    script = ('for a in $(awk \'tolower($1)=="host"{for(i=2;i<=NF;i++) if ($i !~ /[*?!]/) print $i}\' ~/.ssh/config 2>/dev/null); do '
+              'h=$(ssh -G "$a" 2>/dev/null | awk \'$1=="hostname"{print $2}\'); echo "alias $a $h"; done')
+    try:
+        found = subprocess.run([*ssh_of(host), script], capture_output=True, text=True, timeout=PROBE_TIMEOUT + 4, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"ok": False, "state": "unreachable", "detail": f"{host} did not answer over ssh."}
+    aliases = [line.split()[1] for line in found.stdout.splitlines() if len(line.split()) == 3 and line.split()[2].lower().rstrip(".") in want]
+    candidates = list(dict.fromkeys([*aliases, *[(f"{user}@{n}" if user else n) for n in names]]))[:8]
+    trust = ["-o", "StrictHostKeyChecking=accept-new"] if allow else []
+    tests = "; ".join(f'printf "%s\\t%s\\n" {shlex.quote(c)} "$(ssh -o BatchMode=yes -o ConnectTimeout=5 {" ".join(trust)} {shlex.quote(c)} hostname 2>&1 | tail -1)"'
+                      for c in candidates if HOST.fullmatch(c))
+    try:
+        tried = subprocess.run([*ssh_of(host), tests or "true"], capture_output=True, text=True, timeout=BACK_TIMEOUT, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"ok": False, "state": "unreachable", "detail": f"{host} took too long to try reaching this computer."}
+    said = {}
+    for line in tried.stdout.splitlines():
+        name, _, answer = line.partition("\t")
+        said[name] = answer.strip()
+        if answer.strip().split(".")[0].lower() == me:
+            save_settings({"remote": {"studio_host": name}})
+            return {"ok": True, "studio_host": name, "tried": len(said)}
+    sshd = listening(22, "127.0.0.1")
+    why = " ".join(said.values())
+    if not sshd:
+        detail = ("This computer does not accept SSH: turn on System Settings → General → Sharing → Remote Login" if sys.platform == "darwin"
+                  else "This computer does not accept SSH: start its SSH server (sudo systemctl enable --now ssh)") + ", then press Check again."
+        return {"ok": False, "state": "no_sshd", "detail": detail}
+    if re.search(r"Host key verification failed|Permission denied", why):
+        return {"ok": False, "state": "allow", "detail": f"{host} is not allowed in yet. Allow it: the studio adds {host}'s key to this computer's "
+                "authorized_keys and has it trust this computer once."}
+    return {"ok": False, "state": "unreachable", "detail": f"{host} could not reach this computer by any of its names ({', '.join(names) or 'none'})."}
+
+
+def remote_key(host: str) -> str | None:
+    """The other computer's public SSH key, made there with ssh-keygen when it has none (never replaced)."""
+
+    line = ('for k in ~/.ssh/id_ed25519.pub ~/.ssh/id_ecdsa.pub ~/.ssh/id_rsa.pub; do [ -f "$k" ] && head -1 "$k" && exit 0; done; '
+            'mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -C imagination-studio -f ~/.ssh/id_ed25519 </dev/null && head -1 ~/.ssh/id_ed25519.pub')
+    try:
+        done = subprocess.run([*ssh_of(host), line], capture_output=True, text=True, timeout=PROBE_TIMEOUT + 10, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    key = done.stdout.strip().splitlines()[-1] if done.stdout.strip() else ""
+    return key if re.fullmatch(r"(ssh-ed25519|ecdsa-sha2-nistp\d+|ssh-rsa) [A-Za-z0-9+/=]+( .*)?", key) else None
+
+
+def authorize_here(key: str) -> None:
+    """The key in this machine's ~/.ssh/authorized_keys once (0600), its comment left as the other computer wrote it."""
+
+    kind, body = key.split()[:2]
+    folder = Path.home() / ".ssh"
+    folder.mkdir(mode=0o700, exist_ok=True)
+    keys = folder / "authorized_keys"
+    have = keys.read_text() if keys.is_file() else ""
+    if any(line.split()[1:2] == [body] for line in have.splitlines() if len(line.split()) >= 2):
+        return
+    with open(keys, "a") as out:
+        out.write(("" if not have or have.endswith("\n") else "\n") + f"{kind} {body} imagination-studio-link\n")
+    os.chmod(keys, 0o600)
+
+
+def tool_reach(config: dict | None = None) -> dict:
+    """For each tool, why an agent on the linked computer cannot start it yet ({} when every one can)."""
+
+    config = config or saved_settings()
+    host = config["remote"]["host"]
+    out = {}
+    if not host:
+        return out
+    for tool in tools():
+        try:
+            remote_launch(tool, host, config)
+        except RuntimeError:
+            out[tool["id"]] = (f"{tool.get('label') or tool['id']} runs on this computer: {host} needs a way back to it. "
+                               "Link another computer → Let it reach this studio sets it.")
+    return out
 
 
 # ---------- the routes ----------
@@ -2559,6 +2680,11 @@ def attach(home: Path) -> APIRouter:
         local(request, True)
         return save_link(body)
 
+    @router.post("/api/brains/link/back")
+    def brain_link_back(body: dict, request: Request):
+        local(request, True)
+        return reach_back(str(body.get("host") or ""), body.get("allow") is True)
+
     @router.get("/api/brains/{backend}/connect")
     def brain_connect(backend: str, request: Request):
         local(request)
@@ -2591,7 +2717,7 @@ def attach(home: Path) -> APIRouter:
     @router.get("/api/agent/tools")
     def list_tools(request: Request):
         local(request)
-        return {"tools": tools()}
+        return {"tools": tools(), "unreachable": tool_reach()}
 
     @router.post("/api/agent/tools")
     def change_tools(body: dict, request: Request):

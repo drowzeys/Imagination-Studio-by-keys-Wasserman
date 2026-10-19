@@ -68,6 +68,14 @@ A DGX Spark usually has no Claude or Codex sign-in; the Mac beside it does. *Lin
    which never accepts a changed key).
 4. **Use its agents**: the computer is saved as the remote host with the CLIs found there; each one then connects
    with the same four steps over SSH (install, sign in, answer, default).
+5. **Let it reach this studio**: an agent there starts the tools that run here (Blender, the Studio's own) by SSH
+   back to this computer (`remote.studio_host`). The studio finds the way itself: it asks the other computer to SSH
+   here by each name this machine has (that computer's own `~/.ssh/config` aliases for it first, then the Tailscale
+   short name, full name and address, then `hostname.local`) and keeps the first one whose `hostname` answer is this
+   machine. When the other computer is not allowed in, **Allow** (a click) adds its public key to this computer's
+   `~/.ssh/authorized_keys` once (made there with ssh-keygen only if it has none) and has it trust this computer's
+   host key once (`accept-new`). A Mac needs Remote Login on; the step says so. Until the way back is set, the Agent
+   room sets those tools aside with the reason and brings them back once it is.
 
 ## Claude Code on a Mac over SSH: the Keychain
 
@@ -103,7 +111,7 @@ All behind the brains guard: this computer or its Tailscale name, same origin, J
 | `GET /api/brains/{id}/install[?plan=1]` · `POST …/install` | the installer: what would run, start it, follow it |
 | `POST /api/brains/{id}/verify` | one short answer, 60 s at most, with `fix` when it fails |
 | `POST /api/brains/{id}/default` | the default brain (and the Agent room's, for Claude Code and Codex) |
-| `GET /api/brains/link` · `POST …/link/key` · `…/link/test` · `…/link/save` | linking another computer |
+| `GET /api/brains/link` · `POST …/link/key` · `…/link/test` · `…/link/save` · `…/link/back` | linking another computer, and its way back |
 | `…/signin`, `…/signin/code`, `…/signin/cancel`, `…/signout`, `…/status` | the CLI's own sign-in, as before |
 
 Tests: `tests/test_agents_connect.py` (stand-in CLIs, npm and ssh; the Keychain case end to end with a stand-in Mac),

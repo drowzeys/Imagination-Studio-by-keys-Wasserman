@@ -358,3 +358,29 @@ def test_over_ssh_the_chatgpt_apps_newer_codex_is_used_too(fake, monkeypatch):
     assert look["codex"] == (str(app / "bin/codex"), "codex-cli 0.162.0-alpha.17.2")
     script(fake["remote"] / ".local/bin", "codex", 'print("codex-cli 0.170.0")\n')
     assert agents.probe_remote("me@mac", ["codex"])["codex"][1] == "codex-cli 0.170.0"  # a newer one on PATH is kept
+
+
+def test_the_way_back_is_found_by_the_hostname_that_answers_and_allow_adds_the_key(fake, monkeypatch):
+    import socket
+    monkeypatch.setattr(agents, "my_names", lambda: ["studio-box", "studio-box.example.ts.net"])
+    monkeypatch.setattr(socket, "gethostname", lambda: "studio-box.local")
+    remote_mac(["claude"])
+    # the other computer's ssh to here: a stand-in that answers this machine's hostname only for a trusted name
+    script(fake["remote"] / "sys", "ssh", '#!/bin/sh\nfor a in "$@"; do last="$a"; prev2="$prev"; prev="$a"; done\n'
+           'case "$*" in *"-G"*) echo "hostname 100.1.2.3"; exit 0;; esac\n'
+           '[ -f "$HOME/.trusted" ] && echo "studio-box.local" || echo "Host key verification failed."\n')
+    first = agents.reach_back("me@mac")
+    assert first["ok"] is False and first["state"] in ("allow", "no_sshd")
+    monkeypatch.setattr(agents, "listening", lambda port, host="127.0.0.1": True)
+    assert agents.reach_back("me@mac")["state"] == "allow"
+    assert agents.tool_reach()  # until then the tools that run here say why they cannot be started from there
+    (fake["remote"] / ".trusted").write_text("")  # what --allow does there: trust this machine once
+    (fake["remote"] / ".ssh").mkdir(exist_ok=True)
+    (fake["remote"] / ".ssh/id_ed25519.pub").write_text("ssh-ed25519 AAAAC3NzaRemoteKey me@mac\n")
+    done = agents.reach_back("me@mac", allow=True)
+    assert done["ok"] and done["studio_host"].endswith("studio-box") and agents.saved_settings()["remote"]["studio_host"] == done["studio_host"]
+    keys = (fake["home"] / ".ssh/authorized_keys").read_text()
+    assert keys.count("AAAAC3NzaRemoteKey") == 1 and "imagination-studio-link" in keys and "me@mac" not in keys
+    agents.reach_back("me@mac", allow=True)
+    assert (fake["home"] / ".ssh/authorized_keys").read_text().count("AAAAC3NzaRemoteKey") == 1  # once
+    assert agents.tool_reach() == {}

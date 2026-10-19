@@ -625,3 +625,16 @@ if __name__ == "__main__":
             test()
             print("ok", name)
 
+
+
+def test_tools_a_remote_agent_cannot_start_yet_are_set_aside_with_the_reason_and_come_back():
+    out = run("""BR.data = { default: "codex", settings: { remote: { host: "mac", backends: ["codex"] } }, backends: [{ id: "codex", label: "Codex", kind: "cli", found: true, where: "ssh:mac" }] };
+      BR.status = { codex: { state: "signed_in" } }; AG.tasks = []; AG.threads = []; AG.backend = "codex"; AG.tools = new Set(["blender", "studio"]);
+      BR.tools = { tools: [{ id: "blender", label: "Blender" }, { id: "studio", label: "This Studio" }], unreachable: { blender: "Blender runs on this computer: mac needs a way back to it." } };
+      let page = viewAgent(); out.tools = [...AG.tools]; out.off = button(page, "Blender").attrs["aria-disabled"]; out.note = text(find(page, n => n.attrs && n.attrs.class === "note m-flat ag-back"));
+      button(page, "Blender").attrs.onclick(); out.toast = toasts.slice(-1)[0];
+      BR.tools.unreachable = {}; viewAgent(); out.back = [...AG.tools].sort();""")
+    if out is None:
+        return
+    assert out["tools"] == ["studio"] and out["off"] == "true" and "reach this studio" in out["note"]
+    assert "needs a way back" in out["toast"] and out["back"] == ["blender", "studio"]
