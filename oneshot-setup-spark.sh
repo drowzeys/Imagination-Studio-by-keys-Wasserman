@@ -285,8 +285,11 @@ if [ "$SOUND" = 1 ]; then
     echo "  https://huggingface.co/stabilityai/stable-audio-open-1.0 with your own account and sign in (the studio's Install"
     echo "  guide, or hf auth login). MMAudio's weights are CC-BY-NC 4.0: non-commercial use only."; }
   SND="$MODELS/Sound-Comfy"
-  # kijai's ComfyUI-MMAudio (MIT) at a pinned commit; its requirements go into the Studio's environment with the
-  # installed PyTorch held where it is (its pyproject's own list is not installed: it pins numpy and much else)
+  # kijai's ComfyUI-MMAudio (MIT) at a pinned commit. Its requirements may only ADD packages to the Studio's environment:
+  # every package already installed (PyTorch, numpy, ComfyUI's own and the Studio's) is held at its installed version,
+  # so the install never moves one of them, and a later --upgrade finds nothing to do. A requirement that would need a
+  # different version stops the setup with uv's reason instead. (Its pyproject's own list is not installed: it pins
+  # numpy and much else.)
   MMA_NODES="$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" MMA_COMMIT=8eaeb72edc3aaf2059b57f2d96a1f6f689f19ae2
   if [ "$(git -C "$MMA_NODES" rev-parse HEAD 2>/dev/null)" != "$MMA_COMMIT" ]; then
     [ "$VERIFY" = 0 ] || die "ComfyUI-MMAudio is missing or not at ${MMA_COMMIT:0:8}: run with --sound, without --verify"
@@ -295,9 +298,11 @@ if [ "$SOUND" = 1 ]; then
     git -C "$MMA_NODES" checkout -q "$MMA_COMMIT"
   fi
   if [ "$VERIFY" = 0 ]; then
-    HOLD="$(mktemp)"; "$PY" -m pip freeze 2>/dev/null | grep -E '^(torch|torchvision|torchaudio|numpy)==' > "$HOLD" || true
-    [ -s "$HOLD" ] || "$PY" -c "import importlib.metadata as m; [print(f'{p}=={m.version(p)}') for p in ('torch','torchvision','torchaudio','numpy')]" > "$HOLD"
-    pipi -r "$MMA_NODES/requirements.txt" --constraint "$HOLD"; rm -f "$HOLD"
+    HOLD="$(mktemp)"
+    "$PY" -c "import importlib.metadata as m; print('\\n'.join(sorted({f\"{d.metadata['Name']}=={d.version}\" for d in m.distributions() if d.metadata['Name']})))" > "$HOLD"
+    grep -qiE '^torch==' "$HOLD" || die "could not read the environment's packages to hold them"
+    pipi -r "$MMA_NODES/requirements.txt" --constraint "$HOLD" || { rm -f "$HOLD"; die "ComfyUI-MMAudio needs a package at a version other than the one installed: not changed"; }
+    rm -f "$HOLD"
   fi
   "$PY" -c "import open_clip, torchdiffeq, timm, librosa, accelerate, omegaconf" || die "ComfyUI-MMAudio's requirements are missing from $PREFIX/venv"
   ok "ComfyUI-MMAudio @ ${MMA_COMMIT:0:8} (kijai) and the Studio's sampler node (spark/studio_mmaudio, put beside it by spark/comfy.sh)"
