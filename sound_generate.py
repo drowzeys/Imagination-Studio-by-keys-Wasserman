@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-LIMIT = "alimiter=limit=0.891:level=false:attack=1:release=50"  # -1 dBFS
+LIMIT = "alimiter=limit=0.84:level=false:attack=1:release=50"  # -1.5 dBFS before AAC: measured, a -1.0 limit came out at -0.9 dBFS in the clip
 
 
 def say(text: str) -> None:
