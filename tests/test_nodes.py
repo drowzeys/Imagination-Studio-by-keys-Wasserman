@@ -211,6 +211,21 @@ def test_the_templates_are_valid_graphs():
 
 # ---------- graphs on disk ----------
 
+# a card's height on the canvas once its run has drawn what it made (measured in the page at 1440 px, canvas units)
+DRAWN = {"text": 150, "note": 150, "voice": 190, "song": 190, "pick": 285, "reference": 350, "picture": 445, "edit": 445, "clip": 470,
+         "timeline": 200, "export": 300}
+
+
+def test_a_templates_cards_do_not_cover_each_other_once_they_have_run():
+    for template in nodes.TEMPLATES:
+        cards = template["nodes"]
+        for a in cards:
+            for b in cards:
+                if a is b or abs(a["x"] - b["x"]) >= 248 or a["y"] > b["y"]:
+                    continue
+                assert b["y"] - a["y"] >= DRAWN[a["type"]], (template["id"], a["id"], b["id"])
+
+
 def test_graphs_are_saved_listed_and_moved_to_the_trash():
     studio = Studio()
     saved = studio.client.post("/api/nodes/graphs", json={**still_clip(), "id": "mine"}).json()
@@ -252,13 +267,82 @@ def test_a_run_queues_each_job_in_turn_and_passes_files_forward():
     assert run["nodes"]["t1"]["status"] == "done" and run["nodes"]["t1"]["outputs"] == {"text": "a lighthouse at dusk"}
 
 
-def test_without_the_apps_routes_jobs_go_through_enqueue():
+def test_without_the_apps_route_a_card_fails_and_nothing_is_queued_unchecked():
+    """A job only goes in through the app's own route, which checks it; there is no unchecked way round it."""
     studio = Studio(routes=False)
     run = studio.run({"nodes": [node("t", "text", text="We leave at first light."), node("v", "voice", seed=4)], "edges": [edge("t", "text", "v", "text")]})
-    studio.finish(["voice/take.wav"])
     run = studio.settle(run["id"])
-    assert run["status"] == "done" and studio.queued == [("voice", {"text": "We leave at first light.", "seed": 4}, "enqueue")]
-    assert run["nodes"]["v"]["outputs"] == {"audio": "voice/take.wav"}
+    assert run["status"] == "failed" and studio.queued == []
+    assert "/api/voice/takes" in run["nodes"]["v"]["error"] and "not queued" in run["nodes"]["v"]["error"]
+
+
+def test_a_clip_is_not_run_without_the_memory_guards_answer():
+    studio = Studio(routes=False)
+    answer = studio.client.post("/api/nodes/run", json={"graph": still_clip()})
+    assert answer.status_code == 503 and "/api/estimate" in answer.json()["detail"]
+    assert studio.queued == []
+
+
+def test_two_runs_at_once_start_one_and_the_other_is_a_409():
+    """A double click on Run: the check and the start are one step, so the second never passes the check."""
+    studio = Studio()
+    entered, release = threading.Event(), threading.Event()
+
+    slow = next(r for r in studio.app.routes if getattr(r, "path", None) == "/api/estimate")
+    quick = slow.endpoint
+
+    def held(body: dict) -> dict:
+        entered.set()
+        release.wait(5)
+        return quick(body)
+
+    slow.endpoint = held
+    answers = []
+    first = threading.Thread(target=lambda: answers.append(studio.client.post("/api/nodes/run", json={"graph": still_clip()})))
+    first.start()
+    assert entered.wait(5)  # the first run is in its memory checks
+    second = studio.client.post("/api/nodes/run", json={"graph": still_clip()})
+    release.set()
+    first.join(5)
+    assert second.status_code == 409 and "starting" in second.json()["detail"]
+    assert answers and answers[0].status_code == 200
+    third = studio.client.post("/api/nodes/run", json={"graph": still_clip()})  # the first is still running
+    assert third.status_code == 409 and "running" in third.json()["detail"]
+    studio.client.post(f"/api/nodes/runs/{answers[0].json()['id']}/cancel")
+    studio.settle(answers[0].json()["id"])
+    assert len([r for r in studio.client.get("/api/nodes/runs").json()]) == 1
+
+
+def test_numbers_that_are_not_finite_are_refused():
+    for bad in ({"nodes": [{**node("t", "text", text="x"), "x": float("nan")}], "edges": []},
+                {"nodes": [node("c", "clip", seconds=float("inf"))], "edges": []}):
+        try:
+            nodes.tidy(bad)
+        except HTTPException as error:
+            assert error.status_code == 400
+        else:
+            raise AssertionError(bad)
+    assert nodes.tidy({"nodes": [], "edges": [], "view": {"x": float("nan"), "y": 0, "k": 1}})["view"] == {"x": 0.0, "y": 0.0, "k": 1.0}
+
+
+def test_each_save_of_a_graph_writes_its_own_temp_file():
+    studio = Studio()
+    names = []
+    real = Path.write_text
+
+    def spy(self, *args, **kwargs):
+        names.append(self.name)
+        return real(self, *args, **kwargs)
+
+    Path.write_text = spy
+    try:
+        for _ in range(2):
+            assert studio.client.post("/api/nodes/graphs", json={"id": "g1", "name": "one", "nodes": [], "edges": []}).status_code == 200
+    finally:
+        Path.write_text = real
+    temps = [n for n in names if n.startswith("g1.json.")]
+    assert len(temps) == 2 and temps[0] != temps[1] and all(n.endswith(".new") for n in temps)
+    assert not list((studio.home / "nodes").glob("*.new"))
 
 
 def test_a_failed_card_skips_what_waits_on_it_and_says_why():

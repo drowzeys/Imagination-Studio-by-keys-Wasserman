@@ -36,7 +36,7 @@ const ND_EDIT_MODELS = { qwen: "Qwen 2.1 Turbo", "flux3k-fast": "FLUX3-K Fast", 
 const ND_TEMPLATES = [];  // the server's starter graphs, once loaded
 const ND = { graph: null, view: { x: 40, y: 30, k: 1 }, sel: null, seq: 0, dirty: false, saved: null, run: null, est: {}, problems: {},
   drag: null, pan: null, link: null, space: false, palette: null, root: null, stage: null, layer: null, svg: null, cards: {}, asked: false,
-  library: null, projects: null, timer: null, bound: false };
+  library: null, projects: null, timer: null, bound: false, starting: false };
 
 const ndPhone = () => typeof matchMedia === "function" && matchMedia("(max-width: 760px)").matches;
 const ndSay = s => String(s).replace(/_/g, " ");
@@ -45,7 +45,16 @@ const ndNode = id => ND.graph.nodes.find(n => n.id === id);
 const ndOutType = (node, port) => node.type === "reference" ? (port === "file" ? node.params.kind : null) : (ndType(node).outputs[port] || null);
 const ndTitle = node => (node.title || "").trim() || ndType(node).label;
 const ndRows = node => Math.max(Object.keys(ndType(node).inputs).length, Object.keys(ndType(node).outputs).length);
-const ndBusy = () => !!(ND.run && ["queued", "running"].includes(ND.run.status));
+const ndLive = () => !!(ND.run && ["queued", "running"].includes(ND.run.status));
+const ndBusy = () => ND.starting || ndLive();
+// the CSS zoom on the page at Large and Largest type size (studio.css #view): getBoundingClientRect and the pointer are
+// in zoomed pixels, the canvas's own transform and positions in unzoomed ones, so stage pixels are divided by this
+function ndZoom() { const s = ND.stage; if (!s) return 1;
+  if (typeof s.currentCSSZoom === "number" && s.currentCSSZoom > 0) return s.currentCSSZoom;
+  const r = s.getBoundingClientRect ? s.getBoundingClientRect() : null;
+  return r && r.width && s.offsetWidth ? r.width / s.offsetWidth : 1; }
+// a point on the screen, in the stage's own (unzoomed) pixels
+function ndLocal(e) { const r = ND.stage.getBoundingClientRect(), z = ndZoom(); return [(e.clientX - r.left) / z, (e.clientY - r.top) / z]; }
 // where a port sits, in canvas units (the card's left or right edge, the middle of its row)
 function ndPortAt(node, dir, port) {
   const keys = Object.keys(dir === "in" ? ndType(node).inputs : ndType(node).outputs), i = Math.max(0, keys.indexOf(port));
@@ -124,9 +133,14 @@ async function ndEstimate(node) {
     referenced: refs > 0, references: refs, with_lora: !!node.params.look, loras: node.params.look ? [{ id: node.params.look }] : [] }); }
   catch { delete ND.est[node.id]; }
   ndPaintOut(node.id); }
+// Run is held off from the first click until the server has answered (a double click starts one run; the server
+// answers 409 to a second all the same)
 async function ndRun() {
   if (ndPhone() || ndBusy()) return;
   if (!ND.graph.nodes.some(n => n.type !== "note")) return toast("Add a card first: right-click the canvas");
+  ND.starting = true; ndPaintBar();
+  try { await ndStart(); } finally { ND.starting = false; ndPaintBar(); } }
+async function ndStart() {
   let said; try { said = await api("/api/nodes/check", { graph: ndSerialize() }); } catch (e) { return toast(e.message); }
   ND.problems = {}; for (const p of said.problems) if (p.node && !ND.problems[p.node]) ND.problems[p.node] = p.message;
   if (!said.ok) { ndPaint(); return toast(said.problems[0].message + (said.problems.length > 1 ? " (and " + (said.problems.length - 1) + " more)" : "")); }
@@ -134,20 +148,20 @@ async function ndRun() {
   const full = clips.find(n => ND.est[n.id] && ND.est[n.id].memory && ND.est[n.id].memory.fits === false);
   if (full) { ND.sel = { node: full.id }; ndPaint(); return toast(ndTitle(full) + ": " + (ND.est[full.id].memory.reason || "it does not fit this machine's memory")); }
   try { ND.run = await api("/api/nodes/run", { graph: ndSerialize(), ...(ND.graph.id && !ND.dirty ? { id: ND.graph.id } : {}) }); } catch (e) { return toast(e.message); }
-  toast("Running " + ND.graph.name + ": its jobs are in the queue"); ndPaintBar(); ndPaintStatus(); ndWatch(); }
+  toast("Running " + ND.graph.name + ": its jobs are in the queue"); ndPaintStatus(); ndWatch(); }
 async function ndCancel() {
-  if (!ndBusy()) return;
+  if (!ndLive()) return;
   try { ND.run = await api("/api/nodes/runs/" + encodeURIComponent(ND.run.id) + "/cancel", {}); } catch (e) { return toast(e.message); }
   ndPaintBar(); ndPaintStatus(); }
 // the run's state, every second and a half while it runs and the canvas is on the page
 function ndWatch() {
   clearTimeout(ND.timer);
-  if (!ND.run || !ndBusy()) return;
+  if (!ND.run || !ndLive()) return;
   ND.timer = setTimeout(async () => {
     if (!ND.root || !ND.root.isConnected) return;
     try { ND.run = await api("/api/nodes/runs/" + encodeURIComponent(ND.run.id)); } catch { }
     ndPaintBar(); ndPaintStatus();
-    if (!ndBusy()) { toast(ND.run.name + ": " + ({ done: "finished", failed: "stopped at a card that failed", cancelled: "cancelled" }[ND.run.status] || ND.run.status)); if (typeof poll === "function") poll(); }
+    if (!ndLive()) { toast(ND.run.name + ": " + ({ done: "finished", failed: "stopped at a card that failed", cancelled: "cancelled" }[ND.run.status] || ND.run.status)); if (typeof poll === "function") poll(); }
     ndWatch(); }, 1500); }
 function ndMediaLists() {
   if (ND.library) return;
@@ -258,7 +272,7 @@ function ndPaintBar() {
   const bar = ND.root && ND.root.querySelector && ND.root.querySelector(".nd-bar"); if (!bar) return;
   bar.replaceChildren(...ndBar().filter(Boolean)); }
 function ndBar() {
-  const ro = ndPhone(), busy = ndBusy(), run = ND.run;
+  const ro = ndPhone(), run = ND.run, busy = ndLive();
   const open = el("select", { class: "nd-open", "aria-label": "Open a graph", onchange: e => ndOpen(e.target.value) }, el("option", { value: "" }, "Open…"),
     (ND.saved_list || []).length ? el("optgroup", { label: "Saved" }, ND.saved_list.map(g => el("option", { value: g.id }, g.name))) : null,
     ND_TEMPLATES.length ? el("optgroup", { label: "Start from" }, ND_TEMPLATES.map(t => el("option", { value: "t:" + t.id }, t.name))) : null);
@@ -273,7 +287,8 @@ function ndBar() {
     ro ? null : el("button", { class: "small", title: "A new, empty graph", onclick: () => { if (ND.dirty && ND.graph.nodes.length && !confirm("Leave " + ND.graph.name + " without saving it?")) return; ndLoad(ndBlank()); ndPaint(); } }, "New"),
     ro || !ND.graph.id ? null : el("button", { class: "small ghost", onclick: ndDelete }, "Delete"),
     ro ? null : el("button", { class: "small", title: "Save (⌘S)", onclick: ndSave }, "Save"),
-    ro ? null : busy ? el("button", { class: "small", title: "Stop the job that renders and the cards after it (Esc stops a link, not the run)", onclick: ndCancel }, "Cancel run")
+    ro ? null : ND.starting ? el("button", { class: "primary", disabled: true, "aria-busy": "true", title: "Checking the graph and starting its run" }, "Starting…")
+      : busy ? el("button", { class: "small", title: "Stop the job that renders and the cards after it (Esc stops a link, not the run)", onclick: ndCancel }, "Cancel run")
       : el("button", { class: "primary", title: "Run (⌘Enter): the cards' jobs go into the queue one after another", onclick: ndRun }, "Run")]; }
 function ndEmpty() {
   if (ND.graph.nodes.length) return null;
@@ -292,7 +307,8 @@ function ndPaint() {
 // the whole graph in view, at no more than its own size
 function ndFit() {
   if (!ND.stage || !ND.stage.getBoundingClientRect || !ND.graph.nodes.length) return;
-  const r = ND.stage.getBoundingClientRect(); if (!r.width) return;
+  const z = ndZoom(), b = ND.stage.getBoundingClientRect(); if (!b.width) return;
+  const r = { width: b.width / z, height: b.height / z };  // the stage in its own pixels, as the transform is
   const box = ND.graph.nodes.reduce((b, n) => { const c = ND.cards[n.id], h = c && c.offsetHeight ? c.offsetHeight : ND_HEAD + ND_ROW * ndRows(n) + 120;
     return [Math.min(b[0], n.x), Math.min(b[1], n.y), Math.max(b[2], n.x + ND_W), Math.max(b[3], n.y + h)]; }, [Infinity, Infinity, -Infinity, -Infinity]);
   const k = Math.min(1, Math.max(0.4, Math.min((r.width - 64) / (box[2] - box[0]), (r.height - 64) / (box[3] - box[1]))));
@@ -300,7 +316,7 @@ function ndFit() {
 
 // ---------- the palette ----------
 function ndPalette(at, link) {
-  const r = ND.stage.getBoundingClientRect ? ND.stage.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
+  const b = ND.stage.getBoundingClientRect ? ND.stage.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 }, z = ndZoom(), r = { width: b.width / z, height: b.height / z };
   const screen = at || [r.width / 2 - 130, 80];
   const world = [(screen[0] - ND.view.x) / ND.view.k, (screen[1] - ND.view.y) / ND.view.k];
   ND.palette = { screen, world, link: link || null, q: "" };
@@ -325,12 +341,12 @@ function ndPaintPalette() {
     oninput: e => { p.q = e.target.value; fillList(); },
     onkeydown: e => { if (e.key === "Enter") { const first = ndPaletteTypes()[0]; if (first) ndPick(first[0]); } if (e.key === "Escape") { e.stopPropagation(); ndClosePalette(); } } });
   fillList();
-  const r = ND.stage.getBoundingClientRect ? ND.stage.getBoundingClientRect() : { width: 1000, height: 700 };  // kept inside the stage
+  const b = ND.stage.getBoundingClientRect ? ND.stage.getBoundingClientRect() : { width: 1000, height: 700 }, z = ndZoom(), r = { width: b.width / z, height: b.height / z };  // kept inside the stage
   const box = el("div", { class: "nd-palette", style: "left:" + Math.max(8, Math.min(p.screen[0], r.width - 296)) + "px;top:" + Math.max(8, Math.min(p.screen[1], r.height - 380)) + "px" }, search, list);
   ND.stage.append(box); if (search.focus) setTimeout(() => search.focus(), 0); }
 
 // ---------- pointer and keys ----------
-const ndWorld = e => { const r = ND.stage.getBoundingClientRect(); return [(e.clientX - r.left - ND.view.x) / ND.view.k, (e.clientY - r.top - ND.view.y) / ND.view.k]; };
+const ndWorld = e => { const [x, y] = ndLocal(e); return [(x - ND.view.x) / ND.view.k, (y - ND.view.y) / ND.view.k]; };
 function ndDown(e) {
   if (e.button === 2) return;
   const t = e.target, ro = ndPhone();
@@ -351,7 +367,7 @@ function ndDown(e) {
     ND.sel = { node: node.id }; ND.drag = { id: node.id, dx: wx - node.x, dy: wy - node.y, moved: false };
     for (const c of Object.values(ND.cards)) c.classList.toggle("sel", c === card); ndPaintEdges(); e.preventDefault(); return; }
   if (!ND.space && !ro && wire) { ND.sel = { edge: Number(wire.dataset.edge) }; for (const c of Object.values(ND.cards)) c.classList.remove("sel"); ndPaintEdges(); return; }
-  ND.pan = { x: e.clientX, y: e.clientY, vx: ND.view.x, vy: ND.view.y };
+  ND.pan = { x: e.clientX, y: e.clientY, vx: ND.view.x, vy: ND.view.y, z: ndZoom() };
   if (ND.sel) { ND.sel = null; for (const c of Object.values(ND.cards)) c.classList.remove("sel"); ndPaintEdges(); }
   ND.stage.classList.add("panning"); }
 function ndMarkPorts() { if (!ND.stage.querySelectorAll) return;
@@ -362,20 +378,20 @@ function ndMove(e) {
   if (ND.drag) { const node = ndNode(ND.drag.id), [wx, wy] = ndWorld(e); if (!node) return;
     node.x = Math.round(wx - ND.drag.dx); node.y = Math.round(wy - ND.drag.dy); ND.drag.moved = true;
     const card = ND.cards[node.id]; if (card) { card.style.left = node.x + "px"; card.style.top = node.y + "px"; } ndPaintEdges(); return; }
-  if (ND.pan) { ND.view.x = ND.pan.vx + e.clientX - ND.pan.x; ND.view.y = ND.pan.vy + e.clientY - ND.pan.y; ndTransform(); } }
+  if (ND.pan) { ND.view.x = ND.pan.vx + (e.clientX - ND.pan.x) / ND.pan.z; ND.view.y = ND.pan.vy + (e.clientY - ND.pan.y) / ND.pan.z; ndTransform(); } }
 function ndUp(e) {
   if (!ND.stage) return;
   if (ND.link) { const link = ND.link; ND.link = null; ND.stage.classList.remove("linking");
     const hit = document.elementFromPoint ? document.elementFromPoint(e.clientX, e.clientY) : null, port = hit && hit.closest && hit.closest(".nd-port.in");
     if (port) { const why = ndConnect(link.from, link.out, port.dataset.node, port.dataset.port); if (why) toast(why); ndPaint(); }
-    else if (hit && ND.stage.contains(hit) && !hit.closest(".nd-node")) { const r = ND.stage.getBoundingClientRect(); ndPaintEdges(); ndPalette([e.clientX - r.left, e.clientY - r.top], link); }
+    else if (hit && ND.stage.contains(hit) && !hit.closest(".nd-node")) { ndPaintEdges(); ndPalette(ndLocal(e), link); }
     else ndPaintEdges();
     return; }
   if (ND.drag) { if (ND.drag.moved) { ndTouch(); ndPaintBar(); } ND.drag = null; return; }
   if (ND.pan) { ND.pan = null; ND.stage.classList.remove("panning"); } }
 function ndWheel(e) {
   e.preventDefault();
-  const r = ND.stage.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top;
+  const [cx, cy] = ndLocal(e);
   const k = Math.min(2, Math.max(0.4, ND.view.k * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))));
   ND.view.x = cx - (cx - ND.view.x) * k / ND.view.k; ND.view.y = cy - (cy - ND.view.y) * k / ND.view.k; ND.view.k = k; ndTransform(); }
 function ndKey(e) {
@@ -402,10 +418,10 @@ function viewNodes() {
   const ro = ndPhone();
   ND.stage = el("div", { class: "nd-stage" + (ro ? " ro" : ""), tabindex: "0", "aria-label": "Node canvas",
     onpointerdown: ndDown, onwheel: ndWheel,
-    oncontextmenu: e => { if (ro || e.target.closest(".nd-node,.nd-palette")) return; e.preventDefault(); const r = ND.stage.getBoundingClientRect(); ndPalette([e.clientX - r.left, e.clientY - r.top]); },
+    oncontextmenu: e => { if (ro || e.target.closest(".nd-node,.nd-palette")) return; e.preventDefault(); ndPalette(ndLocal(e)); },
     ondblclick: e => { if (ro) return; const head = e.target.closest(".nd-head");
       if (head) { const node = ndNode(head.parentNode.dataset.node), name = prompt("Name this card", ndTitle(node)); if (name != null) { node.title = name.trim().slice(0, 60); ndTouch(); ndPaint(); } return; }
-      if (e.target.closest(".nd-node,.nd-palette")) return; const r = ND.stage.getBoundingClientRect(); ndPalette([e.clientX - r.left, e.clientY - r.top]); } });
+      if (e.target.closest(".nd-node,.nd-palette")) return; ndPalette(ndLocal(e)); } });
   ND.layer = el("div", { class: "nd-layer" }); ND.stage.append(ND.layer);
   const head = typeof vaultHead === "function" ? vaultHead("nodes", "Nodes", "A graph of the studio's own jobs: words to pictures to clips, run in order.")
     : el("div", { class: "pagehead" }, el("h1", { class: "display" }, "Nodes"));

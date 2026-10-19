@@ -12,7 +12,7 @@ made goes on to the next card as paths inside the studio folder. Nothing new run
     POST   /api/nodes/graphs              save {id?, name, nodes, edges, view?}
     DELETE /api/nodes/graphs/{id}         to the trash folder (nodes/.trash), not erased
     POST   /api/nodes/check               {graph} -> {ok, problems: [{node, message}]}
-    POST   /api/nodes/run                 {graph} or {id} -> the run
+    POST   /api/nodes/run                 {graph} or {id} -> the run (409 while another is starting or running)
     GET    /api/nodes/runs/{id}           the run: its status and each node's status, outputs and error
     POST   /api/nodes/runs/{id}/cancel    stops the job that is rendering and the rest of the run
 
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import threading
 import time
@@ -90,7 +91,7 @@ TEMPLATES = [
     {"id": "still-clip", "name": "Still → Clip", "line": "A picture from words, then a clip that opens on it.",
      "nodes": [_node("t1", "text", 40, 60, "The picture", text="A lighthouse keeper on a wet stone stair at dusk, lamp in hand, storm clouds behind"),
                _node("p1", "picture", 360, 40),
-               _node("t2", "text", 360, 400, "What happens", text="The keeper climbs toward the lamp room as the beam sweeps across the sea. Rain and wind."),
+               _node("t2", "text", 40, 280, "What happens", text="The keeper climbs toward the lamp room as the beam sweeps across the sea. Rain and wind."),
                _node("c1", "clip", 700, 120)],
      "edges": [_edge("t1", "text", "p1", "prompt"), _edge("p1", "image", "c1", "first_frame"), _edge("t2", "text", "c1", "prompt")]},
     {"id": "scout-pick-clip", "name": "Scout → Pick → Clip", "line": "Four candidates, pick one, then the clip.",
@@ -156,12 +157,16 @@ def tidy(graph) -> dict:
                     raise HTTPException(400, f"the text of {title_of(node)} is longer than {MOST_TEXT} characters")
             else:
                 try:
+                    if not math.isfinite(float(value)):
+                        raise ValueError
                     value = type(default)(float(value))
                 except (TypeError, ValueError, OverflowError):
                     raise HTTPException(400, f"{key} of {title_of(node)} is a number")
             params[key] = value
         try:
             x, y = float(node.get("x") or 0), float(node.get("y") or 0)
+            if not (math.isfinite(x) and math.isfinite(y)):
+                raise ValueError
         except (TypeError, ValueError):
             raise HTTPException(400, "a card's place is two numbers")
         out.append({"id": nid, "type": node["type"], "x": round(x, 1), "y": round(y, 1), "title": str(node.get("title") or "")[:60], "params": params})
@@ -173,6 +178,8 @@ def tidy(graph) -> dict:
     view = graph.get("view") if isinstance(graph.get("view"), dict) else {}
     try:
         view = {"x": float(view.get("x", 0)), "y": float(view.get("y", 0)), "k": min(max(float(view.get("k", 1)), 0.4), 2)}
+        if not all(math.isfinite(v) for v in view.values()):
+            raise ValueError
     except (TypeError, ValueError):
         view = {"x": 0.0, "y": 0.0, "k": 1.0}
     return {"name": str(graph.get("name") or "Untitled graph").strip()[:80] or "Untitled graph", "nodes": out, "edges": links, "view": view}
@@ -335,13 +342,14 @@ def checked(graph, inside=None) -> dict:
 def attach(home: Path, enqueue, jobs: dict, lock, inside, relative) -> APIRouter:
     """``enqueue(kind, title, params, estimate)`` is server.enqueue, ``jobs`` the queue's jobs and ``lock`` its lock,
     ``inside`` / ``relative`` turn a studio path into a full one and back. A job goes in through the app's own route
-    for its kind where the app has one (the checks a job from any tab gets, the memory guard's among them), and through
-    ``enqueue`` otherwise."""
+    for its kind (the checks a job from any tab gets, the memory guard's among them); where the app has none the card
+    fails rather than queue the job unchecked, so ``enqueue`` is kept for the signature only."""
 
     router = APIRouter()
     folder = home / "nodes"
     runs: dict[str, dict] = {}
     runs_lock = threading.Lock()
+    starting = threading.Lock()  # held while a run is checked and started (start)
 
     def graph_file(graph_id: str) -> Path:
         if not ID.fullmatch(graph_id or ""):
@@ -378,7 +386,7 @@ def attach(home: Path, enqueue, jobs: dict, lock, inside, relative) -> APIRouter
         file = graph_file(graph_id)
         graph = {**tidy(body), "id": graph_id, "saved": time.time()}
         folder.mkdir(parents=True, exist_ok=True)
-        fresh = file.with_suffix(".json.new")  # written beside it and swapped in: a reader never sees half a file
+        fresh = file.with_name(f"{file.name}.{uuid.uuid4().hex}.new")  # written beside it and swapped in: a reader never sees half a file
         fresh.write_text(json.dumps(graph, indent=1))
         fresh.replace(file)
         return graph
@@ -449,11 +457,12 @@ def attach(home: Path, enqueue, jobs: dict, lock, inside, relative) -> APIRouter
                 job["status"] = "cancelled"
 
     def submit(run: dict, path: str, kind: str, title: str, params: dict) -> dict:
-        """The job queued through the app's own route for it, or ``enqueue`` where there is none."""
+        """The job queued through the app's own route for it, which checks it (the memory guard, the studio folder,
+        the engine being installed). Without that route the card fails: a job is never queued unchecked."""
 
         endpoint = route(run["_app"], path)
         if endpoint is None:
-            return enqueue(kind, title, params, None)
+            raise RuntimeError(f"this studio has no {path} to check and queue its job, so it was not queued")
         if path == "/api/jobs":
             return endpoint({"kind": kind, "title": title, "params": params})  # as many Sparks as the Sparks page says
         return endpoint({**params, "title": title})
@@ -563,7 +572,7 @@ def attach(home: Path, enqueue, jobs: dict, lock, inside, relative) -> APIRouter
             raise RuntimeError("the project for the timeline is gone")
         data = json.loads(file.read_text())
         data.setdefault("timeline", []).extend(clips)
-        fresh = file.with_suffix(".json.new")
+        fresh = file.with_name(f"{file.name}.{uuid.uuid4().hex}.new")  # one per write: two writes never share it
         fresh.write_text(json.dumps(data, indent=1))
         fresh.replace(file)
         return data.get("name") or project_id
@@ -616,12 +625,24 @@ def attach(home: Path, enqueue, jobs: dict, lock, inside, relative) -> APIRouter
         if given is None and body.get("id"):
             given = get_graph(str(body["id"]))
         graph = checked(given, inside)
-        with runs_lock:
-            if any(r["status"] in ("queued", "running") for r in runs.values()):
-                raise HTTPException(409, "a graph is running: cancel it or let it finish first")
+        # one run at a time: the slot is taken here, under the lock, and held through the checks until the run is in
+        # the list (two quick Runs would otherwise both pass the check before either is added)
+        if not starting.acquire(blocking=False):
+            raise HTTPException(409, "a graph is starting: wait for it, or cancel it once it runs")
+        try:
+            with runs_lock:
+                if any(r["status"] in ("queued", "running") for r in runs.values()):
+                    raise HTTPException(409, "a graph is running: cancel it or let it finish first")
+            return begin(body, graph, request.app)
+        finally:
+            starting.release()
+
+    def begin(body: dict, graph: dict, app) -> dict:
         steps = order(graph)
-        app = request.app
         estimate = route(app, "/api/estimate")
+        clips = [node for node in graph["nodes"] if node["type"] == "clip"]
+        if clips and estimate is None:  # never skipped: without the memory guard's answer no clip is queued
+            raise HTTPException(503, "this studio has no /api/estimate to check the clips against the machine's memory")
         if estimate is not None:  # the memory guard's answer for every clip before anything is queued
             for node in graph["nodes"]:
                 if node["type"] != "clip":

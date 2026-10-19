@@ -198,3 +198,46 @@ def test_a_phone_sees_the_graph_read_only():
         return
     assert "Best on a desktop" in out["text"] and not out["run"] and not out["save"]
     assert out["disabled"] is True and out["calls"] == 0
+
+
+def test_a_double_click_on_run_starts_one_run():
+    """Run is held off while the graph is checked and started: the second click sends nothing."""
+    out = run("""ndLoad(ndBlank("Twice")); const t = ndAdd("text", 0, 0), c = ndAdd("clip", 300, 0); t.params.text = "x"; ndConnect(t.id, "text", c.id, "prompt");
+      viewNodes(); calls.length = 0; let open; const gate = new Promise(r => { open = r; });
+      answers["/api/nodes/check"] = async () => { await gate; return { ok: true, problems: [], order: [t.id, c.id] }; };
+      answers["/api/estimate"] = { seconds: 90, memory: { fits: true } };
+      answers["/api/nodes/run"] = () => ({ id: "r1", status: "running", order: [t.id, c.id], current: t.id, nodes: { [t.id]: { status: "running" }, [c.id]: { status: "waiting" } } });
+      const first = ndRun(); const second = ndRun(); out.during = text(ND.root.querySelector("nd-bar")); out.disabled = !!button(ND.root, "Starting").attrs.disabled;
+      open(); await first; await second;
+      out.runs = calls.filter(c => c[0] === "/api/nodes/run").length; out.checks = calls.filter(c => c[0] === "/api/nodes/check").length;
+      out.after = text(ND.root.querySelector("nd-bar"));
+      answers["/api/nodes/run"] = new Error("a graph is running: cancel it or let it finish first");
+      ND.run.status = "done"; calls.length = 0; answers["/api/nodes/check"] = { ok: true, problems: [], order: [] };
+      await ndRun(); out.refused = toasts.pop(); out.again = text(ND.root.querySelector("nd-bar"));""")
+    if out is None:
+        return
+    assert "Starting" in out["during"] and out["disabled"]
+    assert out["runs"] == 1 and out["checks"] == 1
+    assert "Cancel run" in out["after"] and "Starting" not in out["after"]
+    assert "a graph is running" in out["refused"] and "Run" in out["again"] and "Starting" not in out["again"]  # the server's 409, said
+
+
+def test_the_canvas_maths_follows_the_type_size_zoom():
+    """At Largest type size (#view zoom 1.194) the stage's rect and the pointer are zoomed, the canvas is not."""
+    out = run("""ndLoad(ndBlank()); viewNodes(); const z = 1.194;
+      ND.stage.offsetWidth = 1000; ND.stage.getBoundingClientRect = () => ({ left: 100 * z, top: 50 * z, width: 1000 * z, height: 700 * z });
+      out.zoom = ndZoom(); ND.view = { x: 0, y: 0, k: 1 };
+      out.world = ndWorld({ clientX: (100 + 300) * z, clientY: (50 + 200) * z });
+      ND.stage.currentCSSZoom = 1.5; out.native = ndZoom(); delete ND.stage.currentCSSZoom;
+      const a = ndAdd("text", 0, 0), b = ndAdd("clip", 1400, 600); ndPaint(); ndFit();
+      out.fit = { ...ND.view };
+      out.right = 1400 + 248; out.inside = (out.right * ND.view.k + ND.view.x) <= 1000;
+      ND.view = { x: 10, y: 20, k: 1 }; ND.space = true; ndDown({ button: 0, target: ND.stage, clientX: 0, clientY: 0, preventDefault() {} });
+      ndMove({ clientX: 119.4, clientY: 59.7 }); out.pan = [Math.round(ND.view.x), Math.round(ND.view.y)]; ndUp({}); ND.space = false;""")
+    if out is None:
+        return
+    assert abs(out["zoom"] - 1.194) < 1e-9 and out["native"] == 1.5
+    assert [round(v, 6) for v in out["world"]] == [300, 200]  # the point under the pointer, in the canvas's own units
+    assert out["inside"]  # Fit keeps the whole graph inside the stage's own width
+    assert out["pan"] == [110, 70]  # a drag of 100 page pixels moves the canvas 100 of its own
+
