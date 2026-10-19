@@ -15,10 +15,14 @@ Packs live under $STUDIO_HOME/motion/<id>/ with <id>.zip beside each.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
 import shutil
+import socket
+import urllib.parse
+import urllib.request
 import signal
 import subprocess
 import sys
@@ -260,6 +264,43 @@ def motion_reference(pack, layer, mode, seconds, width, height, *, timing: str =
             "made": time.time()}
 
 
+# From a link: a clip's address (a video page or a video file) read into uploads/links/, then used like an upload
+LINK_LIMIT = 2 * 1024 ** 3  # bytes
+LINK_TIMEOUT = 20 * 60  # seconds for one download
+LINK_PAGE = ("Reading a video page needs yt-dlp, which the Motion Previs install adds: run "
+             "`bash scripts/setup-motion.sh`, or paste the address of the video file itself (…/clip.mp4).")
+
+
+def public_link(url) -> str:
+    """An http(s) address whose host is out on the internet: never this machine or its network (the server fetches it)."""
+
+    url = str(url or "").strip()
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname or len(url) > 2000 or any(c in url for c in "\r\n\0 "):
+        raise HTTPException(400, "paste the clip's address: https://…")
+    try:
+        found = {info[4][0] for info in socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))}
+    except (OSError, UnicodeError):
+        raise HTTPException(400, f"{parts.hostname} could not be found: check the address")
+    for address in found:
+        ip = ipaddress.ip_address(address.split("%")[0])
+        if not ip.is_global:
+            raise HTTPException(400, "that address is on this machine or its own network: upload the clip instead")
+    return url
+
+
+def link_reader(python: str) -> str | None:
+    """The interpreter that has yt-dlp: the analysis environment's, else the Studio's own; None when neither does."""
+
+    for candidate in dict.fromkeys([python, sys.executable]):
+        try:
+            if subprocess.run([candidate, "-c", "import yt_dlp"], capture_output=True, timeout=20).returncode == 0:
+                return candidate
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
 def attach(home: Path, pack: Path, spark: bool) -> APIRouter:
     global HOME, PACK
     HOME, PACK = home, pack
@@ -482,6 +523,108 @@ def attach(home: Path, pack: Path, spark: bool) -> APIRouter:
             order.append(job_id)
         wake.set()
         return public(job)
+
+    links: dict[str, dict] = {}
+
+    def read_link(item: dict) -> None:
+        """Download one link: yt-dlp for a page (when it is installed), a plain read for a video file."""
+
+        folder = HOME / "uploads" / "links"
+        folder.mkdir(parents=True, exist_ok=True)
+        stem, url = item["id"], item["url"]
+        try:
+            direct = Path(urllib.parse.urlsplit(url).path).suffix.lower() in VIDEO
+            reader = None if direct else link_reader(python())
+            if reader:
+                ffmpeg = shutil.which("ffmpeg", path=environment()["PATH"])
+                argv = [reader, "-m", "yt_dlp", "--no-playlist", "--newline", "--no-color", "--max-filesize", str(LINK_LIMIT),
+                        "--socket-timeout", "20", "-f", "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b", "--merge-output-format", "mp4",
+                        "-o", str(folder / (stem + ".%(ext)s")), *(["--ffmpeg-location", ffmpeg] if ffmpeg else []), "--", url]
+                process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL,
+                                           env=environment(), start_new_session=True)
+                item["process"] = process
+                timer = threading.Timer(LINK_TIMEOUT, lambda: os.killpg(process.pid, signal.SIGTERM))
+                timer.daemon = True
+                timer.start()
+                last = ""
+                for line in process.stdout:
+                    line = line.strip()
+                    got = re.search(r"\[download\]\s+([0-9.]+)%", line)
+                    if got:
+                        item["progress"] = float(got.group(1))
+                    elif line:
+                        last = line
+                process.wait()
+                timer.cancel()
+                made = [p for p in folder.glob(stem + ".*") if p.suffix.lower() in VIDEO]
+                if item.get("cancelled"):
+                    raise RuntimeError("Cancelled.")
+                if process.returncode or not made:
+                    raise RuntimeError(re.sub(r"^ERROR:\s*", "", last)[:300] or f"yt-dlp stopped (exit {process.returncode})")
+                target = made[0]
+            else:
+                request = urllib.request.Request(url, headers={"User-Agent": "ImaginationStudio"})
+                with urllib.request.urlopen(request, timeout=30) as reply:
+                    kind = reply.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                    if not direct and not kind.startswith("video/"):
+                        raise RuntimeError(LINK_PAGE)
+                    suffix = Path(urllib.parse.urlsplit(reply.geturl()).path).suffix.lower()
+                    target = folder / (stem + (suffix if suffix in VIDEO else ".mp4"))
+                    size, part = int(reply.headers.get("Content-Length") or 0), target.with_suffix(".part")
+                    with open(part, "wb") as out:
+                        while chunk := reply.read(1 << 20):
+                            if item.get("cancelled"):
+                                raise RuntimeError("Cancelled.")
+                            out.write(chunk)
+                            if out.tell() > LINK_LIMIT:
+                                raise RuntimeError("the file is over 2 GB")
+                            if size:
+                                item["progress"] = round(100 * out.tell() / size, 1)
+                    part.replace(target)
+            meta = worker.ffprobe(target)
+            if not meta.get("width") or not meta.get("duration"):
+                target.unlink(missing_ok=True)
+                raise RuntimeError("what that address gave is not a video that can be read")
+            item.update(state="done", path=relative(target), progress=100.0, duration=meta["duration"])
+        except (OSError, RuntimeError, ValueError) as error:
+            for leftover in folder.glob(stem + ".*"):
+                leftover.unlink(missing_ok=True)
+            item.update(state="failed", error=str(error)[:400] or "the download stopped")
+        finally:
+            item.pop("process", None)
+
+    def link_public(item: dict) -> dict:
+        return {k: v for k, v in item.items() if k != "process"}
+
+    @router.post("/api/motion/links")
+    def fetch_link(body: dict) -> dict:
+        """Read a clip from its address (a video page or a video file) into the studio folder, to analyse like an upload."""
+
+        url = public_link(body.get("url"))
+        if any(item["state"] == "running" for item in links.values()):
+            raise HTTPException(409, "a link is being read: wait for it or cancel it")
+        item = {"id": "link-" + time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6], "url": url, "state": "running", "progress": 0.0,
+                "path": None, "error": None, "started": time.time()}
+        links[item["id"]] = item
+        threading.Thread(target=read_link, args=(item,), daemon=True).start()
+        return link_public(item)
+
+    @router.get("/api/motion/links/{link_id}")
+    def link_state(link_id: str) -> dict:
+        if link_id not in links:
+            raise HTTPException(404, "no such link")
+        return link_public(links[link_id])
+
+    @router.post("/api/motion/links/{link_id}/cancel")
+    def link_cancel(link_id: str) -> dict:
+        item = links.get(link_id)
+        if not item:
+            raise HTTPException(404, "no such link")
+        item["cancelled"] = True
+        process = item.get("process")
+        if process is not None and process.poll() is None:
+            os.killpg(process.pid, signal.SIGTERM)
+        return link_public(item)
 
     @router.get("/api/motion/jobs")
     def list_jobs() -> list[dict]:

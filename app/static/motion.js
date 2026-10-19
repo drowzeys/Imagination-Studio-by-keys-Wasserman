@@ -42,6 +42,16 @@ async function moUpload(input, pack) {
   } catch (e) { toast(e.message); }
   MO.busy = ""; render();
 }
+// From a link: the server reads the clip (a video page through yt-dlp, or a video file) into the studio folder, then it is the shot
+async function moLink() { const url = (MO.link || "").trim(); if (!url) return toast("Paste the clip's address first");
+  MO.busy = "Reading the link…"; render();
+  try { let item = await api("/api/motion/links", { url });
+    while (item.state === "running") { await new Promise(r => setTimeout(r, 1000)); item = await api("/api/motion/links/" + item.id);
+      const now = "Reading the link… " + Math.round(item.progress || 0) + "%"; if (now !== MO.busy) { MO.busy = now; render(); } }
+    if (item.state !== "done") throw new Error(item.error || "the link could not be read");
+    MO.link = ""; MO.linking = false; await moPick(item.path); toast("Read from the link: choose the part to analyse, with its depth layers"); }
+  catch (e) { toast(e.message, 8000); }
+  MO.busy = ""; render(); }
 async function moRun() {
   try { MO.job = await api("/api/motion/jobs", { source: MO.source, start: Number(MO.start), end: Number(MO.end), mode: MO.mode, layers: [...MO.layers], fps: Number(MO.fps),
       resolution: MO.resolution, pose: { poseModel: MO.poseModel } }); } catch (e) { toast(e.message); return; }
@@ -78,8 +88,14 @@ function moSource() {
   const box = el("div", { class: "group" }, el("h3", {}, "1 · The shot"), up, zip,
     el("div", { class: "chips" }, el("button", { onclick: () => up.click() }, "Upload a clip"),
       el("button", { class: MO.picking ? "small on" : "", style: "padding:8px 14px;font-size:inherit", onclick: async () => { MO.picking = !MO.picking; if (MO.picking) MO.sources = await api("/api/motion/sources"); render(); } }, "Pick from the studio folder"),
+      el("button", { class: MO.linking ? "small on" : "", style: "padding:8px 14px;font-size:inherit", title: "A video page or a video file's address: the clip is read into the studio folder", onclick: () => { MO.linking = !MO.linking; render(); } }, "From a link"),
       el("button", { title: "A production pack exported by Motion Previs Studio, or by this tab: the analysis is skipped", onclick: () => zip.click() }, "Upload a pack ZIP"),
       MO.busy ? el("span", { class: "note", style: "margin:0" }, MO.busy) : null));
+  if (MO.linking) put(box, el("div", { class: "row", style: "margin-top:12px;align-items:center" },
+      el("input", { type: "url", value: MO.link || "", placeholder: "https://… a video page or a .mp4", "aria-label": "The clip's address", style: "flex:1;min-width:0",
+        oninput: e => { MO.link = e.target.value; }, onkeydown: e => { if (e.key === "Enter") moLink(); } }),
+      el("button", { class: "primary fit", disabled: !!MO.busy, onclick: moLink }, "Read the clip")),
+    el("div", { class: "note" }, "The clip is downloaded into the studio folder (uploads/links), then analysed like an upload: depth, AI depth, pose and the camera move. Use clips you have the right to use."));
   if (MO.picking) put(box, !MO.sources ? el("div", { class: "note" }, "Loading…") : !MO.sources.length ? el("div", { class: "note" }, "No clips under the studio folder yet.") :
     el("div", { class: "grid", style: "margin-top:12px;max-height:46vh;overflow:auto" }, MO.sources.slice(0, 60).map(m => el("div", { class: "tile" + (m.path === MO.source ? " on" : "") },
       el("video", { src: file(m.path) + "#t=0.5", preload: "metadata", muted: true }), el("div", { class: "cap" }, el("span", { title: m.path }, m.path.slice(-28)), el("button", { class: "small", onclick: () => moPick(m.path) }, "use"))))));
