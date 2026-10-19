@@ -263,10 +263,11 @@ def test_settings_are_saved_privately_and_checked(fake):
                                                                         "studio_host": "user@studio-box"},
                                          "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b"}).json()["settings"]
     assert good == {"default": "gemini", "remote": {"host": "user@workstation.local:2222", "backends": ["claude"], "studio_host": "user@studio-box"},
-                    "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b"}
+                    "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b", "agent": ""}
     file = agents.HOME / ".studio-agents/settings.json"
     assert json.loads(file.read_text()) == good and (file.stat().st_mode & 0o777) == 0o600
     assert post("/api/brains/settings", {"default": "gpt"}).status_code == 400
+    assert post("/api/brains/settings", {"agent": "gemini"}).status_code == 400  # the Agent room's default drives the Studio's tools
     assert post("/api/brains/settings", {"remote": {"backends": ["local"]}}).status_code == 400
     assert post("/api/brains/settings", {"local_endpoint": "http://x; rm"}).status_code == 400
     assert agents.ssh_of("user@workstation.local:2222")[-3:] == ["-p", "2222", "user@workstation.local", "--"][-3:] and "-p" in agents.ssh_of("user@workstation.local:2222")

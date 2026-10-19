@@ -66,7 +66,13 @@ CHECK_TIMEOUT = 20  # an MCP server's handshake
 LOG_LIMIT = 20000
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 # where coding CLIs install themselves on a remote machine whose non-interactive shell does not have them on PATH
-REMOTE_PATH = 'PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.claude/local:$HOME/.npm-global/bin:$HOME/.bun/bin"; export PATH; '
+# On a Mac reached over ssh, Claude Code cannot read its sign-in: macOS keeps it in the login Keychain, which an ssh
+# session may not open ("User interaction is not allowed"). Connect makes a long-lived token there with `claude
+# setup-token` and keeps it only in that user's own home (CLAUDE_TOKEN, mode 0600); every remote command exports it.
+CLAUDE_TOKEN = ".config/imagination-studio/claude-oauth-token"
+REMOTE_PATH = ('PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.claude/local:$HOME/.npm-global/bin:$HOME/.bun/bin"; export PATH; '
+               f'if [ -z "${{CLAUDE_CODE_OAUTH_TOKEN:-}}" ] && [ -r "$HOME/{CLAUDE_TOKEN}" ]; then '
+               f'CLAUDE_CODE_OAUTH_TOKEN=$(cat "$HOME/{CLAUDE_TOKEN}"); export CLAUDE_CODE_OAUTH_TOKEN; fi; ')
 # a Codex CLI a Mac app carries, used when no codex is on PATH. The ChatGPT desktop app's is a folder, Resources/codex-cli,
 # whose codex-package.json names the entrypoint (bin/codex); its sign-in is the ChatGPT app's (as in Sam Wasserman's Slate)
 MAC_CODEX = ("/Applications/ChatGPT.app/Contents/Resources/codex-cli", "/Applications/ChatGPT.app/Contents/Resources/codex",
@@ -135,6 +141,7 @@ TEXT_LIMIT = 20000
 lock = threading.RLock()
 probes: dict = {}  # (host or "", cli) -> (monotonic time, found)
 codex_checks: dict = {}  # codex path -> (monotonic time, its mtime, why it cannot start or None)
+versions: dict = {}  # CLI path -> (its mtime, its version as numbers)
 CODEX_BROKEN = re.compile(r"Error loading config|unknown variant|unknown field", re.I)
 CODEX_HINT = ("This Codex CLI is older than the settings in ~/.codex/config.toml: update it (`brew upgrade codex` or "
               "`npm install -g @openai/codex`). The ChatGPT desktop app carries a newer one the Studio uses when it is installed.")
@@ -186,7 +193,8 @@ def saved_settings() -> dict:
             "remote": {"host": remote.get("host") or "", "backends": [b for b in remote.get("backends") or [] if b in CLIS],
                        "studio_host": remote.get("studio_host") or ""},
             "local_endpoint": str(saved.get("local_endpoint") or "") if "local_endpoint" in saved else env["local_endpoint"],
-            "local_model": str(saved.get("local_model") or "") if "local_model" in saved else env["local_model"]}
+            "local_model": str(saved.get("local_model") or "") if "local_model" in saved else env["local_model"],
+            "agent": saved["agent"] if saved.get("agent") in HARNESSES else ""}  # the Agent room's first choice
 
 
 def default_brain() -> dict:
@@ -219,6 +227,10 @@ def save_settings(body: dict) -> dict:
         now["remote"] = {"host": valid_host(remote.get("host", now["remote"]["host"]), "remote.host"),
                          "backends": list(dict.fromkeys(backends)),
                          "studio_host": valid_host(remote.get("studio_host", now["remote"]["studio_host"]), "remote.studio_host")}
+    if "agent" in body:
+        if body["agent"] not in (*HARNESSES, ""):
+            raise HTTPException(400, "agent is one of " + ", ".join(HARNESSES))
+        now["agent"] = body["agent"]
     if "local_endpoint" in body:
         value = str(body["local_endpoint"] or "").strip()
         if value and (len(value) > 300 or not re.fullmatch(r"(?:https?://)?[A-Za-z0-9.\-\[\]:]+(?:/[A-Za-z0-9._~/-]*)?", value)):
@@ -266,7 +278,8 @@ def scp_target(host: str) -> tuple[list[str], str]:
 
 
 def search_path() -> str:
-    return os.pathsep.join([os.environ.get("PATH", ""), *slate.CLI_DIRS])
+    # ~/.npm-global/bin: where Connect's install puts an npm CLI when npm's own prefix is not the user's to write
+    return os.pathsep.join([os.environ.get("PATH", ""), *slate.CLI_DIRS, str(Path.home() / ".npm-global/bin")])
 
 
 def child_env(extra: dict | None = None) -> dict:
@@ -299,9 +312,35 @@ def cli(name: str) -> str | None:
         app = next(filter(None, (bundled_codex(p) if os.path.isdir(p) else p if os.access(p, os.X_OK) else None for p in MAC_CODEX)), None)
         if not found:
             return app
-        if app and app != found and codex_broken(found):
-            return app  # a codex on PATH that cannot start (an older one beside newer settings): the ChatGPT app's instead
+        if app and app != found and (codex_broken(found) or older(found, app)):
+            # a codex on PATH that cannot start, or older than the ChatGPT app's (an old one is refused the account's
+            # models: "not supported when using Codex with a ChatGPT account"): the app's instead, which shares its sign-in
+            return app
     return found
+
+
+def version_key(path: str) -> tuple:
+    """A CLI's version as numbers, asked once per binary (by its mtime); () when it does not say."""
+
+    try:
+        stamp = os.stat(path).st_mtime
+    except OSError:
+        return ()
+    with lock:
+        cached = versions.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    said = version_of(path) or ""
+    found_ = re.search(r"(\d+)\.(\d+)\.(\d+)", said)
+    key = tuple(int(x) for x in found_.groups()) if found_ else ()
+    with lock:
+        versions[path] = (stamp, key)
+    return key
+
+
+def older(path: str, than: str) -> bool:
+    mine, theirs = version_key(path), version_key(than)
+    return bool(mine and theirs and mine < theirs)
 
 
 def codex_broken(path: str) -> str | None:
@@ -361,7 +400,7 @@ def probe_remote(host: str, names: list[str]) -> dict:
 
     looks = []
     for name in names:
-        extra = " || ls " + " ".join(p + "/bin/codex" if p.endswith("codex-cli") else p for p in MAC_CODEX) + " 2>/dev/null | head -1" if name == "codex" else ""
+        extra = " || ls " + " ".join(p + "/bin/codex" if p.endswith("codex-cli") else p for p in MAC_CODEX) + " 2>/dev/null | head -1" if name == "codex" and MAC_CODEX else ""
         looks.append(f'p=$(command -v {shlex.quote(CLIS[name][1])}{extra}) && [ -n "$p" ] && '
                       f'printf "%s\\t%s\\t%s\\n" {name} "$p" "$("$p" --version 2>/dev/null | head -1)"')
     script = REMOTE_PATH + "; ".join(f"( {look} )" for look in looks) + "; true"
@@ -437,6 +476,8 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
             broken = codex_broken(other) if other and other != item["path"] else None
             if broken:
                 item["note"] = "The codex on PATH cannot start (“" + broken[:200] + "”), so the Studio uses the ChatGPT app's newer one."
+            elif other and other != item["path"] and older(other, item["path"]):
+                item["note"] = "The ChatGPT app's Codex is newer than the codex on PATH, so the Studio uses it: nothing to install, and it shares your ChatGPT sign-in."
         item.update(signin_flow=recipe_of(name, item["where"] != "here")["flow"], signin_command=terminal_line(name),
                     signin_note=SIGNIN_NOTES.get(name))
         out.append(item)
@@ -1734,6 +1775,8 @@ def read_signin(state: dict) -> dict:
             out["state"] = "starting"
     if out["state"] in ("verifying", "done", "failed") and url:
         out["url"] = url
+    if state.get("token_host"):
+        out["token"] = "saved" if state.get("token_saved") else "waiting"
     lines = [redact(line.strip(), secrets)[:240] for line in text.splitlines() if line.strip()]
     out["lines"] = lines[-12:]
     return out
@@ -1773,6 +1816,8 @@ def pump(state: dict, fd: int, process) -> None:
                 if chunk:
                     with lock:
                         state["raw"] = (state.get("raw", "") + chunk.decode("utf-8", "replace"))[-65536:]
+                    if state.get("token_host"):
+                        catch_token(state)
                     continue
                 eof = True
             if process.poll() is None:
@@ -1780,7 +1825,11 @@ def pump(state: dict, fd: int, process) -> None:
                     time.sleep(0.1)
                 continue
             code = process.returncode
-            if code == 0:
+            if state.get("token_host"):
+                catch_token(state, ended=True)
+            if code == 0 and state.get("token_host") and not state.get("token_saved"):
+                finish(state, "failed", state.get("token_error") or "Claude Code did not print a sign-in token: try again.")
+            elif code == 0:
                 finish(state, "done", None)
             else:
                 text = [redact(line.strip(), [state.get("sent") or ""]) for line in plain(state.get("raw", "")).splitlines() if line.strip()]
@@ -1809,6 +1858,8 @@ def start_signin(backend: str, body: dict) -> dict:
         raise HTTPException(404, "no such brain")
     host = where_of(backend)
     recipe = recipe_of(backend, bool(host), body)
+    if backend == "claude" and host and remote_os(host) == "Darwin":
+        recipe = {"flow": "pty", "args": ["setup-token"], "token": True}  # the Keychain cannot be read over ssh: a token kept there
     if recipe["flow"] != "pty":
         raise HTTPException(400, f"{CLIS[backend][0]} signs in inside its own terminal: run `{terminal_line(backend)}` there")
     with lock:  # the place is taken under the lock, so two quick starts never both run a CLI
@@ -1823,7 +1874,8 @@ def start_signin(backend: str, body: dict) -> dict:
             signin.update(starting=False, ended="failed", reason="the sign-in did not start")
         raise
     state = {"backend": backend, "where": f"ssh:{host}" if host else "here", "process": process, "fd": master, "raw": "",
-             "started": time.time(), "deadline": time.monotonic() + SIGNIN_TIMEOUT, "command": " ".join([CLIS[backend][1], *recipe["args"]])}
+             "started": time.time(), "deadline": time.monotonic() + SIGNIN_TIMEOUT, "command": " ".join([CLIS[backend][1], *recipe["args"]]),
+             "token_host": host if recipe.get("token") else ""}
     with lock:
         cancelled = signin.get("cancelled")
         signin.clear()
@@ -1973,6 +2025,9 @@ def status_of(backend: str) -> dict:
     where = {"where": f"ssh:{host}" if host else "here"}
     try:
         answer = gemini_status(host) if backend == "gemini" else read_status(backend, run_short(status_args(backend), backend, host))
+        if backend == "claude" and host and answer.get("state") == "signed_out" and keychain_signed(host):
+            answer = {"state": "keychain", "detail": "Signed in on that Mac, but macOS keeps the sign-in in its Keychain, which SSH cannot open.",
+                      "hint": "Allow over SSH makes a sign-in token for this studio, kept only on that Mac."}
     except subprocess.TimeoutExpired:
         answer = {"state": "unknown", "detail": f"No answer in {STATUS_TIMEOUT} seconds"}
     except (OSError, RuntimeError) as error:
@@ -1995,6 +2050,9 @@ def sign_out(backend: str, body: dict | None = None) -> dict:
     if not args:
         raise HTTPException(400, f"{CLIS[backend][0]} signs out inside its own terminal")
     try:
+        if backend == "claude" and where_of(backend):
+            subprocess.run([*ssh_of(where_of(backend)), f'rm -f "$HOME/{CLAUDE_TOKEN}"'], capture_output=True, text=True,
+                           timeout=PROBE_TIMEOUT + 2, stdin=subprocess.DEVNULL)
         done = run_short(args, backend, where_of(backend))
     except subprocess.TimeoutExpired:
         raise HTTPException(504, f"{CLIS[backend][0]} did not sign out in {STATUS_TIMEOUT} seconds")
@@ -2005,6 +2063,386 @@ def sign_out(backend: str, body: dict | None = None) -> dict:
         probes.clear()
     said = [redact(line.strip()) for line in plain(done.stdout + "\n" + done.stderr).splitlines() if line.strip()]
     return {"ok": done.returncode == 0, "lines": said[-6:], **status_of(backend)}
+
+
+# ---------- connecting a brain: find it (or install it), sign in, one real answer, make it the default ----------
+#
+# The page's Connect checklist drives these; each step is the CLI's own: its official installer (never sudo: stdin is
+# closed and nothing here runs as root), its own sign-in (above), one short answer through ask() with VERIFY_TIMEOUT.
+# Nothing of a sign-in is kept here: a Claude Code token for a Mac reached over ssh goes straight from the pty to that
+# Mac's CLAUDE_TOKEN file and is cut out of what the page and the log see.
+#
+# Linking another computer: the studio machine's own ssh key (made with ssh-keygen if it has none, never replaced),
+# one authorized_keys line to add there, a Test (BatchMode: a key or nothing), then the remote host saved with the CLIs
+# found on it.
+VERIFY_TIMEOUT = 60
+INSTALL_TIMEOUT = 15 * 60
+OS_TTL = 10 * 60
+CLAUDE_KEYCHAIN = "Claude Code-credentials"
+TOKEN = re.compile(r"sk-ant-oat[0-9]{2}-[A-Za-z0-9_\-]{20,}")
+# backend -> [(what it needs, the shell line, a plain name)], the first whose need is there is used
+INSTALLERS = {
+    "claude": [("npm", "npm install -g @anthropic-ai/claude-code@latest", "npm"),
+               ("curl", "curl -fsSL https://claude.ai/install.sh | bash", "Anthropic's installer")],
+    "codex": [("npm", "npm install -g @openai/codex@latest", "npm"),
+              ("brew", "brew upgrade --cask codex 2>/dev/null || brew install --cask codex", "Homebrew")],
+    "gemini": [("npm", "npm install -g @google/gemini-cli@latest", "npm"),
+               ("brew", "brew upgrade gemini-cli 2>/dev/null || brew install gemini-cli", "Homebrew")],
+    "grok": [("curl", "curl -fsSL https://x.ai/cli/install.sh | bash", "xAI's installer")],
+    "hermes": [("curl", "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", "Nous Research's installer")],
+}
+NPM_HOME = 'npm install -g --prefix "$HOME/.npm-global"'  # npm's own prefix is not the user's to write: their home instead
+LOOK_TOOLS = ('for t in npm brew curl; do command -v "$t" >/dev/null 2>&1 && echo "have $t"; done; '
+              'p=$(npm prefix -g 2>/dev/null) && [ -n "$p" ] && [ -w "$p" ] && echo "npm-writable"; '
+              'echo "os $(uname -s)"; [ -d /Applications/ChatGPT.app ] && echo chatgpt; true')
+installing: dict = {"backend": None}
+verified: dict = {}  # (backend, host) -> the last Verify
+machines: dict = {}  # host -> (monotonic time, uname -s)
+
+
+def shell_here(line: str, timeout: int, host: str = "") -> subprocess.CompletedProcess:
+    """A short shell line here or on `host` (with REMOTE_PATH), stdin closed."""
+
+    argv = [*ssh_of(host), REMOTE_PATH + line] if host else ["sh", "-c", line]
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
+                          env=None if host else child_env(), cwd=None if host else str(Path.home()))
+
+
+def remote_os(host: str) -> str:
+    """`uname -s` of another machine, kept ten minutes; "" when it does not answer."""
+
+    with lock:
+        cached = machines.get(host)
+    if cached and time.monotonic() - cached[0] < OS_TTL:
+        return cached[1]
+    try:
+        done = shell_here("uname -s", PROBE_TIMEOUT + 2, host)
+        name = done.stdout.strip().splitlines()[0][:20] if done.returncode == 0 and done.stdout.strip() else ""
+    except (OSError, subprocess.TimeoutExpired, IndexError):
+        name = ""
+    if name:
+        with lock:
+            machines[host] = (time.monotonic(), name)
+    return name
+
+
+def keychain_signed(host: str) -> bool:
+    """Whether a Mac keeps a Claude Code sign-in in its Keychain: the item's existence only, never its secret."""
+
+    if remote_os(host) != "Darwin":
+        return False
+    try:
+        done = shell_here(f'[ -r "$HOME/{CLAUDE_TOKEN}" ] && exit 3; security find-generic-password -s {shlex.quote(CLAUDE_KEYCHAIN)} >/dev/null 2>&1',
+                          PROBE_TIMEOUT + 2, host)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
+def save_token(host: str, token: str) -> str | None:
+    """The token into CLAUDE_TOKEN on `host` (0600, its folder 0700), sent on stdin; None, or why it failed."""
+
+    folder_ = shlex.quote(str(Path(CLAUDE_TOKEN).parent))
+    line = (f'umask 077; cd "$HOME" && mkdir -p {folder_} && chmod 700 {folder_} && '
+            f'cat > "$HOME/{CLAUDE_TOKEN}.new" && chmod 600 "$HOME/{CLAUDE_TOKEN}.new" && mv -f "$HOME/{CLAUDE_TOKEN}.new" "$HOME/{CLAUDE_TOKEN}"')
+    try:
+        done = subprocess.run([*ssh_of(host), line], input=token + "\n", capture_output=True, text=True, timeout=PROBE_TIMEOUT + 4)
+    except (OSError, subprocess.TimeoutExpired):
+        return f"{host} did not answer while the token was being saved: sign in again."
+    return None if done.returncode == 0 else "The token could not be saved on that Mac: " + redact(done.stderr.strip()[-160:], [token])
+
+
+def catch_token(state: dict, ended: bool = False) -> None:
+    """A `claude setup-token` token in what the pty printed: saved on its machine and cut out here at once."""
+
+    with lock:
+        raw = state.get("raw", "")
+        match = None
+        for found_ in TOKEN.finditer(raw):  # whole only: followed by a space or the end of what the CLI printed
+            if ended or found_.end() < len(raw) and raw[found_.end()] in " \r\n\t\x1b":
+                match = found_
+        if not match:
+            return
+        token = match.group(0)
+        state["raw"] = raw.replace(token, "[token saved on that Mac]")
+        already = state.get("token_saved")
+    if not already:
+        error = save_token(state["token_host"], token)
+        with lock:
+            state["token_saved"] = error is None
+            state["token_error"] = error
+            statuses.clear()
+
+
+def install_plan(backend: str, host: str = "") -> dict:
+    """What Install would run for a CLI, here or on `host`: {ok, command, by, where, chatgpt, os, reason}."""
+
+    if backend not in INSTALLERS:
+        raise HTTPException(404, "no such brain")
+    try:
+        done = shell_here(LOOK_TOOLS, PROBE_TIMEOUT + 2, host)
+        said = done.stdout.splitlines()
+    except (OSError, subprocess.TimeoutExpired):
+        return {"ok": False, "reason": (f"{host} did not answer over ssh. " + ssh_hint(host)) if host else "The shell did not answer."}
+    have = {line[5:] for line in said if line.startswith("have ")}
+    system = next((line[3:] for line in said if line.startswith("os ")), "")
+    out = {"where": f"ssh:{host}" if host else "here", "os": system, "chatgpt": backend == "codex" and "chatgpt" in said and system == "Darwin"}
+    for need, line, by in INSTALLERS[backend]:
+        if need in have:
+            if need == "npm" and "npm-writable" not in said:
+                line = line.replace("npm install -g", NPM_HOME)
+            return {**out, "ok": True, "command": line, "by": by}
+    needs = sorted({need for need, _, _ in INSTALLERS[backend]})
+    reason = ("Install Node.js (nodejs.org) on that computer first, then press Install again." if needs == ["brew", "npm"] or needs == ["curl", "npm"]
+              else "That computer has no " + " or ".join(needs) + " to install with.")
+    return {**out, "ok": False, "reason": reason}
+
+
+def start_install(backend: str) -> dict:
+    host = where_of(backend)
+    plan = install_plan(backend, host)
+    if not plan.get("ok"):
+        raise HTTPException(400, plan.get("reason") or "nothing to install with")
+    with lock:
+        if installing.get("process") is not None and installing["process"].poll() is None:
+            raise HTTPException(409, f"{CLIS[installing['backend']][0]} is installing: wait for it to finish")
+        installing.clear()
+        installing.update(backend=backend, where=plan["where"], command=plan["command"], by=plan["by"], lines=[], started=time.time())
+    argv = [*ssh_of(host), REMOTE_PATH + plan["command"]] if host else ["sh", "-c", plan["command"]]
+    env = None if host else {**child_env(), "NONINTERACTIVE": "1", "HOMEBREW_NO_AUTO_UPDATE": "1"}
+    env and env.pop("SUDO_ASKPASS", None)
+    try:
+        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                   env=env, start_new_session=True, cwd=None if host else str(Path.home()))
+    except OSError as error:
+        with lock:
+            installing.update(ended="failed", reason=f"could not start the installer: {error}")
+        raise HTTPException(400, f"could not start the installer: {error}")
+    with lock:
+        installing["process"] = process
+    threading.Thread(target=follow_install, args=(installing, process), daemon=True).start()
+    return install_of(backend)
+
+
+def follow_install(state: dict, process) -> None:
+    timer = threading.Timer(INSTALL_TIMEOUT, lambda: stop(process))
+    timer.daemon = True
+    timer.start()
+    try:
+        for line in process.stdout:
+            line = plain(line).strip()
+            if line:
+                with lock:
+                    state["lines"] = (state["lines"] + [redact(line)[:240]])[-40:]
+        process.wait()
+    finally:
+        timer.cancel()
+    with lock:
+        state["process"] = None
+        if process.returncode == 0:
+            state.update(ended="done")
+        else:
+            last = state["lines"][-1] if state["lines"] else ""
+            state.update(ended="failed", reason=(last + " · " if last else "") + f"the installer stopped (exit {process.returncode})"
+                         + (f" after {INSTALL_TIMEOUT // 60} minutes" if process.returncode in (-15, -9) else ""))
+        probes.clear()
+        statuses.clear()
+
+
+def install_of(backend: str) -> dict:
+    with lock:
+        if installing.get("backend") != backend:
+            return {"backend": backend, "state": "idle", "lines": []}
+        state = installing.get("ended") or ("running" if installing.get("process") is not None else "starting")
+        out = {k: installing.get(k) for k in ("backend", "where", "command", "by", "started")}
+        return {**out, "state": state, "reason": installing.get("reason"), "lines": list(installing.get("lines") or [])[-14:]}
+
+
+def fix_of(backend: str, error: str, host: str) -> dict:
+    """The one action that fixes a failed answer."""
+
+    if re.search(r"not installed", error, re.I):
+        return {"action": "install", "label": "Install " + CLIS[backend][0]}
+    if re.search(r"older than|unknown variant|Error loading config|not supported when using Codex", error, re.I):
+        return {"action": "install", "label": "Update " + CLIS[backend][0]}
+    if re.search(r"did not answer over ssh|ssh to .* failed|could not reach", error, re.I):
+        return {"action": "link", "label": "Check the link to " + host}
+    if re.search(r"402|balance|payment|usage limit|rate.?limit|quota", error, re.I):
+        return {"action": "none", "label": "Top up or wait for the limit to reset, then press Check again"}
+    for pattern, _ in HINTS.get(backend, []):
+        if re.search(pattern, error, re.I) and re.search(r"sign|login|auth|401|credential|provider|unauthori", pattern + error, re.I):
+            return {"action": "signin", "label": "Sign in again"}
+    return {"action": "verify", "label": "Check again"}
+
+
+def verify(backend: str) -> dict:
+    """One short real answer from the brain, VERIFY_TIMEOUT at most; kept for the Connect checklist."""
+
+    if backend not in BACKENDS:
+        raise HTTPException(404, "no such brain")
+    host = where_of(backend) if backend in CLIS else ""
+    started = time.time()
+    try:
+        text = ask(backend, "", "Reply with the single word: ok", "fast" if backend == "claude" else "top", timeout=VERIFY_TIMEOUT)
+        out = {"ok": bool(text.strip()), "text": text.strip()[:80], "error": None}
+    except subprocess.TimeoutExpired:
+        out = {"ok": False, "text": "", "error": f"No answer in {VERIFY_TIMEOUT} seconds."}
+    except Exception as error:  # the CLI's own words go to the page
+        out = {"ok": False, "text": "", "error": redact(str(error))[:600]}
+    if not out["ok"]:
+        out["fix"] = fix_of(backend, out["error"] or "", host) if backend in CLIS else {"action": "verify", "label": "Check again"}
+    out.update(backend=backend, where=f"ssh:{host}" if host else "here", at=time.time(), elapsedMs=int(1000 * (time.time() - started)))
+    with lock:
+        verified[(backend, host)] = out
+    return out
+
+
+def make_default(backend: str, body: dict) -> dict:
+    if backend not in BACKENDS:
+        raise HTTPException(404, "no such brain")
+    patch = {"default": backend}
+    if backend in HARNESSES and body.get("agent", True):
+        patch["agent"] = backend
+    return {"settings": save_settings(patch)}
+
+
+def connect_of(backend: str) -> dict:
+    """Everything the Connect checklist shows for one brain, from what is already known (the sign-in is asked)."""
+
+    if backend not in CLIS:
+        raise HTTPException(404, "no such brain")
+    config = saved_settings()
+    host = where_of(backend, config)
+    item = next((b for b in detect(config) if b["id"] == backend), {})
+    signin_state = status_of(backend) if item.get("found") else {"state": "missing"}
+    default = config["default"]
+    with lock:
+        last = verified.get((backend, host))
+        ready = verified.get((default, where_of(default, config) if default in CLIS else ""))
+    if default != backend and not (ready and ready.get("ok")):  # the default keeps its place while it is signed in
+        if default in CLIS:
+            ready = {"ok": status_of(default).get("state") == "signed_in"}
+        elif default == "local":
+            ready = {"ok": bool(slate.find_local(config["local_endpoint"])[0])}
+    return {"backend": backend, "label": item.get("label") or CLIS[backend][0], "where": f"ssh:{host}" if host else "here",
+            "find": {"found": bool(item.get("found")), "path": item.get("path"), "version": item.get("version"), "error": item.get("error"),
+                     "chatgpt": from_chatgpt(item.get("path")), "note": item.get("note")},
+            "install": install_of(backend), "signin": signin_state, "signing": signin_of(backend), "verify": last,
+            "default": default == backend, "agent_default": (config["agent"] or "") == backend, "harness": backend in HARNESSES,
+            "default_ready": bool(ready and ready.get("ok")) and default != backend,
+            "token_flow": backend == "claude" and bool(host) and remote_os(host) == "Darwin"}
+
+
+# linking another computer
+KEY_NAMES = ("id_ed25519", "id_ecdsa", "id_rsa")
+
+
+def public_key() -> tuple[Path | None, str | None]:
+    for name in KEY_NAMES:
+        pub = Path.home() / ".ssh" / (name + ".pub")
+        try:
+            if pub.is_file() and (Path.home() / ".ssh" / name).is_file():
+                line = pub.read_text().strip().splitlines()[0]
+                kind, body = line.split()[:2]
+                return pub, f"{kind} {body} imagination-studio"  # its own comment (a user@host) is not shown
+        except (OSError, IndexError, ValueError):
+            continue
+    return None, None
+
+
+def authorize_line(key: str) -> str:
+    return ("mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF '" + key + "' ~/.ssh/authorized_keys 2>/dev/null || echo '" + key +
+            "' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys")
+
+
+def link_of() -> dict:
+    path, key = public_key()
+    remote = saved_settings()["remote"]
+    return {"has_key": bool(key), "public_key": key, "key_file": "~/.ssh/" + path.name if path else None,
+            "command": authorize_line(key) if key else None, "host": remote["host"], "backends": remote["backends"],
+            "studio_host": remote["studio_host"]}
+
+
+def make_key() -> dict:
+    if public_key()[1]:
+        return link_of()  # a key the user has is never replaced
+    target = Path.home() / ".ssh" / "id_ed25519"
+    if target.exists():
+        raise HTTPException(409, "~/.ssh/id_ed25519 exists without its .pub: the studio leaves it alone")
+    target.parent.mkdir(mode=0o700, exist_ok=True)
+    try:
+        done = subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "imagination-studio", "-f", str(target)],
+                              capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise HTTPException(500, f"ssh-keygen did not run: {error}")
+    if done.returncode:
+        raise HTTPException(500, "ssh-keygen failed: " + done.stderr.strip()[-200:])
+    return link_of()
+
+
+def fingerprint(host: str) -> str | None:
+    name, _, port = host.partition(":")
+    name = name.split("@")[-1]
+    try:
+        scan = subprocess.run(["ssh-keyscan", "-T", "5", *(["-p", port] if port else []), "-t", "ed25519,ecdsa,rsa", name],
+                              capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+        prints = subprocess.run(["ssh-keygen", "-lf", "-"], input=scan.stdout, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    line = next((x for x in prints.stdout.splitlines() if "ED25519" in x), None) or next(iter(prints.stdout.splitlines()), None)
+    return line.split()[1] + " (" + line.split()[-1].strip("()") + ")" if line and len(line.split()) >= 2 else None
+
+
+def test_link(body: dict) -> dict:
+    """Can the studio reach `host` with its key? {ok, state: ok|unknown_host|denied|unreachable, os, ...}."""
+
+    host = valid_host(body.get("host") or saved_settings()["remote"]["host"])
+    if not host:
+        raise HTTPException(400, "host is [user@]host[:port]: the other computer's name or address")
+    name, _, port = host.partition(":")
+    extra = ["-o", "StrictHostKeyChecking=accept-new"] if body.get("trust") is True else []
+    argv = [*SSH, *extra, *(["-p", port] if port else []), name, "--", "echo studio-link-ok; uname -s"]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=PROBE_TIMEOUT + 4, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"ok": False, "host": host, "state": "unreachable", "detail": f"{host} did not answer in {PROBE_TIMEOUT} seconds: is it awake and on this network?"}
+    said = done.stdout.splitlines()
+    if done.returncode == 0 and said[:1] == ["studio-link-ok"]:
+        system = said[1].strip() if len(said) > 1 else ""
+        with lock:
+            machines[host] = (time.monotonic(), system)
+            probes.clear()
+            statuses.clear()
+        return {"ok": True, "host": host, "state": "ok", "os": system}
+    error = done.stderr.strip()
+    if re.search(r"Host key verification failed|No .* host key is known", error):
+        return {"ok": False, "host": host, "state": "unknown_host", "fingerprint": fingerprint(host),
+                "detail": "This computer has not met that one before. Check the fingerprint, then trust it."}
+    if re.search(r"REMOTE HOST IDENTIFICATION HAS CHANGED", error):
+        return {"ok": False, "host": host, "state": "changed", "detail": "That computer's host key has changed since it was last seen. "
+                "If it was reinstalled, remove its old line from ~/.ssh/known_hosts here (`ssh-keygen -R " + name.split("@")[-1] + "`); otherwise do not connect."}
+    if re.search(r"Permission denied", error):
+        return {"ok": False, "host": host, "state": "denied", "detail": "That computer does not know this studio's key yet: run the line below on it, then Test again."}
+    return {"ok": False, "host": host, "state": "unreachable", "detail": redact(error[-240:]) or f"ssh stopped (exit {done.returncode})"}
+
+
+def save_link(body: dict) -> dict:
+    """The other computer saved as the remote host, running the CLIs found there (or the ones named)."""
+
+    host = valid_host(body.get("host"))
+    if not host:
+        raise HTTPException(400, "host is [user@]host[:port]")
+    named = body.get("backends")
+    if named is None:
+        look = probe_remote(host, list(CLIS))
+        if "__error__" in look:
+            raise HTTPException(400, look["__error__"])
+        named = [b for b in CLIS if b in look]
+    remote = {"host": host, "backends": named}
+    if "studio_host" in body:
+        remote["studio_host"] = body["studio_host"] or ""
+    settings = save_settings({"remote": remote})
+    return {"settings": settings, "found": named, **link_of()}
 
 
 # ---------- the routes ----------
@@ -2094,6 +2532,56 @@ def attach(home: Path) -> APIRouter:
     def brain_signout(backend: str, body: dict, request: Request):
         local(request, True)
         return sign_out(backend, body)
+
+    # Connect: the checklist's state, the installer, one real answer, the default; linking another computer
+    @router.get("/api/brains/link")
+    def brain_link(request: Request):
+        local(request)
+        return link_of()
+
+    @router.post("/api/brains/link/key")
+    def brain_link_key(body: dict, request: Request):
+        local(request, True)
+        return make_key()
+
+    @router.post("/api/brains/link/test")
+    def brain_link_test(body: dict, request: Request):
+        local(request, True)
+        return test_link(body)
+
+    @router.post("/api/brains/link/save")
+    def brain_link_save(body: dict, request: Request):
+        local(request, True)
+        return save_link(body)
+
+    @router.get("/api/brains/{backend}/connect")
+    def brain_connect(backend: str, request: Request):
+        local(request)
+        return connect_of(backend)
+
+    @router.get("/api/brains/{backend}/install")
+    def brain_install_state(backend: str, request: Request, plan: int = 0):
+        local(request)
+        if backend not in CLIS:
+            raise HTTPException(404, "no such brain")
+        return {**install_of(backend), **({"plan": install_plan(backend, where_of(backend))} if plan else {})}
+
+    @router.post("/api/brains/{backend}/install")
+    def brain_install(backend: str, body: dict, request: Request):
+        local(request, True)
+        if backend not in CLIS:
+            raise HTTPException(404, "no such brain")
+        return start_install(backend)
+
+    @router.post("/api/brains/{backend}/verify")
+    def brain_verify(backend: str, body: dict, request: Request):
+        local(request, True)
+        return verify(backend)
+
+    @router.post("/api/brains/{backend}/default")
+    def brain_default(backend: str, body: dict, request: Request):
+        local(request, True)
+        return make_default(backend, body)
 
     @router.get("/api/agent/tools")
     def list_tools(request: Request):
