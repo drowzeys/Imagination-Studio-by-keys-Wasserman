@@ -1995,7 +1995,11 @@ copying anything anywhere.
 The brain is Slate's: your own Claude Code or Codex sign-in on the machine that runs the app, or a local
 OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). Everything without a ✦ works with no brain. A new film
 starts from the brain chosen in Brains & tools; an install with nothing chosen there yet takes `STUDIO_DEFAULT_BRAIN`
-(`local`, `claude`, `codex`, ...), `STUDIO_LOCAL_ENDPOINT` and `STUDIO_LOCAL_MODEL` from its environment. When a film's
+(`local`, `claude`, `codex`, ...), `STUDIO_LOCAL_ENDPOINT` and `STUDIO_LOCAL_MODEL` from its environment. When nobody
+chose a brain (in Brains & tools or `STUDIO_DEFAULT_BRAIN`) and the local server set there (or in `STUDIO_LOCAL_ENDPOINT`)
+answers, that server is the default for prompt and scene help, the Agent room's first choice included; otherwise Claude
+Code. Only the address that was set is asked, once a minute. A server answering with NVIDIA Nemotron 3.5 Bolt is shown
+by that name. When a film's
 brain is the local model, its frames are only ever shown to that model: the QA look is skipped rather than sent to a
 cloud CLI when the local server is not set. Films are
 Slate's own `project.json` under `~/ImaginationStudio/slate/`: a project made in Slate opens here, and one made here

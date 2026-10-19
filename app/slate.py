@@ -351,7 +351,7 @@ def brain_status(endpoint: str = "") -> dict:
     endpoint = nearby_endpoint(endpoint)
     found = {b["id"]: b for b in agents.detect(endpoint=endpoint)}
     local = found["local"]
-    return {**{name: found[name]["found"] for name in agents.CLIS}, "local": local["found"],
+    return {**{name: found[name]["found"] for name in agents.CLIS}, "local": local["found"], "localLabel": local["label"],
             "endpoint": local["endpoint"] if local["found"] else None, "models": local["models"]}
 
 

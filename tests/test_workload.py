@@ -397,6 +397,7 @@ def agents_home(monkeypatch):
     monkeypatch.setattr(agents, "HOME", home)
     for name in ("STUDIO_DEFAULT_BRAIN", "STUDIO_LOCAL_ENDPOINT", "STUDIO_LOCAL_MODEL"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(agents, "local_answers", lambda endpoint: False)  # a server on this machine never picks the default here
     yield agents
     shutil.rmtree(home, ignore_errors=True)
 

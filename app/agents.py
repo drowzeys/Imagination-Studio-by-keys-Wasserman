@@ -92,6 +92,8 @@ CLIS = {
 BACKENDS = (*CLIS, "local")
 HARNESSES = ("claude", "codex")  # run with the Studio's MCP tools; every other brain is a conversation in the Agent room
 SESSIONS = ("claude", "codex", "hermes")  # keep a session of their own from one turn to the next
+# local models the Studio calls by their own name, known from the model names the server lists: (pattern, name)
+LOCAL_NAMES = ((re.compile(r"nemotron[-_. ]*3[-_. ]*5[-_. ]*bolt", re.I), "NVIDIA Nemotron 3.5 Bolt"),)
 # what a CLI says when its sign-in or install is the trouble, and what to tell the user
 HINTS = {
     "claude": [(r"authenticat|oauth|401|logged? ?in|revoked|/login", "Claude Code's sign-in has expired or was never made {where}: run `claude auth login` in a terminal there, then retry.")],
@@ -140,6 +142,7 @@ TEXT_LIMIT = 20000
 
 lock = threading.RLock()
 probes: dict = {}  # (host or "", cli) -> (monotonic time, found)
+answering: dict = {}  # local server address -> (monotonic time, whether it answered), for the automatic default
 codex_checks: dict = {}  # codex path -> (monotonic time, its mtime, why it cannot start or None)
 versions: dict = {}  # CLI path -> (its mtime, its version as numbers)
 CODEX_BROKEN = re.compile(r"Error loading config|unknown variant|unknown field", re.I)
@@ -183,16 +186,50 @@ def environment_defaults() -> dict:
             "local_model": os.environ.get("STUDIO_LOCAL_MODEL", "").strip()}
 
 
+def chosen_default(saved: dict) -> str:
+    """The brain a person chose: the one saved in Brains & tools, else ``STUDIO_DEFAULT_BRAIN``; "" when nobody chose."""
+
+    if saved.get("default") in BACKENDS:
+        return saved["default"]
+    brain = os.environ.get("STUDIO_DEFAULT_BRAIN", "").strip()
+    return brain if brain in BACKENDS else ""
+
+
+def local_answers(endpoint: str) -> bool:
+    """Whether the local model server at this address answers, asked at most once a minute (2 s at most)."""
+
+    if not endpoint:
+        return False
+    with lock:
+        seen = answering.get(endpoint)
+    if seen and time.monotonic() - seen[0] < PROBE_TTL:
+        return seen[1]
+    up = bool(slate.find_local(endpoint)[0])
+    with lock:
+        answering[endpoint] = (time.monotonic(), up)
+    return up
+
+
+def automatic_default(endpoint: str) -> str:
+    """The brain when nobody chose one: the local model server when the one set (Settings or STUDIO_LOCAL_ENDPOINT)
+    answers, so prompt and scene help stay on the user's own machine, else Claude Code as before. Only the address
+    that was set is asked, never a guessed one."""
+
+    return "local" if local_answers(endpoint) else "claude"
+
+
 def saved_settings() -> dict:
-    """The saved settings; a setting never saved takes the environment's value (``environment_defaults``)."""
+    """The saved settings; a setting never saved takes the environment's value (``environment_defaults``), and a
+    default nobody chose is the automatic one (``automatic_default``)."""
 
     saved = read_json(folder() / "settings.json" if folder() else None, {})
     remote = saved.get("remote") if isinstance(saved.get("remote"), dict) else {}
     env = environment_defaults()
-    return {"default": saved["default"] if saved.get("default") in BACKENDS else env["default"],
+    endpoint = str(saved.get("local_endpoint") or "") if "local_endpoint" in saved else env["local_endpoint"]
+    return {"default": chosen_default(saved) or automatic_default(endpoint),
             "remote": {"host": remote.get("host") or "", "backends": [b for b in remote.get("backends") or [] if b in CLIS],
                        "studio_host": remote.get("studio_host") or ""},
-            "local_endpoint": str(saved.get("local_endpoint") or "") if "local_endpoint" in saved else env["local_endpoint"],
+            "local_endpoint": endpoint,
             "local_model": str(saved.get("local_model") or "") if "local_model" in saved else env["local_model"],
             "agent": saved["agent"] if saved.get("agent") in HARNESSES else ""}  # the Agent room's first choice
 
@@ -213,10 +250,12 @@ def valid_host(value, what: str = "host") -> str:
 
 def save_settings(body: dict) -> dict:
     now = saved_settings()
+    saved = read_json(folder() / "settings.json" if folder() else None, {})
+    chosen = saved["default"] if saved.get("default") in BACKENDS else ""  # only a brain a person picked is kept
     if "default" in body:
-        if body["default"] not in BACKENDS:
+        if body["default"] not in (*BACKENDS, ""):
             raise HTTPException(400, "default is one of " + ", ".join(BACKENDS))
-        now["default"] = body["default"]
+        chosen = body["default"]  # "" goes back to the automatic default
     if "remote" in body:
         remote = body["remote"] or {}
         if not isinstance(remote, dict):
@@ -241,11 +280,30 @@ def save_settings(body: dict) -> dict:
         if len(value) > 200 or any(c in value for c in "\n\r\0"):
             raise HTTPException(400, "local_model is a model name")
         now["local_model"] = value
-    if folder():
-        write_json(folder() / "settings.json", now)
     with lock:
         probes.clear()
+        answering.clear()
+    now["default"] = chosen_default({"default": chosen}) or automatic_default(now["local_endpoint"])
+    if folder():  # a default nobody picked is not written down, so it stays automatic
+        write_json(folder() / "settings.json", {**now, "default": chosen} if chosen else {k: v for k, v in now.items() if k != "default"})
     return now
+
+
+def default_automatic() -> bool:
+    """True when nobody chose the default brain and it is the automatic one."""
+
+    return not chosen_default(read_json(folder() / "settings.json" if folder() else None, {}))
+
+
+def local_label(models: list[str], model: str = "") -> str:
+    """The local brain's name on the pages: the model it answers with, when the Studio knows that model, e.g.
+    "NVIDIA Nemotron 3.5 Bolt (local)"; otherwise "Local model server"."""
+
+    answers_with = model if model in (models or []) else (models or [""])[0]
+    for pattern, name in LOCAL_NAMES:
+        if pattern.search(answers_with or ""):
+            return name + " (local)"
+    return "Local model server"
 
 
 def where_of(backend: str, config: dict | None = None) -> str:
@@ -456,6 +514,8 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
         for key, value in fresh.items():
             if key[0] != "local":
                 probes[key] = (time.monotonic(), value)
+            elif not endpoint and config["local_endpoint"]:  # what the set server said is news for the automatic default
+                answering[config["local_endpoint"]] = (time.monotonic(), bool(value[0]))
     seen = {**cached, **fresh}
     out = []
     for name, (label, _, signin) in CLIS.items():
@@ -487,7 +547,8 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
                     signin_note=SIGNIN_NOTES.get(name))
         out.append(item)
     base, models = seen.get(("local", "")) or (None, [])
-    out.append({"id": "local", "label": "Local model server", "kind": "http", "found": bool(base), "harness": False, "session": False,
+    label = local_label(models, config["local_model"]) if base else "Local model server"
+    out.append({"id": "local", "label": label, "named": label != "Local model server", "kind": "http", "found": bool(base), "harness": False, "session": False,
                 "endpoint": base or slate.endpoint_of(endpoint or config["local_endpoint"]) or None, "models": models or []})
     return out
 
@@ -2685,7 +2746,8 @@ def attach(home: Path) -> APIRouter:
     def brains(request: Request, endpoint: str = ""):
         local(request)
         config = saved_settings()
-        return {"backends": detect(config, endpoint), "settings": config, "default": config["default"]}
+        return {"backends": detect(config, endpoint), "settings": config, "default": config["default"],
+                "automatic": default_automatic()}  # nobody chose: a local server that answers leads, else Claude Code
 
     @router.post("/api/brains/settings")
     def brain_settings(body: dict, request: Request):

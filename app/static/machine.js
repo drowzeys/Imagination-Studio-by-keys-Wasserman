@@ -481,7 +481,7 @@ function viewBrains() {
     el("div", { class: "tri" }, clis.map(b => connectCard(b)),
       localB ? el("div", { class: "brain" + (d.default === "local" ? " on" : ""), "data-brain": "local" }, el("div", { class: "head" }, brainLogo("local"), el("div", { class: "m-min" }, el("b", {}, localB.label),
           el("span", { class: "cn-word " + (localB.found ? "ok" : "bad") }, localB.found ? "Ready" : "Not answering", localB.models && localB.models.length ? " · " + localB.models.length + " models" : ""))),
-        el("div", { class: "m-acts" }, d.default === "local" ? el("span", { class: "tag2 t" }, "default") : el("button", { class: "small", disabled: !localB.found, onclick: () => save({ default: "local" }) }, "Make default"))) : null));
+        el("div", { class: "m-acts" }, d.default === "local" ? el("span", { class: "tag2 t", title: d.automatic ? "Nobody chose a default brain, and this local server answers: it leads until you make another brain the default" : "" }, d.automatic ? "default · automatic" : "default") : el("button", { class: "small", disabled: !localB.found, onclick: () => save({ default: "local" }) }, "Make default"))) : null));
   put(wrap, el("div", { class: "m-gap" }, linkPanel(),
     el("details", { class: "fold m-fold", open: CN.linkOpen || false }, el("summary", {}, "Set the other computer by hand"),
       el("div", { class: "panel stack" },
