@@ -32,13 +32,16 @@ from fastapi.responses import StreamingResponse
 import suite  # the same-computer check of the mutating routes, beside this file
 
 SPARK = sys.platform.startswith("linux")
-TICK = 2.0                      # seconds between samples, and between the stream's events
-KEEP = int(600 / TICK)          # ten minutes of samples
+TICK = 2.0                      # seconds between the open stream's events (a page is watching)
+SAMPLE = 10.0                   # seconds between the history's samples, taken whether or not a page is open
+KEEP = int(600 / SAMPLE)        # ten minutes of samples
 FRESH = 1.0                     # a tool's answer is kept this long
+GPU_FRESH, GPU_BUSY = 5.0, 30.0  # nvidia-smi's answer is kept this long; while a job or the render engine runs, longer
 STORAGE_FRESH = 600             # the folder sizes are worked out again after ten minutes
 DISK_FULL, GPU_HOT = 90, 85     # warnings: a disk this full (%), a GPU this hot (°C, the governor's alert line)
 GPU_FIELDS = "utilization.gpu,temperature.gpu,power.draw,clocks.sm,name"
-GOVERNOR = Path(os.environ.get("SPARK_GOVERNOR_DIR", "/data/model_vault/spark-workload-governor"))
+# the machine's workload governor (spark/workload.py), read only where SPARK_GOVERNOR (or SPARK_GOVERNOR_DIR) names its folder
+GOVERNOR = Path(os.environ.get("SPARK_GOVERNOR_DIR") or os.environ.get("SPARK_GOVERNOR") or "/nonexistent-governor")
 STUDIO_FOLDERS = (("renders", "Renders"), ("scouts", "Scouts"), ("voice", "Voice takes"), ("music", "Songs"),
                   ("motion", "Motion packs"), ("uploads", "Uploads"), ("exports", "Exports"), ("trash", "Trash"),
                   ("projects", "Production projects"), ("slate", "Slate films"), ("loras", "LoRAs"), ("agent", "Agent"))
@@ -142,6 +145,16 @@ def model_folders() -> list[tuple[str, str, Path]]:
 
 
 STOPPING = threading.Event()  # set when the app is going down (an update's restart): every event stream ends at once
+
+
+def disk_of(path: Path) -> dict:
+    """The disk holding ``path`` as `df -h` shows it: Use% is used / (used + available to the user), the blocks kept
+    for root counted as neither, and "free" is what this user can still write (statvfs f_bavail)."""
+
+    st = os.statvfs(Path(path).resolve())
+    total, used, avail = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_bavail * st.f_frsize
+    return {"total_gb": round(total / 1e9, 1), "free_gb": round(avail / 1e9, 1),
+            "used_pct": round(100 * used / (used + avail), 1) if used + avail else None}
 
 
 def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None, comfy_port: int | None = None) -> APIRouter:
@@ -255,19 +268,21 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
                  "progress": job.get("progress"), "spark": job.get("spark")} for job in reversed(listed)]
 
     def snapshot() -> dict:
-        card = cached("gpu", gpu)
+        # nvidia-smi is asked at most every GPU_FRESH s, and every GPU_BUSY s while something renders: one GPU query is
+        # cheap, but on every node every two seconds it added up beside a render
+        lock_held = gpu_lock()
+        busy = lock_held["held"] or any(job.get("status") == "running" for job in list(jobs.values()))
+        card = cached("gpu", gpu, GPU_BUSY if busy else GPU_FRESH)
         mem = cached("memory", memory)
         try:
-            disk = shutil.disk_usage(home)
-            drive = {"path": str(home), "total_gb": round(disk.total / 1e9, 1), "free_gb": round(disk.free / 1e9, 1),
-                     "used_pct": round(100 * (1 - disk.free / disk.total), 1) if disk.total else None}
+            drive = {"path": str(home), **disk_of(home)}
         except OSError:
             drive = {"path": str(home), "total_gb": None, "free_gb": None, "used_pct": None}
         try:
             load = round(os.getloadavg()[0], 2)
         except OSError:
             load = None
-        ruled = cached("governor", governor, 5.0) if SPARK or GOVERNOR.is_dir() else None
+        ruled = cached("governor", governor, 5.0) if GOVERNOR.is_dir() else None
         warnings = []
         if drive["used_pct"] is not None and drive["used_pct"] > DISK_FULL:
             warnings.append(f"The disk holding the studio folder is {drive['used_pct']:.0f}% full ({drive['free_gb']:g} GB free).")
@@ -282,7 +297,7 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
             warnings.append("The workload governor cannot read a sensor: " + "; ".join(str(one) for one in ruled["sensor_errors"][:3]))
         return {"time": time.time(), "host": socket.gethostname(), "platform": "spark" if SPARK else "mac" if sys.platform == "darwin" else sys.platform,
                 "gpu": card, "memory": mem, "cpu": {"load1": load, "cores": os.cpu_count()}, "disk": drive,
-                "gpu_lock": gpu_lock(), "renderer": {"comfy": cached("comfy", comfy)}, "jobs": queue(), "governor": ruled,
+                "gpu_lock": lock_held, "renderer": {"comfy": cached("comfy", comfy)}, "jobs": queue(), "governor": ruled,
                 "warnings": warnings}
 
     def sample() -> None:
@@ -293,7 +308,7 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
                                 "temp": (now["gpu"] or {}).get("temp_c"), "power": (now["gpu"] or {}).get("power_w")})
             except Exception:  # noqa: BLE001 - a bad sample must not stop the sampler
                 pass
-            time.sleep(TICK)
+            time.sleep(SAMPLE)
 
     def measure() -> None:
         try:
@@ -340,9 +355,7 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
 
     def storage_answer() -> dict:
         try:
-            disk = shutil.disk_usage(home)
-            whole = {"total_gb": round(disk.total / 1e9, 1), "free_gb": round(disk.free / 1e9, 1),
-                     "used_pct": round(100 * (1 - disk.free / disk.total), 1) if disk.total else None}
+            whole = disk_of(home)
         except OSError:
             whole = {"total_gb": None, "free_gb": None, "used_pct": None}
         return {"home": str(home), **whole, "buckets": list(storage["buckets"]), "computing": storage["computing"],
@@ -354,7 +367,7 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
 
     @router.get("/api/telemetry/history")
     def telemetry_history() -> dict:
-        return {"interval_s": TICK, "samples": list(history)}
+        return {"interval_s": SAMPLE, "samples": list(history)}
 
     @router.get("/api/events")
     async def events(request: Request):

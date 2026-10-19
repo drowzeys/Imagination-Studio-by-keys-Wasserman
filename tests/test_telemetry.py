@@ -91,6 +91,7 @@ def test_warnings_in_plain_words(monkeypatch):
         return real(command, *args, **kwargs)
 
     monkeypatch.setattr(telemetry.subprocess, "run", stand_in)
+    monkeypatch.setattr(telemetry, "GPU_FRESH", telemetry.FRESH)  # the GPU's answer is kept 5 s in use
     time.sleep(telemetry.FRESH + 0.05)
     now = client.get("/api/telemetry").json()
     assert now["gpu"] == hot
@@ -158,3 +159,16 @@ def test_no_tool_runs_without_a_time_limit():
         tree = ast.parse((ROOT / "app" / name).read_text())
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and ast.unparse(node.func).startswith("subprocess.")]
         assert all(any(keyword.arg == "timeout" for keyword in call.keywords) for call in calls), name
+
+
+def test_the_gpu_is_asked_less_while_something_renders_and_the_governor_only_where_it_is_named():
+    assert telemetry.GPU_BUSY > telemetry.GPU_FRESH >= telemetry.TICK and telemetry.SAMPLE >= 10
+    assert "model_vault" not in str(telemetry.GOVERNOR)  # no machine's own folder built in
+
+
+def test_the_disk_reads_as_df_shows_it(tmp_path):
+    import subprocess as sp
+    mine = telemetry.disk_of(tmp_path)
+    line = sp.run(["df", "-k", str(tmp_path)], capture_output=True, text=True).stdout.splitlines()[-1].split()
+    used_k, avail_k = int(line[2]), int(line[3])
+    assert abs(mine["used_pct"] - 100 * used_k / (used_k + avail_k)) < 1.0  # df rounds its own Use% up

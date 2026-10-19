@@ -137,6 +137,7 @@ async def follow(workflow: dict, sampler: str, parts: int) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(sg.URL.replace("http", "ws", 1) + f"/ws?clientId={client}", max_msg_size=0) as ws:
             prompt_id = sg.call("/prompt", {"prompt": workflow, "client_id": client})["prompt_id"]
+            print(f"[tensorfold] comfy prompt {prompt_id}", flush=True)  # what the app's Cancel stops (server.stop_comfy)
             inner, last = [], None
             async for message in ws:
                 if message.type != aiohttp.WSMsgType.TEXT:

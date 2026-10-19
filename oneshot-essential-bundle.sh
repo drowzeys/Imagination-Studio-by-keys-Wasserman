@@ -32,16 +32,17 @@ done
 # 22), so a first run takes one download and does not depend on fourteen authors' pages. The rest come from their authors.
 # LORA_PACKAGE=none goes to the authors' pages for everything; LORA_PACKAGE=<file or address> names another package.
 PKG_BASE="https://huggingface.co/drowzeys/keys-studio-lora-essential/resolve/main"
+STUDIO_DIR="${STUDIO_HOME:-$(python3 "$HERE/app/studio_home.py")}"  # app/studio_home.py: the folder the app uses
 PKG_FILE="keys-studio-lora-essential-$([ "$(uname -s)" = Darwin ] && echo mac || echo spark)-2026-10-13-r3.tar"
 case " ${ARGS[*]-} " in *" --package"*|*" --source"*|*" --make-package"*|*" --verify "*|*" --dry-run "*) ;; *)
-  if [ "${LORA_PACKAGE:-}" != none ] && [ -z "${LORA_BUNDLE:-}" ] && [ ! -e "${DEST:-${STUDIO_HOME:-$([ -d "$HOME/TensorFoldStudio" ] && [ ! -e "$HOME/ImaginationStudio" ] && echo "$HOME/TensorFoldStudio" || echo "$HOME/ImaginationStudio")}/lora-bundle}/package.json" ]; then
+  if [ "${LORA_PACKAGE:-}" != none ] && [ -z "${LORA_BUNDLE:-}" ] && [ ! -e "${DEST:-$STUDIO_DIR/lora-bundle}/package.json" ]; then
     ARGS+=(--package "${LORA_PACKAGE:-$PKG_BASE/$PKG_FILE}")
   fi;; esac
 PY="$PREFIX/venv/bin/python"; [ -x "$PY" ] || PY="$(command -v python3)" || { echo "python3 is needed" >&2; exit 2; }
 "$PY" "$HERE/scripts/lora-bundle.py" ${ARGS[@]+"${ARGS[@]}"}; RC=$?
 [ $RC -le 1 ] || exit $RC
 if [ "$INSTALL" = 1 ] && [ "$CHECK" = 0 ]; then
-  DEST="${DEST:-${STUDIO_HOME:-$([ -d "$HOME/TensorFoldStudio" ] && [ ! -e "$HOME/ImaginationStudio" ] && echo "$HOME/TensorFoldStudio" || echo "$HOME/ImaginationStudio")}/lora-bundle}"
+  DEST="${DEST:-$STUDIO_DIR/lora-bundle}"
   if [ -x "$PREFIX/venv/bin/python" ]; then
     # into the hub from the bundle only: nothing here goes to the network
     LORA_BUNDLE="$DEST" LORA_OFFLINE=1 H3_MODEL_DIR="${H3_MODEL_DIR:-$HOME/h3-models/MiniMax-H3}" "$PREFIX/venv/bin/python" "$HERE/app/loras.py" install "${GROUPS_ARG:-all}" >&2 || true

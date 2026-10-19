@@ -120,6 +120,7 @@ def test_hermes_continues_its_named_session_with_the_profile_from_settings(fake)
     first = calls_of(fake, "hermes")[-1]
     assert first["args"][:2] == ["-p", "studio"] and first["args"][2:7] == ["chat", "--query-file", "-", "--format", "stream-json"]
     assert first["args"][-3:] == ["--continue", "imagination-" + thread["id"], "--create-if-missing"]
+    assert first["args"][7:11] == ["--toolsets", "clarify,todo", "--max-turns", "25"]  # no terminal, browser or computer use
     assert "Imagination Studio" in first["stdin"] and "not connected in this conversation" in first["stdin"] and first["stdin"].endswith("Plan a trailer")
     assert done["turns"][-1]["text"] == "Here is a plan." and done["turns"][-1]["status"] == "done"
     say(thread["id"], "Shorter")
@@ -138,6 +139,7 @@ def test_hermes_as_a_brain(fake, monkeypatch):
     long_prompt = "ready " + "x" * 120000
     assert agents.ask("hermes", "", long_prompt) == "ready"
     assert calls_of(fake, "hermes")[-1]["args"][:3] == ["chat", "--query-file", "-"]
+    assert call["args"][2:4] == ["-t", "todo"]  # a brain's answer: no Hermes toolset it could act with
     monkeypatch.setenv("FAKE_MODE", "hermes-nologin")
     thread = start("Plan", "hermes")["thread"]
     failed = settled(thread["id"])["turns"][-1]

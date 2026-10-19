@@ -1,4 +1,4 @@
-# Imagination Studio by keys+Wasserman powered by TensorFold (Mac + DGX Spark)
+# Imagination Studio by keys+Wasserman, powered by TensorFold (Mac + DGX Spark)
 
 *Formerly keys+Wasserman Slate AI Studio, built with integrated Fish Audio Drama 3.*
 
@@ -12,7 +12,7 @@ it here. Pictures from Qwen-Image-2.1-Turbo, FLUX3-K (Black Forest Labs' FLUX 3 
 video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Macs (Metal) and the NVIDIA DGX Spark
 (CUDA).**
 
-![Imagination Studio by keys+Wasserman: a local creative all-in-one studio for NVIDIA DGX Spark or Apple silicon, powered by TensorFold](docs/screenshots/imagination-studio.webp)
+![Imagination Studio by keys+Wasserman, powered by TensorFold: a local creative all-in-one studio for NVIDIA DGX Spark or Apple silicon](docs/screenshots/imagination-studio.webp)
 
 *Named at the request of the TensorFold project: this is an app built on TensorFold, not a TensorFold product.*
 
@@ -205,7 +205,7 @@ with Qwen · Built with Fish Audio · MiniMax-Music3.
 
 ## Imagination Studio 3.0: the studio
 
-The web app is **Imagination Studio**, by keys+Wasserman, powered by TensorFold and built with Fish Audio Drama 3.
+The web app is **Imagination Studio by keys+Wasserman**, powered by TensorFold and built with Fish Audio Drama 3.
 Everything it did before is still here, arranged to be quicker to find and calmer to use.
 
 - **Creative Engines.** Story (the film board, Wasserman Slate, the First AD), Image (stills, scouts, edit a picture),

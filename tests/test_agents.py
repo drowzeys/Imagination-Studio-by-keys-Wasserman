@@ -430,7 +430,8 @@ def test_a_task_runs_saves_its_files_and_lists_them(fake):
     config = json.loads((folder / "mcp.json").read_text())["mcpServers"]["fake"]
     assert config == {"command": PY, "args": [str(fake["tmp"] / "mcp.py")], "env": {"FAKE_X": "1"}}
     args = next(c for c in fake["calls"]() if c.get("cli") == "claude")["args"]
-    assert args[args.index("--allowedTools") + 1] == "mcp__fake,Read,Write,Glob" and args[args.index("--tools") + 1] == "Read,Write,Glob"
+    assert args[args.index("--allowedTools") + 1] == "mcp__fake" and args[args.index("--tools") + 1] == "Read,Write,Glob"
+    assert json.loads(args[args.index("--settings") + 1]) == {"permissions": {"blockReadsOutsideWorkingDirectories": True}}
     assert args[args.index("--permission-mode") + 1] == "acceptEdits" and "Bash" not in " ".join(args)
     assert str(folder) in args[args.index("--append-system-prompt") + 1]
     assert client.get(f"/files/agent/{made['thread']}/render.png").content == b"png"

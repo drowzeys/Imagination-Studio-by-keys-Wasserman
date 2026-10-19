@@ -1,4 +1,4 @@
-# Brand guide: Imagination Studio by keys+Wasserman powered by TensorFold
+# Brand guide: Imagination Studio by keys+Wasserman
 
 This guide covers how the Studio is named, how it looks and how it speaks: in the app, on GitHub, in posts and in
 videos. The colours are the app's own (`:root` in `app/static/index.html`). The naming rules are the ones agreed with
@@ -10,9 +10,9 @@ the TensorFold project and the model makers.
 
 | Use | Form |
 |---|---|
-| Full name, first mention | **Imagination Studio by keys+Wasserman powered by TensorFold**, built with integrated Fish Audio Drama 3 |
-| Title, in the app and on cards | **Imagination Studio** · by keys+Wasserman · powered by TensorFold · built with integrated Fish Audio Drama 3 |
-| Short name, after the first mention | **the Studio**, or **Imagination Studio** |
+| Full name, first mention | **Imagination Studio by keys+Wasserman** (formerly keys+Wasserman Slate AI Studio): lower-case keys, no spaces around the plus. Attribution follows it: *powered by TensorFold* |
+| Title, in the app and on cards | **Imagination Studio by keys+Wasserman** · powered by TensorFold · built with integrated Fish Audio Drama 3 |
+| Short name, after the first mention | **the Studio**, or **Imagination Studio** (also the sidebar logo and the manifest's short name) |
 | The film-workflow tab | **Wasserman Slate AI Studio** (Sam Wasserman's Slate, ported) |
 | Hashtags and handles | #ImaginationStudio #keysWasserman #AIStudio #DGXSpark #AppleSilicon |
 
@@ -138,7 +138,7 @@ which reads as a slate or a lens.
 
 | Do | Don't |
 |---|---|
-| "Imagination Studio by keys+Wasserman powered by TensorFold" | "TensorFold Studio", "the TensorFold app" |
+| "Imagination Studio by keys+Wasserman", powered by TensorFold | "TensorFold Studio", "the TensorFold app" |
 | Name the machine and size with every number | Quote a time with no machine, size or step count |
 | Show Studio-made pictures and clips | Use stock or other generators' output as if it were the Studio's |
 | Carry "Built with Fish Audio" on any Drama 3 audio | Clone a real person's voice for a promo |

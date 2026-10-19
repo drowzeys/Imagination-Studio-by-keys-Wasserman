@@ -381,6 +381,26 @@ def test_the_way_back_is_found_by_the_hostname_that_answers_and_allow_adds_the_k
     assert done["ok"] and done["studio_host"].endswith("studio-box") and agents.saved_settings()["remote"]["studio_host"] == done["studio_host"]
     keys = (fake["home"] / ".ssh/authorized_keys").read_text()
     assert keys.count("AAAAC3NzaRemoteKey") == 1 and "imagination-studio-link" in keys and "me@mac" not in keys
+    assert keys.startswith("restrict") and "pty" not in keys  # only to run the tools: no forwarding, no pty
     agents.reach_back("me@mac", allow=True)
     assert (fake["home"] / ".ssh/authorized_keys").read_text().count("AAAAC3NzaRemoteKey") == 1  # once
     assert agents.tool_reach() == {}
+
+
+def test_the_studio_s_key_line_is_limited(monkeypatch):
+    monkeypatch.setattr(agents, "my_addresses", lambda: ["100.106.1.2", "192.168.1.20"])
+    line = agents.authorize_line("ssh-ed25519 AAAAC3NzaStudioKey studio")
+    assert 'restrict,pty,port-forwarding,permitopen="127.0.0.1:*",from="100.106.1.2,192.168.1.20" ssh-ed25519 AAAAC3NzaStudioKey' in line
+    found = agents.usable_addresses("127.0.0.1 ::1 fe80::1 169.254.1.1 10.0.0.4 100.80.73.5 fd7a:115c:a1e0::e201:498f "
+                                    "2601:640:1::7 34.120.1.9 not-an-ip")
+    assert found == ["10.0.0.0/24", "100.80.73.5", "fd7a:115c:a1e0::e201:498f", "34.120.1.9"]
+
+
+def test_a_back_key_the_studio_wrote_before_is_limited_and_a_persons_own_is_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr(agents.Path, "home", lambda: tmp_path)
+    (tmp_path / ".ssh").mkdir()
+    keys = tmp_path / ".ssh/authorized_keys"
+    keys.write_text("ssh-ed25519 AAAAold imagination-studio-link\nssh-ed25519 AAAAmine me@laptop\n")
+    agents.authorize_here("ssh-ed25519 AAAAold x", ["100.1.2.3"])
+    agents.authorize_here("ssh-ed25519 AAAAmine y", ["100.1.2.3"])
+    assert keys.read_text() == 'restrict,from="100.1.2.3" ssh-ed25519 AAAAold imagination-studio-link\nssh-ed25519 AAAAmine me@laptop\n'
