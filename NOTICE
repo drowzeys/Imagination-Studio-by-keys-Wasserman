@@ -26,6 +26,10 @@ under the licence's terms. This pack ships no FLUX 3 weights: they are downloade
 (huggingface.co/black-forest-labs) when a user installs them with --flux3. On a Mac they run on flux3-mlx (Apache-2.0,
 felix-ab), installed in an environment of its own.
 
+MOSS-Image is licensed under the Apache License 2.0, Copyright (c) 2026 OpenMOSS. Commercial use is allowed under the
+licence's terms. This pack ships no MOSS-Image weights: they are downloaded from Comfy Org's repackaged release
+(huggingface.co/Comfy-Org/MOSS-Image, from OpenMOSS-Team/MOSS-Image-SFT) when a user installs them with --moss.
+
 Fish Audio Drama 3 is licensed under the Fish Audio Community License v1.0, Copyright (c) 2026 Fish Audio. Built with
 Fish Audio. Free for non-commercial use and for commercial use below US$500,000 annual revenue; offering speech
 generation to third parties (a Hosted Service) needs a separate licence from Fish Audio. Cloning a real person's voice

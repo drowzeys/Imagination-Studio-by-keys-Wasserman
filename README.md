@@ -422,7 +422,7 @@ collaboration with Keys. Imagination Studio is by Keys + Wasserman.
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
 Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
-contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
+contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx), and OpenMOSS (MOSS-Image). This pack is their work, ported, pinned and measured. See
 [CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
 ## Which picture model to use: the evidence
@@ -3328,7 +3328,7 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 
 Imagination Studio is by **Keys (drowzeys)** and **Sam Wasserman and Wasserman Productions** (Wasserman's Filmmaker
 Suite, and the studio's design with Keys); see [License & credits](#license--credits). Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
-picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
+picture models) and felix-ab (flux3-mlx, their Mac runtime), OpenMOSS (MOSS-Image), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
 [CREDITS.md](CREDITS.md). Pack: drowzeys / keys, with Wasserman Productions.
