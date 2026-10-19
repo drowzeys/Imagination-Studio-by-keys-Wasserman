@@ -826,6 +826,7 @@ html.motion-reduce *, html.motion-reduce *::before, html.motion-reduce *::after 
 .cmp-go { height:52px; padding:0 30px; font-size:18px; display:inline-flex; align-items:center; gap:12px; }
 .cmp-go kbd { border-color:currentColor; color:inherit; background:transparent; opacity:.6; }
 .cmp-recipe { display:inline-flex; align-items:center; gap:8px; } .cmp-recipe .eyebrow { font-size:11px; }
+.cmp-length { display:inline-flex; align-items:center; gap:8px; } .cmp-length .eyebrow { font-size:11px; } .cmp-length select { width:auto; min-width:0; }
 .cmp-more { color:var(--blue-text); font-weight:500; white-space:nowrap; }
 .cmp-made { display:flex; flex-direction:column; gap:8px; margin-top:6px; padding-top:12px; border-top:1px solid var(--line); }
 .cmp-made .strip2 { grid-auto-columns:minmax(220px,260px); }

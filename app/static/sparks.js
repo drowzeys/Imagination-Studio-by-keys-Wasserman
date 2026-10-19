@@ -5,7 +5,7 @@
 const SPK = { data: null, n: 1, form: { address: "", folder: "" }, plans: {}, takes: {}, ticks: 0 };
 // which Spark rendered a clip (sparks/takes.jsonl in the studio folder), for a take's line
 const spkTake = path => { const t = SPK.takes[path]; return t && t.spark ? "on " + t.spark : null; };
-const spkLimit = () => (SPK.data && SPK.data.limit) || 8;
+const spkLimit = () => (SPK.data && SPK.data.limit) || 5;
 // "5 of 8 available" when more are asked for than there are; else how many will be used
 const spkCount = (d, n) => !d || !d.supported ? "this machine" : n > d.available ? d.available + " of " + n + " available" : n === 1 ? "this Spark alone" : n + " of " + d.available + " available Sparks";
 const spkSig = d => !d ? "" : JSON.stringify([d.available, d.default, d.workers.map(w => [w.address, w.name, w.state, w.working, w.enabled, w.why, w.job, w.memory_gb, w.usable]), d.this && d.this.job]);

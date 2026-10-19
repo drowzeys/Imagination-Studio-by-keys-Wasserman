@@ -10,7 +10,7 @@ const SET_DEFAULTS = {
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false }, about: null };
 const SET_SECTIONS = [["appearance", "Appearance", "type, glow, poster, accent"], ["layout", "Studio layout", "what the sidebar shows"],
   ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"],
-  ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to eight DGX Sparks for a job"],
+  ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to five DGX Sparks for a job"],
   ["brains", "Brains & tools", "your agents, another computer, MCP tools"], ["updates", "Updates", "the version and the branch it follows"], ["about", "About", "version, credits, licences"]];
 // Machine's own pages, opened here too: each is the same view, and its data is drawn again when it arrives
 const SET_VIEWS = { models: ["viewDiscover", () => typeof DSC !== "undefined" && DSC.data], sparks: ["viewSparks", () => typeof SPK !== "undefined" && SPK.data],
