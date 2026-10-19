@@ -15,7 +15,7 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 *Credit first: **Keys (drowzeys)** built this studio and its engines; **Sam Wasserman and Wasserman Productions** helped
 design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
-[Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
+[Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
 **3.0.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
@@ -83,6 +83,41 @@ cores · a 2x video decoder for 2K finals on the Mac
 | **Looks** | **Looks, the cards** |
 | ![Wasserman's Filmmaker Suite, built in](docs/screenshots/filmmaker-suite.webp) | ![Machine: live readings and storage on a DGX Spark](docs/screenshots/machine.png) |
 | **Wasserman's Filmmaker Suite** | **Machine** |
+
+## Credits and links (as the studio shows them)
+
+The same credits the studio shows in Settings → About; [CREDITS.md](CREDITS.md) has each one in full.
+
+- **Keys (drowzeys)** — the studio itself, its TensorFold families and int8 kernels, and its Mac and DGX Spark engines.
+- **Sam Wasserman and Wasserman Productions** — helped design and build the studio in collaboration with Keys;
+  Wasserman's Filmmaker Suite (ScriptBreak, Cork Board, Master Canvas, Storyboard Reference Studio, Blockout, Motion
+  Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the
+  studio's art.
+- **Qwen team** — Qwen-Image-2.1. **Black Forest Labs** — FLUX 3 Image Klein (FLUX3-K). **MiniMax** — MiniMax H3 and
+  MiniMax-Music3. **Built with Fish Audio** — Fish Audio Drama 3.
+- **Stability AI** — Stable Audio Open · **Ho Kei Cheng et al.** — MMAudio · **kijai** — ComfyUI-MMAudio (sound effects
+  and foley).
+- **Ash Hart** — TensorFold.
+- **antirez** — h3.c · **RobZombAI** — H3MLX · **mrbizarro** — minimax-h3-mlx (Phosphene) · **Filip Strand and the mflux
+  contributors** · **felix-ab** — flux3-mlx.
+- **Comfy Org** — ComfyUI · **Apple** — MLX · **NVIDIA Research** · **FastVideo** · **LightX2V** · **Viggle** ·
+  **speach1sdef178** · **rookiestar28** · **ddalcu**.
+- **The agents you connect** — Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes
+  Agent (Nous Research); Ollama, LM Studio, vLLM, llama.cpp; Blender and blender-mcp.
+- OpenAI **Whisper** and **faster-whisper**, **yt-dlp**, **FFmpeg**, **PyTorch**, Hugging Face **diffusers** and
+  **transformers**, **FastAPI**, **Geist** and **Instrument Serif**.
+- **The community LoRA authors**, by name in Looks and in [CREDITS.md](CREDITS.md).
+
+**Licences.** The studio's code is Apache-2.0. The models keep their own terms; do not redistribute their weights.
+Qwen-Image-2.1: Qwen Research License (non-commercial) · MiniMax H3: MiniMax H3 Community License (territory limits) ·
+MiniMax-Music3: its licence asks for its name in a commercial UI · FLUX3-K: FLUX Kommunity License · Fish Audio Drama
+3: Fish Audio Community License v1.0 (a hosted voice service needs Fish's own licence) · Stable Audio Open 1.0:
+Stability AI Community License (free under US$1 million of yearly revenue) · MMAudio's weights: CC-BY-NC 4.0,
+non-commercial · Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT).
+
+**Links.** [wassermanproductions.com](https://wassermanproductions.com) ·
+[Wasserman Productions on GitHub](https://github.com/wassermanproductions) · [Keys on GitHub](https://github.com/drowzeys) ·
+[Sam Wasserman on X](https://x.com/SamJWasserman) · [Keys on X](https://x.com/u1tra_instinct)
 
 ## New in 2.9.2
 
@@ -301,7 +336,7 @@ Each lists what was tested and what was not:
 
 These are proposals: this repository's install still pins the engines on the `drowzeys/TensorFold` fork.
 
-## Big credit: Sam Wasserman (wassermanproductions.com)
+## Big credit: Sam Wasserman and Wasserman Productions (wassermanproductions.com)
 
 **Sam Wasserman shaped the production side of this studio: the AI film workflow and the ideas behind it.** Slate, his
 prompt studio for AI filmmaking, is the workflow inside the Wasserman Slate AI Studio tab. The Wasserman Sharp Spec,
@@ -3192,8 +3227,9 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 
 ## Credits
 
-Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
+Imagination Studio is by **Keys (drowzeys)** and **Sam Wasserman and Wasserman Productions** (Wasserman's Filmmaker
+Suite, and the studio's design with Keys); see [Credits and links](#credits-and-links-as-the-studio-shows-them). Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
 picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
-[CREDITS.md](CREDITS.md). Pack: drowzeys / keys.
+[CREDITS.md](CREDITS.md). Pack: drowzeys / keys, with Wasserman Productions.
