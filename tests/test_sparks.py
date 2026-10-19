@@ -26,7 +26,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 client = TestClient(server.app)
 hub = server.hub
-hub.spark = True  # the scheduler is the same on any machine once ssh and the renders are stood in for
 PRESET = "small" if "small" in server.PRESETS else next(iter(server.PRESETS))
 QUALITY = "fh8"
 TAKES = 0.35  # how long a stand-in render takes, here and on a worker
@@ -167,7 +166,9 @@ def stand_in() -> dict:
     """Puts the stand-ins in place and returns what they replaced. Only while this file's tests run: pytest imports
     every test file before it runs any, and a stand-in left behind (memory_of above all) would answer other files' tests."""
 
-    had = {"run": server.run, "memory_of": server.memory_of, "shell": hub.shell, "copy": hub.copy, "dial": hub.dial}
+    had = {"run": server.run, "memory_of": server.memory_of, "shell": hub.shell, "copy": hub.copy, "dial": hub.dial, "poll": sparks.POLL, "spark": hub.spark}
+    hub.spark = True  # the scheduler is the same on any machine once ssh and the renders are stood in for
+    sparks.POLL = float(os.environ["STUDIO_SPARK_POLL"])  # read when sparks.py is imported, maybe by another test file first
     server.run = local_render
     server.memory_of = lambda *args, **kwargs: {"fits": True, "reason": ""}  # this machine's guard has its own tests
     hub.shell, hub.copy = stand_in_shell, lambda pack, address, folder, timeout=900: (SENT.append((address, folder)), (0, ""))[1]
@@ -183,7 +184,8 @@ def stand_ins():
     had = stand_in()
     yield
     server.run, server.memory_of = had["run"], had["memory_of"]
-    hub.shell, hub.copy, hub.dial = had["shell"], had["copy"], had["dial"]
+    hub.shell, hub.copy, hub.dial, sparks.POLL = had["shell"], had["copy"], had["dial"], had["poll"]
+    hub.spark = had["spark"]
 
 
 def fresh(*workers: Worker) -> None:
