@@ -47,6 +47,8 @@ import os, sys, time
 args = sys.argv[1:]
 if args == ["--version"]:
     print("codex-cli 9.9.9"); sys.exit(0)
+if os.environ.get("FAKE_CODEX_BROKEN") == os.path.realpath(sys.argv[0]):
+    sys.stderr.write("Error loading configuration: ~/.codex/config.toml:5:16: unknown variant `priority`, expected `fast` or `flex`\n"); sys.exit(1)
 if args == ["login", "status"]:
     print("Logged in using ChatGPT"); sys.exit(0)
 if args == ["login", "--device-auth"]:
@@ -106,6 +108,8 @@ def fake(tmp_path, monkeypatch):
         script(bin_, name, body)
     monkeypatch.setenv("PATH", f"{bin_}{os.pathsep}/usr/bin{os.pathsep}/bin")
     monkeypatch.delenv("STUDIO_SIGNIN_DEVICE", raising=False)
+    monkeypatch.delenv("FAKE_CODEX_BROKEN", raising=False)
+    agents.codex_checks.clear()
     monkeypatch.setattr(slate, "CLI_DIRS", ())
     monkeypatch.setattr(slate, "find_local", lambda given="": (None, []))
     monkeypatch.setattr(agents, "MAC_CODEX", ())
@@ -220,6 +224,8 @@ def test_redaction():
     assert "state=abc123" not in out and "https://claude.ai/oauth/authorize?…" in out
     assert "WXYZ-9876" not in out and "AbCdEf0123456789" not in out and "someone@example.com" not in out
     assert "hello-there" not in out and "UTF-8" in agents.redact("UTF-8 text")
+    assert agents.redact("Error loading configuration: /home/someone/.codex/config.toml:5:16") == "Error loading configuration: /home/someone/.codex/config.toml:5:16"
+    assert agents.redact("eyJhbGciOiJIUzI1NiJ9abcd.eyJzdWIiOiIxMjM0NTY3ODkwIn0x.sig") == "[hidden].[hidden].sig"
 
 
 def test_status_comes_from_each_cli(fake, monkeypatch):
@@ -261,6 +267,30 @@ def test_the_chatgpt_apps_codex_is_used_when_none_is_on_path(fake, monkeypatch, 
     assert agents.bundled_codex(str(base)) == str(base / "bin" / "codex")
     (base / "bin" / "codex").unlink()
     assert agents.bundled_codex(str(base)) is None
+
+
+def test_a_codex_that_cannot_start_gives_way_to_the_chatgpt_apps(fake, monkeypatch, tmp_path):
+    broken = str((fake["bin"] / "codex").resolve())
+    monkeypatch.setenv("FAKE_CODEX_BROKEN", broken)
+    monkeypatch.setattr(agents.sys, "platform", "darwin")
+    # no ChatGPT app: the status line is the CLI's own words, with what to do
+    status = client.get("/api/brains/codex/status").json()
+    assert status["state"] == "broken" and status["detail"].startswith("Error loading configuration: ~/.codex/config.toml:5:16: unknown variant `priority`")
+    assert "brew upgrade codex" in status["hint"]
+    # with the ChatGPT app's newer codex beside it, that one is used, and the card says why
+    base = tmp_path / "ChatGPT.app" / "Contents" / "Resources" / "codex-cli"
+    (base / "bin").mkdir(parents=True)
+    script(base / "bin", "codex", CODEX)
+    monkeypatch.setattr(agents, "MAC_CODEX", (str(base),))
+    agents.statuses.clear()
+    assert agents.cli("codex") == str(base / "bin" / "codex")
+    codex = next(b for b in client.get("/api/brains").json()["backends"] if b["id"] == "codex")
+    assert codex["label"] == "Codex (from the ChatGPT app)" and "cannot start" in codex["note"] and "unknown variant" in codex["note"]
+    assert client.get("/api/brains/codex/status").json()["detail"] == "ChatGPT"
+    # a codex on PATH that starts is kept
+    monkeypatch.delenv("FAKE_CODEX_BROKEN")
+    agents.codex_checks.clear()
+    assert agents.cli("codex") == str(fake["bin"] / "codex")
 
 
 def test_a_remote_sign_in_runs_over_ssh_with_a_terminal(monkeypatch):

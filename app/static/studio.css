@@ -847,10 +847,12 @@ nav#rooms .lbl.long { white-space:normal; line-height:1.12; font-size:14.5px; }
   box-shadow:inset 0 1px 0 rgba(255,255,255,.28),inset 0 -1px 0 rgba(120,80,20,.35),0 2px 4px -1px rgba(0,0,0,.55); }
 .signin-open:hover { background:#f5bf85; text-decoration:none; }
 .signin-url { font:12px/1.4 var(--mono); color:var(--faint); overflow-wrap:anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
-.signin-code { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-radius:var(--r1); border:1px dashed var(--line3); background:var(--raise); }
-.signin-code span { font:600 26px/1.1 var(--mono); letter-spacing:.08em; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; user-select:all; }
+.signin-code { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 12px; padding:12px 14px; border-radius:var(--r1); border:1px dashed var(--line3); background:var(--raise); }
+/* the code is never cut: the Copy button goes under it when the card is narrow */
+.signin-code span { font:600 22px/1.15 var(--mono); letter-spacing:.04em; color:var(--text); white-space:nowrap; user-select:all; }
 .signin-paste { display:flex; gap:8px; flex-wrap:wrap; } .signin-paste input { flex:1 1 200px; min-width:0; font-family:var(--mono); }
 .signin-cmd { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-radius:var(--r1); background:var(--raise); border:1px solid var(--line); }
 .signin-cmd code { font:500 14px var(--mono); overflow-wrap:anywhere; min-width:0; }
 .signin-log pre { max-height:160px; font-size:12px; margin:8px 0 0; }
 .signin-fine { font-size:12.5px; color:var(--faint); }
+.signin-said { font-family:var(--mono); font-size:12.5px; overflow-wrap:anywhere; }

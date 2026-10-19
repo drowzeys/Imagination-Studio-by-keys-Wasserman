@@ -455,7 +455,9 @@ def test_a_brain_card_signs_in_and_out_and_the_panel_follows_the_sign_in():
       await button(card(viewBrains(), "codex"), "Sign out").attrs.onclick(); out.signedOut = calls.some(c => c[0] === "/api/brains/codex/signout") && BR.status.codex.state === "signed_out";
       // the same cards in Settings → Connections
       tab = "Settings"; SET.section = "connections"; BR.status.claude = { state: "signed_out" }; out.settings = text(viewSettings());
-      out.settingsButton = !!button(find(viewSettings(), n => n.attrs && n.attrs["data-brain"] === "claude"), "Sign in");""")
+      out.settingsButton = !!button(find(viewSettings(), n => n.attrs && n.attrs["data-brain"] === "claude"), "Sign in");
+      BR.status.codex = { state: "broken", detail: "Error loading configuration: ~/.codex/config.toml:5:16: unknown variant `priority`", hint: "update it (`brew upgrade codex`)" };
+      out.broken = text(find(viewSettings(), n => n.attrs && n.attrs["data-signin-state"] === "broken"));""")
     if out is None:
         return
     assert out["buttons"] == {"claude": ["Sign in"], "codex": ["Sign out"], "grok": ["Sign out"], "gemini": ["Sign in"], "hermes": ["Sign in"]}
@@ -473,6 +475,7 @@ def test_a_brain_card_signs_in_and_out_and_the_panel_follows_the_sign_in():
     assert "gemini" in out["gemini"] and "own terminal" in out["gemini"] and "Copy" in out["gemini"] and not out["geminiStarted"]
     assert out["signedOut"]
     assert "Sign in to each CLI right here" in out["settings"] and out["settingsButton"]
+    assert "unknown variant `priority`" in out["broken"] and "brew upgrade codex" in out["broken"]
 
 
 if __name__ == "__main__":

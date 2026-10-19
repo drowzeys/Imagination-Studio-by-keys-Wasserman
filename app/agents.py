@@ -131,6 +131,10 @@ TEXT_LIMIT = 20000
 
 lock = threading.RLock()
 probes: dict = {}  # (host or "", cli) -> (monotonic time, found)
+codex_checks: dict = {}  # codex path -> (monotonic time, its mtime, why it cannot start or None)
+CODEX_BROKEN = re.compile(r"Error loading config|unknown variant|unknown field", re.I)
+CODEX_HINT = ("This Codex CLI is older than the settings in ~/.codex/config.toml: update it (`brew upgrade codex` or "
+              "`npm install -g @openai/codex`). The ChatGPT desktop app carries a newer one the Studio uses when it is installed.")
 tasks: dict[str, dict] = {}
 threads: dict[str, dict] = {}
 pending: "queue.Queue[str]" = queue.Queue()
@@ -288,9 +292,35 @@ def cli(name: str) -> str | None:
     if name == "hermes" and studio_settings()["hermes_command"]:
         return studio_settings()["hermes_command"]
     found = shutil.which(CLIS[name][1] if name in CLIS else name, path=search_path())
-    if not found and name == "codex" and sys.platform == "darwin":
-        found = next(filter(None, (bundled_codex(p) if os.path.isdir(p) else p if os.access(p, os.X_OK) else None for p in MAC_CODEX)), None)
+    if name == "codex" and sys.platform == "darwin":
+        app = next(filter(None, (bundled_codex(p) if os.path.isdir(p) else p if os.access(p, os.X_OK) else None for p in MAC_CODEX)), None)
+        if not found:
+            return app
+        if app and app != found and codex_broken(found):
+            return app  # a codex on PATH that cannot start (an older one beside newer settings): the ChatGPT app's instead
     return found
+
+
+def codex_broken(path: str) -> str | None:
+    """Why a codex cannot start (its own words, from `codex login status`), or None; asked once a minute a binary."""
+
+    try:
+        stamp = os.stat(path).st_mtime
+    except OSError:
+        return None
+    with lock:
+        cached = codex_checks.get(path)
+    if cached and cached[1] == stamp and time.monotonic() - cached[0] < PROBE_TTL:
+        return cached[2]
+    try:
+        done = subprocess.run([path, "login", "status"], capture_output=True, text=True, timeout=PROBE_TIMEOUT,
+                              stdin=subprocess.DEVNULL, env=child_env())
+        said = next((line.strip() for line in (done.stderr + "\n" + done.stdout).splitlines() if CODEX_BROKEN.search(line)), None)
+    except (OSError, subprocess.TimeoutExpired):
+        said = None
+    with lock:
+        codex_checks[path] = (time.monotonic(), stamp, said)
+    return said
 
 
 def bundled_codex(base: str) -> str | None:
@@ -394,6 +424,10 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
             item.update(found=bool(path), path=path, version=version)
         if name == "codex" and from_chatgpt(item["path"]):
             item["label"] = "Codex (from the ChatGPT app)"
+            other = shutil.which("codex", path=search_path())
+            broken = codex_broken(other) if other and other != item["path"] else None
+            if broken:
+                item["note"] = "The codex on PATH cannot start (“" + broken[:200] + "”), so the Studio uses the ChatGPT app's newer one."
         item.update(signin_flow=recipe_of(name, item["where"] != "here")["flow"], signin_command=terminal_line(name),
                     signin_note=SIGNIN_NOTES.get(name))
         out.append(item)
@@ -1477,7 +1511,8 @@ OSC_LINK = re.compile(r"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)(?:\x07|\x1b\\)")
 URL = re.compile(r"https?://[^\s\"'<>`\x07\x1b]+")
 DEVICE_CODE = re.compile(r"(?<![A-Za-z0-9-])([A-Z0-9]{3,8}(?:-[A-Z0-9]{3,8}){1,3})(?![A-Za-z0-9-])")
 CODE_PROMPT = re.compile(r"paste|enter (?:the |your )?(?:authori[sz]ation |verification )?code|code here|authentication code|code:", re.I)
-SECRETISH = re.compile(r"\b(?=[A-Za-z0-9_\-+/=.]*[0-9])(?=[A-Za-z0-9_\-+/=.]*[A-Za-z])[A-Za-z0-9_\-+/=.]{24,}\b")
+# a token-like run (letters and digits, 24 or more); a path or a dotted name is left alone, a JWT loses each part
+SECRETISH = re.compile(r"(?<![A-Za-z0-9_\-+=/])(?=[A-Za-z0-9_\-+=]*[0-9])(?=[A-Za-z0-9_\-+=]*[A-Za-z])[A-Za-z0-9_\-+=]{24,}")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 signin: dict = {"backend": None}  # the one running sign-in, its process, pty and what it printed
 statuses: dict = {}  # (backend, host) -> (monotonic time, answer)
@@ -1760,6 +1795,9 @@ def read_status(backend: str, done: subprocess.CompletedProcess) -> dict:
         return {"state": "signed_in", "detail": " · ".join(x for x in (how, plan) if x)} if info.get("loggedIn") else \
             {"state": "signed_out", "detail": "Not signed in"}
     if backend == "codex":
+        broken = next((line.strip() for line in said.splitlines() if CODEX_BROKEN.search(line)), None)
+        if broken:
+            return {"state": "broken", "detail": broken[:300], "hint": CODEX_HINT}
         if re.search(r"not logged in", said, re.I):
             return {"state": "signed_out", "detail": "Not signed in"}
         found = re.search(r"logged in using ([^\n]+)", said, re.I)

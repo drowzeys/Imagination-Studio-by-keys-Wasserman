@@ -123,6 +123,7 @@ const copyText = async (value, what) => { try { await navigator.clipboard.writeT
 function signLine(b) { if (b.kind !== "cli") return null; const st = BR.status[b.id];
   if (b.found && !st) brainStatus(b.id);
   const on = st && st.state === "signed_in", text = !b.found ? null : !st || st.state === "asking" ? "Asking " + b.label + " whether it is signed in…" : on ? "Signed in" + (st.detail ? " · " + st.detail : "") : st.state === "signed_out" ? "Not signed in" : st.detail || "Sign-in unknown";
+  if (st && st.state === "broken") return el("div", { class: "signin-state", "data-signin-state": "broken" }, el("div", { class: "note m-flat vt-bad signin-said" }, st.detail), st.hint ? el("div", { class: "note m-flat" }, st.hint) : null);
   return text ? el("div", { class: "note m-flat signin-state " + (on ? "vt-ok" : st && st.state === "signed_out" ? "vt-bad" : ""), "data-signin-state": st ? st.state : "asking" }, text) : null; }
 function signButtons(b) { if (b.kind !== "cli") return []; const st = BR.status[b.id], on = st && st.state === "signed_in", running = BR.sign[b.id] && SIGN_RUNNING.includes(BR.sign[b.id].state);
   if (on && SIGN_OUT.includes(b.id)) return [el("button", { type: "button", class: "small", disabled: running, onclick: () => signOut(b) }, "Sign out")];
