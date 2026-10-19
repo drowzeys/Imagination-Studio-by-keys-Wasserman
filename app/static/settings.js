@@ -166,7 +166,7 @@ function setConnections() {
 /* ---------- 5. About ---------- */
 // Keys and Wasserman Productions: their sites and code
 const ABOUT_LINKS = [["wassermanproductions.com", "https://wassermanproductions.com"], ["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"],
-  ["Keys on GitHub", "https://github.com/drowzeys"]];
+  ["Keys on GitHub", "https://github.com/drowzeys"], ["Sam Wasserman on X", "https://x.com/SamJWasserman"], ["Keys on X", "https://x.com/u1tra_instinct"]];
 function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.about = { loading: true }; updRequest().then(d => { SET.about = d; if (tab === "Settings") render(); }, () => { SET.about = { error: true }; }); }
   const u = SET.about || {}, row = (k, v) => el("div", { class: "kv st-kv" }, el("span", {}, k), el("b", {}, v));
   return [setPanel("About", null,
