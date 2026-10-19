@@ -321,7 +321,7 @@ def test_queued_clips_render_one_per_spark_and_come_back_here():
     assert all(job["status"] == "done" for job in done), [(job["status"], job["error"]) for job in done]
     assert {job["spark"] for job in done} == {hub.name, "spark-a", "spark-b"}
     assert one.most == 1 and two.most == 1 and local_render.most == 1  # one job on a Spark at a time
-    assert wall < 6 * TAKES * 0.75, wall  # three machines, not one after another
+    assert wall < 6 * TAKES * 0.75, (wall, [(job["spark"], round(job["started"] - started, 2), round(job["finished"] - started, 2)) for job in done])  # three machines, not one after another
     made = hub.takes()
     for job in done:
         clip = server.HOME / job["outputs"][0]

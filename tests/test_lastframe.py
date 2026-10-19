@@ -8,6 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 HOME = Path(tempfile.mkdtemp()) / "TensorFoldStudio"
 os.environ["STUDIO_HOME"] = str(HOME)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
@@ -38,6 +40,7 @@ def test_lead():
     assert server.compose({"scene": "a table"}, False).startswith("integrated_multimodal_description")
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_build_carries_the_last_frame():
     first, last = picture("a.png"), picture("b.png")
     base = {"prompt": "x", "preset": next(iter(server.PRESETS)), "quality": next(iter(server.QUALITIES)), "seconds": 5}

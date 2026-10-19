@@ -5,6 +5,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp()) / "TensorFoldStudio"))
 sys.path.insert(0, str(ROOT / "app"))
@@ -43,6 +45,7 @@ def test_a_job_asks_by_frames_or_by_seconds():
     assert "at most 243 frames" in refused(lambda: L.of({"frames": 362}, longest=243))
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_the_job_gets_the_frames_it_asked_for():
     _, env, _ = server.build("video", {"prompt": "a harbour", "preset": PRESET, "quality": QUALITY, "frames": 209}, "j1")
     assert env["FRAMES"] == 209
@@ -73,6 +76,7 @@ def test_the_time_estimate_of_the_usual_lengths_is_what_it_was():
     assert client.post("/api/estimate", json={"preset": PRESET, "quality": QUALITY, "frames": 209}).status_code == 200
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_a_machine_without_ffmpeg_is_told_before_the_job_is_queued():
     had = server.media_tools
     try:
