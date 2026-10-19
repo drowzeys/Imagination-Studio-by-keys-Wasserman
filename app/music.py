@@ -150,9 +150,11 @@ class Mlx(voice.Served):
             return "The MLX route runs on a Mac (Apple Silicon)."
         if not self.python().is_file():
             return f"No MiniMax Music 3 environment at {self.venv} (bash scripts/setup-music.sh, or oneshot-setup.sh --music)."
+        self.model = voice.located("music3-weights", self.model, has_weights)
         missing = [str(self.model / part) for part in WEIGHTS if not (self.model / part).is_file()]
         if missing:
-            return f"No MiniMax Music 3 weights at {self.model} (oneshot-setup.sh --music downloads them; MUSIC3_MODEL names another folder)."
+            return (f"No MiniMax Music 3 weights at {self.model} (oneshot-setup.sh --music downloads them; MUSIC3_MODEL names another folder)."
+                    + voice.found_hint("music3-weights"))
         try:
             memory = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=5).stdout.strip() or 0)
         except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -318,6 +320,10 @@ WEIGHTS = ("diffusion_models/minimax_music3_dit_fp16.safetensors", "text_encoder
            "vae/minimax_music3_dav.safetensors")
 
 
+def has_weights(folder: Path) -> bool:
+    return all((folder / part).is_file() for part in WEIGHTS)
+
+
 class Comfy:
     """ComfyUI's MiniMax Music 3 nodes on a DGX Spark (``spark_generate.py music``). The studio's ComfyUI server keeps
     the song's models after a song: that is this route's loaded state (``comfy.kind`` reads "music"). While loaded it
@@ -372,8 +378,8 @@ class Comfy:
         if not (PREFIX / "ComfyUI" / "comfy_extras" / "nodes_minimax_music.py").is_file():
             return f"The ComfyUI at {PREFIX / 'ComfyUI'} has no MiniMax Music 3 nodes (oneshot-setup-spark.sh moves it to the pinned commit)."
         missing = [part for part in WEIGHTS if not (self.models / part).is_file()]
-        if missing:
-            return f"No MiniMax Music 3 weights at {self.models} (bash oneshot-setup-spark.sh --music, 22 GB)."
+        if missing:  # ComfyUI reads its own folders: a file found elsewhere is used once linked there (a symlink)
+            return f"No MiniMax Music 3 weights at {self.models} (bash oneshot-setup-spark.sh --music, 22 GB)." + voice.found_hint("music3-weights")
         return ""
 
     def estimate(self, seconds: float) -> int:
@@ -542,12 +548,15 @@ class Cuda(voice.Served):
 
         if not SPARK:
             return "The CUDA route runs on a DGX Spark (Linux, CUDA)."
+        self.bin = voice.located("music3-binary", self.bin, lambda p: os.access(p, os.X_OK))
+        self.model = voice.located("music3-weights", self.model, has_weights)
         if not os.access(self.bin, os.X_OK):
             return (f"No MiniMax Music 3 engine at {self.bin} (bash spark/build-music3.sh, or oneshot-setup-spark.sh --music; "
-                    "MUSIC3_CUDA_BIN names another).")
+                    "MUSIC3_CUDA_BIN names another)." + voice.found_hint("music3-binary"))
         missing = [part for part in WEIGHTS if not (self.model / part).is_file()]
         if missing:
-            return f"No MiniMax Music 3 weights at {self.model} (bash oneshot-setup-spark.sh --music, 22 GB; MUSIC3_MODEL names another folder)."
+            return (f"No MiniMax Music 3 weights at {self.model} (bash oneshot-setup-spark.sh --music, 22 GB; MUSIC3_MODEL names another folder)."
+                    + voice.found_hint("music3-weights"))
         return ""
 
     def look(self) -> str:
@@ -667,12 +676,15 @@ class Metal(Cuda):
         chip = self.chip()
         if chip is not None and chip < self.FIRST_CHIP:
             return f"TensorFold's Metal engine for MiniMax Music 3 needs an Apple M5 or later; this Mac is an M{chip}."
+        self.bin = voice.located("music3-binary", self.bin, lambda p: os.access(p, os.X_OK))
+        self.model = voice.located("music3-weights", self.model, has_weights)
         if not os.access(self.bin, os.X_OK):
             return (f"No MiniMax Music 3 engine at {self.bin} (bash scripts/build-music3-metal.sh, or oneshot-setup.sh --music; "
-                    "MUSIC3_METAL_BIN names another).")
+                    "MUSIC3_METAL_BIN names another)." + voice.found_hint("music3-binary"))
         missing = [part for part in WEIGHTS if not (self.model / part).is_file()]
         if missing:
-            return f"No MiniMax Music 3 weights at {self.model} (oneshot-setup.sh --music downloads them; MUSIC3_MODEL names another folder)."
+            return (f"No MiniMax Music 3 weights at {self.model} (oneshot-setup.sh --music downloads them; MUSIC3_MODEL names another folder)."
+                    + voice.found_hint("music3-weights"))
         return ""
 
     def look(self) -> str:

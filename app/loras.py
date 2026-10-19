@@ -35,6 +35,39 @@ from fastapi import APIRouter, HTTPException
 import lora_flows
 import lora_layout
 
+try:
+    import discover  # Models & weights: a LoRA's file already somewhere on this machine is linked, not downloaded
+except ImportError:  # pragma: no cover
+    discover = None
+
+
+def found_here(lora_id: str) -> dict | None:
+    """A copy of this LoRA's file elsewhere on this machine that the last scan proved (by its sha256 when the recipe
+    has one), or None."""
+
+    if discover is None:
+        return None
+    try:
+        known = (discover.load().get("needs") or {}).get("lora:" + lora_id) or {}
+    except Exception:  # noqa: BLE001 - a broken cache never stops the hub
+        return None
+    good = [c for c in known.get("candidates", []) if c.get("verified") and c.get("path") and Path(c["path"]).is_file()]
+    return good[0] if good else None
+
+
+def link_found(lora_id: str, target: Path) -> bool:
+    """Instead of a download: the proven copy on this machine linked at ``target`` (discover.use: a symlink, nothing
+    moved or copied). True when the file is there now."""
+
+    found = found_here(lora_id)
+    if found is None or target.exists():
+        return target.exists()
+    try:
+        discover.use("lora:" + lora_id, found["path"])
+    except Exception:  # noqa: BLE001 - then it is downloaded as before
+        return False
+    return target.exists()
+
 PRESETS = Path(__file__).with_name("lora-presets.json")
 FIELDS = ("name", "author", "url", "page", "sha256", "trigger", "styles", "strength", "range", "base", "licence", "notes")
 LIMIT = 4  # LoRAs on one clip
@@ -266,9 +299,12 @@ def attach(home: Path, pack: Path, spark: bool):
     def public(recipe: dict) -> dict:
         state = busy.get(recipe["id"])
         installed = ready(recipe["id"]).is_file() and not state
+        here = None if installed else found_here(recipe["id"])
         # usable: its file is here and this machine has what it runs on (a clip, a Library action or Edit a picture)
         return {**recipe, "installed": installed, "installing": state, "usable": installed and recipe.get("status") != "unsupported",
-                "flow": lora_flows.public(recipe["id"]) if recipe.get("flow") else None}
+                "flow": lora_flows.public(recipe["id"]) if recipe.get("flow") else None,
+                # found on this machine: Install links that file instead of downloading it
+                "found": {"path": here["shown"], "proof": here.get("proof", "")} if here else None}
 
     def prepare(lora_id: str) -> None:
         if ready(lora_id).is_file() or images(lora_id):
@@ -334,7 +370,7 @@ def attach(home: Path, pack: Path, spark: bool):
         lora_id, state = recipe["id"], busy[recipe["id"]]
         try:
             if not prebuilt(recipe, state):
-                if not source(lora_id).is_file():
+                if not source(lora_id).is_file() and not link_found(lora_id, source(lora_id)):
                     download(recipe, source(lora_id), state)
                 state["stage"] = "preparing"
                 prepare(lora_id)
@@ -500,6 +536,8 @@ def main(argv: list[str]) -> int:
         try:
             if target.is_file():
                 print(f"have  {recipe['name']}")
+            elif link_found(recipe["id"], target):
+                print(f"found {recipe['name']} elsewhere on this machine, linked instead of downloading ({found_here(recipe['id'])['shown']})")
             else:
                 came = "the bundle" if bundled(recipe) or bundle().startswith("http") else recipe["page"]
                 download(recipe, target, {"done": 0, "of": 0})
