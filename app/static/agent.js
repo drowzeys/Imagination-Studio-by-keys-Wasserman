@@ -333,7 +333,8 @@ function viewAgent() {
   agAskSignins(found); agIdleWatch();
   const harnesses = found.filter(b => AG_HARNESS.includes(b.id));
   if (!agReady(found.find(b => b.id === AG.backend))) {
-    const def = BR.data && found.find(b => b.id === BR.data.default && agReady(b));
+    const chosen0 = BR.data && BR.data.settings && BR.data.settings.agent;  // the Agent room's own default (Connect sets it)
+    const def = BR.data && (found.find(b => b.id === chosen0 && agReady(b)) || found.find(b => b.id === BR.data.default && agReady(b)));
     AG.backend = ((def && (AG_HARNESS.includes(def.id) || !harnesses.some(agReady)) ? def : null) || harnesses.find(agReady) || found.find(b => agReady(b) && AG_AGENTS.some(a => a[0] === b.id)) || { id: AG.backend || "claude" }).id;
   }
   const missing = harnesses.filter(b => !agReady(b));
@@ -350,6 +351,7 @@ function viewAgent() {
       el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Agent · your own subscription"),
       el("h1", { class: "display" }, "Ask your agent. ", el("em", {}, "It makes it in the Studio.")),
       el("p", { class: "sub" }, "Pick the agent you already use. Say what you want; it works through the Studio and asks when a choice matters. Describe the shot, the scene or the whole film."))),
+    typeof connectNudge === "function" ? connectNudge("agent") : null,
     el("div", { class: "sectionhead" }, el("h2", {}, "Choose your agent"), agSetup()),
     agChooser(found),
     el("div", { class: "agr-under" },

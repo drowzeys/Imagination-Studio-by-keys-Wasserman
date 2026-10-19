@@ -159,6 +159,287 @@ function signPanel(b) { const s = BR.sign[b.id]; if (b.kind !== "cli" || BR.sign
     el("div", { class: "m-acts" }, running ? el("button", { type: "button", class: "small", onclick: () => signCancel(b.id) }, "Cancel")
       : el("button", { type: "button", class: "small", onclick: () => { BR.signOpen = null; if (s.state === "terminal" || s.state === "failed") brainStatus(b.id, true); signRedraw(); } }, s.state === "terminal" ? "Check" : "Close"),
       s.state === "failed" ? el("button", { type: "button", class: "small", onclick: () => signStart(b) }, "Try again") : null)); }
+/* ---------- a QR code for a sign-in address (ISO/IEC 18004, byte mode, level M; drawn as inline SVG, no library) ---------- */
+const QR_ECC = [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28];
+const QR_BLOCKS = [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49];
+const qrRaw = v => { let n = (16 * v + 128) * v + 64; if (v >= 2) { const a = Math.floor(v / 7) + 2; n -= (25 * a - 10) * a - 55; if (v >= 7) n -= 36; } return n; };
+const qrData = v => Math.floor(qrRaw(v) / 8) - QR_ECC[v] * QR_BLOCKS[v];
+const qrMul = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z; };
+function qrDivisor(n) { const r = new Array(n).fill(0); r[n - 1] = 1; let root = 1;
+  for (let i = 0; i < n; i++) { for (let j = 0; j < n; j++) { r[j] = qrMul(r[j], root); if (j + 1 < n) r[j] ^= r[j + 1]; } root = qrMul(root, 2); } return r; }
+function qrRemainder(data, div) { const r = div.map(() => 0); for (const b of data) { const f = b ^ r.shift(); r.push(0); div.forEach((c, i) => { r[i] ^= qrMul(c, f); }); } return r; }
+// the modules of the code for `text` (true is dark), or null when it is too long for one
+function qrMatrix(text, forceMask) {
+  const bytes = typeof TextEncoder !== "undefined" ? [...new TextEncoder().encode(text)] : [...unescape(encodeURIComponent(text))].map(c => c.charCodeAt(0));
+  let v = 1; while (v <= 40 && 4 + (v < 10 ? 8 : 16) + 8 * bytes.length > qrData(v) * 8) v++;
+  if (v > 40) return null;
+  const bits = [], push = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+  push(4, 4); push(bytes.length, v < 10 ? 8 : 16); bytes.forEach(b => push(b, 8));
+  const cap = qrData(v) * 8; push(0, Math.min(4, cap - bits.length)); push(0, (8 - bits.length % 8) % 8);
+  for (let pad = 0xEC; bits.length < cap; pad ^= 0xEC ^ 0x11) push(pad, 8);
+  const data = []; for (let i = 0; i < bits.length; i += 8) data.push(bits.slice(i, i + 8).reduce((a, b) => a * 2 + b, 0));
+  // Reed-Solomon blocks, interleaved
+  const nb = QR_BLOCKS[v], ecc = QR_ECC[v], raw = Math.floor(qrRaw(v) / 8), short = nb - raw % nb, slen = Math.floor(raw / nb), div = qrDivisor(ecc), blocks = [];
+  for (let i = 0, k = 0; i < nb; i++) { const d = data.slice(k, k + slen - ecc + (i < short ? 0 : 1)); k += d.length; const e = qrRemainder(d, div); if (i < short) d.push(0); blocks.push(d.concat(e)); }
+  const words = []; for (let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => { if (i !== slen - ecc || j >= short) words.push(b[i]); });
+  // the function patterns
+  const size = v * 4 + 17, mod = [...Array(size)].map(() => new Array(size).fill(false)), fn = [...Array(size)].map(() => new Array(size).fill(false));
+  const set = (x, y, dark) => { mod[y][x] = dark; fn[y][x] = true; };
+  for (let i = 0; i < size; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+  for (const [cx, cy] of [[3, 3], [size - 4, 3], [3, size - 4]]) for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+    const x = cx + dx, y = cy + dy, d = Math.max(Math.abs(dx), Math.abs(dy)); if (x >= 0 && x < size && y >= 0 && y < size) set(x, y, d !== 2 && d !== 4); }
+  const align = v === 1 ? [] : (() => { const n = Math.floor(v / 7) + 2, step = Math.floor((v * 8 + n * 3 + 5) / (n * 4 - 4)) * 2, r = [6];
+    for (let p = size - 7; r.length < n; p -= step) r.splice(1, 0, p); return r; })();
+  align.forEach((ax, i) => align.forEach((ay, j) => { if ((i === 0 && j === 0) || (i === 0 && j === align.length - 1) || (i === align.length - 1 && j === 0)) return;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) set(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1); }));
+  const format = mask => { const d = mask; let r = d; for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537); const b = ((d << 10) | r) ^ 0x5412, bit = i => ((b >>> i) & 1) === 1;  // level M: 00
+    for (let i = 0; i <= 5; i++) set(8, i, bit(i)); set(8, 7, bit(6)); set(8, 8, bit(7)); set(7, 8, bit(8)); for (let i = 9; i < 15; i++) set(14 - i, 8, bit(i));
+    for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(i)); for (let i = 8; i < 15; i++) set(8, size - 15 + i, bit(i)); set(8, size - 8, true); };
+  format(0);
+  if (v >= 7) { let r = v; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1F25); const b = (v << 12) | r;
+    for (let i = 0; i < 18; i++) { const dark = ((b >>> i) & 1) === 1, a = size - 11 + i % 3, c = Math.floor(i / 3); set(a, c, dark); set(c, a, dark); } }
+  // the data, in the zigzag
+  let i = 0; for (let right = size - 1; right >= 1; right -= 2) { if (right === 6) right = 5;
+    for (let vert = 0; vert < size; vert++) for (let j = 0; j < 2; j++) { const x = right - j, y = ((right + 1) & 2) === 0 ? size - 1 - vert : vert;
+      if (!fn[y][x] && i < words.length * 8) { mod[y][x] = ((words[i >>> 3] >>> (7 - (i & 7))) & 1) === 1; i++; } } }
+  const MASKS = [(x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, x => x % 3 === 0, (x, y) => (x + y) % 3 === 0, (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0,
+    (x, y) => x * y % 2 + x * y % 3 === 0, (x, y) => (x * y % 2 + x * y % 3) % 2 === 0, (x, y) => ((x + y) % 2 + x * y % 3) % 2 === 0];
+  const apply = m => { for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!fn[y][x] && MASKS[m](x, y)) mod[y][x] = !mod[y][x]; };
+  // the mask with the lowest penalty (runs, blocks, finder look-alikes, balance)
+  const penalty = () => { let p = 0, dark = 0; const lines = [];
+    for (let y = 0; y < size; y++) { lines.push(mod[y].map(b => b ? 1 : 0).join("")); lines.push(mod.map(r => r[y] ? 1 : 0).join("")); }
+    for (const l of lines) { for (const run of l.match(/0{5,}|1{5,}/g) || []) p += run.length - 2; p += 40 * ((l.match(/(?=10111010000|00001011101)/g) || []).length); }
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) { if (mod[y][x]) dark++;
+      if (x < size - 1 && y < size - 1 && mod[y][x] === mod[y][x + 1] && mod[y][x] === mod[y + 1][x] && mod[y][x] === mod[y + 1][x + 1]) p += 3; }
+    return p + 10 * Math.floor(Math.abs(dark * 20 - size * size * 10) / (size * size)); };
+  let best = forceMask, low = Infinity;
+  if (best == null) for (let m = 0; m < 8; m++) { apply(m); format(m); const p = penalty(); if (p < low) { low = p; best = m; } apply(m); }
+  apply(best); format(best);
+  return mod;
+}
+// the code drawn as one SVG path, four modules of quiet light around it; a phone's camera opens the address
+function qrSvg(text, px) { const m = qrMatrix(text); if (!m) return null; const n = m.length + 8; let d = "";
+  m.forEach((row, y) => row.forEach((on, x) => { if (on) d += "M" + (x + 4) + " " + (y + 4) + "h1v1h-1z"; }));
+  return svg("svg", { class: "cn-qr", viewBox: "0 0 " + n + " " + n, width: px || 168, height: px || 168, role: "img", "aria-label": "QR code of the sign-in page", "shape-rendering": "crispEdges" },
+    svg("rect", { width: n, height: n, fill: "#fff" }), svg("path", { d, fill: "#000" })); }
+
+/* ---------- Connect: one checklist per agent that the studio works through by itself (app/agents.py, the connect section) ----------
+   Find it (install it when it is missing), sign in (the CLI's own flow: the page opens in a new tab, with the code, a QR
+   code and Copy link), check it answers, make it the default. CN.data[id] is GET /api/brains/{id}/connect. */
+const CN = { open: null, data: {}, plan: {}, install: {}, verifying: {}, tried: {}, timer: null, win: null, tick: 0, link: null, linkHost: null, linkSaid: null, linkBusy: false, linkOpen: false };
+const CN_ORDER = ["claude", "codex", "hermes", "gemini", "grok"];
+const cnRedraw = () => { if (["Brains", "Settings", "Home", "Agent"].includes(tab) && !typing()) render(); };
+const cnWhere = b => b && b.where && b.where !== "here" ? b.where.replace(/^ssh:/, "") : "";
+const cnHere = () => typeof location === "undefined" || ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
+// the one word a card shows, and the next thing to do
+function brainWord(b) { if (!b || b.kind !== "cli") return [b && b.found ? "Ready" : "Not answering", null];
+  const st = BR.status[b.id], ok = CN.data[b.id] && CN.data[b.id].verify && CN.data[b.id].verify.ok, def = BR.data && BR.data.default === b.id;
+  if (b.error) return ["Cannot start", "link", "Check the link"];
+  if (!b.found) return ["Not installed", "connect", "Install"];
+  if (!st || st.state === "asking") return ["Checking…", null];
+  if (st.state === "broken" || st.state === "missing") return ["Cannot start", "connect", "Fix it"];
+  if (st.state === "keychain") return ["Signed in elsewhere", "connect", "Allow over SSH"];
+  if (st.state === "signed_in" || ok) return ["Ready", def ? null : "default", "Make default"];
+  return ["Not signed in", "connect", "Connect"]; }
+// the Connect button's click: a tab is opened now (a click may open one, a timer may not) and pointed at the sign-in page later
+function cnPrepareTab(b) { const st = BR.status[b.id];
+  if (b.found && b.signin_flow === "pty" && !(st && st.state === "signed_in") && typeof window !== "undefined" && typeof window.open === "function") {
+    try { const w = window.open("", "_blank"); if (w) { CN.win = w; try { w.document.title = "Signing in…"; w.document.body.innerHTML = "<p style='font:16px system-ui;padding:24px'>Opening the sign-in page…</p>"; } catch {} } } catch {} } }
+function cnCloseTab() { if (CN.win) { try { CN.win.close(); } catch {} CN.win = null; } }
+async function connectStart(b, fromClick) { if (fromClick !== false) cnPrepareTab(b);
+  CN.open = b.id; CN.tried[b.id] = {}; BR.signOpen = null; await cnLoad(b.id); }
+// from Home or the Agent room: Settings → Connections, the checklist open there
+function connectGo(b) { cnPrepareTab(b); if (typeof SET !== "undefined") SET.section = "connections"; go(typeof viewSettings === "function" ? "Settings" : "Brains"); connectStart(b, false); }
+async function cnLoad(id) { try { CN.data[id] = await api("/api/brains/" + id + "/connect"); } catch (e) { CN.data[id] = { error: e.message }; }
+  const d = CN.data[id]; if (d && d.signin) BR.status[id] = { backend: id, ...d.signin }; if (d && d.signing && d.signing.state !== "idle") BR.sign[id] = d.signing;
+  if (d && !d.error && !d.find.found && !CN.plan[id]) { try { CN.plan[id] = (await api("/api/brains/" + id + "/install?plan=1")).plan; } catch (e) { CN.plan[id] = { ok: false, reason: e.message }; } }
+  cnAdvance(id); cnRedraw(); }
+// the driver: what can run next runs, once each, until the step needs the person
+function cnAdvance(id) { const d = CN.data[id], b = cnBrain(id), tried = CN.tried[id] || (CN.tried[id] = {}); if (!d || d.error || CN.open !== id) return cnWatch();
+  const sign = BR.sign[id], st = d.signin || {};
+  if (!d.find.found) { cnCloseTab(); return cnWatch(); }
+  if (st.state !== "signed_in") {
+    if (sign && SIGN_RUNNING.includes(sign.state)) return cnWatch();
+    if (b && b.signin_flow === "pty" && !["broken", "missing"].includes(st.state) && !tried.signin) { tried.signin = true; cnSignin(id); }
+    return cnWatch(); }
+  cnCloseTab();
+  if (!d.verify && !tried.verify) { tried.verify = true; cnVerify(id); return; }
+  if (d.verify && d.verify.ok && !d.default && !d.default_ready && !tried.default) { tried.default = true; cnDefault(id); }
+  cnWatch(); }
+const cnName = id => { const b = ((BR.data && BR.data.backends) || []).find(x => x.id === id); return b ? b.label : id || "Another brain"; };
+const cnBrain = id => ((BR.data && BR.data.backends) || []).find(x => x.id === id) || (CN.data[id] ? { id, label: CN.data[id].label, kind: "cli", found: CN.data[id].find && CN.data[id].find.found, where: CN.data[id].where, signin_flow: "pty" } : null);
+async function cnSignin(id, extra) { const b = cnBrain(id); if (!b) return;
+  const body = { ...(extra || {}) }; if (id === "codex" && (!cnHere() || cnWhere(b))) body.device = true;  // a localhost callback only reaches a browser on this computer
+  BR.sign[id] = { state: "starting", lines: [] }; cnRedraw();
+  try { BR.sign[id] = await api("/api/brains/" + id + "/signin", body); } catch (e) { BR.sign[id] = { state: "failed", reason: e.message, lines: [] }; }
+  cnPoint(id); cnWatch(); cnRedraw(); }
+// the tab opened on the click goes to the sign-in page as soon as the CLI prints it
+function cnPoint(id) { const s = BR.sign[id]; if (CN.win && s && s.url && ["needs_browser", "needs_code", "device_code"].includes(s.state)) { try { CN.win.location.href = s.url; CN.win.opener = null; } catch {} CN.win = null; } }
+async function cnVerify(id) { CN.verifying[id] = true; cnRedraw();
+  try { const r = await api("/api/brains/" + id + "/verify", {}); if (CN.data[id]) CN.data[id].verify = r; } catch (e) { if (CN.data[id]) CN.data[id].verify = { ok: false, error: e.message, fix: { action: "verify", label: "Check again" } }; }
+  CN.verifying[id] = false; cnAdvance(id); cnRedraw(); }
+async function cnDefault(id) { const d = CN.data[id];
+  try { const r = await api("/api/brains/" + id + "/default", {}); if (BR.data) { BR.data.default = r.settings.default; BR.data.settings = r.settings; } if (d) { d.default = true; d.agent_default = r.settings.agent === id; } }
+  catch (e) { toast(e.message); } cnRedraw(); }
+async function cnInstall(id) { CN.install[id] = { state: "starting", lines: [] }; cnRedraw();
+  try { CN.install[id] = await api("/api/brains/" + id + "/install", {}); } catch (e) { CN.install[id] = { state: "failed", reason: e.message, lines: [] }; }
+  cnWatch(); cnRedraw(); }
+// one timer follows whatever is running: the installer, the sign-in, a sign-in that finishes in another terminal
+function cnWatch() { const id = CN.open, d = id && CN.data[id];
+  const inst = id && CN.install[id], sign = id && BR.sign[id], b = id && cnBrain(id);
+  const live = d && !d.error && ((inst && ["starting", "running"].includes(inst.state)) || (sign && SIGN_RUNNING.includes(sign.state)) ||
+    (d.find.found && d.signin && d.signin.state !== "signed_in" && b && b.signin_flow !== "pty"));
+  if (!live) { clearInterval(CN.timer); CN.timer = null; return; }
+  if (CN.timer) return;
+  CN.timer = setInterval(async () => { const id = CN.open; if (!id) { clearInterval(CN.timer); CN.timer = null; return; } CN.tick++;
+    const inst = CN.install[id], sign = BR.sign[id];
+    if (inst && ["starting", "running"].includes(inst.state)) { try { CN.install[id] = await api("/api/brains/" + id + "/install"); } catch {}
+      if (["done", "failed"].includes(CN.install[id].state)) { clearInterval(CN.timer); CN.timer = null; BR.data = null; await brainsLoad(); if (CN.install[id].state === "done") { BR.status[id] = null; await cnLoad(id); } } cnRedraw(); return; }
+    if (sign && SIGN_RUNNING.includes(sign.state)) { let now; try { now = await api("/api/brains/" + id + "/signin"); } catch (e) { now = { state: "failed", reason: e.message, lines: [] }; }
+      const changed = JSON.stringify(now) !== JSON.stringify(sign); BR.sign[id] = now; cnPoint(id);
+      if (!SIGN_RUNNING.includes(now.state)) { clearInterval(CN.timer); CN.timer = null; if (now.state === "done") { toast("Signed in"); BR.status[id] = null; await cnLoad(id); } }
+      if (changed) cnRedraw(); return; }
+    if (CN.tick % 4 === 0) { clearInterval(CN.timer); CN.timer = null; await cnLoad(id); } }, 1250);
+  if (CN.timer && CN.timer.unref) CN.timer.unref(); }
+function cnClose(id) { if (BR.sign[id] && SIGN_RUNNING.includes(BR.sign[id].state)) signCancel(id); CN.open = null; cnCloseTab(); clearInterval(CN.timer); CN.timer = null; render(); }
+// the sign-in's own parts: the page (opened already, or a big button), the code, a QR code, Copy link
+function cnSignBody(b, s) { const where = cnWhere(b) ? " on " + cnWhere(b) : "", out = [];
+  const page = url => el("div", { class: "cn-page" }, el("div", { class: "stack" }, el("a", { class: "signin-open", href: url, target: "_blank", rel: "noopener noreferrer" }, "Open the sign-in page"),
+      el("div", { class: "chips" }, el("button", { type: "button", class: "small", onclick: () => copyText(url, "Link") }, "Copy link")),
+      el("div", { class: "note m-flat" }, "On your phone? Scan the code.")), qrSvg(url, 152));
+  if (s.state === "starting") out.push(el("div", { class: "note m-flat" }, "Starting " + b.label + "’s sign-in" + where + "…"));
+  else if (s.state === "needs_browser") out.push(page(s.url), el("div", { class: "note m-flat" }, "Sign in on that page. This ticks by itself when " + b.label + " hears back."));
+  else if (s.state === "device_code") out.push(el("div", { class: "note m-flat" }, "Enter this code on the sign-in page:"),
+    el("div", { class: "signin-code cn-code" }, el("span", {}, s.code), el("button", { type: "button", class: "small", onclick: () => copyText(s.code, "Code") }, "Copy code")), page(s.url),
+    el("div", { class: "note m-flat" }, "This ticks by itself once the page accepts the code."));
+  else if (s.state === "needs_code") { const field = el("input", { value: BR.codeDraft[b.id] || "", placeholder: "Paste the code the page shows", "aria-label": "Sign-in code", autocomplete: "off", spellcheck: "false",
+      oninput: e => { BR.codeDraft[b.id] = e.target.value; }, onkeydown: e => { if (e.key === "Enter") signCode(b.id).then(cnWatch); } });
+    out.push(page(s.url), el("div", { class: "note m-flat" }, "After you sign in, the page shows a code: paste it here and the studio hands it to " + b.label + "."),
+      el("div", { class: "signin-paste" }, field, el("button", { type: "button", class: "primary", onclick: () => signCode(b.id).then(cnWatch) }, "Continue"))); }
+  else if (s.state === "verifying") out.push(el("div", { class: "note m-flat" }, "Handing the code to " + b.label + "…"));
+  else if (s.state === "failed") out.push(el("div", { class: "note m-flat vt-bad" }, s.reason || "The sign-in stopped."), el("div", {}, el("button", { type: "button", class: "small", onclick: () => cnSignin(b.id) }, "Try again")));
+  if (s.token) out.push(el("div", { class: "note m-flat" }, s.token === "saved" ? "The sign-in token is kept on that Mac, readable only by you." : "The token this makes is kept only on that Mac (readable only by you), never in the studio."));
+  if (b.id === "codex" && !where && cnHere() && SIGN_RUNNING.includes(s.state) && s.state !== "device_code")
+    out.push(el("button", { type: "button", class: "small ghost", onclick: async () => { await signCancel(b.id); cnSignin(b.id, { device: true }); } }, "Use a one-time code instead"));
+  if ((s.lines || []).length) out.push(el("details", { class: "fold signin-log", open: s.state === "failed" }, el("summary", {}, "What " + b.label + " says"), el("pre", {}, s.lines.join("\n"))));
+  return out; }
+// each step: its state (todo, running, wait, done, failed, skip), a line and what to do
+function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : "on this computer", st = d.signin || {}, sign = BR.sign[b.id], inst = CN.install[b.id], plan = CN.plan[b.id];
+  const steps = [];
+  // a. find it
+  if (d.find.found) steps.push(["find", "Find it", "done", d.find.chatgpt ? "Uses the ChatGPT app's own Codex: nothing to install." : "Found " + on + (d.find.version ? " · " + d.find.version : "")]);
+  else if (d.find.error) steps.push(["find", "Find it", "failed", d.find.error, el("button", { type: "button", class: "small", onclick: () => { CN.linkOpen = true; render(); } }, "Check the link")]);
+  else if (inst && ["starting", "running"].includes(inst.state)) steps.push(["find", "Install it", "running", "Installing with " + (inst.by || "its installer") + " " + on + "…",
+    el("code", { class: "cn-cmd" }, inst.command || ""), (inst.lines || []).length ? el("pre", { class: "cn-log" }, inst.lines.slice(-6).join("\n")) : null]);
+  else if (inst && inst.state === "failed") steps.push(["find", "Install it", "failed", inst.reason || "The installer stopped.", el("button", { type: "button", class: "small", onclick: () => cnInstall(b.id) }, "Try again"),
+    (inst.lines || []).length ? el("details", { class: "fold" }, el("summary", {}, "What the installer said"), el("pre", {}, inst.lines.join("\n"))) : null]);
+  else steps.push(["find", "Install it", "wait", "Not installed " + on + ".", !plan ? el("span", { class: "note m-flat" }, "Looking for npm, Homebrew or curl…")
+    : plan.ok ? [el("div", { class: "note m-flat" }, "Install runs " + b.label + "’s own installer (" + plan.by + ") " + on + ", without administrator rights:"), el("code", { class: "cn-cmd" }, plan.command),
+      el("div", {}, el("button", { type: "button", class: "primary", onclick: () => cnInstall(b.id) }, "Install " + b.label))]
+      : el("div", { class: "note m-flat vt-bad" }, plan.reason)]);
+  // b. sign in
+  const found = d.find.found;
+  if (!found) steps.push(["signin", "Sign in", "todo", "After it is installed."]);
+  else if (st.state === "signed_in") steps.push(["signin", "Sign in", "done", "Signed in" + (st.detail ? " · " + st.detail : "") + (where ? " on " + where : "")]);
+  else if (sign && sign.state !== "idle" && !(sign.state === "done")) steps.push(["signin", d.token_flow ? "Allow it over SSH" : "Sign in", sign.state === "failed" ? "failed" : "running", "", ...cnSignBody(b, sign)]);
+  else if (st.state === "keychain") steps.push(["signin", "Allow it over SSH", "wait", st.detail, el("div", { class: "note m-flat" }, "macOS keeps Claude Code’s sign-in in that Mac’s Keychain, which an SSH session cannot open. Allow over SSH signs in once more and keeps a sign-in token only on that Mac, in your own folder, readable only by you."),
+    el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Allow over SSH"))]);
+  else if (st.state === "broken") steps.push(["signin", "Sign in", "failed", st.detail, st.hint ? el("div", { class: "note m-flat" }, st.hint) : null, el("button", { type: "button", class: "small", onclick: () => cnInstall(b.id) }, "Update " + b.label)]);
+  else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait", b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
+    el("div", { class: "signin-cmd" }, el("code", {}, b.signin_command || ""), el("button", { type: "button", class: "small", onclick: () => copyText(b.signin_command || "", "Command") }, "Copy"))]);
+  else steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Not signed in yet.", el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Sign in"))]);
+  // c. one real answer
+  const v = d.verify, signed = st.state === "signed_in";
+  if (CN.verifying[b.id]) steps.push(["verify", "Check it answers", "running", "Asking " + b.label + " to say ok (one short answer, a minute at most)…"]);
+  else if (v && v.ok) steps.push(["verify", "Check it answers", "done", "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s"]);
+  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" }, act = { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action];
+    steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, fix.label)) : el("div", { class: "note m-flat" }, fix.label)]); }
+  else steps.push(["verify", "Check it answers", signed ? "wait" : "todo", signed ? "" : "After it is signed in.", signed ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
+  // d. the default
+  const names = d.harness ? "your default brain and the Agent room's" : "your default brain";
+  if (d.default) steps.push(["default", "Make it your default", "done", "It is " + (d.harness && !d.agent_default ? "your default brain" : names) + "."]);
+  else if (v && v.ok) steps.push(["default", "Make it your default", "wait", cnName(BR.data && BR.data.default) + " stays your default.", el("button", { type: "button", class: "small", onclick: () => cnDefault(b.id) }, "Make " + b.label + " the default")]);
+  else steps.push(["default", "Make it your default", "todo", "Once it answers."]);
+  return steps; }
+function connectPanel(b) { if (CN.open !== b.id) return null; const d = CN.data[b.id], where = cnWhere(b);
+  const head = el("div", { class: "signin-head" }, el("b", {}, "Connect " + b.label + (where ? " on " + where : "")), el("button", { type: "button", class: "small", onclick: () => cnClose(b.id) }, "Close"));
+  if (!d) return el("div", { class: "signin connect", "data-connect": b.id }, head, el("div", { class: "note m-flat" }, "Looking…"));
+  if (d.error) return el("div", { class: "signin connect", "data-connect": b.id }, head, el("div", { class: "note m-flat vt-bad" }, d.error));
+  const steps = cnSteps(b, d), all = steps.every(s => s[2] === "done") || (steps.slice(0, 3).every(s => s[2] === "done") && steps[3][2] === "wait");
+  return el("div", { class: "signin connect", "data-connect": b.id, "data-done": all ? "yes" : "no" }, head,
+    el("ol", { class: "cn-steps" }, steps.map(([key, name, state, line, ...more]) => el("li", { class: "cn-step " + state, "data-step": key, "data-state": state },
+      el("span", { class: "cn-tick", "aria-hidden": "true" }, state === "done" ? "✓" : state === "failed" ? "!" : state === "running" ? "…" : ""),
+      el("div", { class: "cn-body" }, el("b", {}, name), line ? el("span", { class: "cn-said" }, line) : null, ...more.flat())))),
+    all ? el("div", { class: "note m-flat vt-ok" }, b.label + " is ready" + (d.harness ? ": the Agent room can use it with the Studio’s tools." : ".")) : null,
+    el("div", { class: "note m-flat signin-fine" }, "Each step is " + b.label + "’s own: its installer, its sign-in, one short answer billed to your subscription. The studio keeps none of its sign-in.")); }
+// a brain's card: its mark, one word, the one next thing; the rest under Details
+function connectCard(b, extra) { const [word, action, label] = brainWord(b), where = cnWhere(b), said = BR.said[b.id], def = BR.data && BR.data.default === b.id;
+  if (b.kind === "cli" && b.found && !BR.status[b.id]) brainStatus(b.id);
+  const next = action === "connect" || action === "link" ? el("button", { type: "button", class: "small on", onclick: () => action === "link" ? (CN.linkOpen = true, render()) : connectStart(b) }, label)
+    : action === "default" ? el("button", { type: "button", class: "small", onclick: () => cnDefault(b.id) }, label) : null;
+  const st = BR.status[b.id];
+  return el("div", { class: "brain cn-card" + (def ? " on" : "") + (CN.open === b.id ? " cn-open" : ""), "data-brain": b.id, "data-word": word },
+    el("div", { class: "head" }, brainLogo(b.id), el("div", { class: "m-min" }, el("b", {}, b.label), el("span", { class: "cn-word " + (word === "Ready" ? "ok" : word === "Checking…" ? "" : "bad") }, word, where && b.found ? " · on " + where : ""))),
+    def ? el("div", { class: "m-tags" }, el("span", { class: "tag2 t" }, "default")) : null,
+    CN.open === b.id ? null : el("div", { class: "m-acts" }, next, word === "Ready" ? el("button", { type: "button", class: "small", onclick: () => connectStart(b) }, "Check") : null),
+    connectPanel(b),
+    el("details", { class: "fold cn-details" }, el("summary", {}, "Details"),
+      el("div", { class: "note m-flat" }, setWhere(b)), !b.found && !b.error && b.signin ? el("div", { class: "note m-flat" }, brainMissing(b)) : null, b.path ? el("div", { class: "note m-flat m-cmd" }, relHome(b.path)) : null,
+      st && st.detail ? el("div", { class: "note m-flat" }, st.detail) : null, st && st.hint ? el("div", { class: "note m-flat" }, st.hint) : null,
+      b.note ? el("div", { class: "note m-flat" }, b.note) : null, b.error ? el("div", { class: "note m-flat vt-bad" }, b.error) : null,
+      b.signin_command ? el("div", { class: "note m-flat" }, "In a terminal instead: ", el("code", {}, b.signin_command)) : null,
+      ...(extra || []),
+      said ? el("div", { class: "note m-flat " + (said.ok ? "vt-ok" : "vt-bad") }, said.ok ? "Answered “" + (said.text || "").slice(0, 40) + "” in " + ((said.elapsedMs || 0) / 1000).toFixed(1) + " s" : said.error) : null,
+      el("div", { class: "m-acts" }, el("button", { type: "button", class: "small", disabled: !b.found || BR.testing[b.id], onclick: async () => { BR.testing[b.id] = true; render();
+        try { BR.said[b.id] = await api("/api/brains/test", { backend: b.id }); } catch (e) { BR.said[b.id] = { ok: false, error: e.message }; } BR.testing[b.id] = false; render(); } }, BR.testing[b.id] ? "Asking…" : "Test"),
+        st && st.state === "signed_in" && SIGN_OUT.includes(b.id) ? el("button", { type: "button", class: "small", onclick: () => signOut(b) }, "Sign out") : null))); }
+
+/* ---------- Link another computer: this studio's key, the one line to run there, a Test, then its agents ---------- */
+async function linkLoad() { try { CN.link = await api("/api/brains/link"); } catch (e) { CN.link = { error: e.message }; } if (CN.linkHost === null) CN.linkHost = (CN.link && CN.link.host) || ""; cnRedraw(); }
+async function linkDo(path, body) { CN.linkBusy = true; render();
+  try { const r = await api(path, body); if (path.endsWith("/key")) CN.link = r; else if (path.endsWith("/test")) CN.linkSaid = r;
+    else { CN.link = r; CN.linkSaid = { ...CN.linkSaid, saved: r.found }; BR.data = null; BR.status = {}; await brainsLoad(); } }
+  catch (e) { CN.linkSaid = { ok: false, state: "error", detail: e.message }; } CN.linkBusy = false; render(); }
+function linkPanel() { if (!CN.link) { linkLoad(); return el("section", { class: "panel st-panel cn-link" }, el("h2", {}, "Link another computer"), el("div", { class: "note m-flat" }, "Looking for this studio's key…")); }
+  const L = CN.link, said = CN.linkSaid, host = CN.linkHost || "", tested = said && said.ok && said.host === host;
+  const field1 = el("input", { value: host, placeholder: "you@your-mac.local", "aria-label": "The other computer", autocomplete: "off", spellcheck: "false", oninput: e => { CN.linkHost = e.target.value.trim(); } });
+  const step = (n, title, state, ...kids) => el("li", { class: "cn-step " + state, "data-step": "link-" + n, "data-state": state }, el("span", { class: "cn-tick", "aria-hidden": "true" }, state === "done" ? "✓" : state === "failed" ? "!" : ""), el("div", { class: "cn-body" }, el("b", {}, title), ...kids.flat()));
+  const found = (said && said.saved) || null, agents = found ? found.map(id => cnBrain(id)).filter(Boolean) : [];
+  return el("section", { class: "panel st-panel cn-link", "data-card": "link" },
+    el("div", { class: "st-ph" }, el("h2", {}, "Link another computer"), el("p", { class: "note m-flat" }, "Use the agents signed in on another computer (a Mac beside a DGX Spark, say). The studio runs them there over SSH with its own key; no password is typed or kept.")),
+    L.error ? el("div", { class: "note m-flat vt-bad" }, L.error) : el("ol", { class: "cn-steps" },
+      step(1, "This studio's key", L.has_key ? "done" : "wait", L.has_key ? el("span", { class: "cn-said" }, "Ready (" + L.key_file + ")") : [el("span", { class: "cn-said" }, "This computer has no SSH key yet."),
+        el("div", {}, el("button", { type: "button", class: "primary", disabled: CN.linkBusy, onclick: () => linkDo("/api/brains/link/key", {}) }, "Make a key"))]),
+      step(2, "Let the other computer in", L.has_key ? (tested ? "done" : "wait") : "todo", el("span", { class: "cn-said" }, "On the other computer, open Terminal and run this one line. On a Mac, first turn on System Settings → General → Sharing → Remote Login."),
+        L.command ? el("div", { class: "signin-cmd" }, el("code", { class: "cn-cmd" }, L.command), el("button", { type: "button", class: "small", onclick: () => copyText(L.command, "Command") }, "Copy")) : null),
+      step(3, "Test the link", tested ? "done" : said && !said.ok ? "failed" : L.has_key ? "wait" : "todo", el("div", { class: "st-lrow" }, field1,
+          el("button", { type: "button", class: "small on", disabled: CN.linkBusy || !L.has_key, onclick: () => linkDo("/api/brains/link/test", { host: CN.linkHost }) }, CN.linkBusy ? "Testing…" : "Test")),
+        said && said.host === host ? el("div", { class: "note m-flat " + (said.ok ? "vt-ok" : "vt-bad") }, said.ok ? "Reached " + said.host + (said.os ? " (" + ({ Darwin: "macOS", Linux: "Linux" }[said.os] || said.os) + ")" : "") + "." : said.detail) : null,
+        said && said.state === "unknown_host" && said.host === host ? [said.fingerprint ? el("div", { class: "note m-flat" }, "Its key fingerprint: ", el("code", {}, said.fingerprint), ". On that computer, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` shows the same if it is the one you mean.") : null,
+          el("button", { type: "button", class: "small", onclick: () => linkDo("/api/brains/link/test", { host: CN.linkHost, trust: true }) }, "Trust this computer and test")] : null),
+      step(4, "Use its agents", found ? "done" : tested ? "wait" : "todo", tested && !found ? el("div", {}, el("button", { type: "button", class: "primary", disabled: CN.linkBusy, onclick: () => linkDo("/api/brains/link/save", { host: CN.linkHost }) }, "Use " + host + " for its agents")) : null,
+        found ? [el("span", { class: "cn-said" }, found.length ? "Its agents now run there: connect each one, and the studio installs, signs in and checks it over SSH." : "No agent is installed there yet."),
+          el("div", { class: "chips" }, agents.map(b => el("button", { type: "button", class: "small", onclick: () => connectStart(b) }, "Connect " + b.label)))] : null,
+        L.host && !found ? el("span", { class: "note m-flat" }, "Now: " + L.host + " runs " + ((L.backends || []).join(", ") || "nothing") + ".") : null))); }
+
+/* ---------- "Connect your agent": on Home and in the Agent room while no agent is signed in ---------- */
+const CN_DISMISS = "studio-connect-dismissed";
+const cnDismissed = () => { try { return localStorage.getItem(CN_DISMISS) === "1"; } catch { return false; } };
+function connectNudge(where) { if (typeof BR === "undefined") return null;
+  if (!BR.data) { if (!BR.loadingNudge) { BR.loadingNudge = true; brainsLoad().then(() => { BR.loadingNudge = false; cnRedraw(); }); } return null; }
+  if (BR.data.error || (where === "home" && cnDismissed())) return null;
+  const clis = (BR.data.backends || []).filter(b => b.kind === "cli");
+  for (const b of clis) if (b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(cnRedraw, () => {});
+  if (clis.some(b => b.found && (!BR.status[b.id] || BR.status[b.id].state === "asking"))) return null;  // not yet known: nothing flashes up
+  if (clis.some(b => BR.status[b.id] && BR.status[b.id].state === "signed_in")) return null;
+  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found) || order[0];
+  if (!pick) return null;
+  return el("section", { class: "panel cn-nudge", "data-card": "connect", "data-where": where },
+    el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, "One click"), el("h2", {}, "Connect your agent"),
+      el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
+      where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
+    el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
+      order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small", onclick: () => connectGo(b) }, b.label)))); }
 function viewBrains() {
   const wrap = el("div");
   const head = () => pageHead("Studio Vault", "Brains & tools", "Your own AI sign-ins, and the tools an agent may use.");
@@ -171,28 +452,20 @@ function viewBrains() {
     el("p", { class: "note m-flat m-setlink" }, "Sign-in help, the Hermes profile and every connection in one place: ", el("a", { href: "#Settings", onclick: e => { e.preventDefault(); typeof goSettings === "function" ? goSettings("connections") : go("Settings"); } }, "Settings → Connections"), "."),
     el("details", { class: "fold m-fold" }, el("summary", {}, "What is kept, and who pays"),
     el("div", { class: "note m-flat" }, "Studio uses the AI subscriptions you already pay for. Nothing is stored but which one you prefer: each answer is billed to your own sign-in, and a local model never leaves your network.")));
-  put(wrap, el("div", { class: "tri" }, (d.backends || []).map(b => { const on = d.default === b.id;
-    return el("div", { class: "brain" + (on ? " on" : "") },
-      el("div", { class: "head" }, brainLogo(b.id), el("div", { class: "m-min" }, el("b", {}, b.label), el("span", {}, b.found ? (b.where && b.where !== "here" ? "signed in on " + b.where.replace(/^ssh:/, "") : "found on this machine") + (b.version ? " · " + b.version : "") : "not found"))),
-      el("div", { class: "m-tags" }, el("span", { class: "tag2 " + (b.found ? "ok" : "") }, b.found ? "ready" : "not set up"), on ? el("span", { class: "tag2 t" }, "default") : null,
-        b.kind === "http" && b.models && b.models.length ? el("span", { class: "tag2" }, b.models.length + " models") : null),
-      !b.found && !b.error && b.signin ? el("div", { class: "note m-flat" }, brainMissing(b)) : null,
-      b.error ? el("div", { class: "note m-flat vt-bad" }, b.error) : null,
-      signLine(b),
-      BR.said[b.id] ? el("div", { class: "note m-flat " + (BR.said[b.id].ok ? "vt-ok" : "vt-bad") }, BR.said[b.id].ok ? "Answered “" + (BR.said[b.id].text || "").slice(0, 40) + "” in " + (BR.said[b.id].elapsedMs / 1000).toFixed(1) + " s" : BR.said[b.id].error) : null,
-      el("div", { class: "m-acts" }, el("button", { class: "small", disabled: !b.found || BR.testing[b.id], onclick: async () => { BR.testing[b.id] = true; render();
-          try { BR.said[b.id] = await api("/api/brains/test", { backend: b.id }); } catch (e) { BR.said[b.id] = { ok: false, error: e.message }; } BR.testing[b.id] = false; render(); } }, BR.testing[b.id] ? "Asking…" : "Test"),
-        ...signButtons(b),
-        on ? null : el("button", { class: "small", disabled: !b.found, onclick: () => save({ default: b.id }) }, "Make default")),
-      signPanel(b)); })));
-  put(wrap, el("div", { class: "m-gap" },
-    el("div", { class: "panel stack" }, el("h2", {}, "Use the sign-ins on another computer"),
-      el("div", { class: "note m-flat" }, "Studio runs the CLI there over SSH, with key login only."),
-      el("details", { class: "fold" }, el("summary", {}, "When to use this"), el("div", { class: "note m-flat" }, "A DGX Spark usually has no Claude or Codex sign-in of its own. Name the Mac (or any machine) where you are signed in, and Studio runs the CLI there over SSH. The Spark needs key login to it; no password is ever typed or kept here.")),
+  const clis = (d.backends || []).filter(b => b.kind !== "http" && b.id !== "local").map(b => ({ kind: "cli", ...b })), localB = (d.backends || []).find(b => b.kind === "http" || b.id === "local");
+  put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Your agents"), el("span", { class: "note" }, "Connect one: the studio installs it, signs you in and checks it.")),
+    el("div", { class: "tri" }, clis.map(b => connectCard(b)),
+      localB ? el("div", { class: "brain" + (d.default === "local" ? " on" : ""), "data-brain": "local" }, el("div", { class: "head" }, brainLogo("local"), el("div", { class: "m-min" }, el("b", {}, localB.label),
+          el("span", { class: "cn-word " + (localB.found ? "ok" : "bad") }, localB.found ? "Ready" : "Not answering", localB.models && localB.models.length ? " · " + localB.models.length + " models" : ""))),
+        el("div", { class: "m-acts" }, d.default === "local" ? el("span", { class: "tag2 t" }, "default") : el("button", { class: "small", disabled: !localB.found, onclick: () => save({ default: "local" }) }, "Make default"))) : null));
+  put(wrap, el("div", { class: "m-gap" }, linkPanel(),
+    el("details", { class: "fold m-fold", open: CN.linkOpen || false }, el("summary", {}, "Set the other computer by hand"),
+      el("div", { class: "panel stack" },
+      el("div", { class: "note m-flat" }, "Studio runs the CLI there over SSH, with key login only. A DGX Spark usually has no Claude or Codex sign-in of its own: name the Mac (or any machine) where you are signed in."),
       field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "gemini", "grok", "hermes"].filter(id => id !== "hermes" || (d.backends || []).some(b => b.id === "hermes")).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
         el("input", { type: "checkbox", checked: (remote.backends || []).includes(id), class: "hide", onchange: e => { const list = new Set(remote.backends || []); e.target.checked ? list.add(id) : list.delete(id); remote.backends = [...list]; e.target.parentNode.classList.toggle("on", e.target.checked); } }),
         el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
-      el("div", {}, el("button", { class: "primary", onclick: () => save({ remote: { host: host.value.trim(), backends: remote.backends || [], studio_host: studioHost.value.trim() } }) }, "Save")))));
+      el("div", {}, el("button", { class: "primary", onclick: () => save({ remote: { host: host.value.trim(), backends: remote.backends || [], studio_host: studioHost.value.trim() } }) }, "Save"))))));
   const tools = BR.tools;
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Tools your agent can use"), el("button", { class: "small", onclick: () => go("Agent") }, "Ask your agent →")),
     !tools ? el("div", { class: "note" }, "This Studio server does not list agent tools yet.") : el("div", { class: "tri" }, (tools.tools || tools || []).map(t => {

@@ -9,7 +9,12 @@ const SET_DEFAULTS = {
   hermes_profile: "", hermes_command: "" };
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false }, about: null };
 const SET_SECTIONS = [["appearance", "Appearance", "type, glow, poster, accent"], ["layout", "Studio layout", "what the sidebar shows"],
-  ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"], ["about", "About", "version, credits, licences"]];
+  ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"],
+  ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to eight DGX Sparks for a job"],
+  ["brains", "Brains & tools", "your agents, another computer, MCP tools"], ["updates", "Updates", "the version and the branch it follows"], ["about", "About", "version, credits, licences"]];
+// Machine's own pages, opened here too: each is the same view, and its data is drawn again when it arrives
+const SET_VIEWS = { models: ["viewDiscover", () => typeof DSC !== "undefined" && DSC.data], sparks: ["viewSparks", () => typeof SPK !== "undefined" && SPK.data],
+  brains: ["viewBrains", () => typeof BR !== "undefined" && [BR.data, BR.status, BR.sign]], updates: ["viewUpdates", () => typeof UPD !== "undefined" && [UPD.data, UPD.said]] };
 const ALWAYS_ROOMS = ["machine", "settings"];
 // Settings, merged over the defaults: what every other module reads
 function prefs() { const d = SET.data || {}, out = {};
@@ -131,20 +136,7 @@ function localModelsCard() {
     model ? el("div", { class: "st-lrow" }, el("span", { class: "note m-flat" }, "Model"), model) : null,
     L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null); }
 const setWhere = b => b.found ? (b.where && b.where !== "here" ? "on " + b.where.replace(/^ssh:/, "") : "found here") + (b.version ? " · " + b.version : "") : b.error || (b.where && b.where !== "here" ? "not found on " + b.where.replace(/^ssh:/, "") : "not found");
-function setBrainCard(b) { const said = BR.said[b.id], remote = b.where && b.where !== "here";
-  const state = b.found ? (remote ? "remote" : "found") : "not found";
-  return el("div", { class: "brain", "data-brain": b.id }, el("div", { class: "head" }, typeof brainLogo === "function" ? brainLogo(b.id) : null,
-      el("div", { class: "m-min" }, el("b", {}, b.label), el("span", {}, setWhere(b)))),
-    el("div", { class: "m-tags" }, el("span", { class: "tag2 " + (b.found ? "ok" : "") }, state), b.harness ? el("span", { class: "tag2" }, "agent with Studio tools") : el("span", { class: "tag2" }, "brain")),
-    !b.found && !b.error && b.signin ? el("div", { class: "note m-flat" }, brainMissing(b)) : null,
-    typeof signLine === "function" ? signLine(b) : null,
-    b.note ? el("div", { class: "note m-flat" }, b.note) : null,
-    b.id === "hermes" ? setHermes() : null,
-    said ? el("div", { class: "note m-flat " + (said.ok ? "vt-ok" : "vt-bad") }, said.ok ? "Answered “" + (said.text || "").slice(0, 40) + "” in " + ((said.elapsedMs || 0) / 1000).toFixed(1) + " s" : said.error) : null,
-    el("div", { class: "m-acts" }, el("button", { type: "button", class: "small", disabled: !b.found || BR.testing[b.id], onclick: async () => { BR.testing[b.id] = true; render();
-      try { BR.said[b.id] = await api("/api/brains/test", { backend: b.id }); } catch (e) { BR.said[b.id] = { ok: false, error: e.message }; } BR.testing[b.id] = false; render(); } }, BR.testing[b.id] ? "Asking…" : "Test"),
-      ...(typeof signButtons === "function" ? signButtons(b) : [])),
-    typeof signPanel === "function" ? signPanel(b) : null); }
+function setBrainCard(b) { return typeof connectCard === "function" ? connectCard(b, b.id === "hermes" ? [setHermes()] : []) : el("div", { class: "brain", "data-brain": b.id }, b.label); }
 function setHermes() { const p = prefs();
   const prof = el("input", { value: p.hermes_profile, placeholder: "profile (optional)", "aria-label": "Hermes profile" }), cmd = el("input", { value: p.hermes_command, placeholder: "full path to hermes (optional)", "aria-label": "Hermes command" });
   return el("div", { class: "st-hermes" }, prof, cmd, el("button", { type: "button", class: "small", onclick: () => settingsSave({ hermes_profile: prof.value.trim(), hermes_command: cmd.value.trim() }) }, "Save")); }
@@ -155,10 +147,10 @@ function setConnections() {
   const clis = (BR.data.backends || []).filter(b => b.kind === "cli"), remote = (BR.data.settings || {}).remote || {};
   const tools = BR.tools ? (BR.tools.tools || BR.tools) : [];
   return [localModelsCard(),
-    setPanel("Your subscriptions", "Sign in to each CLI right here: the studio runs the CLI's own sign-in and keeps nothing of it but which brain you prefer. Each answer is billed to your own subscription.",
+    setPanel("Your agents", "Press Connect: the studio finds the agent (or installs it), runs its own sign-in, checks it answers and makes it your default. It keeps nothing of the sign-in; each answer is billed to your own subscription.",
       el("div", { class: "tri" }, clis.map(setBrainCard)),
-      el("div", { class: "note m-flat" }, remote.host ? "Signed in on another computer: " + remote.host + " runs " + ((remote.backends || []).join(", ") || "nothing yet") + " over SSH. " : "A DGX Spark can use the sign-ins on your Mac over SSH. ",
-        el("a", { href: "#Brains", onclick: e => { e.preventDefault(); go("Brains"); } }, "Set the computer in Brains & tools"))),
+      el("div", { class: "note m-flat" }, remote.host ? "On another computer: " + remote.host + " runs " + ((remote.backends || []).join(", ") || "nothing yet") + " over SSH." : "A DGX Spark can use the agents signed in on your Mac: link it below.")),
+    typeof linkPanel === "function" ? linkPanel() : null,
     setPanel("Tools and the suite", "What an agent may drive, and how the filmmaker suite and Resolve connect (by files, nothing to sign in to).",
       el("div", { class: "tri" }, tools.map(t => { const said = BR.checked[t.id];
         return el("div", { class: "brain", "data-tool": t.id }, el("div", { class: "head" }, typeof toolLogo === "function" ? toolLogo(t.id) : null,
@@ -185,8 +177,17 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
     el("ul", { class: "st-credits" }, ["Qwen-Image-2.1: Qwen Research License (non-commercial)", "MiniMax H3: MiniMax H3 Community License (territory limits)", "MiniMax-Music3: its licence asks for its name in a commercial UI",
       "FLUX3-K: FLUX Kommunity License", "Fish Audio Drama 3: Fish Audio Community License v1.0; a hosted voice service needs Fish's own licence"].map(t => el("li", {}, t))))]; }
 
+function setEmbedded(section) { const [name, data] = SET_VIEWS[section], view = typeof globalThis[name] === "function" ? globalThis[name] : null;
+  if (!view) return [setPanel(SET_SECTIONS.find(x => x[0] === section)[1], "Not in this build.")];
+  // a view that redraws only while its own tab is open: drawn again here when what it shows changes
+  clearInterval(SET.embedTimer); let seen = JSON.stringify(data() || null);
+  SET.embedTimer = setInterval(() => { if (tab !== "Settings" || SET.section !== section) { clearInterval(SET.embedTimer); SET.embedTimer = null; return; }
+    const now = JSON.stringify(data() || null); if (now !== seen && !(document.activeElement && document.activeElement.matches && document.activeElement.matches("input,textarea,select"))) { seen = now; render(); } }, 1500);
+  if (SET.embedTimer && SET.embedTimer.unref) SET.embedTimer.unref();
+  return [el("div", { class: "st-embed", "data-embed": section }, view())]; }
 function viewSettings() {
-  const draw = { appearance: setAppearance, layout: setLayout, presets: setPresets, connections: setConnections, about: setAbout }[SET.section] || setAppearance;
+  const draw = { appearance: setAppearance, layout: setLayout, presets: setPresets, connections: setConnections, about: setAbout,
+    models: () => setEmbedded("models"), sparks: () => setEmbedded("sparks"), brains: () => setEmbedded("brains"), updates: () => setEmbedded("updates") }[SET.section] || setAppearance;
   return el("div", { class: "settings" },
     typeof pageHead === "function" ? pageHead("Studio Vault", "Settings", "How the studio looks, what it shows, and what it connects to.") : el("h1", { class: "display" }, "Settings"),
     el("div", { class: "st-wrap" },

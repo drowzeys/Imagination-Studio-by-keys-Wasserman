@@ -204,7 +204,7 @@ def test_a_brought_in_shot_opens_in_create_and_brains_save_the_default():
         return
     assert out["create"] == ["Create", "A garage at night.", "Maya turns.", "Slow push-in.", "Who's there?", "uploads/suite/x/12c.png", "own"]
     assert "Make a Slate film" in out["importPage"] and "Timeline with media for Resolve (ZIP)" in out["importPage"] and "Night Shift" in out["importPage"]
-    assert "signed in on user@workstation" in out["brains"] and "1 models" in out["brains"]
+    assert "on user@workstation" in out["brains"] and "1 models" in out["brains"]
     assert out["saved"] == "local"
 
 
@@ -341,14 +341,15 @@ def test_settings_shows_its_five_sections_and_the_look_saves():
     if out is None:
         return
     assert out["prefs"]["type_size"] == "large" and out["prefs"]["glow"] is False and out["prefs"]["start_cards"] == ["clip"]
-    for words in ("Appearance", "Studio layout", "Presets & preferences", "Connections", "About"):
+    for words in ("Appearance", "Studio layout", "Presets & preferences", "Connections", "Models & weights", "Sparks", "Brains & tools", "Updates", "About"):
         assert any(words in r for r in out["rail"]), words
     assert "Type size" in out["pages"]["appearance"] and "Poster on Home" in out["pages"]["appearance"] and "Cobalt" in out["pages"]["appearance"]
     assert "Settings" in out["pages"]["layout"] and "stays" in out["pages"]["layout"] and "⌘K" in out["pages"]["layout"]
     assert "Render recipe" in out["pages"]["presets"] and "48 kHz stereo" in out["pages"]["presets"] and "QA gate" in out["pages"]["presets"]
     c = out["pages"]["connections"]
     assert "Any local model works here — nothing leaves your machine." in c and "Ollama" in c and "LM Studio" in c and "vLLM" in c and "llama.cpp" in c and "Hermes proxy" in c
-    assert "Hermes" in c and "not found" in c and "hermes setup" in c and "remote" in c and "Blender" in c
+    assert "Hermes" in c and "not found" in c and "hermes setup" in c and "Not installed" in c and "on mac" in c and "Blender" in c
+    assert "Link another computer" in c
     a = out["pages"]["about"]
     assert "Fish Audio" in a and "MiniMax-Music3" in a and "abc1234" in a
     assert out["sent"] == {"appearance": {"type_size": "largest"}}
@@ -408,76 +409,178 @@ def test_the_home_composer_queues_each_kind_and_carries_the_words():
     assert out["agent"] == ["Agent", "Plan a short"]
 
 
-def test_a_brain_card_signs_in_and_out_and_the_panel_follows_the_sign_in():
-    out = run("""const ticks = []; globalThis.setInterval = fn => { ticks.push(fn); return ticks.length; }; globalThis.clearInterval = () => {}; globalThis.confirm = () => true;
-      const brains = [{ id: "claude", label: "Claude Code", kind: "cli", found: true, where: "here", harness: true, signin_flow: "pty", signin_command: "claude auth login" },
-        { id: "codex", label: "Codex (from the ChatGPT app)", kind: "cli", found: true, where: "here", signin_flow: "pty", signin_command: "codex login" },
-        { id: "grok", label: "Grok CLI", kind: "cli", found: true, where: "ssh:mac", signin_flow: "pty", signin_command: "grok login" },
-        { id: "gemini", label: "Gemini CLI", kind: "cli", found: true, where: "here", signin_flow: "terminal", signin_command: "gemini" },
-        { id: "hermes", label: "Hermes", kind: "cli", found: false, where: "here", signin_flow: "pty", signin: "Run `hermes setup`" },
-        { id: "local", label: "Local model server", kind: "http", found: true, endpoint: "http://127.0.0.1:11434/v1", models: [] }];
-      BR.data = { default: "claude", settings: { remote: { host: "mac", backends: ["grok"] }, local_endpoint: "" }, backends: brains }; BR.tools = { tools: [] };
-      answers["/api/brains"] = BR.data; answers["/api/agent/tools"] = { tools: [] };
-      answers["/api/brains/claude/status"] = { backend: "claude", state: "signed_out", detail: "Not signed in" };
-      answers["/api/brains/codex/status"] = { backend: "codex", state: "signed_in", detail: "ChatGPT" };
-      answers["/api/brains/grok/status"] = { backend: "grok", state: "signed_in", detail: "grok.com" };
-      answers["/api/brains/gemini/status"] = { backend: "gemini", state: "unknown", detail: "Unknown until its first use" };
-      tab = "Brains"; viewBrains(); await new Promise(r => setTimeout(r, 0));
-      const card = (page, id) => find(page, n => n.attrs && n.attrs.class && n.attrs.class.startsWith("brain") && text(n).includes(brains.find(b => b.id === id).label));
-      let page = viewBrains(); out.page = text(page);
-      out.buttons = Object.fromEntries(["claude", "codex", "grok", "gemini", "hermes"].map(id => [id, ["Sign in", "Sign out"].filter(w => button(card(page, id), w))]));
-      out.hermesOff = button(card(page, "hermes"), "Sign in").attrs.disabled; out.localSigns = !!button(card(page, "local"), "Sign in");
-      out.statusAsked = calls.filter(c => /\\/status$/.test(c[0])).map(c => c[0]).sort();
-      // claude: start, the panel shows the page and a code field, the code goes to the CLI, done refreshes the cards
-      answers["/api/brains/claude/signin"] = { backend: "claude", state: "needs_code", url: "https://claude.ai/oauth/authorize?code=true", prompt: "Paste code here if prompted >", lines: ["visit https://claude.ai/oauth/authorize?…"] };
-      await button(card(page, "claude"), "Sign in").attrs.onclick(); out.started = calls.filter(c => c[0] === "/api/brains/claude/signin").slice(-1)[0][1];
-      page = viewBrains(); let panel = find(page, n => n.attrs && n.attrs["data-signin"] === "claude");
-      out.needsCode = text(panel); out.link = find(panel, n => n.tag === "a").attrs;
-      const field = find(panel, n => n.tag === "input"); field.attrs.oninput({ target: { value: " the-code " } });
-      answers["/api/brains/claude/signin/code"] = { backend: "claude", state: "verifying", lines: [] };
-      await button(panel, "Continue").attrs.onclick(); out.code = calls.filter(c => c[0] === "/api/brains/claude/signin/code").slice(-1)[0][1];
-      out.verifying = text(find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "claude"));
-      answers["/api/brains/claude/signin"] = { backend: "claude", state: "done", lines: [] }; const before = calls.filter(c => c[0] === "/api/brains").length;
-      await ticks[ticks.length - 1](); await new Promise(r => setTimeout(r, 0)); out.refreshed = calls.filter(c => c[0] === "/api/brains").length > before; out.doneToast = toasts.includes("Signed in");
-      // a device code: large, with a Copy button and the page to open
-      BR.data = { default: "claude", settings: { remote: { host: "mac", backends: ["grok"] }, local_endpoint: "" }, backends: brains };
-      BR.status.grok = { state: "signed_out" }; answers["/api/brains/grok/signin"] = { backend: "grok", state: "device_code", url: "https://accounts.x.ai/device", code: "WXYZ-1234", lines: [] };
-      await button(card(viewBrains(), "grok"), "Sign in").attrs.onclick(); panel = find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "grok");
-      out.device = text(panel); out.deviceCode = text(find(panel, n => n.attrs && n.attrs.class === "signin-code")); out.cancel = !!button(panel, "Cancel");
-      answers["/api/brains/grok/signin/cancel"] = { backend: "grok", state: "failed", reason: "Cancelled.", lines: [] };
-      await button(panel, "Cancel").attrs.onclick(); out.cancelled = text(find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "grok"));
-      // codex here: a browser sign-in, with the one-time code offered instead
-      BR.status.codex = { state: "signed_out" }; answers["/api/brains/codex/signin"] = { backend: "codex", state: "needs_browser", url: "https://auth.openai.com/oauth/authorize?x=1", lines: [] };
-      await button(card(viewBrains(), "codex"), "Sign in").attrs.onclick(); panel = find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "codex"); out.browser = text(panel);
-      // gemini: the Terminal command, nothing started
-      await button(card(viewBrains(), "gemini"), "Sign in").attrs.onclick(); out.gemini = text(find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "gemini"));
-      out.geminiStarted = calls.some(c => c[0] === "/api/brains/gemini/signin");
-      // sign out runs the CLI's own sign-out
-      BR.status.codex = { state: "signed_in" }; BR.signOpen = null; answers["/api/brains/codex/signout"] = { ok: true, state: "signed_out" };
-      await button(card(viewBrains(), "codex"), "Sign out").attrs.onclick(); out.signedOut = calls.some(c => c[0] === "/api/brains/codex/signout") && BR.status.codex.state === "signed_out";
-      // the same cards in Settings → Connections
-      tab = "Settings"; SET.section = "connections"; BR.status.claude = { state: "signed_out" }; out.settings = text(viewSettings());
-      out.settingsButton = !!button(find(viewSettings(), n => n.attrs && n.attrs["data-brain"] === "claude"), "Sign in");
-      BR.status.codex = { state: "broken", detail: "Error loading configuration: ~/.codex/config.toml:5:16: unknown variant `priority`", hint: "update it (`brew upgrade codex`)" };
-      out.broken = text(find(viewSettings(), n => n.attrs && n.attrs["data-signin-state"] === "broken"));""")
+def test_each_card_shows_one_word_and_one_next_action():
+    out = run("""const brains = [{ id: "claude", label: "Claude Code", kind: "cli", found: true, where: "ssh:mac", signin_flow: "pty" },
+        { id: "codex", label: "Codex", kind: "cli", found: true, where: "here", signin_flow: "pty" },
+        { id: "gemini", label: "Gemini CLI", kind: "cli", found: false, where: "here", signin_flow: "terminal", signin: "Run `gemini`" },
+        { id: "grok", label: "Grok CLI", kind: "cli", found: true, where: "here", signin_flow: "pty" },
+        { id: "hermes", label: "Hermes", kind: "cli", found: true, where: "ssh:mac", error: "mac did not answer" },
+        { id: "local", label: "Local model server", kind: "http", found: false, models: [] }];
+      BR.data = { default: "codex", settings: { remote: { host: "mac", backends: ["claude", "hermes"] } }, backends: brains }; BR.tools = { tools: [] };
+      BR.status = { claude: { state: "keychain", detail: "Signed in on that Mac, but macOS keeps the sign-in in its Keychain" }, codex: { state: "signed_in", detail: "ChatGPT" },
+        grok: { state: "broken", detail: "Error loading config" } };
+      tab = "Settings"; SET.section = "connections"; const page = viewSettings();
+      const card = id => find(page, n => n.attrs && n.attrs["data-brain"] === id);
+      out.words = Object.fromEntries(["claude", "codex", "gemini", "grok", "hermes"].map(id => [id, card(id).attrs["data-word"]]));
+      out.actions = Object.fromEntries(["claude", "codex", "gemini", "grok", "hermes"].map(id => [id, (find(card(id), n => n.attrs && n.attrs.class === "m-acts") || { kids: [] }).kids.filter(Boolean).map(text)]));
+      out.hidden = text(find(card("claude"), n => n.tag === "details"));
+      out.top = text(card("claude")).replace(out.hidden, "");""")
     if out is None:
         return
-    assert out["buttons"] == {"claude": ["Sign in"], "codex": ["Sign out"], "grok": ["Sign out"], "gemini": ["Sign in"], "hermes": ["Sign in"]}
-    assert out["hermesOff"] is True and out["localSigns"] is False
-    assert out["statusAsked"] == ["/api/brains/claude/status", "/api/brains/codex/status", "/api/brains/gemini/status", "/api/brains/grok/status"]
-    assert "Not signed in" in out["page"] and "Signed in · ChatGPT" in out["page"] and "Unknown until its first use" in out["page"]
-    assert out["started"] == {}
-    assert "Open sign-in page" in out["needsCode"] and "Paste the code the page shows" in out["needsCode"] and "stores nothing" in out["needsCode"]
-    assert out["link"]["href"].startswith("https://claude.ai/") and out["link"]["target"] == "_blank" and "noopener" in out["link"]["rel"]
-    assert out["code"] == {"code": "the-code"} and "Checking the code" in out["verifying"]
-    assert out["refreshed"] and out["doneToast"]
-    assert "WXYZ-1234" in out["deviceCode"] and "Copy" in out["deviceCode"] and "Open sign-in page" in out["device"] and "on mac" in out["device"] and out["cancel"]
-    assert "Cancelled." in out["cancelled"] and "Try again" in out["cancelled"]
-    assert "Open sign-in page" in out["browser"] and "Use a one-time code instead" in out["browser"]
-    assert "gemini" in out["gemini"] and "own terminal" in out["gemini"] and "Copy" in out["gemini"] and not out["geminiStarted"]
-    assert out["signedOut"]
-    assert "Sign in to each CLI right here" in out["settings"] and out["settingsButton"]
-    assert "unknown variant `priority`" in out["broken"] and "brew upgrade codex" in out["broken"]
+    assert out["words"] == {"claude": "Signed in elsewhere", "codex": "Ready", "gemini": "Not installed", "grok": "Cannot start", "hermes": "Cannot start"}
+    assert out["actions"]["claude"] == ["Allow over SSH"] and out["actions"]["gemini"] == ["Install"] and out["actions"]["grok"] == ["Fix it"]
+    assert out["actions"]["hermes"] == ["Check the link"] and out["actions"]["codex"] == ["Check"]  # the default: nothing to make
+    assert "Keychain" in out["hidden"] and "Keychain" not in out["top"]  # the technical part only under Details
+
+
+CONNECT = """const ticks = []; globalThis.setInterval = fn => { ticks.push(fn); return ticks.length; }; globalThis.clearInterval = () => {};
+  const tabs = []; globalThis.window.open = () => { const w = { location: {}, document: { body: {} }, closed: false, close() { this.closed = true; } }; tabs.push(w); return w; };
+  globalThis.location.hostname = "127.0.0.1";
+  globalThis.document.createElementNS = (ns, tag) => { const n = el(tag, {}); n.setAttribute = (k, v) => { n.attrs[k] = v; }; n.append = (...k) => n.kids.push(...k); return n; };
+  const tick = async () => { await ticks[ticks.length - 1](); await new Promise(r => setTimeout(r, 0)); };
+  const settle = () => new Promise(r => setTimeout(r, 0));
+  const steps = id => { const p = find(viewSettings(), n => n.attrs && n.attrs["data-connect"] === id); return p ? Object.fromEntries(p.kids.find(k => k && k.tag === "ol").kids.map(li => [li.attrs["data-step"], li.attrs["data-state"]])) : null; };
+  const panel = id => find(viewSettings(), n => n.attrs && n.attrs["data-connect"] === id);
+  const base = (id, more) => ({ backend: id, label: id, where: "here", find: { found: true, version: "1.0" }, install: { state: "idle" }, signin: { state: "signed_out" }, signing: { state: "idle" },
+    verify: null, default: false, agent_default: false, harness: true, default_ready: false, token_flow: false, ...more });
+  tab = "Settings"; SET.section = "connections";"""
+
+
+def test_connect_ticks_find_signin_verify_and_default_by_itself():
+    out = run(CONNECT + """
+      const b = { id: "claude", label: "Claude Code", kind: "cli", found: true, where: "here", signin_flow: "pty", signin_command: "claude auth login" };
+      BR.data = { default: "local", settings: { remote: { host: "", backends: [] } }, backends: [b] }; BR.tools = { tools: [] }; BR.status = { claude: { state: "signed_out" } };
+      answers["/api/brains/claude/connect"] = base("claude");
+      answers["/api/brains/claude/signin"] = { backend: "claude", state: "needs_code", url: "https://claude.com/cai/oauth/authorize?code=true&state=x", prompt: "Paste code here", lines: [] };
+      await connectStart(b); await settle();
+      out.opened = tabs.length; out.pointed = tabs[0].location.href;
+      out.s1 = steps("claude"); const p = panel("claude"); out.panel = text(p);
+      out.qr = !!find(p, n => n.tag === "svg" && n.attrs.class === "cn-qr"); out.qrPath = (find(p, n => n.tag === "path") || { attrs: {} }).attrs.d.length > 200;
+      out.copy = !!button(p, "Copy link"); out.open = find(p, n => n.tag === "a" && n.attrs.class === "signin-open").attrs.href;
+      find(p, n => n.tag === "input").attrs.oninput({ target: { value: "pasted#code" } });
+      answers["/api/brains/claude/signin/code"] = { backend: "claude", state: "verifying", lines: [] };
+      await button(p, "Continue").attrs.onclick(); out.code = calls.filter(c => c[0] === "/api/brains/claude/signin/code").slice(-1)[0][1];
+      answers["/api/brains/claude/signin"] = { backend: "claude", state: "done", lines: [] };
+      answers["/api/brains/claude/connect"] = base("claude", { signin: { state: "signed_in", detail: "Claude subscription" } });
+      answers["/api/brains/claude/verify"] = { ok: true, text: "ok", elapsedMs: 2100 };
+      answers["/api/brains/claude/default"] = { settings: { default: "claude", agent: "claude", remote: { host: "", backends: [] } } };
+      await tick(); await settle(); await settle();
+      out.verified = calls.some(c => c[0] === "/api/brains/claude/verify"); out.madeDefault = calls.some(c => c[0] === "/api/brains/claude/default");
+      out.s2 = steps("claude"); out.done = text(panel("claude")); out.default = BR.data.default;""")
+    if out is None:
+        return
+    assert out["opened"] == 1 and out["pointed"].startswith("https://claude.com/cai/oauth/authorize")  # the tab opened on the click goes to the page
+    assert out["s1"] == {"find": "done", "signin": "running", "verify": "todo", "default": "todo"}
+    assert "Open the sign-in page" in out["panel"] and "Scan the code" in out["panel"] and out["copy"] and out["open"].startswith("https://claude.com/")
+    assert out["qr"] and out["qrPath"]
+    assert out["code"] == {"code": "pasted#code"}
+    assert out["verified"] and out["madeDefault"] and out["default"] == "claude"
+    assert out["s2"] == {"find": "done", "signin": "done", "verify": "done", "default": "done"} and "Answered “ok” in 2.1 s" in out["done"] and "is ready" in out["done"]
+
+
+def test_connect_installs_a_missing_cli_shows_a_device_code_and_the_fix_for_a_failed_answer():
+    out = run(CONNECT + """
+      const b = { id: "codex", label: "Codex", kind: "cli", found: false, where: "ssh:mac", signin_flow: "pty" };
+      BR.data = { default: "claude", settings: { remote: { host: "mac", backends: ["codex"] } }, backends: [b] }; BR.tools = { tools: [] }; BR.status = {};
+      answers["/api/brains/codex/connect"] = base("codex", { where: "ssh:mac", find: { found: false }, signin: { state: "missing" } });
+      answers["/api/brains/codex/install?plan=1"] = { state: "idle", plan: { ok: true, command: "npm install -g @openai/codex@latest", by: "npm", where: "ssh:mac" } };
+      await connectStart(b); await settle(); out.tabs = tabs.length; out.s1 = steps("codex"); out.plan = text(panel("codex"));
+      answers["/api/brains/codex/install"] = { backend: "codex", state: "running", command: "npm install -g @openai/codex@latest", by: "npm", lines: ["added 1 package"] };
+      await button(panel("codex"), "Install Codex").attrs.onclick(); out.running = text(panel("codex")); out.s2 = steps("codex");
+      // installed: the brains are read again, the sign-in starts with a one-time code (the CLI is on another computer)
+      answers["/api/brains/codex/install"] = { backend: "codex", state: "done", lines: [] };
+      BR.data.backends[0].found = true; answers["/api/brains"] = BR.data; answers["/api/agent/tools"] = { tools: [] };
+      answers["/api/brains/codex/connect"] = base("codex", { where: "ssh:mac" });
+      answers["/api/brains/codex/signin"] = { backend: "codex", state: "device_code", url: "https://auth.openai.com/codex/device", code: "ABCD-12345", lines: [] };
+      await tick(); await settle(); await settle();
+      out.device = calls.filter(c => c[0] === "/api/brains/codex/signin" && c[1]).slice(-1)[0][1];
+      const p = panel("codex"); out.code = text(find(p, n => n.attrs && /signin-code/.test(n.attrs.class || ""))); out.qr = !!find(p, n => n.tag === "svg");
+      // signed in, but the answer fails: the exact error and the one action that fixes it
+      answers["/api/brains/codex/signin"] = { backend: "codex", state: "done", lines: [] };
+      answers["/api/brains/codex/connect"] = base("codex", { where: "ssh:mac", signin: { state: "signed_in" } });
+      answers["/api/brains/codex/verify"] = { ok: false, error: "This Codex CLI on mac is older than your ChatGPT account's models: update it", fix: { action: "install", label: "Update Codex" } };
+      await tick(); await settle(); await settle();
+      out.s3 = steps("codex"); out.failed = text(panel("codex")); out.fix = !!button(panel("codex"), "Update Codex"); out.noDefault = !calls.some(c => c[0] === "/api/brains/codex/default");""")
+    if out is None:
+        return
+    assert out["tabs"] == 0  # nothing to sign in to yet: no tab is opened
+    assert out["s1"] == {"find": "wait", "signin": "todo", "verify": "todo", "default": "todo"}
+    assert "npm install -g @openai/codex@latest" in out["plan"] and "on mac" in out["plan"] and "without administrator rights" in out["plan"]
+    assert out["s2"]["find"] == "running" and "added 1 package" in out["running"]
+    assert out["device"] == {"device": True} and "ABCD-12345" in out["code"] and "Copy code" in out["code"] and out["qr"]
+    assert out["s3"] == {"find": "done", "signin": "done", "verify": "failed", "default": "todo"}
+    assert "older than your ChatGPT account" in out["failed"] and out["fix"] and out["noDefault"]
+
+
+def test_a_mac_over_ssh_offers_allow_over_ssh_and_the_link_wizard_tests_and_saves():
+    out = run(CONNECT + """
+      const b = { id: "claude", label: "Claude Code", kind: "cli", found: true, where: "ssh:me@mac", signin_flow: "pty" };
+      BR.data = { default: "codex", settings: { remote: { host: "me@mac", backends: ["claude"] } }, backends: [b] }; BR.tools = { tools: [] };
+      BR.status = { claude: { state: "keychain", detail: "Signed in on that Mac, but macOS keeps the sign-in in its Keychain, which SSH cannot open." } };
+      answers["/api/brains/claude/connect"] = base("claude", { where: "ssh:me@mac", token_flow: true, signin: BR.status.claude, default_ready: true });
+      answers["/api/brains/link"] = { has_key: false, host: "", backends: [] };
+      CN.tried.claude = { signin: true }; CN.open = "claude"; CN.data.claude = answers["/api/brains/claude/connect"];
+      out.s = steps("claude"); out.keychain = text(panel("claude")); out.allow = !!button(panel("claude"), "Allow over SSH");
+      answers["/api/brains/claude/signin"] = { backend: "claude", state: "needs_code", url: "https://claude.com/cai/oauth/authorize?x=1", token: "waiting", lines: [] };
+      await button(panel("claude"), "Allow over SSH").attrs.onclick(); await settle(); out.tokenNote = text(panel("claude"));
+      // the wizard: make a key, the line to run there, test (a first meeting asks to trust), save
+      CN.link = null; let page = viewSettings(); await settle(); page = viewSettings();
+      const wiz = () => find(viewSettings(), n => n.attrs && n.attrs["data-card"] === "link");
+      out.w1 = text(wiz());
+      answers["/api/brains/link/key"] = { has_key: true, public_key: "ssh-ed25519 AAAAC3 imagination-studio", key_file: "~/.ssh/id_ed25519.pub", command: "mkdir -p ~/.ssh && echo 'ssh-ed25519 AAAAC3 imagination-studio' >> ~/.ssh/authorized_keys", host: "", backends: [] };
+      await button(wiz(), "Make a key").attrs.onclick(); out.w2 = text(wiz());
+      find(wiz(), n => n.tag === "input").attrs.oninput({ target: { value: "me@mac" } });
+      answers["/api/brains/link/test"] = { ok: false, host: "me@mac", state: "unknown_host", fingerprint: "SHA256:abc (ED25519)", detail: "This computer has not met that one before." };
+      await button(wiz(), "Test").attrs.onclick(); out.w3 = text(wiz());
+      answers["/api/brains/link/test"] = { ok: true, host: "me@mac", state: "ok", os: "Darwin" };
+      await button(wiz(), "Trust this computer and test").attrs.onclick(); out.trust = calls.filter(c => c[0] === "/api/brains/link/test").slice(-1)[0][1];
+      out.w4 = text(wiz());
+      answers["/api/brains/link/save"] = { settings: {}, found: ["claude"], has_key: true, host: "me@mac", backends: ["claude"] };
+      answers["/api/brains"] = BR.data; answers["/api/agent/tools"] = { tools: [] };
+      await button(wiz(), "Use me@mac for its agents").attrs.onclick(); out.w5 = text(wiz()); out.connectOne = !!button(wiz(), "Connect Claude Code");""")
+    if out is None:
+        return
+    assert out["s"]["signin"] == "wait" and "Keychain" in out["keychain"] and out["allow"]
+    assert "kept only on that Mac" in out["tokenNote"]
+    assert "Make a key" in out["w1"]
+    assert "authorized_keys" in out["w2"] and "Remote Login" in out["w2"]
+    assert "SHA256:abc" in out["w3"] and "Trust this computer and test" in out["w3"]
+    assert out["trust"] == {"host": "me@mac", "trust": True} and "Reached me@mac (macOS)" in out["w4"]
+    assert "Its agents now run there" in out["w5"] and out["connectOne"]
+
+
+def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
+    out = run(CONNECT + """
+      const store = {}; globalThis.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+      globalThis.ART = { ready: new Set() }; globalThis.artSlot = () => null; globalThis.palOpen = () => {}; globalThis.platName = () => "Mac"; globalThis.SHELL = { tel: null, samples: [] };
+      BR.data = { default: "claude", settings: { remote: { host: "", backends: [] } }, backends: [{ id: "claude", label: "Claude Code", kind: "cli", found: false, where: "here" },
+        { id: "codex", label: "Codex", kind: "cli", found: true, where: "here", signin_flow: "pty" }] }; BR.tools = { tools: [] };
+      BR.status = { codex: { state: "signed_out" } };
+      tab = "Home"; let home = viewHome(); const card = n => find(n, x => x.attrs && x.attrs["data-card"] === "connect");
+      out.home = text(card(home)); out.primary = text(find(card(home), n => n.tag === "button" && /primary/.test(n.attrs.class || "")));
+      answers["/api/brains/codex/connect"] = base("codex", { signin: { state: "signed_out" } });
+      await find(card(home), n => n.tag === "button" && /primary/.test(n.attrs.class || "")).attrs.onclick(); out.went = [tab, SET.section, CN.open, tabs.length];
+      tab = "Agent"; AG.tasks = []; AG.threads = []; out.room = !!card(viewAgent());
+      tab = "Home"; await button(card(viewHome()), "Not now").attrs.onclick(); out.dismissed = !card(viewHome());
+      out.roomStill = !!card(viewAgent());
+      BR.status.codex = { state: "signed_in" }; out.gone = !card(viewAgent());""")
+    if out is None:
+        return
+    assert "Connect your agent" in out["home"] and out["primary"].endswith("Connect Codex")  # the one that is installed first
+    assert out["went"][:3] == ["Settings", "connections", "codex"] and out["went"][3] == 1
+    assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
+
+
+def test_the_qr_code_has_its_finders_and_size_for_the_address():
+    out = run("""const m = qrMatrix("https://auth.openai.com/codex/device"), big = qrMatrix("https://claude.com/" + "a".repeat(420));
+      const finder = (m, x, y) => [0, 1, 2, 3, 4, 5, 6].every(i => m[y][x + i] && m[y + 6][x + i] && m[y + i][x] && m[y + i][x + 6]) && m[y + 3][x + 3] && !m[y + 1][x + 1];
+      out.size = m.length; out.bigSize = big.length; out.finders = [finder(m, 0, 0), finder(m, m.length - 7, 0), finder(m, 0, m.length - 7)];
+      out.timing = [...Array(m.length - 16)].map((_, i) => m[6][8 + i] === (i % 2 === 0)).every(Boolean); out.dark = m[m.length - 8][8];
+      out.tooLong = qrMatrix("x".repeat(3000)) === null;""")
+    if out is None:
+        return
+    assert out["size"] == 29 and out["bigSize"] == 81  # version 3 and version 16 at level M
+    assert out["finders"] == [True, True, True] and out["timing"] and out["dark"] and out["tooLong"]
 
 
 def test_a_stream_that_goes_quiet_without_an_error_is_opened_again():
