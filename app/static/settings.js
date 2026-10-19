@@ -187,7 +187,8 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "OpenAI Whisper and faster-whisper, yt-dlp, FFmpeg, PyTorch, Hugging Face diffusers and transformers, FastAPI, Geist and Instrument Serif",
       "The community LoRA authors, by name in Looks and in CREDITS.md"].map(t => el("li", {}, t)))),
   setPanel("Licences", "The studio's code is Apache-2.0. The models keep their own terms: do not redistribute their weights.",
-    el("ul", { class: "st-credits" }, ["Qwen-Image-2.1: Qwen Research License (non-commercial)", "MiniMax H3: MiniMax H3 Community License (territory limits)", "MiniMax-Music3: its licence asks for its name in a commercial UI",
+    el("ul", { class: "st-credits" }, ["Attribution required: per the NOTICE file (Apache 2.0 §4(d)), any use, fork or redistribution keeps the NOTICE and credits Keys (github.com/drowzeys) and Sam Wasserman / Wasserman Productions (wassermanproductions.com) in its documentation and about/credits surface",
+      "Qwen-Image-2.1: Qwen Research License (non-commercial)", "MiniMax H3: MiniMax H3 Community License (territory limits)", "MiniMax-Music3: its licence asks for its name in a commercial UI",
       "FLUX3-K: FLUX Kommunity License", "Fish Audio Drama 3: Fish Audio Community License v1.0; a hosted voice service needs Fish's own licence",
       "Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue)", "MMAudio's weights: CC-BY-NC 4.0, non-commercial",
       "Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT); the studio ships none of their code but the Slate workflow and the Motion Previs port, each with its NOTICE"].map(t => el("li", {}, t))))]; }

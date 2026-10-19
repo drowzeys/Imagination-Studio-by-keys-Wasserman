@@ -1,5 +1,9 @@
 # Credits
 
+**Imagination Studio is by Keys (drowzeys) and Sam Wasserman / Wasserman Productions.** Attribution required: per the
+NOTICE file (Apache 2.0 §4(d)), any use, fork or redistribution keeps the NOTICE and credits Keys (github.com/drowzeys)
+and Sam Wasserman / Wasserman Productions (wassermanproductions.com) in its documentation and about/credits surface.
+
 **Thank you.** Almost everything here is other people's work. Keys / drowzeys ported pieces into two TensorFold
 families, wrote the int8 tensor-unit kernels with their designs as the guide, pinned it and measured it on a Mac
 Studio M5 Ultra. Cite the authors first.

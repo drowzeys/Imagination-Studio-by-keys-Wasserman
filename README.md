@@ -84,7 +84,15 @@ cores · a 2x video decoder for 2K finals on the Mac
 | ![Wasserman's Filmmaker Suite, built in](docs/screenshots/filmmaker-suite.webp) | ![Machine: live readings and storage on a DGX Spark](docs/screenshots/machine.png) |
 | **Wasserman's Filmmaker Suite** | **Machine** |
 
-## Credits and links (as the studio shows them)
+## License & credits
+
+**Apache License 2.0** — see [LICENSE](LICENSE). Free to use, modify, fork and build on, commercially or otherwise;
+the models it downloads keep their own licences (below).
+
+**Attribution required:** per the [NOTICE](NOTICE) file (Apache 2.0 §4(d)), any use, fork or redistribution must retain
+the NOTICE file and credit **Keys ([github.com/drowzeys](https://github.com/drowzeys))** and **Sam Wasserman / Wasserman
+Productions ([wassermanproductions.com](https://wassermanproductions.com))** in its documentation and about/credits
+surface. To cite it: [CITATION.cff](CITATION.cff).
 
 The same credits the studio shows in Settings → About; [CREDITS.md](CREDITS.md) has each one in full.
 
@@ -3228,7 +3236,7 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 ## Credits
 
 Imagination Studio is by **Keys (drowzeys)** and **Sam Wasserman and Wasserman Productions** (Wasserman's Filmmaker
-Suite, and the studio's design with Keys); see [Credits and links](#credits-and-links-as-the-studio-shows-them). Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
+Suite, and the studio's design with Keys); see [License & credits](#license--credits). Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
 picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
