@@ -181,7 +181,9 @@ def unpack(package: str, dest: Path, presets: list, folder_of: dict, retries: in
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="lora-bundle.py", description="Build or check the essential LoRA bundle.")
-    parser.add_argument("--dest", default=os.path.join(os.environ.get("STUDIO_HOME") or str(Path.home() / ("TensorFoldStudio" if (Path.home() / "TensorFoldStudio").is_dir() and not (Path.home() / "ImaginationStudio").exists() else "ImaginationStudio")), "lora-bundle"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
+    from studio_home import studio_home  # the folder the app uses
+    parser.add_argument("--dest", default=str(studio_home() / "lora-bundle"))
     parser.add_argument("--categories", default="", help="group ids, comma separated (default: all)")
     parser.add_argument("--only", default="", help="LoRA ids, comma separated")
     parser.add_argument("--source", default=os.environ.get("LORA_BUNDLE", ""), help="another bundle to copy from: a folder or a base address")

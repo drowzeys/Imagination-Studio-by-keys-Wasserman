@@ -11,7 +11,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
-HOME_DIR="${STUDIO_HOME:-$([ -d "$HOME/TensorFoldStudio" ] && [ ! -e "$HOME/ImaginationStudio" ] && echo "$HOME/TensorFoldStudio" || echo "$HOME/ImaginationStudio")}"
+HOME_DIR="${STUDIO_HOME:-$(python3 "$HERE/../app/studio_home.py")}"  # app/studio_home.py: the folder the app uses
 REF="${1:-}"; OUT="${2:-outputs/turn}"
 [ -s "$REF" ] || { echo "usage: turnaround.sh PICTURE OUT_PREFIX (no picture at '$REF')" >&2; exit 2; }
 SIZE="${SIZE:-1024}"; STRENGTH="${STRENGTH:-1.0}"; STEPS="${STEPS:-28}"
