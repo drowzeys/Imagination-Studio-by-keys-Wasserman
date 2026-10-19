@@ -10,15 +10,15 @@ the TensorFold project and the model makers.
 
 | Use | Form |
 |---|---|
-| Full name, first mention | **Imagination Studio by keys+Wasserman powered with TensorFold** (formerly keys+Wasserman Slate AI Studio): lower-case keys, no spaces around the plus, no comma, powered **with** |
-| Title, in the app and on cards | **Imagination Studio by keys+Wasserman powered with TensorFold** · built with integrated Fish Audio Drama 3 |
+| Full name, first mention | **Imagination Studio by keys+Wasserman** (formerly keys+Wasserman Slate AI Studio): lower-case keys, no spaces around the plus. Attribution follows it: *powered by TensorFold* |
+| Title, in the app and on cards | **Imagination Studio by keys+Wasserman** · powered by TensorFold · built with integrated Fish Audio Drama 3 |
 | Short name, after the first mention | **the Studio**, or **Imagination Studio** (also the sidebar logo and the manifest's short name) |
 | The film-workflow tab | **Wasserman Slate AI Studio** (Sam Wasserman's Slate, ported) |
 | Hashtags and handles | #WassermanSlate #AIStudio #DGXSpark #AppleSilicon |
 
 **Rules:**
 - **The Studio is an app built on TensorFold, not a TensorFold product.**
-  - "Powered with TensorFold" is attribution. Never make it the name: not "TensorFold Studio" and not "TF Studio".
+  - "Powered by TensorFold" is attribution. Never make it the name: not "TensorFold Studio" and not "TF Studio".
   - Keep the README's line: *Named at the request of the TensorFold project: this is an app built on TensorFold, not a
     TensorFold product.*
 - **Never put the TensorFold name next to abliterated or uncensored models,** in any post, picture, repo or video.
@@ -138,7 +138,7 @@ which reads as a slate or a lens.
 
 | Do | Don't |
 |---|---|
-| "Imagination Studio by keys+Wasserman powered with TensorFold" | "TensorFold Studio", "the TensorFold app" |
+| "Imagination Studio by keys+Wasserman", powered by TensorFold | "TensorFold Studio", "the TensorFold app" |
 | Name the machine and size with every number | Quote a time with no machine, size or step count |
 | Show Studio-made pictures and clips | Use stock or other generators' output as if it were the Studio's |
 | Carry "Built with Fish Audio" on any Drama 3 audio | Clone a real person's voice for a promo |
