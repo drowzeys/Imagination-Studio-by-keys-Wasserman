@@ -11,9 +11,10 @@ image, the TensorFold families for Qwen-Image and MiniMax H3 with their int8 ten
 engines the studio runs (FastH3 on Metal, H3, Drama 3 and MiniMax Music 3 on CUDA, and Music 3 on Metal), and the
 measurements every setting here is held to. Imagination Studio is **by Keys + Wasserman**.
 
-## Wasserman's Filmmaker Suite: Sam Wasserman and Wasserman Productions
+## The studio's design and Wasserman's Filmmaker Suite: Sam Wasserman and Wasserman Productions
 
-**Sam Wasserman and Wasserman Productions** made **Wasserman's Filmmaker Suite**, the apps the Studio's suite vault
+**Sam Wasserman and Wasserman Productions** helped design and build Imagination Studio in collaboration with Keys, and
+made **Wasserman's Filmmaker Suite**, the apps the Studio's suite vault
 brings work in from and sends work out to, each under its own licence (as its repository states):
 
 - **ScriptBreak** (screenplay breakdown and prompt packs) — Apache-2.0

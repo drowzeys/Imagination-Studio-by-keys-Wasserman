@@ -13,8 +13,8 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 *Name, credits, colours and voice for anything public: the [brand guide](docs/BRAND.md).*
 
-*Credit first: **Keys (drowzeys)** built this studio and its engines; **Sam Wasserman and Wasserman Productions** made
-Wasserman's Filmmaker Suite and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
+*Credit first: **Keys (drowzeys)** built this studio and its engines; **Sam Wasserman and Wasserman Productions** helped
+design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
 **3.0.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
@@ -315,7 +315,8 @@ Master Canvas, Storyboard Reference Studio, Blockout, Motion Previs Studio, Slat
 and DaVinci MCP, each under its own licence (Apache-2.0; Master Canvas MIT). The Studio reads and writes their files.
 
 **Keys (drowzeys)** built the studio itself: the app, both builds, the TensorFold families and int8 kernels, and the
-Metal and CUDA engines it renders with. Imagination Studio is by Keys + Wasserman.
+Metal and CUDA engines it renders with. **Sam Wasserman and Wasserman Productions** helped design and build it in
+collaboration with Keys. Imagination Studio is by Keys + Wasserman.
 
 **Thank you to everyone this stands on:** the Qwen team at Alibaba (Qwen-Image-2.1, Qwen3-VL), the MiniMax team
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
