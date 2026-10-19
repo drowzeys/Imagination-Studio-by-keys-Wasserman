@@ -88,3 +88,29 @@ def test_a_video_page_goes_through_yt_dlp_and_its_error_is_shown(monkeypatch, tm
     bad = until(client.post("/api/motion/links", json={"url": "https://video.example/broken"}).json()["id"])
     assert bad["state"] == "failed" and bad["error"].startswith("[generic] Unsupported URL")
     assert not list((server.HOME / "uploads/links").glob(bad["id"] + ".*"))  # nothing half-read is left
+
+
+def test_a_redirect_into_this_machine_is_refused(monkeypatch):
+    class Redirect(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "/inside.mp4")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    first = f"http://127.0.0.1:{httpd.server_address[1]}/clip.mp4"
+    checked = motion.public_link
+
+    def public(url):  # the pasted address passes as if it were public; where it redirects is checked for real
+        return url if url == first else checked(url)
+    monkeypatch.setattr(motion, "public_link", public)
+    monkeypatch.setattr(motion, "link_reader", lambda python: None)
+    try:
+        item = until(client.post("/api/motion/links", json={"url": first}).json()["id"])
+        assert item["state"] == "failed" and "redirected to 127.0.0.1" in item["error"], item
+    finally:
+        httpd.shutdown()
