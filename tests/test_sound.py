@@ -3,6 +3,7 @@ Nothing real runs: the sound environment's python is a stand-in that writes a sh
 runner writes, so the job, its checks, the takes list and the Library are tested end to end."""
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -53,6 +54,14 @@ def ready(tmp_path, monkeypatch):
     monkeypatch.setenv("SOUND_MODELS", str(models))
     router, build, title, source = sound.attach(server.HOME, ROOT, False, server.inside, server.relative)
     monkeypatch.setattr(server, "sound_build", build)
+
+    def run(job, command, env, label=""):  # the command as it is (another test file swaps the server's runner for its own)
+        done = subprocess.run(command, env={**os.environ, **{k: str(v) for k, v in env.items()}}, capture_output=True, text=True, timeout=120)
+        job["log"] += done.stdout + done.stderr
+        if done.returncode:
+            raise RuntimeError(done.stderr[-300:] or "the runner failed")
+        return True
+    monkeypatch.setattr(server, "run", run)
     return {"build": build, "models": models}
 
 

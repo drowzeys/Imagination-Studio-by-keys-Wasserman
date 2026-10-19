@@ -1,4 +1,6 @@
 """Where the studio keeps everything (app/studio_home.py): python3 -m pytest tests/test_studio_home.py."""
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,3 +39,15 @@ def test_both_folders_there_leaves_the_old_one_alone(tmp_path, monkeypatch):
     (tmp_path / "TensorFoldStudio").mkdir()
     (tmp_path / "ImaginationStudio").mkdir()
     assert studio_home(move=True) == tmp_path / "ImaginationStudio" and not (tmp_path / "TensorFoldStudio").is_symlink()
+
+
+def test_importing_the_server_never_moves_the_folder(tmp_path):
+    # only a started studio moves it: a script, a test or a check that imports server.py leaves the person's folder be
+    (tmp_path / "TensorFoldStudio").mkdir()
+    env = {k: v for k, v in os.environ.items() if k != "STUDIO_HOME"}
+    env["HOME"] = str(tmp_path)
+    app = Path(__file__).resolve().parent.parent / "app"
+    done = subprocess.run([sys.executable, "-c", "import server; print(server.HOME)"], cwd=app, env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr[-800:]
+    assert done.stdout.strip().endswith("TensorFoldStudio") and not (tmp_path / "TensorFoldStudio").is_symlink()
+    assert not (tmp_path / "ImaginationStudio").exists()
