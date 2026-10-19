@@ -9,6 +9,8 @@
 # IMAGE_MODEL=flux3k-fast | flux3k-full makes it with FLUX3-K instead (oneshot-setup-spark.sh --flux3): Fast is the
 # distilled checkpoint (16 steps), Full the base one (50 steps); BFL's prompt upsampler writes the caption first
 # (UPSAMPLE=0 sends a prompt that is already a full scene caption as written).
+# IMAGE_MODEL=moss-image makes it with MOSS-Image (oneshot-setup-spark.sh --moss): 25 steps at CFG 2.5, the prompt as
+# written; NEGATIVE replaces its template's negative prompt.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
@@ -18,6 +20,7 @@ PROMPT="${1:-}"; OUT="${2:-outputs/image.png}"
 ARGS=(image -o "$OUT" --width "${WIDTH:-1344}" --height "${HEIGHT:-768}" --seed "${SEED:-0}")
 [ "${TURBO:-1}" = 1 ] || ARGS+=(--base --steps "${STEPS:-40}")
 [ "${UPSAMPLE:-1}" = 1 ] || ARGS+=(--no-upsample)
+[ -z "${NEGATIVE:-}" ] || ARGS+=(--negative "$NEGATIVE")
 if [ -n "${PROMPT_FILE:-}" ]; then ARGS+=(--prompt-file "$PROMPT_FILE"); else ARGS+=(--prompt "$PROMPT"); fi
 # shellcheck disable=SC2086
 PREFIX="$PREFIX" exec "$PREFIX/venv/bin/python" "$HERE/spark_generate.py" "${ARGS[@]}" ${EXTRA:-}
