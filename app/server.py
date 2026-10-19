@@ -830,7 +830,7 @@ def image_models() -> list[str]:
     """The picture models installed here, Qwen first: FLUX3-K's ComfyUI files on a Spark, its own venv and BFL's
     checkpoints on a Mac."""
 
-    found = ["qwen"] + (["qwen-full"] if qwen_base_ready() else [])
+    found = (["qwen"] if qwen_ready() else []) + (["qwen-full"] if qwen_base_ready() else [])
     for name, unets in FLUX3_FILES.items():
         if SPARK:
             folder = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "FLUX3-K-Comfy"
@@ -857,6 +857,18 @@ def moss_ready() -> bool:
             and (comfy / "comfy_extras/nodes_moss_image.py").is_file())
 
 
+def qwen_ready() -> bool:
+    """Qwen-Image-2.1-Turbo, every install's picture model: on a Spark its ComfyUI files (a worker set up without image
+    weights has none, and a picture there used to fail inside ComfyUI with a bare 400); a Mac's setup always has it."""
+
+    if not SPARK:
+        return True
+    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
+    return all((models / name).is_file() for name in ("diffusion_models/qwen_image_2.1_turbo_bf16.safetensors",
+                                                     "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+                                                     "vae/qwen_image_2.1_vae_bf16.safetensors"))
+
+
 def qwen_base_ready() -> bool:
     """Qwen-Image-2.1's 40-step base model, the same files Edit a picture's 40-step choice uses."""
 
@@ -875,8 +887,9 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
-        how = {"qwen-full": "--image-edit", "moss-image": "--moss (on a DGX Spark)"}.get(name, "--flux3")
-        raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh {how} adds it")
+        how = {"qwen": "", "qwen-full": " --image-edit", "moss-image": " --moss (on a DGX Spark)"}.get(name, " --flux3")
+        raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh{how} adds it"
+                                 + (" (Machine → Models & weights shows what is missing)" if name == "qwen" else ""))
     return {"IMAGE_MODEL": name}
 
 

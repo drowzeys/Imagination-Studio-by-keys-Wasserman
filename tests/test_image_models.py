@@ -233,6 +233,34 @@ def test_a_spark_offers_moss_image_only_with_its_files_and_a_comfyui_that_knows_
                     os.environ[key] = value
 
 
+def test_a_spark_without_qwens_files_does_not_offer_it_and_says_so_when_asked():
+    import server
+    from fastapi import HTTPException
+
+    had = server.SPARK, os.environ.get("SPARK_MODELS")
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            server.SPARK = True
+            os.environ["SPARK_MODELS"] = folder
+            assert "qwen" not in server.image_models()
+            try:
+                server.image_model_env({})
+                raise AssertionError("a picture was queued without Qwen's weights")
+            except HTTPException as error:
+                assert "Qwen 2.1 Turbo is not installed here" in error.detail and "Models & weights" in error.detail
+            for name in ("diffusion_models/qwen_image_2.1_turbo_bf16.safetensors", "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+                         "vae/qwen_image_2.1_vae_bf16.safetensors"):
+                (Path(folder) / "Qwen-Image-2.1-Comfy" / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(folder) / "Qwen-Image-2.1-Comfy" / name).write_bytes(b"x")
+            assert server.image_models()[0] == "qwen" and server.image_model_env({}) == {"IMAGE_MODEL": "qwen"}
+        finally:
+            server.SPARK = had[0]
+            if had[1] is None:
+                os.environ.pop("SPARK_MODELS", None)
+            else:
+                os.environ["SPARK_MODELS"] = had[1]
+
+
 def test_moss_image_is_asked_for_by_name_and_refused_where_it_is_not():
     import server
     from fastapi import HTTPException
