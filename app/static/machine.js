@@ -98,7 +98,7 @@ async function brainsLoad() { try { BR.data = await api("/api/brains"); } catch 
    device_code, verifying, done, failed), polled every second while it runs. Shown on Settings → Connections and Brains & tools. */
 const SIGN_RUNNING = ["starting", "needs_browser", "needs_code", "device_code", "verifying"];
 const SIGN_OUT = ["claude", "codex", "grok"], HERMES_PROVIDERS = [["openai-codex", "ChatGPT (Codex)"], ["anthropic", "Claude"], ["nous", "Nous Portal"]];
-const signRedraw = () => { if (tab === "Brains" || tab === "Settings") render(); };
+const signRedraw = () => { if (typeof CN !== "undefined" && CN.sheet) return cnSheetDraw(); if (tab === "Brains" || tab === "Settings") render(); };
 const typing = () => typeof document !== "undefined" && document.activeElement && document.activeElement.matches && document.activeElement.matches("input,textarea,select");
 async function brainStatus(id, fresh) { if (!fresh && BR.status[id]) return; BR.status[id] = { state: "asking" };
   try { BR.status[id] = await api("/api/brains/" + id + "/status"); } catch (e) { BR.status[id] = { state: "unknown", detail: e.message }; } signRedraw(); }
@@ -228,7 +228,7 @@ function qrSvg(text, px) { const m = qrMatrix(text); if (!m) return null; const 
    code and Copy link), check it answers, make it the default. CN.data[id] is GET /api/brains/{id}/connect. */
 const CN = { open: null, data: {}, plan: {}, install: {}, verifying: {}, tried: {}, timer: null, win: null, tick: 0, link: null, linkHost: null, linkSaid: null, linkBusy: false, linkOpen: false };
 const CN_ORDER = ["claude", "codex", "hermes", "gemini", "grok"];
-const cnRedraw = () => { if (["Brains", "Settings", "Home", "Agent"].includes(tab) && !typing()) render(); };
+const cnRedraw = () => { if (typing()) return; if (CN.sheet) cnSheetDraw(); else if (["Brains", "Settings", "Home", "Agent"].includes(tab)) render(); };
 const cnWhere = b => b && b.where && b.where !== "here" ? b.where.replace(/^ssh:/, "") : "";
 const cnHere = () => typeof location === "undefined" || ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
 // the one word a card shows, and the next thing to do
@@ -248,8 +248,18 @@ function cnPrepareTab(b) { const st = BR.status[b.id];
 function cnCloseTab() { if (CN.win) { try { CN.win.close(); } catch {} CN.win = null; } }
 async function connectStart(b, fromClick) { if (fromClick !== false) cnPrepareTab(b);
   CN.open = b.id; CN.tried[b.id] = {}; BR.signOpen = null; await cnLoad(b.id); }
-// from Home or the Agent room: Settings → Connections, the checklist open there
-function connectGo(b) { cnPrepareTab(b); if (typeof SET !== "undefined") SET.section = "connections"; go(typeof viewSettings === "function" ? "Settings" : "Brains"); connectStart(b, false); }
+// from anywhere (Home, the Agent room, Slate's Bible): the same checklist over the page, nothing to go and find
+function connectGo(b) { connectOpen(b.id || b); }
+async function connectOpen(id) { if (!BR.data) await brainsLoad();
+  const b = cnBrain(id) || { id, label: id, kind: "cli", found: false, where: "here", signin_flow: "pty" };
+  cnPrepareTab(b); CN.sheet = id; cnSheetDraw(); await connectStart(b, false); cnSheetDraw(); }
+function cnSheetDraw() { if (!CN.sheet || typeof document === "undefined" || !document.body || typeof document.body.append !== "function") return;
+  const id = CN.sheet, b = cnBrain(id) || { id, label: id, kind: "cli", where: "here" };
+  const panel = connectPanel(b) || el("div", { class: "signin connect" }, el("div", { class: "note m-flat" }, "Looking…"));
+  const node = el("div", { class: "gate-wrap cn-sheet", "data-sheet": id, onclick: e => { if (e.target === node) cnClose(id); } },
+    el("div", { class: "gate-sheet", role: "dialog", "aria-modal": "true", "aria-label": "Connect " + (b.label || id) }, panel));
+  if (CN.sheetNode && CN.sheetNode.replaceWith) CN.sheetNode.replaceWith(node); else document.body.append(node);
+  CN.sheetNode = node; }
 async function cnLoad(id) { try { CN.data[id] = await api("/api/brains/" + id + "/connect"); } catch (e) { CN.data[id] = { error: e.message }; }
   const d = CN.data[id]; if (d && d.signin) BR.status[id] = { backend: id, ...d.signin }; if (d && d.signing && d.signing.state !== "idle") BR.sign[id] = d.signing;
   if (d && !d.error && !d.find.found && !CN.plan[id]) { try { CN.plan[id] = (await api("/api/brains/" + id + "/install?plan=1")).plan; } catch (e) { CN.plan[id] = { ok: false, reason: e.message }; } }
@@ -301,7 +311,9 @@ function cnWatch() { const id = CN.open, d = id && CN.data[id];
       if (changed) cnRedraw(); return; }
     if (CN.tick % 4 === 0) { clearInterval(CN.timer); CN.timer = null; await cnLoad(id); } }, 1250);
   if (CN.timer && CN.timer.unref) CN.timer.unref(); }
-function cnClose(id) { if (BR.sign[id] && SIGN_RUNNING.includes(BR.sign[id].state)) signCancel(id); CN.open = null; cnCloseTab(); clearInterval(CN.timer); CN.timer = null; render(); }
+function cnClose(id) { if (BR.sign[id] && SIGN_RUNNING.includes(BR.sign[id].state)) signCancel(id); CN.open = null; cnCloseTab(); clearInterval(CN.timer); CN.timer = null;
+  if (CN.sheet) { CN.sheet = null; if (CN.sheetNode && CN.sheetNode.remove) CN.sheetNode.remove(); CN.sheetNode = null; BR.status = {}; BR.data = null; brainsLoad().then(() => render()); return; }
+  render(); }
 // the sign-in's own parts: the page (opened already, or a big button), the code, a QR code, Copy link
 function cnSignBody(b, s) { const where = cnWhere(b) ? " on " + cnWhere(b) : "", out = [];
   const page = url => el("div", { class: "cn-page" }, el("div", { class: "stack" }, el("a", { class: "signin-open", href: url, target: "_blank", rel: "noopener noreferrer" }, "Open the sign-in page"),

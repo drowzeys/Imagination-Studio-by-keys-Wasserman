@@ -31,7 +31,7 @@ def test_the_chooser_shows_found_remote_and_missing_agents():
     out = run(BRAINS + """
       const at = TABS.indexOf("Settings"); if (at >= 0) TABS.splice(at, 1);  // first without a Settings page
       let page = viewAgent(); out.backend = AG.backend;
-      out.states = ["claude", "codex", "hermes", "gemini", "grok", "local"].map(id => [text(card(page, id)), !!card(page, id).attrs.disabled]);
+      out.states = ["claude", "codex", "hermes", "gemini", "grok", "local"].map(id => [text(card(page, id)), card(page, id).attrs["aria-disabled"] === "true"]);
       out.under = text(cls(page, "agr-under"));
       out.setup = text(find(page, n => n.tag === "a" && n.attrs.class === "ag-setup"));
       card(page, "hermes").attrs.onclick(); page = viewAgent(); out.hermes = [AG.backend, text(cls(page, "agr-under"))];
@@ -45,7 +45,7 @@ def test_the_chooser_shows_found_remote_and_missing_agents():
     assert "Ready · 2.1.4" in states["claude"][0] and "Uses the Studio" in states["claude"][0] and not states["claude"][1]
     assert "On workstation" in states["codex"][0] and not states["codex"][1]  # over SSH: there, so not greyed
     assert "Conversation" in states["hermes"][0] and "Ready" in states["hermes"][0] and not states["hermes"][1]
-    assert "Not found" in states["gemini"][0] and states["gemini"][1] and "sign in" in states["gemini"][0]  # the sign-in hint as its title
+    assert "Not found" in states["gemini"][0] and states["gemini"][1] and "Click to connect" in states["gemini"][0] and "sign in" in states["gemini"][0]  # not ready: its card connects it, the reason in its title
     assert "Not reached" in states["grok"][0] and states["grok"][1]
     assert not states["local"][1]
     assert "It may use" in out["under"] and "This Studio" in out["under"]
@@ -122,11 +122,11 @@ def test_a_remote_not_reached_or_a_cli_not_signed_in_is_not_ready():
         error: "ssh to user@workstation failed: Host key verification failed.. The Studio signs in ... run `ssh user@workstation true` once" };
       BR.status.claude = { state: "signed_out", detail: "Not signed in" };
       let page = viewAgent();
-      out.claude = [text(card(page, "claude")), !!card(page, "claude").attrs.disabled];
-      out.codex = [text(card(page, "codex")), !!card(page, "codex").attrs.disabled];
+      out.claude = [text(card(page, "claude")), card(page, "claude").attrs["aria-disabled"] === "true"];
+      out.codex = [text(card(page, "codex")), card(page, "codex").attrs["aria-disabled"] === "true"];
       out.backend = AG.backend; out.hint = text(cls(page, "ag-hint"));
       BR.status.claude = { state: "signed_in", detail: "Claude subscription" }; page = viewAgent();
-      out.after = [text(card(page, "claude")), !!card(page, "claude").attrs.disabled];""")
+      out.after = [text(card(page, "claude")), card(page, "claude").attrs["aria-disabled"] === "true"];""")
     if out is None:
         return
     assert "Not signed in" in out["claude"][0] and out["claude"][1]

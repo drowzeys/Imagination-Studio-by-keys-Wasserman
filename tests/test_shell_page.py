@@ -74,16 +74,16 @@ def test_the_sidebar_shows_both_groups_and_marks_the_room():
     out = run("""for (const k of ["#rooms", "#roomname", "#subtabs"]) NODES[k] = el("div", {});
       go("Music"); renderShell(); out.nav = text(NODES["#rooms"]); out.room = NODES["#roomname"].textContent; out.subs = text(NODES["#subtabs"]);
       out.on = NODES["#rooms"].kids.filter(n => n.attrs && n.attrs.class === "on").map(n => n.attrs["data-room"]);
-      out.groups = NODES["#rooms"].kids.filter(n => n.attrs && n.attrs.class === "grp").map(text);
+      out.groups = NODES["#rooms"].kids.filter(n => n.attrs && /^grp/.test(n.attrs.class || "")).map(text);
       go("Library"); renderShell(); out.single = NODES["#subtabs"].kids.length;
-      go("Home"); renderShell(); out.homeOn = NODES["#rooms"].kids.filter(n => n.attrs && n.attrs.class === "on").length; out.homeName = NODES["#roomname"].textContent;""")
+      go("Home"); renderShell(); out.homeOn = NODES["#rooms"].kids.filter(n => n.attrs && /\bon\b/.test(n.attrs.class || "") && n.attrs["data-room"] !== "home").length; out.homeBtn = NODES["#rooms"].kids[0].attrs.class; out.homeName = NODES["#roomname"].textContent;""")
     if out is None:
         return
     assert out["groups"] == ["Creative Engines", "Studio Vaults"]
     assert out["nav"].index("Creative Engines") < out["nav"].index("Story") < out["nav"].index("Studio Vaults") < out["nav"].index("Library")
     assert out["on"] == ["sound"] and out["room"] == "Sound" and "Voice" in out["subs"] and "Music" in out["subs"]
     assert out["single"] == 0  # a room of one view shows no tabs
-    assert out["homeOn"] == 0 and out["homeName"] == "Home"
+    assert out["homeOn"] == 0 and out["homeName"] == "Home" and out["homeBtn"] == "home on"  # Home is the first button, lit at Home
 
 
 def test_each_engine_opens_on_a_landing_whose_cards_open_the_views():
@@ -181,7 +181,7 @@ def test_the_agent_sends_the_request_with_the_chosen_tools():
       button(page, "Blockout push-in").attrs.onclick(); page = viewAgent();
       await button(page, "Send").attrs.onclick();
       out.sent = calls.find(c => c[0] === "/api/agent/tasks" && c[1]);
-      out.codexOff = !!button(page, "Codex").attrs.disabled;
+      out.codexOff = find(page, n => n.attrs && n.attrs.role === "radio" && text(n).includes("Codex")).attrs["aria-disabled"] === "true";
       useOutput("agent/a1/garage.png", "first"); out.first = [tab, C.image, C.start];""")
     if out is None:
         return
@@ -268,7 +268,7 @@ def test_paths_are_shown_from_the_studio_folder_and_dropped_players_let_go():
 def test_a_brain_that_is_not_set_up_is_greyed_and_links_to_brains_and_tools():
     out = run("""BR.data = { default: "claude", backends: [{ id: "claude", label: "Claude Code", found: false, where: "here" }, { id: "codex", label: "Codex", found: false, where: "ssh:mac" }], settings: {} };
       BR.tools = { tools: [] }; AG.tasks = []; AG.backend = "claude"; answers["/api/agent/tasks"] = [];
-      let page = viewAgent(); out.backend = AG.backend; out.claudeOff = !!button(page, "Claude Code").attrs.disabled; out.codexOn = !button(page, "Codex").attrs.disabled;
+      let page = viewAgent(); out.backend = AG.backend; const agent = w => find(page, n => n.attrs && n.attrs.role === "radio" && text(n).includes(w)); out.claudeOff = agent("Claude Code").attrs["aria-disabled"] === "true"; out.codexOn = agent("Codex").attrs["aria-disabled"] !== "true";
       out.hint = text(find(page, n => /ag-hint/.test(n.attrs && n.attrs.class || "")));
       find(page, n => n.tag === "a" && n.attrs.class === "ag-setup").attrs.onclick({}); out.link = tab;
       BR.data.backends[1] = { id: "codex", label: "Codex", found: false, where: "here" }; AG.backend = null; page = viewAgent();
@@ -559,7 +559,8 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
       tab = "Home"; let home = viewHome(); const card = n => find(n, x => x.attrs && x.attrs["data-card"] === "connect");
       out.home = text(card(home)); out.primary = text(find(card(home), n => n.tag === "button" && /primary/.test(n.attrs.class || "")));
       answers["/api/brains/codex/connect"] = base("codex", { signin: { state: "signed_out" } });
-      await find(card(home), n => n.tag === "button" && /primary/.test(n.attrs.class || "")).attrs.onclick(); out.went = [tab, SET.section, CN.open, tabs.length];
+      await find(card(home), n => n.tag === "button" && /primary/.test(n.attrs.class || "")).attrs.onclick(); out.went = [tab, CN.sheet, CN.open, tabs.length];
+      CN.sheet = null;
       tab = "Agent"; AG.tasks = []; AG.threads = []; out.room = !!card(viewAgent());
       tab = "Home"; await button(card(viewHome()), "Not now").attrs.onclick(); out.dismissed = !card(viewHome());
       out.roomStill = !!card(viewAgent());
@@ -567,7 +568,7 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
     if out is None:
         return
     assert "Connect your agent" in out["home"] and out["primary"].endswith("Connect Codex")  # the one that is installed first
-    assert out["went"][:3] == ["Settings", "connections", "codex"] and out["went"][3] == 1
+    assert out["went"][:3] == ["Home", "codex", "codex"] and out["went"][3] == 1  # Connect opens over the page: nothing to go and find
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
 
 

@@ -60,8 +60,11 @@ function agAskSignins(found) { if (typeof brainStatus !== "function") return;
   for (const b of found) if (b.kind === "cli" && b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(() => { if (tab === "Agent") agRender(); }).catch(() => {}); }
 // Settings → Connections where the Settings page is there, else Machine → Brains & tools
 const agSettings = () => typeof viewSettings === "function" && typeof TABS !== "undefined" && TABS.includes("Settings");
-const agSetup = () => el("a", { href: agSettings() ? "#Settings" : "#Brains", class: "ag-setup", onclick: e => { if (e && e.preventDefault) e.preventDefault(); go(agSettings() ? "Settings" : "Brains"); } },
-  agSettings() ? "Set up in Settings → Connections" : "Set up on Machine → Brains & tools");
+// the room's own way to fix it: Connect opens the checklist here; every connection lives in Settings → Connections too
+const agSetup = () => { const want = ((BR.data && BR.data.backends) || []).find(b => AG_HARNESS.includes(b.id) && !agReady(b));
+  return el("span", { class: "ag-fixes" }, want && typeof connectOpen === "function" ? el("button", { type: "button", class: "small on", onclick: () => connectOpen(want.id) }, "Connect " + (want.label || agName(want.id))) : null,
+    el("a", { href: agSettings() ? "#Settings" : "#Brains", class: "ag-setup", onclick: e => { if (e && e.preventDefault) e.preventDefault(); if (agSettings() && typeof SET !== "undefined") SET.section = "connections"; go(agSettings() ? "Settings" : "Brains"); } },
+      agSettings() ? "Set up in Settings → Connections" : "Set up on Machine → Brains & tools")); };
 const agName = id => { const b = ((BR.data && BR.data.backends) || []).find(x => x.id === id); return (b && b.label) || (AG_AGENTS.find(a => a[0] === id) || [id, id])[1]; };
 const agAgo = s => { if (!s) return ""; const d = Date.now() / 1000 - s; return d < 60 ? "just now" : d < 3600 ? Math.round(d / 60) + " min ago" : d < 86400 ? Math.round(d / 3600) + " h ago" : new Date(s * 1000).toLocaleDateString(); };
 const agPic = p => /\.(png|jpe?g|webp|mp4|mov)$/i.test(p), agSound = p => /\.(wav|mp3|m4a|aac|flac|ogg)$/i.test(p);
@@ -275,12 +278,15 @@ function agChooser(found) {
     const b = found.find(x => x.id === id), ready = agReady(b), on = ready && AG.backend === id, remote = b && /^ssh:./.test(b.where || ""), st = agSignState(b);
     const state = !b ? "Not found" : b.error ? "Not reached" : st ? AG_NOT_SIGNED[st.state] : remote ? "On " + b.where.slice(4).replace(/^[^@]*@/, "") : b.found ? "Ready" + (b.version ? " · " + String(b.version).replace(/^[^0-9]*/, "").split(/[\s(]/)[0] : "") : "Not found";
     const can = AG_HARNESS.includes(id) ? "Uses the Studio" : "Conversation";
-    return el("button", { class: "agr-card" + (on ? " on" : "") + (ready ? "" : " off"), role: "radio", "aria-checked": on ? "true" : "false", disabled: !ready, "aria-disabled": ready ? false : "true",
-      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : (b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it"),
-      onclick: () => { AG.backend = id; render(); } },
+    // an agent that is not ready is one click from ready: its card opens the Connect checklist over the room
+    const fix = id !== "local" && typeof connectOpen === "function";
+    return el("button", { class: "agr-card" + (on ? " on" : "") + (ready ? "" : " off"), role: "radio", "aria-checked": on ? "true" : "false", disabled: !ready && !fix, "aria-disabled": ready ? false : "true",
+      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : ((b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it")) +
+        (fix ? " · Click to connect it: the studio installs it if needed, signs you in and checks it answers." : ""),
+      onclick: () => { if (!ready) { if (fix) connectOpen(id); else if (typeof goSettings === "function") goSettings("connections"); return; } AG.backend = id; render(); } },
       el("span", { class: "agr-top" }, agBadge(id), (b && b.label && !["codex", "local"].includes(id) ? b.label : name)),
       el("span", { class: "agr-state" }, el("span", { class: "dotl" + (ready ? (on ? " t" : "") : " o") }), state),
-      el("span", { class: "agr-can" + (ready && AG_HARNESS.includes(id) ? " t" : "") }, can)); }));
+      !ready && fix ? el("span", { class: "agr-can agr-fix" }, "Click to connect") : el("span", { class: "agr-can" + (ready && AG_HARNESS.includes(id) ? " t" : "") }, can)); }));
 }
 function agPicker() {
   if (!AG.picking) return null; if (!AG.lib) api("/api/library").then(l => { AG.lib = l; render(); }).catch(() => {});
