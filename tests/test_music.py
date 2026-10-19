@@ -12,6 +12,8 @@ import time
 import wave
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp()) / "TensorFoldStudio"))
 os.environ["STUDIO_GPU_LOCK"] = str(Path(tempfile.mkdtemp()) / "studio-gpu.lock.d")
@@ -118,6 +120,7 @@ def test_the_mac_engine_runs_int8_weights_unless_told_otherwise():
             os.environ["MUSIC3_QUANT"] = old
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_a_song_is_checked_before_it_is_queued():
     had = music._engine
     try:
@@ -143,6 +146,7 @@ def test_a_song_is_checked_before_it_is_queued():
         music._engine = had
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_a_song_runs_on_the_served_engine_holds_the_lock_and_is_unloaded_before_other_jobs():
     folder = Path(tempfile.mkdtemp())
     one = fake_mlx(folder)
@@ -196,6 +200,7 @@ def test_a_song_runs_on_the_served_engine_holds_the_lock_and_is_unloaded_before_
         music._engine, music.qa.ready = had, had_ready
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_a_song_plays_while_it_is_made_as_stereo_and_keeps_the_finished_wav():
     folder = Path(tempfile.mkdtemp())
     one = fake_mlx(folder, streams=True)
@@ -275,6 +280,7 @@ def test_the_voice_live_header_stays_mono():
     assert struct.unpack("<HHIIHH", voice.live_header(44100, 2)[20:36]) == (1, 2, 44100, 176400, 4, 16)
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_a_voice_take_and_a_song_never_stand_together():
     """Drama 3 loaded after a take is unloaded before a song, and the song's engine before the next take."""
 
@@ -310,6 +316,7 @@ def test_a_voice_take_and_a_song_never_stand_together():
         music._engine, voice._backend = had_music, had_voice
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_the_spark_route_runs_comfy_holds_the_lock_while_loaded_and_frees_it():
     folder = Path(tempfile.mkdtemp())
     script = folder / "fake_generate.py"
@@ -547,6 +554,7 @@ def test_the_metal_engine_makes_a_song_under_the_lock_and_does_not_stream():
         finally:
             music.qa.ready = had_ready
 
+@pytest.mark.usefixtures("spark_memory")
 def test_the_cuda_engine_makes_a_song_stops_comfy_first_and_is_unloaded_before_other_jobs():
     folder = Path(tempfile.mkdtemp())
     cuda_install(folder)
@@ -612,6 +620,7 @@ def test_the_cuda_engine_makes_a_song_stops_comfy_first_and_is_unloaded_before_o
             server.build, voice.comfy_up, music.qa.ready = built, had_up, had_ready
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_the_cuda_engine_unloads_when_idle_and_gives_the_lock_back():
     folder = Path(tempfile.mkdtemp())
     cuda_install(folder)
@@ -632,6 +641,7 @@ def test_the_cuda_engine_unloads_when_idle_and_gives_the_lock_back():
             voice.comfy_up = had_up
 
 
+@pytest.mark.usefixtures("spark_memory")
 def test_the_comfy_route_still_runs_where_the_engine_is_not_built():
     folder = Path(tempfile.mkdtemp())
     cuda_install(folder, binary=False)
