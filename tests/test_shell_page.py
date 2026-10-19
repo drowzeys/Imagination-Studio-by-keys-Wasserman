@@ -222,7 +222,7 @@ def test_the_phone_bar_folds_the_vaults_search_and_updates_into_more():
     if out is None:
         return
     assert out["more"][0] == "more" and out["more"][1] == "more on" and "More" in out["more"][2]  # a vault is open: More is the lit item
-    assert out["vaults"] == ["library", "looks", "suite", "nodes", "machine", "learn", "settings"]  # hidden from the phone bar by studio.css
+    assert out["vaults"] == ["library", "looks", "suite", "nodes", "machine", "learn", "settings", "about"]  # hidden from the phone bar by studio.css
     for words in ("Agent", "Studio Vaults", "Library", "Looks", "Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings", "Search", "⌘K", "Updates"):
         assert words in out["sheet"], words
     assert "Looks" in out["on"]

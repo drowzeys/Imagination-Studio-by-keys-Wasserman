@@ -29,13 +29,14 @@ lock = threading.Lock()
 # the sidebar's rooms (shell.js ROOMS): Home is not a room, and Machine and Settings always stay in the sidebar
 ROOMS = ("story", "image", "video", "previs", "sound", "edit", "agent", "library", "looks", "suite", "nodes", "machine", "learn", "settings")
 ALWAYS = ("machine", "settings")
-STARTS = ("clip", "scout", "still", "sharp", "long", "voice", "song", "agent")
+STARTS = ("clip", "scout", "still", "sharp", "long", "voice", "song", "sfx", "looks", "previs", "nodes", "agent")
+NEW_STARTS = ("sfx", "looks", "previs", "nodes")  # 3.0's cards: shown unless switched off (start_off), whatever an older start_cards says
 PROFILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 MODEL_ID = re.compile(r"[a-z0-9][a-z0-9_.-]{0,31}")
 
 DEFAULTS = {
     "appearance": {"type_size": "comfortable", "glow": True, "poster": True, "accent": "amber", "motion": "system",
-                   "start_cards": ["clip", "scout", "still", "sharp", "long", "voice"]},
+                   "start_cards": ["clip", "scout", "still", "sharp", "long", "voice"], "start_off": []},
     "layout": {"hidden": [], "order": []},
     "presets": {"recipe": "quick", "image_model": "qwen", "seconds": 5, "qa_gate": True, "audio_rate": "keep",
                 "seed": "fixed", "mode": "clip"},
@@ -84,9 +85,9 @@ def check_one(section: str, key: str, value):
         if not isinstance(value, bool):
             raise HTTPException(400, f"{section}.{key} is true or false")
         return value
-    if (section, key) == ("appearance", "start_cards"):
+    if (section, key) in (("appearance", "start_cards"), ("appearance", "start_off")):
         if not isinstance(value, list) or any(v not in STARTS for v in value):
-            raise HTTPException(400, "appearance.start_cards lists cards: " + ", ".join(STARTS))
+            raise HTTPException(400, f"appearance.{key} lists cards: " + ", ".join(STARTS))
         return list(dict.fromkeys(value))
     if (section, key) == ("layout", "hidden"):
         hidden = rooms_list(value, "layout.hidden", tuple(r for r in ROOMS if r not in ALWAYS))

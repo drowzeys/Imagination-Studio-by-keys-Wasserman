@@ -35,7 +35,11 @@ function sfxTake(t) { const clip = t.clip && t.kind === "foley";
       el("button", { class: "small", onclick: () => { SFX.seed = (Number(t.seed) || 1) + 1; SFX.prompt = t.prompt || ""; SFX.mode = t.kind; if (t.kind === "foley" && t.source) SFX.video = t.source; render(); } }, "again"))); }
 function viewFoley() {
   if (!SFX.state) sfxLoad(); if (sfxLive()) sfxWatch();
-  const head = typeof pageHead === "function" ? pageHead("Sound", "Sound effects", "Foley for a clip, or a sound effect from words. Made on this machine.") : el("h1", { class: "display" }, "Sound effects");
+  const art = typeof ART !== "undefined" && ART.ready.has("start-sfx") && typeof artSlot === "function";
+  const head = art ? el("div", { class: "pagehead enghead vault" }, artSlot("start-sfx", "", "sound"),
+      el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Sound"), el("h1", { class: "display" }, "Sound effects"),
+        el("p", { class: "sub" }, "Foley for a clip, or a sound effect from words. Made on this machine.")))
+    : typeof pageHead === "function" ? pageHead("Sound", "Sound effects", "Foley for a clip, or a sound effect from words. Made on this machine.") : el("h1", { class: "display" }, "Sound effects");
   if (!SFX.state) return el("div", {}, head, el("div", { class: "note" }, "Looking…"));
   if (SFX.state.error) return el("div", {}, head, el("div", { class: "note" }, SFX.state.error));
   const k = SFX.state.kinds[SFX.mode], m = SFX.mode;

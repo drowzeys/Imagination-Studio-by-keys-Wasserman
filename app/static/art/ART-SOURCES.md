@@ -37,6 +37,7 @@ originals are kept outside the repo.
 - art/start-long.webp: a long hotel corridor with receding practicals
 - art/start-voice.webp: a microphone with a pop filter, headphones on a stand
 - art/start-song.webp: an upright piano with sheet music under one lamp
+- art/start-sfx.webp: a foley stage: celery snapped by hand, a split coconut, a boot on gravel, a sheet of tin and old keys under a recorder and two microphones, a rain-lit street on the screen behind (Sam Wasserman's art)
 - art/start-agent.webp: a drafting table with a set blueprint and a robot hand
 - art/look-noir.webp: venetian-blind shadows on a wall
 - art/look-golden.webp: backlit dust in a golden beam

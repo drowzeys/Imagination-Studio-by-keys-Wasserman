@@ -10,6 +10,8 @@ const SUITE_APPS = [
 function timeOfDay() { const h = new Date().getHours(); return h < 5 ? ["Night shoot", "Still rolling at this hour."] : h < 12 ? ["Morning call", "Fresh light. Good time to scout."]
   : h < 17 ? ["Afternoon shoot", "Plenty of day left for coverage."] : h < 21 ? ["Golden hour", "Make something that glows."] : ["Tonight's slate", "Queue it up and let the Sparks work."]; }
 function timecode(d = new Date()) { const p = n => String(n).padStart(2, "0"); return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + ":" + p(Math.floor(d.getMilliseconds() / 41.67)); }
+// where Keys and Wasserman Productions publish (Home under the credit; Settings → About lists them with the rest)
+const HOME_LINKS = [["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"], ["Keys on GitHub", "https://github.com/drowzeys"]];
 const startCreate = (set, step = 0) => { Object.assign(C, set); C.step = step; C.prompt = ""; sync(); go("Create"); };
 
 // the machine, in one line: LED, name, GPU, memory against the guard's floor, disk
@@ -37,8 +39,15 @@ const STARTS = () => [
   { id: "long", art: "start-long", sign: "video", k: "VIDEO", title: "A long take", one: "Chained clips, 30 seconds and up", run: () => { const k = S && S.long ? Object.keys(S.long)[0] : null; startCreate({ goes: "video", start: "text", ...(k ? { seconds: k } : {}) }); } },
   { id: "voice", art: "start-voice", sign: "sound", k: "SOUND", title: "A voice line", one: "Fish Audio Drama 3: cast or clone a voice", run: () => go("Voice") },
   { id: "song", art: "start-song", sign: "sound", k: "SOUND", title: "A song", one: "MiniMax-Music3: lyrics and a style", run: () => go("Music") },
+  { id: "sfx", art: "start-sfx", sign: "sound", k: "SOUND", title: "Sound effects & foley", one: "Foley for a clip, or a sound from words", run: () => go("Foley") },
+  { id: "looks", art: "vault-looks", sign: "looks", k: "LOOKS", title: "Looks", one: "LoRA styles for pictures and clips", run: () => go("Looks") },
+  { id: "previs", art: "engine-previs", sign: "previs", k: "PREVIS", title: "Previs", one: "Motion, depth and camera from a clip", run: () => go("Previs") },
+  { id: "nodes", art: "vault-nodes", sign: "nodes", k: "NODES", title: "Nodes", one: "Words to pictures to clips, wired in order", run: () => go("Nodes") },
   { id: "agent", art: "start-agent", sign: "previs", k: "AGENT", title: "Ask your agent", one: "Claude, Codex or Hermes make it with the studio", run: () => go("Agent") },
 ];
+// 3.0's cards show unless switched off in Settings, even beside a start_cards list saved before they existed
+const START_NEW = ["sfx", "looks", "previs", "nodes"];
+const startShown = (look, id) => (look.start_cards || []).includes(id) || (START_NEW.includes(id) && !(look.start_off || []).includes(id));
 const homePrefs = () => typeof prefs === "function" ? prefs() : { appearance: { start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], poster: true }, presets: { recipe: "quick", mode: "clip", seconds: 5, seed: "fixed", qa_gate: true, image_model: "qwen" } };
 
 /* ---------- the composer: one box, four kinds of take, one Generate ---------- */
@@ -118,10 +127,11 @@ function viewHome() {
       el("div", { class: "stack" }, el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap" }, el("span", { class: "eyebrow" }, new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })), tc),
         el("h1", { class: "display" }, hello), el("p", { class: "tagline" }, "Local Creative ", el("em", {}, "All in One"), " Studio"),
         el("p", { class: "creator" }, el("span", { class: "by" }, "by"), el("img", { src: "brand/keys-wasserman-neon.svg", alt: "Keys + Wasserman", width: 320, height: 37 })),
+        el("p", { class: "home-links" }, HOME_LINKS.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label))),
         el("p", { class: "sub", style: "margin:0" }, line + " Pictures, clips with sound, voices and score, made on your own machine.")),
       el("div", { class: "acts" }, el("button", { onclick: () => go("Production") }, "Plan a film"), el("button", { class: "ghost", onclick: palOpen }, "Search ", el("kbd", {}, "⌘K")))));
   put(wrap, hero, typeof connectNudge === "function" ? connectNudge("home") : null, homeComposer());
-  const starts = STARTS().filter(s => (look.start_cards || []).includes(s.id));
+  const starts = STARTS().filter(s => startShown(look, s.id));
   if (starts.length) put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Start something"), el("span", { class: "note" }, "Each opens the full form with sensible settings.")),
     el("div", { class: "cards startrow" }, starts.map(pcard)));
   const recent = el("div", { class: "strip2" }, el("div", { class: "note" }, "Loading recent takes…"));

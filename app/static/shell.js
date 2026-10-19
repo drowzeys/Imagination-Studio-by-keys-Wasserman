@@ -46,6 +46,7 @@ const ICON = {
   nodes: KIT("M8 10H22V22H8Z M34 34H48V46H34Z M34 8H48V20H34Z M22 16C30 16 26 40 34 40 M22 16H34 M15 22V40H34"),
   settings: KIT("M28 20A8 8 0 1 1 28 36A8 8 0 1 1 28 20Z M28 6V12 M28 44V50 M6 28H12 M44 28H50 M12.4 12.4L16.7 16.7 M39.3 39.3L43.6 43.6 M12.4 43.6L16.7 39.3 M39.3 16.7L43.6 12.4"),
   learn: KIT("M48 28A20 20 0 1 1 8 28A20 20 0 1 1 48 28Z M22.2 21.5A6.1 6.1 0 0 1 33.9 23.6C33.9 27.8 28.1 28.7 28.1 32.7 M28 40H28.1"),
+  about: SVG('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><path d="M12 7.7v.1"/>'),
   doc: SVG('<path d="M6 3.5h8.5L18 7v13.5H6z"/><path d="M14.5 3.5V7H18"/><path d="M9 11h6M9 14h6M9 17h4"/>'),
   update: SVG('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>'),
   search: SVG('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
@@ -81,6 +82,7 @@ function goHome() { if (tab !== "Home") go("Home"); }
 function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
 
 const shown = list => typeof roomsShown === "function" ? roomsShown(list) : list;
+const aboutOn = () => tab === "Settings" && typeof SET !== "undefined" && SET.section === "about";
 function renderShell() {
   const now = tab === "Home" ? null : roomOf(tab), live = jobs.some(j => j.status === "running");
   // Home first, under the brand and above the engines (phones keep Home in the top bar: studio.css)
@@ -88,10 +90,13 @@ function renderShell() {
     "aria-current": tab === "Home" ? "page" : false, onclick: () => go("Home") }, icon("home", "ic"), el("span", { class: "lbl" }, "Home"))];
   for (const g of GROUPS) { const rooms = shown(ROOMS.filter(x => x.group === g.id)); if (!rooms.length) continue;
     if (g.name) nav.push(el("div", { class: "grp g-" + g.id, role: "presentation" }, g.name));
-    for (const r of rooms) { const b = el("button", { class: now === r ? "on" : "", "data-room": r.id, "data-group": r.group, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
+    for (const r of rooms) { const b = el("button", { class: now === r && !(r.id === "settings" && aboutOn()) ? "on" : "", "data-room": r.id, "data-group": r.group, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
       icon(r.id, "ic"), el("span", { class: "lbl" + (r.name.length > 18 ? " long" : "") }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
       if (r.id === "video" && live && now !== r) b.prepend(el("span", { class: "live", "aria-label": "rendering" }));
-      nav.push(b); } }
+      nav.push(b);
+      // About has a button of its own under Settings: the credits, licences and links (Settings → About)
+      if (r.id === "settings") nav.push(el("button", { class: aboutOn() ? "on" : "", "data-room": "about", "data-group": "vaults", type: "button", title: "About: credits, licences and links",
+        "aria-current": aboutOn() ? "page" : false, onclick: () => { if (typeof goSettings === "function") goSettings("about"); else go("Settings"); } }, icon("about", "ic"), el("span", { class: "lbl" }, "About"))); } }
   // phones only (studio.css): the bar keeps the engines and folds the vaults, search and updates into More
   nav.push(el("button", { class: "more" + (now && now.group !== "engines" ? " on" : ""), "data-room": "more", type: "button", title: "More: the Agent, the Studio Vaults, search and updates", "aria-haspopup": "dialog", onclick: moreOpen },
     icon("more", "ic"), el("span", { class: "lbl" }, "More")));

@@ -3,7 +3,7 @@
 // tools it connects to, and what it is. Kept by the server in the studio folder's settings.json (app/settings.py);
 // the look is also kept in this browser so the next load paints with it before the server answers.
 const SET_DEFAULTS = {
-  appearance: { type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"] },
+  appearance: { type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], start_off: [] },
   layout: { hidden: [], order: [] },
   presets: { recipe: "quick", image_model: "qwen", seconds: 5, qa_gate: true, audio_rate: "keep", seed: "fixed", mode: "clip" },
   hermes_profile: "", hermes_command: "" };
@@ -58,7 +58,7 @@ const setRow = (title, one, control) => el("div", { class: "st-row" }, el("div",
 const setPanel = (title, line, ...kids) => el("section", { class: "panel st-panel" }, el("div", { class: "st-ph" }, el("h2", {}, title), line ? el("p", { class: "note m-flat" }, line) : null), ...kids);
 
 /* ---------- 1. Appearance ---------- */
-const START_NAMES = { clip: "A clip with sound", scout: "Scout, then animate", still: "A still", sharp: "Sharp Spec", long: "A long take", voice: "A voice line", song: "A song", agent: "Ask your agent" };
+const START_NAMES = { clip: "A clip with sound", scout: "Scout, then animate", still: "A still", sharp: "Sharp Spec", long: "A long take", voice: "A voice line", song: "A song", sfx: "Sound effects & foley", looks: "Looks", previs: "Previs", nodes: "Nodes", agent: "Ask your agent" };
 function setAppearance() { const a = prefs().appearance, put1 = patch => settingsSave({ appearance: patch }, true);
   return [setPanel("Appearance", "Applied as you choose, on this screen and every other one that opens the studio.",
     setRow("Type size", "Text and controls in the work area", setSeg(a.type_size, { comfortable: "Comfortable", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Type size")),
@@ -68,9 +68,10 @@ function setAppearance() { const a = prefs().appearance, put1 = patch => setting
       setSeg(a.accent, { amber: "Amber", cobalt: "Cobalt" }, v => put1({ accent: v }), "Accent")),
     setRow("Motion", "The breathing tally lights and hover moves", setSeg(a.motion, { system: "Follow the system", reduce: "Always reduce" }, v => put1({ motion: v }), "Motion"))),
   setPanel("Start cards on Home", "Which ways in sit under the composer. Six fill one row.",
-    el("div", { class: "chips st-chips" }, Object.entries(START_NAMES).map(([id, name]) => { const on = a.start_cards.includes(id);
+    el("div", { class: "chips st-chips" }, Object.entries(START_NAMES).map(([id, name]) => { const off = a.start_off || [], on = typeof startShown === "function" ? startShown(a, id) : a.start_cards.includes(id);
       return el("button", { type: "button", class: "toggle" + (on ? " on" : ""), "aria-pressed": on ? "true" : "false",
-        onclick: () => put1({ start_cards: on ? a.start_cards.filter(x => x !== id) : [...a.start_cards, id] }) }, el("span", { class: "dotl" + (on ? "" : " o") }), name); })))]; }
+        onclick: () => put1(on ? { start_cards: a.start_cards.filter(x => x !== id), start_off: [...off.filter(x => x !== id), id] }
+          : { start_cards: [...a.start_cards.filter(x => x !== id), id], start_off: off.filter(x => x !== id) }) }, el("span", { class: "dotl" + (on ? "" : " o") }), name); })))]; }
 
 /* ---------- 2. Studio layout ---------- */
 function setLayout() { const lay = prefs().layout, hidden = new Set(lay.hidden || []);
@@ -163,11 +164,15 @@ function setConnections() {
             el("button", { type: "button", class: "small", onclick: () => go("Import") }, "Open"))))) ]; }
 
 /* ---------- 5. About ---------- */
+// Keys and Wasserman Productions: their sites and code
+const ABOUT_LINKS = [["wassermanproductions.com", "https://wassermanproductions.com"], ["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"],
+  ["Keys on GitHub", "https://github.com/drowzeys"]];
 function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.about = { loading: true }; updRequest().then(d => { SET.about = d; if (tab === "Settings") render(); }, () => { SET.about = { error: true }; }); }
   const u = SET.about || {}, row = (k, v) => el("div", { class: "kv st-kv" }, el("span", {}, k), el("b", {}, v));
   return [setPanel("About", null,
     el("div", { class: "st-about" }, el("img", { src: "brand/ribbon-title-only-color.svg", alt: "Imagination Studio", width: 240, height: 83 }),
       el("img", { class: "st-credit", src: "brand/keys-wasserman-neon.svg", alt: "by Keys + Wasserman", width: 320, height: 37 })),
+    el("div", { class: "st-links" }, ABOUT_LINKS.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label))),
     row("Version", "Studio " + ((S && S.version) || "")), row("Commit", u.installed_commit || (u.loading ? "…" : "unknown")), row("Follows", [u.source, u.following || u.branch].filter(Boolean).join(" · ") || "—"),
     el("div", {}, el("button", { type: "button", onclick: () => go("Updates") }, u.available ? "An update is ready: Machine → Updates" : "Check for updates"))),
   setPanel("Credits", "The authors whose work the studio runs.",

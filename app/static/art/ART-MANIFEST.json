@@ -122,6 +122,14 @@
    "ready": true
   },
   {
+   "name": "start-sfx",
+   "file": "art/start-sfx.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Sound effects and foley: the Sound engine's card, the Home start card and the page's own picture",
+   "ready": true
+  },
+  {
    "name": "start-agent",
    "file": "art/start-agent.webp",
    "size": "1280x720",

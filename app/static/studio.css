@@ -921,3 +921,8 @@ nav#rooms .grp.g-engines::after, nav#rooms .grp.g-vaults::after { content:""; fl
 
 /* Wasserman's Filmmaker Suite: each app's maker and licence on its card */
 .su-txt .su-by { display:block; margin-top:4px; font:500 11.5px/1.3 var(--mono); color:var(--faint); letter-spacing:.02em; }
+
+/* Keys' and Wasserman Productions' links: under the credit on Home, and in Settings → About */
+.home-links, .st-links { display:flex; flex-wrap:wrap; gap:8px 14px; margin:0; }
+.home-links a, .st-links a { font:500 13.5px/1.3 var(--sans); color:var(--blue-text); text-decoration:none; border-bottom:1px solid rgba(92,155,255,.35); }
+.home-links a:hover, .st-links a:hover { color:var(--text); border-bottom-color:var(--text); }
