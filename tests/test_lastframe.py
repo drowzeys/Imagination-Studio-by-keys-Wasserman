@@ -18,7 +18,7 @@ import server  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-HOME = server.HOME  # the folder the server took when it was first imported (another test file may have been first)
+HOME = server.HOME.resolve()  # the server's own folder (another test file may have imported it first), as it gives paths (/private/var on a Mac)
 
 for name in ("renders", "uploads"):
     (HOME / name).mkdir(parents=True, exist_ok=True)
