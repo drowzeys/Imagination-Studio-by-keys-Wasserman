@@ -619,10 +619,11 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
     if backend == "hermes":
         # -z prints only the answer; a prompt too long for one argument goes on stdin to `chat --query-file -` instead
         if len(joined) < 100000:
-            done = run_cli([tool, *profile_args(), "-z", joined], "", host, timeout)
+            done = run_cli([tool, *profile_args(), "-z", joined, "-t", HERMES_ASK_TOOLSETS], "", host, timeout)
             reply = done.stdout.strip()
         else:
-            done = run_cli([tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json"], joined, host, timeout)
+            done = run_cli([tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json", "--toolsets", HERMES_ASK_TOOLSETS,
+                            "--max-turns", str(HERMES_TURNS)], joined, host, timeout)
             reply = hermes_events(done.stdout)[1].strip()
         if reply and not done.returncode:
             return reply
@@ -1277,6 +1278,8 @@ def toml_value(value) -> str:
     return json.dumps(value)  # a JSON string or list of strings is TOML too
 
 
+HERMES_TOOLSETS, HERMES_TURNS = "clarify,todo", 25  # its question card and its plan; a turn's tool calls at most
+HERMES_ASK_TOOLSETS = "todo"  # a brain's one answer (the Slate's First AD, a prompt's rewrite): no tool it could act with
 CLAUDE_FILES = json.dumps({"permissions": {"blockReadsOutsideWorkingDirectories": True}})
 
 
@@ -1295,7 +1298,10 @@ def harness_args(task: dict, tool: str, config_path: str, servers: dict, system:
             args += ["--resume", session] if session else ["--session-id", task["_session"]["id"]]
         return args
     if task["backend"] == "hermes":
-        args = [tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json"]
+        # in the room Hermes converses and plans (it drives no Studio tool): its toolsets are held to HERMES_TOOLSETS, so
+        # its terminal, browser, code execution, computer use and cron are off here whatever its own config enables
+        args = [tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json",
+                "--toolsets", HERMES_TOOLSETS, "--max-turns", str(HERMES_TURNS)]
         return args + (["--resume", session] if session else ["--continue", "imagination-" + task["thread"], "--create-if-missing"])
     # `codex exec resume` takes no --sandbox: the same sandbox goes as its config value
     args = ([tool, "exec", "resume", "--skip-git-repo-check", "--json", "-c", 'sandbox_mode="workspace-write"'] if session
