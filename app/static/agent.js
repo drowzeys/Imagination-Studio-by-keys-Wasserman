@@ -320,10 +320,17 @@ function agConversation(thread) {
     asking ? agQuestion(thread, last) : agComposer("next", AG.reply, v => { AG.reply = v; }, thread.live ? "Your agent is working. Write the next thing; it goes when this turn ends." : "Reply, or ask for the next thing…", "next", (thread.queued || []).length >= 3),
     agPicker(), el("div", { class: "agr-end" }));
 }
+// each harness that cannot start a conversation, said once and as it is: installed but signed out (or failing to start)
+// is not "not on this machine", which only one that was not found is
+function agWhyNot(missing) {
+  const said = {};
+  missing.forEach(b => { const st = agSignState(b), why = st ? (AG_NOT_SIGNED[st.state] || st.state).toLowerCase()
+    : b.error ? "not reached" : b.found || /^ssh:./.test(b.where || "") ? "not ready" : "not on this machine"; (said[why] = said[why] || []).push(b.label); });
+  return Object.entries(said).map(([why, names]) => names.join(" and ") + (names.length > 1 ? " are " : " is ") + why + ".").join(" "); }
 function agStart(missing) {
   return el("section", { class: "agr-convo", "aria-label": "New conversation" },
     agComposer("start", AG.prompt, v => { AG.prompt = v; }, "Describe the shot, the scene or the film. “Make a 10-second clip of a diner at night with rain on the window, then a sung sting under it.”", "start"),
-    missing.length ? el("div", { class: "note ag-hint" }, missing.map(b => b.label).join(" and ") + (missing.length > 1 ? " are" : " is") + " not on this machine. ", agSetup()) : null,
+    missing.length ? el("div", { class: "note ag-hint" }, agWhyNot(missing), " ", agSetup()) : null,
     agPicker(),
     el("div", { class: "suggest" }, AG_SUGGEST.map(([k, text]) => el("button", { onclick: () => { AG.prompt = text; if (/Blockout/.test(text)) AG.tools.add("blockout"); if (/Blender/.test(text)) AG.tools.add("blender"); if (/Studio|clip|still|sting/.test(text)) AG.tools.add("studio"); render(); } }, k))),
     el("div", { class: "agr-empty" }, "Your agent works through the Studio's own tools: stills, clips with sound, voice lines, songs and the timeline. When something matters (the length, the look, a voice, which take) it asks you here first."));

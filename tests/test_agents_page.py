@@ -155,3 +155,11 @@ def test_a_reply_goes_to_the_threads_own_agent():
     assert "Hermes" in out["bar"] and "Claude" not in out["bar"]
     assert out["sent"] == [{"text": "Shorter, please", "backend": "hermes", "attach": []}]  # no tools: the thread keeps its own
     assert "Queued" in out["queued"] and "And a title card" in out["queued"]
+
+
+def test_a_signed_out_agent_is_never_called_not_on_this_machine():
+    out = run(BRAINS + """
+      BR.status = { claude: { state: "signed_out" } };
+      out.said = agWhyNot(BR.data.backends.filter(b => ["claude", "codex", "gemini", "grok"].includes(b.id)));""")
+    assert "Claude Code is not signed in." in out["said"] and "Claude Code is not on this machine" not in out["said"]
+    assert "Gemini CLI is not on this machine." in out["said"] and "Grok CLI is not reached." in out["said"]
