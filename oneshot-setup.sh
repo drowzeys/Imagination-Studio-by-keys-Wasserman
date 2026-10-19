@@ -105,6 +105,15 @@ ok()  { echo "  ✓ $*"; }
 step(){ echo; echo "==> $*"; }
 # a weight that is not on disk: --verify stops there; --upgrade says so and goes on without fetching it
 absent() { [ "$MODE" != "--verify" ] || die "$1"; [ "$UPGRADE" = 1 ] || return 1; echo "  ! $1: --upgrade fetches no weights (run oneshot-setup.sh without it to add them)"; }
+# elsewhere PLACE...: before a download, what is already somewhere else on this machine is linked at PLACE instead
+# (app/discover.py: a symlink, nothing moved or copied; one scan, kept an hour)
+elsewhere() {
+  [ "$MODE" != "--verify" ] || return 0
+  local py="$PREFIX/venv/bin/python" said; [ -x "$py" ] || py=python3
+  said="$(PREFIX="$PREFIX" H3_MODEL_DIR="$H3_MODEL_DIR" QWEN_MODEL_DIR="$QWEN_MODEL_DIR" FASTH3_DIR="$FASTH3_DIR" \
+    "$py" "$HERE/app/discover.py" --scan --link --max-age 3600 --paths "$@" 2>/dev/null)" || return 0
+  [ -z "$said" ] || { echo "  found elsewhere on this machine, linking instead of downloading:"; echo "$said" | sed 's/^/    /'; }
+}
 
 step "Preflight"
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || die "Apple silicon macOS only"
@@ -182,6 +191,7 @@ print("  ✓ int8 tensor-unit kernels available" if mlp_int8.available() else " 
 EOF
 
 step "Qwen-Image-2.1-Turbo weights (33 GB) -> $QWEN_MODEL_DIR"
+[ -f "$QWEN_MODEL_DIR/transformer/diffusion_pytorch_model-00002-of-00002.safetensors" ] || elsewhere "$QWEN_MODEL_DIR"
 if [ ! -f "$QWEN_MODEL_DIR/transformer/diffusion_pytorch_model-00002-of-00002.safetensors" ] && ! absent "no Qwen-Image-2.1-Turbo weights at $QWEN_MODEL_DIR"; then
   echo "  Qwen-Image-2.1-Turbo is under the Qwen Research License Agreement: NON-COMMERCIAL use only. Read it first:"
   echo "  https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE"
@@ -206,6 +216,7 @@ if [ "$IMAGE_EDIT" = 1 ]; then
   # is fetched, and the text encoder, image coder and processor are Turbo's own, linked.
   BASE="${QWEN_BASE_DIR:-$(dirname "$QWEN_MODEL_DIR")/Qwen-Image-2.1}"
   step "Qwen-Image-2.1 base transformer (13 GB) -> $BASE"
+  [ -f "$BASE/transformer/diffusion_pytorch_model-00002-of-00002.safetensors" ] || elsewhere "$BASE"
   if [ ! -f "$BASE/transformer/diffusion_pytorch_model-00002-of-00002.safetensors" ] && ! absent "no Qwen-Image-2.1 base transformer at $BASE"; then
     echo "  Qwen-Image-2.1 is under the Qwen Research License Agreement: NON-COMMERCIAL use only. Read it first:"
     echo "  https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE"
@@ -245,6 +256,7 @@ if [ "$VIDEO" = 1 ]; then
   h3_ok() { ls "$H3_MODEL_DIR"/FL2VA/text_encoder/model-00014-of-00014.safetensors "$H3_MODEL_DIR"/FL2VA/audio_vae/model.safetensors \
               "$H3_MODEL_DIR"/FL2VA/video_vae/config.json "$H3_MODEL_DIR"/FL2VA/transformer/config.json >/dev/null 2>&1 \
             && { [ "$TURBO" = 0 ] || ls "$H3_MODEL_DIR"/FL2VA/transformer/model-00013-of-00013.safetensors >/dev/null 2>&1; }; }
+  h3_ok || elsewhere "$H3_MODEL_DIR"
   if ! h3_ok && ! absent "no H3 weights at $H3_MODEL_DIR"; then
     echo "  MiniMax H3 is under the MiniMax H3 Community License, which limits where it may be used. Read it first:"
     echo "  https://huggingface.co/MiniMaxAI/MiniMax-H3"
@@ -257,6 +269,7 @@ if [ "$VIDEO" = 1 ]; then
   if [ "$REF2VA" = 1 ]; then
     # Ref2VA is the same pipeline with another transformer: its text encoder and decoders are FL2VA's files, linked
     step "MiniMax H3 Ref2VA transformer (reference pictures to video, 62 GB) -> $H3_MODEL_DIR/Ref2VA"
+    [ -d "$H3_MODEL_DIR/Ref2VA/transformer" ] || elsewhere "$H3_MODEL_DIR/Ref2VA"
     if ! ls "$H3_MODEL_DIR"/Ref2VA/transformer/model-00013-of-00013.safetensors "$H3_MODEL_DIR"/Ref2VA/model_index.json >/dev/null 2>&1 && ! absent "no Ref2VA transformer at $H3_MODEL_DIR/Ref2VA"; then
       "$PREFIX/venv/bin/hf" download MiniMaxAI/MiniMax-H3 --include "Ref2VA/transformer/*" --include "Ref2VA/model_index.json" \
         --local-dir "$H3_MODEL_DIR"
@@ -267,6 +280,7 @@ if [ "$VIDEO" = 1 ]; then
       [ -e "$H3_MODEL_DIR/Ref2VA/$part" ] || die "$H3_MODEL_DIR/Ref2VA/$part is missing (a link to ../FL2VA/$part)"
     done
     REF_ADAPTER="$PREFIX/adapters/$REF_ADAPTER_NAME"
+    [ -f "$REF_ADAPTER" ] || elsewhere "$REF_ADAPTER"
     if [ ! -f "$REF_ADAPTER" ]; then
       if [ "$MODE" = "--verify" ] || [ "$UPGRADE" = 1 ]; then echo "  ! no Ref2VA Turbo adapter at $REF_ADAPTER: reference clips run their 20 passes"; else
         mkdir -p "$PREFIX/adapters/h3-ref2v"
@@ -283,6 +297,7 @@ if [ "$VIDEO" = 1 ]; then
   if [ "$TURBO" = 1 ]; then
     step "Video Turbo adapter (lightx2v v1.0, runner layout, 1.96 GB)"
     H3_ADAPTER="$PREFIX/adapters/$H3_ADAPTER_NAME"
+    [ -f "$H3_ADAPTER" ] || elsewhere "$H3_ADAPTER"
     if [ ! -f "$H3_ADAPTER" ] && ! absent "no video Turbo adapter at $H3_ADAPTER"; then
       curl -L --fail --retry 3 -C - -o "$H3_ADAPTER.partial" "$H3_ADAPTER_URL"
       echo "$H3_ADAPTER_SHA256  $H3_ADAPTER.partial" | shasum -a 256 -c - >/dev/null || die "video Turbo adapter checksum mismatch"
@@ -293,6 +308,7 @@ if [ "$VIDEO" = 1 ]; then
 
   step "2x video decoder (MiniMax-H3-X2-Detail-VAE, 5.2 GB)"
   X2_VAE="$PREFIX/adapters/$X2_NAME"
+  [ -f "$X2_VAE" ] || elsewhere "$X2_VAE"
   if [ ! -f "$X2_VAE" ] && ! absent "no 2x video decoder at $X2_VAE"; then
     "$PREFIX/venv/bin/hf" download "$X2_REPO" "$X2_NAME" LICENSE NOTICE --local-dir "$PREFIX/adapters/h3-x2" >/dev/null
     echo "$X2_SHA256  $PREFIX/adapters/h3-x2/$X2_NAME" | shasum -a 256 -c - >/dev/null || die "2x video decoder checksum mismatch"
@@ -302,6 +318,7 @@ if [ "$VIDEO" = 1 ]; then
 
   if true; then
     step "FastH3 8-Step V2 transformer (70 GB) -> $FASTH3_DIR"
+    [ -d "$FASTH3_DIR/transformer" ] || elsewhere "$FASTH3_DIR"
     if ! ls "$FASTH3_DIR"/transformer/diffusion_pytorch_model-00014-of-00014.safetensors >/dev/null 2>&1 \
        && [ ! -f "$FASTH3_DIR/transformer-q8/q8.json" ] && ! absent "no FastH3 transformer at $FASTH3_DIR"; then
       echo "  FastH3 is a derivative of MiniMax H3 under the MiniMax H3 Community License. Read it first:"

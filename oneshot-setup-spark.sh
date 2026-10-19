@@ -147,12 +147,25 @@ fi
 "$PY" -c "import comfy_kitchen, aiohttp, fastapi, uvicorn, PIL" || die "the environment is missing packages"
 ok "ComfyUI and its requirements"
 
+# elsewhere PLACE...: before a download, what is already somewhere else on this machine is linked at PLACE instead
+# (app/discover.py: a symlink, nothing moved or copied; one scan, kept an hour)
+elsewhere() {
+  [ "$VERIFY" = 0 ] || return 0
+  local py="$PREFIX/venv/bin/python" said; [ -x "$py" ] || py=python3
+  said="$(PREFIX="$PREFIX" SPARK_MODELS="$MODELS" "$py" "$HERE/app/discover.py" --scan --link --max-age 3600 --paths "$@" 2>/dev/null)" || return 0
+  [ -z "$said" ] || { echo "  found elsewhere on this machine, linking instead of downloading:"; echo "$said" | sed 's/^/    /'; }
+}
+
 # fetch <repo> <folder under $MODELS> <file in the repo>...: download what is not there yet
 fetch() {
   local repo="$1" folder="$2" missing=(); shift 2
   for file in "$@"; do [ -s "$MODELS/$folder/$file" ] || missing+=("$file"); done
   [ ${#missing[@]} = 0 ] && return 0
   [ "$VERIFY" = 0 ] || die "missing in $MODELS/$folder: ${missing[*]}"
+  local file found=(); for file in "${missing[@]}"; do found+=("$MODELS/$folder/$file"); done
+  elsewhere "${found[@]}"
+  missing=(); for file in "$@"; do [ -s "$MODELS/$folder/$file" ] || missing+=("$file"); done
+  [ ${#missing[@]} = 0 ] && return 0
   if [ "$UPGRADE" = 1 ]; then echo "  ! missing in $MODELS/$folder: ${missing[*]}: --upgrade fetches no weights (run oneshot-setup-spark.sh without it)"; return 0; fi
   "$PREFIX/venv/bin/hf" download "$repo" "${missing[@]}" --local-dir "$MODELS/$folder" >/dev/null
   for file in "${missing[@]}"; do [ -s "$MODELS/$folder/$file" ] || die "$file did not download"; done

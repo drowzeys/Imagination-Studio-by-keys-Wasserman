@@ -1082,6 +1082,12 @@ Qwen-Image-2.1-Turbo 31 GB, the 2x decoder 6 GB, Python environment 1.3 GB). `--
 (MiniMax H3's transformer 62 GB and the Turbo adapter 2 GB). The Studio's own code and the native engine are a few
 megabytes. On an M1 to M4 the setup also writes the 8-bit FastH3 weights (37 GB); `Q8_ONLY=1` then deletes the
 65 GB they were made from. If you run it on another machine, a report of the chip, memory and times is welcome as an issue.
+Before each download the setup searches this machine for the same weights, models and LoRAs, and a copy it finds
+elsewhere (another folder, a disk, a Hugging Face cache) is linked where the Studio looks instead of being downloaded
+again (`python3 app/discover.py --scan` shows the table; nothing is moved or copied). The Studio itself searches again
+shortly after every start, on a Mac and on a DGX Spark alike, with nothing to configure, and links what it can prove is
+the same file. **Machine → Models & weights** lists what it found, what it linked and what still needs a download or a
+conversion, with *Use it* and *Unlink*.
 
 ```bash
 brew install python@3.11 uv ffmpeg
