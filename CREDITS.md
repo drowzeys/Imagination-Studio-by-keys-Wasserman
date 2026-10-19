@@ -235,6 +235,22 @@ of this pack's scripts. No code is shared; theirs is the far more complete tool.
 **ddalcu**'s **mlx-serve** showed how to make 30 steps cost nine: a velocity cache and attention reuse with careful
 gates. The engine pinned here carries an adaptation of it; it is not yet enabled in this pack's scripts.
 
+## The agents and brains you connect: their makers
+
+The studio drives the coding agents and model servers you already use, each with your own sign-in or on your own
+machine; none of their code ships in this pack.
+
+- **Anthropic** — **Claude Code**.
+- **OpenAI** — **Codex** (the CLI, and the copy the ChatGPT desktop app carries).
+- **Google** — **Gemini CLI**.
+- **xAI** — **Grok CLI**.
+- **Nous Research** — **Hermes Agent**.
+- **Ollama**, **LM Studio**, **vLLM** and **llama.cpp** (Georgi Gerganov and the ggml contributors) — the local model
+  servers a brain may be.
+- **Siddharth Ahuja** — **blender-mcp**, the Blender bridge an agent works through; the **Blender Foundation** —
+  **Blender**.
+- The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
+
 ## Platform and tools
 
 - **Apple / ml-explore** — **MLX**, and the Metal 4 tensor operations on M5.
@@ -243,6 +259,14 @@ gates. The engine pinned here carries an adaptation of it; it is not yet enabled
 - **Kijai**, **DeepBeepMeep**, **ddalcu** — the ComfyUI conversions, pruned checkpoints and MLX quants that the
   wider H3 ecosystem (and Phosphene's install) relies on.
 - **FFmpeg**.
+- **OpenAI** — **Whisper**, and **SYSTRAN** — **faster-whisper**: the QA gate's and Voice's check of the spoken words.
+- **yt-dlp** contributors — Motion Previs reading a shot from a link.
+- **PyTorch**; **Hugging Face** — **diffusers**, **transformers** and **huggingface_hub**; **Patrick Kidger** and
+  **Xuechen Li** — **torchsde**.
+- **Comfy Org** — **ComfyUI**, which every render on a DGX Spark runs through.
+- **Sebastián Ramírez** — **FastAPI**; **Encode** — **Starlette** and **Uvicorn**: the web app.
+- **The Geist Project Authors** — **Geist** and **Geist Mono**; **The Instrument Serif Project Authors** — **Instrument
+  Serif** (SIL Open Font License, `app/static/fonts/`).
 
 ## Test prompts
 
