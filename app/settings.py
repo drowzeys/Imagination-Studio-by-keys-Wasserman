@@ -5,7 +5,9 @@ command. Kept in $STUDIO_HOME/settings.json, written whole and atomically.
     POST /api/settings   a partial settings object, merged in; every key is checked and an unknown one is refused (400)
 
 Nothing here is a secret and nothing secret is ever accepted: sign-ins stay the CLIs' own, a local model server is an
-address (Brains: /api/brains/settings). The write goes through server.py's WriteGuard like every other POST.
+address (Brains: /api/brains/settings). The write goes through server.py's WriteGuard like every other POST; a write
+that sets the Hermes keys must also come from this computer or its Tailscale address (agents.local), as the brains
+routes, since agents.py runs that program with the user's sign-ins.
 agents.py reads ``hermes_profile`` and ``hermes_command`` from the same file; ``job_env`` hands the delivery sound rate
 to the jobs the app launches (DELIVERY_AUDIO_RATE, spark/video.sh)."""
 
@@ -19,7 +21,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 HOME: Path | None = None
 lock = threading.Lock()
@@ -50,6 +52,8 @@ CHOICES = {
     ("presets", "mode"): ("clip", "picture", "voice", "song"),
 }
 FLAGS = {("appearance", "glow"), ("appearance", "poster"), ("presets", "qa_gate")}
+# what the Agent room runs with the user's sign-ins: set from this computer or its Tailscale address only (agents.local)
+LOCAL_ONLY = ("hermes_command", "hermes_profile")
 
 
 def schema() -> dict:
@@ -112,6 +116,15 @@ def check_top(key: str, value):
     raise HTTPException(400, f"{key} is not a setting")
 
 
+def runnable(command: str) -> str:
+    """A Hermes command as it is saved: the full, plain path of a program file this user may run (agents.py runs it as
+    it is, never through a shell). Checked when it is set, not when the file is read back."""
+
+    if command and (os.path.normpath(command) != command or not os.path.isfile(command) or not os.access(command, os.X_OK)):
+        raise HTTPException(400, "hermes_command is the full path of the hermes program on this computer, and it must be a program it can run")
+    return command
+
+
 def merge(now: dict, body: dict) -> dict:
     if not isinstance(body, dict):
         raise HTTPException(400, "settings are an object")
@@ -124,6 +137,8 @@ def merge(now: dict, body: dict) -> dict:
                 out[key][sub] = check_one(key, sub, one)
         else:
             out[key] = check_top(key, value)
+            if key == "hermes_command":
+                out[key] = runnable(out[key])
     return out
 
 
@@ -182,7 +197,10 @@ def attach(home: Path) -> APIRouter:
         return {"settings": load(), "defaults": DEFAULTS, "schema": schema()}
 
     @router.post("/api/settings")
-    def post_settings(body: dict) -> dict:
+    def post_settings(body: dict, request: Request) -> dict:
+        if isinstance(body, dict) and any(key in body for key in LOCAL_ONLY):
+            import agents  # noqa: PLC0415  (agents.py reads this module's file; imported here, not at the top)
+            agents.local(request, True)  # the program Hermes runs as, and its profile: as the brains routes, this computer only
         return {"settings": save(body)}
 
     return router

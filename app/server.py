@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -26,7 +28,8 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -202,30 +205,83 @@ async def update_maintenance(request, call_next):
 # ---------- requests that change something: from the Studio's own page, and not too large ----------
 
 WRITES = ("POST", "PUT", "PATCH", "DELETE")
-JSON_LIMIT = int(float(os.environ.get("STUDIO_JSON_MB", "1")) * (1 << 20))       # a JSON body
+JSON_LIMIT = int(float(os.environ.get("STUDIO_JSON_MB", "1")) * (1 << 20))       # any body but a file upload
 UPLOAD_LIMIT = int(float(os.environ.get("STUDIO_UPLOAD_MB", "512")) * (1 << 20))  # one file sent to /api/upload
+# a production pack or a suite file brought in (a .zip of clips): the suite's own cap per file was 2 GB already
+ARCHIVE_LIMIT = int(float(os.environ.get("STUDIO_ARCHIVE_MB", "2048")) * (1 << 20))
+# the routes that take a file (multipart), each with its own limit; every other write is held to JSON_LIMIT, whatever its type
+UPLOAD_ROUTES = {"/api/upload": "UPLOAD_LIMIT", "/api/motion/packs/import": "ARCHIVE_LIMIT", "/api/suite/import": "ARCHIVE_LIMIT"}
+TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+# this machine's own names (learn_own_names), learned once in the background: None until then
+OWN: dict = {"labels": None, "tailnet": None}
+
+
+def learn_own_names() -> dict:
+    """This computer's names, for trusted_host (OWN): its host name, its Bonjour name (macOS) and its Tailscale name. Each
+    tool is asked once, with a short time limit; one that is missing or does not answer is left out."""
+
+    labels = {socket.gethostname().split(".")[0].lower()}
+    tailnet = None
+    asks = [["scutil", "--get", "LocalHostName"]] if sys.platform == "darwin" else []
+    tailscale = shutil.which("tailscale") or (TAILSCALE_APP if os.access(TAILSCALE_APP, os.X_OK) else None)
+    for ask in asks:
+        try:
+            said = subprocess.run(ask, capture_output=True, text=True, timeout=2).stdout.strip().lower()
+            if said:
+                labels.add(said)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if tailscale:
+        try:
+            said = subprocess.run([tailscale, "status", "--json", "--peers=false"], capture_output=True, text=True, timeout=3)
+            me = (json.loads(said.stdout or "{}").get("Self") or {}) if said.returncode == 0 else {}
+            dns = str(me.get("DNSName") or "").rstrip(".").lower()
+            if dns.endswith(".ts.net") and dns.count(".") >= 3:
+                labels.add(dns.split(".")[0])
+                tailnet = dns.split(".", 1)[1]  # e.g. tail1234.ts.net: the names of this tailnet
+            if me.get("HostName"):
+                labels.add(str(me["HostName"]).lower())
+        except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+            pass
+    return {"labels": {one for one in labels if one}, "tailnet": tailnet}
+
+
+threading.Thread(target=lambda into=OWN: into.update(learn_own_names()), daemon=True, name="own-names").start()
 
 
 def trusted_host(host: str) -> bool:
-    """Whether a request's Host is one a page from elsewhere cannot point at this app (DNS rebinding): this computer's
-    names, an address written as numbers, a Tailscale name, a name of this network (one word, or .local), or one
-    named in STUDIO_ALLOWED_HOSTS (comma-separated). The app is opened to a LAN with HOST=0.0.0.0, so a LAN address
-    stays allowed; a public name that could resolve to this machine is not."""
+    """Whether a request's Host is one a page from elsewhere cannot point at this app (DNS rebinding): localhost, an
+    address written as numbers (the app is opened to a LAN with HOST=0.0.0.0, so a LAN or tailnet address stays
+    allowed), this computer's own names (one word, or .local), a Tailscale name, or one named in STUDIO_ALLOWED_HOSTS
+    (comma-separated). A public name that could resolve to this machine is refused.
+
+    A .local name must be this computer's own once its names are learned (learn_own_names, a few seconds after start):
+    anyone on the LAN can announce one. A one-word name must be too, where Tailscale answered with this computer's
+    name on the tailnet (its MagicDNS short name); without Tailscale to ask, a one-word name is taken as before. Any
+    *.ts.net name is taken, as by the agents' and the updater's own checks: those names are given out by Tailscale
+    and resolve to tailnet addresses only, so a page cannot point one at this machine."""
 
     try:
-        name = (urlsplit("//" + host).hostname or "").rstrip(".")
+        name = (urlsplit("//" + host).hostname or "").rstrip(".").lower()
     except ValueError:
         return False
     if not name:
         return False
-    if name in ("localhost", "testserver") or name.endswith((".ts.net", ".local", ".localhost")) or "." not in name:
+    if name in ("localhost", "testserver") or name.endswith(".localhost"):
         return True
     try:
         ipaddress.ip_address(name)
         return True
     except ValueError:
         pass
-    return name in {one.strip().lower() for one in os.environ.get("STUDIO_ALLOWED_HOSTS", "").split(",") if one.strip()}
+    if name in {one.strip().lower() for one in os.environ.get("STUDIO_ALLOWED_HOSTS", "").split(",") if one.strip()}:
+        return True
+    labels, tailnet = OWN["labels"], OWN["tailnet"]
+    if name.endswith(".local"):
+        return labels is None or name[:-len(".local")] in labels
+    if "." not in name:
+        return labels is None or tailnet is None or name in labels
+    return name.endswith(".ts.net")
 
 
 def refused(request_headers: dict) -> str:
@@ -249,24 +305,31 @@ class TooLarge(Exception):
 
 
 class WriteGuard:
-    """Every POST, PUT, PATCH and DELETE under /api/: refused (403) when a page of another site sent it, and refused
-    (413) when its body is over the limit: JSON_LIMIT for JSON, UPLOAD_LIMIT for /api/upload. A request without an
-    Origin (curl, scripts, the workers' own calls) passes the Origin test; /api/updates keeps its own, stricter one."""
+    """Every request, reads included: refused (403) when its Host is not one of this computer's (trusted_host: a page
+    that rebinds its own name to this machine could otherwise read the Library, the jobs' prompts and the settings).
+    Every POST, PUT, PATCH and DELETE under /api/ besides: refused (403) when a page of another site sent it, and
+    refused (413) when its body is over the limit, whatever its Content-Type: the routes that take a file have their
+    own (UPLOAD_ROUTES), every other is held to JSON_LIMIT. A request without an Origin (curl, scripts, the workers' own
+    calls) passes the Origin test; /api/updates keeps its own, stricter one."""
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["method"] not in WRITES or not scope["path"].startswith("/api/"):
+        if scope["type"] not in ("http", "websocket"):
             return await self.app(scope, receive, send)
         headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope["headers"]}
+        if not trusted_host(headers.get("host", "")):
+            if scope["type"] == "websocket":
+                return await send({"type": "websocket.close", "code": 1008})
+            return await JSONResponse({"error": "Open the Studio by this computer's name, its address or its Tailscale name (STUDIO_ALLOWED_HOSTS adds another)."},
+                                      status_code=403)(scope, receive, send)
+        if scope["type"] != "http" or scope["method"] not in WRITES or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
         why = refused(headers)
         if why:
             return await JSONResponse({"error": why}, status_code=403)(scope, receive, send)
-        kind = headers.get("content-type", "").split(";")[0].strip().lower()
-        limit = UPLOAD_LIMIT if scope["path"] == "/api/upload" else JSON_LIMIT if kind == "application/json" else None
-        if limit is None:
-            return await self.app(scope, receive, send)
+        limit = globals()[UPLOAD_ROUTES.get(scope["path"].rstrip("/"), "JSON_LIMIT")]  # read here: a test may change one
         too_large = JSONResponse({"error": f"this is over the {limit / (1 << 20):g} MB a request may carry here"}, status_code=413)
         try:
             if int(headers.get("content-length") or 0) > limit:
@@ -310,12 +373,27 @@ def accepting_jobs():
 
 
 def inside(path: str | Path) -> Path:
-    """A path under the studio folder, or 400."""
+    """A path under the studio folder, or 400: never one with a null byte, and never in or of a hidden folder or file
+    (a part that starts with "."): .studio-agents holds the agents' tools and threads, .studio-updates the updater's."""
 
-    resolved = (HOME / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
-    if HOME.resolve() not in (resolved, *resolved.parents):
+    if "\0" in str(path):
+        raise HTTPException(400, "a path has no null byte")
+    try:
+        resolved = (HOME / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    except (OSError, ValueError, RuntimeError):
+        raise HTTPException(400, "not a path")
+    home = HOME.resolve()
+    if home not in (resolved, *resolved.parents):
         raise HTTPException(400, "path is outside the studio folder")
+    if hidden(resolved.relative_to(home)):
+        raise HTTPException(400, "hidden files of the studio folder are not served or used")
     return resolved
+
+
+def hidden(relative_path: Path | str) -> bool:
+    """Whether a path under the studio folder is in or of a hidden folder or file."""
+
+    return any(part.startswith(".") for part in Path(relative_path).parts)
 
 
 def relative(path: Path) -> str:
@@ -1574,8 +1652,38 @@ def state() -> dict:
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
 
 
+def numbers(body: dict, keys: tuple) -> dict:
+    """The body with each of ``keys`` that is given read as a number (references as a whole one): 400 with the name of
+    the first that is not, never a 500."""
+
+    out = dict(body)
+    for key in keys:
+        value = body.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                raise ValueError
+            number = float(value)
+            if not math.isfinite(number) or (key == "references" and (number < 0 or number != int(number))):
+                raise ValueError
+        except ValueError:
+            raise HTTPException(400, f"{key} is {'a whole number' if key == 'references' else 'a number'}")
+        out[key] = int(number) if key == "references" else number
+    return out
+
+
+def plain_fields(body: dict) -> dict:
+    """The composer's form, checked before it is read: fields is an object, the counts are numbers."""
+
+    if not isinstance(body.get("fields", {}), dict):
+        raise HTTPException(400, "fields is an object of the shot's words")
+    return numbers(body, ("references", "seconds"))
+
+
 @app.post("/api/compose")
 def compose_prompt(body: dict) -> dict:
+    body = plain_fields(body)
     if body.get("references") or body.get("referenced"):
         # a picked LoRA with its own caption style (Character Swap, Lineart Anime, Keyframe Animation) writes the prompt
         own = lora_flows.compose(body.get("loras") or (body.get("fields") or {}).get("loras"), body.get("fields", {}))
@@ -1605,6 +1713,12 @@ def estimate_time(body: dict) -> dict:
     """The time a clip is expected to take (None where none was measured) and, on a DGX Spark, whether it fits the
     machine's memory: {"fits", "reason", "need_mb", ...} from spark/memory_guard.py, shown before the job is queued."""
 
+    body = numbers(body, ("seconds", "references"))
+    if body.get("frames") not in (None, ""):
+        try:
+            lengths.of({"frames": body["frames"]})
+        except ValueError as error:
+            raise HTTPException(400, str(error))
     room = None
     if SPARK and float(body.get("seconds") or 5) <= LONGEST + 1:
         try:
@@ -1813,6 +1927,15 @@ def take_frame(body: dict) -> dict:
     if not media_tools()["ffmpeg"]:
         raise HTTPException(400, f"taking a frame of a clip needs ffmpeg, which is not installed on this machine: {FFMPEG_HOW}")
     at = body.get("at", "last")
+    if at not in ("last", "first") and (isinstance(at, bool) or not isinstance(at, (int, float, str))):
+        raise HTTPException(400, 'at is "first", "last" or a number of seconds into the clip')
+    if isinstance(at, str) and at not in ("last", "first"):
+        try:
+            at = float(at)
+        except ValueError:
+            raise HTTPException(400, 'at is "first", "last" or a number of seconds into the clip')
+    if isinstance(at, float) and not math.isfinite(at):
+        raise HTTPException(400, 'at is "first", "last" or a number of seconds into the clip')
     name = f"{source.stem[:40]}_{'last' if at == 'last' else 'first' if at == 'first' else str(at).replace('.', 's')}_{uuid.uuid4().hex[:6]}.png"
     target = HOME / "uploads" / name
     try:
@@ -1840,7 +1963,7 @@ def library() -> list[dict]:
                           ("uploads", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")), ("projects", (".mp4",)), ("slate", (".mp4",)),
                           ("agent", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov"))):
         for path in (HOME / folder).rglob("*"):
-            if path.suffix.lower() in kinds and path.is_file():
+            if path.suffix.lower() in kinds and not hidden(path.relative_to(HOME)) and path.is_file():
                 found.append({"path": relative(path), "kind": "video" if path.suffix.lower() in (".mp4", ".mov")
                               else "image", "folder": folder, "modified": path.stat().st_mtime,
                               "size": path.stat().st_size})
@@ -2037,17 +2160,37 @@ def wait(ms: int = 1000):
     return JSONResponse({"waited": ms})
 
 
+# what an agent's harness wrote while it worked (the whole transcript, its errors, its tool servers): this computer only
+AGENT_RECORDS = ("stderr.txt", "stream.jsonl", "log.txt", "mcp.json")
+
+
 @app.get("/files/{path:path}")
-def files(path: str):
+def files(path: str, request: Request):
+    if "\0" in path or hidden(path):
+        raise HTTPException(404, "no such file")
     target = inside(path)
     if not target.is_file():
         raise HTTPException(404, "no such file")
+    parts = target.relative_to(HOME.resolve()).parts
+    if parts[0] == "agent" and parts[-1] in AGENT_RECORDS:
+        agents.local(request)
     return FileResponse(target)
 
 
 @app.exception_handler(HTTPException)
 async def errors(_, error: HTTPException):
     return JSONResponse({"error": error.detail}, status_code=error.status_code)
+
+
+@app.exception_handler(RequestValidationError)
+async def malformed(_, error: RequestValidationError):
+    """A body or parameter FastAPI could not read: said plainly, with where it was wrong, and never with what was sent
+    (FastAPI's own answer echoes the whole body back)."""
+
+    where = [".".join(str(part) for part in one.get("loc", ())[:4])[:80] for one in error.errors()[:5]]
+    said = [str(one.get("msg") or "")[:120] for one in error.errors()[:5]]
+    return JSONResponse({"error": "this request is not what the route takes: " + "; ".join(f"{w}: {m}" for w, m in zip(where, said)),
+                         "detail": [{"loc": w, "msg": m} for w, m in zip(where, said)]}, status_code=422)
 
 
 import lineart  # noqa: E402  (a line-art copy of a clip, for a line-art LoRA)

@@ -75,11 +75,38 @@ def test_anything_outside_the_schema_is_refused_and_nothing_is_written(fresh, bo
     assert not fresh.exists()
 
 
-def test_the_hermes_keys_are_the_ones_agents_reads(fresh):
-    reply = client.post("/api/settings", json={"hermes_profile": "studio", "hermes_command": "/usr/local/bin/hermes"})
+def a_program(tmp_path, mode=0o755) -> str:
+    program = tmp_path / "hermes"
+    program.write_text("#!/bin/sh\nexit 0\n")
+    program.chmod(mode)
+    return str(program)
+
+
+def test_the_hermes_keys_are_the_ones_agents_reads(fresh, tmp_path):
+    command = a_program(tmp_path)
+    reply = client.post("/api/settings", json={"hermes_profile": "studio", "hermes_command": command})
     assert reply.status_code == 200
     saved = json.loads(fresh.read_text())
-    assert saved["hermes_profile"] == "studio" and saved["hermes_command"] == "/usr/local/bin/hermes"
+    assert saved["hermes_profile"] == "studio" and saved["hermes_command"] == command
+
+
+def test_hermes_command_is_a_program_this_computer_can_run(fresh, tmp_path):
+    for command in (str(tmp_path / "missing"), str(tmp_path), a_program(tmp_path, 0o644), str(tmp_path / "x" / ".." / "hermes")):
+        reply = client.post("/api/settings", json={"hermes_command": command})
+        assert reply.status_code == 400 and "hermes_command" in reply.json()["error"], (command, reply.text)
+    assert not fresh.exists()
+    assert client.post("/api/settings", json={"hermes_command": ""}).status_code == 200  # cleared: the one on PATH
+
+
+def test_the_hermes_keys_are_set_from_this_computer_only(fresh, tmp_path):
+    """The program the Agent room runs with the user's sign-ins: a LAN client (HOST=0.0.0.0) cannot set it."""
+    away = TestClient(server.app, client=("192.168.1.50", 50000))
+    for body in ({"hermes_command": a_program(tmp_path)}, {"hermes_profile": "studio"}, {"appearance": {"glow": False}, "hermes_command": "/bin/sh"}):
+        reply = away.post("/api/settings", json=body)
+        assert reply.status_code == 403, (body, reply.text)
+    assert not fresh.exists()
+    assert away.post("/api/settings", json={"appearance": {"glow": False}}).status_code == 200  # the look is anyone's on the page
+    assert client.post("/api/settings", json={"hermes_profile": "studio"}).status_code == 200
 
 
 def test_a_page_of_another_site_cannot_change_settings(fresh):
