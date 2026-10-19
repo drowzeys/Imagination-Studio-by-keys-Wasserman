@@ -2,7 +2,7 @@
 
 A recipe says where a LoRA's file comes from and how it is used: its trigger word, the phrases that pick one of its
 looks, the strength it was made for. The presets that ship with the pack are in lora-presets.json beside this file;
-recipes a user adds are kept in ~/TensorFoldStudio/loras/hub.json. No weights ship with the pack: a LoRA's file is
+recipes a user adds are kept in ~/ImaginationStudio/loras/hub.json. No weights ship with the pack: a LoRA's file is
 downloaded from its author's own page when the user installs it, under that file's own licence.
 
 A preset also says where it sits in the hub (`category`, one or two of GROUPS), what kind of clip it is for (`needs`)
@@ -29,6 +29,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from studio_home import studio_home
 
 from fastapi import APIRouter, HTTPException
 
@@ -158,7 +160,7 @@ def bundle() -> str:
     named = os.environ.get("LORA_BUNDLE", "").strip()
     if named:
         return named.rstrip("/")
-    local = Path(os.environ.get("STUDIO_HOME", str(Path.home() / "TensorFoldStudio"))) / "lora-bundle"
+    local = studio_home() / "lora-bundle"
     return str(local) if local.is_dir() else ""
 
 
@@ -509,7 +511,7 @@ def main(argv: list[str]) -> int:
     if unknown:
         print("no LoRA group " + ", ".join(sorted(unknown)), file=sys.stderr)
         return 2
-    folder = Path(os.environ.get("STUDIO_HOME", str(Path.home() / "TensorFoldStudio"))) / "loras"
+    folder = studio_home() / "loras"
     folder.mkdir(parents=True, exist_ok=True)
     failed = 0
     for recipe in json.loads(PRESETS.read_text()):

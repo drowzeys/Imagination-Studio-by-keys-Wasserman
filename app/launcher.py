@@ -12,12 +12,13 @@ import uuid
 from pathlib import Path
 from urllib.request import ProxyHandler, build_opener
 
+from studio_home import studio_home
 from updates import Manager, UpdateError, apply_stopped, rollback, write_json, git
 
 
 def main() -> int:
     pack = Path(__file__).resolve().parent.parent
-    home = Path(os.environ.get("STUDIO_HOME", Path.home() / "TensorFoldStudio"))
+    home = studio_home(move=True)
     manager = Manager(pack, home, None, lambda: False)
     # Lock the checkout across launchers, even when two installations use different Studio homes or ports.
     lock_path = Path(git(pack, "rev-parse", "--git-path", "studio-launcher.lock"))

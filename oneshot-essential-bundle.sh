@@ -7,7 +7,7 @@
 #   bash oneshot-essential-bundle.sh                                  # everything (about 4 GB), then install into the hub
 #   bash oneshot-essential-bundle.sh --categories camera,style        # some groups: wasserman camera transform character motion style finish fun
 #   bash oneshot-essential-bundle.sh --only camera-motion,anime-slider
-#   bash oneshot-essential-bundle.sh --dest /Volumes/Drive/lora-bundle   # where the bundle is kept (default ~/TensorFoldStudio/lora-bundle)
+#   bash oneshot-essential-bundle.sh --dest /Volumes/Drive/lora-bundle   # where the bundle is kept (default ~/ImaginationStudio/lora-bundle)
 #   bash oneshot-essential-bundle.sh --source /Volumes/Drive/lora-bundle # take the files from another copy of a bundle (or LORA_BUNDLE=...)
 #   bash oneshot-essential-bundle.sh --verify --json                  # check what is there, fetch nothing, one JSON summary
 #   bash oneshot-essential-bundle.sh --dry-run                        # what would be fetched, and its size
@@ -34,14 +34,14 @@ done
 PKG_BASE="https://huggingface.co/drowzeys/keys-studio-lora-essential/resolve/main"
 PKG_FILE="keys-studio-lora-essential-$([ "$(uname -s)" = Darwin ] && echo mac || echo spark)-2026-10-13-r3.tar"
 case " ${ARGS[*]-} " in *" --package"*|*" --source"*|*" --make-package"*|*" --verify "*|*" --dry-run "*) ;; *)
-  if [ "${LORA_PACKAGE:-}" != none ] && [ -z "${LORA_BUNDLE:-}" ] && [ ! -e "${DEST:-${STUDIO_HOME:-$HOME/TensorFoldStudio}/lora-bundle}/package.json" ]; then
+  if [ "${LORA_PACKAGE:-}" != none ] && [ -z "${LORA_BUNDLE:-}" ] && [ ! -e "${DEST:-${STUDIO_HOME:-$([ -d "$HOME/TensorFoldStudio" ] && [ ! -e "$HOME/ImaginationStudio" ] && echo "$HOME/TensorFoldStudio" || echo "$HOME/ImaginationStudio")}/lora-bundle}/package.json" ]; then
     ARGS+=(--package "${LORA_PACKAGE:-$PKG_BASE/$PKG_FILE}")
   fi;; esac
 PY="$PREFIX/venv/bin/python"; [ -x "$PY" ] || PY="$(command -v python3)" || { echo "python3 is needed" >&2; exit 2; }
 "$PY" "$HERE/scripts/lora-bundle.py" ${ARGS[@]+"${ARGS[@]}"}; RC=$?
 [ $RC -le 1 ] || exit $RC
 if [ "$INSTALL" = 1 ] && [ "$CHECK" = 0 ]; then
-  DEST="${DEST:-${STUDIO_HOME:-$HOME/TensorFoldStudio}/lora-bundle}"
+  DEST="${DEST:-${STUDIO_HOME:-$([ -d "$HOME/TensorFoldStudio" ] && [ ! -e "$HOME/ImaginationStudio" ] && echo "$HOME/TensorFoldStudio" || echo "$HOME/ImaginationStudio")}/lora-bundle}"
   if [ -x "$PREFIX/venv/bin/python" ]; then
     # into the hub from the bundle only: nothing here goes to the network
     LORA_BUNDLE="$DEST" LORA_OFFLINE=1 H3_MODEL_DIR="${H3_MODEL_DIR:-$HOME/h3-models/MiniMax-H3}" "$PREFIX/venv/bin/python" "$HERE/app/loras.py" install "${GROUPS_ARG:-all}" >&2 || true

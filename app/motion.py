@@ -33,7 +33,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 import motion_worker as worker
 import pace
 
-HOME = Path.home() / "TensorFoldStudio"
+HOME = Path.home() / "ImaginationStudio"
 PACK = Path(__file__).resolve().parent.parent
 FPS = 24                      # the Studio's clips
 SHORTEST, LONGEST = 2.0, 15.0  # one reference clip for MiniMax H3 Ref2VA: 2 to 15 seconds (3 clips, 15 s in all)

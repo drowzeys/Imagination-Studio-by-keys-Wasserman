@@ -52,7 +52,7 @@ except ImportError:  # pragma: no cover - imported as app.voice from outside the
         discover = None
 
 router = APIRouter()
-HOME: Path = Path.home() / "TensorFoldStudio"
+HOME: Path = Path.home() / "ImaginationStudio"
 qa = None  # app/qa.py, given by attach
 SPARK = sys.platform.startswith("linux")
 FRAME_RATE = 21.5  # the Fish codec's frames per second of audio

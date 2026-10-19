@@ -58,7 +58,7 @@ from fastapi.responses import FileResponse
 import voice
 
 router = APIRouter()
-HOME: Path = Path.home() / "TensorFoldStudio"
+HOME: Path = Path.home() / "ImaginationStudio"
 PACK = Path(__file__).resolve().parent.parent
 SPARK = sys.platform.startswith("linux")
 MAC = sys.platform == "darwin"

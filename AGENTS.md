@@ -38,7 +38,7 @@ Do these in order on the person's Mac, and report each result plainly.
    folders, export `QWEN_MODEL_DIR`, `H3_MODEL_DIR`, `FASTH3_DIR` first: the app records them. Do not set
    `HOST=0.0.0.0` unless the person asks to reach it from other machines; there is no login.
 6. `open "$HOME/Applications/Wasserman Slate AI Studio.app"`, then check `curl -s http://127.0.0.1:7870/api/state` answers.
-7. Tell the person: double-click Wasserman Slate AI Studio in Applications; renders land in `~/TensorFoldStudio`; the log is
+7. Tell the person: double-click Wasserman Slate AI Studio in Applications; renders land in `~/ImaginationStudio`; the log is
    `~/Library/Logs/TensorFoldStudio.log`; to stop it run the app's executable with `stop`.
 
 The app is a launcher around this clone, unsigned and built locally, so Gatekeeper does not block it. Do not move
@@ -57,7 +57,7 @@ clips made by the web app's `long` job (each opens on the last frame of the one 
 rendered, so do not promise the look of a 30 minute one.
 
 Web app: `bash scripts/app.sh` (http://127.0.0.1:7870; `HOST=0.0.0.0` to open it to the LAN, no login). It runs the
-same scripts through a one-at-a-time queue and stores everything under `~/TensorFoldStudio`.
+same scripts through a one-at-a-time queue and stores everything under `~/ImaginationStudio`.
 
 Rules:
 

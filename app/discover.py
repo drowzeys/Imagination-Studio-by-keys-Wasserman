@@ -75,7 +75,11 @@ def home() -> Path:
 
 
 def studio_home() -> Path:
-    return Path(os.environ.get("STUDIO_HOME", str(home() / "TensorFoldStudio"))).expanduser()
+    named = os.environ.get("STUDIO_HOME", "").strip()
+    if named:
+        return Path(named).expanduser()
+    new = home() / "ImaginationStudio"  # app/studio_home.py: an older ~/TensorFoldStudio until the server moves it
+    return new if new.exists() or not (home() / "TensorFoldStudio").is_dir() else home() / "TensorFoldStudio"
 
 
 def env_path(name: str, default) -> Path:

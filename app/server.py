@@ -5,7 +5,7 @@
     HOST=0.0.0.0 bash scripts/app.sh   # reachable from other machines on the network (no login: trusted LANs only)
 
 One job runs at a time, in the order queued; every job is one of this pack's scripts with environment variables.
-Projects, uploads and renders live under $STUDIO_HOME (default ~/TensorFoldStudio).
+Projects, uploads and renders live under $STUDIO_HOME (default ~/ImaginationStudio; app/studio_home.py).
 """
 
 from __future__ import annotations
@@ -35,7 +35,9 @@ from fastapi.staticfiles import StaticFiles
 
 HERE = Path(__file__).resolve().parent
 PACK = HERE.parent
-HOME = Path(os.environ.get("STUDIO_HOME", Path.home() / "TensorFoldStudio"))
+from studio_home import studio_home  # noqa: E402  (~/ImaginationStudio, an older ~/TensorFoldStudio moved there once)
+HOME = studio_home(move=True)
+os.environ["STUDIO_HOME"] = str(HOME)  # the scripts and engines it starts keep everything in the same folder
 for name in ("projects", "uploads", "renders", "scouts", "exports"):
     (HOME / name).mkdir(parents=True, exist_ok=True)
 

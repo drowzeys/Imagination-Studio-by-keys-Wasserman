@@ -11,7 +11,7 @@ It is one Python file with no dependencies (Python 3.9 or newer). The Studio mus
 ```
 
 Set `STUDIO_URL` when the Studio is somewhere else (default `http://127.0.0.1:7870`). Paths in and out are
-relative to the Studio's folder (`~/TensorFoldStudio` by default), as the Library shows them; a finished file is
+relative to the Studio's folder (`~/ImaginationStudio` by default), as the Library shows them; a finished file is
 at `$STUDIO_URL/files/<path>`.
 
 Inside the Studio, **Brains & agents** already connects this server for you. The sections below are for using it

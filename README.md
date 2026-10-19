@@ -418,7 +418,7 @@ bash oneshot-setup.sh --upgrade  # on Linux: oneshot-setup-spark.sh --upgrade
 `--upgrade` moves an existing install to the version of the clone: the environment's packages, ComfyUI at its pinned
 commit, the engine (rebuilt only when its pinned commit changed) and the Motion Previs environment, which it adds
 when it is missing. It **fetches no weights** (a model that is not on disk is named and left out; an image-only
-install stays image-only), does not touch `~/TensorFoldStudio` (clips, projects, LoRAs, settings), prints the version
+install stays image-only), does not touch `~/ImaginationStudio` (clips, projects, LoRAs, settings), prints the version
 before and after, and ends with `--verify`. Running it a second time changes nothing. Restart the app afterwards
 (`bash scripts/app.sh`) so it serves the new pages. Run it when no clip is rendering.
 
@@ -1026,6 +1026,11 @@ editor's timeline; ComfyUI's H3 decoder makes 32 kHz. The picture is copied unch
 
 ## Install, and the one-click app
 
+Everything the studio makes and keeps (renders, projects, uploads, voice, music, LoRAs, settings) is in
+`~/ImaginationStudio`, or in `STUDIO_HOME` when that is set. An install from before the name kept it in
+`~/TensorFoldStudio`: the studio moves that folder once to `~/ImaginationStudio` when it starts (a rename on the same
+disk, nothing copied) and leaves `~/TensorFoldStudio` as a link to it (`app/studio_home.py`).
+
 ### Minimum requirements
 
 | What you want to run | Memory | Disk | Chip |
@@ -1109,7 +1114,7 @@ bash oneshot-setup.sh --upgrade         # add --app to rebuild the double-clicka
 install's own environment when it is older than this version needs (2.6.1: the build with reference videos and
 audio), copies the render scripts, and adds the Motion Previs environment when it is missing (0.5 GB). It **fetches
 no weights**: a model that is not on disk is named and left out, and an image-only install stays image-only. It does
-not touch `~/TensorFoldStudio` (clips, projects, LoRAs, settings), prints the version before and after, and ends with
+not touch `~/ImaginationStudio` (clips, projects, LoRAs, settings), prints the version before and after, and ends with
 `--verify`. Running it a second time changes nothing. Quit and reopen the app afterwards. A plain
 `bash oneshot-setup.sh` after `git pull` upgrades the engine too, and also fetches any model the install lacks.
 
@@ -1407,7 +1412,7 @@ Once the Music tab has a song, *Song under the export* lays it under the whole e
 **Library** lists every render, scout and export. Under a picture: *use* makes it the first frame of a new clip,
 *last frame* ends a clip on it, *edit* opens Edit a picture, and *Turnaround* makes five views. Under a clip: *continue*
 starts a new clip on its last frame, *+ timeline* sends it to the editor, *Upscale* and *Remove a person*. 🗑 moves a
-file to `~/TensorFoldStudio/trash`.
+file to `~/ImaginationStudio/trash`.
 
 ![Tutorial (screenshot from 2.4; the tab now has a part for each tab of the app)](samples/ui_tutorial.png)
 
@@ -1494,7 +1499,7 @@ A cleared form is put back by *Undo* in the message or by *Undo clear* beside th
 or reloaded. A queued or running job cannot be deleted (cancel it first), and a file such a job reads or writes
 stays. Deleting never touches a project file, a LoRA or a model: only pictures, clips and sound in `renders`,
 `exports`, `scouts`, `uploads` and `qa`, and clips in `projects` and `slate`, can be moved. The trash is
-`~/TensorFoldStudio/trash`; a LoRA removed in the hub goes there too, so *Empty trash* erases that as well.
+`~/ImaginationStudio/trash`; a LoRA removed in the hub goes there too, so *Empty trash* erases that as well.
 `tests/test_clear.py` holds the path checks. Driven in a headless Chromium on both machines' builds, against a
 studio folder of test clips: each Clear and Undo, one job deleted and put back, two ticked jobs, the failed ones,
 all finished, restore, two ticked Library files, and the trash emptied (25 checks). Not driven in a browser: the
@@ -1516,7 +1521,7 @@ Each clip made to the spec then goes through his **QA gate** (`app/qa.py`), abou
   model checks that face, hair and wardrobe are the same in all three with no smeared faces. The model is the film's
   brain, or Claude Code, Codex or a local vision model, under your own sign-in: the sheet is sent to that model.
 - **Retake.** A clip that fails either gate is rendered once more at the next seed; the failed take and every contact
-  sheet are kept in `~/TensorFoldStudio/qa/`. The job card shows what each gate found, and the sharpness figure of
+  sheet are kept in `~/ImaginationStudio/qa/`. The job card shows what each gate found, and the sharpness figure of
   the three frames as a diagnosis.
 
 A gate whose tool is missing on the machine is shown as skipped and does not fail the clip.
@@ -1531,7 +1536,7 @@ author's, for credit.
 - **Browse.** "▸ Browse the hub" opens the library: a tab for each group, a search box, "Installed only", and a card
   for each LoRA with what it does, its author, what it works from, its licence, its size and its trigger word.
 - **Install.** After the essential bundle (below) every usable LoRA is already installed. Otherwise "⤓ Install" on a
-  card, or "Install all in this category", puts the file in `~/TensorFoldStudio/loras/`, checked against its sha256.
+  card, or "Install all in this category", puts the file in `~/ImaginationStudio/loras/`, checked against its sha256.
 - **Use.** "Use on this clip" adds the LoRA to the clip being made. Each picked LoRA has a strength (its author's range
   is in the tooltip; a slider LoRA also takes minus values) and, when its recipe has them, a look. The trigger word and
   look phrase are put at the start of the shot for you. Up to four can be stacked.
@@ -1736,7 +1741,7 @@ It fetches every preset of the hub once: fourteen in one essential package per p
 author's card and licence; `LORA_PACKAGE=none` skips it) and the rest each from its author's own page (about 6.5 GB in
 all and 4 minutes measured on a fast line;
 the three Keyframe Animation adapters, 5.6 GB of it, need your Hugging Face account's acceptance of their licence),
-into `~/TensorFoldStudio/lora-bundle/`, laid out by the hub's groups (`01-camera-viewpoint` ... `06-support-finishing`, `07-fun`,
+into `~/ImaginationStudio/lora-bundle/`, laid out by the hub's groups (`01-camera-viewpoint` ... `06-support-finishing`, `07-fun`,
 with `bundle.json` as the menu), checks each sha256, keeps the author's model card and licence beside each file, and
 installs the set into the hub (on a Mac, rewritten for the MLX engine). After that the Studio needs none of those
 links: copy the folder to another machine or drive and run `bash oneshot-essential-bundle.sh --source /path/to/lora-bundle`
@@ -1782,7 +1787,7 @@ starts from the brain chosen in Brains & tools; an install with nothing chosen t
 (`local`, `claude`, `codex`, ...), `STUDIO_LOCAL_ENDPOINT` and `STUDIO_LOCAL_MODEL` from its environment. When a film's
 brain is the local model, its frames are only ever shown to that model: the QA look is skipped rather than sent to a
 cloud CLI when the local server is not set. Films are
-Slate's own `project.json` under `~/TensorFoldStudio/slate/`: a project made in Slate opens here, and one made here
+Slate's own `project.json` under `~/ImaginationStudio/slate/`: a project made in Slate opens here, and one made here
 downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at any length
 the model takes (their seconds, or their slot in bars) and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
 
@@ -1815,7 +1820,7 @@ and audio analysis, the stills library, compiles for other generators, and its M
 its own: anyone who can open it can use the brain, so keep it on a network you trust.
 
 The app drives the same scripts as the command line, one job at a time on each machine, and keeps projects, uploads
-and renders under `~/TensorFoldStudio`. What it is not: the editor has one video track with trims and ordering only
+and renders under `~/ImaginationStudio`. What it is not: the editor has one video track with trims and ordering only
 (no transforms, text or transitions; its only audio step is a song laid under the export), and outside Slate's ✦
 buttons there is no assisted prompt writing. The workflow is modelled
 on rookiestar28's ComfyUI-MiniMaxH3-Studio, which does far more; no code is shared with it.
@@ -1927,7 +1932,7 @@ says on the tab what is missing. `DRAMA3_BACKEND=mlx|cuda` picks the engine (`ml
 default). The API: `GET /api/voice/state`, `POST /api/voice/takes {text, ref_audio?, ref_text?, consent?, seed?,
 temperature?, top_p?, top_k?}` (a job of kind `voice`), `GET /api/voice/takes`, `GET /api/voice/takes/{id}/audio`,
 `GET /api/voice/takes/{id}/live` (the take as it is made; `"live": false` in a take's settings: not played, Mac only), `POST /api/voice/sheet {sheet, project}` and
-`POST /api/voice/cut {path, seconds}`. Takes are kept in `~/TensorFoldStudio/voice/` (the WAV, its settings and
+`POST /api/voice/cut {path, seconds}`. Takes are kept in `~/ImaginationStudio/voice/` (the WAV, its settings and
 measurements, and the text).
 
 ### Voice on a DGX Spark (CUDA)
@@ -2136,7 +2141,7 @@ The API: `GET /api/music/state`, `POST /api/music/takes {caption, lyrics, second
 top_k?, title?, asr?, live?}` (a job of kind `music`; `live: false` does not stream), `GET /api/music/takes`, `GET
 /api/music/takes/{id}/audio`, `GET /api/music/takes/{id}/live` (the song being made, a stereo WAV), `POST
 /api/music/soundtrack {take, video, music_db?}` (a job of kind `soundtrack`), and an export job's `params.soundtrack
-{take, music_db?}`. Songs are kept in `~/TensorFoldStudio/music/` (the WAV and its settings and measurements).
+{take, music_db?}`. Songs are kept in `~/ImaginationStudio/music/` (the WAV and its settings and measurements).
 
 **Licence.** MiniMax-Music3 is under the **MiniMax-Music3 Community License**: commercial use is allowed; a commercial
 product or service must display "MiniMax-Music3" in its user interface; a licensee above US$20 million of yearly
@@ -2151,7 +2156,7 @@ the app.
 
 The **Motion Previs** tab takes a clip (one you upload, or an earlier render or upload), a range of 2 to 15 seconds
 and one of four reference modes (camera only, actor motion, object motion, full scene), and writes a production pack
-under `~/TensorFoldStudio/motion/<id>/` with a ZIP beside it: the trimmed reference clip, a pose track
+under `~/ImaginationStudio/motion/<id>/` with a ZIP beside it: the trimmed reference clip, a pose track
 (`pose_landmarks.json`), an OpenPose BODY_25 skeleton video and `openpose_keypoints.json`, a subject-masked camera
 solve (`camera_motion.json`), depth (Depth-Anything-small, and an ffmpeg proxy), edges, line art, a motion mask, a
 contact sheet, a shot bible and a prompt pack. The tab shows the reference, skeleton, depth and edges side by side
@@ -2637,7 +2642,7 @@ IMAGE_MODEL=flux3k-fast UPSAMPLE=0 bash scripts/image.sh "a full scene caption .
 
 ```bash
 bash scripts/edit.sh photo.png "The same statue at night under a full moon" night.png
-LORA=~/TensorFoldStudio/loras/qwen-multiple-angles.safetensors:0.9 \
+LORA=~/ImaginationStudio/loras/qwen-multiple-angles.safetensors:0.9 \
   bash scripts/edit.sh photo.png "<mva> right side view, high-angle shot" side.png
 SET_FILE=edits.json bash scripts/edit.sh photo.png          # [["prompt", "out.png"], ...] from one load
 BASE=1 bash scripts/edit.sh photo.png "..." out.png         # 40 steps, base model (--image-edit)
