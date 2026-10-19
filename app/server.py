@@ -819,7 +819,9 @@ IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Re
                 "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
                 "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast")}
-FLUX3_FILES = {"flux3k-fast": "flux3_image_klein_sd_bf16.safetensors", "flux3k-full": "flux3_image_klein_base_bf16.safetensors"}
+# BFL's file names, the present one first (renamed 2026-10-17, the same files; spark_generate.FLUX3_OLD)
+FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors"),
+               "flux3k-full": ("flux3-image-klein-base-bf16.safetensors", "flux3_image_klein_base_bf16.safetensors")}
 
 
 def image_models() -> list[str]:
@@ -827,10 +829,11 @@ def image_models() -> list[str]:
     checkpoints on a Mac."""
 
     found = ["qwen"] + (["qwen-full"] if qwen_base_ready() else [])
-    for name, unet in FLUX3_FILES.items():
+    for name, unets in FLUX3_FILES.items():
         if SPARK:
             folder = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "FLUX3-K-Comfy"
-            ready = (folder / "diffusion_models" / unet).is_file() and (folder / "system_prompts.json").is_file()
+            ready = (any((folder / "diffusion_models" / unet).is_file() for unet in unets)
+                     and (folder / "system_prompts.json").is_file())
         else:
             folder = Path(os.environ.get("FLUX3_MODEL_DIR", Path.home() / "flux3-models"))
             ready = ((ZIG_ENGINE.parent / "flux3-venv" / "bin" / "python").exists()

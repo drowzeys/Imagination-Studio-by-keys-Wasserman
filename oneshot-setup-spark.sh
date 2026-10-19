@@ -73,6 +73,7 @@ if [ "$UPGRADE" = 1 ]; then
   [ -x "$PREFIX/venv/bin/python" ] || die "nothing to upgrade at $PREFIX: run oneshot-setup-spark.sh without --upgrade"
   [ -s "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" ] || IMAGE_ONLY=1
   [ ! -s "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" ] || REF2VA=1
+  [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || FLUX3=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] || FLUX3=1
   [ ! -s "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" ] || MUSIC=1
   [ ! -d "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" ] || SOUND=1
@@ -217,8 +218,17 @@ if [ "$FLUX3" = 1 ]; then
   [ "$VERIFY" = 1 ] || { echo "  FLUX 3 Image Klein is under the FLUX Kommunity License: non-commercial use, and commercial use of the outputs"
     echo "  only for Qualifying Users (under US\$5M revenue). Read it, and accept it on the model page, first:"
     echo "  https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy"; }
-  fetch black-forest-labs/flux-3-image-klein-comfy FLUX3-K-Comfy diffusion_models/flux3_image_klein_sd_bf16.safetensors \
-    diffusion_models/flux3_image_klein_base_bf16.safetensors text_encoders/qwen3vl_4b_bf16.safetensors \
+  # BFL renamed the checkpoints on 2026-10-17 (the same files, same SHA-256): an older install's are renamed, not fetched again
+  KLEIN=()
+  for pair in sd_bf16:flux3-image-klein-bf16 base_bf16:flux3-image-klein-base-bf16; do
+    old="diffusion_models/flux3_image_klein_${pair%%:*}.safetensors"; new="diffusion_models/${pair#*:}.safetensors"
+    if [ -s "$MODELS/FLUX3-K-Comfy/$old" ] && [ ! -e "$MODELS/FLUX3-K-Comfy/$new" ]; then
+      if [ "$VERIFY" = 1 ]; then echo "  - $old has BFL's old name (the app reads it; the setup renames it)"; new="$old"
+      else mv "$MODELS/FLUX3-K-Comfy/$old" "$MODELS/FLUX3-K-Comfy/$new" && ok "renamed $old to BFL's new name $new"; fi
+    fi
+    KLEIN+=("$new")
+  done
+  fetch black-forest-labs/flux-3-image-klein-comfy FLUX3-K-Comfy "${KLEIN[@]}" text_encoders/qwen3vl_4b_bf16.safetensors \
     text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors vae/flux2-vae.safetensors
   fetch black-forest-labs/flux-3-image-klein-pup FLUX3-K-Comfy system_prompts.json
   ok "FLUX3-K Fast and Full (bf16), Qwen3-VL-4B text encoder, BFL's prompt upsampler (8-bit) and the decoder"

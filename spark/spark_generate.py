@@ -68,8 +68,11 @@ TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0
 # BFL's prompt upsampler (Qwen3.5 9B, 8-bit) writes one from the prompt inside the same workflow, with the system prompt
 # of their system_prompts.json. FLUX Kommunity License.
 FLUX3_DIR = "FLUX3-K-Comfy"
-FLUX3 = {"flux3k-fast": ("flux3_image_klein_sd_bf16.safetensors", 16, 1.0),
-         "flux3k-full": ("flux3_image_klein_base_bf16.safetensors", 50, 3.5)}
+FLUX3 = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", 16, 1.0),
+         "flux3k-full": ("flux3-image-klein-base-bf16.safetensors", 50, 3.5)}
+# BFL's names until 2026-10-17, the same files (same SHA-256): an install made before then has these until the setup renames them
+FLUX3_OLD = {"flux3-image-klein-bf16.safetensors": "flux3_image_klein_sd_bf16.safetensors",
+             "flux3-image-klein-base-bf16.safetensors": "flux3_image_klein_base_bf16.safetensors"}
 FLUX3_TEXT = "qwen3vl_4b_bf16.safetensors"
 FLUX3_UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors"
 FLUX3_VAE = "flux2-vae.safetensors"
@@ -803,11 +806,20 @@ def flux3_system_prompt(task: str = "t2i") -> str:
         sys.exit(f"FLUX3-K's prompt upsampler has no system prompt at {path}: run oneshot-setup-spark.sh --flux3")
 
 
+def flux3_unet(model: str) -> str:
+    """The file of a FLUX3-K model, under BFL's present name, or the old one where only that is on disk."""
+
+    name = FLUX3[model][0]
+    folder = MODELS / FLUX3_DIR / "diffusion_models"
+    return FLUX3_OLD[name] if not (folder / name).is_file() and (folder / FLUX3_OLD[name]).is_file() else name
+
+
 def flux3_workflow(args, text: str, seed: int, caption: str = "") -> dict:
     """FLUX3-K on ComfyUI's own FLUX 3 nodes, the layout of BFL's templates: the upsampler (TextGenerate, their
     sampling settings) writes the caption, which goes to the Qwen3-VL text encoder, then the sampler."""
 
-    unet, steps, cfg = FLUX3[args.model]
+    _, steps, cfg = FLUX3[args.model]
+    unet = flux3_unet(args.model)
     w = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": FLUX3_TEXT, "type": "flux3", "device": "default"}},

@@ -24,7 +24,7 @@ runtime for FastH3 on Metal and on CUDA:
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
-## New in 3.0 (since 2.9.2)
+## New in 3.0 (since 2.9.3)
 
 **A new studio around the same engines**
 - **Imagination Studio**: a new look (the poster's serif, blue, green and amber; Geist and Instrument Serif), Sam's
@@ -126,6 +126,15 @@ non-commercial · Wasserman's Filmmaker Suite: each app under its own licence, A
 **Links.** [wassermanproductions.com](https://wassermanproductions.com) ·
 [Wasserman Productions on GitHub](https://github.com/wassermanproductions) · [Keys on GitHub](https://github.com/drowzeys) ·
 [Sam Wasserman on X](https://x.com/SamJWasserman) · [Keys on X](https://x.com/u1tra_instinct)
+
+## New in 2.9.3
+
+- **FLUX3-K installs again on a DGX Spark.** On 2026-10-17 Black Forest Labs renamed the Klein checkpoints on Hugging
+  Face (`flux3-image-klein-bf16.safetensors`, `flux3-image-klein-base-bf16.safetensors`) and removed the old
+  underscore names, so `oneshot-setup-spark.sh --flux3` could not download them. The setup now fetches the new names
+  and renames an older install's files in place instead of fetching 22 GB again: they are the same files (the same
+  SHA-256 on Hugging Face). The app reads either name, so a Spark updated from the Sparks tab keeps FLUX3-K before
+  the setup runs. Nothing changes on a Mac.
 
 ## New in 2.9.2
 
@@ -714,6 +723,9 @@ says what the governor folder must hold.
 editor's timeline; ComfyUI's H3 decoder makes 32 kHz. The picture is copied unchanged, and resampling adds no detail.
 
 ## What changed
+
+> **2.9.3 (2026-10-17): FLUX3-K's new file names.** BFL renamed the Klein checkpoints; the Spark setup fetches the
+> new names and renames old ones. Details: [New in 2.9.3](#new-in-293).
 
 > **2.9.2 (2026-10-17): Music on TensorFold's native Metal engine on an M5 Mac.** No live playback there yet; an M1 to
 > M4, or `MUSIC3_BACKEND=mlx`, keeps the MLX port and its live playback. Details: [New in 2.9.2](#new-in-292).

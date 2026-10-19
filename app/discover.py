@@ -182,10 +182,18 @@ def spark_fetches() -> list[tuple[str, str, str]]:
     """(repository, folder under SPARK_MODELS, file) of every ``fetch`` in oneshot-setup-spark.sh."""
 
     out = []
+    flux3 = literals(PACK / "spark" / "spark_generate.py").get("FLUX3")
     for line in shell_lines(PACK / "oneshot-setup-spark.sh"):
         words = line.split()
         if len(words) >= 4 and words[0] == "fetch" and not words[1].startswith("("):
-            out += [(words[1], words[2], f) for f in words[3:] if not f.startswith("#")]
+            for f in words[3:]:
+                if f.startswith("#"):
+                    continue
+                if f.strip('"') == "${KLEIN[@]}" and isinstance(flux3, dict):
+                    # BFL's checkpoints, fetched under their present names (renamed 2026-10-17): the names spark_generate.py loads
+                    out += [(words[1], words[2], f"diffusion_models/{v[0]}") for v in flux3.values() if isinstance(v, (tuple, list)) and v]
+                elif not f.startswith(('"$', "$")):
+                    out.append((words[1], words[2], f))
     return out
 
 
