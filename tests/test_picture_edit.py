@@ -169,6 +169,11 @@ def test_a_job_refuses_the_other_models_lora():
 
 def test_further_pictures_and_the_size_of_the_result():
     home, build = studio()
+    # the Spark's model folder is the test's own: a host without Qwen's weights (or with them) gives the same answers
+    with_env(models(home), lambda: further_pictures(home, build))
+
+
+def further_pictures(home, build):
     (home / "uploads/man.png").write_bytes(b"png")
     (home / "uploads/room.jpg").write_bytes(b"jpg")
     # one picture, nothing said about the size: the result has the picture's own (2.6.5 returned the model's)
