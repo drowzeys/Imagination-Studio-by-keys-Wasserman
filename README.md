@@ -2,6 +2,11 @@
 
 *Formerly keys+Wasserman Slate AI Studio, built with integrated Fish Audio Drama 3.*
 
+**Keys:** [X @u1tra_instinct](https://x.com/u1tra_instinct) · [GitHub](https://github.com/drowzeys)
+
+**Sam Wasserman / Wasserman Productions:** [wassermanproductions.com](https://wassermanproductions.com) ·
+[X @SamJWasserman](https://x.com/SamJWasserman) · [GitHub](https://github.com/wassermanproductions)
+
 **An AI film studio on your own machine: plan a film the way a crew does in the Wasserman Slate AI Studio, and render
 it here. Pictures from Qwen-Image-2.1-Turbo or FLUX3-K (Black Forest Labs' FLUX 3 Image Klein), MiniMax H3 / FastH3
 video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Macs (Metal) and the NVIDIA DGX Spark
@@ -123,9 +128,9 @@ MiniMax-Music3: its licence asks for its name in a commercial UI · FLUX3-K: FLU
 Stability AI Community License (free under US$1 million of yearly revenue) · MMAudio's weights: CC-BY-NC 4.0,
 non-commercial · Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT).
 
-**Links.** Keys: [X](https://x.com/u1tra_instinct) · [GitHub](https://github.com/drowzeys).
+**Links.** Keys: [X @u1tra_instinct](https://x.com/u1tra_instinct) · [GitHub](https://github.com/drowzeys).
 Sam Wasserman / Wasserman Productions: [wassermanproductions.com](https://wassermanproductions.com) ·
-[X](https://x.com/SamJWasserman) · [GitHub](https://github.com/wassermanproductions).
+[X @SamJWasserman](https://x.com/SamJWasserman) · [GitHub](https://github.com/wassermanproductions).
 
 **Powered by** TensorFold (Ash Hart and the TensorFold contributors) · built with integrated Fish Audio Drama 3 · Built
 with Qwen · Built with Fish Audio · MiniMax-Music3.
