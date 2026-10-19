@@ -1,0 +1,461 @@
+{
+ "_how": "Each slot is a picture a card reads. Save it as webp (at most 250 KB) at 'file', then set \"ready\": true here; the page only asks for ready files. Invented content only: no real people, logos or text in the picture. List each file in ART-SOURCES.md.",
+ "slots": [
+  {
+   "name": "poster",
+   "file": "art/poster.webp",
+   "size": "1672x941",
+   "aspect": "16:9",
+   "purpose": "Home: the product poster, shown whole as the key art; nothing is laid over it",
+   "ready": true
+  },
+  {
+   "name": "home-hero",
+   "file": "art/home-hero.webp",
+   "size": "2520x1080",
+   "aspect": "21:9",
+   "purpose": "Home: key art behind the greeting; the lower third carries text, keep it calm there",
+   "ready": true
+  },
+  {
+   "name": "engine-story",
+   "file": "art/engine-story.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Story: films, boards and shots engine page",
+   "ready": true
+  },
+  {
+   "name": "engine-image",
+   "file": "art/engine-image.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Image: stills and picture edits engine page",
+   "ready": true
+  },
+  {
+   "name": "engine-video",
+   "file": "art/engine-video.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Video: clips with sound engine page",
+   "ready": true
+  },
+  {
+   "name": "engine-previs",
+   "file": "art/engine-previs.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Previs: motion and 3D sets engine page",
+   "ready": true
+  },
+  {
+   "name": "engine-sound",
+   "file": "art/engine-sound.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Sound: voices and score engine page",
+   "ready": true
+  },
+  {
+   "name": "engine-edit",
+   "file": "art/engine-edit.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Edit: the timeline and the cut engine page",
+   "ready": true
+  },
+  {
+   "name": "start-clip",
+   "file": "art/start-clip.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: A clip with sound",
+   "ready": true
+  },
+  {
+   "name": "start-scout",
+   "file": "art/start-scout.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: Scout, then animate",
+   "ready": true
+  },
+  {
+   "name": "start-still",
+   "file": "art/start-still.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: A still",
+   "ready": true
+  },
+  {
+   "name": "start-sharp",
+   "file": "art/start-sharp.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: Sharp Spec recipe",
+   "ready": true
+  },
+  {
+   "name": "start-long",
+   "file": "art/start-long.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: A long take",
+   "ready": true
+  },
+  {
+   "name": "start-voice",
+   "file": "art/start-voice.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: A voice line",
+   "ready": true
+  },
+  {
+   "name": "start-song",
+   "file": "art/start-song.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: A song",
+   "ready": true
+  },
+  {
+   "name": "start-sfx",
+   "file": "art/start-sfx.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Sound effects and foley: the Sound engine's card, the Home start card and the page's own picture",
+   "ready": true
+  },
+  {
+   "name": "start-agent",
+   "file": "art/start-agent.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Home start card: Ask your agent (3D set in Blender/Blockout)",
+   "ready": true
+  },
+  {
+   "name": "act-story-board",
+   "file": "art/act-story-board.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Story: film board",
+   "ready": true
+  },
+  {
+   "name": "act-story-slate",
+   "file": "art/act-story-slate.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Story: Wasserman Slate",
+   "ready": true
+  },
+  {
+   "name": "act-story-firstad",
+   "file": "art/act-story-firstad.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Story: First AD",
+   "ready": true
+  },
+  {
+   "name": "act-story-import",
+   "file": "art/act-story-import.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Story: bring in a script",
+   "ready": true
+  },
+  {
+   "name": "act-image-scouts",
+   "file": "art/act-image-scouts.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Image: scouts",
+   "ready": true
+  },
+  {
+   "name": "act-image-edit",
+   "file": "art/act-image-edit.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Image: edit a picture",
+   "ready": true
+  },
+  {
+   "name": "act-image-looks",
+   "file": "art/act-image-looks.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Image: looks",
+   "ready": true
+  },
+  {
+   "name": "act-video-own",
+   "file": "art/act-video-own.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Video: from your picture",
+   "ready": true
+  },
+  {
+   "name": "act-video-refs",
+   "file": "art/act-video-refs.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Video: references",
+   "ready": true
+  },
+  {
+   "name": "act-previs-motion",
+   "file": "art/act-previs-motion.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Previs: Motion Previs",
+   "ready": true
+  },
+  {
+   "name": "act-edit-timeline",
+   "file": "art/act-edit-timeline.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Edit: timeline",
+   "ready": true
+  },
+  {
+   "name": "act-edit-resolve",
+   "file": "art/act-edit-resolve.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Edit: to Resolve",
+   "ready": true
+  },
+  {
+   "name": "act-edit-dailies",
+   "file": "art/act-edit-dailies.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Edit: dailies",
+   "ready": true
+  },
+  {
+   "name": "act-edit-library",
+   "file": "art/act-edit-library.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Edit: library",
+   "ready": true
+  },
+  {
+   "name": "look-camera-motion",
+   "file": "art/look-camera-motion.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Camera Motion look card",
+   "ready": true
+  },
+  {
+   "name": "look-headmounted-fpv",
+   "file": "art/look-headmounted-fpv.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Head-mounted FPV look card",
+   "ready": true
+  },
+  {
+   "name": "look-equi360",
+   "file": "art/look-equi360.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Equirectangular 360\u00b0 look card",
+   "ready": true
+  },
+  {
+   "name": "look-orbit-360",
+   "file": "art/look-orbit-360.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the 360\u00b0 Orbit look card",
+   "ready": true
+  },
+  {
+   "name": "look-transformation",
+   "file": "art/look-transformation.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Transformation look card",
+   "ready": true
+  },
+  {
+   "name": "look-turnaround",
+   "file": "art/look-turnaround.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Turnaround look card",
+   "ready": true
+  },
+  {
+   "name": "look-keyframe-animation",
+   "file": "art/look-keyframe-animation.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Keyframe Animation look card",
+   "ready": true
+  },
+  {
+   "name": "look-character-swap",
+   "file": "art/look-character-swap.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Character Swap look card",
+   "ready": true
+  },
+  {
+   "name": "look-person-remover",
+   "file": "art/look-person-remover.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Person Remover look card",
+   "ready": true
+  },
+  {
+   "name": "look-natural-face-speech",
+   "file": "art/look-natural-face-speech.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Natural Face Speech look card",
+   "ready": true
+  },
+  {
+   "name": "look-motion-continuity-repair",
+   "file": "art/look-motion-continuity-repair.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Motion Continuity Repair look card",
+   "ready": true
+  },
+  {
+   "name": "look-combat-base-v2",
+   "file": "art/look-combat-base-v2.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Combat Base V2 look card",
+   "ready": true
+  },
+  {
+   "name": "look-weapon-combat",
+   "file": "art/look-weapon-combat.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Weapon Combat look card",
+   "ready": true
+  },
+  {
+   "name": "look-spatial-physics",
+   "file": "art/look-spatial-physics.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Spatial Physics look card",
+   "ready": true
+  },
+  {
+   "name": "look-anime-slider",
+   "file": "art/look-anime-slider.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Anime Slider look card",
+   "ready": true
+  },
+  {
+   "name": "look-lineart-anime",
+   "file": "art/look-lineart-anime.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Lineart Anime look card",
+   "ready": true
+  },
+  {
+   "name": "look-3d-animation-style",
+   "file": "art/look-3d-animation-style.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the 3D Animation Style look card",
+   "ready": true
+  },
+  {
+   "name": "look-video-upscaler",
+   "file": "art/look-video-upscaler.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Video Upscaler LoRA look card",
+   "ready": true
+  },
+  {
+   "name": "look-vh5tape-vhs",
+   "file": "art/look-vh5tape-vhs.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the VH5 Tape (VHS) look card",
+   "ready": true
+  },
+  {
+   "name": "look-wushu-action",
+   "file": "art/look-wushu-action.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Wushu Action look card",
+   "ready": true
+  },
+  {
+   "name": "look-qwen-multiple-angles",
+   "file": "art/look-qwen-multiple-angles.webp",
+   "size": "1024x1024",
+   "aspect": "1:1",
+   "purpose": "cover for the Multiple Angles (image) look card",
+   "ready": true
+  },
+  {
+   "name": "vault-library",
+   "file": "art/vault-library.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Library vault",
+   "ready": true
+  },
+  {
+   "name": "vault-looks",
+   "file": "art/vault-looks.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Looks vault",
+   "ready": true
+  },
+  {
+   "name": "vault-suite",
+   "file": "art/vault-suite.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of Wasserman's Filmmaker Suite",
+   "ready": true
+  },
+  {
+   "name": "vault-nodes",
+   "file": "art/vault-nodes.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Nodes vault",
+   "ready": true
+  },
+  {
+   "name": "vault-agent",
+   "file": "art/vault-agent.webp",
+   "size": "1600x900",
+   "aspect": "16:9",
+   "purpose": "cover of the Agent room",
+   "ready": true
+  }
+ ]
+}

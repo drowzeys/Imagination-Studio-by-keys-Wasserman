@@ -32,7 +32,7 @@ memory back. **Remove** takes it off the list. Untick **use** to keep a Spark in
 
 A worker's app is never opened to the network. This app reaches it through an ssh tunnel that it opens itself and
 closes when you remove the worker or stop the app. The list is kept in `sparks/sparks.json` in the studio folder
-(`~/TensorFoldStudio`), not in the code.
+(`~/ImaginationStudio`), not in the code.
 
 ## Choose the number
 

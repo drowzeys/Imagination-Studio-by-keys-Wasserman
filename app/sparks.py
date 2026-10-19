@@ -64,7 +64,7 @@ FOLDER = re.compile(r"[A-Za-z0-9_+][A-Za-z0-9_.+/-]{0,200}")
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"]
 # the files that are the app: a worker whose copy of any of them differs from this Spark's is updated before it is used
 CODE = ("VERSION", "*.py", "app/*.py", "app/*.json", "app/static/*.js", "app/static/index.html", "spark/*.py", "spark/*.sh",
-        "spark/tensorfold_h3/*.py", "scripts/*.sh", "scripts/*.py")
+        "spark/tensorfold_h3/*.py", "spark/studio_mmaudio/*.py", "scripts/*.sh", "scripts/*.py")
 # Eight 56-frame 864x480 FastH3 clips (8 passes, int8 engine) through this app's own API on 2026-10-13, this Spark and
 # four workers on the 200G fabric, models loaded, one run each: 263.2, 129.8, 97.5, 69.0 and 65.0 s of wall time on
 # 1 to 5 Sparks (docs/multi-spark.md). With n Sparks the clips go in ceil(8 / n) rounds, so 8 / rounds is the most

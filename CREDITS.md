@@ -1,8 +1,41 @@
 # Credits
 
+**Imagination Studio is by Keys (drowzeys) and Sam Wasserman / Wasserman Productions.** Attribution required: per the
+NOTICE file (Apache 2.0 §4(d)), any use, fork or redistribution keeps the NOTICE and credits Keys (github.com/drowzeys)
+and Sam Wasserman / Wasserman Productions (wassermanproductions.com) in its documentation and about/credits surface.
+
 **Thank you.** Almost everything here is other people's work. Keys / drowzeys ported pieces into two TensorFold
 families, wrote the int8 tensor-unit kernels with their designs as the guide, pinned it and measured it on a Mac
 Studio M5 Ultra. Cite the authors first.
+
+## The studio itself: Keys (drowzeys)
+
+**Keys (drowzeys)** built this studio: the app and its scripts, the Mac and the DGX Spark builds and the carrier
+image, the TensorFold families for Qwen-Image and MiniMax H3 with their int8 tensor-unit kernels, the native and CUDA
+engines the studio runs (FastH3 on Metal, H3, Drama 3 and MiniMax Music 3 on CUDA, and Music 3 on Metal), and the
+measurements every setting here is held to. Imagination Studio is **by Keys + Wasserman**.
+
+## The studio's design and Wasserman's Filmmaker Suite: Sam Wasserman and Wasserman Productions
+
+**Sam Wasserman and Wasserman Productions** helped design and build Imagination Studio in collaboration with Keys, and
+made **Wasserman's Filmmaker Suite**, the apps the Studio's suite vault
+brings work in from and sends work out to, each under its own licence (as its repository states):
+
+- **ScriptBreak** (screenplay breakdown and prompt packs) — Apache-2.0
+- **Cork Board** (index-card story structure) — Apache-2.0
+- **Master Canvas** (the pre-production canvas), and its MCP server — MIT
+- **Storyboard Reference Studio** (reference frames into storyboard stills) — Apache-2.0
+- **Blockout** (grey-box 3D previs), and its MCP server — Apache-2.0
+- **Motion Previs Studio** (motion, depth, pose and camera from a clip), and its MCP server — Apache-2.0
+- **Slate** (the prompt studio for AI filmmaking) — Apache-2.0
+- **Circle Take** (AI dailies) — Apache-2.0
+- **Stem Studio** (dialogue, music and effects stems) — Apache-2.0
+- **Call Sheet** (the suite's launcher and dashboard) — Apache-2.0
+- **DaVinci MCP** (an agent drives DaVinci Resolve) — Apache-2.0
+
+The Studio reads and writes their files and ships none of their code, except where a section below says so (the
+Slate workflow and its files in `app/static/slate/`, and the Motion Previs analysis port, each with its NOTICE). Sam
+Wasserman's own art covers every engine, card and look in this studio.
 
 ## The film workflow in Production: Sam Wasserman's Slate
 
@@ -139,6 +172,25 @@ on TensorFold's native Metal port (Zig and Metal, on an M5 or later) or its MLX 
 drowzeys/TensorFold fork), both following ComfyUI's reference code. The
 pack ships no weights. **MiniMax-Music3.**
 
+## Sound effects and foley: Stability AI, and Ho Kei Cheng and the MMAudio authors
+
+**Stability AI** made **Stable Audio Open 1.0**, the model behind a sound effect from words (44.1 kHz stereo, up to
+47 seconds), run through diffusers' StableAudioPipeline (Hugging Face). Its weights are under the **Stability AI
+Community License**: free for research and for a business under US$1 million of yearly revenue; above that,
+Stability's own licence. Its page on Hugging Face is gated.
+
+**Ho Kei Cheng, Masato Ishii, Akio Hayakawa, Takashi Shibuya, Alexander Schwing and Yuki Mitsufuji** (University of
+Illinois Urbana-Champaign and Sony AI) made **MMAudio**, the model behind foley for a clip: it watches the frames and
+reads the words, so the sound lands on what is seen. Its code is MIT (Sony Research Inc.) and its weights are
+**CC-BY-NC 4.0, non-commercial**. It loads Apple's DFN5B CLIP, Synchformer (Vladimir Iashin et al.) and NVIDIA's
+BigVGAN v2 vocoder (Sang-gil Lee et al.). The studio installs it from its repository at a pinned commit, in an
+environment of its own; the pack ships none of its code or weights.
+
+**kijai** (Jukka Seppänen) wrote **ComfyUI-MMAudio** (MIT), the ComfyUI nodes foley runs on on a DGX Spark, and its
+safetensors copies of MMAudio's weights. The studio clones it at a pinned commit; its own sampler node beside it
+(`spark/studio_mmaudio`) calls kijai's loaders' models and generate. On a Spark a sound effect runs on **ComfyUI**'s
+own Stable Audio nodes.
+
 ## The first native Mac engine: Salvatore Sanfilippo (antirez)
 
 **antirez** wrote **h3.c**, MiniMax H3 in C and Metal. It is the reference for what is possible on Apple
@@ -216,6 +268,22 @@ of this pack's scripts. No code is shared; theirs is the far more complete tool.
 **ddalcu**'s **mlx-serve** showed how to make 30 steps cost nine: a velocity cache and attention reuse with careful
 gates. The engine pinned here carries an adaptation of it; it is not yet enabled in this pack's scripts.
 
+## The agents and brains you connect: their makers
+
+The studio drives the coding agents and model servers you already use, each with your own sign-in or on your own
+machine; none of their code ships in this pack.
+
+- **Anthropic** — **Claude Code**.
+- **OpenAI** — **Codex** (the CLI, and the copy the ChatGPT desktop app carries).
+- **Google** — **Gemini CLI**.
+- **xAI** — **Grok CLI**.
+- **Nous Research** — **Hermes Agent**.
+- **Ollama**, **LM Studio**, **vLLM** and **llama.cpp** (Georgi Gerganov and the ggml contributors) — the local model
+  servers a brain may be.
+- **Siddharth Ahuja** — **blender-mcp**, the Blender bridge an agent works through; the **Blender Foundation** —
+  **Blender**.
+- The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
+
 ## Platform and tools
 
 - **Apple / ml-explore** — **MLX**, and the Metal 4 tensor operations on M5.
@@ -224,6 +292,14 @@ gates. The engine pinned here carries an adaptation of it; it is not yet enabled
 - **Kijai**, **DeepBeepMeep**, **ddalcu** — the ComfyUI conversions, pruned checkpoints and MLX quants that the
   wider H3 ecosystem (and Phosphene's install) relies on.
 - **FFmpeg**.
+- **OpenAI** — **Whisper**, and **SYSTRAN** — **faster-whisper**: the QA gate's and Voice's check of the spoken words.
+- **yt-dlp** contributors — Motion Previs reading a shot from a link.
+- **PyTorch**; **Hugging Face** — **diffusers**, **transformers** and **huggingface_hub**; **Patrick Kidger** and
+  **Xuechen Li** — **torchsde**.
+- **Comfy Org** — **ComfyUI**, which every render on a DGX Spark runs through.
+- **Sebastián Ramírez** — **FastAPI**; **Encode** — **Starlette** and **Uvicorn**: the web app.
+- **The Geist Project Authors** — **Geist** and **Geist Mono**; **The Instrument Serif Project Authors** — **Instrument
+  Serif** (SIL Open Font License, `app/static/fonts/`).
 
 ## Test prompts
 

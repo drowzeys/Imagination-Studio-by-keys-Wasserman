@@ -38,7 +38,7 @@ Do these in order on the person's Mac, and report each result plainly.
    folders, export `QWEN_MODEL_DIR`, `H3_MODEL_DIR`, `FASTH3_DIR` first: the app records them. Do not set
    `HOST=0.0.0.0` unless the person asks to reach it from other machines; there is no login.
 6. `open "$HOME/Applications/Wasserman Slate AI Studio.app"`, then check `curl -s http://127.0.0.1:7870/api/state` answers.
-7. Tell the person: double-click Wasserman Slate AI Studio in Applications; renders land in `~/TensorFoldStudio`; the log is
+7. Tell the person: double-click Wasserman Slate AI Studio in Applications; renders land in `~/ImaginationStudio`; the log is
    `~/Library/Logs/TensorFoldStudio.log`; to stop it run the app's executable with `stop`.
 
 The app is a launcher around this clone, unsigned and built locally, so Gatekeeper does not block it. Do not move
@@ -57,7 +57,7 @@ clips made by the web app's `long` job (each opens on the last frame of the one 
 rendered, so do not promise the look of a 30 minute one.
 
 Web app: `bash scripts/app.sh` (http://127.0.0.1:7870; `HOST=0.0.0.0` to open it to the LAN, no login). It runs the
-same scripts through a one-at-a-time queue and stores everything under `~/TensorFoldStudio`.
+same scripts through a one-at-a-time queue and stores everything under `~/ImaginationStudio`.
 
 Rules:
 
@@ -155,7 +155,11 @@ Rules:
   not with ffmpeg afterwards. What needs ffmpeg is refused when it is queued (`without_ffmpeg` in `app/server.py`).
 - DGX Spark memory (`spark/memory_guard.py`; the README's *The memory guard*): a clip is checked before it is queued
   (`memory_of` in `app/server.py`) and again in `spark_generate.py` before anything loads, and the guard stands beside
-  every server `comfy.sh` starts. Never start ComfyUI another way. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
+  every server `comfy.sh` starts. Never start ComfyUI another way. With `SPARK_GOVERNOR` (a machine-wide workload
+  governor, `spark/workload.py`) `comfy.sh` runs the server through `spark/managed_comfy.py`, which starts the same
+  guard (and its plain-loop fallback) beside it inside a reservation, and `start_gate.py` runs before every submission;
+  `DRAMA3_MANAGED_GUARD=1` does the same for Drama 3 (`spark/managed_voice.py`). Its limits add to the guard's, never
+  replace or lower them; unset, nothing of it runs. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
   are measurements, one route each. A LoRA on FastH3 is merged into TensorFold's int8 engine (`TensorFoldH3Blocks`
   takes the block projections' patches off ComfyUI and calls `tf_h3_set_weight`; route `int8-lora`, measured to
   1376x768 at 243 frames); on ComfyUI's bfloat16 blocks (an engine without that symbol, `--engine comfy`, Ref2VA,
@@ -225,8 +229,20 @@ Rules:
   `start_s` (the measured no-stall start, `NO_STALL_S`, and `HOLD_MARGIN_S`) and `lead_s`; those are measurements, change
   them only with new ones. The kept song is the engine's finished WAV. A Spark does not stream, on the CUDA engine or ComfyUI's route.
   Lyric accuracy is Whisper's rough count on sung words.
-- mflux, minimax-h3-mlx, flux3-mlx and TensorFold's music3-mlx are pinned by commit and used at run time. Do not unpin.
+- Sound effects and foley (`app/sound.py`, `sound_generate.py`, `scripts/setup-sound.sh`, `app/static/sound.js`): jobs
+  `sfx` (Stable Audio Open 1.0, Stability AI Community License, gated on Hugging Face) and `foley` (MMAudio large_44k_v2,
+  weights CC-BY-NC 4.0: non-commercial; say so when asked about commercial use) in `$PREFIX/sound-venv`, never the
+  Studio's venv. Foley is laid under the clip's own sound (speech stays, peaks under -1 dBFS) unless asked to replace
+  it. On a DGX Spark (`oneshot-setup-spark.sh --sound`) both go through the ComfyUI server of `spark/comfy.sh` as
+  `spark_generate.py sfx|foley` (the same flags as `sound_generate.py`): ComfyUI's own Stable Audio nodes
+  (`sfx_workflow`), and kijai's ComfyUI-MMAudio (pinned `MMA_COMMIT`) with the Studio's `StudioMMAudioSampler`
+  (`spark/studio_mmaudio`, `foley_workflow`): kijai's own sampler reads one frame stream as both 8 and 25 fps, so keep
+  the Studio's node, which picks frames by the clip's own rate. Never run either as standalone model code there. A
+  kind renders on a Spark only when `memory_guard.SOUND_ESTIMATE` has its measured line (`sound_check`, asked when
+  the job is queued and in `spark_generate.py` before anything loads); `SOUND_ESTIMATE` and `SOUND_MEASURED` are
+  measurements, added only from runs on a worker Spark under the DGX Spark memory rules above.
+- mflux, minimax-h3-mlx, flux3-mlx, TensorFold's music3-mlx, MMAudio and ComfyUI-MMAudio are pinned by commit and used at run time. Do not unpin.
 
-**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),
+**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), Stability AI (Stable Audio Open), Ho Kei Cheng et al. (MMAudio), kijai (ComfyUI-MMAudio), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),
 RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx / Phosphene), Filip Strand and mflux contributors, Viggle, speach1sdef178, LightX2V,
 NVIDIA Research, FastVideo, Sam Wasserman (Slate: the film workflow in Production; keep app/static/slate/NOTICE. Motion Previs Studio: the Motion Previs tab's analysis is a modified Python port of it; keep LICENSES/Motion-Previs-Studio-NOTICE, THIRD_PARTY_NOTICES.md and the headers of app/motion*.py, and keep the link to the original), Apple MLX. Authors only — no credit hyperlinks, except the link to Motion Previs Studio.

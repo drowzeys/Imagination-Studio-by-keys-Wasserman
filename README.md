@@ -1,27 +1,143 @@
-# keys+Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3 (Mac + DGX Spark)
+# Imagination Studio by Keys + Wasserman, powered by TensorFold (Mac + DGX Spark)
+
+*Formerly keys+Wasserman Slate AI Studio, built with integrated Fish Audio Drama 3.*
 
 **An AI film studio on your own machine: plan a film the way a crew does in the Wasserman Slate AI Studio, and render
 it here. Pictures from Qwen-Image-2.1-Turbo or FLUX3-K (Black Forest Labs' FLUX 3 Image Klein), MiniMax H3 / FastH3
 video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Macs (Metal) and the NVIDIA DGX Spark
 (CUDA).**
 
-[![Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3: an AI film studio for Mac and NVIDIA DGX Spark](samples/banner.jpg)](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3)
-
-*Banner art made with this studio's own Qwen-Image-2.1 step (1664x928, seed 25); the lettering was set afterwards.*
+![Imagination Studio by Keys + Wasserman: a local creative all-in-one studio for NVIDIA DGX Spark or Apple silicon, powered by TensorFold](docs/screenshots/imagination-studio.webp)
 
 *Named at the request of the TensorFold project: this is an app built on TensorFold, not a TensorFold product.*
 
 *Name, credits, colours and voice for anything public: the [brand guide](docs/BRAND.md).*
 
-*Credit first: Sam Wasserman shaped the production side of this studio (Slate, the Sharp Spec, Motion Previs). See
-[Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes.*
+*Credit first: **Keys (drowzeys)** built this studio and its engines; **Sam Wasserman and Wasserman Productions** helped
+design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
+[Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
-**2.9.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**3.0.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 3.0 (since 2.9.3)
+
+**A new studio around the same engines**
+- **Imagination Studio**: a new look (the poster's serif, blue, green and amber; Geist and Instrument Serif), Sam's
+  art on every engine, card and look, and a sidebar of **Creative Engines** and **Studio Vaults** with Home on top.
+- **Six engines, one page each**: Story, Image, Video, Previs, Sound and Edit, each opening on its own cards.
+- **Home**: one composer makes a clip, a picture, a voice line or a song straight away; start cards, recent takes,
+  the machine in one line.
+- **Settings**: the look, which rooms show, what a new take starts from, every connection, and Models & weights,
+  Sparks, Brains & tools and Updates in one place.
+- **Phones**: a bottom bar, a More sheet for the vaults, search and updates.
+
+**Agents and your own sign-ins**
+- **The Agent room**: pick Claude Code, Codex, Hermes, Gemini, Grok or a local model and talk it through; it keeps
+  its own session, asks when a choice matters and drives the studio's tools (stills, clips, voice, songs, the
+  timeline), Blender and Blockout.
+- **One-click Connect** for every agent, from any page that needs one: finds it or installs it, runs its own
+  sign-in (the page opens by itself, with the code, a QR code and Copy link), checks it answers, makes it the default.
+- **Link another computer**: a DGX Spark uses the agents signed in on your Mac over SSH, and the studio sets up both
+  directions itself. Claude Code's Mac Keychain over SSH is solved with **Allow over SSH** (`BRAINS.md`).
+- The ChatGPT app's own Codex is used when the one on PATH is older, here or over SSH.
+
+**Models, looks and installs**
+- **Models & weights** finds every model the studio needs anywhere on the machine and links it instead of
+  downloading it again (**Use everything found here**), and **Install** runs the right installer for what is missing.
+- **Gated weights** (Keyframe Animation, 3D Animation Style, Stable Audio Open): Install signs you in to Hugging Face
+  once, opens the licence page, and downloads by itself once access is granted.
+- **Looks**: the LoRA hub as a style library, one card a look.
+
+**Sound, previs and the library**
+- **Sound effects and foley**: MMAudio makes a clip's own sound from its picture, Stable Audio Open makes a sound from
+  words (Mac; on a DGX Spark through ComfyUI once its memory is measured).
+- **Motion Previs from a link**: paste a video page or a video file's address and its depth, pose and camera are read.
+- **The Library** lists voice lines, songs and sound effects beside clips and stills, each with its own filter.
+- **Nodes**: a ComfyUI-style canvas over the studio's own jobs, run in order.
+- **Wasserman's Filmmaker Suite** built in: bring work in from Sam's apps, send the cut to Resolve as a ZIP with media.
+
+**Machine, updates and safety**
+- **Machine**: live GPU, memory, temperature, power and storage; Sparks; an optional workload governor for a shared Spark.
+- **Updates** in the app: follows the installed branch, waits for idle, shows the latest release.
+- Everything is kept in **`~/ImaginationStudio`** (an older `~/TensorFoldStudio` is moved there once, with a link left behind).
+- Tighter safety: this computer or its Tailscale name only, same-origin writes, size limits, no hidden files served.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Home: the composer, start cards and the machine](docs/screenshots/home.webp) | ![Story: the film board, Wasserman Slate, First AD](docs/screenshots/story.webp) |
+| **Home** | **Story** |
+| ![Image: stills, scouts, edits and looks](docs/screenshots/image.webp) | ![Video: clips with sound, long takes, references, Sharp Spec](docs/screenshots/video.webp) |
+| **Image** | **Video** |
+| ![Previs: Motion Previs and your agent](docs/screenshots/previs.webp) | ![Sound: voice lines and songs](docs/screenshots/sound.webp) |
+| **Previs** | **Sound** |
+| ![Edit: timeline, Resolve, dailies, Library](docs/screenshots/edit.webp) | ![Nodes: a canvas over the studio's jobs](docs/screenshots/nodes.webp) |
+| **Edit** | **Nodes** |
+| ![Looks: the LoRA hub as a style library](docs/screenshots/looks.webp) | ![Looks: one card a look, with its licence and size](docs/screenshots/looks-cards.webp) |
+| **Looks** | **Looks, the cards** |
+| ![Wasserman's Filmmaker Suite, built in](docs/screenshots/filmmaker-suite.webp) | ![Machine: live readings and storage on a DGX Spark](docs/screenshots/machine.png) |
+| **Wasserman's Filmmaker Suite** | **Machine** |
+
+## License & credits
+
+**Apache License 2.0** — see [LICENSE](LICENSE). Free to use, modify, fork and build on, commercially or otherwise;
+the models it downloads keep their own licences (below).
+
+**Attribution required:** per the [NOTICE](NOTICE) file (Apache 2.0 §4(d)), any use, fork or redistribution must retain
+the NOTICE file and credit **Keys ([github.com/drowzeys](https://github.com/drowzeys))** and **Sam Wasserman / Wasserman
+Productions ([wassermanproductions.com](https://wassermanproductions.com))** in its documentation and about/credits
+surface. To cite it: [CITATION.cff](CITATION.cff).
+
+The same credits the studio shows in Settings → About; [CREDITS.md](CREDITS.md) has each one in full.
+
+- **Keys (drowzeys)** — the studio itself, its TensorFold families and int8 kernels, and its Mac and DGX Spark engines.
+- **Sam Wasserman and Wasserman Productions** — helped design and build the studio in collaboration with Keys;
+  Wasserman's Filmmaker Suite (ScriptBreak, Cork Board, Master Canvas, Storyboard Reference Studio, Blockout, Motion
+  Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the
+  studio's art.
+- **Qwen team** — Qwen-Image-2.1. **Black Forest Labs** — FLUX 3 Image Klein (FLUX3-K). **MiniMax** — MiniMax H3 and
+  MiniMax-Music3. **Built with Fish Audio** — Fish Audio Drama 3.
+- **Stability AI** — Stable Audio Open · **Ho Kei Cheng et al.** — MMAudio · **kijai** — ComfyUI-MMAudio (sound effects
+  and foley).
+- **Ash Hart** — TensorFold.
+- **antirez** — h3.c · **RobZombAI** — H3MLX · **mrbizarro** — minimax-h3-mlx (Phosphene) · **Filip Strand and the mflux
+  contributors** · **felix-ab** — flux3-mlx.
+- **Comfy Org** — ComfyUI · **Apple** — MLX · **NVIDIA Research** · **FastVideo** · **LightX2V** · **Viggle** ·
+  **speach1sdef178** · **rookiestar28** · **ddalcu**.
+- **The agents you connect** — Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes
+  Agent (Nous Research); Ollama, LM Studio, vLLM, llama.cpp; Blender and blender-mcp.
+- OpenAI **Whisper** and **faster-whisper**, **yt-dlp**, **FFmpeg**, **PyTorch**, Hugging Face **diffusers** and
+  **transformers**, **FastAPI**, **Geist** and **Instrument Serif**.
+- **The community LoRA authors**, by name in Looks and in [CREDITS.md](CREDITS.md).
+
+**Licences.** The studio's code is Apache-2.0. The models keep their own terms; do not redistribute their weights.
+Qwen-Image-2.1: Qwen Research License (non-commercial) · MiniMax H3: MiniMax H3 Community License (territory limits) ·
+MiniMax-Music3: its licence asks for its name in a commercial UI · FLUX3-K: FLUX Kommunity License · Fish Audio Drama
+3: Fish Audio Community License v1.0 (a hosted voice service needs Fish's own licence) · Stable Audio Open 1.0:
+Stability AI Community License (free under US$1 million of yearly revenue) · MMAudio's weights: CC-BY-NC 4.0,
+non-commercial · Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT).
+
+**Links.** Keys: [X](https://x.com/u1tra_instinct) · [GitHub](https://github.com/drowzeys).
+Sam Wasserman / Wasserman Productions: [wassermanproductions.com](https://wassermanproductions.com) ·
+[X](https://x.com/SamJWasserman) · [GitHub](https://github.com/wassermanproductions).
+
+**Powered by** TensorFold (Ash Hart and the TensorFold contributors) · built with integrated Fish Audio Drama 3 · Built
+with Qwen · Built with Fish Audio · MiniMax-Music3.
+
+## New in 2.9.3
+
+- **FLUX3-K installs again on a DGX Spark.** On 2026-10-17 Black Forest Labs renamed the Klein checkpoints on Hugging
+  Face (`flux3-image-klein-bf16.safetensors`, `flux3-image-klein-base-bf16.safetensors`) and removed the old
+  underscore names, so `oneshot-setup-spark.sh --flux3` could not download them. The setup now fetches the new names
+  and renames an older install's files in place instead of fetching 22 GB again: they are the same files (the same
+  SHA-256 on Hugging Face). The app reads either name, so a Spark updated from the Sparks tab keeps FLUX3-K before
+  the setup runs. Nothing changes on a Mac.
 
 ## New in 2.9.2
 
@@ -33,6 +149,32 @@ cores · a 2x video decoder for 2K finals on the Mac
   song the model ended at 33.4 s took 35.2 s, load included, at 16.1 GB. Limits: it does not stream yet, so *Play
   while it's made* is MLX-only (`MUSIC3_BACKEND=mlx`); an M1 to M4 keeps the MLX port; measured on an M5 Ultra only.
   See [Music](#music-minimax-music-3).
+
+## Imagination Studio 3.0 (development branch)
+
+The web app is **Imagination Studio**, by Keys + Wasserman, powered by TensorFold and built with Fish Audio Drama 3.
+Everything it did before is still here, arranged to be quicker to find and calmer to use.
+
+- **Creative Engines.** Story (the film board, Wasserman Slate, the First AD), Image (stills, scouts, edit a picture),
+  Video (clips with sound, long takes, references), Previs (Motion Previs, Ask your agent), Sound (Voice, Music) and
+  Edit (the Timeline and its exports). Each opens on a page of picture cards; a card opens the view that does it,
+  already set up. In Create a small switch at the top says where the prompt goes: video with sound, an image, or an
+  edit of a picture.
+- **Studio Vaults.** Library (every take), Looks (the LoRA hub as a library of styles, one card each), Suite (bring work
+  in from the filmmaker suite, send the cut to Resolve and dailies to Circle Take), Machine (telemetry, Sparks, brains
+  and tools, updates) and Learn.
+- **Home**, under the wordmark, starts the common jobs in one click and shows recent takes and the machine.
+- **Updates.** Machine → Updates shows the installed version and commit, the branch it follows, the newest GitHub
+  release (for information) and one *Update and restart* button. Installing is always a fast-forward of the followed
+  branch, and waits until jobs and the render engine are idle.
+- **Render bay and ⌘K.** The queue is docked along the bottom of every room. ⌘K (or `/`) searches and runs anything;
+  ⌥1 to ⌥9 and ⌥0 jump between rooms. Below 1100 px the sidebar is an icon rail; on a phone the rooms sit along the
+  bottom.
+- **Pictures.** The cards' key art fills from `app/static/art`: each slot is listed in `art/ART-MANIFEST.json` and
+  shows a plain panel until its picture is there. Model and tool marks in `app/static/brand` identify what the Studio
+  runs and belong to their owners (`brand/THIRD-PARTY-MARKS.md`).
+
+The typefaces (Geist, Geist Mono, Instrument Serif) ship in `app/static/fonts` under the SIL Open Font License.
 
 ## New in 2.9.1
 
@@ -214,7 +356,7 @@ Each lists what was tested and what was not:
 
 These are proposals: this repository's install still pins the engines on the `drowzeys/TensorFold` fork.
 
-## Big credit: Sam Wasserman (wassermanproductions.com)
+## Big credit: Sam Wasserman and Wasserman Productions (wassermanproductions.com)
 
 **Sam Wasserman shaped the production side of this studio: the AI film workflow and the ideas behind it.** Slate, his
 prompt studio for AI filmmaking, is the workflow inside the Wasserman Slate AI Studio tab. The Wasserman Sharp Spec,
@@ -222,6 +364,14 @@ the QA gate that follows it, and the 80s Horror LoRA that opens the Keys and Was
 Python port of his [Motion Previs Studio](https://github.com/wassermanproductions/motion-previs-studio). The aim
 we share is the best AI film studio there is, and this pack is where his planning tools meet a render engine. See
 [CREDITS.md](CREDITS.md).
+
+**Wasserman's Filmmaker Suite, by Sam Wasserman and Wasserman Productions**, is built in: ScriptBreak, Cork Board,
+Master Canvas, Storyboard Reference Studio, Blockout, Motion Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet
+and DaVinci MCP, each under its own licence (Apache-2.0; Master Canvas MIT). The Studio reads and writes their files.
+
+**Keys (drowzeys)** built the studio itself: the app, both builds, the TensorFold families and int8 kernels, and the
+Metal and CUDA engines it renders with. **Sam Wasserman and Wasserman Productions** helped design and build it in
+collaboration with Keys. Imagination Studio is by Keys + Wasserman.
 
 **Thank you to everyone this stands on:** the Qwen team at Alibaba (Qwen-Image-2.1, Qwen3-VL), the MiniMax team
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
@@ -392,7 +542,7 @@ bash oneshot-setup.sh --upgrade  # on Linux: oneshot-setup-spark.sh --upgrade
 `--upgrade` moves an existing install to the version of the clone: the environment's packages, ComfyUI at its pinned
 commit, the engine (rebuilt only when its pinned commit changed) and the Motion Previs environment, which it adds
 when it is missing. It **fetches no weights** (a model that is not on disk is named and left out; an image-only
-install stays image-only), does not touch `~/TensorFoldStudio` (clips, projects, LoRAs, settings), prints the version
+install stays image-only), does not touch `~/ImaginationStudio` (clips, projects, LoRAs, settings), prints the version
 before and after, and ends with `--verify`. Running it a second time changes nothing. Restart the app afterwards
 (`bash scripts/app.sh`) so it serves the new pages. Run it when no clip is rendering.
 
@@ -546,7 +696,39 @@ for the same prompt; a 30 second chained clip at 864x480 (two 15 second parts) t
 Not tested: clips longer than 15 seconds in one piece, chains longer than 30 seconds, a download of the models from nothing
 (the files were already on the test machine), any GPU other than the GB10, and two Sparks working on one clip.
 
+### A Spark shared with other work: the workload governor (optional)
+
+A Spark that also runs other model servers can have a machine-wide workload governor: a small service that hands
+out memory reservations through an admission socket, so two heavy jobs never start on the same memory. Point the
+studio at its folder with `SPARK_GOVERNOR` and the studio takes part (`spark/workload.py`); leave it unset and nothing
+changes.
+
+- **The renderer starts inside a reservation of its own** (`spark/managed_comfy.py`, used by `spark/comfy.sh`). It
+  first releases its own reservations whose servers have ended, waits for the governor to allow the start, then
+  starts ComfyUI with the same memory guard beside it and the governor's telemetry as well: memory under the floor, a
+  GPU at 90 C or throttling, a platform zone near its trip point or a minute of memory pressure stop the server, and
+  the render says why. `bash spark/comfy.sh stop` ends that server only (each port has its own
+  `$PREFIX/managed-comfy-<port>.json`).
+- **Every job waits for a cool, calm start** (`spark/start_gate.py`, before each submission): the server must still
+  hold its reservation, the GPU must be under 80 C and memory not under pressure. It waits up to three minutes, then
+  the job fails with the reasons.
+- **Drama 3 too**, with `DRAMA3_MANAGED_GUARD=1` (`spark/managed_voice.py`): the engine starts in its own
+  reservation, after the studio's renderer is stopped when idle (never while it renders), keeps its own 8 GB
+  kill-guard, and each part of a take waits for the same start checks.
+
+`SPARK_GOVERNOR_MIN_FREE_GIB` (12, never lower), `SPARK_GOVERNOR_RESERVE_GIB` (85 for a render),
+`SPARK_GOVERNOR_VOICE_GIB` (55), `SPARK_GOVERNOR_OWNER` and `SPARK_GOVERNOR_VOICE_OWNER` (the names it reserves
+under), `SPARK_GOVERNOR_SOCKET`, `SPARK_GOVERNOR_FREE_URL` (another ComfyUI on the machine whose idle model cache is
+freed before a reservation; a busy one is never touched) and `SPARK_THERMAL_ZONES` adjust it. `spark/workload.py`
+says what the governor folder must hold.
+
+`DELIVERY_AUDIO_RATE=48000` (also 44100 or 96000) delivers a Spark clip's sound as stereo AAC at that rate for an
+editor's timeline; ComfyUI's H3 decoder makes 32 kHz. The picture is copied unchanged, and resampling adds no detail.
+
 ## What changed
+
+> **2.9.3 (2026-10-17): FLUX3-K's new file names.** BFL renamed the Klein checkpoints; the Spark setup fetches the
+> new names and renames old ones. Details: [New in 2.9.3](#new-in-293).
 
 > **2.9.2 (2026-10-17): Music on TensorFold's native Metal engine on an M5 Mac.** No live playback there yet; an M1 to
 > M4, or `MUSIC3_BACKEND=mlx`, keeps the MLX port and its live playback. Details: [New in 2.9.2](#new-in-292).
@@ -971,6 +1153,11 @@ Not tested: clips longer than 15 seconds in one piece, chains longer than 30 sec
 
 ## Install, and the one-click app
 
+Everything the studio makes and keeps (renders, projects, uploads, voice, music, LoRAs, settings) is in
+`~/ImaginationStudio`, or in `STUDIO_HOME` when that is set. An install from before the name kept it in
+`~/TensorFoldStudio`: the studio moves that folder once to `~/ImaginationStudio` when it starts (a rename on the same
+disk, nothing copied) and leaves `~/TensorFoldStudio` as a link to it (`app/studio_home.py`).
+
 ### Minimum requirements
 
 | What you want to run | Memory | Disk | Chip |
@@ -1027,6 +1214,12 @@ Qwen-Image-2.1-Turbo 31 GB, the 2x decoder 6 GB, Python environment 1.3 GB). `--
 (MiniMax H3's transformer 62 GB and the Turbo adapter 2 GB). The Studio's own code and the native engine are a few
 megabytes. On an M1 to M4 the setup also writes the 8-bit FastH3 weights (37 GB); `Q8_ONLY=1` then deletes the
 65 GB they were made from. If you run it on another machine, a report of the chip, memory and times is welcome as an issue.
+Before each download the setup searches this machine for the same weights, models and LoRAs, and a copy it finds
+elsewhere (another folder, a disk, a Hugging Face cache) is linked where the Studio looks instead of being downloaded
+again (`python3 app/discover.py --scan` shows the table; nothing is moved or copied). The Studio itself searches again
+shortly after every start, on a Mac and on a DGX Spark alike, with nothing to configure, and links what it can prove is
+the same file. **Machine → Models & weights** lists what it found, what it linked and what still needs a download or a
+conversion, with *Use it* and *Unlink*.
 
 ```bash
 brew install python@3.11 uv ffmpeg
@@ -1048,7 +1241,7 @@ bash oneshot-setup.sh --upgrade         # add --app to rebuild the double-clicka
 install's own environment when it is older than this version needs (2.6.1: the build with reference videos and
 audio), copies the render scripts, and adds the Motion Previs environment when it is missing (0.5 GB). It **fetches
 no weights**: a model that is not on disk is named and left out, and an image-only install stays image-only. It does
-not touch `~/TensorFoldStudio` (clips, projects, LoRAs, settings), prints the version before and after, and ends with
+not touch `~/ImaginationStudio` (clips, projects, LoRAs, settings), prints the version before and after, and ends with
 `--verify`. Running it a second time changes nothing. Quit and reopen the app afterwards. A plain
 `bash oneshot-setup.sh` after `git pull` upgrades the engine too, and also fetches any model the install lacks.
 
@@ -1069,6 +1262,38 @@ if it is not running and opens it in your browser; double-click again to come ba
 stop the server: `"$HOME/Applications/Wasserman Slate AI Studio.app/Contents/MacOS/TensorFoldStudio" stop`. There is **no
 login**, and by default it listens on this Mac only; `HOST=0.0.0.0 bash scripts/make-app.sh` opens it to your
 network, which you should do only on a network you trust.
+
+### Updating Studio
+
+Open **Updates** in the header, choose **Check for updates**, then **Update and restart**. The page reconnects after
+the restart and offers **Reload Studio** when you have saved your work. The update source is the GitHub repository
+you installed (`origin`), and Studio follows the branch you have checked out: the branch it tracks on `origin`, or the
+repository's default branch when it tracks none. The Updates panel shows the installed version and commit, the branch
+it follows, and the newest GitHub release of that repository for information; what is installed is always the latest
+commit of the followed branch. A fork follows its own branches; it does not automatically merge its parent.
+
+A development checkout updates the same way: check out the development branch so that it tracks `origin` (for
+example `git switch --track origin/<branch>`), and the panel follows that branch. To follow a particular branch
+whatever is tracked, start Studio with `STUDIO_UPDATE_BRANCH=<branch>`; the checkout must be on that branch. A branch
+that tracks another remote, or a local branch, is not updated from the app.
+
+**Automatic updates** is off by default. Turn it on to check every six hours while Studio is open and install when
+its queue and render engine are idle. The setting is saved for this installation. Updates preserve projects, media,
+models and runtime environments. Updates only move the branch forward: local code changes, untracked files, commits
+of your own that are not on GitHub, or a detached checkout pause updates without discarding work. Updates requiring changes to installation
+dependencies show a message asking you to follow that version's setup instructions.
+
+Start Studio using `bash scripts/app.sh` or the existing Mac app launcher to support an update and restart. The launcher
+waits for its server to exit before changing source, saves the old commit under `refs/studio-backups/`, and checks the
+new server's startup. If startup fails, it restores the previous code and turns automatic updates off. It does not
+discard files changed by somebody during recovery. Git archive downloads and an app started directly with
+`python app/server.py` can still run; use a Git clone and `scripts/app.sh` for in-app installation of updates. Each
+checkout runs one launcher. Manage update controls on the local computer, through an SSH tunnel, or through its
+Tailscale address; an exposed LAN app cannot manage source updates.
+
+Worker Sparks keep the existing **Sparks → Update and start** workflow. They do not independently auto-update to
+different code while the head Studio is dispatching work. Model and engine installation remains a separate setup
+step; this updater never downloads weights, changes memory guards, or runs setup scripts.
 
 ## Using the studio
 
@@ -1314,7 +1539,7 @@ Once the Music tab has a song, *Song under the export* lays it under the whole e
 **Library** lists every render, scout and export. Under a picture: *use* makes it the first frame of a new clip,
 *last frame* ends a clip on it, *edit* opens Edit a picture, and *Turnaround* makes five views. Under a clip: *continue*
 starts a new clip on its last frame, *+ timeline* sends it to the editor, *Upscale* and *Remove a person*. 🗑 moves a
-file to `~/TensorFoldStudio/trash`.
+file to `~/ImaginationStudio/trash`.
 
 ![Tutorial (screenshot from 2.4; the tab now has a part for each tab of the app)](samples/ui_tutorial.png)
 
@@ -1401,7 +1626,7 @@ A cleared form is put back by *Undo* in the message or by *Undo clear* beside th
 or reloaded. A queued or running job cannot be deleted (cancel it first), and a file such a job reads or writes
 stays. Deleting never touches a project file, a LoRA or a model: only pictures, clips and sound in `renders`,
 `exports`, `scouts`, `uploads` and `qa`, and clips in `projects` and `slate`, can be moved. The trash is
-`~/TensorFoldStudio/trash`; a LoRA removed in the hub goes there too, so *Empty trash* erases that as well.
+`~/ImaginationStudio/trash`; a LoRA removed in the hub goes there too, so *Empty trash* erases that as well.
 `tests/test_clear.py` holds the path checks. Driven in a headless Chromium on both machines' builds, against a
 studio folder of test clips: each Clear and Undo, one job deleted and put back, two ticked jobs, the failed ones,
 all finished, restore, two ticked Library files, and the trash emptied (25 checks). Not driven in a browser: the
@@ -1423,7 +1648,7 @@ Each clip made to the spec then goes through his **QA gate** (`app/qa.py`), abou
   model checks that face, hair and wardrobe are the same in all three with no smeared faces. The model is the film's
   brain, or Claude Code, Codex or a local vision model, under your own sign-in: the sheet is sent to that model.
 - **Retake.** A clip that fails either gate is rendered once more at the next seed; the failed take and every contact
-  sheet are kept in `~/TensorFoldStudio/qa/`. The job card shows what each gate found, and the sharpness figure of
+  sheet are kept in `~/ImaginationStudio/qa/`. The job card shows what each gate found, and the sharpness figure of
   the three frames as a diagnosis.
 
 A gate whose tool is missing on the machine is shown as skipped and does not fail the clip.
@@ -1438,7 +1663,7 @@ author's, for credit.
 - **Browse.** "▸ Browse the hub" opens the library: a tab for each group, a search box, "Installed only", and a card
   for each LoRA with what it does, its author, what it works from, its licence, its size and its trigger word.
 - **Install.** After the essential bundle (below) every usable LoRA is already installed. Otherwise "⤓ Install" on a
-  card, or "Install all in this category", puts the file in `~/TensorFoldStudio/loras/`, checked against its sha256.
+  card, or "Install all in this category", puts the file in `~/ImaginationStudio/loras/`, checked against its sha256.
 - **Use.** "Use on this clip" adds the LoRA to the clip being made. Each picked LoRA has a strength (its author's range
   is in the tooltip; a slider LoRA also takes minus values) and, when its recipe has them, a look. The trigger word and
   look phrase are put at the start of the shot for you. Up to four can be stacked.
@@ -1643,7 +1868,7 @@ It fetches every preset of the hub once: fourteen in one essential package per p
 author's card and licence; `LORA_PACKAGE=none` skips it) and the rest each from its author's own page (about 6.5 GB in
 all and 4 minutes measured on a fast line;
 the three Keyframe Animation adapters, 5.6 GB of it, need your Hugging Face account's acceptance of their licence),
-into `~/TensorFoldStudio/lora-bundle/`, laid out by the hub's groups (`01-camera-viewpoint` ... `06-support-finishing`, `07-fun`,
+into `~/ImaginationStudio/lora-bundle/`, laid out by the hub's groups (`01-camera-viewpoint` ... `06-support-finishing`, `07-fun`,
 with `bundle.json` as the menu), checks each sha256, keeps the author's model card and licence beside each file, and
 installs the set into the hub (on a Mac, rewritten for the MLX engine). After that the Studio needs none of those
 links: copy the folder to another machine or drive and run `bash oneshot-essential-bundle.sh --source /path/to/lora-bundle`
@@ -1684,8 +1909,12 @@ copying anything anywhere.
 | **Deliver** | Render a whole scene in order, a continuity check, the shot list as Markdown or CSV, and the film's takes to the Editor's timeline. |
 
 The brain is Slate's: your own Claude Code or Codex sign-in on the machine that runs the app, or a local
-OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). Everything without a ✦ works with no brain. Films are
-Slate's own `project.json` under `~/TensorFoldStudio/slate/`: a project made in Slate opens here, and one made here
+OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). Everything without a ✦ works with no brain. A new film
+starts from the brain chosen in Brains & tools; an install with nothing chosen there yet takes `STUDIO_DEFAULT_BRAIN`
+(`local`, `claude`, `codex`, ...), `STUDIO_LOCAL_ENDPOINT` and `STUDIO_LOCAL_MODEL` from its environment. When a film's
+brain is the local model, its frames are only ever shown to that model: the QA look is skipped rather than sent to a
+cloud CLI when the local server is not set. Films are
+Slate's own `project.json` under `~/ImaginationStudio/slate/`: a project made in Slate opens here, and one made here
 downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at any length
 the model takes (their seconds, or their slot in bars) and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
 
@@ -1718,7 +1947,7 @@ and audio analysis, the stills library, compiles for other generators, and its M
 its own: anyone who can open it can use the brain, so keep it on a network you trust.
 
 The app drives the same scripts as the command line, one job at a time on each machine, and keeps projects, uploads
-and renders under `~/TensorFoldStudio`. What it is not: the editor has one video track with trims and ordering only
+and renders under `~/ImaginationStudio`. What it is not: the editor has one video track with trims and ordering only
 (no transforms, text or transitions; its only audio step is a song laid under the export), and outside Slate's ✦
 buttons there is no assisted prompt writing. The workflow is modelled
 on rookiestar28's ComfyUI-MiniMaxH3-Studio, which does far more; no code is shared with it.
@@ -1830,7 +2059,7 @@ says on the tab what is missing. `DRAMA3_BACKEND=mlx|cuda` picks the engine (`ml
 default). The API: `GET /api/voice/state`, `POST /api/voice/takes {text, ref_audio?, ref_text?, consent?, seed?,
 temperature?, top_p?, top_k?}` (a job of kind `voice`), `GET /api/voice/takes`, `GET /api/voice/takes/{id}/audio`,
 `GET /api/voice/takes/{id}/live` (the take as it is made; `"live": false` in a take's settings: not played, Mac only), `POST /api/voice/sheet {sheet, project}` and
-`POST /api/voice/cut {path, seconds}`. Takes are kept in `~/TensorFoldStudio/voice/` (the WAV, its settings and
+`POST /api/voice/cut {path, seconds}`. Takes are kept in `~/ImaginationStudio/voice/` (the WAV, its settings and
 measurements, and the text).
 
 ### Voice on a DGX Spark (CUDA)
@@ -2039,12 +2268,52 @@ The API: `GET /api/music/state`, `POST /api/music/takes {caption, lyrics, second
 top_k?, title?, asr?, live?}` (a job of kind `music`; `live: false` does not stream), `GET /api/music/takes`, `GET
 /api/music/takes/{id}/audio`, `GET /api/music/takes/{id}/live` (the song being made, a stereo WAV), `POST
 /api/music/soundtrack {take, video, music_db?}` (a job of kind `soundtrack`), and an export job's `params.soundtrack
-{take, music_db?}`. Songs are kept in `~/TensorFoldStudio/music/` (the WAV and its settings and measurements).
+{take, music_db?}`. Songs are kept in `~/ImaginationStudio/music/` (the WAV and its settings and measurements).
 
 **Licence.** MiniMax-Music3 is under the **MiniMax-Music3 Community License**: commercial use is allowed; a commercial
 product or service must display "MiniMax-Music3" in its user interface; a licensee above US$20 million of yearly
 revenue needs MiniMax's prior written authorisation; a hosted service must keep safeguards against misuse. Do not
 redistribute the weights.
+
+## Sound effects and foley (Stable Audio Open, MMAudio)
+
+Sound → **Sound effects** makes two kinds of take, each a job of the queue, on a Mac (`bash scripts/setup-sound.sh`,
+or `oneshot-setup.sh --sound`; about 13 GB of weights in `$PREFIX/sound-models` and Hugging Face's cache):
+
+- **Foley for a clip** (MMAudio large_44k_v2): pick a Library clip; MMAudio watches its frames and makes its sound,
+  steps on the footfalls. Words are optional. The result is a WAV and the clip with it, laid under the clip's own
+  sound at -6 dB (its speech stays on top; peaks under -1 dBFS) or in place of it. Up to 15 s, the studio's longest clip.
+- **A sound effect** (Stable Audio Open 1.0): words to 1 to 47 s of 44.1 kHz stereo.
+
+Both land in `~/ImaginationStudio/sound/` with a take file each, and in the Library under **Sound effects** (foley
+clips under Clips). `POST /api/jobs {kind: "sfx", params: {prompt, seconds, negative?, seed?, steps?, cfg?}}` or
+`{kind: "foley", params: {video, prompt?, negative?, keep_sound?, foley_db?, seed?}}`; `GET /api/sound/state`,
+`GET /api/sound/takes`.
+
+**On a DGX Spark** (`bash oneshot-setup-spark.sh --sound`, about 11 GB in `$SPARK_MODELS/Sound-Comfy`) both run through
+the studio's ComfyUI server (`spark/comfy.sh`, with its memory guard beside it) as `spark/spark_generate.py sfx` and
+`foley`, never as standalone model code:
+
+- **A sound effect** runs on ComfyUI's own Stable Audio nodes (the checkpoint, its T5-base encoder, the seconds as
+  conditioning, KSampler with dpmpp_3m_sde_gpu on the exponential schedule), the files from Stability's gated repo
+  with your own Hugging Face sign-in.
+- **Foley** runs on kijai's ComfyUI-MMAudio (MIT, pinned at `8eaeb72e`) with the Studio's own sampler node
+  (`spark/studio_mmaudio`, put beside it by `comfy.sh`): kijai's sampler reads one stream of frames as both CLIP's
+  8 a second and Synchformer's 25 a second, so a 24 fps clip would land a little early; the Studio's node takes the
+  clip's own rate and picks the frame on screen at each of MMAudio's times. The clip is brought to 384 rows before
+  ComfyUI decodes it (a 15 s clip at 1376x768 would be 4.6 GB of frames in memory, at 384 rows 1.1 GB). The weights
+  are Kijai/MMAudio_safetensors (fp16, run in bf16) and NVIDIA's BigVGAN v2, fetched by the install so nothing is
+  downloaded at the first take.
+
+Each starts from a ComfyUI server with nothing else loaded, as a song does. A kind renders on a Spark only once
+`spark/memory_guard.py` has its measured estimate (`SOUND_ESTIMATE`, `python3 spark/memory_guard.py sound`): it is
+asked before the job is queued and again before anything loads, and a kind with no measurement is refused with that
+reason. The WAV is levelled the way a song is (full level, peaks under -1 dBFS) and foley is laid under the clip by
+the same ffmpeg step as on a Mac.
+
+**Licences.** Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue); its
+Hugging Face page is gated, so accept the licence there first (the studio's Install guide signs you in to Hugging
+Face). MMAudio's weights are **CC-BY-NC 4.0: non-commercial**; its code is MIT. Do not redistribute either's weights.
 
 ## Motion Previs: a shot into control layers and a camera move
 
@@ -2054,7 +2323,7 @@ the app.
 
 The **Motion Previs** tab takes a clip (one you upload, or an earlier render or upload), a range of 2 to 15 seconds
 and one of four reference modes (camera only, actor motion, object motion, full scene), and writes a production pack
-under `~/TensorFoldStudio/motion/<id>/` with a ZIP beside it: the trimmed reference clip, a pose track
+under `~/ImaginationStudio/motion/<id>/` with a ZIP beside it: the trimmed reference clip, a pose track
 (`pose_landmarks.json`), an OpenPose BODY_25 skeleton video and `openpose_keypoints.json`, a subject-masked camera
 solve (`camera_motion.json`), depth (Depth-Anything-small, and an ffmpeg proxy), edges, line art, a motion mask, a
 contact sheet, a shot bible and a prompt pack. The tab shows the reference, skeleton, depth and edges side by side
@@ -2540,7 +2809,7 @@ IMAGE_MODEL=flux3k-fast UPSAMPLE=0 bash scripts/image.sh "a full scene caption .
 
 ```bash
 bash scripts/edit.sh photo.png "The same statue at night under a full moon" night.png
-LORA=~/TensorFoldStudio/loras/qwen-multiple-angles.safetensors:0.9 \
+LORA=~/ImaginationStudio/loras/qwen-multiple-angles.safetensors:0.9 \
   bash scripts/edit.sh photo.png "<mva> right side view, high-angle shot" side.png
 SET_FILE=edits.json bash scripts/edit.sh photo.png          # [["prompt", "out.png"], ...] from one load
 BASE=1 bash scripts/edit.sh photo.png "..." out.png         # 40 steps, base model (--image-edit)
@@ -2981,8 +3250,9 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 
 ## Credits
 
-Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
+Imagination Studio is by **Keys (drowzeys)** and **Sam Wasserman and Wasserman Productions** (Wasserman's Filmmaker
+Suite, and the studio's design with Keys); see [License & credits](#license--credits). Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
 picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
-[CREDITS.md](CREDITS.md). Pack: drowzeys / keys.
+[CREDITS.md](CREDITS.md). Pack: drowzeys / keys, with Wasserman Productions.

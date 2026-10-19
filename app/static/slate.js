@@ -1,5 +1,5 @@
 "use strict";
-/* Wasserman Slate AI Studio, inside the Production tab.
+/* Wasserman Slate, inside Story's Film tab.
    A port of the workflow of Slate, the prompt studio for AI filmmaking, by Sam Wasserman (wassermanproductions.com),
    Apache-2.0: its NOTICE is at slate/NOTICE and its data files beside it, unchanged. The project files are Slate's
    own project.json, the brain prompts are Slate's, and the coverage plans and setups are read from its data. What is
@@ -352,7 +352,7 @@ function slFeedback(scene, shot, take) { const active = job => job && ["queued",
 function slRoll(scene, shot) { const tf = slTf(shot), p = SL.p, plan = SL.plan[shot.id], redo = () => { delete SL.plan[shot.id]; slDraw(); }, soft = () => { tf.h3Auto !== false && delete SL.plan[shot.id]; };
   if (!plan) { SL.plan[shot.id] = { pending: true }; slCompile(shot).then(render, e => { SL.plan[shot.id] = { prompt: "", plan: {}, warnings: [e.message], mode: "text" }; render(); }); }
   const up = el("input", { type: "file", accept: "image/*", onchange: async () => { const data = new FormData(); data.append("file", up.files[0]); const j = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (j.path) { tf.image = j.path; redo(); } else toast(j.error || "upload failed"); } });
-  const h3 = el("textarea", { style: "min-height:190px;font:12px/1.5 var(--mono)" }); h3.value = tf.h3 || (plan && plan.prompt) || ""; h3.addEventListener("input", () => { tf.h3 = h3.value; tf.h3Auto = false; slSave(); });
+  const h3 = el("textarea", { style: "min-height:190px;font:13.5px/1.5 var(--mono)" }); h3.value = tf.h3 || (plan && plan.prompt) || ""; h3.addEventListener("input", () => { tf.h3 = h3.value; tf.h3Auto = false; slSave(); });
   const size = plan && plan.plan && (plan.plan.width ? plan.plan.width + " × " + plan.plan.height : (S.presets[plan.plan.preset] || { size: [] }).size.join(" × "));
   return el("div", { class: "group" }, el("label", {}, "Roll camera · this shot opens on"),
     choice(tf, "start", { text: ["Text only", "the model invents the frame"], previous: ["The shot before", "its last frame, no cut"], image: ["An image", "your own first frame"], cast: ["Cast stills", S.ref2va ? "reference pictures keep the faces" : "needs the Ref2VA model"] }, redo, true),
@@ -381,7 +381,7 @@ function slRoll(scene, shot) { const tf = slTf(shot), p = SL.p, plan = SL.plan[s
       // how many Sparks the shots queued from here may use: one shot per Spark, side by side (sparks.js)
       typeof sparksPick === "function" ? sparksPick({ kind: "video", clips: Math.max(1, scene.shots.length), params: { loras: typeof lorasOf === "function" ? lorasOf(slFilm()) : [] } }) : null,
     shot.takes.some(t => t.mediaPath) ? el("h3", {}, "Takes · circle the one that works") : null, slTakes(scene, shot), slImport(scene, shot)); }
-function slWorkspace(scene, shot) { if (!SL.open.cat) SL.open.cat = SL.data.categories[0].id; const edit = el("textarea", { style: "min-height:250px;font:12.5px/1.55 var(--mono)", placeholder: "# Subject\nwho or what the shot is about, the action, wardrobe\n\n# Composition\n# Lighting\n# Camera\n# Style\n# Mood" }); edit.value = shot.prompt;
+function slWorkspace(scene, shot) { if (!SL.open.cat) SL.open.cat = SL.data.categories[0].id; const edit = el("textarea", { style: "min-height:250px;font:14px/1.55 var(--mono)", placeholder: "# Subject\nwho or what the shot is about, the action, wardrobe\n\n# Composition\n# Lighting\n# Camera\n# Style\n# Mood" }); edit.value = shot.prompt;
   edit.addEventListener("input", () => { shot.prompt = edit.value; shot.updatedAt = slNow(); slTf(shot).h3Auto !== false && delete SL.plan[shot.id]; slSave(); });
   const note = el("input", { placeholder: "Talk to the shot: make it rain, keep the neon", onkeydown: e => { if (e.key === "Enter" && note.value.trim()) slNote(shot, note.value.trim()); } }), cats = SL.data.categories, cat = cats.find(c => c.id === SL.open.cat) || cats[0], lines = shot.prompt.split("\n");
   const flip = (list, n) => { list.includes(n) ? list.splice(list.indexOf(n), 1) : list.push(n); delete SL.plan[shot.id]; slDraw(); };
@@ -442,6 +442,9 @@ function slBible() { const p = SL.p, d = p.defaults, film = slFilm(), b = SL.bra
       S.ref2va ? field("Cast stills (reference) passes", slPick(film, "refPasses", S.ref2va_turbo ? { 20: "20 passes · the model as released", 4: "Turbo 4 passes · about 2.5x faster" } : { 20: "20 passes" })) : null),
     loraHub(film, slSave, slDraw),
     el("h3", {}, "The brain"), el("div", { class: "note" }, "The brain writes and rewrites prompts. It is your own sign-in or your own local model: no API keys. On this machine: Claude Code " + (b.claude ? "✓" : "not found") + " · Codex " + (b.codex ? "✓" : "not found") + " · local server " + (b.local ? "✓ " + b.endpoint : "none answering") + "."),
+    typeof connectOpen === "function" ? el("div", { class: "chips" }, [["claude", "Claude Code"], ["codex", "Codex"]].map(([id, name]) => el("button", { class: "small" + (d.brain === id && !b[id] ? " on" : ""),
+      title: "Connect " + name + ": the studio installs it if needed, signs you in and checks it answers", onclick: () => connectOpen(id) }, (b[id] ? "Check " : "Connect ") + name)),
+      el("button", { class: "small", onclick: () => { if (typeof goSettings === "function") goSettings("connections"); } }, "A local model")) : null,
     el("div", { class: "row" }, field("Brain", slPick(d, "brain", { claude: "Claude Code", codex: "Codex", local: "Local model (Ollama, LM Studio, vLLM, llama.cpp)" }, render)),
       d.brain === "local" ? field("Server address (empty: auto-detect)", slIn(d, "localEndpoint", { placeholder: "http://localhost:11434/v1" })) : null, d.brain === "local" ? field("Model (empty: the first one loaded)", slIn(d, "localModel", { placeholder: (b.models || [])[0] || "" })) : null,
       el("button", { class: "fit", disabled: !!SL.busy, onclick: async () => { const r = await slBrain("Brain test", "Reply with exactly: SLATE-OK", { tier: "fast", system: "You are a connectivity test. Reply with exactly what is asked." }); SL.test = r ? "The brain answered in " + (r.elapsedMs / 1000).toFixed(1) + " s: " + r.text.slice(0, 80) : "No answer: the reason is in the message at the bottom left."; render(); } }, "Test the brain")), SL.test ? el("div", { class: "note" }, SL.test) : null,

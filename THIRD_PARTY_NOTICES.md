@@ -169,3 +169,18 @@ On an M5 or later Mac the song runs on TensorFold's Metal port of MiniMax Music 
 
 On an older Mac, or with `MUSIC3_BACKEND=mlx`, the song runs on TensorFold's MLX port of MiniMax Music 3 (drowzeys/TensorFold, branch `music3-mlx`, commit
 6844b413, Apache-2.0), installed into its own environment by `scripts/setup-music.sh`.
+
+## Typefaces
+
+The web app ships three typefaces in `app/static/fonts`, each under the SIL Open Font License 1.1 (full text beside
+each file):
+
+- Geist and Geist Mono, Copyright 2024 The Geist Project Authors (`OFL-geist.txt`)
+- Instrument Serif, Copyright 2022 The Instrument Serif Project Authors (`OFL-instrument-serif.txt`)
+
+## Marks of other projects
+
+`app/static/brand` holds the marks of the models and tools the web app runs (Qwen, MiniMax, Black Forest Labs, Fish
+Audio, ComfyUI, TensorFold, and the agent brains), shown beside their names to identify them. They are trademarks of
+their owners; sources, licences of the drawings and each owner's usage notes are in
+`app/static/brand/THIRD-PARTY-MARKS.md`.

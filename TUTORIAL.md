@@ -78,7 +78,7 @@ any time to come back. Drag it to the Dock to keep it there.
 
 - It is a small launcher around the folder you cloned. If you move that folder, run `make-app.sh` again.
 - Stop it: `"$HOME/Applications/Wasserman Slate AI Studio.app/Contents/MacOS/TensorFoldStudio" stop`
-- Log: `~/Library/Logs/TensorFoldStudio.log`. Everything you make: `~/TensorFoldStudio`.
+- Log: `~/Library/Logs/TensorFoldStudio.log`. Everything you make: `~/ImaginationStudio`.
 - It listens on this Mac only, and has no login. `HOST=0.0.0.0 bash scripts/make-app.sh` opens it to your network;
   do that only on a network you trust.
 
@@ -212,7 +212,7 @@ When it is done, **Lay a song under it** opens the Music tab with the video chos
 - **Tutorial:** short lessons for every tab, one step at a time. *Show me in the app* opens the tab and outlines the
   control; a bar at the bottom carries the lesson on from there.
 - **Clearing:** every prompt form has **Clear** (with **Undo**). In the queue, 🗑 deletes a finished job and what it
-  made, and **Clear failed** / **Delete all finished** tidy the list. Deleted files go to `~/TensorFoldStudio/trash`.
+  made, and **Clear failed** / **Delete all finished** tidy the list. Deleted files go to `~/ImaginationStudio/trash`.
 
 ## 8.5 The LoRA hub: a trained look or move for a clip
 

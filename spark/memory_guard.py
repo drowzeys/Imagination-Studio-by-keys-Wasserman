@@ -17,6 +17,7 @@ file is the three layers that now stand in the way, and everything that starts a
 
     python3 spark/memory_guard.py check --width 1376 --height 768 --frames 124 --lora
     python3 spark/memory_guard.py watch --pid 1234 [--floor MB]
+    python3 spark/memory_guard.py sound      # sound effects and foley: measured, and whether they fit
 
 What was measured (2026-10-13, a 124.5 GB Spark with nothing else running, 118.7 GB available; MemAvailable sampled
 ten times a second through whole jobs of the app; "need" is what the job took from the machine at its lowest point):
@@ -331,6 +332,47 @@ def music_check(seconds: float, available_mb: int | None = None, total_mb: int |
     return out
 
 
+# Sound effects (Stable Audio Open 1.0) and foley (MMAudio large_44k_v2) on ComfyUI (spark_generate.py sfx / foley):
+# kind -> (MB with the models loaded and nothing made, MB per second of sound asked for). Each is measured the way a
+# song was, from a stopped server on a worker Spark under a second watchdog, smallest first; a kind with no line here
+# has not been measured on a DGX Spark, and is refused there.
+SOUND_ESTIMATE: dict = {}
+# kind -> ((seconds asked, MB), ...): the measured runs; tests/test_sound.py holds each line to them
+SOUND_MEASURED: dict = {}
+SOUND_LONGEST = {"sfx": 47.0, "foley": 15.0}  # the app's longest of each (app/sound.py)
+SOUND_NAMES = {"sfx": "a sound effect (Stable Audio Open 1.0)", "foley": "foley (MMAudio)"}
+
+
+def sound_check(kind: str, seconds: float, available_mb: int | None = None, total_mb: int | None = None) -> dict:
+    """Whether a sound effect or a clip's foley of ``seconds`` fits this machine, as ``music_check`` answers for a song;
+    a kind not measured here is refused with that reason. Everything fits where there is no /proc/meminfo."""
+
+    if total_mb is None:
+        total_mb = meminfo().get("MemTotal", 0)
+    if not total_mb:
+        return {"fits": True, "reason": "", "route": None}
+    if available_mb is None:
+        available_mb = room_mb() or total_mb - IDLE_MB
+    floor = floor_mb(total_mb)
+    out = {"fits": False, "reason": "", "need_mb": None, "error_mb": ERROR_MB, "left_mb": None, "floor_mb": floor,
+           "available_mb": available_mb, "route": f"sound-{kind}", "rows": None, "nearest": None}
+    if kind not in SOUND_ESTIMATE:
+        out["reason"] = (f"{SOUND_NAMES.get(kind, kind)} has not been measured on a DGX Spark yet, and nothing renders on a "
+                         "Spark without a measured memory estimate (spark/memory_guard.py), so it is refused here")
+        return out
+    if seconds > SOUND_LONGEST.get(kind, 0):
+        out["reason"] = f"{SOUND_NAMES[kind]} is at most {SOUND_LONGEST[kind]:g} s here, the longest measured"
+        return out
+    fixed, per_second = SOUND_ESTIMATE[kind]
+    need = int(fixed + per_second * float(seconds))
+    left = available_mb - need - ERROR_MB
+    out.update(fits=left >= floor, need_mb=need, left_mb=left)
+    if not out["fits"]:
+        out["reason"] = (f"{SOUND_NAMES[kind]} of {seconds:g} s needs about {need / 1000:.0f} GB at its peak (give or take "
+                         f"{ERROR_MB / 1000:g}); this machine has {available_mb / 1000:.0f} GB for it and keeps "
+                         f"{floor / 1000:.0f} GB free as its floor, so it is refused. Something outside the studio holds the rest")
+    return out
+
 # ---------- layer 2: the floor under a running server ----------
 
 def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0) -> str:
@@ -519,9 +561,19 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--lora", action="store_true"); c.add_argument("--references", action="store_true")
     c.add_argument("--base", action="store_true"); c.add_argument("--no-engine", action="store_true")
     c.add_argument("--pictures", type=int, default=0); c.add_argument("--reference-frames", type=int, default=0)
+    kinds.add_parser("sound", help="whether sound effects and foley (their longest) fit this machine")
     args = parser.parse_args(argv)
     if args.kind == "watch":
         return watch(args.pid, args.floor or floor_mb())
+    if args.kind == "sound":
+        for kind, longest in SOUND_LONGEST.items():
+            found = sound_check(kind, longest)
+            if found.get("route") is None:
+                print("no /proc/meminfo here: this guard is for a DGX Spark")
+                return 0
+            said = (f"about {found['need_mb'] / 1000:.1f} GB at {longest:g} s, " if found["need_mb"] else "") + ("fits" if found["fits"] else "REFUSED")
+            print(f"{SOUND_NAMES[kind]}: {said}" + ("" if found["fits"] else f": {found['reason']}"))
+        return 0
     found = check(args.width, args.height, args.frames, args.lora, args.references, args.base, not args.no_engine,
                   args.pictures, args.reference_frames)
     if found.get("route") is None:

@@ -43,8 +43,17 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+try:
+    import discover  # Models & weights: what was found elsewhere on this machine and linked
+except ImportError:  # pragma: no cover - imported as app.voice from outside the app folder
+    try:
+        from app import discover
+    except ImportError:
+        discover = None
+
 router = APIRouter()
-HOME: Path = Path.home() / "TensorFoldStudio"
+HOME: Path = Path.home() / "ImaginationStudio"
+qa = None  # app/qa.py, given by attach
 SPARK = sys.platform.startswith("linux")
 FRAME_RATE = 21.5  # the Fish codec's frames per second of audio
 SAMPLING = {"temperature": (1.0, 0.1, 2.0), "top_p": (0.9, 0.1, 1.0), "top_k": (30, 1, 200)}  # Fish's defaults, then the range
@@ -447,9 +456,10 @@ class Mlx(Served):
             return "The MLX backend runs on a Mac (Apple Silicon)."
         if not self.python().is_file():
             return f"No Drama 3 environment at {self.venv} (README, Voice: TensorFold's drama3-mlx branch in its own venv)."
+        self.model = located("drama3-mlx", self.model, lambda p: (p / "config.json").is_file() and (p / "codec.safetensors").is_file())
         if not (self.model / "config.json").is_file() or not (self.model / "codec.safetensors").is_file():
             return (f"No converted Drama 3 model at {self.model} (python -m tensorfold.families.drama3.convert "
-                    "~/models/drama-3 ~/models/drama-3-mlx).")
+                    "~/models/drama-3 ~/models/drama-3-mlx)." + found_hint("drama3-mlx"))
         try:
             memory = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=5).stdout.strip() or 0)
         except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -536,6 +546,47 @@ class Mlx(Served):
                 "made_s": round(time.time() - loaded, 2)}
 
 
+SPARK_DIR = Path(__file__).resolve().parent.parent / "spark"
+
+
+def located(need: str, path: Path, there) -> Path:
+    """``path`` when ``there(path)``; else where Models & weights (app/discover.py) says that file or folder is on this
+    machine (a link the studio made, or the variable that names it), when that passes the same test."""
+
+    if there(path) or discover is None:
+        return path
+    try:
+        found = discover.resolve(need)
+    except Exception:  # noqa: BLE001 - a broken cache never stops a check
+        return path
+    return found if found is not None and there(found) else path
+
+
+def found_hint(need: str) -> str:
+    """What Models & weights adds to a "not installed" message: where a scan found it, or that it looked."""
+
+    try:
+        return discover.hint(need) if discover is not None else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def managed() -> bool:
+    """``DRAMA3_MANAGED_GUARD=1``: on a machine with a workload governor (``SPARK_GOVERNOR``, spark/workload.py),
+    Drama 3 starts inside a reservation of its own (spark/managed_voice.py) and every part of a take waits for the
+    start checks (ownership, memory, pressure, a cool start) first. Off by default."""
+
+    return os.environ.get("DRAMA3_MANAGED_GUARD") == "1"
+
+
+def submission_check() -> None:
+    """The start checks before a part is sent to a managed engine: a RuntimeError with the reason when refused."""
+
+    done = subprocess.run(["python3", str(SPARK_DIR / "managed_voice.py"), "--check"], capture_output=True, text=True, timeout=190)
+    if done.returncode:
+        raise RuntimeError("the voice was not sent: " + (done.stderr or done.stdout).strip()[-1500:])
+
+
 class Cuda(Served):
     """TensorFold's CUDA port of Drama 3 (``drama3-generate``, Zig + CUDA, no Python) on a DGX Spark.
 
@@ -584,15 +635,25 @@ class Cuda(Served):
     def look(self) -> str:
         if not sys.platform.startswith("linux"):
             return "The CUDA backend runs on a DGX Spark (Linux, CUDA)."
+        if managed() and not os.environ.get("SPARK_GOVERNOR"):
+            return "DRAMA3_MANAGED_GUARD=1 starts Drama 3 under the machine's workload governor: set SPARK_GOVERNOR to its folder."
+        # a file not where it is expected is looked for where Models & weights found and linked it
+        self.bin = located("drama3-binary", self.bin, lambda p: os.access(p, os.X_OK))
+        self.lib = located("drama3-lib", self.lib, Path.is_file)
+        self.model = located("drama3-checkpoint", self.model,
+                             lambda p: (p / "config.json").is_file() and (p / "model.safetensors.index.json").is_file())
+        self.codec = located("drama3-codec", self.codec, Path.is_file)
         if not os.access(self.bin, os.X_OK):
-            return f"No Drama 3 engine at {self.bin} (README, Voice: build TensorFold's drama3-cuda branch; DRAMA3_CUDA_BIN names another)."
+            return (f"No Drama 3 engine at {self.bin} (README, Voice: build TensorFold's drama3-cuda branch; DRAMA3_CUDA_BIN names another)."
+                    + found_hint("drama3-binary"))
         if not self.lib.is_file():
-            return f"No libtensorfold_drama3.so at {self.lib} (the same build makes it; DRAMA3_CUDA_LIB names another)."
+            return f"No libtensorfold_drama3.so at {self.lib} (the same build makes it; DRAMA3_CUDA_LIB names another)." + found_hint("drama3-lib")
         if not (self.model / "config.json").is_file() or not (self.model / "model.safetensors.index.json").is_file():
-            return f"No Drama 3 checkpoint at {self.model} (hf download fishaudio/drama-3; DRAMA3_CUDA_MODEL names another)."
+            return (f"No Drama 3 checkpoint at {self.model} (hf download fishaudio/drama-3; DRAMA3_CUDA_MODEL names another)."
+                    + found_hint("drama3-checkpoint"))
         if not self.codec.is_file():
             return (f"No converted codec at {self.codec} (once: codec_convert.py {self.model} {self.codec}; "
-                    "DRAMA3_CUDA_CODEC names another).")
+                    "DRAMA3_CUDA_CODEC names another)." + found_hint("drama3-codec"))
         free = mem_available_gb()
         if 0 <= free < self.NEED_GB and not comfy_up():
             return (f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory and this Spark has {free:.0f} GB available now "
@@ -600,7 +661,8 @@ class Cuda(Served):
         return ""
 
     def argv(self) -> list[str]:
-        return [str(self.bin), "--model", str(self.model), "--codec", str(self.codec), "--serve", "1"]
+        engine = [str(self.bin), "--model", str(self.model), "--codec", str(self.codec), "--serve", "1"]
+        return ["python3", str(SPARK_DIR / "managed_voice.py"), *engine] if managed() else engine
 
     # -- a take --
 
@@ -623,6 +685,8 @@ class Cuda(Served):
             answers, files = [], []
             try:
                 for index, part in enumerate(parts):
+                    if managed():
+                        submission_check()
                     job["progress"] = {"stage": "Drama 3 voice" + (f", part {index + 1} of {len(parts)}" if len(parts) > 1 else ""),
                                        "at": index, "of": len(parts)}
                     out = wav if len(parts) == 1 else wav.with_name(f"{wav.stem}.part{index}.wav")
@@ -668,6 +732,7 @@ class Cuda(Served):
 
 
 LIVE: dict[str, dict] = {}  # a running take's raw PCM parts, as the engine writes them (the live WAV, /live)
+LIVE_GRACE_S = 2.0  # how long /live waits for a take the worker has not begun yet (its text not written)
 
 
 def forget_live(job_id: str, folder: Path) -> None:
@@ -800,7 +865,10 @@ def release(why: str) -> bool:
     its memory and the GPU lock. True when it was loaded."""
 
     one = _backend
-    return bool(one is not None and hasattr(one, "release") and one.release(why))
+    released = bool(one is not None and hasattr(one, "release") and one.release(why))
+    if released and hasattr(qa, "trim_heap"):
+        qa.trim_heap()  # Whisper's CPU model (the app's word check) leaves freed heap behind: back before the next job
+    return released
 
 
 # ---------- text ----------
@@ -1241,8 +1309,9 @@ def take_live(take_id: str):
         raise HTTPException(400, "bad take id")
     entry, began = LIVE.get(take_id), time.time()
     # a take that has started (its text is written first) and is not at the engine yet: its clip is being read
-    while entry is None and (HOME / "voice" / f"{take_id}.txt").is_file() and not (HOME / "voice" / f"{take_id}.take.json").is_file() \
-            and time.time() - began < 300:
+    # the page may ask before the worker has written the text: a short grace for that, never minutes for an unknown id
+    while entry is None and ((HOME / "voice" / f"{take_id}.txt").is_file() or time.time() - began < LIVE_GRACE_S) \
+            and not (HOME / "voice" / f"{take_id}.take.json").is_file() and time.time() - began < 300:
         time.sleep(0.2)
         entry = LIVE.get(take_id)
     if entry is None:
