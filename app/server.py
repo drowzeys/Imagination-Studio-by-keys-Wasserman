@@ -2311,6 +2311,12 @@ except ImportError:  # an install without it keeps the rest of the app
     nodes = None
 if nodes is not None:
     app.include_router(nodes.attach(HOME, enqueue, jobs, lock, inside, relative))
+try:
+    import discover  # noqa: E402  (models, weights and LoRAs found anywhere on this machine: Machine → Models & weights)
+except ImportError:
+    discover = None
+if discover is not None:
+    app.include_router(discover.attach(HOME, Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()))
 
 
 @app.middleware("http")

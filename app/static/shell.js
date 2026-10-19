@@ -16,13 +16,13 @@ const ROOMS = [
   { id: "looks", group: "vaults", name: "Looks", key: "8", tabs: ["Looks"], says: "LoRA styles for pictures and clips" },
   { id: "suite", group: "vaults", name: "Wasserman's Filmmaker Suite", short: "Filmmaker Suite", key: "9", tabs: ["Import"], says: "the entire Wasserman Filmmaker Suite of apps, built in" },
   { id: "nodes", group: "vaults", name: "Nodes", key: "", tabs: ["Nodes"], says: "a canvas of jobs, words to pictures to clips" },
-  { id: "machine", group: "vaults", name: "Machine", key: "0", tabs: ["Machine", "Sparks", "Brains", "Updates"], says: "telemetry, Sparks, brains and updates" },
+  { id: "machine", group: "vaults", name: "Machine", key: "0", tabs: ["Machine", "Models", "Sparks", "Brains", "Updates"], says: "telemetry, Sparks, brains and updates" },
   { id: "learn", group: "vaults", name: "Learn", key: "", tabs: ["Tutorial"], says: "lessons, step by step" },
   { id: "settings", group: "vaults", name: "Settings", key: ",", tabs: ["Settings"], says: "looks, layout, presets and connections" },
 ];
 const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", Previs: "Overview", "Motion Previs": "Motion Previs",
   Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Edit: "Overview", Editor: "Timeline", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
-  Machine: "Telemetry", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn", Nodes: "Nodes", Settings: "Settings" };
+  Machine: "Telemetry", Models: "Models & weights", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn", Nodes: "Nodes", Settings: "Settings" };
 // Create is shared by Image and Video: it sits in the room of what the prompt goes to
 const roomOf = t => t === "Create" ? ROOMS.find(r => r.id === (typeof C !== "undefined" && C.goes === "video" ? "video" : "image"))
   : ROOMS.find(r => r.tabs.includes(t)) || null;
