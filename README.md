@@ -22,12 +22,23 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
-**3.0.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**3.0.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MOSS-Image** (text to image, DGX Spark) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 3.0.1
+
+- **MOSS-Image**, a fifth picture model, on a DGX Spark: OpenMOSS's 5B model (Apache 2.0, commercial use allowed),
+  through ComfyUI's own support. It is the best of the picture models at lettering: posters, title cards, signs and
+  menus came out exactly as written, in English and Japanese. About 45 s for 1344x768. Install it with
+  `oneshot-setup-spark.sh --moss` (30 GB); see [MOSS-Image on a DGX Spark](#moss-image-on-a-dgx-spark).
+- **ComfyUI moves to v0.42.0** (`b9b290e4`) on a DGX Spark, for MOSS-Image: `oneshot-setup-spark.sh --upgrade` moves
+  an existing install. FLUX3-K, Qwen and FastH3 clips render as before on it.
+- **Credits:** OpenMOSS in the README, CREDITS.md, NOTICE and the app's About.
+- Nothing changes on a Mac: MOSS-Image has no Mac build yet.
 
 ## New in 3.0 (since 2.9.3)
 
@@ -59,9 +70,6 @@ cores · a 2x video decoder for 2K finals on the Mac
 - **Gated weights** (Keyframe Animation, 3D Animation Style, Stable Audio Open): Install signs you in to Hugging Face
   once, opens the licence page, and downloads by itself once access is granted.
 - **Looks**: the LoRA hub as a style library, one card a look.
-- **MOSS-Image** (OpenMOSS, Apache 2.0) as a picture model on a DGX Spark: exact lettering for posters, title cards,
-  signs and menus, in English, Chinese and Japanese. `oneshot-setup-spark.sh --moss`; see
-  [MOSS-Image](#moss-image-on-a-dgx-spark).
 
 **Sound, previs and the library**
 - **Sound effects and foley**: MMAudio makes a clip's own sound from its picture, Stable Audio Open makes a sound from
@@ -195,7 +203,7 @@ with Qwen · Built with Fish Audio · MiniMax-Music3.
   while it's made* is MLX-only (`MUSIC3_BACKEND=mlx`); an M1 to M4 keeps the MLX port; measured on an M5 Ultra only.
   See [Music](#music-minimax-music-3).
 
-## Imagination Studio 3.0 (development branch)
+## Imagination Studio 3.0: the studio
 
 The web app is **Imagination Studio**, by Keys + Wasserman, powered by TensorFold and built with Fish Audio Drama 3.
 Everything it did before is still here, arranged to be quicker to find and calmer to use.
