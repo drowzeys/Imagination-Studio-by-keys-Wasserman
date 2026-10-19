@@ -1,10 +1,13 @@
 """The studio's frame and its rooms (app/static/shell.js, home.js, engines.js, machine.js, agent.js, suite.js, updates.js), run in node with
 the page's helpers stood in for: python3 tests/test_shell_page.py. Skipped where node is not installed."""
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ["shell.js", "home.js", "engines.js", "machine.js", "agent.js", "suite.js", "updates.js", "settings.js", "sound.js"]
@@ -41,9 +44,18 @@ vm.runInThisContext(`(async () => { const out = {}; ${fs.readFileSync(process.ar
 """
 
 
+def need_node():
+    """The page tests run the app's JavaScript in node: skip without it, or fail where it must be there (CI)."""
+    if shutil.which("node"):
+        return
+    why = "node is not installed: the page tests run the app's JavaScript in node"
+    if os.environ.get("STUDIO_TESTS_NEED_NODE") == "1":
+        pytest.fail(why + " (STUDIO_TESTS_NEED_NODE=1)")
+    pytest.skip(why)
+
+
 def run(code: str) -> dict:
-    if not shutil.which("node"):
-        return None
+    need_node()
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "harness.js").write_text(HARNESS)
         (Path(scratch) / "test.js").write_text(code)
@@ -59,8 +71,6 @@ def test_every_tab_has_one_room_and_old_links_still_work():
       go("Voice"); out.voice = tab; goRoom("edit"); out.edit = tab; goRoom("library"); out.lib = tab; go("Nowhere"); out.still = tab; out.names = TABS.map(t => TAB_NAMES[t] || "");
       C.goes = "video"; out.createVideo = roomOf("Create").id; C.goes = "edit"; out.createEdit = roomOf("Create").id; C.goes = "image"; out.createImage = roomOf("Create").id;
       out.keys = ROOMS.map(r => r.key);""")
-    if out is None:
-        return
     assert out["rooms"] == ["Story", "Image", "Video", "Previs", "Sound", "Edit", "Agent", "Library", "Looks", "Wasserman's Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings"]
     assert out["groups"] == ["Creative Engines:Story,Image,Video,Previs,Sound,Edit", ":Agent", "Studio Vaults:Library,Looks,Wasserman's Filmmaker Suite,Nodes,Machine,Learn,Settings"]
     assert out["homeless"] == ["Home", "Create"]  # home sits outside the rooms; Create is in Image and in Video
@@ -77,8 +87,6 @@ def test_the_sidebar_shows_both_groups_and_marks_the_room():
       out.groups = NODES["#rooms"].kids.filter(n => n.attrs && /^grp/.test(n.attrs.class || "")).map(text);
       go("Library"); renderShell(); out.single = NODES["#subtabs"].kids.length;
       go("Home"); renderShell(); out.homeOn = NODES["#rooms"].kids.filter(n => n.attrs && /\bon\b/.test(n.attrs.class || "") && n.attrs["data-room"] !== "home").length; out.homeBtn = NODES["#rooms"].kids[0].attrs.class; out.homeName = NODES["#roomname"].textContent;""")
-    if out is None:
-        return
     assert out["groups"] == ["Creative Engines", "Studio Vaults"]
     assert out["nav"].index("Creative Engines") < out["nav"].index("Story") < out["nav"].index("Studio Vaults") < out["nav"].index("Library")
     assert out["on"] == ["sound"] and out["room"] == "Sound" and "Voice" in out["subs"] and "Music" in out["subs"]
@@ -98,8 +106,6 @@ def test_each_engine_opens_on_a_landing_whose_cards_open_the_views():
       for (const r of ROOMS.filter(r => r.group === "engines")) { goRoom(r.id); out["land_" + r.id] = tab; }
       out.art = find(viewVideo(), n => n.attrs && n.attrs["data-art"] === "engine-video") ? "slot" : "none";
       out.img = !!find(viewVideo(), n => n.tag === "img" && /^art[/]/.test(n.attrs.src || ""));""")
-    if out is None:
-        return
     assert "MiniMax H3" in out["pages"]["Video"] and "FLUX3-K" in out["pages"]["Image"] and "Qwen 2.1" in out["pages"]["Image"]
     assert "Fish Audio Drama 3" in out["pages"]["Sound"] and "MiniMax-Music3" in out["pages"]["Sound"]
     assert out["still"] == ["Create", "image", "text"] and out["edit"][:2] == ["Create", "edit"] and out["clip"] == ["Create", "video", "text"]
@@ -114,8 +120,6 @@ def test_create_carries_what_the_prompt_goes_to_as_one_small_control():
     out = run("""C.goes = "image"; const bar = intentBar(); out.bar = text(bar);
       const seg = find(bar, n => n.attrs && n.attrs.role === "tablist"); out.on = seg.kids.filter(n => n.attrs.class === "on").map(text);
       button(bar, "Video with sound").attrs.onclick(); out.goes = [C.goes, C.step];""")
-    if out is None:
-        return
     assert "The prompt goes to" in out["bar"] and "Qwen 2.1" in out["bar"] and "FLUX3-K" in out["bar"]
     assert out["on"] == ["Image"] and out["goes"] == ["video", 0]
 
@@ -131,8 +135,6 @@ def test_the_updates_panel_shows_the_followed_branch_and_the_latest_release():
       // after Update and restart: waiting until a new session answers, then a Reload button and no more polling
       UPD.session = "s1"; UPD.waiting = true; updTake({ updating: true, session: "s1", message: "" }); out.during = updBusy();
       updTake({ updating: false, session: "s2", message: "Studio is up to date." }); out.after = [UPD.back, updBusy()]; out.back = text(viewUpdates());""")
-    if out is None:
-        return
     assert "drowzeys/studio · development/wasserman-studio" in out["page"] and "Latest on GitHub: v2.9.3 · " + out["day"] in " ".join(out["page"].split()) and out["day"]
     assert "Latest on GitHub" not in out["err"]  # no release in the answer: nothing is said about one
     assert "2.9.2 · 189a988" in out["page"] and "2 min ago" in out["page"]
@@ -148,8 +150,6 @@ def test_the_palette_finds_actions_and_runs_them():
       acts.find(a => a.label === "New still or scouts").run(); out.still = [tab, C.goes];
       out.blender = acts.filter(a => a.words.includes("blender")).map(a => a.label);
       out.lessons = acts.find(a => a.label.startsWith("Learn")).hint; acts.find(a => a.label === "Check for updates").run(); out.updates = tab;""")
-    if out is None:
-        return
     for label in ("New clip with sound", "Ask your agent", "Wasserman's Filmmaker Suite", "Brains & tools", "Telemetry", "Check for updates", "Looks", "Motion Previs"):
         assert label in out["labels"], label
     assert out["lessons"] == "23 lessons"
@@ -164,8 +164,6 @@ def test_the_stage_offers_every_recipe_and_the_take_sheet_sets_one():
       button(home, "A voice line").attrs.onclick(); out.voice = tab;
       const sheet = takeSheet(); out.sheet = text(sheet);
       button(sheet, "Quick look").attrs.onclick(); out.quick = [C.passes, C.res];""")
-    if out is None:
-        return
     for words in ("A clip with sound", "Scout, then animate", "A still", "Sharp Spec", "A long take", "A voice line", "Song", "Ask your agent", "ScriptBreak", "Blockout", "Start something", "Recent takes"):
         assert words in out["home"], words
     assert out["voice"] == "Voice"
@@ -183,8 +181,6 @@ def test_the_agent_sends_the_request_with_the_chosen_tools():
       out.sent = calls.find(c => c[0] === "/api/agent/tasks" && c[1]);
       out.codexOff = find(page, n => n.attrs && n.attrs.role === "radio" && text(n).includes("Codex")).attrs["aria-disabled"] === "true";
       useOutput("agent/a1/garage.png", "first"); out.first = [tab, C.image, C.start];""")
-    if out is None:
-        return
     assert "Describe the shot" in out["page"] and "Blender" in out["page"]
     body = out["sent"][1]
     assert body["backend"] == "claude" and "blockout" in body["tools"] and "Blockout" in body["prompt"]
@@ -200,8 +196,6 @@ def test_a_brought_in_shot_opens_in_create_and_brains_save_the_default():
       BR.data = { default: "claude", settings: { remote: { host: "", backends: [] } }, backends: [{ id: "claude", label: "Claude Code", found: true, where: "ssh:user@workstation" }, { id: "local", label: "Local model server", kind: "http", found: true, models: ["qwen3"] }] };
       BR.tools = { tools: [] }; const page = viewBrains(); out.brains = text(page);
       await button(page, "Make default").attrs.onclick(); out.saved = calls.find(c => c[0] === "/api/brains/settings")[1].default;""")
-    if out is None:
-        return
     assert out["create"] == ["Create", "A garage at night.", "Maya turns.", "Slow push-in.", "Who's there?", "uploads/suite/x/12c.png", "own"]
     assert "Make a Slate film" in out["importPage"] and "Timeline with media for Resolve (ZIP)" in out["importPage"] and "Night Shift" in out["importPage"]
     assert "on user@workstation" in out["brains"] and "1 models" in out["brains"]
@@ -219,8 +213,6 @@ def test_the_phone_bar_folds_the_vaults_search_and_updates_into_more():
       button(sheet, "Updates").attrs.onclick(); out.updates = tab; button(sheet, "Search").attrs.onclick();
       button(sheet, "Machine").attrs.onclick(); out.machine = tab;
       go("Story"); renderShell(); out.engineMore = NODES["#rooms"].kids.slice(-1)[0].attrs.class;""")
-    if out is None:
-        return
     assert out["more"][0] == "more" and out["more"][1] == "more on" and "More" in out["more"][2]  # a vault is open: More is the lit item
     assert out["vaults"] == ["library", "looks", "suite", "nodes", "machine", "learn", "settings", "about"]  # hidden from the phone bar by studio.css
     for words in ("Agent", "Studio Vaults", "Library", "Looks", "Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings", "Search", "⌘K", "Updates"):
@@ -244,8 +236,6 @@ def test_a_lost_event_stream_polls_then_reconnects_with_backoff():
       out.pollers = polls(); out.dog = [...timers.values()].filter(ms => ms === 5000).length; out.telCalls = calls.filter(c => c[0] === "/api/telemetry").length;
       for (let i = 0; i < 6; i++) { waits[waits.length - 1][1](); fail(streams.length - 1); } out.cap = waits[waits.length - 1][0];
       waits[waits.length - 1][1](); streams[streams.length - 1].onopen(); out.back = [SHELL.telPoll, polls(), SHELL.telWait, SHELL.es === streams[streams.length - 1]];""")
-    if out is None:
-        return
     assert out["opened"] == 1 and out["applied"] >= 1
     assert out["first"] == [True, True, 2000] and out["second"] == [True, True, 4000] and out["third"] == [True, True, 8000]
     assert out["pollers"] == 1 and out["telCalls"] == 1  # one 3 s poll while down, not one per failure
@@ -259,8 +249,6 @@ def test_paths_are_shown_from_the_studio_folder_and_dropped_players_let_go():
         relHome("/data/studio-old/a"), relHome("/elsewhere/b"), relHome(null)];
       const seen = []; const player = n => ({ pause() { seen.push(n + ":pause"); }, removeAttribute(a) { seen.push(n + ":-" + a); }, load() { seen.push(n + ":load"); } });
       releaseMedia({ querySelectorAll: () => [player("v1"), player("a1")], matches: () => false }); out.seen = seen;""")
-    if out is None:
-        return
     assert out["rel"] == ["renders/a.mp4", "the studio folder", "log: logs/comfy.log and x", "/data/studio-old/a", "/elsewhere/b", None]
     assert out["seen"] == ["v1:pause", "v1:-src", "v1:load", "a1:pause", "a1:-src", "a1:load"]
 
@@ -277,8 +265,6 @@ def test_a_brain_that_is_not_set_up_is_greyed_and_links_to_brains_and_tools():
       S.home = "/data/studio"; const card = taskCard({ id: "t1", status: "failed", prompt: "a room", backend: "claude", error: "Claude Code is not installed on this machine: install it and sign in, or run it over ssh", log: "[claude here] wrote /data/studio/agent/t1/log.txt" });
       AG.open.t1 = true; const open = taskCard({ id: "t1", status: "failed", prompt: "a room", backend: "claude", error: "boom", log: "wrote /data/studio/agent/t1/out.png" });
       out.card = text(card); out.cardLink = !!find(card, n => n.tag === "a" && n.attrs.class === "ag-setup"); out.plain = !!find(open, n => n.tag === "a" && n.attrs.class === "ag-setup"); out.log = text(open);""")
-    if out is None:
-        return
     assert out["backend"] == "codex"  # Claude Code is missing here, Codex runs over SSH: the page picks Codex
     assert out["claudeOff"] and out["codexOn"]
     # the set-up link names Settings → Connections, or Brains & tools on an Agent room that predates Settings
@@ -311,8 +297,6 @@ def test_back_returns_to_the_last_page_home_goes_home_and_the_stack_is_bounded()
       SHELL.history.length = 0; pushed.length = 0; go("Story"); go("Video"); const before = pushed.length;
       go("Story", { fromHash: true }); out.hash = [tab, SHELL.history.slice(-1)[0] || null, pushed.length - before];
       const acts = palActions(); out.pal = ["Back", "Home", "Settings", "Nodes", "Ask your agent"].map(l => !!acts.find(a => a.label === l));""")
-    if out is None:
-        return
     assert out["homeHidden"] and out["backOff"]  # on Home with nowhere to go back to
     assert out["homeShown"] and out["backOn"] and out["stack"] == ["Home", "Voice"]  # the same tab twice is one entry
     assert out["pushed"] == ["#Voice", "#Library"]  # the browser's history moves with the app
@@ -338,8 +322,6 @@ def test_settings_shows_its_five_sections_and_the_look_saves():
       await button(find(page, n => n.attrs && n.attrs["data-brain"] === "claude"), "Test").attrs.onclick(); out.test = calls.filter(c => c[0] === "/api/brains/test").slice(-1)[0][1];
       await button(find(page, n => n.attrs && n.attrs["data-tool"] === "blender"), "Test").attrs.onclick(); out.check = calls.some(c => c[0] === "/api/agent/tools/blender/check");
       out.brains = text(viewBrains());""")
-    if out is None:
-        return
     assert out["prefs"]["type_size"] == "large" and out["prefs"]["glow"] is False and out["prefs"]["start_cards"] == ["clip"]
     for words in ("Appearance", "Studio layout", "Presets & preferences", "Connections", "Models & weights", "Sparks", "Brains & tools", "Updates", "About"):
         assert any(words in r for r in out["rail"]), words
@@ -367,8 +349,6 @@ def test_layout_hides_and_orders_rooms_and_a_hidden_room_stays_in_the_palette():
       out.machineSwitch = !!find(find(page, n => n.attrs && n.attrs["data-room"] === "machine"), n => n.attrs && n.attrs.role === "switch");
       SET.data = { layout: { hidden: [], order: ["sound", "story"] } }; renderShell();
       out.reordered = NODES["#rooms"].kids.filter(n => n.attrs && n.attrs["data-group"] === "engines").map(n => n.attrs["data-room"]);""")
-    if out is None:
-        return
     assert "looks" not in out["nav"] and "learn" not in out["nav"] and "machine" in out["nav"] and "settings" in out["nav"] and "agent" in out["nav"]
     assert out["pal"] == ["Looks", "Learn"]
     assert out["order"].index("sound") < out["order"].index("previs")
@@ -394,8 +374,6 @@ def test_the_home_composer_queues_each_kind_and_carries_the_words():
       const chip = find(page, n => n.attrs && n.attrs["data-mode"] === "voice"); chip.attrs.onclick(); out.chip = hcMode();
       HC.mode = "clip"; HC.text = "A lighthouse at dusk"; hcMore(); out.more = [tab, C.prompt, C.goes];
       HC.text = "Plan a short"; hcAgent(); out.agent = [tab, AG.prompt];""")
-    if out is None:
-        return
     assert "What do you want to make?" in out["page"] and "Clip with sound" in out["page"] and "MiniMax H3" in out["page"] and "Drama 3" in out["page"] and "Music 3" in out["page"]
     assert "Ask your agent instead" in out["page"] and "More options" in out["page"] and "Quick look" in out["page"]
     assert out["primaries"] == 1  # Generate is the one primary on Home
@@ -425,8 +403,6 @@ def test_each_card_shows_one_word_and_one_next_action():
       out.actions = Object.fromEntries(["claude", "codex", "gemini", "grok", "hermes"].map(id => [id, (find(card(id), n => n.attrs && n.attrs.class === "m-acts") || { kids: [] }).kids.filter(Boolean).map(text)]));
       out.hidden = text(find(card("claude"), n => n.tag === "details"));
       out.top = text(card("claude")).replace(out.hidden, "");""")
-    if out is None:
-        return
     assert out["words"] == {"claude": "Signed in elsewhere", "codex": "Ready", "gemini": "Not installed", "grok": "Cannot start", "hermes": "Cannot start"}
     assert out["actions"]["claude"] == ["Allow over SSH"] and out["actions"]["gemini"] == ["Install"] and out["actions"]["grok"] == ["Fix it"]
     assert out["actions"]["hermes"] == ["Check the link"] and out["actions"]["codex"] == ["Check"]  # the default: nothing to make
@@ -467,8 +443,6 @@ def test_connect_ticks_find_signin_verify_and_default_by_itself():
       await tick(); await settle(); await settle();
       out.verified = calls.some(c => c[0] === "/api/brains/claude/verify"); out.madeDefault = calls.some(c => c[0] === "/api/brains/claude/default");
       out.s2 = steps("claude"); out.done = text(panel("claude")); out.default = BR.data.default;""")
-    if out is None:
-        return
     assert out["opened"] == 1 and out["pointed"].startswith("https://claude.com/cai/oauth/authorize")  # the tab opened on the click goes to the page
     assert out["s1"] == {"find": "done", "signin": "running", "verify": "todo", "default": "todo"}
     assert "Open the sign-in page" in out["panel"] and "Scan the code" in out["panel"] and out["copy"] and out["open"].startswith("https://claude.com/")
@@ -501,8 +475,6 @@ def test_connect_installs_a_missing_cli_shows_a_device_code_and_the_fix_for_a_fa
       answers["/api/brains/codex/verify"] = { ok: false, error: "This Codex CLI on mac is older than your ChatGPT account's models: update it", fix: { action: "install", label: "Update Codex" } };
       await tick(); await settle(); await settle();
       out.s3 = steps("codex"); out.failed = text(panel("codex")); out.fix = !!button(panel("codex"), "Update Codex"); out.noDefault = !calls.some(c => c[0] === "/api/brains/codex/default");""")
-    if out is None:
-        return
     assert out["tabs"] == 0  # nothing to sign in to yet: no tab is opened
     assert out["s1"] == {"find": "wait", "signin": "todo", "verify": "todo", "default": "todo"}
     assert "npm install -g @openai/codex@latest" in out["plan"] and "on mac" in out["plan"] and "without administrator rights" in out["plan"]
@@ -538,8 +510,6 @@ def test_a_mac_over_ssh_offers_allow_over_ssh_and_the_link_wizard_tests_and_save
       answers["/api/brains/link/save"] = { settings: {}, found: ["claude"], has_key: true, host: "me@mac", backends: ["claude"] };
       answers["/api/brains"] = BR.data; answers["/api/agent/tools"] = { tools: [] };
       await button(wiz(), "Use me@mac for its agents").attrs.onclick(); out.w5 = text(wiz()); out.connectOne = !!button(wiz(), "Connect Claude Code");""")
-    if out is None:
-        return
     assert out["s"]["signin"] == "wait" and "Keychain" in out["keychain"] and out["allow"]
     assert "kept only on that Mac" in out["tokenNote"]
     assert "Make a key" in out["w1"]
@@ -565,8 +535,6 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
       tab = "Home"; await button(card(viewHome()), "Not now").attrs.onclick(); out.dismissed = !card(viewHome());
       out.roomStill = !!card(viewAgent());
       BR.status.codex = { state: "signed_in" }; out.gone = !card(viewAgent());""")
-    if out is None:
-        return
     assert "Connect your agent" in out["home"] and out["primary"].endswith("Connect Codex")  # the one that is installed first
     assert out["went"][:3] == ["Home", "codex", "codex"] and out["went"][3] == 1  # Connect opens over the page: nothing to go and find
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
@@ -578,8 +546,6 @@ def test_the_qr_code_has_its_finders_and_size_for_the_address():
       out.size = m.length; out.bigSize = big.length; out.finders = [finder(m, 0, 0), finder(m, m.length - 7, 0), finder(m, 0, m.length - 7)];
       out.timing = [...Array(m.length - 16)].map((_, i) => m[6][8 + i] === (i % 2 === 0)).every(Boolean); out.dark = m[m.length - 8][8];
       out.tooLong = qrMatrix("x".repeat(3000)) === null;""")
-    if out is None:
-        return
     assert out["size"] == 29 and out["bigSize"] == 81  # version 3 and version 16 at level M
     assert out["finders"] == [True, True, True] and out["timing"] and out["dark"] and out["tooLong"]
 
@@ -598,8 +564,6 @@ def test_a_stream_that_goes_quiet_without_an_error_is_opened_again():
       waits[0][1](); out.reopened = [streams.length, SHELL.es === streams[1]];
       streams[1].readyState = 2; dogs[0](); out.closed = [SHELL.es, waits.length];
       telStart(); out.oneDog = dogs.length;""")
-    if out is None:
-        return
     assert out["fresh"] == [1, 1, 0]  # telemetry 4 s ago: left alone
     assert out["quiet"] == [2, None, True, 1]  # 20 s without telemetry: closed, polled, and opened again after a wait
     assert out["reopened"] == [2, True]
@@ -614,8 +578,6 @@ def test_the_back_pill_takes_the_browsers_back_and_adds_no_page():
         replaceState(s, t, u) { stack[at] = { state: s, hash: u }; }, back() { backs++; at--; go(stack[at].hash.slice(1), { fromHash: true }); } };
       go("Nodes"); go("Looks"); goBack(); out.after = [tab, at, stack.length, backs, [...SHELL.history]];
       go("Voice"); history.replaceState(null, "", "#Voice"); goBack(); out.fallback = [tab, backs];""")
-    if out is None:
-        return
     assert out["after"] == ["Nodes", 1, 3, 1, ["Home"]]  # back on Nodes, one entry back, nothing pushed; Forward still holds Looks
     assert out["fallback"] == ["Nodes", 1]  # where the browser's entry is not the app's last page, Back still goes there
 
@@ -635,7 +597,5 @@ def test_tools_a_remote_agent_cannot_start_yet_are_set_aside_with_the_reason_and
       let page = viewAgent(); out.tools = [...AG.tools]; out.off = button(page, "Blender").attrs["aria-disabled"]; out.note = text(find(page, n => n.attrs && n.attrs.class === "note m-flat ag-back"));
       button(page, "Blender").attrs.onclick(); out.toast = toasts.slice(-1)[0];
       BR.tools.unreachable = {}; viewAgent(); out.back = [...AG.tools].sort();""")
-    if out is None:
-        return
     assert out["tools"] == ["studio"] and out["off"] == "true" and "reach this studio" in out["note"]
     assert "needs a way back" in out["toast"] and out["back"] == ["blender", "studio"]

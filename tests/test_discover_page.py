@@ -1,10 +1,11 @@
 """Machine → Models & weights (app/static/discover.js), run in node with the page's helpers stood in for:
 python3 -m pytest tests/test_discover_page.py. Skipped where node is not installed."""
 import json
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+from test_shell_page import need_node
 
 ROOT = Path(__file__).resolve().parent.parent
 HARNESS = r"""
@@ -47,8 +48,7 @@ STATE = {"scanning": False, "platform": "spark", "note": "Nothing is moved, copi
 
 
 def run(code: str) -> dict:
-    if not shutil.which("node"):
-        return None
+    need_node()
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "harness.js").write_text(HARNESS)
         (Path(scratch) / "test.js").write_text(code)
@@ -70,8 +70,6 @@ def test_the_panel_groups_needs_says_their_state_and_links_on_use_it():
       out.used = calls.find(c => c[0] === "/api/discover/use");
       button(box, "Scan again").attrs.onclick(); await tick();
       out.scan = calls.some(c => c[0] === "/api/discover/scan");""")
-    if out is None:
-        return
     assert out["ready"] is True
     assert out["groups"] == ["Voice (Drama 3)", "Video (FastH3)"]
     assert out["rows"] == ["drama3-checkpoint", "drama3-codec", "fasth3"]  # an optional model not installed is hidden
@@ -95,8 +93,6 @@ def test_unlink_and_the_optional_toggle():
       out.text = text(box2);
       answers["/api/discover"] = new Error("Not Found");
       DSC.data = null; const box3 = viewDiscover(); await tick(); await tick(); out.old = text(box3);""")
-    if out is None:
-        return
     assert out["unlinked"] == ["/api/discover/unlink", {"need": "fasth3"}]
     assert "flux3k-full" in out["rows"] and "not installed (optional)" in out["text"] and "Download: oneshot-setup-spark.sh --flux3" in out["text"]
     assert "newer Studio server" in out["old"]
@@ -121,8 +117,6 @@ def test_install_and_use_everything_found_are_one_click_each():
       answers["/api/discover/link-all"] = {{ ...{json.dumps(state)}, linked: ["drama3-checkpoint"] }};
       await button(box, "Use everything found here").attrs.onclick(); await tick();
       out.all = calls.some(c => c[0] === "/api/discover/link-all");""")
-    if out is None:
-        return
     assert "Use everything found here (1)" in out["text"] and "Fish Audio Drama 3 checkpoint" in out["text"]
     assert "Install" in out["flux"] and "bash scripts/setup-flux3.sh · about 41 GB" in out["flux"]
     assert "Comes by itself the first time it is used" in out["whisper"] and "Install" not in out["whisper"]
