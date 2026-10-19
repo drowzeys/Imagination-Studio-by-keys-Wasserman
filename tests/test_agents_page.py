@@ -161,5 +161,7 @@ def test_a_signed_out_agent_is_never_called_not_on_this_machine():
     out = run(BRAINS + """
       BR.status = { claude: { state: "signed_out" } };
       out.said = agWhyNot(BR.data.backends.filter(b => ["claude", "codex", "gemini", "grok"].includes(b.id)));""")
+    if out is None:
+        return  # no node on this machine: the page's code is not run here, as for the other page tests
     assert "Claude Code is not signed in." in out["said"] and "Claude Code is not on this machine" not in out["said"]
     assert "Gemini CLI is not on this machine." in out["said"] and "Grok CLI is not reached." in out["said"]
