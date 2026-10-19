@@ -137,11 +137,14 @@ function setBrainCard(b) { const said = BR.said[b.id], remote = b.where && b.whe
       el("div", { class: "m-min" }, el("b", {}, b.label), el("span", {}, setWhere(b)))),
     el("div", { class: "m-tags" }, el("span", { class: "tag2 " + (b.found ? "ok" : "") }, state), b.harness ? el("span", { class: "tag2" }, "agent with Studio tools") : el("span", { class: "tag2" }, "brain")),
     !b.found && b.signin ? el("div", { class: "note m-flat" }, "How to sign in: " + b.signin) : null,
+    typeof signLine === "function" ? signLine(b) : null,
     b.note ? el("div", { class: "note m-flat" }, b.note) : null,
     b.id === "hermes" ? setHermes() : null,
     said ? el("div", { class: "note m-flat " + (said.ok ? "vt-ok" : "vt-bad") }, said.ok ? "Answered “" + (said.text || "").slice(0, 40) + "” in " + ((said.elapsedMs || 0) / 1000).toFixed(1) + " s" : said.error) : null,
     el("div", { class: "m-acts" }, el("button", { type: "button", class: "small", disabled: !b.found || BR.testing[b.id], onclick: async () => { BR.testing[b.id] = true; render();
-      try { BR.said[b.id] = await api("/api/brains/test", { backend: b.id }); } catch (e) { BR.said[b.id] = { ok: false, error: e.message }; } BR.testing[b.id] = false; render(); } }, BR.testing[b.id] ? "Asking…" : "Test"))); }
+      try { BR.said[b.id] = await api("/api/brains/test", { backend: b.id }); } catch (e) { BR.said[b.id] = { ok: false, error: e.message }; } BR.testing[b.id] = false; render(); } }, BR.testing[b.id] ? "Asking…" : "Test"),
+      ...(typeof signButtons === "function" ? signButtons(b) : [])),
+    typeof signPanel === "function" ? signPanel(b) : null); }
 function setHermes() { const p = prefs();
   const prof = el("input", { value: p.hermes_profile, placeholder: "profile (optional)", "aria-label": "Hermes profile" }), cmd = el("input", { value: p.hermes_command, placeholder: "full path to hermes (optional)", "aria-label": "Hermes command" });
   return el("div", { class: "st-hermes" }, prof, cmd, el("button", { type: "button", class: "small", onclick: () => settingsSave({ hermes_profile: prof.value.trim(), hermes_command: cmd.value.trim() }) }, "Save")); }
@@ -152,7 +155,7 @@ function setConnections() {
   const clis = (BR.data.backends || []).filter(b => b.kind === "cli"), remote = (BR.data.settings || {}).remote || {};
   const tools = BR.tools ? (BR.tools.tools || BR.tools) : [];
   return [localModelsCard(),
-    setPanel("Your subscriptions", "The CLIs you are already signed in to. Nothing is kept here but which you prefer: each answer is billed to your own sign-in.",
+    setPanel("Your subscriptions", "Sign in to each CLI right here: the studio runs the CLI's own sign-in and keeps nothing of it but which brain you prefer. Each answer is billed to your own subscription.",
       el("div", { class: "tri" }, clis.map(setBrainCard)),
       el("div", { class: "note m-flat" }, remote.host ? "Signed in on another computer: " + remote.host + " runs " + ((remote.backends || []).join(", ") || "nothing yet") + " over SSH. " : "A DGX Spark can use the sign-ins on your Mac over SSH. ",
         el("a", { href: "#Brains", onclick: e => { e.preventDefault(); go("Brains"); } }, "Set the computer in Brains & tools"))),

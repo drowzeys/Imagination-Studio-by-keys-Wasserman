@@ -87,12 +87,74 @@ function viewMachine() {
 }
 
 /* ---------- Brains & tools: the user's own subscriptions and the MCP tools an agent may use ---------- */
-const BR = { data: null, tools: null, testing: {}, said: {}, checking: {}, checked: {} };
+const BR = { data: null, tools: null, testing: {}, said: {}, checking: {}, checked: {}, status: {}, sign: {}, signOpen: null, signTimer: null, signSig: "", codeDraft: {} };
 // each brain shows its own mark (brand/, THIRD-PARTY-MARKS.md); a local model server and the tools show a plain sign
 const BRAIN_MARK = { claude: "claude", codex: "codex", gemini: "gemini", grok: "grok", openai: "openai", chatgpt: "openai" };
 const brainLogo = id => el("span", { class: "logo" }, BRAIN_MARK[id] ? mark(BRAIN_MARK[id], "") : icon("machine"));
 const toolLogo = id => el("span", { class: "logo" }, id === "studio" ? el("img", { src: "brand/aperture-mark-color.svg", alt: "Imagination Studio", width: 20, height: 20 }) : icon(id === "blockout" ? "library" : id === "blender" ? "previs" : "suite"));
 async function brainsLoad() { try { BR.data = await api("/api/brains"); } catch (e) { BR.data = { error: e.message }; } try { BR.tools = await api("/api/agent/tools"); } catch { BR.tools = null; } if (tab === "Brains") render(); }
+/* ---------- signing a brain in: the CLI's own login run by the studio (app/agents.py, the signin section) ----------
+   BR.status[id] is the CLI's own word on its sign-in; BR.sign[id] follows a sign-in (starting, needs_browser, needs_code,
+   device_code, verifying, done, failed), polled every second while it runs. Shown on Settings → Connections and Brains & tools. */
+const SIGN_RUNNING = ["starting", "needs_browser", "needs_code", "device_code", "verifying"];
+const SIGN_OUT = ["claude", "codex", "grok"], HERMES_PROVIDERS = [["openai-codex", "ChatGPT (Codex)"], ["anthropic", "Claude"], ["nous", "Nous Portal"]];
+const signRedraw = () => { if (tab === "Brains" || tab === "Settings") render(); };
+const typing = () => typeof document !== "undefined" && document.activeElement && document.activeElement.matches && document.activeElement.matches("input,textarea,select");
+async function brainStatus(id, fresh) { if (!fresh && BR.status[id]) return; BR.status[id] = { state: "asking" };
+  try { BR.status[id] = await api("/api/brains/" + id + "/status"); } catch (e) { BR.status[id] = { state: "unknown", detail: e.message }; } signRedraw(); }
+function signFollow(id) { clearInterval(BR.signTimer); BR.signTimer = setInterval(async () => { let now;
+  try { now = await api("/api/brains/" + id + "/signin"); } catch (e) { now = { state: "failed", reason: e.message, lines: [] }; }
+  const sig = JSON.stringify(now), was = BR.signSig; BR.signSig = sig; BR.sign[id] = now;
+  if (!SIGN_RUNNING.includes(now.state)) { clearInterval(BR.signTimer); BR.signTimer = null;
+    if (now.state === "done") { toast("Signed in"); BR.status = {}; BR.data = null; brainsLoad().then(signRedraw); } }
+  if (sig !== was && !(typing() && now.state === "needs_code")) signRedraw(); }, 1000); }
+async function signStart(b, extra) { BR.signOpen = b.id; BR.codeDraft[b.id] = "";
+  if (b.signin_flow !== "pty" || (b.id === "hermes" && !extra)) { BR.sign[b.id] = { state: b.signin_flow === "pty" ? "choose" : "terminal" }; return signRedraw(); }
+  BR.sign[b.id] = { state: "starting", lines: [] }; signRedraw();
+  try { BR.sign[b.id] = await api("/api/brains/" + b.id + "/signin", extra || {}); signFollow(b.id); } catch (e) { BR.sign[b.id] = { state: "failed", reason: e.message, lines: [] }; } signRedraw(); }
+async function signCode(id) { const code = (BR.codeDraft[id] || "").trim(); if (!code) return toast("Paste the code from the sign-in page first");
+  try { BR.sign[id] = await api("/api/brains/" + id + "/signin/code", { code }); BR.codeDraft[id] = ""; } catch (e) { toast(e.message); } signRedraw(); }
+async function signCancel(id) { try { BR.sign[id] = await api("/api/brains/" + id + "/signin/cancel", {}); } catch (e) { toast(e.message); }
+  clearInterval(BR.signTimer); BR.signTimer = null; signRedraw(); }
+async function signOut(b) { if (typeof confirm === "function" && !confirm("Sign " + b.label + " out" + (b.where && b.where !== "here" ? " on " + b.where.replace(/^ssh:/, "") : "") + "? This runs its own sign-out; you can sign in again here.")) return;
+  try { const r = await api("/api/brains/" + b.id + "/signout", {}); BR.status[b.id] = r; toast(r.ok ? "Signed out" : "The CLI did not say it signed out"); } catch (e) { toast(e.message); } signRedraw(); }
+const copyText = async (value, what) => { try { await navigator.clipboard.writeText(value); toast(what + " copied"); } catch { toast("Select it and copy: " + value); } };
+// the status line and the Sign in / Sign out buttons on a brain card
+function signLine(b) { if (b.kind !== "cli") return null; const st = BR.status[b.id];
+  if (b.found && !st) brainStatus(b.id);
+  const on = st && st.state === "signed_in", text = !b.found ? null : !st || st.state === "asking" ? "Asking " + b.label + " whether it is signed in…" : on ? "Signed in" + (st.detail ? " · " + st.detail : "") : st.state === "signed_out" ? "Not signed in" : st.detail || "Sign-in unknown";
+  return text ? el("div", { class: "note m-flat signin-state " + (on ? "vt-ok" : st && st.state === "signed_out" ? "vt-bad" : ""), "data-signin-state": st ? st.state : "asking" }, text) : null; }
+function signButtons(b) { if (b.kind !== "cli") return []; const st = BR.status[b.id], on = st && st.state === "signed_in", running = BR.sign[b.id] && SIGN_RUNNING.includes(BR.sign[b.id].state);
+  if (on && SIGN_OUT.includes(b.id)) return [el("button", { type: "button", class: "small", disabled: running, onclick: () => signOut(b) }, "Sign out")];
+  return [el("button", { type: "button", class: "small" + (b.found && !on ? " on" : ""), disabled: !b.found || running, title: b.found ? "" : "Install " + b.label + " first", onclick: () => signStart(b) }, on ? "Sign in again" : "Sign in")]; }
+// the panel under a card while it signs in
+function signPanel(b) { const s = BR.sign[b.id]; if (b.kind !== "cli" || BR.signOpen !== b.id || !s) return null;
+  const where = b.where && b.where !== "here" ? " on " + b.where.replace(/^ssh:/, "") : "", running = SIGN_RUNNING.includes(s.state);
+  const open = url => [el("a", { class: "signin-open", href: url, target: "_blank", rel: "noopener noreferrer" }, "Open sign-in page"), el("div", { class: "signin-url" }, url)];
+  const body = [];
+  if (s.state === "choose") body.push(el("div", { class: "note m-flat" }, "Which provider should Hermes sign in to?"), el("div", { class: "chips" }, HERMES_PROVIDERS.map(([id, label]) => el("button", { type: "button", class: "small", onclick: () => signStart(b, { provider: id }) }, label))));
+  else if (s.state === "terminal") body.push(el("div", { class: "note m-flat" }, b.label + " signs in inside its own terminal" + where + ". Run this there, follow its steps, then come back and press Check:"),
+    el("div", { class: "signin-cmd" }, el("code", {}, b.signin_command || ""), el("button", { type: "button", class: "small", onclick: () => copyText(b.signin_command || "", "Command") }, "Copy")));
+  else if (s.state === "starting") body.push(el("div", { class: "note m-flat" }, "Starting " + (s.command ? "“" + s.command + "”" : b.label + "’s sign-in") + where + "…"));
+  else if (s.state === "needs_browser") body.push(...open(s.url), el("div", { class: "note m-flat" }, "Sign in on that page. This finishes by itself when " + b.label + " hears back."));
+  else if (s.state === "device_code") body.push(el("div", { class: "note m-flat" }, "Open the page and enter this code:"), el("div", { class: "signin-code" }, el("span", {}, s.code), el("button", { type: "button", class: "small", onclick: () => copyText(s.code, "Code") }, "Copy")), ...open(s.url),
+    el("div", { class: "note m-flat" }, "This finishes by itself once the page accepts the code."));
+  else if (s.state === "needs_code") { const field = el("input", { value: BR.codeDraft[b.id] || "", placeholder: "Paste the code the page shows", "aria-label": "Sign-in code", autocomplete: "off", spellcheck: "false",
+      oninput: e => { BR.codeDraft[b.id] = e.target.value; }, onkeydown: e => { if (e.key === "Enter") signCode(b.id); } });
+    body.push(...open(s.url), el("div", { class: "note m-flat", title: s.prompt || "" }, "After you sign in, the page shows a code: paste it here."), el("div", { class: "signin-paste" }, field, el("button", { type: "button", class: "primary", onclick: () => signCode(b.id) }, "Continue"))); }
+  else if (s.state === "verifying") body.push(el("div", { class: "note m-flat" }, "Checking the code with " + b.label + "…"));
+  else if (s.state === "done") body.push(el("div", { class: "note m-flat vt-ok" }, "Signed in" + where + "."));
+  else if (s.state === "failed") body.push(el("div", { class: "note m-flat vt-bad" }, s.reason || "The sign-in stopped."));
+  const lines = s.lines || [];
+  return el("div", { class: "signin", "data-signin": b.id, "data-state": s.state },
+    el("div", { class: "signin-head" }, el("b", {}, "Sign in to " + b.label + where), el("span", { class: "tag2" }, s.state.replace("_", " "))),
+    ...body,
+    lines.length ? el("details", { class: "fold signin-log", open: s.state === "failed" }, el("summary", {}, "What " + b.label + " says"), el("pre", {}, lines.join("\n"))) : null,
+    b.id === "codex" && !where && running && s.state !== "device_code" ? el("button", { type: "button", class: "small ghost", onclick: async () => { await signCancel(b.id); signStart(b, { device: true }); } }, "Use a one-time code instead") : null,
+    el("div", { class: "note m-flat signin-fine" }, "This is " + b.label + "’s own sign-in: it keeps its credentials where it always does. The studio stores nothing of it."),
+    el("div", { class: "m-acts" }, running ? el("button", { type: "button", class: "small", onclick: () => signCancel(b.id) }, "Cancel")
+      : el("button", { type: "button", class: "small", onclick: () => { BR.signOpen = null; if (s.state === "terminal" || s.state === "failed") brainStatus(b.id, true); signRedraw(); } }, s.state === "terminal" ? "Check" : "Close"),
+      s.state === "failed" ? el("button", { type: "button", class: "small", onclick: () => signStart(b) }, "Try again") : null)); }
 function viewBrains() {
   const wrap = el("div");
   const head = () => pageHead("Studio Vault", "Brains & tools", "Your own AI sign-ins, and the tools an agent may use.");
@@ -111,10 +173,13 @@ function viewBrains() {
       el("div", { class: "m-tags" }, el("span", { class: "tag2 " + (b.found ? "ok" : "") }, b.found ? "ready" : "not set up"), on ? el("span", { class: "tag2 t" }, "default") : null,
         b.kind === "http" && b.models && b.models.length ? el("span", { class: "tag2" }, b.models.length + " models") : null),
       !b.found && b.signin ? el("div", { class: "note m-flat" }, b.signin) : null,
+      signLine(b),
       BR.said[b.id] ? el("div", { class: "note m-flat " + (BR.said[b.id].ok ? "vt-ok" : "vt-bad") }, BR.said[b.id].ok ? "Answered “" + (BR.said[b.id].text || "").slice(0, 40) + "” in " + (BR.said[b.id].elapsedMs / 1000).toFixed(1) + " s" : BR.said[b.id].error) : null,
       el("div", { class: "m-acts" }, el("button", { class: "small", disabled: !b.found || BR.testing[b.id], onclick: async () => { BR.testing[b.id] = true; render();
           try { BR.said[b.id] = await api("/api/brains/test", { backend: b.id }); } catch (e) { BR.said[b.id] = { ok: false, error: e.message }; } BR.testing[b.id] = false; render(); } }, BR.testing[b.id] ? "Asking…" : "Test"),
-        on ? null : el("button", { class: "small", disabled: !b.found, onclick: () => save({ default: b.id }) }, "Make default"))); })));
+        ...signButtons(b),
+        on ? null : el("button", { class: "small", disabled: !b.found, onclick: () => save({ default: b.id }) }, "Make default")),
+      signPanel(b)); })));
   put(wrap, el("div", { class: "m-gap" },
     el("div", { class: "panel stack" }, el("h2", {}, "Use the sign-ins on another computer"),
       el("div", { class: "note m-flat" }, "Studio runs the CLI there over SSH, with key login only."),

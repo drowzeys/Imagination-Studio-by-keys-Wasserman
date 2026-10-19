@@ -406,6 +406,75 @@ def test_the_home_composer_queues_each_kind_and_carries_the_words():
     assert out["agent"] == ["Agent", "Plan a short"]
 
 
+def test_a_brain_card_signs_in_and_out_and_the_panel_follows_the_sign_in():
+    out = run("""const ticks = []; globalThis.setInterval = fn => { ticks.push(fn); return ticks.length; }; globalThis.clearInterval = () => {}; globalThis.confirm = () => true;
+      const brains = [{ id: "claude", label: "Claude Code", kind: "cli", found: true, where: "here", harness: true, signin_flow: "pty", signin_command: "claude auth login" },
+        { id: "codex", label: "Codex (from the ChatGPT app)", kind: "cli", found: true, where: "here", signin_flow: "pty", signin_command: "codex login" },
+        { id: "grok", label: "Grok CLI", kind: "cli", found: true, where: "ssh:mac", signin_flow: "pty", signin_command: "grok login" },
+        { id: "gemini", label: "Gemini CLI", kind: "cli", found: true, where: "here", signin_flow: "terminal", signin_command: "gemini" },
+        { id: "hermes", label: "Hermes", kind: "cli", found: false, where: "here", signin_flow: "pty", signin: "Run `hermes setup`" },
+        { id: "local", label: "Local model server", kind: "http", found: true, endpoint: "http://127.0.0.1:11434/v1", models: [] }];
+      BR.data = { default: "claude", settings: { remote: { host: "mac", backends: ["grok"] }, local_endpoint: "" }, backends: brains }; BR.tools = { tools: [] };
+      answers["/api/brains"] = BR.data; answers["/api/agent/tools"] = { tools: [] };
+      answers["/api/brains/claude/status"] = { backend: "claude", state: "signed_out", detail: "Not signed in" };
+      answers["/api/brains/codex/status"] = { backend: "codex", state: "signed_in", detail: "ChatGPT" };
+      answers["/api/brains/grok/status"] = { backend: "grok", state: "signed_in", detail: "grok.com" };
+      answers["/api/brains/gemini/status"] = { backend: "gemini", state: "unknown", detail: "Unknown until its first use" };
+      tab = "Brains"; viewBrains(); await new Promise(r => setTimeout(r, 0));
+      const card = (page, id) => find(page, n => n.attrs && n.attrs.class && n.attrs.class.startsWith("brain") && text(n).includes(brains.find(b => b.id === id).label));
+      let page = viewBrains(); out.page = text(page);
+      out.buttons = Object.fromEntries(["claude", "codex", "grok", "gemini", "hermes"].map(id => [id, ["Sign in", "Sign out"].filter(w => button(card(page, id), w))]));
+      out.hermesOff = button(card(page, "hermes"), "Sign in").attrs.disabled; out.localSigns = !!button(card(page, "local"), "Sign in");
+      out.statusAsked = calls.filter(c => /\\/status$/.test(c[0])).map(c => c[0]).sort();
+      // claude: start, the panel shows the page and a code field, the code goes to the CLI, done refreshes the cards
+      answers["/api/brains/claude/signin"] = { backend: "claude", state: "needs_code", url: "https://claude.ai/oauth/authorize?code=true", prompt: "Paste code here if prompted >", lines: ["visit https://claude.ai/oauth/authorize?…"] };
+      await button(card(page, "claude"), "Sign in").attrs.onclick(); out.started = calls.filter(c => c[0] === "/api/brains/claude/signin").slice(-1)[0][1];
+      page = viewBrains(); let panel = find(page, n => n.attrs && n.attrs["data-signin"] === "claude");
+      out.needsCode = text(panel); out.link = find(panel, n => n.tag === "a").attrs;
+      const field = find(panel, n => n.tag === "input"); field.attrs.oninput({ target: { value: " the-code " } });
+      answers["/api/brains/claude/signin/code"] = { backend: "claude", state: "verifying", lines: [] };
+      await button(panel, "Continue").attrs.onclick(); out.code = calls.filter(c => c[0] === "/api/brains/claude/signin/code").slice(-1)[0][1];
+      out.verifying = text(find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "claude"));
+      answers["/api/brains/claude/signin"] = { backend: "claude", state: "done", lines: [] }; const before = calls.filter(c => c[0] === "/api/brains").length;
+      await ticks[ticks.length - 1](); await new Promise(r => setTimeout(r, 0)); out.refreshed = calls.filter(c => c[0] === "/api/brains").length > before; out.doneToast = toasts.includes("Signed in");
+      // a device code: large, with a Copy button and the page to open
+      BR.data = { default: "claude", settings: { remote: { host: "mac", backends: ["grok"] }, local_endpoint: "" }, backends: brains };
+      BR.status.grok = { state: "signed_out" }; answers["/api/brains/grok/signin"] = { backend: "grok", state: "device_code", url: "https://accounts.x.ai/device", code: "WXYZ-1234", lines: [] };
+      await button(card(viewBrains(), "grok"), "Sign in").attrs.onclick(); panel = find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "grok");
+      out.device = text(panel); out.deviceCode = text(find(panel, n => n.attrs && n.attrs.class === "signin-code")); out.cancel = !!button(panel, "Cancel");
+      answers["/api/brains/grok/signin/cancel"] = { backend: "grok", state: "failed", reason: "Cancelled.", lines: [] };
+      await button(panel, "Cancel").attrs.onclick(); out.cancelled = text(find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "grok"));
+      // codex here: a browser sign-in, with the one-time code offered instead
+      BR.status.codex = { state: "signed_out" }; answers["/api/brains/codex/signin"] = { backend: "codex", state: "needs_browser", url: "https://auth.openai.com/oauth/authorize?x=1", lines: [] };
+      await button(card(viewBrains(), "codex"), "Sign in").attrs.onclick(); panel = find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "codex"); out.browser = text(panel);
+      // gemini: the Terminal command, nothing started
+      await button(card(viewBrains(), "gemini"), "Sign in").attrs.onclick(); out.gemini = text(find(viewBrains(), n => n.attrs && n.attrs["data-signin"] === "gemini"));
+      out.geminiStarted = calls.some(c => c[0] === "/api/brains/gemini/signin");
+      // sign out runs the CLI's own sign-out
+      BR.status.codex = { state: "signed_in" }; BR.signOpen = null; answers["/api/brains/codex/signout"] = { ok: true, state: "signed_out" };
+      await button(card(viewBrains(), "codex"), "Sign out").attrs.onclick(); out.signedOut = calls.some(c => c[0] === "/api/brains/codex/signout") && BR.status.codex.state === "signed_out";
+      // the same cards in Settings → Connections
+      tab = "Settings"; SET.section = "connections"; BR.status.claude = { state: "signed_out" }; out.settings = text(viewSettings());
+      out.settingsButton = !!button(find(viewSettings(), n => n.attrs && n.attrs["data-brain"] === "claude"), "Sign in");""")
+    if out is None:
+        return
+    assert out["buttons"] == {"claude": ["Sign in"], "codex": ["Sign out"], "grok": ["Sign out"], "gemini": ["Sign in"], "hermes": ["Sign in"]}
+    assert out["hermesOff"] is True and out["localSigns"] is False
+    assert out["statusAsked"] == ["/api/brains/claude/status", "/api/brains/codex/status", "/api/brains/gemini/status", "/api/brains/grok/status"]
+    assert "Not signed in" in out["page"] and "Signed in · ChatGPT" in out["page"] and "Unknown until its first use" in out["page"]
+    assert out["started"] == {}
+    assert "Open sign-in page" in out["needsCode"] and "Paste the code the page shows" in out["needsCode"] and "stores nothing" in out["needsCode"]
+    assert out["link"]["href"].startswith("https://claude.ai/") and out["link"]["target"] == "_blank" and "noopener" in out["link"]["rel"]
+    assert out["code"] == {"code": "the-code"} and "Checking the code" in out["verifying"]
+    assert out["refreshed"] and out["doneToast"]
+    assert "WXYZ-1234" in out["deviceCode"] and "Copy" in out["deviceCode"] and "Open sign-in page" in out["device"] and "on mac" in out["device"] and out["cancel"]
+    assert "Cancelled." in out["cancelled"] and "Try again" in out["cancelled"]
+    assert "Open sign-in page" in out["browser"] and "Use a one-time code instead" in out["browser"]
+    assert "gemini" in out["gemini"] and "own terminal" in out["gemini"] and "Copy" in out["gemini"] and not out["geminiStarted"]
+    assert out["signedOut"]
+    assert "Sign in to each CLI right here" in out["settings"] and out["settingsButton"]
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
