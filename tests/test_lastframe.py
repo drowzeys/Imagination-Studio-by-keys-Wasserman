@@ -12,8 +12,11 @@ HOME = Path(tempfile.mkdtemp()) / "TensorFoldStudio"
 os.environ["STUDIO_HOME"] = str(HOME)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import server  # noqa: E402
+
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+
+HOME = server.HOME  # the folder the server took when it was first imported (another test file may have been first)
 
 for name in ("renders", "uploads"):
     (HOME / name).mkdir(parents=True, exist_ok=True)

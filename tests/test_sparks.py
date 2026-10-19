@@ -12,6 +12,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 from test_shell_page import need_node
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -159,11 +161,29 @@ def local_render(job, command, env, label=""):
 
 
 local_render.now = local_render.most = 0
-server.run = local_render
-server.memory_of = lambda *args, **kwargs: {"fits": True, "reason": ""}  # this machine's guard has its own tests
-hub.shell, hub.copy = stand_in_shell, lambda pack, address, folder, timeout=900: (SENT.append((address, folder)), (0, ""))[1]
-hub.dial = lambda address: Line(WORKERS[address])
-threading.Thread(target=hub.loop, daemon=True).start()
+
+
+def stand_in() -> dict:
+    """Puts the stand-ins in place and returns what they replaced. Only while this file's tests run: pytest imports
+    every test file before it runs any, and a stand-in left behind (memory_of above all) would answer other files' tests."""
+
+    had = {"run": server.run, "memory_of": server.memory_of, "shell": hub.shell, "copy": hub.copy, "dial": hub.dial}
+    server.run = local_render
+    server.memory_of = lambda *args, **kwargs: {"fits": True, "reason": ""}  # this machine's guard has its own tests
+    hub.shell, hub.copy = stand_in_shell, lambda pack, address, folder, timeout=900: (SENT.append((address, folder)), (0, ""))[1]
+    hub.dial = lambda address: Line(WORKERS[address])
+    if not getattr(stand_in, "looping", False):
+        stand_in.looping = True
+        threading.Thread(target=hub.loop, daemon=True).start()
+    return had
+
+
+@pytest.fixture(autouse=True, scope="module")
+def stand_ins():
+    had = stand_in()
+    yield
+    server.run, server.memory_of = had["run"], had["memory_of"]
+    hub.shell, hub.copy, hub.dial = had["shell"], had["copy"], had["dial"]
 
 
 def fresh(*workers: Worker) -> None:
@@ -578,6 +598,7 @@ def test_the_page_draws_the_chooser_and_the_list():
 
 
 if __name__ == "__main__":
+    stand_in()
     for name, test in list(globals().items()):
         if name.startswith("test_"):
             test()
