@@ -345,3 +345,16 @@ def test_an_older_codex_on_path_gives_way_to_the_chatgpt_apps_newer_one(fake, mo
     script(fake["bin"], "codex", 'import sys\nprint("codex-cli 0.170.0")\n')  # a newer one on PATH is kept
     agents.versions.clear()
     assert agents.cli("codex") == str(fake["bin"] / "codex")
+
+
+def test_over_ssh_the_chatgpt_apps_newer_codex_is_used_too(fake, monkeypatch):
+    # measured: from a DGX Spark the Mac's Homebrew codex 0.130 was found first, and that one is refused the account's models
+    script(fake["remote"] / ".local/bin", "codex", 'print("codex-cli 0.130.0")\n')
+    app = fake["remote"] / "ChatGPT.app/Contents/Resources/codex-cli"
+    script(app / "bin", "codex", 'print("codex-cli 0.162.0-alpha.17.2")\n')
+    monkeypatch.setattr(agents, "MAC_CODEX", (str(app),))
+    remote_mac(["codex"])
+    look = agents.probe_remote("me@mac", ["codex"])
+    assert look["codex"] == (str(app / "bin/codex"), "codex-cli 0.162.0-alpha.17.2")
+    script(fake["remote"] / ".local/bin", "codex", 'print("codex-cli 0.170.0")\n')
+    assert agents.probe_remote("me@mac", ["codex"])["codex"][1] == "codex-cli 0.170.0"  # a newer one on PATH is kept

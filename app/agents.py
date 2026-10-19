@@ -400,9 +400,11 @@ def probe_remote(host: str, names: list[str]) -> dict:
 
     looks = []
     for name in names:
-        extra = " || ls " + " ".join(p + "/bin/codex" if p.endswith("codex-cli") else p for p in MAC_CODEX) + " 2>/dev/null | head -1" if name == "codex" and MAC_CODEX else ""
-        looks.append(f'p=$(command -v {shlex.quote(CLIS[name][1])}{extra}) && [ -n "$p" ] && '
+        looks.append(f'p=$(command -v {shlex.quote(CLIS[name][1])}) && [ -n "$p" ] && '
                       f'printf "%s\\t%s\\t%s\\n" {name} "$p" "$("$p" --version 2>/dev/null | head -1)"')
+        if name == "codex":  # the ChatGPT app's own Codex too: the newer of the two is used (an old one is refused the account's models)
+            for app in (p + "/bin/codex" if p.endswith("codex-cli") else p for p in MAC_CODEX):
+                looks.append(f'p={shlex.quote(app)}; [ -x "$p" ] && printf "%s\\t%s\\t%s\\n" codex "$p" "$("$p" --version 2>/dev/null | head -1)"')
     script = REMOTE_PATH + "; ".join(f"( {look} )" for look in looks) + "; true"
     try:
         done = subprocess.run([*ssh_of(host), script], capture_output=True, text=True, timeout=PROBE_TIMEOUT + 2,
@@ -412,10 +414,13 @@ def probe_remote(host: str, names: list[str]) -> dict:
     if done.returncode == 255:
         return {"__error__": f"ssh to {host} failed: " + (done.stderr.strip()[-200:] or "no answer") + ". " + ssh_hint(host)}
     found = {}
+    numbers = lambda said: tuple(int(x) for x in (re.search(r"(\d+)\.(\d+)\.(\d+)", said or "") or re.search("()()()", "")).groups() if x) or ()
     for line in done.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) == 3 and parts[0] in names:
-            found[parts[0]] = (parts[1], parts[2].strip()[:80] or None)
+            here = (parts[1], parts[2].strip()[:80] or None)
+            if parts[0] not in found or numbers(here[1]) > numbers(found[parts[0]][1]):  # the first (PATH) wins a tie
+                found[parts[0]] = here
     return found
 
 
