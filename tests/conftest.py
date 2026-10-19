@@ -5,3 +5,6 @@ import tempfile
 from pathlib import Path
 
 os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp(prefix="studio-test-")) / "ImaginationStudio"))
+# nor walk the machine for models: the app starts that scan 20 s after it is imported (app/discover.py), and it would
+# hold the scan's lock while tests/test_discover.py runs its own scans
+os.environ.setdefault("STUDIO_DISCOVER_DELAY", "-1")
