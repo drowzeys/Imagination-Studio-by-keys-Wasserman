@@ -77,6 +77,7 @@ QUALITIES = {
     "fh4": ("FastH3: 4 passes, fastest and softer", {"ENGINE": "fasth3", "STEPS": "4"}),
     "fh20": ("FastH3: 20 passes, for prompts with several actions", {"ENGINE": "fasth3", "STEPS": "20"}),
 }
+API_QUALITY = "fh4"  # a clip asked for over the API without a quality: FastH3 at 4 passes, the page's default (settings.js recipeParams)
 SCOUT_SIZES = {"draft": (1344, 768), "2k": (1024, 576), "qhd": (1280, 736), "small": (864, 480),
                "native": (1344, 768), "p720": (1280, 736), "p960": (864, 480), "sharp": (1376, 768)}
 # measured on a Mac Studio M5 Ultra, 8 second clips, standard quality, image step included (README)
@@ -178,7 +179,7 @@ def machine() -> tuple[str, str]:
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
 
-app = FastAPI(title="Imagination Studio by keys+Wasserman powered by TensorFold, built with Fish Audio Drama 3")
+app = FastAPI(title="Imagination Studio by keys+Wasserman, powered by TensorFold, built with Fish Audio Drama 3")
 jobs: dict[str, dict] = {}
 order: list[str] = []
 lock = threading.Lock()
@@ -862,7 +863,7 @@ def image_models() -> list[str]:
     """The picture models installed here, Qwen first: FLUX3-K's ComfyUI files on a Spark, its own venv and BFL's
     checkpoints on a Mac."""
 
-    found = ["qwen"] + (["qwen-full"] if qwen_base_ready() else [])
+    found = (["qwen"] if qwen_ready() else []) + (["qwen-full"] if qwen_base_ready() else [])
     for name, unets in FLUX3_FILES.items():
         if SPARK:
             folder = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "FLUX3-K-Comfy"
@@ -889,6 +890,18 @@ def moss_ready() -> bool:
             and (comfy / "comfy_extras/nodes_moss_image.py").is_file())
 
 
+def qwen_ready() -> bool:
+    """Qwen-Image-2.1-Turbo, every install's picture model: on a Spark its ComfyUI files (a worker set up without image
+    weights has none, and a picture there used to fail inside ComfyUI with a bare 400); a Mac's setup always has it."""
+
+    if not SPARK:
+        return True
+    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
+    return all((models / name).is_file() for name in ("diffusion_models/qwen_image_2.1_turbo_bf16.safetensors",
+                                                     "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+                                                     "vae/qwen_image_2.1_vae_bf16.safetensors"))
+
+
 def qwen_base_ready() -> bool:
     """Qwen-Image-2.1's 40-step base model, the same files Edit a picture's 40-step choice uses."""
 
@@ -907,8 +920,9 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
-        how = {"qwen-full": "--image-edit", "moss-image": "--moss (on a DGX Spark)"}.get(name, "--flux3")
-        raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh {how} adds it")
+        how = {"qwen": "", "qwen-full": " --image-edit", "moss-image": " --moss (on a DGX Spark)"}.get(name, " --flux3")
+        raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh{how} adds it"
+                                 + (" (Machine → Models & weights shows what is missing)" if name == "qwen" else ""))
     return {"IMAGE_MODEL": name}
 
 
@@ -1074,8 +1088,10 @@ def estimate(preset: str, quality: str, seconds: float, text_only: bool = False,
             base = (REF2VA_TURBO_5S if ref_turbo else REF2VA_5S).get(preset)
         return None if base is None or seconds > LONGEST else int(base * (seconds / 5.0) ** 1.6)
     if seconds > LONGEST:
-        # every part after the first opens on a frame
-        parts = [estimate(preset, quality, piece) for piece in plan(seconds)]
+        # every part after the first opens on a frame. On a DGX Spark a chained part takes the time of a clip from text:
+        # Keys measured a 30 s take at 864x480, 4 passes (two 15 s parts) in 333 s, where the from-a-picture factor
+        # said 508 s, and a 30 minute chain in about 5.5 h (2026-10-19, one Spark)
+        parts = [estimate(preset, quality, piece, text_only=SPARK) for piece in plan(seconds)]
         return None if None in parts else int(sum(parts) + 2 * len(parts))
     if SPARK:
         base = (SPARK_FASTH3_5S if SPARK_ENGINE_LIB.exists() else SPARK_COMFY_5S).get(quality, {}).get(preset)
@@ -1875,6 +1891,8 @@ def queue_job(body: dict) -> dict:
         params["soundtrack"] = {"take": song["id"], "song": song["path"], "music_db": level}
     found = references(params) if kind == "video" else {}
     referenced, ref_media = bool(found), bool(found and (found["videos"] or found["audios"]))
+    if kind in ("video", "studio", "long") and not referenced and not params.get("quality"):
+        params["quality"] = API_QUALITY  # a job that names no quality gets the page's own default, as Home sends it
     if kind in ("video", "studio", "long") and not referenced and not str(params.get("quality", "standard")).startswith("fh") and not turbo_ready():
         raise HTTPException(400, "MiniMax H3 Turbo is not installed here (oneshot-setup.sh --turbo adds it): use FastH3, quality fh4, fh8 or fh20")
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
@@ -1944,21 +1962,32 @@ def cancel(job_id: str) -> dict:
 NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa")  # jobs a Spark runs without its ComfyUI server
 
 
+COMFY_PROMPT = re.compile(r"^\[tensorfold\] comfy prompt ([0-9a-f-]{8,64})$", re.M)
+
+
 def stop_comfy(job: dict) -> bool:
     """On a DGX Spark the render runs inside the ComfyUI server (spark/comfy.sh), not in the script the job started:
-    killing the script leaves the prompt it queued running on the GPU. Ask the server to stop its current prompt
-    (its /interrupt, 2 s, best effort) and say in the job's log what it answered.
+    killing the script leaves the prompt it queued running on the GPU. The runner prints the id of every prompt it
+    queues ("[tensorfold] comfy prompt <id>"); the last one is this job's. It is taken out of ComfyUI's queue if it is
+    still waiting and interrupted only if it is the one running (ComfyUI's /interrupt with its prompt_id), so another
+    job's prompt is never stopped. A job that never reached ComfyUI sends nothing. Best effort, 2 s each; the job's
+    log says what happened."""
 
-    The prompt id is not known here (spark_generate.py keeps it to itself and does not print it), so a prompt still
-    waiting in ComfyUI's queue is not deleted: the script is stopped before it queues another, and the runner only
-    queues one prompt at a time, so the one that runs is this job's."""
+    found = COMFY_PROMPT.findall(job.get("log") or "")
+    if not found:
+        job["log"] = (job["log"] + "[studio] cancelled before it reached ComfyUI: nothing to stop there\n")[-20000:]
+        return True
+    prompt_id, base = found[-1], os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190"))
 
-    url = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190")) + "/interrupt"
-    try:
-        request = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+    def post(path: str, body: dict) -> int:
+        request = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(request, timeout=2) as answer:
-            said = f"ComfyUI stopped the prompt it was running (it answered {answer.status})"
-            stopped = True
+            return answer.status
+
+    try:
+        post("/queue", {"delete": [prompt_id]})  # if it is still waiting
+        status = post("/interrupt", {"prompt_id": prompt_id})  # if it is the one running; otherwise ComfyUI does nothing
+        said, stopped = f"ComfyUI was asked to stop this job's prompt {prompt_id[:8]} (it answered {status})", True
     except urllib.error.HTTPError as error:
         said, stopped = f"ComfyUI did not stop the prompt: it answered {error.code}", False
     except (OSError, ValueError) as error:

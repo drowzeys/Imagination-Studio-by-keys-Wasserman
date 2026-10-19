@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import socket
+import urllib.error
 import urllib.parse
 import urllib.request
 import signal
@@ -287,6 +288,20 @@ def public_link(url) -> str:
         if not ip.is_global:
             raise HTTPException(400, "that address is on this machine or its own network: upload the clip instead")
     return url
+
+
+class PublicRedirects(urllib.request.HTTPRedirectHandler):
+    """Every address a redirect leads to is checked as the pasted one was: a public host gives no way to this machine."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            public_link(newurl)
+        except HTTPException as refused:
+            raise urllib.error.URLError(f"the address redirected to {urllib.parse.urlsplit(newurl).hostname}: {refused.detail}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+LINK_OPENER = urllib.request.build_opener(PublicRedirects)
 
 
 def link_reader(python: str) -> str | None:
@@ -564,7 +579,7 @@ def attach(home: Path, pack: Path, spark: bool) -> APIRouter:
                 target = made[0]
             else:
                 request = urllib.request.Request(url, headers={"User-Agent": "ImaginationStudio"})
-                with urllib.request.urlopen(request, timeout=30) as reply:
+                with LINK_OPENER.open(request, timeout=30) as reply:
                     kind = reply.headers.get("Content-Type", "").split(";")[0].strip().lower()
                     if not direct and not kind.startswith("video/"):
                         raise RuntimeError(LINK_PAGE)

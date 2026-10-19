@@ -70,6 +70,12 @@ nav#rooms button .lbl { flex:1; overflow:hidden; text-overflow:ellipsis; }
 nav#rooms button .kbd { font:500 12px var(--mono); color:var(--faint); opacity:0; transition:opacity var(--t1) var(--ease); }
 nav#rooms:hover button .kbd { opacity:1; }
 nav#rooms button.more { display:none; }
+/* a shorter window (900 px tall, a laptop) keeps every room in view, About at the bottom included: tighter rows */
+@media (max-height: 1000px) and (min-width: 1100px) {
+  nav#rooms button { height:34px; }
+  nav#rooms .grp { padding:12px 10px 6px; }
+  nav#rooms .grp:first-child { padding-top:4px; }
+}
 nav#rooms button .live { position:absolute; left:23px; top:8px; width:6px; height:6px; border-radius:50%; background:var(--red); animation:tally 1.6s ease-in-out infinite; }
 .sidefoot { border-top:1px solid var(--line); padding:12px 10px 14px; display:flex; flex-direction:column; gap:8px; }
 .machinepill { display:flex; align-items:center; gap:9px; width:100%; height:40px; padding:0 10px; border-radius:var(--r1); border:1px solid var(--line); background:var(--panel);

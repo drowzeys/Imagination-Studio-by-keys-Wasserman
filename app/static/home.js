@@ -51,7 +51,8 @@ const startShown = (look, id) => (look.start_cards || []).includes(id) || (START
 const homePrefs = () => typeof prefs === "function" ? prefs() : { appearance: { start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], poster: true }, presets: { recipe: "quick", mode: "clip", seconds: 5, seed: "fixed", qa_gate: true, image_model: "qwen" } };
 
 /* ---------- the composer: one box, four kinds of take, one Generate ---------- */
-const HC = { text: "", mode: null, recipe: null, seconds: null, made: [], busy: false };
+const HC = { text: "", mode: null, recipe: null, seconds: null, est: {}, made: [], busy: false };
+const hcSpan = sec => sec == null ? "" : sec < 90 ? Math.round(sec) + " s" : sec < 5400 ? Math.round(sec / 60) + " min" : Math.floor(sec / 3600) + " h " + Math.round(sec % 3600 / 60) + " min";
 const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe the shot: who is there, what happens, what is heard."],
   picture: ["Picture", "qwen", "Qwen 2.1", "Describe the picture: the subject, the place, the light, the lens."],
   voice: ["Voice", "fish", "Drama 3", "Write the line as it is said. A [direction] in brackets sets the voice."],
@@ -71,7 +72,13 @@ function hcLength() { const now = hcSeconds(), shorts = Object.keys((S && S.dura
     el("span", { class: "eyebrow" }, "Length"),
     el("select", { "aria-label": "Clip length", onchange: e => { HC.seconds = Number(e.target.value); render(); } },
       shorts.sort((a, b) => a - b).map(k => el("option", { value: k, selected: k === now }, k + " s")),
-      Object.entries(longs).map(([k, label]) => el("option", { value: k, selected: Number(k) === now }, label + " · " + Math.ceil(k / 15) + " clips chained")))); }
+      Object.entries(longs).map(([k, label]) => el("option", { value: k, selected: Number(k) === now }, label + " · " + Math.ceil(k / 15) + " clips chained"))),
+    (est => est ? el("small", { class: "note m-flat" }, "about " + hcSpan(est)) : null)(hcEstimate())); }
+// the expected time of this length with this recipe (server.estimate: a long take adds up its clips), asked once a choice
+function hcEstimate() { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" }, seconds = hcSeconds(), key = [r.preset, r.quality, seconds].join("|");
+  if (!(key in HC.est)) { HC.est[key] = undefined;
+    api("/api/estimate", { preset: r.preset, quality: r.quality, seconds, text_only: true }).then(d => { HC.est[key] = d && d.seconds != null ? d.seconds : null; render(); }, () => { HC.est[key] = null; }); }
+  return HC.est[key]; }
 // what Generate sends for each kind of take: the same endpoints and bodies the tabs use
 async function hcRequest(mode, text, seed, retake) {
   const p = homePrefs().presets;
