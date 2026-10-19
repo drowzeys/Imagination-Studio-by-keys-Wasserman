@@ -4,7 +4,7 @@ from test_shell_page import run
 
 BRAINS = """BR.data = { default: "claude", settings: {}, backends: [
     { id: "claude", label: "Claude Code", found: true, where: "here", version: "2.1.4 (Claude Code)", harness: true },
-    { id: "codex", label: "Codex · ChatGPT sign-in", found: false, where: "ssh:sam@mac", harness: true },
+    { id: "codex", label: "Codex · ChatGPT sign-in", found: false, where: "ssh:user@workstation", harness: true },
     { id: "gemini", label: "Gemini CLI", found: false, where: "here", signin: "Run `gemini` once and sign in." },
     { id: "grok", label: "Grok CLI", found: false, where: "here", error: "ssh to x failed" },
     { id: "hermes", label: "Hermes", found: true, where: "here", version: "Hermes Agent v0.21.5", session: true },
@@ -43,7 +43,7 @@ def test_the_chooser_shows_found_remote_and_missing_agents():
     assert out["backend"] == "claude"
     states = dict(zip(["claude", "codex", "hermes", "gemini", "grok", "local"], out["states"]))
     assert "Ready · 2.1.4" in states["claude"][0] and "Uses the Studio" in states["claude"][0] and not states["claude"][1]
-    assert "On mac" in states["codex"][0] and not states["codex"][1]  # over SSH: there, so not greyed
+    assert "On workstation" in states["codex"][0] and not states["codex"][1]  # over SSH: there, so not greyed
     assert "Conversation" in states["hermes"][0] and "Ready" in states["hermes"][0] and not states["hermes"][1]
     assert "Not found" in states["gemini"][0] and states["gemini"][1] and "sign in" in states["gemini"][0]  # the sign-in hint as its title
     assert "Not reached" in states["grok"][0] and states["grok"][1]
@@ -65,7 +65,7 @@ def test_a_new_conversation_starts_and_opens_its_thread():
       out.sent = calls.find(c => c[0] === "/api/agent/tasks" && c[1]); out.cur = AG.cur; out.prompt = AG.prompt;
       answers["/api/agent/threads"] = { threads: [{ id: "th-1018-100000-bbbbbb", title: "A teaser", backend: "claude", status: "running", turns: 1, updated: Date.now() / 1000 }] };
       await agThreadsLoad(); page = viewAgent(); out.live = text(cls(page, "agr-livebox")); out.list = text(cls(page, "agr-list"));
-      out.nextOff = !!button(page, "Send").attrs.disabled;
+      out.nextOn = !button(page, "Send").attrs.disabled;  // a message written while it works waits its turn (agents.submit)
       await button(cls(page, "agr-livebox"), "Stop").attrs.onclick(); out.stop = calls.some(c => c[0] === "/api/agent/threads/th-1018-100000-bbbbbb/cancel");
       clearInterval(AG.timer); AG.timer = null;""")
     if out is None:
@@ -76,7 +76,7 @@ def test_a_new_conversation_starts_and_opens_its_thread():
     assert out["cur"] == "th-1018-100000-bbbbbb" and out["prompt"] == ""
     assert "is working" in out["live"] and "→ studio · queue_clip" in out["live"]
     assert "A teaser" in out["list"] and "working" in out["list"]
-    assert out["nextOff"] and out["stop"]
+    assert out["nextOn"] and out["stop"]
 
 
 def test_a_question_card_takes_the_answer_and_the_thread_shows_what_it_made():
@@ -114,3 +114,44 @@ def test_an_agents_words_are_never_html():
         return
     assert '"tag":"b"' in out["tags"] and '"tag":"code"' in out["tags"] and '"tag":"li"' in out["tags"] and '"tag":"img"' not in out["tags"]
     assert "<img src=x onerror=alert(1)>" in out["text"] and not out["html"] and out["nested"] == 0
+
+
+def test_a_remote_not_reached_or_a_cli_not_signed_in_is_not_ready():
+    out = run(BRAINS + """
+      BR.data.backends[1] = { id: "codex", label: "Codex", found: false, where: "ssh:user@workstation", harness: true,
+        error: "ssh to user@workstation failed: Host key verification failed.. The Studio signs in ... run `ssh user@workstation true` once" };
+      BR.status.claude = { state: "signed_out", detail: "Not signed in" };
+      let page = viewAgent();
+      out.claude = [text(card(page, "claude")), !!card(page, "claude").attrs.disabled];
+      out.codex = [text(card(page, "codex")), !!card(page, "codex").attrs.disabled];
+      out.backend = AG.backend; out.hint = text(cls(page, "ag-hint"));
+      BR.status.claude = { state: "signed_in", detail: "Claude subscription" }; page = viewAgent();
+      out.after = [text(card(page, "claude")), !!card(page, "claude").attrs.disabled];""")
+    if out is None:
+        return
+    assert "Not signed in" in out["claude"][0] and out["claude"][1]
+    assert "Not reached" in out["codex"][0] and out["codex"][1] and "ssh user@workstation true" in out["codex"][0]  # its title says what to do
+    assert out["backend"] not in ("claude", "codex") and "Claude Code" in out["hint"] and "Codex" in out["hint"]
+    assert "Ready" in out["after"][0] and not out["after"][1]
+
+
+def test_a_reply_goes_to_the_threads_own_agent():
+    out = run(BRAINS + THREAD + """
+      thread.backend = "hermes"; thread.tools = []; thread.turns.forEach(t => { if (t.backend) t.backend = "hermes"; });
+      answers["/api/agent/threads"] = { threads: [{ id: thread.id, title: thread.title, backend: "hermes", status: "idle", turns: 4, updated: 1 }] };
+      answers["/api/agent/threads/" + thread.id] = thread; await agThreadsLoad();
+      AG.backend = "claude"; let page = viewAgent();
+      await find(page, n => n.attrs && n.attrs["data-thread"] === thread.id).attrs.onclick();
+      AG.backend = "claude";  // the card chosen above is another agent
+      page = viewAgent(); out.bar = text(cls(page, "agr-bar"));
+      AG.reply = "Shorter, please"; page = viewAgent(); await button(cls(page, "agr-q"), "Send answer").attrs.onclick();
+      out.sent = calls.filter(c => c[0] === "/api/agent/threads/" + thread.id + "/messages").map(c => c[1]);
+      // a message written while a turn runs is shown as queued
+      thread.live = { task: "t2", status: "running", backend: "hermes", steps: [], outputs: [], jobs: [] }; thread.queued = [{ task: "t3", text: "And a title card", attachments: [] }];
+      page = viewAgent(); out.queued = text(cls(page, "agr-queued"));
+      clearInterval(AG.timer); AG.timer = null;""")
+    if out is None:
+        return
+    assert "Hermes" in out["bar"] and "Claude" not in out["bar"]
+    assert out["sent"] == [{"text": "Shorter, please", "backend": "hermes", "attach": []}]  # no tools: the thread keeps its own
+    assert "Queued" in out["queued"] and "And a title card" in out["queued"]

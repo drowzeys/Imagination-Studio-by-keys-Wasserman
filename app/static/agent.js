@@ -22,7 +22,7 @@ const agentLoad = async () => { try { const r = await api("/api/agent/tasks"); A
 const agThreadsLoad = async () => { try { const r = await api("/api/agent/threads"); AG.threads = Array.isArray(r) ? r : (r.threads || []); } catch { AG.threads = []; } };
 const agThreadLoad = async id => { if (!id) { AG.thread = null; return; } try { const t = await api("/api/agent/threads/" + encodeURIComponent(id)); if (t && t.id) AG.thread = t; } catch { AG.thread = null; AG.cur = null; } };
 const agBusy = () => (AG.threads || []).some(t => AG_LIVE.includes(t.status)) || !!(AG.thread && AG.thread.live) || (AG.tasks || []).some(t => !t.thread && AG_LIVE.includes(t.status));
-const agShape = () => JSON.stringify([(AG.threads || []).map(t => [t.id, t.status, t.turns, t.waiting]), AG.thread && [AG.thread.id, (AG.thread.turns || []).length,
+const agShape = () => JSON.stringify([(AG.threads || []).map(t => [t.id, t.status, t.turns, t.waiting, t.updated]), AG.thread && [AG.thread.id, (AG.thread.turns || []).length, (AG.thread.queued || []).length,
   AG.thread.live && [AG.thread.live.status, (AG.thread.live.steps || []).length, (AG.thread.live.outputs || []).length]], (AG.tasks || []).map(t => [t.id, t.status])]);
 // a redraw that keeps the box being typed in, and where its caret was
 function agRender() {
@@ -31,6 +31,13 @@ function agRender() {
   render();
   if (key && typeof document.querySelector === "function") { const n = document.querySelector('[data-ag="' + key + '"]'); if (n && n.focus) { n.focus(); if (sel && n.setSelectionRange) n.setSelectionRange(sel[0], sel[1]); } }
 }
+function agIdleWatch() {
+  if (!AG.idle) AG.idle = setInterval(async () => { if (tab !== "Agent") { clearInterval(AG.idle); AG.idle = null; return; } if (AG.timer) return;
+    const before = agShape(); await agThreadsLoad(); if (AG.cur) await agThreadLoad(AG.cur); if (agShape() !== before) agRender(); if (agBusy()) agentWatch(); }, 10000);
+  if (AG.idle && AG.idle.unref) AG.idle.unref();  // (node, in the tests: never keeps the process alive)
+  if (!AG.focusHooked && typeof window !== "undefined" && window.addEventListener) { AG.focusHooked = true;
+    window.addEventListener("focus", async () => { if (tab !== "Agent" || AG.timer) return; const before = agShape(); await agThreadsLoad(); if (AG.cur) await agThreadLoad(AG.cur);
+      if (agShape() !== before) agRender(); if (agBusy()) agentWatch(); }); } }
 function agentWatch() { if (AG.timer) return; AG.timer = setInterval(async () => { if (tab !== "Agent") { clearInterval(AG.timer); AG.timer = null; return; }
   const before = agShape(); await agThreadsLoad(); if (AG.cur) await agThreadLoad(AG.cur); if ((AG.tasks || []).some(t => !t.thread && AG_LIVE.includes(t.status))) await agentLoad();
   if (agShape() !== before) agRender();
@@ -43,8 +50,14 @@ function useOutput(path, how) {
 // a brain's mark beside its name, where it has one (shell.js MARKS); a letter where it has none
 const agMark = id => typeof mark === "function" && typeof MARKS !== "undefined" && MARKS[id] ? mark(id, "") : null;
 const agBadge = id => agMark(id) || el("span", { class: "agr-mono", "aria-hidden": "true" }, id === "local" ? "◎" : (id || "?").slice(0, 1).toUpperCase());
-// a brain a task can go to: found on this machine, or run over SSH on the computer named in Brains & tools
-const agReady = b => !!b && (!!b.found || /^ssh:./.test(b.where || ""));
+// a brain a task can go to: found on this machine, or run over SSH on the computer named in Brains & tools, that machine
+// reached, and not known to be signed out (the CLI's own word, as Settings → Connections shows it: BR.status, machine.js)
+const AG_NOT_SIGNED = { signed_out: "Not signed in", broken: "Cannot start", missing: "Not found" };
+const agSignState = b => { const st = b && typeof BR !== "undefined" && BR.status ? BR.status[b.id] : null; return st && AG_NOT_SIGNED[st.state] ? st : null; };
+const agReady = b => !!b && !b.error && (!!b.found || /^ssh:./.test(b.where || "")) && !agSignState(b);
+// each found CLI's sign-in, asked once (kept with Settings' own answers) and the room redrawn when it comes
+function agAskSignins(found) { if (typeof brainStatus !== "function") return;
+  for (const b of found) if (b.kind === "cli" && b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(() => { if (tab === "Agent") agRender(); }).catch(() => {}); }
 // Settings → Connections where the Settings page is there, else Machine → Brains & tools
 const agSettings = () => typeof viewSettings === "function" && typeof TABS !== "undefined" && TABS.includes("Settings");
 const agSetup = () => el("a", { href: agSettings() ? "#Settings" : "#Brains", class: "ag-setup", onclick: e => { if (e && e.preventDefault) e.preventDefault(); go(agSettings() ? "Settings" : "Brains"); } },
@@ -133,6 +146,7 @@ const AG_CSS = `
 .agr-dtile .agr-dcap > span { flex:1 0 100%; font:11.5px var(--mono); color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .agr-dtile .agr-dcap button { padding:2px 8px; font-size:12px; }
 .agr-err { color:var(--red); font-size:13.5px; }
+.agr-queued { opacity:.7; border-style:dashed; }
 .agr-end { height:8px; scroll-margin-bottom:96px; }
 .agr-empty { padding:18px; color:var(--dim); font-size:14px; border:1px dashed var(--line2); border-radius:var(--r2); }
 @media (max-width:1180px) { .agr-cards { grid-template-columns:repeat(3,minmax(0,1fr)); } }
@@ -179,7 +193,7 @@ function agDelivered(thread) {
   if (thread.live) for (const p of [...(thread.live.outputs || []), ...agJobOutputs(thread.live.jobs)]) if (!seen.has(p)) { seen.add(p); files.push(p); }
   if (!files.length) return null;
   const toLibrary = p => { if (typeof LIBF !== "undefined") LIBF.q = p.split("/").pop(); go("Library"); };
-  return el("div", { class: "agr-deliv" }, el("div", { class: "kv" }, el("span", { class: "eyebrow" }, "Delivered · " + files.length), el("span", { class: "note m-flat" }, "Everything here is in the Library too")),
+  return el("div", { class: "agr-deliv" }, el("div", { class: "kv" }, el("span", { class: "eyebrow" }, "Delivered · " + files.length), files.some(agPic) ? el("span", { class: "note m-flat" }, files.every(agPic) ? "Everything here is in the Library too" : "The stills and clips here are in the Library too") : null),
     el("div", { class: "agr-strip" }, files.map(p => el("div", { class: "agr-dtile" }, agSound(p) ? el("div", { class: "agr-audio" }, media(p)) : agPic(p) ? media(p, { controls: /\.(mp4|mov)$/i.test(p), preload: "metadata" }) : null,
       el("div", { class: "agr-dcap" }, el("span", {}, p.split("/").pop()),
         agPic(p) || agSound(p) ? el("button", { class: "small", onclick: () => toLibrary(p) }, "Open in Library") : el("a", { class: "tag2", href: file(p), download: "" }, "Download"),
@@ -201,7 +215,7 @@ function agTurns(thread) {
       out.push(el("div", { class: "agr-agent" }, el("div", { class: "agr-who" }, agBadge(t.backend || thread.backend)),
         el("div", { class: "agr-body" }, t.status === "cancelled" ? el("span", { class: "note m-flat" }, "Stopped.") : null,
           asking ? el("p", { class: "note m-flat" }, "Asked below.") : t.text ? agText(t.text) : null,
-          t.error ? el("div", { class: "agr-err" }, relHome(t.error), /not installed|signed in|sign-in|setup/.test(t.error) ? [" · ", agSetup()] : null) : null,
+          t.error ? el("div", { class: "agr-err" }, relHome(t.error), /not installed|signed in|sign-in|setup|ssh|Settings → Connections/.test(t.error) ? [" · ", agSetup()] : null) : null,
           (t.attachments || []).filter(p => agPic(p) || agSound(p)).length ? el("div", { class: "agr-files" }, t.attachments.filter(p => agPic(p) || agSound(p)).slice(0, 8).map(agThumb)) : null))); } }
   return out;
 }
@@ -218,26 +232,31 @@ function agLive(thread) {
 async function agStop(id) { try { await api("/api/agent/threads/" + encodeURIComponent(id) + "/cancel", {}); await agThreadLoad(id); await agThreadsLoad(); agRender(); } catch (e) { toast(e.message); } }
 
 // ---------- sending ----------
-function agChosen() { const bs = (BR.data && BR.data.backends) || []; return bs.find(b => b.id === AG.backend); }
+const agBrain = id => ((BR.data && BR.data.backends) || []).find(b => b.id === id);
+function agChosen() { return agBrain(AG.backend); }
+// the agent a message goes to: an open conversation's own, else the card chosen above
+const agTarget = how => how !== "start" && AG.cur && AG.thread ? AG.thread.backend : AG.backend;
 async function agSend(text, how) {
   text = String(text || "").trim(); if (!text) return toast(how === "reply" ? "Write your answer first" : "Say what you need first");
-  const brain = agChosen(); if (!agReady(brain)) return toast((brain ? brain.label : agName(AG.backend) || "No agent") + " is not set up here: " + (agSettings() ? "Settings → Connections" : "Machine → Brains & tools"));
-  const body = { backend: AG.backend, tools: AG_HARNESS.includes(AG.backend) ? [...AG.tools] : [], attach: AG.attach };
+  const id = agTarget(how), brain = agBrain(id), st = agSignState(brain);
+  if (!agReady(brain)) return toast((brain ? brain.label : agName(id) || "No agent") + (st ? " is " + st.state.replace("_", " ") : " is not set up here") + ": " + (agSettings() ? "Settings → Connections" : "Machine → Brains & tools"));
   try {
-    if (AG.cur && AG.thread) { const r = await api("/api/agent/threads/" + encodeURIComponent(AG.cur) + "/messages", { text, ...body }); if (r && r.thread) AG.thread = r.thread; AG.reply = ""; }
-    else { const r = await api("/api/agent/tasks", { prompt: text, ...body }); AG.prompt = ""; if (r && r.thread) { AG.cur = r.thread; await agThreadLoad(AG.cur); } }
-    AG.attach = []; AG.picking = false; AG.seen = -1; await agThreadsLoad(); agentWatch(); render(); toast("Sent to " + agName(AG.backend));
+    if (how !== "start" && AG.cur && AG.thread) { const r = await api("/api/agent/threads/" + encodeURIComponent(AG.cur) + "/messages", { text, backend: id, attach: AG.attach }); if (r && r.thread) AG.thread = r.thread; AG.reply = ""; }
+    else { const r = await api("/api/agent/tasks", { prompt: text, backend: id, tools: AG_HARNESS.includes(id) ? [...AG.tools] : [], attach: AG.attach }); AG.prompt = ""; if (r && r.thread) { AG.cur = r.thread; await agThreadLoad(AG.cur); } }
+    AG.attach = []; AG.picking = false; AG.seen = -1; await agThreadsLoad(); agentWatch(); render(); toast((AG.thread && AG.thread.live && how !== "start" && (AG.thread.queued || []).length ? "Queued for " : "Sent to ") + agName(id));
   } catch (e) { toast(e.message); }
 }
 function agComposer(key, value, set, placeholder, how, disabled) {
   const area = el("textarea", { placeholder, "aria-label": how === "reply" ? "Your answer" : "Your message", "data-ag": key, rows: how === "start" ? 4 : 2 });
   area.value = value; area.addEventListener("input", () => set(area.value));
   area.addEventListener("keydown", e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") agSend(area.value, how); });
-  const ready = agReady(agChosen());
+  const id = agTarget(how), brain = agBrain(id), ready = agReady(brain), st = agSignState(brain);
   return el("div", { class: "agr-box" + (how === "start" ? " agentbox" : "") }, area,
+    !ready && how !== "start" && brain ? el("div", { class: "note m-flat agr-err" }, agName(id) + (st ? ": " + (AG_NOT_SIGNED[st.state] || st.state) : brain.error ? ": " + relHome(brain.error) : " is not set up here") + " · ", agSetup()) : null,
     AG.attach.length ? el("div", { class: "chips ag-attached" }, AG.attach.map(p => el("span", { class: "tag2 t" }, p.split("/").pop(), el("a", { href: "#", class: "ag-x", "aria-label": "Remove", onclick: e => { e.preventDefault(); AG.attach = AG.attach.filter(x => x !== p); render(); } }, "×")))) : null,
-    el("div", { class: "agr-bar" }, el("span", { class: "tag2" }, agBadge(AG.backend), agName(AG.backend)),
-      AG_HARNESS.includes(AG.backend) && AG.tools.size ? el("span", { class: "note m-flat" }, "with " + [...AG.tools].join(", ")) : null,
+    el("div", { class: "agr-bar" }, el("span", { class: "tag2" }, agBadge(id), agName(id)),
+      how === "start" ? (AG_HARNESS.includes(id) && AG.tools.size ? el("span", { class: "note m-flat" }, "with " + [...AG.tools].join(", ")) : null)
+        : AG.thread && (AG.thread.tools || []).length ? el("span", { class: "note m-flat" }, "with " + AG.thread.tools.join(", ")) : null,
       el("span", { class: "su-grow" }),
       el("button", { class: "small", onclick: () => { AG.picking = !AG.picking; render(); } }, "Attach" + (AG.attach.length ? " (" + AG.attach.length + ")" : "")),
       el("button", { class: "primary", disabled: !ready || !!disabled, onclick: () => agSend(area.value || (how === "start" ? AG.prompt : AG.reply), how) }, how === "reply" ? "Send answer " : "Send ", el("kbd", { class: "ag-kbd" }, "⌘⏎"))));
@@ -253,11 +272,11 @@ function agQuestion(thread, t) {
 // ---------- the room ----------
 function agChooser(found) {
   return el("div", { class: "agr-cards", role: "radiogroup", "aria-label": "Choose your agent" }, AG_AGENTS.map(([id, name]) => {
-    const b = found.find(x => x.id === id), ready = agReady(b), on = ready && AG.backend === id, remote = b && /^ssh:./.test(b.where || "");
-    const state = !b ? "Not found" : b.error ? "Not reached" : remote ? "On " + b.where.slice(4).replace(/^[^@]*@/, "") : b.found ? "Ready" + (b.version ? " · " + String(b.version).replace(/^[^0-9]*/, "").split(/[\s(]/)[0] : "") : "Not found";
+    const b = found.find(x => x.id === id), ready = agReady(b), on = ready && AG.backend === id, remote = b && /^ssh:./.test(b.where || ""), st = agSignState(b);
+    const state = !b ? "Not found" : b.error ? "Not reached" : st ? AG_NOT_SIGNED[st.state] : remote ? "On " + b.where.slice(4).replace(/^[^@]*@/, "") : b.found ? "Ready" + (b.version ? " · " + String(b.version).replace(/^[^0-9]*/, "").split(/[\s(]/)[0] : "") : "Not found";
     const can = AG_HARNESS.includes(id) ? "Uses the Studio" : "Conversation";
     return el("button", { class: "agr-card" + (on ? " on" : "") + (ready ? "" : " off"), role: "radio", "aria-checked": on ? "true" : "false", disabled: !ready, "aria-disabled": ready ? false : "true",
-      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : (b && b.signin) || (b && b.error) || (name + " is not found on this machine and no other computer is set up for it"),
+      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : (b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it"),
       onclick: () => { AG.backend = id; render(); } },
       el("span", { class: "agr-top" }, agBadge(id), (b && b.label && !["codex", "local"].includes(id) ? b.label : name)),
       el("span", { class: "agr-state" }, el("span", { class: "dotl" + (ready ? (on ? " t" : "") : " o") }), state),
@@ -290,8 +309,9 @@ function agConversation(thread) {
       !thread.live ? el("button", { class: "small", onclick: async () => { if (typeof confirm === "function" && !confirm("Forget this conversation? What it made stays in the Library.")) return;
         try { await api("/api/agent/threads/" + encodeURIComponent(thread.id), undefined, "DELETE"); AG.cur = null; AG.thread = null; await agThreadsLoad(); render(); } catch (e) { toast(e.message); } } }, "Forget") : null),
     agDelivered(thread),
-    el("div", { class: "agr-turns" }, agTurns(thread), agLive(thread)),
-    asking ? agQuestion(thread, last) : agComposer("next", AG.reply, v => { AG.reply = v; }, thread.live ? "Your agent is working. Write the next thing; it goes when this turn ends." : "Reply, or ask for the next thing…", "next", !!thread.live),
+    el("div", { class: "agr-turns" }, agTurns(thread), agLive(thread),
+      (thread.queued || []).map(q => el("div", { class: "agr-user agr-queued", title: "Sent while the agent works: it goes when this turn ends" }, el("span", { class: "note m-flat" }, "Queued · "), q.text))),
+    asking ? agQuestion(thread, last) : agComposer("next", AG.reply, v => { AG.reply = v; }, thread.live ? "Your agent is working. Write the next thing; it goes when this turn ends." : "Reply, or ask for the next thing…", "next", (thread.queued || []).length >= 3),
     agPicker(), el("div", { class: "agr-end" }));
 }
 function agStart(missing) {
@@ -310,6 +330,7 @@ function viewAgent() {
     agThreadsLoad().then(async () => { AG.loadingThreads = false; if (AG.cur) await agThreadLoad(AG.cur); if (tab === "Agent") { render(); if (agBusy()) agentWatch(); } }); }
   if (agBusy()) agentWatch();
   const found = (BR.data && BR.data.backends) || [];
+  agAskSignins(found); agIdleWatch();
   const harnesses = found.filter(b => AG_HARNESS.includes(b.id));
   if (!agReady(found.find(b => b.id === AG.backend))) {
     const def = BR.data && found.find(b => b.id === BR.data.default && agReady(b));

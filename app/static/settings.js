@@ -136,7 +136,7 @@ function setBrainCard(b) { const said = BR.said[b.id], remote = b.where && b.whe
   return el("div", { class: "brain", "data-brain": b.id }, el("div", { class: "head" }, typeof brainLogo === "function" ? brainLogo(b.id) : null,
       el("div", { class: "m-min" }, el("b", {}, b.label), el("span", {}, setWhere(b)))),
     el("div", { class: "m-tags" }, el("span", { class: "tag2 " + (b.found ? "ok" : "") }, state), b.harness ? el("span", { class: "tag2" }, "agent with Studio tools") : el("span", { class: "tag2" }, "brain")),
-    !b.found && b.signin ? el("div", { class: "note m-flat" }, "How to sign in: " + b.signin) : null,
+    !b.found && !b.error && b.signin ? el("div", { class: "note m-flat" }, brainMissing(b)) : null,
     typeof signLine === "function" ? signLine(b) : null,
     b.note ? el("div", { class: "note m-flat" }, b.note) : null,
     b.id === "hermes" ? setHermes() : null,

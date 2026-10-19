@@ -119,6 +119,9 @@ async function signCancel(id) { try { BR.sign[id] = await api("/api/brains/" + i
 async function signOut(b) { if (typeof confirm === "function" && !confirm("Sign " + b.label + " out" + (b.where && b.where !== "here" ? " on " + b.where.replace(/^ssh:/, "") : "") + "? This runs its own sign-out; you can sign in again here.")) return;
   try { const r = await api("/api/brains/" + b.id + "/signout", {}); BR.status[b.id] = r; toast(r.ok ? "Signed out" : "The CLI did not say it signed out"); } catch (e) { toast(e.message); } signRedraw(); }
 const copyText = async (value, what) => { try { await navigator.clipboard.writeText(value); toast(what + " copied"); } catch { toast("Select it and copy: " + value); } };
+// a CLI that is not there: install it here, or use it where it is over SSH; how it signs in once it is installed
+const brainMissing = b => (b.where && b.where !== "here" ? "Not installed on " + b.where.replace(/^ssh:/, "") + ": install it there. " :
+  "Not installed here: install it, or use it on another computer over SSH (Brains & tools → Use the sign-ins on another computer). ") + "Then: " + b.signin;
 // the status line and the Sign in / Sign out buttons on a brain card
 function signLine(b) { if (b.kind !== "cli") return null; const st = BR.status[b.id];
   if (b.found && !st) brainStatus(b.id);
@@ -173,7 +176,8 @@ function viewBrains() {
       el("div", { class: "head" }, brainLogo(b.id), el("div", { class: "m-min" }, el("b", {}, b.label), el("span", {}, b.found ? (b.where && b.where !== "here" ? "signed in on " + b.where.replace(/^ssh:/, "") : "found on this machine") + (b.version ? " · " + b.version : "") : "not found"))),
       el("div", { class: "m-tags" }, el("span", { class: "tag2 " + (b.found ? "ok" : "") }, b.found ? "ready" : "not set up"), on ? el("span", { class: "tag2 t" }, "default") : null,
         b.kind === "http" && b.models && b.models.length ? el("span", { class: "tag2" }, b.models.length + " models") : null),
-      !b.found && b.signin ? el("div", { class: "note m-flat" }, b.signin) : null,
+      !b.found && !b.error && b.signin ? el("div", { class: "note m-flat" }, brainMissing(b)) : null,
+      b.error ? el("div", { class: "note m-flat vt-bad" }, b.error) : null,
       signLine(b),
       BR.said[b.id] ? el("div", { class: "note m-flat " + (BR.said[b.id].ok ? "vt-ok" : "vt-bad") }, BR.said[b.id].ok ? "Answered “" + (BR.said[b.id].text || "").slice(0, 40) + "” in " + (BR.said[b.id].elapsedMs / 1000).toFixed(1) + " s" : BR.said[b.id].error) : null,
       el("div", { class: "m-acts" }, el("button", { class: "small", disabled: !b.found || BR.testing[b.id], onclick: async () => { BR.testing[b.id] = true; render();
