@@ -168,7 +168,10 @@ function ndMediaLists() {
   ND.library = []; ND.projects = [];
   const list = path => api(path).then(x => Array.isArray(x) ? x.filter(t => t && t.path) : [], () => []);
   Promise.all([list("/api/library"), list("/api/voice/takes"), list("/api/music/takes")]).then(([lib, v, m]) => {
-    ND.library = [...lib.map(x => ({ path: x.path, kind: x.kind })), ...[...v, ...m].map(t => ({ path: t.path, kind: "audio" }))]; if (ND.graph.nodes.some(n => n.type === "reference")) ndPaint(); });
+    // the Library lists voice lines and songs itself now; takes it does not list yet are added once, by their kind of sound
+    const seen = new Set(lib.map(x => x.path));
+    ND.library = [...lib.map(x => ({ path: x.path, kind: x.kind, sound: x.sound })), ...[...v.map(t => ({ ...t, sound: "voice" })), ...m.map(t => ({ ...t, sound: "music" }))]
+      .filter(t => t.path && !seen.has(t.path)).map(t => ({ path: t.path, kind: "audio", sound: t.sound }))]; if (ND.graph.nodes.some(n => n.type === "reference")) ndPaint(); });
   api("/api/projects").then(found => { ND.projects = Array.isArray(found) ? found : []; if (ND.graph.nodes.some(n => n.type === "timeline")) ndPaint(); }, () => {}); }
 
 // ---------- drawing ----------
@@ -201,7 +204,9 @@ function ndField(node, key, kind, options) {
       looks.map(r => el("option", { value: r.id, selected: p.look === r.id }, r.name)), p.look && !looks.some(r => r.id === p.look) ? el("option", { value: p.look, selected: true }, p.look) : null); }
   else if (kind === "library") { const list = (ND.library || []).filter(x => x.kind === p.kind);
     input = el("select", { disabled: ro, onchange: e => { p.path = e.target.value; changed(true); } }, el("option", { value: "" }, list.length ? "Choose a file…" : "Nothing of this kind in the Library"),
-      list.slice(0, 300).map(x => el("option", { value: x.path, selected: p.path === x.path }, x.path.split("/").slice(-2).join("/"))),
+      ...(p.kind === "audio" ? [["voice", "Voice lines"], ["music", "Songs"], ["sfx", "Sound effects"]].map(([k, label]) => { const of = list.filter(x => (x.sound || "sfx") === k).slice(0, 200);
+        return of.length ? el("optgroup", { label }, of.map(x => el("option", { value: x.path, selected: p.path === x.path }, x.path.split("/").slice(-2).join("/")))) : null; })
+        : list.slice(0, 300).map(x => el("option", { value: x.path, selected: p.path === x.path }, x.path.split("/").slice(-2).join("/")))),
       p.path && !list.some(x => x.path === p.path) ? el("option", { value: p.path, selected: true }, p.path.split("/").pop()) : null); }
   else if (kind === "project") input = el("select", { disabled: ro, onchange: e => { p.project = e.target.value; changed(false); } }, el("option", { value: "" }, "Pass the clips on only"),
     (ND.projects || []).map(x => el("option", { value: x.id, selected: p.project === x.id }, "Add to " + x.name)));

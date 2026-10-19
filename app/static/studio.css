@@ -889,3 +889,9 @@ nav#rooms .lbl.long { white-space:normal; line-height:1.12; font-size:14.5px; }
 .cn-nudge .primary .logo { width:20px; height:20px; margin-right:8px; }
 .st-embed .pagehead { margin-top:0; }
 @media (max-width: 640px) { .cn-qr { width:132px; height:132px; } .cn-code span { font-size:24px; } .connect { padding:10px; } .cn-step { grid-template-columns:22px minmax(0,1fr); gap:8px; } .cn-tick { width:22px; height:22px; } }
+
+/* the Library's sounds: a voice line, a song or a sound effect, with its words over the player */
+.tile.lib-sound { display:flex; flex-direction:column; gap:8px; padding:12px 12px 0; }
+.lib-sound-top { display:flex; flex-direction:column; gap:4px; min-height:64px; }
+.lib-sound-top b { font:500 14px/1.35 var(--sans); color:var(--text); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.tile.lib-sound audio { width:100%; }

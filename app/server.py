@@ -1956,7 +1956,7 @@ def take_frame(body: dict) -> dict:
 
 @app.get("/api/library")
 def library() -> list[dict]:
-    """Every clip and still under the studio folder, newest first."""
+    """Every clip, still, voice line, song and sound effect under the studio folder, newest first."""
 
     found = []
     for folder, kinds in (("renders", (".mp4",)), ("exports", (".mp4",)), ("scouts", (".png",)),
@@ -1967,12 +1967,38 @@ def library() -> list[dict]:
                 found.append({"path": relative(path), "kind": "video" if path.suffix.lower() in (".mp4", ".mov")
                               else "image", "folder": folder, "modified": path.stat().st_mtime,
                               "size": path.stat().st_size})
+    found += library_sounds()
     found = sorted(found, key=lambda item: -item["modified"])[:400]
     made = hub.takes()  # which Spark rendered a clip, and at which seed (sparks.py)
     for item in found:
         if item["path"] in made:
             item.update(spark=made[item["path"]].get("spark"), seed=made[item["path"]].get("seed"))
     return found
+
+
+SOUND_FILES = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
+
+
+def library_sounds() -> list[dict]:
+    """Voice lines and songs (their kept takes) and sound effects (the sound folder): kind "audio", `sound` says which."""
+
+    out, seen = [], set()
+    for which, module in (("voice", globals().get("voice")), ("music", globals().get("music"))):
+        try:
+            takes = module.takes() if module else []
+        except Exception:  # a take folder that cannot be read leaves the rest of the Library alone
+            takes = []
+        for take in takes:
+            path = HOME / str(take.get("path") or "")
+            if path.suffix.lower() in SOUND_FILES and path.is_file() and relative(path) not in seen:
+                seen.add(relative(path))
+                words = str(take.get("text") or take.get("caption") or take.get("title") or "")
+                out.append({"path": relative(path), "kind": "audio", "sound": which, "folder": which, "title": " ".join(words.split())[:80],
+                            "modified": path.stat().st_mtime, "size": path.stat().st_size})
+    for path in (HOME / "sound").rglob("*") if (HOME / "sound").is_dir() else []:
+        if path.suffix.lower() in SOUND_FILES and path.is_file() and not hidden(path.relative_to(HOME)) and relative(path) not in seen:
+            out.append({"path": relative(path), "kind": "audio", "sound": "sfx", "folder": "sound", "modified": path.stat().st_mtime, "size": path.stat().st_size})
+    return out
 
 
 @app.delete("/api/library")

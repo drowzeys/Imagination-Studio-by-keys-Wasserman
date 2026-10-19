@@ -837,14 +837,24 @@ function viewEditor() {
 
 /* ---------- Library ---------- */
 const LIBF = { kind: "all", q: "" };
+// a voice line, a song or a sound effect: its player, its words, and where it goes next (kept in Voice and Music, not deleted here)
+const LIB_SOUND = { voice: ["Voice line", "Voice"], music: ["Song", "Music"], sfx: ["Sound effect", null] };
+function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
+  return el("div", { class: "tile lib-sound", "data-path": m.path, "data-sound": m.sound || "sfx", style: shown ? null : "display:none" },
+    el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
+    el("div", { class: "cap" }, el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
+    el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
+      el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
+      room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null)); }
 function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
   const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
   Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
     // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
-    const kindList = all_.filter(m => LIBF.kind === "all" || m.kind === LIBF.kind);
+    // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
+    const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
     const hits = () => { const words = LIBF.q.trim().toLowerCase().split(/\s+/).filter(Boolean); return kindList.filter(m => words.every(w => (m.path + " " + (m.spark || "")).toLowerCase().includes(w))); };
     let list = hits();
-    const kinds = { all: "Everything", video: "Clips", image: "Stills" }, n = k => k === "all" ? all_.length : all_.filter(m => m.kind === k).length;
+    const kinds = { all: "Everything", video: "Clips", image: "Stills", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
     const find = el("input", { type: "search", placeholder: "Find by name, folder or Spark", value: LIBF.q, style: "max-width:320px", "aria-label": "Find in the Library" });
     let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits(); const on = new Set(list.map(m => m.path));
       for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none"; tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
@@ -852,10 +862,10 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
     find.addEventListener("keydown", e => { if (e.key === "Enter") apply(); });
     put(box, el("div", { class: "row", style: "align-items:center;margin-bottom:6px" }, el("div", { class: "chips fit" }, Object.entries(kinds).map(([k, t]) => el("button", { class: "small" + (LIBF.kind === k ? " on" : ""), onclick: () => { LIBF.kind = k; render(); } }, t + " · " + n(k)))), el("span"), el("div", { class: "fit" }, find)));
     const many = el("button", { class: "fit", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
-    const all = el("button", { class: "fit", onclick: () => { const every = LIBPICK.size === list.length; LIBPICK.clear(); if (!every) for (const m of list) LIBPICK.add(m.path); render(); } }, LIBPICK.size && LIBPICK.size === list.length ? "Select none" : "Select all");
+    const all = el("button", { class: "fit", onclick: () => { const every = LIBPICK.size === list.length; LIBPICK.clear(); if (!every) for (const m of list) if (m.kind !== "audio") LIBPICK.add(m.path); render(); } }, LIBPICK.size && LIBPICK.size === list.length ? "Select none" : "Select all");
     const show = () => { many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = LIBPICK.size && LIBPICK.size === list.length ? "Select none" : "Select all"; }; show();
     const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
-    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m =>
+    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
     el("div", { class: "tile", "data-path": m.path, style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
       el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + m.spark + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
       m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, m.spark + (m.seed != null ? " · s" + m.seed : "")) : null),
