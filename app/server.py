@@ -211,6 +211,7 @@ JSON_LIMIT = int(float(os.environ.get("STUDIO_JSON_MB", "1")) * (1 << 20))      
 UPLOAD_LIMIT = int(float(os.environ.get("STUDIO_UPLOAD_MB", "512")) * (1 << 20))  # one file sent to /api/upload
 # a production pack or a suite file brought in (a .zip of clips): the suite's own cap per file was 2 GB already
 ARCHIVE_LIMIT = int(float(os.environ.get("STUDIO_ARCHIVE_MB", "2048")) * (1 << 20))
+QUEUE_MAX = int(os.environ.get("STUDIO_QUEUE_MAX", "200"))  # jobs waiting or running at once
 # the routes that take a file (multipart), each with its own limit; every other write is held to JSON_LIMIT, whatever its type
 UPLOAD_ROUTES = {"/api/upload": "UPLOAD_LIMIT", "/api/motion/packs/import": "ARCHIVE_LIMIT", "/api/suite/import": "ARCHIVE_LIMIT"}
 TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
@@ -366,6 +367,37 @@ class WriteGuard:
 
 
 app.add_middleware(WriteGuard)
+
+
+class SecurityHeaders:
+    """Headers on every answer: this is a local app, so it needs no remote code, no framing and no sniffing."""
+
+    CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+           "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; "
+           "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def headed(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                for key, value in ((b"content-security-policy", self.CSP.encode()),
+                                   (b"x-content-type-options", b"nosniff"),
+                                   (b"x-frame-options", b"DENY"),
+                                   (b"referrer-policy", b"no-referrer"),
+                                   (b"permissions-policy", b"camera=(), microphone=(), geolocation=()")):
+                    headers.append([key, value])
+            await send(message)
+
+        await self.app(scope, receive, headed)
+
+
+app.add_middleware(SecurityHeaders)
 
 
 def accepting_jobs():
@@ -1868,6 +1900,9 @@ def queue_job(body: dict) -> dict:
     job["sparks"] = {"chosen": chosen if SPARK else 1, "available": said["available"], "used": said["used"], "says": said["says"]}
     with lock:
         accepting_jobs()
+        waiting = sum(1 for one in jobs.values() if one["status"] in ("queued", "running"))
+        if waiting >= QUEUE_MAX:  # a page or a peer cannot fill the machine with jobs
+            raise HTTPException(429, f"the queue is full ({QUEUE_MAX} jobs waiting or running): let some finish first")
         jobs[job_id] = job
         order.append(job_id)
     wake.set()
@@ -1992,9 +2027,13 @@ def library() -> list[dict]:
                           ("agent", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov"))):
         for path in (HOME / folder).rglob("*"):
             if path.suffix.lower() in kinds and not hidden(path.relative_to(HOME)) and path.is_file():
+                try:
+                    stat = path.stat()
+                except OSError:  # a file taken out of the Library while it is being listed
+                    continue
                 found.append({"path": relative(path), "kind": "video" if path.suffix.lower() in (".mp4", ".mov")
-                              else "image", "folder": folder, "modified": path.stat().st_mtime,
-                              "size": path.stat().st_size})
+                              else "image", "folder": folder, "modified": stat.st_mtime,
+                              "size": stat.st_size})
     found += library_sounds()
     found = sorted(found, key=lambda item: -item["modified"])[:400]
     made = hub.takes()  # which Spark rendered a clip, and at which seed (sparks.py)
@@ -2052,6 +2091,15 @@ def discard(path: str) -> dict:
     return {"trash": relative(kept)}
 
 
+def seconds_of(data: dict) -> float:
+    """A clip's duration from ffprobe's answer: 0 when it gave none or something that is not a number."""
+
+    try:
+        return float((data.get("format") or {}).get("duration") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 @app.get("/api/probe")
 def probe(path: str) -> dict:
     target = inside(path)
@@ -2063,12 +2111,17 @@ def probe(path: str) -> dict:
                              capture_output=True, text=True, env=environment({}), timeout=30)  # in a request: never without a limit
     except subprocess.TimeoutExpired:
         raise HTTPException(400, "the file could not be read in 30 seconds")
-    data = json.loads(out.stdout or "{}")
+    try:
+        data = json.loads(out.stdout or "{}")
+    except ValueError:
+        raise HTTPException(400, "the file could not be read")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "the file could not be read")
     streams = data.get("streams") or []
     stream = next((one for one in streams if one.get("codec_type") == "video"), {})
     # sound: whether the file has an audio track (a reference video's own sound, a reference audio clip)
     return {"width": stream.get("width"), "height": stream.get("height"), "frames": stream.get("nb_frames"),
-            "duration": float((data.get("format") or {}).get("duration") or 0),
+            "duration": seconds_of(data),
             "sound": any(one.get("codec_type") == "audio" for one in streams)}
 
 
@@ -2196,7 +2249,10 @@ def get_project(project_id: str) -> dict:
     file = project_file(project_id)
     if not file.is_file():
         raise HTTPException(404, "no such project")
-    return json.loads(file.read_text())
+    try:
+        return json.loads(file.read_text())
+    except (OSError, ValueError):
+        raise HTTPException(404, "the project file could not be read")
 
 
 @app.put("/api/projects/{project_id}")
@@ -2283,6 +2339,9 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
            "estimate": estimate, "sparks": {"chosen": 1, "available": 1, "used": 1, "says": ""}}
     with lock:
         accepting_jobs()
+        waiting = sum(1 for one in jobs.values() if one["status"] in ("queued", "running"))
+        if waiting >= QUEUE_MAX:  # a page or a peer cannot fill the machine with jobs
+            raise HTTPException(429, f"the queue is full ({QUEUE_MAX} jobs waiting or running): let some finish first")
         jobs[job_id] = job
         order.append(job_id)
     wake.set()
