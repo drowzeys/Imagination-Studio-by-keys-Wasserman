@@ -416,7 +416,10 @@ SPARK_IDS = {("FASTH3", "bf16"): ("fasth3", "FastH3 8-step transformer (bf16)", 
              ("FLUX3", "flux3k-full"): ("flux3k-full", "FLUX3-K Full (50 steps)", "Picture (FLUX3-K)", True),
              ("FLUX3_TEXT", None): ("flux3k-text-encoder", "FLUX3-K text encoder (Qwen3-VL-4B)", "Picture (FLUX3-K)", True),
              ("FLUX3_UPSAMPLER", None): ("flux3k-upsampler", "FLUX3-K prompt upsampler (8-bit)", "Picture (FLUX3-K)", True),
-             ("FLUX3_VAE", None): ("flux3k-vae", "FLUX3-K decoder", "Picture (FLUX3-K)", True)}
+             ("FLUX3_VAE", None): ("flux3k-vae", "FLUX3-K decoder", "Picture (FLUX3-K)", True),
+             ("MOSS", "moss-image"): ("moss-image", "MOSS-Image SFT (25 steps)", "Picture (MOSS-Image)", True),
+             ("MOSS_TEXT", None): ("moss-image-text-encoder", "MOSS-Image text encoder (Qwen3.5 9B)", "Picture (MOSS-Image)", True),
+             ("MOSS_VAE", None): ("moss-image-vae", "MOSS-Image decoder (FLUX.2 small)", "Picture (MOSS-Image)", True)}
 
 
 def spark_comfy_needs() -> list[dict]:

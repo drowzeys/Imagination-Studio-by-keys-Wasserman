@@ -126,6 +126,14 @@ revenue); this pack ships none of them. On a DGX Spark they run on **ComfyUI**'s
 **felix-ab**, a port of BFL's reference code to MLX (Apache-2.0), with the 8-bit MLX conversion of the prompt
 upsampler by **VisualInference**.
 
+## The MOSS-Image picture model: OpenMOSS
+
+**OpenMOSS** released **MOSS-Image**: a 5B single-stream image transformer in a base and a supervised fine-tuned
+(SFT) checkpoint, with a Qwen3.5 9B text encoder and the FLUX.2 small decoder, and its JSON layout prompts. The weights
+are under the Apache License 2.0; this pack ships none of them. On a DGX Spark the SFT checkpoint runs on **ComfyUI**'s
+own MOSS-Image support (Jukka Seppänen (kijai) and the ComfyUI contributors, GPL-3.0, run as a separate program), from
+**Comfy Org**'s repackaged files.
+
 ## The MLX port the image family is adapted from: Filip Strand and the mflux contributors
 
 **mflux** has the MLX implementation of Qwen-Image-2.1 that TensorFold's family is adapted from: the transformer

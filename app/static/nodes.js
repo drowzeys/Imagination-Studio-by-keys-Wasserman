@@ -32,7 +32,7 @@ const ND_PRESETS = { small: "Small 864x480", draft: "Draft 1344x768", p720: "720
 const ND_QUALITIES = { fh8: "FastH3 8 passes", fh4: "FastH3 4 passes", fh20: "FastH3 20 passes", standard: "H3 Turbo", high: "H3 high", full: "H3 full 20 steps", fast: "H3 fast" };
 const ND_KINDS = { image: "Picture", video: "Video", audio: "Sound" };
 const ND_SIZES = { "1920x1080": "1920x1080", "1280x720": "1280x720", "3840x2160": "3840x2160", "1080x1920": "1080x1920 (9:16)" };
-const ND_EDIT_MODELS = { qwen: "Qwen 2.1 Turbo", "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full" };
+const ND_EDIT_MODELS = { qwen: "Qwen 2.1 Turbo", "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image" };
 const ND_TEMPLATES = [];  // the server's starter graphs, once loaded
 const ND = { graph: null, view: { x: 40, y: 30, k: 1 }, sel: null, seq: 0, dirty: false, saved: null, run: null, est: {}, problems: {},
   drag: null, pan: null, link: null, space: false, palette: null, root: null, stage: null, layer: null, svg: null, cards: {}, asked: false,
@@ -215,7 +215,7 @@ function ndField(node, key, kind, options) {
     kind === "area" ? null : el("span", {}, words), input); }
 function ndFields(node) {
   const models = typeof S !== "undefined" && S && S.image_models && S.image_models.length ? Object.fromEntries(S.image_models.map(m => [m.id, m.label]))
-    : { qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full", "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full" };
+    : { qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full", "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image" };
   const f = (key, kind, options) => ndField(node, key, kind, options);
   return {
     text: () => [f("text", "area")], note: () => [f("text", "area")],

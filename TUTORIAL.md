@@ -1,7 +1,7 @@
 # Wasserman Slate AI Studio, powered by TensorFold: install it, click it, make things
 
 **Thank you first** to Sam Wasserman (Slate, the Sharp Spec, Motion Previs Studio), the Qwen team (Qwen-Image-2.1),
-Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx), MiniMax (H3 and MiniMax-Music3), FastVideo / Hao AI
+Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx), OpenMOSS (MOSS-Image), MiniMax (H3 and MiniMax-Music3), FastVideo / Hao AI
 Lab (FastH3), Fish Audio (Drama 3), Ash Hart (TensorFold), mrbizarro, LightX2V, Viggle, speach1sdef178 and Apple's MLX
 team. Full list in [CREDITS.md](CREDITS.md). **Built with Fish Audio.**
 

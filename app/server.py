@@ -814,11 +814,13 @@ def turbo_ready() -> bool:
 # Fast, the distilled checkpoint at 16 steps, and Full, the base one at 50. Seconds per 1344x768 picture, measured with
 # the model loaded, bf16: Qwen 9.7 on an M5 Ultra; FLUX3-K Fast 10.5 on a DGX Spark (ComfyUI) and 14.9 on an M5 Ultra
 # (flux3-mlx), Full 57.5 on a Spark and 53.6 on an M5 Ultra; BFL's prompt upsampler adds about 18 s on a Spark (8-bit,
-# ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt.
+# ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt. MOSS-Image (OpenMOSS, Apache 2.0, oneshot-setup-spark.sh
+# --moss) runs on a Spark only, on ComfyUI v0.42.0's own support: 45 s for 1344x768 with the model loaded.
 IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Research License (non-commercial)"),
                 "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
-                "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast")}
+                "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast"),
+                "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed")}
 # BFL's file names, the present one first (renamed 2026-10-17, the same files; spark_generate.FLUX3_OLD)
 FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors"),
                "flux3k-full": ("flux3-image-klein-base-bf16.safetensors", "flux3_image_klein_base_bf16.safetensors")}
@@ -840,7 +842,19 @@ def image_models() -> list[str]:
                      and (folder / ("FLUX3-K-Fast" if name == "flux3k-fast" else "FLUX3-K-Full") / "model.safetensors").is_file())
         if ready:
             found.append(name)
+    if SPARK and moss_ready():
+        found.append("moss-image")
     return found
+
+
+def moss_ready() -> bool:
+    """MOSS-Image's ComfyUI files, and a ComfyUI that knows the model (v0.42.0 and later)."""
+
+    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "MOSS-Image-Comfy"
+    comfy = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")) / "ComfyUI"
+    return ((models / "diffusion_models/moss_image_sft_bf16.safetensors").is_file()
+            and (models / "text_encoders/qwen3.5_9b_bf16.safetensors").is_file()
+            and (comfy / "comfy_extras/nodes_moss_image.py").is_file())
 
 
 def qwen_base_ready() -> bool:
@@ -861,7 +875,7 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
-        how = "--image-edit" if name == "qwen-full" else "--flux3"
+        how = {"qwen-full": "--image-edit", "moss-image": "--moss (on a DGX Spark)"}.get(name, "--flux3")
         raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh {how} adds it")
     return {"IMAGE_MODEL": name}
 

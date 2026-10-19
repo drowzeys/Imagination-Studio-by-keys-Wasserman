@@ -76,6 +76,17 @@ FLUX3_OLD = {"flux3-image-klein-bf16.safetensors": "flux3_image_klein_sd_bf16.sa
 FLUX3_TEXT = "qwen3vl_4b_bf16.safetensors"
 FLUX3_UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors"
 FLUX3_VAE = "flux2-vae.safetensors"
+# MOSS-Image (OpenMOSS, Apache 2.0) on ComfyUI's own MOSS-Image support (v0.42.0): the SFT checkpoint, its Qwen3.5 9B
+# text encoder and the FLUX.2 small decoder, Comfy-Org/MOSS-Image's files. The settings of ComfyUI's template
+# "image_moss_image_t2i": 25 steps of er_sde at CFG 2.5 against its negative prompt, shift 5 (the model's own), no
+# skip-layer guidance. Measured on a DGX Spark (2026-10-19, bf16): 45 s for 1344x768 with the model loaded, 26 GB taken
+# from the machine starting from nothing loaded; OpenMOSS's own 50 Euler steps at CFG 3 with layer 22 skipped took 87 s
+# for a picture of the same quality.
+MOSS_DIR = "MOSS-Image-Comfy"
+MOSS = {"moss-image": ("moss_image_sft_bf16.safetensors", 25, 2.5)}
+MOSS_TEXT = "qwen3.5_9b_bf16.safetensors"
+MOSS_VAE = "flux2-vae_small.safetensors"
+MOSS_NEGATIVE = "nsfw, worst quality, bad anatomy, watermark, jpeg artifact"
 
 
 def call(path, data=None):
@@ -848,6 +859,26 @@ def flux3_workflow(args, text: str, seed: int, caption: str = "") -> dict:
     return w
 
 
+def moss_workflow(args, text: str, seed: int) -> dict:
+    """MOSS-Image, the layout of ComfyUI's template: the prompt goes to the model as written."""
+
+    unet, steps, cfg = MOSS[args.model]
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": MOSS_TEXT, "type": "moss_image", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": MOSS_VAE}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": text}},
+        "6": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": args.width, "height": args.height, "batch_size": 1}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": args.negative or MOSS_NEGATIVE}},
+        "12": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps or steps,
+                                                    "cfg": cfg, "sampler_name": "er_sde", "scheduler": "simple",
+                                                    "positive": ["5", 0], "negative": ["7", 0], "latent_image": ["6", 0],
+                                                    "denoise": 1.0}},
+        "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/image_{uuid.uuid4().hex[:8]}"}},
+    }
+
+
 # MiniMax Music 3 (lyrics and a style caption to a song with sung vocals, 44.1 kHz stereo) on ComfyUI's own nodes, the
 # layout of ComfyUI's blueprint "Text to Music (MiniMax Music 3)": the text encoder runs MiniMax's autoregressive
 # model (the acoustic conditioning, and where the song ends), the DiT fills it in over 30 Euler steps at CFG 1.7 against
@@ -1118,10 +1149,19 @@ def image(args) -> None:
         if value % 16:
             sys.exit(f"--{name} must be a multiple of 16, got {value}")
     flux3 = args.model in FLUX3
-    ensure_server("flux3" if flux3 else "image")
+    ensure_server("flux3" if flux3 else "moss" if args.model in MOSS else "image")
     text = prompt_of(args)
     target = Path(args.output)
     seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else [args.seed]
+    if args.model in MOSS:
+        for seed in seeds:
+            item, seconds = render(moss_workflow(args, text, seed), "12")
+            out = target.with_name(f"{target.stem}_s{seed}{target.suffix}") if args.seeds else target
+            fetch(item, out)
+            print("[tensorfold] " + json.dumps({"output": str(out), "engine": "cuda", "model": args.model,
+                                                "width": args.width, "height": args.height, "seed": seed,
+                                                "steps": args.steps or MOSS[args.model][1], "total_s": round(seconds, 1)}), flush=True)
+        return
     if flux3:
         caption = "" if args.upsample else text
         for seed in seeds:
@@ -1218,15 +1258,16 @@ def main() -> None:
     i.add_argument("-o", "--output", required=True)
     i.add_argument("--width", type=int, default=1344); i.add_argument("--height", type=int, default=768)
     i.add_argument("--seed", type=int, default=0); i.add_argument("--seeds", default="", help="several pictures: 1,2,3")
-    i.add_argument("--model", choices=("qwen", *FLUX3), default=os.environ.get("IMAGE_MODEL") or "qwen",
+    i.add_argument("--model", choices=("qwen", *FLUX3, *MOSS), default=os.environ.get("IMAGE_MODEL") or "qwen",
                    help="qwen: Qwen-Image-2.1-Turbo (the default); flux3k-fast: FLUX3-K distilled, 16 steps; "
-                        "flux3k-full: FLUX3-K base, 50 steps at CFG 3.5 (oneshot-setup-spark.sh --flux3)")
+                        "flux3k-full: FLUX3-K base, 50 steps at CFG 3.5 (oneshot-setup-spark.sh --flux3); "
+                        "moss-image: MOSS-Image SFT, 25 steps at CFG 2.5 (oneshot-setup-spark.sh --moss)")
     i.add_argument("--no-upsample", dest="upsample", action="store_false",
                    help="FLUX3-K: send the prompt as written (a full scene caption) instead of BFL's prompt upsampler's")
     i.add_argument("--base", action="store_true", help="the base model without the turbo adapter")
-    i.add_argument("--steps", type=int, default=None, help="Qwen's base model (40) or FLUX3-K (16 Fast, 50 Full)")
+    i.add_argument("--steps", type=int, default=None, help="Qwen's base model (40), FLUX3-K (16 Fast, 50 Full) or MOSS-Image (25)")
     i.add_argument("--cfg", type=float, default=4.0, help="base model only")
-    i.add_argument("--negative", default="")
+    i.add_argument("--negative", default="", help="Qwen's base model; MOSS-Image (default: its template's)")
     i.set_defaults(run=image)
     m = kinds.add_parser("music", help="MiniMax Music 3: lyrics and a style caption to a song (oneshot-setup-spark.sh --music)")
     m.add_argument("--caption", default=""); m.add_argument("--caption-file", default="")

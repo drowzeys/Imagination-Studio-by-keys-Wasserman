@@ -1,4 +1,4 @@
-"""The picture models (Qwen 2.1 Turbo, FLUX3-K Fast, FLUX3-K Full): python3 -m pytest tests/test_image_models.py (or
+"""The picture models (Qwen 2.1 Turbo, FLUX3-K Fast, FLUX3-K Full, MOSS-Image): python3 -m pytest tests/test_image_models.py (or
 python3 tests/test_image_models.py). No GPU, no ComfyUI, no weights: what a job asks for, and the workflow FLUX3-K
 becomes on a Spark."""
 import json
@@ -203,6 +203,81 @@ def test_qwen_full_runs_the_base_model_with_guidance():
                                    "QWEN_MODEL_DIR": str(Path(folder) / "Qwen-Image-2.1-Turbo")})
         assert done.returncode == 0, done.stderr
         assert done.stdout.startswith(str(base)) and "--steps 40 --cfg 4" in done.stdout, done.stdout
+
+
+def test_a_spark_offers_moss_image_only_with_its_files_and_a_comfyui_that_knows_it():
+    import server
+
+    had = server.SPARK, os.environ.get("SPARK_MODELS"), os.environ.get("PREFIX")
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            server.SPARK = True
+            os.environ["SPARK_MODELS"], os.environ["PREFIX"] = folder + "/models", folder + "/prefix"
+            files = Path(folder) / "models/MOSS-Image-Comfy"
+            for name in ("diffusion_models/moss_image_sft_bf16.safetensors", "text_encoders/qwen3.5_9b_bf16.safetensors"):
+                (files / name).parent.mkdir(parents=True, exist_ok=True)
+                (files / name).write_bytes(b"x")
+            assert "moss-image" not in server.image_models()  # a ComfyUI from before v0.42.0 cannot load it
+            nodes = Path(folder) / "prefix/ComfyUI/comfy_extras/nodes_moss_image.py"
+            nodes.parent.mkdir(parents=True)
+            nodes.write_text("")
+            assert server.image_models()[-1] == "moss-image"
+            server.SPARK = False
+            assert "moss-image" not in server.image_models()  # no Mac build
+        finally:
+            server.SPARK = had[0]
+            for key, value in (("SPARK_MODELS", had[1]), ("PREFIX", had[2])):
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+def test_moss_image_is_asked_for_by_name_and_refused_where_it_is_not():
+    import server
+    from fastapi import HTTPException
+
+    had = server.image_models
+    try:
+        server.image_models = lambda: ["qwen"]
+        try:
+            server.image_model_env({"image_model": "moss-image"})
+            raise AssertionError("moss-image was accepted without its files")
+        except HTTPException as error:
+            assert "MOSS-Image is not installed" in error.detail and "--moss" in error.detail, error.detail
+        server.image_models = lambda: ["qwen", "moss-image"]
+        _, env, _ = server.build("scout", {"prompt": "a poster", "count": 2, "seed": 3, "image_model": "moss-image"}, "j1")
+        assert env["IMAGE_MODEL"] == "moss-image"
+    finally:
+        server.image_models = had
+
+
+def test_the_moss_workflow_follows_comfys_template():
+    import spark_generate as G
+
+    class Args:
+        model, width, height, steps, negative = "moss-image", 1344, 768, None, ""
+
+    w = G.moss_workflow(Args, 'A poster that reads "THE LAST FRAME"', 7)
+    assert w["1"]["inputs"]["unet_name"] == "moss_image_sft_bf16.safetensors"
+    assert w["3"]["inputs"] == {"clip_name": G.MOSS_TEXT, "type": "moss_image", "device": "default"}
+    assert w["4"]["inputs"]["vae_name"] == "flux2-vae_small.safetensors"
+    assert w["5"]["inputs"]["text"] == 'A poster that reads "THE LAST FRAME"'  # the prompt as written
+    assert w["7"]["inputs"]["text"] == G.MOSS_NEGATIVE
+    sampler = w["12"]["inputs"]
+    assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["seed"]) == (25, 2.5, "er_sde", 7)
+    assert w["6"]["class_type"] == "EmptyFlux2LatentImage"
+    Args.negative, Args.steps = "blurry", 50
+    w = G.moss_workflow(Args, "a lighthouse", 7)
+    assert w["7"]["inputs"]["text"] == "blurry" and w["12"]["inputs"]["steps"] == 50
+
+
+def test_moss_image_on_a_mac_says_where_it_runs():
+    if sys.platform.startswith("linux"):
+        return
+    done = subprocess.run(["bash", str(ROOT / "scripts/image.sh"), "x", "/tmp/never.png"], capture_output=True, text=True,
+                          env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", "IMAGE_MODEL": "moss-image"})
+    assert done.returncode == 1 and "DGX Spark" in done.stderr
 
 
 def test_an_unknown_model_is_refused_by_the_script():

@@ -14,6 +14,9 @@
 #                                             # FLUX3-K Fast (distilled, 16 steps) and Full (base, 50 steps), their text
 #                                             # encoder, BFL's prompt upsampler and the decoder. FLUX Kommunity License; the
 #                                             # Hugging Face repo is gated: accept its licence and `hf auth login` first
+#   bash oneshot-setup-spark.sh --moss        # add MOSS-Image (OpenMOSS) as a picture model, 30 GB more: the SFT checkpoint
+#                                             # (bf16), its Qwen3.5 9B text encoder (bf16) and the FLUX.2 small decoder, from
+#                                             # Comfy-Org/MOSS-Image. Apache 2.0, commercial use allowed
 #   bash oneshot-setup-spark.sh --music       # add MiniMax Music 3 for the Music tab, 22 GB more: its DiT (fp16), text encoder
 #                                             # (pruned, bf16) and decoder, read by ComfyUI and by TensorFold's CUDA engine,
 #                                             # which it builds too (spark/build-music3.sh). MiniMax-Music3 Community License:
@@ -47,11 +50,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 MODELS="${SPARK_MODELS:-$HOME/spark-studio-models}"
-COMFY_COMMIT=5a665890ded5020c282f63c4ea2dd9e083e025ff  # v0.41.0 and later: ComfyUI's FLUX 3 nodes
-IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MUSIC=0; SOUND=0
+COMFY_COMMIT=b9b290e43f1eb379946dfeb013faf9bbefa1a618  # v0.42.0 and later: ComfyUI's FLUX 3 and MOSS-Image nodes
+IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0
 for arg in "$@"; do
   case "$arg" in
-    --ref2va) REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --music) MUSIC=1;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
+    --ref2va) REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --no-workflows) WORKFLOWS=0;;
     --loras) LORAS=all;; --loras=*) LORAS="${arg#--loras=}";; --no-loras) LORAS=none;; --lora-bundle=*) LORA_BUNDLE="${arg#--lora-bundle=}";;
     *) echo "unknown option $arg" >&2; exit 2;;
@@ -75,6 +78,7 @@ if [ "$UPGRADE" = 1 ]; then
   [ ! -s "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" ] || REF2VA=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || FLUX3=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] || FLUX3=1
+  [ ! -s "$MODELS/MOSS-Image-Comfy/diffusion_models/moss_image_sft_bf16.safetensors" ] || MOSS=1
   [ ! -s "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" ] || MUSIC=1
   [ ! -d "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" ] || SOUND=1
   ok "upgrade: installed $INSTALLED -> $(cat "$HERE/VERSION")$([ "$IMAGE_ONLY" = 0 ] || echo " (image-only install)")"
@@ -131,17 +135,20 @@ studio:
     Qwen-Image-2.1-Comfy/diffusion_models
     MiniMax-H3-Comfy/diffusion_models
     FLUX3-K-Comfy/diffusion_models
+    MOSS-Image-Comfy/diffusion_models
     MiniMax-Music3-Comfy/diffusion_models
   text_encoders: |
     FastH3-Comfy/text_encoders
     Qwen-Image-2.1-Comfy/text_encoders
     FLUX3-K-Comfy/text_encoders
+    MOSS-Image-Comfy/text_encoders
     MiniMax-Music3-Comfy/text_encoders
     Sound-Comfy/text_encoders
   vae: |
     FastH3-Comfy/vae
     Qwen-Image-2.1-Comfy/vae
     FLUX3-K-Comfy/vae
+    MOSS-Image-Comfy/vae
     MiniMax-Music3-Comfy/vae
   loras: |
     loras
@@ -233,6 +240,16 @@ if [ "$FLUX3" = 1 ]; then
   fetch black-forest-labs/flux-3-image-klein-pup FLUX3-K-Comfy system_prompts.json
   ok "FLUX3-K Fast and Full (bf16), Qwen3-VL-4B text encoder, BFL's prompt upsampler (8-bit) and the decoder"
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
+fi
+
+if [ "$MOSS" = 1 ]; then
+  say "MOSS-Image for ComfyUI: the SFT checkpoint, Qwen3.5 9B text encoder, FLUX.2 small decoder (30 GB) -> $MODELS"
+  [ "$VERIFY" = 1 ] || echo "  MOSS-Image (OpenMOSS) is under the Apache License 2.0: https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT"
+  fetch Comfy-Org/MOSS-Image MOSS-Image-Comfy diffusion_models/moss_image_sft_bf16.safetensors \
+    text_encoders/qwen3.5_9b_bf16.safetensors vae/flux2-vae_small.safetensors
+  [ -f "$PREFIX/ComfyUI/comfy_extras/nodes_moss_image.py" ] || die "this ComfyUI has no MOSS-Image nodes: run without --verify to move it to ${COMFY_COMMIT:0:8}"
+  ok "MOSS-Image: a picture model (IMAGE_MODEL=moss-image)"
+  if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
 if [ "$MUSIC" = 1 ]; then
@@ -355,7 +372,7 @@ fi
 [ "$VERIFY" = 1 ] || cp "$HERE/VERSION" "$PREFIX/VERSION"
 if [ "$UPGRADE" = 1 ]; then
   say "Upgraded: $INSTALLED -> $(cat "$PREFIX/VERSION"). Checking the install (restart the app to serve the new pages: scripts/app.sh)"
-  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MUSIC" = 0 ] || echo --music) $([ "$SOUND" = 0 ] || echo --sound)
+  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$MUSIC" = 0 ] || echo --music) $([ "$SOUND" = 0 ] || echo --sound)
 fi
 # The essential LoRA bundle: every preset of the LoRA hub, fetched once from its author's page into one folder laid out
 # by the hub's groups, then installed (oneshot-essential-bundle.sh). --loras=GROUPS takes some groups, --lora-bundle=PATH

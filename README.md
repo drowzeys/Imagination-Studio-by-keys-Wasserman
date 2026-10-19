@@ -8,7 +8,7 @@
 [X @SamJWasserman](https://x.com/SamJWasserman) · [GitHub](https://github.com/wassermanproductions)
 
 **An AI film studio on your own machine: plan a film the way a crew does in the Wasserman Slate AI Studio, and render
-it here. Pictures from Qwen-Image-2.1-Turbo or FLUX3-K (Black Forest Labs' FLUX 3 Image Klein), MiniMax H3 / FastH3
+it here. Pictures from Qwen-Image-2.1-Turbo, FLUX3-K (Black Forest Labs' FLUX 3 Image Klein) or MOSS-Image, MiniMax H3 / FastH3
 video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Macs (Metal) and the NVIDIA DGX Spark
 (CUDA).**
 
@@ -25,7 +25,7 @@ design and build the studio in collaboration with Keys, made Wasserman's Filmmak
 **3.0.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
-**Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
+**Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MOSS-Image** (text to image, DGX Spark) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
@@ -59,6 +59,9 @@ cores · a 2x video decoder for 2K finals on the Mac
 - **Gated weights** (Keyframe Animation, 3D Animation Style, Stable Audio Open): Install signs you in to Hugging Face
   once, opens the licence page, and downloads by itself once access is granted.
 - **Looks**: the LoRA hub as a style library, one card a look.
+- **MOSS-Image** (OpenMOSS, Apache 2.0) as a picture model on a DGX Spark: exact lettering for posters, title cards,
+  signs and menus, in English, Chinese and Japanese. `oneshot-setup-spark.sh --moss`; see
+  [MOSS-Image](#moss-image-on-a-dgx-spark).
 
 **Sound, previs and the library**
 - **Sound effects and foley**: MMAudio makes a clip's own sound from its picture, Stable Audio Open makes a sound from
@@ -142,8 +145,8 @@ The same credits the studio shows in Settings → About; [CREDITS.md](CREDITS.md
   Wasserman's Filmmaker Suite (ScriptBreak, Cork Board, Master Canvas, Storyboard Reference Studio, Blockout, Motion
   Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the
   studio's art.
-- **Qwen team** — Qwen-Image-2.1. **Black Forest Labs** — FLUX 3 Image Klein (FLUX3-K). **MiniMax** — MiniMax H3 and
-  MiniMax-Music3. **Built with Fish Audio** — Fish Audio Drama 3.
+- **Qwen team** — Qwen-Image-2.1. **Black Forest Labs** — FLUX 3 Image Klein (FLUX3-K). **OpenMOSS** — MOSS-Image.
+  **MiniMax** — MiniMax H3 and MiniMax-Music3. **Built with Fish Audio** — Fish Audio Drama 3.
 - **Stability AI** — Stable Audio Open · **Ho Kei Cheng et al.** — MMAudio · **kijai** — ComfyUI-MMAudio (sound effects
   and foley).
 - **Ash Hart** — TensorFold.
@@ -159,7 +162,8 @@ The same credits the studio shows in Settings → About; [CREDITS.md](CREDITS.md
 
 **Licences.** The studio's code is Apache-2.0. The models keep their own terms; do not redistribute their weights.
 Qwen-Image-2.1: Qwen Research License (non-commercial) · MiniMax H3: MiniMax H3 Community License (territory limits) ·
-MiniMax-Music3: its licence asks for its name in a commercial UI · FLUX3-K: FLUX Kommunity License · Fish Audio Drama
+MiniMax-Music3: its licence asks for its name in a commercial UI · FLUX3-K: FLUX Kommunity License · MOSS-Image:
+Apache 2.0 (commercial use allowed) · Fish Audio Drama
 3: Fish Audio Community License v1.0 (a hosted voice service needs Fish's own licence) · Stable Audio Open 1.0:
 Stability AI Community License (free under US$1 million of yearly revenue) · MMAudio's weights: CC-BY-NC 4.0,
 non-commercial · Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT).
@@ -418,7 +422,7 @@ collaboration with Keys. Imagination Studio is by Keys + Wasserman.
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /
 Phosphene), Filip Strand and the mflux contributors, Viggle (the image turbo adapter up to 2.2), speach1sdef178 (the 2x video
 decoder), LightX2V (the video Turbo adapter), NVIDIA Research (Sol-Engine, Sol-Attn, Sol-H3), FastVideo (FastH3), and Apple's MLX team and every MLX
-contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx). This pack is their work, ported, pinned and measured. See
+contributor, Fish Audio (Drama 3, text to speech), the MiniMax team again (MiniMax-Music3, the Music tab's songs), Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx), and OpenMOSS (MOSS-Image). This pack is their work, ported, pinned and measured. See
 [CREDITS.md](CREDITS.md). Built with Qwen. **Built with Fish Audio.**
 
 ## Which picture model to use: the evidence
@@ -470,6 +474,37 @@ eight Qwen pictures put it on the left.*
 
 **Limits:** two seeds a prompt and one judge, by eye. These model times leave out the text encode, so they are lower
 than the whole-run times in the table above.
+
+### MOSS-Image on a DGX Spark
+
+**MOSS-Image** is OpenMOSS's 5B text-to-image model (Apache 2.0: commercial use is allowed). On a DGX Spark it is a
+fifth choice in the picture picker, for scouts, studio jobs and Nodes. It makes pictures from words only: it does not
+edit pictures.
+- **Install:** `bash oneshot-setup-spark.sh --moss` (30 GB: the SFT checkpoint and its Qwen3.5 9B text encoder in bf16,
+  and the FLUX.2 small decoder, from Comfy-Org/MOSS-Image). It needs ComfyUI v0.42.0 or later, which this setup moves to.
+- **Settings:** ComfyUI's own template: 25 steps of er_sde at CFG 2.5, with its negative prompt. The prompt goes to the
+  model as written.
+- **Mac:** not available yet; there is no MLX build.
+
+Tested on one DGX Spark on 2026-10-19 (bf16, one seed per prompt, judged by eye):
+
+| | MOSS-Image | FLUX3-K Full | Qwen 2.1 Turbo |
+|---|---|---|---|
+| 1344x768, model loaded | 45 s | 69 s | 10 s |
+| 1024x576 (a scout picture) | 26 s | | |
+| Memory taken, from nothing loaded | 26 GB | | |
+| Poster: title, tagline and date | All three lines exact, cleanest layout | Title cut off at the top | Exact |
+
+- **Best at:** lettering. Posters, title cards, signs, menus with prices and labels came out exactly as written. A
+  Japanese station sign was right too.
+- **Also good:** a photoreal portrait at dawn (warm, filmic, the light as asked) and anime key art.
+- **Not tested yet:** hands, the same character across pictures, and MOSS-Image's JSON layout prompts.
+- **Use it for:** posters, title cards, signage and anything with words in the frame, and pictures meant for
+  commercial use.
+
+![MOSS-Image, FLUX3-K Full and Qwen 2.1 Turbo on the same poster prompt](docs/shootout/moss-poster.jpg)
+
+![The same film-still prompt: MOSS-Image at 25 and 50 steps, FLUX3-K Full, Qwen 2.1 Turbo](docs/shootout/moss-still.jpg)
 
 ## Speed: the first version on each machine, and 2.3
 
@@ -3293,7 +3328,7 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
 
 Imagination Studio is by **Keys (drowzeys)** and **Sam Wasserman and Wasserman Productions** (Wasserman's Filmmaker
 Suite, and the studio's design with Keys); see [License & credits](#license--credits). Cite the original authors first: the Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein, the FLUX3-K
-picture models) and felix-ab (flux3-mlx, their Mac runtime), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
+picture models) and felix-ab (flux3-mlx, their Mac runtime), OpenMOSS (MOSS-Image), the MiniMax team (MiniMax H3, MiniMax-Music3), Ash Hart and the
 TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx, Phosphene), Filip Strand and
 the mflux contributors, Viggle, speach1sdef178 (the 2x decoder), LightX2V, NVIDIA Research, FastVideo, and Apple MLX and its contributors. Full list:
 [CREDITS.md](CREDITS.md). Pack: drowzeys / keys, with Wasserman Productions.
