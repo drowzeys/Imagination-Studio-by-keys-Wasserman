@@ -4,6 +4,34 @@
 families, wrote the int8 tensor-unit kernels with their designs as the guide, pinned it and measured it on a Mac
 Studio M5 Ultra. Cite the authors first.
 
+## The studio itself: Keys (drowzeys)
+
+**Keys (drowzeys)** built this studio: the app and its scripts, the Mac and the DGX Spark builds and the carrier
+image, the TensorFold families for Qwen-Image and MiniMax H3 with their int8 tensor-unit kernels, the native and CUDA
+engines the studio runs (FastH3 on Metal, H3, Drama 3 and MiniMax Music 3 on CUDA, and Music 3 on Metal), and the
+measurements every setting here is held to. Imagination Studio is **by Keys + Wasserman**.
+
+## Wasserman's Filmmaker Suite: Sam Wasserman and Wasserman Productions
+
+**Sam Wasserman and Wasserman Productions** made **Wasserman's Filmmaker Suite**, the apps the Studio's suite vault
+brings work in from and sends work out to, each under its own licence (as its repository states):
+
+- **ScriptBreak** (screenplay breakdown and prompt packs) — Apache-2.0
+- **Cork Board** (index-card story structure) — Apache-2.0
+- **Master Canvas** (the pre-production canvas), and its MCP server — MIT
+- **Storyboard Reference Studio** (reference frames into storyboard stills) — Apache-2.0
+- **Blockout** (grey-box 3D previs), and its MCP server — Apache-2.0
+- **Motion Previs Studio** (motion, depth, pose and camera from a clip), and its MCP server — Apache-2.0
+- **Slate** (the prompt studio for AI filmmaking) — Apache-2.0
+- **Circle Take** (AI dailies) — Apache-2.0
+- **Stem Studio** (dialogue, music and effects stems) — Apache-2.0
+- **Call Sheet** (the suite's launcher and dashboard) — Apache-2.0
+- **DaVinci MCP** (an agent drives DaVinci Resolve) — Apache-2.0
+
+The Studio reads and writes their files and ships none of their code, except where a section below says so (the
+Slate workflow and its files in `app/static/slate/`, and the Motion Previs analysis port, each with its NOTICE). Sam
+Wasserman's own art covers every engine, card and look in this studio.
+
 ## The film workflow in Production: Sam Wasserman's Slate
 
 **Sam Wasserman (wassermanproductions.com)** created **Slate**, the prompt studio for AI filmmaking: projects, scenes

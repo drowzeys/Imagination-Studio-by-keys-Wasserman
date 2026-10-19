@@ -224,28 +224,31 @@ def fountain(text: str) -> dict:
 
 # ---------- the suite's own formats ----------
 
+# every app of Wasserman's Filmmaker Suite is by Sam Wasserman and Wasserman Productions, each under its own licence
+# (read from its repository: Apache-2.0, Master Canvas MIT); the Studio reads their files and ships none of their code
+SUITE_BY = "Sam Wasserman · Wasserman Productions"
 APPS = [
-    {"id": "scriptbreak", "name": "ScriptBreak", "what": "Screenplay breakdown: scenes, cast, bibles, shot lists and prompt packs.",
+    {"id": "scriptbreak", "by": SUITE_BY, "licence": "Apache-2.0", "name": "ScriptBreak", "what": "Screenplay breakdown: scenes, cast, bibles, shot lists and prompt packs.",
      "imports": ["project file (.scriptbreak)", "video or frame prompt pack (.md)", "export bundle (.zip)"], "exports": []},
-    {"id": "cork-board", "name": "Cork Board", "what": "Index-card story structure on an endless cork wall.",
+    {"id": "cork-board", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Cork Board", "what": "Index-card story structure on an endless cork wall.",
      "imports": ["project (.json)", "outline (.fountain)"], "exports": []},
-    {"id": "master-canvas", "name": "Master Canvas", "what": "An infinite canvas for pre-production: shot cards, prompts and references.",
+    {"id": "master-canvas", "by": SUITE_BY, "licence": "MIT", "name": "Master Canvas", "what": "An infinite canvas for pre-production: shot cards, prompts and references.",
      "imports": ["project (master-canvas-project.json)", "handoff package (.zip)"], "exports": []},
-    {"id": "storyboard-reference", "name": "Storyboard Reference Studio", "what": "Reference frames pulled from clips, reframed, with a prompt each.",
+    {"id": "storyboard-reference", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Storyboard Reference Studio", "what": "Reference frames pulled from clips, reframed, with a prompt each.",
      "imports": ["board export folder, zipped (prompts.json and NN_label/still.png)"], "exports": []},
-    {"id": "blockout", "name": "Blockout", "what": "Grey-box 3D previs with real camera optics and marks-based blocking.",
+    {"id": "blockout", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Blockout", "what": "Grey-box 3D previs with real camera optics and marks-based blocking.",
      "imports": ["shot export folder, zipped (metadata.json, <shot>_reference.mp4, stills, prompt.txt)"],
      "exports": ["Motion Previs pack from a Blockout shot"]},
-    {"id": "motion-previs-studio", "name": "Motion Previs Studio", "what": "Pose, depth and camera move read from a clip, as a production pack.",
+    {"id": "motion-previs-studio", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Motion Previs Studio", "what": "Pose, depth and camera move read from a clip, as a production pack.",
      "imports": ["production pack (.zip)"], "exports": []},
-    {"id": "slate", "name": "Slate", "what": "The prompt studio for AI filmmaking: scenes and shots with sectioned prompts.",
+    {"id": "slate", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Slate", "what": "The prompt studio for AI filmmaking: scenes and shots with sectioned prompts.",
      "imports": ["project.json"], "exports": ["a Slate film from any import"]},
     {"id": "fountain", "name": "Fountain screenplay", "what": "Any screenplay saved as Fountain.", "imports": [".fountain"], "exports": []},
-    {"id": "circle-take", "name": "Circle Take", "what": "AI dailies: takes bound to shots, quality checks, circled takes.",
+    {"id": "circle-take", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Circle Take", "what": "AI dailies: takes bound to shots, quality checks, circled takes.",
      "imports": [], "exports": ["dailies package (.zip): clips named by shot with a provenance sidecar each"]},
-    {"id": "stem-studio", "name": "Stem Studio", "what": "A mixed soundtrack split into dialogue, music and effects stems.",
+    {"id": "stem-studio", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Stem Studio", "what": "A mixed soundtrack split into dialogue, music and effects stems.",
      "imports": [], "exports": ["timeline clips carry their sound into the FCPXML and EDL"]},
-    {"id": "call-sheet", "name": "Call Sheet", "what": "The suite's menu-bar launcher and dashboard.",
+    {"id": "call-sheet", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Call Sheet", "what": "The suite's menu-bar launcher and dashboard.",
      "imports": [], "exports": ["an entry for its apps list"]},
     {"id": "editor", "name": "DaVinci Resolve or Final Cut Pro", "what": "A Production timeline in an editor.",
      "imports": [], "exports": ["FCPXML 1.11", "CMX 3600 EDL"]},

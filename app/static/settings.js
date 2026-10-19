@@ -171,9 +171,11 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
     row("Version", "Studio " + ((S && S.version) || "")), row("Commit", u.installed_commit || (u.loading ? "…" : "unknown")), row("Follows", [u.source, u.following || u.branch].filter(Boolean).join(" · ") || "—"),
     el("div", {}, el("button", { type: "button", onclick: () => go("Updates") }, u.available ? "An update is ready: Machine → Updates" : "Check for updates"))),
   setPanel("Credits", "The authors whose work the studio runs.",
-    el("ul", { class: "st-credits" }, ["Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "MiniMax: MiniMax H3 and MiniMax-Music3", "Built with Fish Audio: Fish Audio Drama 3",
+    el("ul", { class: "st-credits" }, ["Keys (drowzeys): the studio itself, its TensorFold families and int8 kernels, and its Mac and DGX Spark engines",
+      "Sam Wasserman and Wasserman Productions: Wasserman's Filmmaker Suite (ScriptBreak, Cork Board, Master Canvas, Storyboard Reference Studio, Blockout, Motion Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the studio's art",
+      "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "MiniMax: MiniMax H3 and MiniMax-Music3", "Built with Fish Audio: Fish Audio Drama 3",
       "Stability AI: Stable Audio Open · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio (sound effects and foley)",
-      "Ash Hart: TensorFold", "Sam Wasserman: Slate, the Sharp Spec and Motion Previs Studio",
+      "Ash Hart: TensorFold",
       "antirez: h3.c · RobZombAI: H3MLX · mrbizarro: minimax-h3-mlx (Phosphene) · Filip Strand and the mflux contributors · felix-ab: flux3-mlx",
       "Comfy Org: ComfyUI · Apple: MLX · NVIDIA Research · FastVideo · LightX2V · Viggle · speach1sdef178 · rookiestar28 · ddalcu",
       "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, llama.cpp; Blender and blender-mcp",
@@ -182,7 +184,8 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
   setPanel("Licences", "The studio's code is Apache-2.0. The models keep their own terms: do not redistribute their weights.",
     el("ul", { class: "st-credits" }, ["Qwen-Image-2.1: Qwen Research License (non-commercial)", "MiniMax H3: MiniMax H3 Community License (territory limits)", "MiniMax-Music3: its licence asks for its name in a commercial UI",
       "FLUX3-K: FLUX Kommunity License", "Fish Audio Drama 3: Fish Audio Community License v1.0; a hosted voice service needs Fish's own licence",
-      "Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue)", "MMAudio's weights: CC-BY-NC 4.0, non-commercial"].map(t => el("li", {}, t))))]; }
+      "Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue)", "MMAudio's weights: CC-BY-NC 4.0, non-commercial",
+      "Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT); the studio ships none of their code but the Slate workflow and the Motion Previs port, each with its NOTICE"].map(t => el("li", {}, t))))]; }
 
 function setEmbedded(section) { const [name, data] = SET_VIEWS[section], view = typeof globalThis[name] === "function" ? globalThis[name] : null;
   if (!view) return [setPanel(SET_SECTIONS.find(x => x[0] === section)[1], "Not in this build.")];

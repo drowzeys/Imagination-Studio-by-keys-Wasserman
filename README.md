@@ -13,8 +13,9 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 *Name, credits, colours and voice for anything public: the [brand guide](docs/BRAND.md).*
 
-*Credit first: Sam Wasserman shaped the production side of this studio (Slate, the Sharp Spec, Motion Previs). See
-[Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes.*
+*Credit first: **Keys (drowzeys)** built this studio and its engines; **Sam Wasserman and Wasserman Productions** made
+Wasserman's Filmmaker Suite and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
+[Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
 **3.0.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
@@ -308,6 +309,13 @@ the QA gate that follows it, and the 80s Horror LoRA that opens the Keys and Was
 Python port of his [Motion Previs Studio](https://github.com/wassermanproductions/motion-previs-studio). The aim
 we share is the best AI film studio there is, and this pack is where his planning tools meet a render engine. See
 [CREDITS.md](CREDITS.md).
+
+**Wasserman's Filmmaker Suite, by Sam Wasserman and Wasserman Productions**, is built in: ScriptBreak, Cork Board,
+Master Canvas, Storyboard Reference Studio, Blockout, Motion Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet
+and DaVinci MCP, each under its own licence (Apache-2.0; Master Canvas MIT). The Studio reads and writes their files.
+
+**Keys (drowzeys)** built the studio itself: the app, both builds, the TensorFold families and int8 kernels, and the
+Metal and CUDA engines it renders with. Imagination Studio is by Keys + Wasserman.
 
 **Thank you to everyone this stands on:** the Qwen team at Alibaba (Qwen-Image-2.1, Qwen3-VL), the MiniMax team
 (MiniMax H3), Ash Hart and the TensorFold contributors, antirez (h3.c), RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx /

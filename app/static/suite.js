@@ -50,8 +50,9 @@ const SU_ICON = { scriptbreak: "scriptbreak", "cork-board": "cork-board", blocko
   editor: "davinci-mcp" };
 const SU_ROLE = { scriptbreak: "in", "cork-board": "in", blockout: "in", "storyboard-reference": "in", "master-canvas": "in", slate: "in", fountain: "in",
   "circle-take": "dailies", editor: "timeline", "motion-previs-studio": "previs", "stem-studio": "info", "call-sheet": "info", "davinci-mcp": "info" };
-const SU_MORE = [{ id: "call-sheet", name: "Call Sheet", what: "The suite's launcher and dashboard." }, { id: "motion-previs-studio", name: "Motion Previs Studio", what: "Pose, depth and camera from a clip." },
-  { id: "davinci-mcp", name: "DaVinci MCP", what: "Your agent drives Resolve." }];
+const SU_BY = "Sam Wasserman · Wasserman Productions";
+const SU_MORE = [{ id: "call-sheet", name: "Call Sheet", what: "The suite's launcher and dashboard.", by: SU_BY, licence: "Apache-2.0" }, { id: "motion-previs-studio", name: "Motion Previs Studio", what: "Pose, depth and camera from a clip.", by: SU_BY, licence: "Apache-2.0" },
+  { id: "davinci-mcp", name: "DaVinci MCP", what: "Your agent drives Resolve.", by: "Sam Wasserman · Wasserman Productions", licence: "Apache-2.0" }];
 const suSlug = a => a.id || String(a.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 function suApps() { const list = (SU.apps && SU.apps.length ? SU.apps : SUITE_APPS.map(([name, what]) => ({ name, what }))).map(a => ({ ...a, id: suSlug(a) }));
   for (const m of SU_MORE) if (!list.some(a => a.id === m.id)) list.push(m);
@@ -61,7 +62,8 @@ function suAppCard(a, act) { const role = SU_ROLE[a.id] || "info", slug = SU_ICO
   const [tag, cls, run] = role === "in" ? ["Bring in", "t", act.bring] : role === "dailies" ? ["Send out · dailies", "", act.dailies] : role === "timeline" ? ["Send out · timeline", "", suSendout]
     : role === "previs" ? ["Open in Previs", "", () => go("Motion Previs")] : ["Works alongside", "", null];
   const pic = slug ? el("img", { class: "su-icon", src: "art/suite/" + slug + ".webp", alt: "", loading: "lazy", decoding: "async" }) : el("span", { class: "su-icon blank" }, icon(a.id === "fountain" ? "doc" : "suite"));
-  const kids = [pic, el("div", { class: "su-txt" }, el("b", {}, a.name), el("span", {}, a.what || "")), el("span", { class: "tag2 " + cls }, tag)];
+  const kids = [pic, el("div", { class: "su-txt" }, el("b", {}, a.name), el("span", {}, a.what || ""),
+    a.by ? el("small", { class: "su-by" }, "by " + a.by + (a.licence ? " · " + a.licence : "")) : null), el("span", { class: "tag2 " + cls }, tag)];
   return run ? el("button", { class: "su-app", type: "button", title: tag + ": " + a.name, onclick: run }, ...kids) : el("div", { class: "su-app still" }, ...kids); }
 function viewImport() {
   if (SU.apps === null) { suLoad().then(() => { if (tab === "Import") render(); }); }

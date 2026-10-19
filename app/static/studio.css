@@ -918,3 +918,6 @@ nav#rooms .grp.g-engines { color:var(--amber); }
 nav#rooms .grp.g-vaults { color:var(--blue-text); }
 nav#rooms .grp.g-engines::after, nav#rooms .grp.g-vaults::after { content:""; flex:1; height:1px; background:currentColor; opacity:.28; }
 @media (max-width:720px) { nav#rooms button.home, nav#rooms .grp.g-engines, nav#rooms .grp.g-vaults { display:none; } }  /* the phone bar keeps its own layout */
+
+/* Wasserman's Filmmaker Suite: each app's maker and licence on its card */
+.su-txt .su-by { display:block; margin-top:4px; font:500 11.5px/1.3 var(--mono); color:var(--faint); letter-spacing:.02em; }
