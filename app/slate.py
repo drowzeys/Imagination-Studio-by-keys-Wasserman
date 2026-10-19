@@ -7,19 +7,20 @@ Claude Code or Codex sign-in, or a local OpenAI-compatible server), and what Sla
 a shot to MiniMax H3's prompt form and the plan of the render that the Studio's queue then runs.
 """
 
+import ipaddress
 import json
 import math
 import os
 import re
 import shutil
 import subprocess
-import tempfile
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 import lengths  # which frame counts the model takes, beside this file
 import remote  # another machine's Studio app, read over its own API, beside this file
@@ -78,9 +79,12 @@ def now() -> str:
 
 
 def blank(name: str) -> dict:
+    import agents  # the brain saved in Brains & tools, or the environment's when nothing is saved
+
+    brain = agents.default_brain()
     return {"id": new_id(), "name": name, "logline": "", "world": "",
-            "defaults": {"aspectRatio": "16:9", "fps": 24, "durationSec": 8, "targetModel": "minimax-h3", "brain": "claude",
-                         "localEndpoint": "", "localModel": ""},
+            "defaults": {"aspectRatio": "16:9", "fps": 24, "durationSec": 8, "targetModel": "minimax-h3", "brain": brain["backend"],
+                         "localEndpoint": brain["endpoint"], "localModel": brain["model"]},
             "scenes": [], "characters": [], "artDept": [], "locations": [], "lookbook": [], "references": [], "mySetups": [],
             "music": [], "voices": [], "copilot": [], "createdAt": now(), "updatedAt": now()}
 
@@ -305,55 +309,57 @@ def extract_json(text: str):
 
 
 def ask(backend: str, system: str, prompt: str, tier: str, endpoint: str = "", model: str = "") -> str:
-    if backend == "local":
-        base, models = find_local(endpoint)
-        if not base:
-            raise RuntimeError("no local model server answers: start Ollama, LM Studio, vLLM or llama.cpp, or set its address in the Bible")
-        body = json.dumps({"model": model or (models[0] if models else ""), "temperature": 0.7,
-                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}).encode()
-        request = urllib.request.Request(base + "/chat/completions", body, {"Content-Type": "application/json"})
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
-            return json.loads(answer.read())["choices"][0]["message"]["content"]
-    tool = cli(backend if backend in ("claude", "codex") else "claude")
-    if not tool:
-        raise RuntimeError(f"{backend} is not installed on this machine: install it and sign in, or pick another brain in the Bible")
-    env = {**os.environ, "PATH": os.pathsep.join([os.environ.get("PATH", ""), *CLI_DIRS])}
-    with tempfile.TemporaryDirectory() as scratch:  # an empty folder: the brain writes text, it has no files to act on
-        if backend == "codex":
-            last = Path(scratch) / "last.txt"
-            done = subprocess.run([tool, "exec", "--skip-git-repo-check", "--output-last-message", str(last), "-"],
-                                  input=f"{system}\n\n---\n\n{prompt}", capture_output=True, text=True, timeout=TIMEOUT, cwd=scratch, env=env)
-            if last.is_file() and last.read_text().strip():
-                return last.read_text().strip()
-            raise RuntimeError((done.stderr or done.stdout or "codex gave no answer").strip()[-400:])
-        args = [tool, "-p", "--output-format", "json", "--tools", "", "--append-system-prompt", system]
-        if TIER_MODEL.get(tier):
-            args += ["--model", TIER_MODEL[tier]]
-        done = subprocess.run(args, input=prompt, capture_output=True, text=True, timeout=TIMEOUT, cwd=scratch, env=env)
-    raw = done.stdout.strip()
+    import agents  # the brains (agents.py): Claude Code, Codex, Gemini CLI, Grok CLI here or over ssh, or a local server
+
+    return agents.ask(backend if backend in agents.BACKENDS else "claude", system, prompt, tier, endpoint, model)
+
+
+NEARBY = [ipaddress.ip_network(net) for net in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                                                 "100.64.0.0/10", "::1/128", "fc00::/7")]  # 100.64/10, fd7a:…: a tailnet
+
+
+def nearby_endpoint(given: str) -> str:
+    """A local model server's address as typed, when it is on this computer, this network or the tailnet: http(s) to
+    localhost, a loopback, private-LAN or Tailscale address (100.64.0.0/10, fd7a:…), a *.ts.net or *.local name or a
+    one-word LAN name. Anything else (a public site, a cloud's metadata address at 169.254.x) is a 400: the server
+    fetches what is named here, and the page that names it need not be the Studio's."""
+
+    text = (given or "").strip()
+    if not text:
+        return ""
+    parts = urllib.parse.urlsplit(text if "://" in text else "http://" + text)
     try:
-        parsed = json.loads(raw)
+        name = (parts.hostname or "").rstrip(".").lower()
     except ValueError:
-        if raw:
-            return raw
-        raise RuntimeError((done.stderr or "Claude Code gave no answer").strip()[-400:])
-    result = parsed.get("result") if isinstance(parsed, dict) else None
-    if isinstance(parsed, dict) and parsed.get("is_error"):
-        message = result if isinstance(result, str) else "Claude Code returned an error"
-        if re.search(r"authenticat|oauth|401|logged? ?in|revoked", message, re.I):
-            message = "Claude Code's sign-in has expired: run `claude auth login` in a terminal on this machine, then retry. " + message
-        raise RuntimeError(message)
-    return result if isinstance(result, str) else raw
+        name = ""
+    if parts.scheme in ("http", "https") and name and not parts.username and not parts.password:
+        if name == "localhost" or name.endswith((".ts.net", ".local", ".localhost")) or "." not in name and ":" not in name:
+            return text
+        try:
+            address = ipaddress.ip_address(name)
+        except ValueError:
+            address = None
+        if address is not None and any(address in net for net in NEARBY if net.version == address.version):
+            return text
+    raise HTTPException(400, "a local model server is on this computer, this network or the tailnet: http://host:port")
 
 
 @router.get("/api/slate/brain")
 def brain_status(endpoint: str = "") -> dict:
-    base, models = find_local(endpoint)
-    return {"claude": bool(cli("claude")), "codex": bool(cli("codex")), "local": bool(base), "endpoint": base, "models": models}
+    import agents
+
+    endpoint = nearby_endpoint(endpoint)
+    found = {b["id"]: b for b in agents.detect(endpoint=endpoint)}
+    local = found["local"]
+    return {**{name: found[name]["found"] for name in agents.CLIS}, "local": local["found"],
+            "endpoint": local["endpoint"] if local["found"] else None, "models": local["models"]}
 
 
 @router.post("/api/slate/brain")
-def brain(body: dict) -> dict:
+def brain(body: dict, request: Request) -> dict:
+    import agents
+
+    agents.local(request, True)  # runs the user's CLI sign-ins: the same check as the brains and agents routes
     started = time.time()
     try:
         text = ask(body.get("backend") or "claude", body.get("system") or "", body.get("prompt") or "", body.get("tier") or "top",

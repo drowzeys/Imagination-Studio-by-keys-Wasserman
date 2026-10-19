@@ -5,3 +5,4 @@ mediapipe==1.1.0           # Apache-2.0: Pose Landmarker (pose, the OpenPose ske
 opencv-contrib-python==5.0.0.93  # Apache-2.0: the camera solve and the skeleton drawing; the build MediaPipe asks for
 onnxruntime==1.31.0        # MIT: runs Depth-Anything-small's ONNX file on the processor
 numpy>=2,<3
+yt-dlp>=2025.1.15         # Unlicense: reads a video page's link (From a link) into the studio folder; newest, as sites change

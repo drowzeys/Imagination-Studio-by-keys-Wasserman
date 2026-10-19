@@ -1,7 +1,7 @@
 # Wasserman Slate AI Studio, powered by TensorFold: install it, click it, make things
 
 **Thank you first** to Sam Wasserman (Slate, the Sharp Spec, Motion Previs Studio), the Qwen team (Qwen-Image-2.1),
-Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx), MiniMax (H3 and MiniMax-Music3), FastVideo / Hao AI
+Black Forest Labs (FLUX 3 Image Klein) and felix-ab (flux3-mlx), OpenMOSS (MOSS-Image), MiniMax (H3 and MiniMax-Music3), FastVideo / Hao AI
 Lab (FastH3), Fish Audio (Drama 3), Ash Hart (TensorFold), mrbizarro, LightX2V, Viggle, speach1sdef178 and Apple's MLX
 team. Full list in [CREDITS.md](CREDITS.md). **Built with Fish Audio.**
 
@@ -78,7 +78,7 @@ any time to come back. Drag it to the Dock to keep it there.
 
 - It is a small launcher around the folder you cloned. If you move that folder, run `make-app.sh` again.
 - Stop it: `"$HOME/Applications/Wasserman Slate AI Studio.app/Contents/MacOS/TensorFoldStudio" stop`
-- Log: `~/Library/Logs/TensorFoldStudio.log`. Everything you make: `~/TensorFoldStudio`.
+- Log: `~/Library/Logs/TensorFoldStudio.log`. Everything you make: `~/ImaginationStudio`.
 - It listens on this Mac only, and has no login. `HOST=0.0.0.0 bash scripts/make-app.sh` opens it to your network;
   do that only on a network you trust.
 
@@ -212,7 +212,7 @@ When it is done, **Lay a song under it** opens the Music tab with the video chos
 - **Tutorial:** short lessons for every tab, one step at a time. *Show me in the app* opens the tab and outlines the
   control; a bar at the bottom carries the lesson on from there.
 - **Clearing:** every prompt form has **Clear** (with **Undo**). In the queue, 🗑 deletes a finished job and what it
-  made, and **Clear failed** / **Delete all finished** tidy the list. Deleted files go to `~/TensorFoldStudio/trash`.
+  made, and **Clear failed** / **Delete all finished** tidy the list. Deleted files go to `~/ImaginationStudio/trash`.
 
 ## 8.5 The LoRA hub: a trained look or move for a clip
 

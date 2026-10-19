@@ -92,7 +92,7 @@ function viewMusic() {
   const st = S.music || { available: false, why: "This app does not know MiniMax Music 3.", seconds: [10, 300], sections: MU_TAGS, rtf: 1 };
   if (MU.job) { const fresh = jobs.find(j => j.id === MU.job.id); if (fresh) { if (fresh.status === "done" && MU.job.status !== "done") muLoad(); MU.job = fresh; } }
   put(box, el("div", { class: "note", style: "margin-top:-4px" }, "A whole song from your lyrics and a style, on this machine: sung vocals, up to five minutes, 44.1 kHz stereo. A song can go under a long video or the Editor's export (", el("b", {}, "Use as soundtrack"), ")."),
-    el("div", { class: "note", style: "color:var(--text)" }, el("b", {}, "MiniMax-Music3."), " " + (st.licence || "") + " " + (st.label ? "Runs on " + st.label + "." : "")));
+    el("div", { class: "note vt-credit" }, typeof mark === "function" ? mark("music3", "") : null, el("b", {}, "MiniMax-Music3."), " " + (st.licence || "") + " " + (st.label ? "Runs on " + st.label + "." : "")));
   if (!st.available) put(box, el("div", { class: "tip" }, el("b", {}, "Not available here. "), st.why || ""));
   const lyrics = bind(MU, "lyrics", el("textarea", { style: "min-height:170px", disabled: !st.available, placeholder: "[Verse]\nThe lines that are sung…\n\n[Chorus]\nThe hook…" }));
   const tagButton = name => el("button", { class: "small fit", type: "button", disabled: !st.available, title: "Add [" + name + "] on a line of its own", onclick: () => { MU.lyrics = (MU.lyrics.replace(/\s+$/, "") + (MU.lyrics.trim() ? "\n\n" : "") + "[" + name + "]\n"); render(); } }, "[" + name + "]");

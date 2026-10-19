@@ -34,6 +34,7 @@ the TensorFold project and the model makers.
 | Anything Drama 3 speaks: Voice tab, voice-over, demo audio | **Built with Fish Audio**, and name the model as Fish Audio Drama 3 |
 | Qwen-Image pictures | **Built with Qwen**; the model is Qwen-Image-2.1 (Qwen 2.1 Turbo / Qwen 2.1 Full in the UI) |
 | FLUX pictures | **FLUX3-K** in the UI. In prose: FLUX 3 Image Klein by Black Forest Labs |
+| MOSS-Image pictures | **MOSS-Image** in the UI. In prose: MOSS-Image by OpenMOSS |
 | Video with sound | MiniMax H3 / FastH3. With an H3 LoRA: *Powered by MiniMax H3* |
 | Songs from the Music tab: in the app, in soundtracks, in demo audio | **MiniMax-Music3** (required in a commercial UI by its licence); in prose: MiniMax Music 3 by MiniMax |
 | Long-form credits | The README's thank-you list and [CREDITS.md](../CREDITS.md): authors first, no credit hyperlinks except Motion Previs Studio |
@@ -129,7 +130,7 @@ which reads as a slate or a lens.
 - The banner and demo stills are made in the Studio. Say so: *made with this studio's own Qwen-Image-2.1 step*.
 - End cards:
   - Background, with the lockup centred.
-  - Then the credit line: *Built with Fish Audio · Built with Qwen · FLUX 3 Klein by Black Forest Labs · MiniMax H3 · MiniMax-Music3* (the last only where a song plays).
+  - Then the credit line: *Built with Fish Audio · Built with Qwen · FLUX 3 Klein by Black Forest Labs · MOSS-Image by OpenMOSS · MiniMax H3 · MiniMax-Music3* (MOSS-Image only where its pictures appear, the last only where a song plays).
 - No third-party logos (Apple, NVIDIA, Fish Audio, BFL, Qwen, MiniMax) unless their brand rules allow it. Name them in
   text.
 
@@ -147,7 +148,7 @@ which reads as a slate or a lens.
 
 ## 7. Assets
 
-- `samples/banner.jpg`: the GitHub banner, made in the Studio.
+- `docs/screenshots/imagination-studio.webp`: the GitHub banner since 3.0 (the poster); `samples/banner.jpg` was the one before, made in the Studio.
 - `docs/brand/brand-sheet.jpg`: this page's sheet.
 - `samples/demo_mac_280.jpg` and the [60 s demo](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v2.8.0/wasserman-studio-mac-demo.mp4).
 - `samples/ui_*.png`: app screenshots.

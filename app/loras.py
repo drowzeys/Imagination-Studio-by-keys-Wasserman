@@ -2,7 +2,7 @@
 
 A recipe says where a LoRA's file comes from and how it is used: its trigger word, the phrases that pick one of its
 looks, the strength it was made for. The presets that ship with the pack are in lora-presets.json beside this file;
-recipes a user adds are kept in ~/TensorFoldStudio/loras/hub.json. No weights ship with the pack: a LoRA's file is
+recipes a user adds are kept in ~/ImaginationStudio/loras/hub.json. No weights ship with the pack: a LoRA's file is
 downloaded from its author's own page when the user installs it, under that file's own licence.
 
 A preset also says where it sits in the hub (`category`, one or two of GROUPS), what kind of clip it is for (`needs`)
@@ -30,10 +30,46 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import hf_gate
+from studio_home import studio_home
+
 from fastapi import APIRouter, HTTPException
 
 import lora_flows
 import lora_layout
+
+try:
+    import discover  # Models & weights: a LoRA's file already somewhere on this machine is linked, not downloaded
+except ImportError:  # pragma: no cover
+    discover = None
+
+
+def found_here(lora_id: str) -> dict | None:
+    """A copy of this LoRA's file elsewhere on this machine that the last scan proved (by its sha256 when the recipe
+    has one), or None."""
+
+    if discover is None:
+        return None
+    try:
+        known = (discover.load().get("needs") or {}).get("lora:" + lora_id) or {}
+    except Exception:  # noqa: BLE001 - a broken cache never stops the hub
+        return None
+    good = [c for c in known.get("candidates", []) if c.get("verified") and c.get("path") and Path(c["path"]).is_file()]
+    return good[0] if good else None
+
+
+def link_found(lora_id: str, target: Path) -> bool:
+    """Instead of a download: the proven copy on this machine linked at ``target`` (discover.use: a symlink, nothing
+    moved or copied). True when the file is there now."""
+
+    found = found_here(lora_id)
+    if found is None or target.exists():
+        return target.exists()
+    try:
+        discover.use("lora:" + lora_id, found["path"])
+    except Exception:  # noqa: BLE001 - then it is downloaded as before
+        return False
+    return target.exists()
 
 PRESETS = Path(__file__).with_name("lora-presets.json")
 FIELDS = ("name", "author", "url", "page", "sha256", "trigger", "styles", "strength", "range", "base", "licence", "notes")
@@ -59,9 +95,7 @@ def hosted(lora_id: str, platform: str) -> dict | None:
 def token() -> str:
     """The user's own Hugging Face token, for a file its author gates. Sent to huggingface.co only."""
 
-    found = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
-    saved = Path.home() / ".cache/huggingface/token"
-    return found.strip() or (saved.read_text().strip() if saved.is_file() else "")
+    return hf_gate.token()
 
 
 def check(path: Path, target: str = "video") -> int:
@@ -125,7 +159,7 @@ def bundle() -> str:
     named = os.environ.get("LORA_BUNDLE", "").strip()
     if named:
         return named.rstrip("/")
-    local = Path(os.environ.get("STUDIO_HOME", str(Path.home() / "TensorFoldStudio"))) / "lora-bundle"
+    local = studio_home() / "lora-bundle"
     return str(local) if local.is_dir() else ""
 
 
@@ -148,7 +182,7 @@ def download(recipe: dict, target: Path, state: dict) -> None:
 
     part = target.with_name(target.name + ".part")
     headers = {"User-Agent": "TensorFoldStudio"}
-    if recipe.get("status") == "gated" and "huggingface.co/" in recipe["url"] and token():
+    if hf_gate.repo_of(recipe["url"]) and token():  # the person's own token, to huggingface.co only: a gated file opens with it
         headers["Authorization"] = "Bearer " + token()
     try:
         digest = hashlib.sha256()
@@ -266,9 +300,12 @@ def attach(home: Path, pack: Path, spark: bool):
     def public(recipe: dict) -> dict:
         state = busy.get(recipe["id"])
         installed = ready(recipe["id"]).is_file() and not state
+        here = None if installed else found_here(recipe["id"])
         # usable: its file is here and this machine has what it runs on (a clip, a Library action or Edit a picture)
         return {**recipe, "installed": installed, "installing": state, "usable": installed and recipe.get("status") != "unsupported",
-                "flow": lora_flows.public(recipe["id"]) if recipe.get("flow") else None}
+                "flow": lora_flows.public(recipe["id"]) if recipe.get("flow") else None,
+                # found on this machine: Install links that file instead of downloading it
+                "found": {"path": here["shown"], "proof": here.get("proof", "")} if here else None}
 
     def prepare(lora_id: str) -> None:
         if ready(lora_id).is_file() or images(lora_id):
@@ -334,7 +371,7 @@ def attach(home: Path, pack: Path, spark: bool):
         lora_id, state = recipe["id"], busy[recipe["id"]]
         try:
             if not prebuilt(recipe, state):
-                if not source(lora_id).is_file():
+                if not source(lora_id).is_file() and not link_found(lora_id, source(lora_id)):
                     download(recipe, source(lora_id), state)
                 state["stage"] = "preparing"
                 prepare(lora_id)
@@ -397,6 +434,10 @@ def attach(home: Path, pack: Path, spark: bool):
             if not ready(lora_id).is_file() and (state is None or state["stage"] == "failed"):
                 if not recipe.get("url") and not source(lora_id).is_file():
                     raise HTTPException(400, "this recipe has no download address")
+                if not source(lora_id).is_file() and not bundled(recipe) and not hosted(recipe["id"], "spark") and os.environ.get("LORA_OFFLINE") != "1":
+                    gate = hf_gate.gate_of(recipe["url"])  # a file its author gates: the page walks the person through it
+                    if gate["access"] not in ("open", "granted"):
+                        return {**public(recipe), "gate": gate}
                 busy[lora_id] = {"stage": "downloading", "done": 0, "of": 0}
                 threading.Thread(target=fetch, args=(recipe,), daemon=True).start()
         return public(recipe)
@@ -473,7 +514,7 @@ def main(argv: list[str]) -> int:
     if unknown:
         print("no LoRA group " + ", ".join(sorted(unknown)), file=sys.stderr)
         return 2
-    folder = Path(os.environ.get("STUDIO_HOME", str(Path.home() / "TensorFoldStudio"))) / "loras"
+    folder = studio_home() / "loras"
     folder.mkdir(parents=True, exist_ok=True)
     failed = 0
     for recipe in json.loads(PRESETS.read_text()):
@@ -500,6 +541,8 @@ def main(argv: list[str]) -> int:
         try:
             if target.is_file():
                 print(f"have  {recipe['name']}")
+            elif link_found(recipe["id"], target):
+                print(f"found {recipe['name']} elsewhere on this machine, linked instead of downloading ({found_here(recipe['id'])['shown']})")
             else:
                 came = "the bundle" if bundled(recipe) or bundle().startswith("http") else recipe["page"]
                 download(recipe, target, {"done": 0, "of": 0})

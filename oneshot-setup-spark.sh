@@ -14,11 +14,19 @@
 #                                             # FLUX3-K Fast (distilled, 16 steps) and Full (base, 50 steps), their text
 #                                             # encoder, BFL's prompt upsampler and the decoder. FLUX Kommunity License; the
 #                                             # Hugging Face repo is gated: accept its licence and `hf auth login` first
+#   bash oneshot-setup-spark.sh --moss        # add MOSS-Image (OpenMOSS) as a picture model, 30 GB more: the SFT checkpoint
+#                                             # (bf16), its Qwen3.5 9B text encoder (bf16) and the FLUX.2 small decoder, from
+#                                             # Comfy-Org/MOSS-Image. Apache 2.0, commercial use allowed
 #   bash oneshot-setup-spark.sh --music       # add MiniMax Music 3 for the Music tab, 22 GB more: its DiT (fp16), text encoder
 #                                             # (pruned, bf16) and decoder, read by ComfyUI and by TensorFold's CUDA engine,
 #                                             # which it builds too (spark/build-music3.sh). MiniMax-Music3 Community License:
 #                                             # commercial use allowed; a commercial UI shows "MiniMax-Music3"; above US$20M
 #                                             # yearly revenue needs MiniMax's written authorisation
+#   bash oneshot-setup-spark.sh --sound       # add sound effects and foley (Sound -> Sound effects), 11 GB more: Stability AI's
+#                                             # Stable Audio Open 1.0 on ComfyUI's own nodes (Stability AI Community License; the
+#                                             # Hugging Face repo is gated: accept its licence there and sign in first) and
+#                                             # MMAudio large_44k_v2 on kijai's ComfyUI-MMAudio at a pinned commit (weights
+#                                             # CC-BY-NC 4.0: non-commercial)
 #   bash oneshot-setup-spark.sh --motion      # add the Motion Previs tab's analysis: pose, camera solve and AI depth (0.5 GB, own environment)
 #   bash oneshot-setup-spark.sh --no-loras    # skip the essential LoRA bundle (about 4 GB from the LoRAs' authors; --loras=camera,style
 #                                       # takes some groups, --lora-bundle=PATH installs from a bundle on disk with no other network)
@@ -42,11 +50,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 MODELS="${SPARK_MODELS:-$HOME/spark-studio-models}"
-COMFY_COMMIT=5a665890ded5020c282f63c4ea2dd9e083e025ff  # v0.41.0 and later: ComfyUI's FLUX 3 nodes
-IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MUSIC=0
+COMFY_COMMIT=b9b290e43f1eb379946dfeb013faf9bbefa1a618  # v0.42.0 and later: ComfyUI's FLUX 3 and MOSS-Image nodes
+IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0
 for arg in "$@"; do
   case "$arg" in
-    --ref2va) REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --music) MUSIC=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
+    --ref2va) REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --no-workflows) WORKFLOWS=0;;
     --loras) LORAS=all;; --loras=*) LORAS="${arg#--loras=}";; --no-loras) LORAS=none;; --lora-bundle=*) LORA_BUNDLE="${arg#--lora-bundle=}";;
     *) echo "unknown option $arg" >&2; exit 2;;
@@ -70,7 +78,9 @@ if [ "$UPGRADE" = 1 ]; then
   [ ! -s "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" ] || REF2VA=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || FLUX3=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] || FLUX3=1
+  [ ! -s "$MODELS/MOSS-Image-Comfy/diffusion_models/moss_image_sft_bf16.safetensors" ] || MOSS=1
   [ ! -s "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" ] || MUSIC=1
+  [ ! -d "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" ] || SOUND=1
   ok "upgrade: installed $INSTALLED -> $(cat "$HERE/VERSION")$([ "$IMAGE_ONLY" = 0 ] || echo " (image-only install)")"
 else ok "version $(cat "$HERE/VERSION")$([ ! -f "$PREFIX/VERSION" ] || echo " (installed: $INSTALLED)")"; fi
 GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
@@ -125,28 +135,44 @@ studio:
     Qwen-Image-2.1-Comfy/diffusion_models
     MiniMax-H3-Comfy/diffusion_models
     FLUX3-K-Comfy/diffusion_models
+    MOSS-Image-Comfy/diffusion_models
     MiniMax-Music3-Comfy/diffusion_models
   text_encoders: |
     FastH3-Comfy/text_encoders
     Qwen-Image-2.1-Comfy/text_encoders
     FLUX3-K-Comfy/text_encoders
+    MOSS-Image-Comfy/text_encoders
     MiniMax-Music3-Comfy/text_encoders
+    Sound-Comfy/text_encoders
   vae: |
     FastH3-Comfy/vae
     Qwen-Image-2.1-Comfy/vae
     FLUX3-K-Comfy/vae
+    MOSS-Image-Comfy/vae
     MiniMax-Music3-Comfy/vae
   loras: |
     loras
     MiniMax-H3-Comfy/loras
   checkpoints: |
     Workflows-Comfy/checkpoints
+    Sound-Comfy/checkpoints
   latent_upscale_models: |
     Workflows-Comfy/latent_upscale_models
+  mmaudio: |
+    Sound-Comfy/mmaudio
 YAML
 fi
 "$PY" -c "import comfy_kitchen, aiohttp, fastapi, uvicorn, PIL" || die "the environment is missing packages"
 ok "ComfyUI and its requirements"
+
+# elsewhere PLACE...: before a download, what is already somewhere else on this machine is linked at PLACE instead
+# (app/discover.py: a symlink, nothing moved or copied; one scan, kept an hour)
+elsewhere() {
+  [ "$VERIFY" = 0 ] || return 0
+  local py="$PREFIX/venv/bin/python" said; [ -x "$py" ] || py=python3
+  said="$(PREFIX="$PREFIX" SPARK_MODELS="$MODELS" "$py" "$HERE/app/discover.py" --scan --link --max-age 3600 --paths "$@" 2>/dev/null)" || return 0
+  [ -z "$said" ] || { echo "  found elsewhere on this machine, linking instead of downloading:"; echo "$said" | sed 's/^/    /'; }
+}
 
 # fetch <repo> <folder under $MODELS> <file in the repo>...: download what is not there yet
 fetch() {
@@ -154,6 +180,10 @@ fetch() {
   for file in "$@"; do [ -s "$MODELS/$folder/$file" ] || missing+=("$file"); done
   [ ${#missing[@]} = 0 ] && return 0
   [ "$VERIFY" = 0 ] || die "missing in $MODELS/$folder: ${missing[*]}"
+  local file found=(); for file in "${missing[@]}"; do found+=("$MODELS/$folder/$file"); done
+  elsewhere "${found[@]}"
+  missing=(); for file in "$@"; do [ -s "$MODELS/$folder/$file" ] || missing+=("$file"); done
+  [ ${#missing[@]} = 0 ] && return 0
   if [ "$UPGRADE" = 1 ]; then echo "  ! missing in $MODELS/$folder: ${missing[*]}: --upgrade fetches no weights (run oneshot-setup-spark.sh without it)"; return 0; fi
   "$PREFIX/venv/bin/hf" download "$repo" "${missing[@]}" --local-dir "$MODELS/$folder" >/dev/null
   for file in "${missing[@]}"; do [ -s "$MODELS/$folder/$file" ] || die "$file did not download"; done
@@ -212,6 +242,16 @@ if [ "$FLUX3" = 1 ]; then
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
+if [ "$MOSS" = 1 ]; then
+  say "MOSS-Image for ComfyUI: the SFT checkpoint, Qwen3.5 9B text encoder, FLUX.2 small decoder (30 GB) -> $MODELS"
+  [ "$VERIFY" = 1 ] || echo "  MOSS-Image (OpenMOSS) is under the Apache License 2.0: https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT"
+  fetch Comfy-Org/MOSS-Image MOSS-Image-Comfy diffusion_models/moss_image_sft_bf16.safetensors \
+    text_encoders/qwen3.5_9b_bf16.safetensors vae/flux2-vae_small.safetensors
+  [ -f "$PREFIX/ComfyUI/comfy_extras/nodes_moss_image.py" ] || die "this ComfyUI has no MOSS-Image nodes: run without --verify to move it to ${COMFY_COMMIT:0:8}"
+  ok "MOSS-Image: a picture model (IMAGE_MODEL=moss-image)"
+  if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
+fi
+
 if [ "$MUSIC" = 1 ]; then
   say "MiniMax Music 3 for ComfyUI: DiT (fp16), text encoder (pruned, bf16), decoder (22 GB) -> $MODELS"
   [ "$VERIFY" = 1 ] || { echo "  MiniMax Music 3 is under the MiniMax-Music3 Community License: commercial use is allowed; a commercial"
@@ -233,6 +273,66 @@ if [ "$MUSIC" = 1 ]; then
   else
     echo "  the engine did not build: songs will run on ComfyUI's nodes (slower). Fix and rerun spark/build-music3.sh"
   fi
+fi
+
+if [ "$SOUND" = 1 ]; then
+  # Sound effects and foley (app/sound.py, spark_generate.py sfx / foley): every render goes through the studio's
+  # ComfyUI server and its memory guard, never as standalone model code; a kind renders only once memory_guard.py
+  # has its measured estimate (sound_check).
+  say "Sound effects and foley for ComfyUI: Stable Audio Open 1.0, MMAudio large_44k_v2 and its nodes (11 GB) -> $MODELS/Sound-Comfy"
+  [ "$VERIFY" = 1 ] || { echo "  Stable Audio Open 1.0 is under the Stability AI Community License: free under US\$1M yearly revenue, a larger"
+    echo "  business needs Stability's licence. Its Hugging Face repo is gated: accept the licence on"
+    echo "  https://huggingface.co/stabilityai/stable-audio-open-1.0 with your own account and sign in (the studio's Install"
+    echo "  guide, or hf auth login). MMAudio's weights are CC-BY-NC 4.0: non-commercial use only."; }
+  SND="$MODELS/Sound-Comfy"
+  # kijai's ComfyUI-MMAudio (MIT) at a pinned commit; its requirements go into the Studio's environment with the
+  # installed PyTorch held where it is (its pyproject's own list is not installed: it pins numpy and much else)
+  MMA_NODES="$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" MMA_COMMIT=8eaeb72edc3aaf2059b57f2d96a1f6f689f19ae2
+  if [ "$(git -C "$MMA_NODES" rev-parse HEAD 2>/dev/null)" != "$MMA_COMMIT" ]; then
+    [ "$VERIFY" = 0 ] || die "ComfyUI-MMAudio is missing or not at ${MMA_COMMIT:0:8}: run with --sound, without --verify"
+    [ -d "$MMA_NODES/.git" ] || git clone -q https://github.com/kijai/ComfyUI-MMAudio "$MMA_NODES"
+    git -C "$MMA_NODES" fetch -q origin "$MMA_COMMIT" 2>/dev/null || git -C "$MMA_NODES" fetch -q origin
+    git -C "$MMA_NODES" checkout -q "$MMA_COMMIT"
+  fi
+  if [ "$VERIFY" = 0 ]; then
+    HOLD="$(mktemp)"; "$PY" -m pip freeze 2>/dev/null | grep -E '^(torch|torchvision|torchaudio|numpy)==' > "$HOLD" || true
+    [ -s "$HOLD" ] || "$PY" -c "import importlib.metadata as m; [print(f'{p}=={m.version(p)}') for p in ('torch','torchvision','torchaudio','numpy')]" > "$HOLD"
+    pipi -r "$MMA_NODES/requirements.txt" --constraint "$HOLD"; rm -f "$HOLD"
+  fi
+  "$PY" -c "import open_clip, torchdiffeq, timm, librosa, accelerate, omegaconf" || die "ComfyUI-MMAudio's requirements are missing from $PREFIX/venv"
+  ok "ComfyUI-MMAudio @ ${MMA_COMMIT:0:8} (kijai) and the Studio's sampler node (spark/studio_mmaudio, put beside it by spark/comfy.sh)"
+  fetch Kijai/MMAudio_safetensors Sound-Comfy/mmaudio mmaudio_large_44k_v2_fp16.safetensors mmaudio_vae_44k_fp16.safetensors \
+    mmaudio_synchformer_fp16.safetensors apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors
+  # the vocoder the 44 kHz decoder loads by folder name (kijai's loader would download it at the first foley otherwise)
+  fetch nvidia/bigvgan_v2_44khz_128band_512x Sound-Comfy/mmaudio/nvidia/bigvgan_v2_44khz_128band_512x bigvgan_generator.pt config.json
+  ok "MMAudio large_44k_v2 (fp16 safetensors), its VAE, Synchformer, Apple's DFN5B CLIP and NVIDIA's BigVGAN v2: foley"
+  # Stable Audio Open: the checkpoint (DiT and VAE) and its T5-base encoder, from the gated repo with the person's own
+  # token (app/hf_gate.py keeps it where hf reads it), linked under the names ComfyUI's loaders list
+  SAO_REPO=stabilityai/stable-audio-open-1.0 SAO="$SND/stable-audio-open-1.0"
+  if [ ! -s "$SAO/model.safetensors" ] || [ ! -s "$SAO/text_encoder/model.safetensors" ]; then
+    if [ "$VERIFY" = 1 ]; then echo "  ! Stable Audio Open 1.0 is not downloaded: sound effects wait for it"
+    else
+      ACCESS="$("$PY" -c "import sys; sys.path.insert(0, sys.argv[1]); import hf_gate as g; print(g.access(sys.argv[2], g.token()))" \
+        "$HERE/app" "https://huggingface.co/$SAO_REPO/resolve/main/model_index.json" 2>/dev/null || echo unknown)"
+      case "$ACCESS" in
+        granted|unknown)
+          "$PREFIX/venv/bin/hf" download "$SAO_REPO" model.safetensors text_encoder/model.safetensors LICENSE.md --local-dir "$SAO" >/dev/null \
+            || echo "  ! Stable Audio Open 1.0 did not download: sound effects wait for it (run with --sound again)";;
+        sign_in) echo "  ! Stable Audio Open 1.0 is gated: sign in to Hugging Face (the studio's Install guide, or hf auth login), accept the licence on https://huggingface.co/$SAO_REPO, then run with --sound again";;
+        accept)  echo "  ! Stable Audio Open 1.0 is gated: accept its licence on https://huggingface.co/$SAO_REPO with your account, then run with --sound again";;
+        pending) echo "  ! Stable Audio Open 1.0: your access request is waiting for the author's approval; run with --sound again once it is granted";;
+      esac
+    fi
+  fi
+  if [ -s "$SAO/model.safetensors" ] && [ -s "$SAO/text_encoder/model.safetensors" ]; then
+    mkdir -p "$SND/checkpoints" "$SND/text_encoders"
+    ln -sfn ../stable-audio-open-1.0/model.safetensors "$SND/checkpoints/stable_audio_open_1.0.safetensors"
+    ln -sfn ../stable-audio-open-1.0/text_encoder/model.safetensors "$SND/text_encoders/stable_audio_open_t5_base.safetensors"
+    ok "Stable Audio Open 1.0: the checkpoint and its T5-base encoder: sound effects"
+  fi
+  grep -q "Sound-Comfy/mmaudio" "$PREFIX/ComfyUI/extra_model_paths.yaml" 2>/dev/null || die "extra_model_paths.yaml does not list Sound-Comfy: run with --sound, without --verify"
+  "$PY" "$HERE/spark/memory_guard.py" sound 2>/dev/null | sed 's/^/  /' || true
+  if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
 if [ "$H3_BASE" = 1 ] && [ "$IMAGE_ONLY" = 0 ] && [ "$VERIFY" = 0 ]; then
@@ -272,7 +372,7 @@ fi
 [ "$VERIFY" = 1 ] || cp "$HERE/VERSION" "$PREFIX/VERSION"
 if [ "$UPGRADE" = 1 ]; then
   say "Upgraded: $INSTALLED -> $(cat "$PREFIX/VERSION"). Checking the install (restart the app to serve the new pages: scripts/app.sh)"
-  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MUSIC" = 0 ] || echo --music)
+  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$MUSIC" = 0 ] || echo --music) $([ "$SOUND" = 0 ] || echo --sound)
 fi
 # The essential LoRA bundle: every preset of the LoRA hub, fetched once from its author's page into one folder laid out
 # by the hub's groups, then installed (oneshot-essential-bundle.sh). --loras=GROUPS takes some groups, --lora-bundle=PATH

@@ -5,6 +5,7 @@
 #   PROMPT_FILE=prompts/baker-image.txt bash scripts/image.sh "" out.png
 #   IMAGE_MODEL=flux3k-fast bash scripts/image.sh "a prompt" out.png   # FLUX3-K Fast (16 steps); flux3k-full: 50 steps
 #   IMAGE_MODEL=qwen-full bash scripts/image.sh "a prompt" out.png     # Qwen 2.1 Full: the base model, 40 steps at CFG 4
+#   IMAGE_MODEL=moss-image bash scripts/image.sh "a prompt" out.png    # MOSS-Image, 25 steps (DGX Spark only)
 # Environment: PREFIX, QWEN_MODEL_DIR (Qwen-Image-2.1-Turbo: 8 steps on the schedule saved with the checkpoint),
 # QWEN_BASE_DIR (Qwen-Image-2.1, for TURBO=0), TURBO, STEPS (base model only, default 40), WIDTH, HEIGHT (multiples
 # of 16), SEED, EXTRA (extra flags), QWEN_CFG (base model only, default 4; 1 runs it without guidance). An install from before 2.3 has the base model at QWEN_MODEL_DIR: it keeps
@@ -35,9 +36,10 @@ case "${IMAGE_MODEL:-qwen}" in
     if [ -n "${PROMPT_FILE:-}" ]; then ARGS+=(--prompt-file "$PROMPT_FILE"); else ARGS+=(--prompt "$PROMPT"); fi
     # shellcheck disable=SC2086
     exec "$PREFIX/flux3-venv/bin/python" "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/flux3_generate.py" "${ARGS[@]}" ${EXTRA:-};;
+  moss-image) echo "MOSS-Image runs on a DGX Spark (ComfyUI): there is no Mac build of it yet" >&2; exit 1;;
   qwen) ;;
   qwen-full) TURBO=0;;
-  *) echo "IMAGE_MODEL is qwen, qwen-full, flux3k-fast or flux3k-full, not ${IMAGE_MODEL}" >&2; exit 2;;
+  *) echo "IMAGE_MODEL is qwen, qwen-full, flux3k-fast, flux3k-full or moss-image, not ${IMAGE_MODEL}" >&2; exit 2;;
 esac
 # the Turbo checkpoint carries its schedule in model_index.json; the base model does not
 if grep -q sample_sigmas "$QWEN_MODEL_DIR/model_index.json" 2>/dev/null; then DISTILLED=1; else DISTILLED=0; fi

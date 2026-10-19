@@ -45,7 +45,7 @@ function spkQueue() { const box = document.querySelector("#sparks"); if (!box ||
 const spkDo = async (path, body, method) => { try { SPK.data = await api(path, body, method); SPK.plans = {}; } catch (e) { toast(e.message, 6000); } spkQueue(); render(); };
 const spkHas = can => !can ? "" : [can.fasth3 ? "FastH3 clips (text, first and last frame)" : "no FastH3", can.ref2va ? "Ref2VA" + (can.ref2va_turbo ? " with Turbo" : "") : "no Ref2VA", can.image ? "image model" : "no image model",
   can.loras ? can.loras + " LoRA" + (can.loras === 1 ? "" : "s") : "no LoRAs", can.ffmpeg ? "ffmpeg" : "no ffmpeg"].join(" · ");
-const spkDot = state => el("span", { style: "display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:" + ({ ready: "var(--ok)", busy: "var(--warn)", update: "var(--warn)", stopped: "#94a3b8", new: "#64748b" }[state] || "var(--bad)") });
+const spkDot = state => el("span", { style: "display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:" + ({ ready: "var(--ok)", busy: "var(--warn)", update: "var(--warn)", stopped: "var(--dim)", new: "var(--faint)" }[state] || "var(--bad)") });
 function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}, "Sparks")), d = SPK.data;
   if (!d) { spkLoad(true).then(() => { if (SPK.data && tab === "Sparks") render(); }); return put(box, el("div", { class: "note" }, "Loading…")), box; }
   if (!d.supported) return put(box, el("div", { class: "note" }, d.note), sparksPick()), box;

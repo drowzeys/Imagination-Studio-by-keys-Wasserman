@@ -5,36 +5,46 @@
     HOST=0.0.0.0 bash scripts/app.sh   # reachable from other machines on the network (no login: trusted LANs only)
 
 One job runs at a time, in the order queued; every job is one of this pack's scripts with environment variables.
-Projects, uploads and renders live under $STUDIO_HOME (default ~/TensorFoldStudio).
+Projects, uploads and renders live under $STUDIO_HOME (default ~/ImaginationStudio; app/studio_home.py).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import math
 import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 HERE = Path(__file__).resolve().parent
 PACK = HERE.parent
-HOME = Path(os.environ.get("STUDIO_HOME", Path.home() / "TensorFoldStudio"))
+from studio_home import studio_home  # noqa: E402  (~/ImaginationStudio, an older ~/TensorFoldStudio moved there once)
+HOME = studio_home(move=__name__ == "__main__")  # moved only when the studio starts, never by a script that imports this
+os.environ["STUDIO_HOME"] = str(HOME)  # the scripts and engines it starts keep everything in the same folder
 for name in ("projects", "uploads", "renders", "scouts", "exports"):
     (HOME / name).mkdir(parents=True, exist_ok=True)
 
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
 import memory_guard  # noqa: E402  (a DGX Spark's memory: what a clip needs and whether this machine has it, in spark/)
+import settings  # noqa: E402  (Settings: looks, layout, presets, settings.json, beside this file)
 
 FPS = 24
 # seconds -> frames (17n + 5): the four lengths the app has always offered. A job may ask for any count the model takes
@@ -168,21 +178,224 @@ def machine() -> tuple[str, str]:
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
 
-app = FastAPI(title="Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3")
+app = FastAPI(title="Imagination Studio, by Keys + Wasserman, powered by TensorFold, built with Fish Audio Drama 3")
 jobs: dict[str, dict] = {}
 order: list[str] = []
 lock = threading.Lock()
 wake = threading.Event()
 running: dict = {"process": None, "id": None}
+update_writes = 0
+
+
+@app.middleware("http")
+async def update_maintenance(request, call_next):
+    global update_writes
+    writes = request.method not in ("GET", "HEAD", "OPTIONS") and not request.url.path.startswith("/api/updates")
+    with lock:
+        if writes and updater.maintenance.is_set():
+            return JSONResponse({"error": "Studio is restarting for an update. This page will reconnect shortly."}, status_code=503)
+        if writes:
+            update_writes += 1
+    try:
+        return await call_next(request)
+    finally:
+        if writes:
+            with lock:
+                update_writes -= 1
+
+
+# ---------- requests that change something: from the Studio's own page, and not too large ----------
+
+WRITES = ("POST", "PUT", "PATCH", "DELETE")
+JSON_LIMIT = int(float(os.environ.get("STUDIO_JSON_MB", "1")) * (1 << 20))       # any body but a file upload
+UPLOAD_LIMIT = int(float(os.environ.get("STUDIO_UPLOAD_MB", "512")) * (1 << 20))  # one file sent to /api/upload
+# a production pack or a suite file brought in (a .zip of clips): the suite's own cap per file was 2 GB already
+ARCHIVE_LIMIT = int(float(os.environ.get("STUDIO_ARCHIVE_MB", "2048")) * (1 << 20))
+# the routes that take a file (multipart), each with its own limit; every other write is held to JSON_LIMIT, whatever its type
+UPLOAD_ROUTES = {"/api/upload": "UPLOAD_LIMIT", "/api/motion/packs/import": "ARCHIVE_LIMIT", "/api/suite/import": "ARCHIVE_LIMIT"}
+TAILSCALE_APP = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+# this machine's own names (learn_own_names), learned once in the background: None until then
+OWN: dict = {"labels": None, "tailnet": None}
+
+
+def learn_own_names() -> dict:
+    """This computer's names, for trusted_host (OWN): its host name, its Bonjour name (macOS) and its Tailscale name. Each
+    tool is asked once, with a short time limit; one that is missing or does not answer is left out."""
+
+    labels = {socket.gethostname().split(".")[0].lower()}
+    tailnet = None
+    asks = [["scutil", "--get", "LocalHostName"]] if sys.platform == "darwin" else []
+    tailscale = shutil.which("tailscale") or (TAILSCALE_APP if os.access(TAILSCALE_APP, os.X_OK) else None)
+    for ask in asks:
+        try:
+            said = subprocess.run(ask, capture_output=True, text=True, timeout=2).stdout.strip().lower()
+            if said:
+                labels.add(said)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if tailscale:
+        try:
+            said = subprocess.run([tailscale, "status", "--json", "--peers=false"], capture_output=True, text=True, timeout=3)
+            me = (json.loads(said.stdout or "{}").get("Self") or {}) if said.returncode == 0 else {}
+            dns = str(me.get("DNSName") or "").rstrip(".").lower()
+            if dns.endswith(".ts.net") and dns.count(".") >= 3:
+                labels.add(dns.split(".")[0])
+                tailnet = dns.split(".", 1)[1]  # e.g. tail1234.ts.net: the names of this tailnet
+            if me.get("HostName"):
+                labels.add(str(me["HostName"]).lower())
+        except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+            pass
+    return {"labels": {one for one in labels if one}, "tailnet": tailnet}
+
+
+threading.Thread(target=lambda into=OWN: into.update(learn_own_names()), daemon=True, name="own-names").start()
+
+
+def trusted_host(host: str) -> bool:
+    """Whether a request's Host is one a page from elsewhere cannot point at this app (DNS rebinding): localhost, an
+    address written as numbers (the app is opened to a LAN with HOST=0.0.0.0, so a LAN or tailnet address stays
+    allowed), this computer's own names (one word, or .local), a Tailscale name, or one named in STUDIO_ALLOWED_HOSTS
+    (comma-separated). A public name that could resolve to this machine is refused.
+
+    A .local name must be this computer's own once its names are learned (learn_own_names, a few seconds after start):
+    anyone on the LAN can announce one. A one-word name must be too, where Tailscale answered with this computer's
+    name on the tailnet (its MagicDNS short name); without Tailscale to ask, a one-word name is taken as before. Any
+    *.ts.net name is taken, as by the agents' and the updater's own checks: those names are given out by Tailscale
+    and resolve to tailnet addresses only, so a page cannot point one at this machine."""
+
+    try:
+        name = (urlsplit("//" + host).hostname or "").rstrip(".").lower()
+    except ValueError:
+        return False
+    if not name:
+        return False
+    if name in ("localhost", "testserver") or name.endswith(".localhost"):
+        return True
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    if name in {one.strip().lower() for one in os.environ.get("STUDIO_ALLOWED_HOSTS", "").split(",") if one.strip()}:
+        return True
+    labels, tailnet = OWN["labels"], OWN["tailnet"]
+    if name.endswith(".local"):
+        return labels is None or name[:-len(".local")] in labels
+    if "." not in name:
+        return labels is None or tailnet is None or name in labels
+    return name.endswith(".ts.net")
+
+
+def refused(request_headers: dict) -> str:
+    """Why a request that changes something is refused ("" when it is not): sent by a page of another site."""
+
+    host = request_headers.get("host", "")
+    origin = request_headers.get("origin")
+    if not trusted_host(host):
+        return "Open the Studio by this computer's name, its address or its Tailscale name (STUDIO_ALLOWED_HOSTS adds another)."
+    try:
+        elsewhere = origin is not None and urlsplit(origin).netloc.lower() != host.lower()
+    except ValueError:  # an Origin that is not a URL
+        elsewhere = True
+    if request_headers.get("sec-fetch-site") == "cross-site" or elsewhere:
+        return "Do this from the Studio page."
+    return ""
+
+
+class TooLarge(Exception):
+    pass
+
+
+class WriteGuard:
+    """Every request, reads included: refused (403) when its Host is not one of this computer's (trusted_host: a page
+    that rebinds its own name to this machine could otherwise read the Library, the jobs' prompts and the settings).
+    Every POST, PUT, PATCH and DELETE under /api/ besides: refused (403) when a page of another site sent it, and
+    refused (413) when its body is over the limit, whatever its Content-Type: the routes that take a file have their
+    own (UPLOAD_ROUTES), every other is held to JSON_LIMIT. A request without an Origin (curl, scripts, the workers' own
+    calls) passes the Origin test; /api/updates keeps its own, stricter one."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope["headers"]}
+        if not trusted_host(headers.get("host", "")):
+            if scope["type"] == "websocket":
+                return await send({"type": "websocket.close", "code": 1008})
+            return await JSONResponse({"error": "Open the Studio by this computer's name, its address or its Tailscale name (STUDIO_ALLOWED_HOSTS adds another)."},
+                                      status_code=403)(scope, receive, send)
+        if scope["type"] != "http" or scope["method"] not in WRITES or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+        why = refused(headers)
+        if why:
+            return await JSONResponse({"error": why}, status_code=403)(scope, receive, send)
+        limit = globals()[UPLOAD_ROUTES.get(scope["path"].rstrip("/"), "JSON_LIMIT")]  # read here: a test may change one
+        too_large = JSONResponse({"error": f"this is over the {limit / (1 << 20):g} MB a request may carry here"}, status_code=413)
+        try:
+            if int(headers.get("content-length") or 0) > limit:
+                return await too_large(scope, receive, send)
+        except ValueError:
+            return await JSONResponse({"error": "Content-Length is a number"}, status_code=400)(scope, receive, send)
+        seen, over, started = 0, False, False
+
+        async def counted():  # a body sent without a length (chunked) is counted as it comes
+            nonlocal seen, over
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > limit:
+                    over = True
+                    raise TooLarge()
+            return message
+
+        async def guarded(message):
+            nonlocal started
+            if over:
+                return  # whatever the route made of a cut-off body, the answer is 413 (below)
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, counted, guarded)
+        except TooLarge:
+            pass
+        if over and not started:
+            await too_large(scope, receive, send)
+
+
+app.add_middleware(WriteGuard)
+
+
+def accepting_jobs():
+    """Called under the queue lock, shared with the updater's idle check."""
+    if updater.maintenance.is_set():
+        raise HTTPException(503, "Studio is restarting for an update. Try again after it reconnects.")
 
 
 def inside(path: str | Path) -> Path:
-    """A path under the studio folder, or 400."""
+    """A path under the studio folder, or 400: never one with a null byte, and never in or of a hidden folder or file
+    (a part that starts with "."): .studio-agents holds the agents' tools and threads, .studio-updates the updater's."""
 
-    resolved = (HOME / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
-    if HOME.resolve() not in (resolved, *resolved.parents):
+    if "\0" in str(path):
+        raise HTTPException(400, "a path has no null byte")
+    try:
+        resolved = (HOME / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    except (OSError, ValueError, RuntimeError):
+        raise HTTPException(400, "not a path")
+    home = HOME.resolve()
+    if home not in (resolved, *resolved.parents):
         raise HTTPException(400, "path is outside the studio folder")
+    if hidden(resolved.relative_to(home)):
+        raise HTTPException(400, "hidden files of the studio folder are not served or used")
     return resolved
+
+
+def hidden(relative_path: Path | str) -> bool:
+    """Whether a path under the studio folder is in or of a hidden folder or file."""
+
+    return any(part.startswith(".") for part in Path(relative_path).parts)
 
 
 def relative(path: Path) -> str:
@@ -387,6 +600,17 @@ def said_quiet(sound: str) -> bool:
     return "no speech" in low or "only ambient sound" in low
 
 
+STOPS = ".!?…:;,\"”’')"
+
+
+def joined(*parts) -> str:
+    """The wizard's parts as one shot: each but the last ends on a full stop where it has no stop of its own, so the
+    scene and the action read as two sentences ("…from a window. The lamp turns…", not "…from a window The lamp…")."""
+
+    parts = [part.strip() for part in parts if part and part.strip()]
+    return " ".join([part if part[-1] in STOPS else part + "." for part in parts[:-1]] + parts[-1:])
+
+
 def compose_references(fields: dict, count: int) -> str:
     """The Ref2VA model's own prompt form: who each picture is, what is kept of it, then the shot.
 
@@ -469,8 +693,7 @@ def compose_references(fields: dict, count: int) -> str:
                     else f"<Audio {sounds}>: reference - the target audio references the sound of <Audio {sounds}>.")
         voices.append(f"<Audio {sounds}>")
     scene = (fields.get("scene") or "").strip()
-    shot = " ".join(part.strip() for part in (scene, fields.get("camera", ""), fields.get("action", ""), *follow)
-                    if part and part.strip())
+    shot = joined(scene, fields.get("camera", ""), fields.get("action", ""), *follow)
     spoken = []
     for index, line in enumerate(fields.get("dialogue") or [], start=1):
         text = (line.get("text") or "").strip()
@@ -520,8 +743,7 @@ def compose_references(fields: dict, count: int) -> str:
 def compose(fields: dict, first_frame: bool, last_frame: bool = False, seconds: float = 5, frames: int | None = None) -> str:
     """MiniMax H3's three-field prompt from the wizard's parts."""
 
-    shot = " ".join(part.strip() for part in (fields.get("scene", ""), fields.get("camera", ""),
-                                               fields.get("action", "")) if part and part.strip())
+    shot = joined(fields.get("scene", ""), fields.get("camera", ""), fields.get("action", ""))
     spoken = []
     for index, line in enumerate(fields.get("dialogue") or [], start=1):
         text = (line.get("text") or "").strip()
@@ -592,11 +814,13 @@ def turbo_ready() -> bool:
 # Fast, the distilled checkpoint at 16 steps, and Full, the base one at 50. Seconds per 1344x768 picture, measured with
 # the model loaded, bf16: Qwen 9.7 on an M5 Ultra; FLUX3-K Fast 10.5 on a DGX Spark (ComfyUI) and 14.9 on an M5 Ultra
 # (flux3-mlx), Full 57.5 on a Spark and 53.6 on an M5 Ultra; BFL's prompt upsampler adds about 18 s on a Spark (8-bit,
-# ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt.
+# ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt. MOSS-Image (OpenMOSS, Apache 2.0, oneshot-setup-spark.sh
+# --moss) runs on a Spark only, on ComfyUI v0.42.0's own support: 45 s for 1344x768 with the model loaded.
 IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Research License (non-commercial)"),
                 "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
-                "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast")}
+                "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast"),
+                "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed")}
 # BFL's file names, the present one first (renamed 2026-10-17, the same files; spark_generate.FLUX3_OLD)
 FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors"),
                "flux3k-full": ("flux3-image-klein-base-bf16.safetensors", "flux3_image_klein_base_bf16.safetensors")}
@@ -618,7 +842,19 @@ def image_models() -> list[str]:
                      and (folder / ("FLUX3-K-Fast" if name == "flux3k-fast" else "FLUX3-K-Full") / "model.safetensors").is_file())
         if ready:
             found.append(name)
+    if SPARK and moss_ready():
+        found.append("moss-image")
     return found
+
+
+def moss_ready() -> bool:
+    """MOSS-Image's ComfyUI files, and a ComfyUI that knows the model (v0.42.0 and later)."""
+
+    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "MOSS-Image-Comfy"
+    comfy = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")) / "ComfyUI"
+    return ((models / "diffusion_models/moss_image_sft_bf16.safetensors").is_file()
+            and (models / "text_encoders/qwen3.5_9b_bf16.safetensors").is_file()
+            and (comfy / "comfy_extras/nodes_moss_image.py").is_file())
 
 
 def qwen_base_ready() -> bool:
@@ -639,7 +875,7 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
-        how = "--image-edit" if name == "qwen-full" else "--flux3"
+        how = {"qwen-full": "--image-edit", "moss-image": "--moss (on a DGX Spark)"}.get(name, "--flux3")
         raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh {how} adds it")
     return {"IMAGE_MODEL": name}
 
@@ -830,6 +1066,8 @@ def estimate(preset: str, quality: str, seconds: float, text_only: bool = False,
 
 def environment(extra: dict) -> dict:
     env = dict(os.environ)
+    for key, value in settings.job_env().items():  # Settings → Presets (the delivery sound rate); the environment's own wins
+        env.setdefault(key, value)
     env.update({key: str(value) for key, value in extra.items() if value not in (None, "")})
     env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
     return env
@@ -875,6 +1113,14 @@ def clip_seconds(params: dict) -> float:
     return {count: named for named, count in DURATIONS.items()}.get(frames) or min(frames / FPS * 120 / 124, float(LONGEST))
 
 
+def held_room() -> int | None:
+    """What this machine has for a render while Drama 3 or MiniMax Music 3's CUDA engine is loaded (both are unloaded
+    before any other job starts, so their memory counts as that job's, like the ComfyUI server's own); None otherwise."""
+
+    held = [one for one in (voice.room_mb(), music.room_mb()) if one]
+    return max([memory_guard.room_mb() or 0] + held) if held else None
+
+
 def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | None = None) -> dict:
     """Whether a clip fits this machine's memory (spark/memory_guard.py; a DGX Spark only, everything fits on a Mac):
     the size it is generated at, its frames, whether references put it on ComfyUI's own bfloat16 blocks and whether a
@@ -892,8 +1138,7 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
     engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
     # a Drama 3 server kept loaded after a voice take is unloaded before this job starts (voice.release): its memory
     # counts as this job's, like the ComfyUI server's own; so does MiniMax Music 3's CUDA engine (music.release)
-    held = [one for one in (voice.room_mb(), music.room_mb()) if one]
-    room = max([memory_guard.room_mb() or 0] + held) if held else None
+    room = held_room()
     return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room,
                               base=env.get("SPARK_BASE") == "h3", engine=engine,
                               pictures=len(found.get("pictures") or []),
@@ -935,6 +1180,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     scripts = PACK / "scripts"
     if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove
         return action_build(kind, params, job_id)
+    if kind in sound.KINDS:  # a sound effect or a clip's foley (sound.py)
+        return sound_build(kind, params, job_id)
     seed = str(int(params.get("seed", 0)))
     if kind == "scout":
         folder = HOME / "scouts" / job_id
@@ -1433,8 +1680,38 @@ def state() -> dict:
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
 
 
+def numbers(body: dict, keys: tuple) -> dict:
+    """The body with each of ``keys`` that is given read as a number (references as a whole one): 400 with the name of
+    the first that is not, never a 500."""
+
+    out = dict(body)
+    for key in keys:
+        value = body.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                raise ValueError
+            number = float(value)
+            if not math.isfinite(number) or (key == "references" and (number < 0 or number != int(number))):
+                raise ValueError
+        except ValueError:
+            raise HTTPException(400, f"{key} is {'a whole number' if key == 'references' else 'a number'}")
+        out[key] = int(number) if key == "references" else number
+    return out
+
+
+def plain_fields(body: dict) -> dict:
+    """The composer's form, checked before it is read: fields is an object, the counts are numbers."""
+
+    if not isinstance(body.get("fields", {}), dict):
+        raise HTTPException(400, "fields is an object of the shot's words")
+    return numbers(body, ("references", "seconds"))
+
+
 @app.post("/api/compose")
 def compose_prompt(body: dict) -> dict:
+    body = plain_fields(body)
     if body.get("references") or body.get("referenced"):
         # a picked LoRA with its own caption style (Character Swap, Lineart Anime, Keyframe Animation) writes the prompt
         own = lora_flows.compose(body.get("loras") or (body.get("fields") or {}).get("loras"), body.get("fields", {}))
@@ -1464,6 +1741,12 @@ def estimate_time(body: dict) -> dict:
     """The time a clip is expected to take (None where none was measured) and, on a DGX Spark, whether it fits the
     machine's memory: {"fits", "reason", "need_mb", ...} from spark/memory_guard.py, shown before the job is queued."""
 
+    body = numbers(body, ("seconds", "references"))
+    if body.get("frames") not in (None, ""):
+        try:
+            lengths.of({"frames": body["frames"]})
+        except ValueError as error:
+            raise HTTPException(400, str(error))
     room = None
     if SPARK and float(body.get("seconds") or 5) <= LONGEST + 1:
         try:
@@ -1494,11 +1777,40 @@ def clip_estimate(kind: str, params: dict, referenced: bool = False, ref_media: 
                     bool(params.get("ref_turbo")), ref_media)
 
 
+WRONG_TYPE = "a setting of this job has the wrong kind of value: a number is a number, a list is a list"
+
+
+def export_clips(params: dict) -> None:
+    """An export's clips, checked when it is queued: a list of {path, in?, out?, duration?} inside the studio folder."""
+
+    clips = params.get("clips")
+    if not isinstance(clips, list) or not all(isinstance(clip, dict) and isinstance(clip.get("path"), str) for clip in clips):
+        raise HTTPException(400, "an export's clips are a list of clips, each with the path of a file in the studio's folder")
+    for clip in clips:
+        inside(clip["path"])
+        for key in ("in", "out", "duration"):
+            if clip.get(key) is not None and (isinstance(clip[key], bool) or not isinstance(clip[key], (int, float))):
+                raise HTTPException(400, f"a clip's {key} is a number of seconds")
+
+
 @app.post("/api/jobs")
 def submit(body: dict) -> dict:
+    try:
+        return queue_job(body)
+    except (TypeError, ValueError, AttributeError, KeyError) as error:
+        # a setting sent as the wrong type (text for a number, a list for an object): said plainly, not a 500
+        print(f"[studio] a job was refused: {type(error).__name__}: {error}", flush=True)
+        raise HTTPException(400, WRONG_TYPE) from None
+
+
+def queue_job(body: dict) -> dict:
     kind = body.get("kind")
+    if body.get("params") is not None and not isinstance(body.get("params"), dict):
+        raise HTTPException(400, "params is an object of the job's settings")
+    if body.get("title") is not None and not isinstance(body.get("title"), str):
+        raise HTTPException(400, "title is text")
     params = dict(body.get("params") or {})
-    if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS:
+    if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS + sound.KINDS:
         raise HTTPException(400, "unknown job kind")
     if kind == "long" and (params.get("last_image") or params.get("last_same") or params.get("last_frame_from")):
         raise HTTPException(400, "a last frame is for single clips: a long video is a chain of clips")
@@ -1508,12 +1820,14 @@ def submit(body: dict) -> dict:
             raise HTTPException(400, f"a long video is over {LONGEST} seconds and at most {max(LONG) // 60} minutes")
         pieces = plan(total, int(params.get("segment_seconds", LONGEST)))
         build("video", {**params, "seconds": pieces[0], "output": None}, "check")
-    if kind not in ("export", "edit") + actions.KINDS and not (params.get("prompt") or "").strip():
+    if kind not in ("export", "edit", "foley") + actions.KINDS and not (params.get("prompt") or "").strip():
         raise HTTPException(400, "a prompt is needed")
     if kind != "video" and params.get("references"):
         raise HTTPException(400, "reference pictures are for single clips")
     if kind != "video" and (params.get("reference_videos") or params.get("reference_audios")):
         raise HTTPException(400, "reference videos and audio are for single clips")
+    if kind == "export":
+        export_clips(params)
     missing = without_ffmpeg(kind, params)
     if missing:
         raise HTTPException(400, missing)
@@ -1534,8 +1848,8 @@ def submit(body: dict) -> dict:
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     if kind not in ("export", "long"):
         build(kind, params, job_id)  # reject bad settings now, not when the job's turn comes
-    job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else kind), "params": params,
-           "source": action_source(kind, params) if kind in actions.KINDS else None,
+    job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else sound_title(kind, params) if kind in sound.KINDS else kind), "params": params,
+           "source": action_source(kind, params) if kind in actions.KINDS else sound_source(kind, params) if kind in sound.KINDS else None,
            "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(), "started": None,
            "finished": None, "estimate": clip_estimate(kind, params, referenced, ref_media)}
     if referenced:  # the passes a reference clip runs: the number set by hand, or the model's 20, or the adapter's 4
@@ -1553,6 +1867,7 @@ def submit(body: dict) -> dict:
     said = hub.plan({"sparks": chosen, "kind": kind, "params": params})
     job["sparks"] = {"chosen": chosen if SPARK else 1, "available": said["available"], "used": said["used"], "says": said["says"]}
     with lock:
+        accepting_jobs()
         jobs[job_id] = job
         order.append(job_id)
     wake.set()
@@ -1581,9 +1896,40 @@ def cancel(job_id: str) -> dict:
         job["status"] = "cancelled"
         process = running["process"] if running["id"] == job_id else None
         if process is not None:
-            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # it ended on its own meanwhile
+            if SPARK and job["kind"] not in NOT_ON_COMFY:
+                stop_comfy(job)
         hub.kick.set()  # a clip on another Spark is cancelled there by the thread that follows it
     return public(job)
+
+
+NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa")  # jobs a Spark runs without its ComfyUI server
+
+
+def stop_comfy(job: dict) -> bool:
+    """On a DGX Spark the render runs inside the ComfyUI server (spark/comfy.sh), not in the script the job started:
+    killing the script leaves the prompt it queued running on the GPU. Ask the server to stop its current prompt
+    (its /interrupt, 2 s, best effort) and say in the job's log what it answered.
+
+    The prompt id is not known here (spark_generate.py keeps it to itself and does not print it), so a prompt still
+    waiting in ComfyUI's queue is not deleted: the script is stopped before it queues another, and the runner only
+    queues one prompt at a time, so the one that runs is this job's."""
+
+    url = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190")) + "/interrupt"
+    try:
+        request = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(request, timeout=2) as answer:
+            said = f"ComfyUI stopped the prompt it was running (it answered {answer.status})"
+            stopped = True
+    except urllib.error.HTTPError as error:
+        said, stopped = f"ComfyUI did not stop the prompt: it answered {error.code}", False
+    except (OSError, ValueError) as error:
+        said, stopped = f"ComfyUI did not answer the stop ({getattr(error, 'reason', error)}): it may still be rendering", False
+    job["log"] = (job["log"] + f"[studio] cancelled: {said}\n")[-20000:]
+    return stopped
 
 
 @app.post("/api/upload")
@@ -1609,6 +1955,15 @@ def take_frame(body: dict) -> dict:
     if not media_tools()["ffmpeg"]:
         raise HTTPException(400, f"taking a frame of a clip needs ffmpeg, which is not installed on this machine: {FFMPEG_HOW}")
     at = body.get("at", "last")
+    if at not in ("last", "first") and (isinstance(at, bool) or not isinstance(at, (int, float, str))):
+        raise HTTPException(400, 'at is "first", "last" or a number of seconds into the clip')
+    if isinstance(at, str) and at not in ("last", "first"):
+        try:
+            at = float(at)
+        except ValueError:
+            raise HTTPException(400, 'at is "first", "last" or a number of seconds into the clip')
+    if isinstance(at, float) and not math.isfinite(at):
+        raise HTTPException(400, 'at is "first", "last" or a number of seconds into the clip')
     name = f"{source.stem[:40]}_{'last' if at == 'last' else 'first' if at == 'first' else str(at).replace('.', 's')}_{uuid.uuid4().hex[:6]}.png"
     target = HOME / "uploads" / name
     try:
@@ -1629,22 +1984,55 @@ def take_frame(body: dict) -> dict:
 
 @app.get("/api/library")
 def library() -> list[dict]:
-    """Every clip and still under the studio folder, newest first."""
+    """Every clip, still, voice line, song and sound effect under the studio folder, newest first."""
 
     found = []
-    for folder, kinds in (("renders", (".mp4",)), ("exports", (".mp4",)), ("scouts", (".png",)),
-                          ("uploads", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")), ("projects", (".mp4",)), ("slate", (".mp4",))):
+    for folder, kinds in (("renders", (".mp4",)), ("exports", (".mp4",)), ("scouts", (".png",)), ("sound", (".mp4",)),
+                          ("uploads", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov")), ("projects", (".mp4",)), ("slate", (".mp4",)),
+                          ("agent", (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov"))):
         for path in (HOME / folder).rglob("*"):
-            if path.suffix.lower() in kinds and path.is_file():
+            if path.suffix.lower() in kinds and not hidden(path.relative_to(HOME)) and path.is_file():
                 found.append({"path": relative(path), "kind": "video" if path.suffix.lower() in (".mp4", ".mov")
                               else "image", "folder": folder, "modified": path.stat().st_mtime,
                               "size": path.stat().st_size})
+    found += library_sounds()
     found = sorted(found, key=lambda item: -item["modified"])[:400]
     made = hub.takes()  # which Spark rendered a clip, and at which seed (sparks.py)
     for item in found:
         if item["path"] in made:
             item.update(spark=made[item["path"]].get("spark"), seed=made[item["path"]].get("seed"))
     return found
+
+
+SOUND_FILES = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
+
+
+def library_sounds() -> list[dict]:
+    """Voice lines and songs (their kept takes) and sound effects (the sound folder): kind "audio", `sound` says which."""
+
+    out, seen = [], set()
+    for which, module in (("voice", globals().get("voice")), ("music", globals().get("music"))):
+        try:
+            takes = module.takes() if module else []
+        except Exception:  # a take folder that cannot be read leaves the rest of the Library alone
+            takes = []
+        for take in takes:
+            path = HOME / str(take.get("path") or "")
+            if path.suffix.lower() in SOUND_FILES and path.is_file() and relative(path) not in seen:
+                seen.add(relative(path))
+                words = str(take.get("text") or take.get("caption") or take.get("title") or "")
+                out.append({"path": relative(path), "kind": "audio", "sound": which, "folder": which, "title": " ".join(words.split())[:80],
+                            "modified": path.stat().st_mtime, "size": path.stat().st_size})
+    for path in (HOME / "sound").rglob("*") if (HOME / "sound").is_dir() else []:
+        if path.suffix.lower() in SOUND_FILES and path.is_file() and not hidden(path.relative_to(HOME)) and relative(path) not in seen:
+            try:  # a sound effect's or a foley's words, from its take file (sound.py)
+                said = json.loads(path.with_name(path.stem + ".take.json").read_text())
+                words = str(said.get("prompt") or ("Foley for " + Path(str(said.get("source") or "")).name if said.get("kind") == "foley" else ""))
+            except (OSError, ValueError, AttributeError):
+                words = ""
+            out.append({"path": relative(path), "kind": "audio", "sound": "sfx", "folder": "sound", "title": " ".join(words.split())[:80],
+                        "modified": path.stat().st_mtime, "size": path.stat().st_size})
+    return out
 
 
 @app.delete("/api/library")
@@ -1747,6 +2135,7 @@ def qa_gate(body: dict) -> dict:
            "params": params, "source": None, "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(),
            "started": time.time(), "finished": None, "estimate": None}
     with lock:
+        accepting_jobs()
         jobs[job_id] = job
         order.append(job_id)
     threading.Thread(target=qa_run, args=(job,), daemon=True).start()
@@ -1831,11 +2220,20 @@ def wait(ms: int = 1000):
     return JSONResponse({"waited": ms})
 
 
+# what an agent's harness wrote while it worked (the whole transcript, its errors, its tool servers): this computer only
+AGENT_RECORDS = ("stderr.txt", "stream.jsonl", "log.txt", "mcp.json")
+
+
 @app.get("/files/{path:path}")
-def files(path: str):
+def files(path: str, request: Request):
+    if "\0" in path or hidden(path):
+        raise HTTPException(404, "no such file")
     target = inside(path)
     if not target.is_file():
         raise HTTPException(404, "no such file")
+    parts = target.relative_to(HOME.resolve()).parts
+    if parts[0] == "agent" and parts[-1] in AGENT_RECORDS:
+        agents.local(request)
     return FileResponse(target)
 
 
@@ -1844,11 +2242,24 @@ async def errors(_, error: HTTPException):
     return JSONResponse({"error": error.detail}, status_code=error.status_code)
 
 
+@app.exception_handler(RequestValidationError)
+async def malformed(_, error: RequestValidationError):
+    """A body or parameter FastAPI could not read: said plainly, with where it was wrong, and never with what was sent
+    (FastAPI's own answer echoes the whole body back)."""
+
+    where = [".".join(str(part) for part in one.get("loc", ())[:4])[:80] for one in error.errors()[:5]]
+    said = [str(one.get("msg") or "")[:120] for one in error.errors()[:5]]
+    return JSONResponse({"error": "this request is not what the route takes: " + "; ".join(f"{w}: {m}" for w, m in zip(where, said)),
+                         "detail": [{"loc": w, "msg": m} for w, m in zip(where, said)]}, status_code=422)
+
+
 import lineart  # noqa: E402  (a line-art copy of a clip, for a line-art LoRA)
 import lora_flows  # noqa: E402  (what a hub LoRA needs of a clip)
 import loras  # noqa: E402  (Keys and Wasserman LoRA Hub, beside this file)
 lora_router, lora_resolve, lora_lead = loras.attach(HOME, PACK, SPARK)
 app.include_router(lora_router)
+import hf_gate  # noqa: E402  (gated weights: the person's Hugging Face sign-in and the licence they accept, beside this file)
+app.include_router(hf_gate.attach(lambda request: agents.local(request, True)))
 app.include_router(lineart.attach(HOME))
 import picture_edit  # noqa: E402  (a picture re-drawn by the image model, with the hub's image LoRAs)
 edit_router, edit_build = picture_edit.attach(HOME, PACK, SPARK, lora_resolve, inside, relative,
@@ -1871,6 +2282,7 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
            "progress": None, "error": None, "log": "", "created": time.time(), "started": None, "finished": None,
            "estimate": estimate, "sparks": {"chosen": 1, "available": 1, "used": 1, "says": ""}}
     with lock:
+        accepting_jobs()
         jobs[job_id] = job
         order.append(job_id)
     wake.set()
@@ -1896,11 +2308,16 @@ def slate_room(plan: dict, lora: bool) -> dict:
 
 app.include_router(slate.attach(HOME, DURATIONS, compose, compose_references, REFERENCE_LIMIT,
                                 lambda: {"ref2va": ref2va_ready(), "ref2va_turbo": ref2va_turbo_ready()}, slate_room))
+import agents  # noqa: E402  (Brains and agents: the user's own CLI sign-ins and MCP tools, beside this file)
+app.include_router(agents.attach(HOME))
 import motion  # noqa: E402  (Motion Previs: a Python port of Sam Wasserman's Motion Previs Studio analysis, beside this file)
 app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)
 action_router, action_build, action_title, action_source = actions.attach(HOME, PACK, SPARK, inside, relative)
+import sound  # noqa: E402  (sound effects and foley: Stable Audio Open and MMAudio, run locally, beside this file)
+sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative, held_room)
 app.include_router(action_router)
+app.include_router(sound_router)
 import clear  # noqa: E402  (finished jobs and their files into the trash folder, and back, beside this file)
 app.include_router(clear.attach(HOME, jobs, order, lock)[0])
 import sparks  # noqa: E402  (worker Sparks behind this queue: a job's "sparks" number, beside this file)
@@ -1930,8 +2347,52 @@ def clip_time(kind: str, params: dict) -> int | None:
 
 hub = sparks.Hub(HOME, PACK, SPARK, jobs, order, lock, wake, about_this_spark, inside, perform, clip_time)
 app.include_router(hub.router())
+import updates  # noqa: E402  (Git source updates after an idle, graceful app shutdown)
+
+
+def update_busy():
+    with hub.mutex:
+        workers_active = any(worker.get("working") or worker.get("job") for worker in hub.live.values())
+    return (update_writes > 0 or workers_active
+            or any(job["status"] in ("queued", "running") for job in jobs.values())
+            or running.get("process") is not None
+            or Path(os.environ.get("STUDIO_GPU_LOCK", Path.home() / "studio-gpu.lock.d")).exists())
+
+
+updater = updates.Manager(PACK, HOME, lock, update_busy)
+app.include_router(updater.router())
+app.router.on_startup.append(updater.start)
+app.router.on_shutdown.append(updater.stop.set)
 if hasattr(app.router, "on_shutdown"):
     app.router.on_shutdown.append(hub.close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
+import telemetry  # noqa: E402  (this machine's readings for the status bar: GPU, memory, disk, queue, beside this file)
+app.include_router(telemetry.attach(HOME, jobs, order, lock, memory_guard))
+import suite  # noqa: E402  (the filmmaker suite's files in and out: imports, timeline, dailies, beside this file)
+app.include_router(suite.attach(HOME, jobs, lock, PRESETS, app))
+app.include_router(settings.attach(HOME))
+try:
+    import nodes  # noqa: E402  (Nodes: a canvas of the studio's own jobs, run in order, beside this file)
+except ImportError:  # an install without it keeps the rest of the app
+    nodes = None
+if nodes is not None:
+    app.include_router(nodes.attach(HOME, enqueue, jobs, lock, inside, relative))
+try:
+    import discover  # noqa: E402  (models, weights and LoRAs found anywhere on this machine: Machine → Models & weights)
+except ImportError:
+    discover = None
+if discover is not None:
+    app.include_router(discover.attach(HOME, Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()))
+
+
+@app.middleware("http")
+async def fresh_pages(request, call_next):
+    """The page and its scripts are checked again on every load, so an update shows without a forced reload."""
+    response = await call_next(request)
+    if not request.url.path.startswith(("/api/", "/files/")):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 
 if not media_tools()["ffmpeg"]:
@@ -1944,5 +2405,15 @@ if __name__ == "__main__":
         Path(os.environ["STUDIO_PIDFILE"]).write_text(str(os.getpid()))
     hub.start()
 
-    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "7870")),
-                log_level="warning")
+    # Update authorization needs the actual socket peer. Tailscale Serve forwards the browser's IP,
+    # but its authenticated local proxy is the peer allowed to manage this loopback installation.
+    web_server = uvicorn.Server(uvicorn.Config(app, host=os.environ.get("HOST", "127.0.0.1"),
+                               port=int(os.environ.get("PORT", "7870")), log_level="warning", proxy_headers=False,
+                               timeout_graceful_shutdown=10))  # open connections (event streams) never hold a restart
+
+    def restart() -> None:
+        telemetry.STOPPING.set()  # every /api/events stream ends at its next tick, so the server can close
+        web_server.should_exit = True
+
+    updater.restart = restart
+    web_server.run()

@@ -1,5 +1,14 @@
-Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3 (Mac + DGX Spark)
-Pack: drowzeys / keys.
+Imagination Studio — by Keys + Wasserman, powered by TensorFold (Mac + DGX Spark)
+(formerly Wasserman Slate AI Studio, built with integrated Fish Audio Drama 3)
+Copyright 2026 Keys (drowzeys) and Sam Wasserman (Wasserman Productions)
+https://github.com/drowzeys · https://wassermanproductions.com · https://github.com/wassermanproductions
+
+This product was created by Keys (drowzeys) and Sam Wasserman of Wasserman Productions. If you use, fork, or
+redistribute this software or derivative works, you must retain this NOTICE file and credit
+"Keys (github.com/drowzeys)" and "Sam Wasserman / Wasserman Productions (wassermanproductions.com)" in your
+documentation and any about/credits surface, per Section 4(d) of the Apache License 2.0.
+
+Pack: drowzeys / keys, with Wasserman Productions.
 
 This pack installs and runs other people's work. See CREDITS.md. It ships no model weights.
 
@@ -16,6 +25,10 @@ Forest Labs. Non-commercial use; commercial use of the outputs only for Qualifyi
 under the licence's terms. This pack ships no FLUX 3 weights: they are downloaded from Black Forest Labs' releases
 (huggingface.co/black-forest-labs) when a user installs them with --flux3. On a Mac they run on flux3-mlx (Apache-2.0,
 felix-ab), installed in an environment of its own.
+
+MOSS-Image is licensed under the Apache License 2.0, Copyright (c) 2026 OpenMOSS. Commercial use is allowed under the
+licence's terms. This pack ships no MOSS-Image weights: they are downloaded from Comfy Org's repackaged release
+(huggingface.co/Comfy-Org/MOSS-Image, from OpenMOSS-Team/MOSS-Image-SFT) when a user installs them with --moss.
 
 Fish Audio Drama 3 is licensed under the Fish Audio Community License v1.0, Copyright (c) 2026 Fish Audio. Built with
 Fish Audio. Free for non-commercial use and for commercial use below US$500,000 annual revenue; offering speech

@@ -3,16 +3,20 @@
 #   bash scripts/app.sh                 # http://127.0.0.1:7870
 #   HOST=0.0.0.0 bash scripts/app.sh    # also reachable from other machines on your network (no login: trusted LANs only)
 # Environment: PREFIX, QWEN_MODEL_DIR, H3_MODEL_DIR (as for the other scripts), HOST, PORT, STUDIO_HOME (default
-# ~/TensorFoldStudio, where projects, uploads and renders are kept).
+# ~/ImaginationStudio, where projects, uploads and renders are kept).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 export PATH="/opt/homebrew/bin:$PATH"
 [ -x "$PREFIX/venv/bin/python" ] || { echo "run oneshot-setup.sh first: no environment at $PREFIX" >&2; exit 1; }
-echo "Wasserman Slate AI Studio (powered by TensorFold) on http://${HOST:-127.0.0.1}:${PORT:-7870}"
+echo "Imagination Studio · By Keys + Wasserman · powered by TensorFold on http://${HOST:-127.0.0.1}:${PORT:-7870}"
 # The app starts without ffmpeg and says what it then cannot do (long videos, the timeline export, frames taken from a
 # clip, reference videos and audio); the page shows the same line.
 for TOOL in ffmpeg ffprobe; do
   command -v "$TOOL" >/dev/null || echo "  ! $TOOL is not installed on this machine: $([ "$(uname -s)" = Linux ] && echo "sudo apt install ffmpeg" || echo "brew install ffmpeg")" >&2
 done
-exec "$PREFIX/venv/bin/python" "$HERE/app/server.py"
+# Worker Sparks keep their existing PID and lifecycle contract with the head Studio.
+if [ -n "${STUDIO_PIDFILE:-}" ] || ! command -v git >/dev/null || ! git -C "$HERE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  exec "$PREFIX/venv/bin/python" "$HERE/app/server.py"
+fi
+exec "$PREFIX/venv/bin/python" "$HERE/app/launcher.py"

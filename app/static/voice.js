@@ -79,7 +79,7 @@ function viewVoice() {
   const st = S.voice || { available: false, why: "This app does not know Drama 3.", defaults: {} };
   if (VO.job) { const fresh = jobs.find(j => j.id === VO.job.id); if (fresh) { if (fresh.status === "done" && VO.job.status !== "done") voLoad(); VO.job = fresh; } }
   put(box, el("div", { class: "note", style: "margin-top:-4px" }, "Speech from text with Fish Audio Drama 3, on this machine: several speakers, directions for the delivery, a voice cloned from a clip. A take can go to a MiniMax H3 reference clip as its voice (", el("b", {}, "Use as Ref2VA voice reference"), ")."),
-    el("div", { class: "note", style: "color:var(--text)" }, el("b", {}, "Built with Fish Audio."), " " + (st.licence || "") + " Nothing is sent to Fish Audio: " + (st.label || "TensorFold") + "."));
+    el("div", { class: "note vt-credit" }, typeof mark === "function" ? mark("fish", "") : null, el("b", {}, "Built with Fish Audio."), " " + (st.licence || "") + " Nothing is sent to Fish Audio: " + (st.label || "TensorFold") + "."));
   if (!st.available) put(box, el("div", { class: "tip" }, el("b", {}, "Not available here. "), st.why || ""));
   const text = el("textarea", { style: "min-height:130px", disabled: !st.available, placeholder: "What is said. <|speaker:0|> … <|speaker:15|> switch voices; [whispering], [sighs], [laughs] or a description in brackets steer the delivery." });
   bind(VO, "text", text);

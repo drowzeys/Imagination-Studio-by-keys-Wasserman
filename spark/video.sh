@@ -23,6 +23,8 @@
 # TEXT_ENCODER names another MiniMax H3 text encoder file in ComfyUI's text_encoders folder; unset or regular is MiniMax's own.
 # The clip's sound is made from a lossless copy of the decoder's output: 256 kb/s, and limited to -1 dBFS when the
 # decoded peak is higher (the render says which). AUDIO_EQ=off keeps ComfyUI's own track.
+# DELIVERY_AUDIO_RATE=48000 delivers the sound as stereo AAC at that rate (ComfyUI's H3 decoder makes 32 kHz): a
+# resampling for an editor's timeline, the picture copied unchanged, not added detail. Unset, the clip keeps 32 kHz.
 # Not on the Spark: MiniMax H3 Turbo (ENGINE=h3, QUALITY) and the 2x decoder (X2, TWOK, QHD).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,4 +88,16 @@ fi
 if [ -n "${PROMPT_FILE:-}" ]; then ARGS+=(--prompt-file "$PROMPT_FILE"); else ARGS+=(--prompt "$PROMPT"); fi
 START=$(date +%s)
 PREFIX="$PREFIX" "$PREFIX/venv/bin/python" "$HERE/spark_generate.py" "${ARGS[@]}"
+if [ -n "${DELIVERY_AUDIO_RATE:-}" ] && command -v ffprobe >/dev/null; then
+  [[ "$DELIVERY_AUDIO_RATE" =~ ^(44100|48000|96000)$ ]] || { echo "DELIVERY_AUDIO_RATE is 44100, 48000 or 96000" >&2; exit 2; }
+  AUDIO_FORMAT="$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate,channels -of csv=p=0 "$OUT")"
+  if [ -n "$AUDIO_FORMAT" ] && [ "$AUDIO_FORMAT" != "$DELIVERY_AUDIO_RATE,2" ]; then
+    NORMALIZED="$(mktemp "${OUT%.*}.audio-XXXXXX.mp4")"
+    trap 'rm -f "$NORMALIZED"' EXIT
+    ffmpeg -v error -y -i "$OUT" -map 0:v:0 -map 0:a:0 -c:v copy -c:a aac -b:a 256k -ar "$DELIVERY_AUDIO_RATE" -ac 2 -movflags +faststart "$NORMALIZED"
+    mv "$NORMALIZED" "$OUT"
+    trap - EXIT
+    echo "[studio] delivery sound: stereo $((DELIVERY_AUDIO_RATE / 1000)) kHz AAC (the picture copied unchanged)"
+  fi
+fi
 echo "[studio] $KIND, ${WIDTH:-864}x${HEIGHT:-480}, total $(( $(date +%s) - START )) s -> $OUT"

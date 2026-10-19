@@ -1,6 +1,6 @@
 """Clearing the studio: finished jobs and the clips, stills and check files they wrote go to the trash folder.
 
-Nothing here erases a file except "Empty trash". A deletion moves each file to ~/TensorFoldStudio/trash under a
+Nothing here erases a file except "Empty trash". A deletion moves each file to ~/ImaginationStudio/trash under a
 timestamped name (the convention of the library's and the LoRA hub's delete) and writes down where it came from, so
 the last deletion can be put back. What can be moved: pictures, clips and sound in renders, exports, scouts, uploads
 and qa, Drama 3 voice takes in voice, and clips in projects and slate. Never a project file, a LoRA, a model, or a file a queued or running job

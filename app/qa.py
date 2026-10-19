@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -74,6 +75,24 @@ def duration(clip: Path) -> float:
     return float(done.stdout.strip() or 0)
 
 
+def trim_heap() -> None:
+    """Give the heap this process freed back to the system (Linux): glibc keeps the arenas of a CPU Whisper model
+    after it is let go, and on a DGX Spark the GPU takes from the same memory. Only unused pages are returned."""
+
+    if not sys.platform.startswith("linux"):
+        return
+    import ctypes
+    import gc
+
+    gc.collect()
+    try:
+        trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
+    except OSError:
+        return
+    if trim is not None:
+        trim(0)
+
+
 def transcribe(clip: Path) -> str | None:
     """What is said in the clip, or None when this machine has nothing to transcribe with."""
 
@@ -94,7 +113,10 @@ def transcribe(clip: Path) -> str | None:
             with wave.open(str(sound)) as handle:
                 samples = np.frombuffer(handle.readframes(handle.getnframes()), np.int16).astype(np.float32) / 32768.0
             parts, _ = model.transcribe(samples, beam_size=5)
-            return " ".join(part.text.strip() for part in parts)
+            text = " ".join(part.text.strip() for part in parts)
+            del model, parts
+            trim_heap()  # the model is loaded for each transcript: its memory back now, not at the next job's check
+            return text
         except ImportError:
             pass
         whisper = tool("whisper")
@@ -181,10 +203,23 @@ def local_vision(picture: Path, endpoint: str, model: str) -> str:
         return json.loads(answer.read())["choices"][0]["message"]["content"]
 
 
+def default_brain() -> dict:
+    """The brain saved in Brains & tools (agents.py), which the studio's environment fills only when nothing is saved
+    (``STUDIO_DEFAULT_BRAIN``, ``STUDIO_LOCAL_ENDPOINT``, ``STUDIO_LOCAL_MODEL``)."""
+
+    try:
+        import agents
+    except ImportError:
+        return {}
+    return agents.default_brain()
+
+
 def look(picture: Path, brain: dict) -> tuple[str, str]:
     """(answer, who gave it) from the first vision model that answers: the film's brain first, then the others."""
 
-    order = [brain.get("backend")] + ["claude", "codex", "local"]
+    brain = {**default_brain(), **{key: value for key, value in (brain or {}).items() if value}}
+    # a film whose brain is a local model never has its frames sent to a cloud CLI, even when the local one is down
+    order = ["local"] if brain.get("backend") == "local" else [brain.get("backend")] + ["claude", "codex", "local"]
     tried = []
     for backend in dict.fromkeys(b for b in order if b):
         try:
