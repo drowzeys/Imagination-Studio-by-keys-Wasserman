@@ -1056,8 +1056,10 @@ def estimate(preset: str, quality: str, seconds: float, text_only: bool = False,
             base = (REF2VA_TURBO_5S if ref_turbo else REF2VA_5S).get(preset)
         return None if base is None or seconds > LONGEST else int(base * (seconds / 5.0) ** 1.6)
     if seconds > LONGEST:
-        # every part after the first opens on a frame
-        parts = [estimate(preset, quality, piece) for piece in plan(seconds)]
+        # every part after the first opens on a frame. On a DGX Spark a chained part takes the time of a clip from text:
+        # Keys measured a 30 s take at 864x480, 4 passes (two 15 s parts) in 333 s, where the from-a-picture factor
+        # said 508 s, and a 30 minute chain in about 5.5 h (2026-10-19, one Spark)
+        parts = [estimate(preset, quality, piece, text_only=SPARK) for piece in plan(seconds)]
         return None if None in parts else int(sum(parts) + 2 * len(parts))
     if SPARK:
         base = (SPARK_FASTH3_5S if SPARK_ENGINE_LIB.exists() else SPARK_COMFY_5S).get(quality, {}).get(preset)

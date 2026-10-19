@@ -51,7 +51,11 @@ const startShown = (look, id) => (look.start_cards || []).includes(id) || (START
 const homePrefs = () => typeof prefs === "function" ? prefs() : { appearance: { start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], poster: true }, presets: { recipe: "quick", mode: "clip", seconds: 5, seed: "fixed", qa_gate: true, image_model: "qwen" } };
 
 /* ---------- the composer: one box, four kinds of take, one Generate ---------- */
-const HC = { text: "", mode: null, recipe: null, made: [], busy: false };
+const HC = { text: "", mode: null, recipe: null, seconds: null, est: {}, made: [], busy: false };
+// a clip's length on Home: one clip up to 15 s, a long take (a chain of clips, each opening on the last frame) above
+const HC_LENGTHS = [5, 10, 15, 30, 60, 300, 1800];
+const hcLabel = s => s < 60 ? s + " s" : s % 60 ? Math.round(s / 6) / 10 + " min" : s / 60 + " min";
+const hcSpan = sec => sec == null ? "" : sec < 90 ? Math.round(sec) + " s" : sec < 5400 ? Math.round(sec / 60) + " min" : Math.floor(sec / 3600) + " h " + Math.round(sec % 3600 / 60) + " min";
 const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe the shot: who is there, what happens, what is heard."],
   picture: ["Picture", "qwen", "Qwen 2.1", "Describe the picture: the subject, the place, the light, the lens."],
   voice: ["Voice", "fish", "Drama 3", "Write the line as it is said. A [direction] in brackets sets the voice."],
@@ -63,11 +67,18 @@ const hcPictureModel = () => { const want = homePrefs().presets.image_model, hav
 const hcSeed = () => typeof prefSeed === "function" ? prefSeed() : 1;
 const hcTitle = t => t.replace(/\s+/g, " ").trim().slice(0, 48);
 // what Generate sends for each kind of take: the same endpoints and bodies the tabs use
+const hcClip = () => typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" };
+const hcSeconds = () => HC.seconds || hcClip().seconds || homePrefs().presets.seconds || 5;
+// the expected time of this length with this recipe (server.estimate: a long take adds up its clips), asked once a choice
+function hcEstimate() { const r = hcClip(), seconds = hcSeconds(), key = [r.preset, r.quality, seconds].join("|");
+  if (!(key in HC.est)) { HC.est[key] = undefined;
+    api("/api/estimate", { preset: r.preset, quality: r.quality, seconds, text_only: true }).then(d => { HC.est[key] = d && d.seconds != null ? d.seconds : null; render(); }, () => { HC.est[key] = null; }); }
+  return HC.est[key]; }
 async function hcRequest(mode, text, seed, retake) {
   const p = homePrefs().presets;
-  if (mode === "clip") { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" };
-    const seconds = r.seconds || p.seconds || 5;
-    const composed = await api("/api/compose", { fields: { scene: text, action: "", camera: "", dialogue: [], soundscape: "", music: "N/A" }, first_frame: false, last_frame: false, seconds });
+  if (mode === "clip") { const r = hcClip(), seconds = hcSeconds();
+    const composed = await api("/api/compose", { fields: { scene: text, action: "", camera: "", dialogue: [], soundscape: "", music: "N/A" }, first_frame: false, last_frame: false, seconds: Math.min(seconds, 15) });
+    if (seconds > 15) return ["/api/jobs", { kind: "long", title: hcLabel(seconds) + ": " + hcTitle(text).slice(0, 40), params: { prompt: composed.prompt, image: null, preset: r.preset, quality: r.quality, seed: r.seed && !retake ? r.seed : seed, total_seconds: seconds, beats: [], ...(p.qa_gate ? {} : { qa: false }) } }];
     return ["/api/jobs", { kind: "video", title: hcTitle(text), params: { prompt: composed.prompt, image: null, preset: r.preset, quality: r.quality, seed: r.seed && !retake ? r.seed : seed, seconds, ...(p.qa_gate ? {} : { qa: false }) } }]; }
   if (mode === "picture") return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40), params: { prompt: text, count: 1, seed, preset: "2k", image_model: hcPictureModel() } }];
   if (mode === "voice") return ["/api/voice/takes", { text, seed }];
@@ -112,6 +123,10 @@ function homeComposer() {
       el("button", { type: "button", class: "primary cmp-go", disabled: HC.busy, onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
       mode === "clip" ? el("button", { type: "button", class: "small cmp-recipe", title: "The render recipe: click for the next one (Settings → Presets sets the default)",
         onclick: () => { HC.recipe = ids[(ids.indexOf(rec) + 1) % ids.length]; render(); } }, el("span", { class: "eyebrow" }, "Recipe"), recipes[rec]) : null,
+      mode === "clip" ? el("button", { type: "button", class: "small cmp-recipe cmp-length", title: "The clip's length: click for the next one. Over 15 s it is a long take, a chain of clips that each open on the last frame of the one before.",
+        onclick: () => { const now = hcSeconds(), at = HC_LENGTHS.indexOf(now); HC.seconds = HC_LENGTHS[(at + 1) % HC_LENGTHS.length]; render(); } },
+        el("span", { class: "eyebrow" }, hcSeconds() > 15 ? "Long take" : "Length"), hcLabel(hcSeconds()),
+        (est => est ? el("small", { class: "note m-flat" }, "about " + hcSpan(est)) : null)(hcEstimate())) : null,
       el("button", { type: "button", class: "ghost cmp-agent", onclick: hcAgent }, "Ask your agent instead"),
       el("span", { class: "su-grow" }),
       el("a", { href: "#Create", class: "cmp-more", onclick: e => { if (e.preventDefault) e.preventDefault(); hcMore(); } }, "More options →")),

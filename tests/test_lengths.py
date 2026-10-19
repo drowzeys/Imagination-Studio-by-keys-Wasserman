@@ -96,3 +96,11 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_a_long_take_on_a_spark_is_estimated_as_keys_measured_it(monkeypatch):
+    import server
+    monkeypatch.setattr(server, "SPARK", True)
+    monkeypatch.setattr(server, "SPARK_ENGINE_LIB", Path(__file__))  # TensorFold's engine is there
+    assert abs(server.estimate("small", "fh4", 30) - 333) < 0.1 * 333  # two 15 s parts, measured 333 s
+    assert 5.0 < server.estimate("small", "fh4", 1800) / 3600 < 6.0  # 30 minutes, measured about 5.5 h
