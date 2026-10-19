@@ -1196,11 +1196,28 @@ def state() -> dict:
                     "state": status, "expected": shown(item["expected"]) if not item.get("unlisted") or item.get("linkable") else "",
                     "env": item["env"], "candidates": good, "conversions": convert, "download": item.get("download", ""),
                     "link": {**record, "shown": shown(record["path"]), "link_shown": shown(record["link"])} if record else None,
-                    "linked_by_studio": bool(record), "unlisted": bool(item.get("unlisted")), "linkable": item.get("linkable", True)})
+                    "linked_by_studio": bool(record), "unlisted": bool(item.get("unlisted")), "linkable": item.get("linkable", True),
+                    "install": install_plan(item)})
     scan_info = data.get("scan")
-    return {"needs": out, "scanning": scanning(), "progress": dict(_progress), "last_scan": scan_info,
+    try:
+        import installs
+        installing = installs.public()
+    except ImportError:
+        installing = {"need": None, "state": "idle"}
+    return {"needs": out, "scanning": scanning(), "progress": dict(_progress), "last_scan": scan_info, "installing": installing,
             "tools": {k: [shown(p) for p in v] for k, v in (data.get("tools") or {}).items()},
             "platform": "spark" if SPARK else "mac" if MAC else sys.platform, "note": NOTE}
+
+
+def install_plan(item: dict) -> dict | None:
+    """How Install would add this need (installs.py), as the page shows it; None when nothing can run."""
+
+    try:
+        import installs
+        plan = installs.plan_of(item)
+    except ImportError:
+        return None
+    return {k: plan.get(k) for k in ("how", "shown", "size_gb", "lora")}
 
 
 def start_scan() -> bool:
@@ -1243,6 +1260,44 @@ def attach(home_folder: Path, prefix_folder: Path):
         except (ValueError, OSError) as error:
             raise HTTPException(400, str(error))
         return {"linked": {**record, "shown": shown(record["path"])}, **state()}
+
+    @router.post("/api/discover/install")
+    async def install(request: Request) -> dict:
+        """Install a need this machine does not have: its own installer, one at a time (installs.py)."""
+
+        suite.local(request, json_body=True)
+        import installs
+        body = await request.json()
+        item = find_need(str(body.get("need") or ""))
+        if item is None:
+            raise HTTPException(404, "no such model or weight")
+        if present(item):
+            return {"installing": installs.public(), **state()}
+        try:
+            installs.start(item)
+        except ValueError as error:
+            raise HTTPException(400, str(error.args[0]))
+        return state()
+
+    @router.get("/api/discover/install")
+    def installing() -> dict:
+        import installs
+        return installs.public()
+
+    @router.post("/api/discover/install/cancel")
+    async def stop_install(request: Request) -> dict:
+        suite.local(request, json_body=True)
+        import installs
+        installs.cancel()
+        return state()
+
+    @router.post("/api/discover/link-all")
+    async def link_all(request: Request) -> dict:
+        """Every need found on this machine with exactly one proved copy, linked where the studio looks."""
+
+        suite.local(request, json_body=True)
+        done = auto_link()
+        return {"linked": done, **state()}
 
     @router.post("/api/discover/unlink")
     async def undo(request: Request) -> dict:

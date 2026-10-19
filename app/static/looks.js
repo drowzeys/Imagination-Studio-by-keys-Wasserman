@@ -15,12 +15,16 @@ const lookTerms = r => "“" + r.name + "”" + (r.author ? " by " + r.author : 
 const GATE = { r: null, g: null, node: null, timer: null, token: "", busy: false, said: "" };
 async function loraInstallOne(r) { const out = await api("/api/loras/" + r.id + "/install", {}); if (out && out.gate) gateOpen(r, out.gate); return out; }
 const gateInstall = r => typeof loraInstallOne === "function" ? loraInstallOne(r) : api("/api/loras/" + r.id + "/install", {});
-function gateOpen(r, g) { GATE.r = r; GATE.g = g; GATE.said = ""; GATE.token = ""; gateDraw(); gateWatch(); }
+// `then` (optional) is for a gate that is not a LoRA's: {check: async () => gate, done: () => …} (Models & weights)
+function gateOpen(r, g, then) { GATE.r = r; GATE.g = g; GATE.then = then || null; GATE.said = ""; GATE.token = ""; gateDraw(); gateWatch(); }
 function gateClose() { clearInterval(GATE.timer); GATE.timer = null; GATE.r = null; if (GATE.node) { GATE.node.remove(); GATE.node = null; } }
 // while the person is on the licence page, the hub is asked every few seconds; access granted starts the download
 function gateWatch() { clearInterval(GATE.timer); GATE.timer = null; if (!GATE.r || !["accept", "pending"].includes(GATE.g.access)) return;
   GATE.timer = setInterval(gateCheck, GATE.g.gated === "manual" ? 15000 : 4000); }
 async function gateCheck() { const r = GATE.r; if (!r) return;
+  if (GATE.then) { let g; try { g = await GATE.then.check(); } catch (e) { GATE.said = e.message; gateDraw(); return; }
+    if (g && !["open", "granted"].includes(g.access)) { const was = GATE.g.access; GATE.g = { ...GATE.g, ...g }; if (was !== GATE.g.access) { gateWatch(); gateDraw(); } return; }
+    const done = GATE.then.done; gateClose(); toast("Access granted: “" + r.name + "”"); if (done) done(); return; }
   let out; try { out = await api("/api/loras/" + r.id + "/install", {}); } catch (e) { GATE.said = e.message; gateDraw(); return; }
   if (out && out.gate) { const was = GATE.g.access; GATE.g = out.gate; if (was !== GATE.g.access) { gateWatch(); gateDraw(); } return; }
   gateClose(); toast("Access granted: “" + r.name + "” is downloading"); await loadLoras(); hubWatch(render); render(); }

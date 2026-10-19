@@ -100,3 +100,32 @@ def test_unlink_and_the_optional_toggle():
     assert out["unlinked"] == ["/api/discover/unlink", {"need": "fasth3"}]
     assert "flux3k-full" in out["rows"] and "not installed (optional)" in out["text"] and "Download: oneshot-setup-spark.sh --flux3" in out["text"]
     assert "newer Studio server" in out["old"]
+
+
+def test_install_and_use_everything_found_are_one_click_each():
+    state = json.loads(json.dumps(STATE))
+    state["needs"][3]["install"] = {"how": "script", "shown": "bash scripts/setup-flux3.sh", "size_gb": 41}
+    state["needs"].append({"id": "whisper-faster", "label": "Whisper", "engine": "Speech check (Whisper)", "optional": False, "state": "missing",
+                           "expected": "~/x", "env": None, "download": "downloaded by faster-whisper on first use", "link": None,
+                           "candidates": [], "conversions": [], "install": {"how": "first_use", "shown": ""}})
+    out = run(f"""answers["/api/discover"] = {json.dumps(state)};
+      const box = viewDiscover(); await tick(); await tick();
+      find(box, n => n.tag === "input").attrs.onchange({{ target: {{ checked: true }} }});
+      out.text = text(box);
+      const row = id => find(box, n => n.attrs && n.attrs["data-need"] === id);
+      out.flux = text(row("flux3k-full")); out.whisper = text(row("whisper-faster"));
+      answers["/api/discover/install"] = {{ ...{json.dumps(state)}, installing: {{ need: "flux3k-full", state: "running", label: "FLUX3-K Full", lines: ["  ✓ environment"], shown: "bash scripts/setup-flux3.sh" }} }};
+      await button(row("flux3k-full"), "Install").attrs.onclick(); await tick();
+      out.sent = calls.find(c => c[0] === "/api/discover/install");
+      out.running = text(find(box, n => n.attrs && n.attrs["data-need"] === "flux3k-full"));
+      answers["/api/discover/link-all"] = {{ ...{json.dumps(state)}, linked: ["drama3-checkpoint"] }};
+      await button(box, "Use everything found here").attrs.onclick(); await tick();
+      out.all = calls.some(c => c[0] === "/api/discover/link-all");""")
+    if out is None:
+        return
+    assert "Use everything found here (1)" in out["text"] and "Fish Audio Drama 3 checkpoint" in out["text"]
+    assert "Install" in out["flux"] and "bash scripts/setup-flux3.sh · about 41 GB" in out["flux"]
+    assert "Comes by itself the first time it is used" in out["whisper"] and "Install" not in out["whisper"]
+    assert out["sent"] == ["/api/discover/install", {"need": "flux3k-full"}]
+    assert "installing…" in out["running"] and "Cancel" in out["running"] and "✓ environment" in out["running"]
+    assert out["all"]

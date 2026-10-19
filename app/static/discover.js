@@ -1,7 +1,8 @@
 "use strict";
 /* Machine → Models & weights (app/discover.py): what the studio needs, whether it is where the studio looks, and
    where a scan of this machine found it otherwise. "Use it" links the found file or folder where the studio looks
-   (nothing is moved, copied or downloaded); "Unlink" undoes a link the studio made. viewDiscover() draws the panel. */
+   (nothing is moved, copied or downloaded), "Use everything found here" links each one proved; "Install" runs a
+   missing one's own installer (app/installs.py); "Unlink" undoes a link the studio made. viewDiscover() draws it. */
 (() => {
   if (typeof document === "undefined" || !document.head || document.getElementById("discover-style")) return;
   const style = document.createElement("style");
@@ -65,8 +66,35 @@ function dscRow(node, n) {
       el("span", { class: "note" }, c.verified ? "proved by " + c.proof : c.proof), c.copies && c.copies.length ? el("span", { class: "note" }, "identical copies: " + c.copies.length) : null, use(c))) : null,
     !n.link && n.state !== "expected" ? (n.conversions || []).map(c => el("div", {}, el("div", { class: "dsc-path" }, "found " + c.shown + ", in another layout: " + (c.note || "")),
       c.convert ? el("div", { class: "dsc-cmd" }, c.convert) : null)) : null,
-    n.state === "missing" && n.download ? el("div", { class: "note" }, "Download: " + n.download) : null);
+    n.state === "missing" ? dscInstall(node, n) : null);
 }
+
+// what Install does for a need that is not on this machine: the engine's own installer, the LoRA hub, or nothing to run
+const dscRunning = () => DSC.data && DSC.data.installing && DSC.data.installing.state === "running";
+function dscInstall(node, n) { const p = n.install || {}, job = DSC.data.installing || {}, mine = job.need === n.id;
+  if (p.how === "first_use") return el("div", { class: "note" }, "Comes by itself the first time it is used.");
+  if (!p.how) return n.download ? el("div", { class: "note" }, "Download: " + n.download) : null;  // a server without Install
+  if (p.how === "manual") return n.download ? el("div", { class: "note" }, "Installed by hand: " + n.download) : null;
+  if (p.how === "lora") { const r = (typeof LORAS !== "undefined" ? LORAS : []).find(x => x.id === p.lora) || { id: p.lora, name: n.label };
+    return el("div", { class: "dsc-cand" }, el("button", { class: "small on", onclick: async () => { try { const out = typeof loraInstallOne === "function" ? await loraInstallOne(r) : await api("/api/loras/" + p.lora + "/install", {});
+      if (!(out && out.gate)) toast("Installing " + (r.name || n.label)); setTimeout(() => dscLoad(node), 1500); } catch (e) { toast(e.message, 6000); } } }, "Install"), el("span", { class: "note" }, "from its author's page, through the LoRA hub")); }
+  const size = p.size_gb ? " · about " + p.size_gb + " GB" : "";
+  if (mine && job.state === "running") return el("div", {}, el("div", { class: "dsc-cand" }, el("span", { class: "dsc-state scanning" }, "installing…"),
+      el("button", { class: "small", onclick: () => dscDo(node, "/api/discover/install/cancel", {}, n.id) }, "Cancel")),
+    el("div", { class: "dsc-cmd" }, (job.lines || []).slice(-4).join("\n") || job.shown));
+  return el("div", {},
+    mine && job.state === "failed" ? el("div", { class: "note vt-bad" }, job.reason) : null,
+    mine && job.state === "gated" ? el("div", { class: "note vt-bad" }, "A file it needs is gated on Hugging Face" + (job.gate && job.gate.repo ? " (" + job.gate.repo + ")" : "") + ": accept its licence, then Install again.") : null,
+    el("div", { class: "dsc-cand" },
+      el("button", { class: "small on", disabled: !!DSC.busy || dscRunning(), title: "Runs " + p.shown, onclick: () => dscDo(node, "/api/discover/install", { need: n.id }, n.id).then(() => dscFollow(node)) },
+        mine && job.state === "done" ? "Installed" : "Install"),
+      mine && job.state === "gated" && job.gate && job.gate.page && typeof gateOpen === "function" ? el("button", { class: "small", onclick: () => gateOpen({ id: n.id, name: n.label }, job.gate, {
+        check: () => api("/api/hf/repo?repo=" + encodeURIComponent(job.gate.repo)),
+        done: () => dscDo(node, "/api/discover/install", { need: n.id }, n.id).then(() => dscFollow(node)) }) }, "Get access") : null,
+      el("span", { class: "note" }, p.shown + size)));
+}
+// while an installer runs, the page follows it
+function dscFollow(node) { clearTimeout(DSC.follow); if (!dscRunning()) return; DSC.follow = setTimeout(async () => { await dscLoad(node); dscFollow(node); }, 2500); }
 
 function dscDraw(node) {
   const d = DSC.data, rows = [];
@@ -84,6 +112,12 @@ function dscDraw(node) {
     : scan ? "Last scan " + dscWhen(scan.at) + ", " + scan.dirs + " folders in " + scan.seconds + " s" + (scan.complete ? "." : " (stopped at its time limit).") : "Not scanned yet: a scan runs shortly after the Studio starts."));
   rows.push(el("div", { class: "note" }, d.note || "Nothing is moved or downloaded."));
   rows.push(el("div", { class: "note" }, count("expected") + " in place · " + count("found") + " found elsewhere · " + count("needs-conversion") + " to convert · " + count("missing") + " not on this machine"));
+  const ready = needs.filter(n => n.state === "found" && !n.link && (n.candidates || []).filter(c => c.verified).length === 1);
+  if (ready.length) rows.push(el("div", { class: "dsc-cand" }, el("button", { class: "primary", disabled: !!DSC.busy,
+      title: "Link each one where the studio looks for it: nothing is moved, copied or downloaded",
+      onclick: () => dscDo(node, "/api/discover/link-all", {}, "link-all").then(() => toast("Linked what was found on this machine")) }, "Use everything found here (" + ready.length + ")"),
+    el("span", { class: "note" }, "Already on this machine: " + ready.map(n => n.label).slice(0, 4).join(", ") + (ready.length > 4 ? "…" : ""))));
+  if (dscRunning()) { const j = DSC.data.installing; rows.push(el("div", { class: "note" }, "Installing " + j.label + "…")); dscFollow(node); }
   rows.push(el("label", { class: "note", style: "display:flex;gap:6px;align-items:center" }, el("input", { type: "checkbox", style: "width:auto", checked: DSC.all,
     onchange: e => { DSC.all = e.target.checked; dscDraw(node); } }), "Show optional models that are not installed"));
   for (const g of groups) rows.push(el("div", { class: "dsc-group" }, el("h3", {}, g.name), g.needs.map(n => dscRow(node, n))));

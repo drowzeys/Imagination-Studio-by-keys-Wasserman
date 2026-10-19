@@ -139,6 +139,22 @@ def gate_of(url: str) -> dict:
     return out
 
 
+def repo_gate(repo: str) -> dict:
+    """gate_of for a whole repository (an installer's download): access is read on one of its gated files."""
+
+    if not REPO.fullmatch(repo or ""):
+        return {"gated": False, "access": "open"}
+    try:
+        with call(f"{HUB}/api/models/{repo}") as reply:
+            files = [s.get("rfilename", "") for s in json.loads(reply.read(4 << 20)).get("siblings", [])]
+    except (urllib.error.URLError, OSError, ValueError):
+        files = []
+    first = next((f for f in files if f not in (".gitattributes", "README.md", "LICENSE.md", "LICENSE") and not f.endswith(".md")), None)
+    if not first:
+        return {"gated": gated(repo) or "unknown", "repo": repo, "page": f"{HUB}/{repo}", "token_page": TOKEN_PAGE, "access": "accept"}
+    return gate_of(f"{HUB}/{repo}/resolve/main/{first}")
+
+
 def save_token(given) -> dict:
     """A read token checked with the hub, then kept where Hugging Face's tools keep it."""
 
@@ -174,6 +190,14 @@ def attach(guard=None) -> APIRouter:
     @router.get("/api/hf")
     def hf_status() -> dict:
         return status()
+
+    @router.get("/api/hf/repo")
+    def hf_repo(repo: str = "") -> dict:
+        """A whole repository's gate, for an installer's download (Models & weights)."""
+
+        if not REPO.fullmatch(repo):
+            raise HTTPException(400, "repo is owner/name")
+        return repo_gate(repo)
 
     @router.post("/api/hf/token")
     def hf_token(body: dict, request: Request) -> dict:
