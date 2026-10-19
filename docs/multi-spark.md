@@ -1,6 +1,6 @@
 # More than one DGX Spark: the Sparks setting
 
-A job in the Studio can use more than one DGX Spark. You choose a number from 1 to 8, **Sparks**: how many machines
+A job in the Studio can use more than one DGX Spark. You choose a number from 1 to 5, **Sparks**: how many machines
 the job may use, the one the app runs on counted as one. The app shows how many are there and able, uses that many,
 and says what the number will do before you queue anything.
 
@@ -36,15 +36,15 @@ closes when you remove the worker or stop the app. The list is kept in `sparks/s
 
 ## Choose the number
 
-The chooser, **Sparks 1 2 3 4 5 6 7 8**, is in four places and is one setting:
+The chooser, **Sparks 1 2 3 4 5**, is in four places and is one setting:
 
 - at the top of the **Queue**, on every tab;
 - in the last step of **Create**, above *Queue this clip*;
 - on the **Production** board, above *Generate every segment not yet rendered*;
 - in a **Slate** shot, under *Render this shot*.
 
-Under it the app says what will happen, for example *5 of 8 available. One clip per Spark, 5 at a time: 8 clips on
-5 Sparks.* with a time estimate, and which Sparks are left out and why (*spark-0060 (the LoRA camera-motion is not
+Under it the app says what will happen, for example *3 of 5 available. One clip per Spark, 3 at a time: 8 clips on
+3 Sparks.* with a time estimate, and which Sparks are left out and why (*spark-0060 (the LoRA camera-motion is not
 installed there)*). Choosing more than there are is allowed: the app uses what is there. Numbers above the ones
 available are shown dimmed.
 
@@ -134,4 +134,4 @@ measured run lost at four. It is an estimate. Six to eight Sparks are not measur
 - **The queue across a restart.** Jobs are kept in memory: if this app stops while a worker renders, the worker
   finishes its clip in its own folder and this app, started again, does not fetch it.
 - **Starting a worker's install.** The app sends code, not models or the environment.
-- **Six to eight Sparks.** The limit is 8 (`LIMIT` in `app/sparks.py`); nothing above five has run.
+- **Five Sparks at most.** The limit is 5 (`LIMIT` in `app/sparks.py`), the most that have been measured.

@@ -264,11 +264,11 @@ def test_the_number_is_held_to_the_sparks_there_are():
     one, two = Worker("spark-a"), Worker("spark-b")
     fresh(one, two)
     seen = client.get("/api/sparks").json()
-    assert seen["supported"] and seen["limit"] == 8 and seen["available"] == 3 and seen["listed"] == 3
+    assert seen["supported"] and seen["limit"] == 5 and seen["available"] == 3 and seen["listed"] == 3
     assert [row["state"] for row in seen["workers"]] == ["ready", "ready"] and [row["name"] for row in seen["workers"]] == ["spark-a", "spark-b"]
     assert seen["workers"][0]["can"]["fasth3"] and seen["workers"][0]["guard"] and seen["workers"][0]["memory_gb"] == 116.0
-    said = client.post("/api/sparks/plan", json={"sparks": 8, "kind": "video", "clips": 8, "seconds": 40}).json()
-    assert said["chosen"] == 8 and said["available"] == 3 and said["used"] == 3 and said["count"] == "3 of 8 available" and said["mode"] == "parallel"
+    said = client.post("/api/sparks/plan", json={"sparks": 5, "kind": "video", "clips": 8, "seconds": 40}).json()
+    assert said["chosen"] == 5 and said["available"] == 3 and said["used"] == 3 and said["count"] == "3 of 5 available" and said["mode"] == "parallel"
     assert "3 at a time" in said["says"] and said["estimate"]["one_spark"] == 320
     assert client.post("/api/sparks/plan", json={"sparks": 2, "clips": 8}).json()["count"] == "2 Sparks"
     # one clip: one Spark, and it says that a clip is not split
@@ -279,13 +279,13 @@ def test_the_number_is_held_to_the_sparks_there_are():
     # a LoRA no worker has: this Spark alone, and the reason for each worker
     lora = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 4, "params": {"loras": [{"id": "camera-motion"}]}}).json()
     assert lora["available"] == 1 and lora["used"] == 1 and len(lora["without"]) == 2 and "camera-motion" in lora["without"][0]["why"]
-    # the API: sparks on a job, 1 to 8
-    assert client.post("/api/jobs", json={"kind": "video", "sparks": 9, "params": {"prompt": "x", "preset": PRESET, "quality": QUALITY}}).status_code == 400
+    # the API: sparks on a job, 1 to 5
+    assert client.post("/api/jobs", json={"kind": "video", "sparks": 6, "params": {"prompt": "x", "preset": PRESET, "quality": QUALITY}}).status_code == 400
     assert client.post("/api/jobs", json={"kind": "video", "sparks": "many", "params": {"prompt": "x", "preset": PRESET, "quality": QUALITY}}).status_code == 400
-    job = queue(8)
-    assert job["sparks"]["chosen"] == 8 and job["sparks"]["available"] == 3 and job["sparks"]["used"] == 3
+    job = queue(5)
+    assert job["sparks"]["chosen"] == 5 and job["sparks"]["available"] == 3 and job["sparks"]["used"] == 3
     finished([job["id"]])
-    assert client.get("/api/state").json()["sparks"] == {"supported": server.SPARK, "limit": 8}
+    assert client.get("/api/state").json()["sparks"] == {"supported": server.SPARK, "limit": 5}
 
 
 def test_queued_clips_render_one_per_spark_and_come_back_here():
@@ -540,18 +540,18 @@ globalThis.text = node => node == null || node === false ? "" : typeof node !== 
 globalThis.all = (node, tag, out = []) => { if (node && typeof node === "object") { if (node.tag === tag) out.push(node); (Array.isArray(node) ? node : node.kids || []).forEach(k => all(k, tag, out)); } return out; };
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"));
 vm.runInThisContext(`(async () => { const out = {};
-  const five = { supported: true, limit: 8, available: 5, listed: 5, default: 1, this: { name: "head", state: "ready", version: "2.6.6", memory_gb: 110, disk_gb: 70, can: { fasth3: true, image: true, ref2va: true, ref2va_turbo: true, ffmpeg: true, loras: 22 } },
+  const five = { supported: true, limit: 5, available: 3, listed: 3, default: 1, this: { name: "head", state: "ready", version: "2.6.6", memory_gb: 110, disk_gb: 70, can: { fasth3: true, image: true, ref2va: true, ref2va_turbo: true, ffmpeg: true, loras: 22 } },
     workers: [{ address: "10.100.10.5", name: "gx10-5482", state: "ready", says: "idle", enabled: true, usable: true, guard: true, version: "2.6.6", memory_gb: 116.1, disk_gb: 40, can: { fasth3: true, loras: 0 }, why: "", working: "" },
               { address: "10.100.10.3", name: "spark-0060", state: "down", says: "stopped answering", enabled: true, usable: false, unusable: "it stopped answering", why: "It stopped answering for 60 s while rendering", working: "", version: "2.6.6" }] };
-  out.counts = [spkCount(five, 1), spkCount(five, 5), spkCount(five, 8), spkCount({ supported: false }, 1)];
-  answers["/api/sparks"] = five; answers["/api/sparks/plan"] = { supported: true, count: "5 of 8 available", says: "One clip per Spark, 5 at a time: 8 clips on 5 Sparks.", mode: "parallel", without: [{ name: "spark-0060", why: "it stopped answering" }], estimate: { seconds: 80, one_spark: 320, faster: 4, note: "an estimate" } };
-  await spkLoad(); spkSet(8);
+  out.counts = [spkCount(five, 1), spkCount(five, 3), spkCount(five, 5), spkCount({ supported: false }, 1)];
+  answers["/api/sparks"] = five; answers["/api/sparks/plan"] = { supported: true, count: "3 of 5 available", says: "One clip per Spark, 3 at a time: 8 clips on 3 Sparks.", mode: "parallel", without: [{ name: "spark-0060", why: "it stopped answering" }], estimate: { seconds: 80, one_spark: 320, faster: 4, note: "an estimate" } };
+  await spkLoad(); spkSet(8);  /* above the limit: held to 5 */
   const pick = sparksPick({ kind: "video", clips: 8 }); await new Promise(r => setTimeout(r, 20));
-  const buttons = all(pick, "button").filter(b => /^[1-8]$/.test(text(b)));
+  const buttons = all(pick, "button").filter(b => /^[1-9]$/.test(text(b)));
   out.buttons = buttons.map(b => text(b)); out.on = buttons.filter(b => b.attrs.class.includes(" on")).map(b => text(b)); out.far = buttons.filter(b => b.attrs.class.includes(" far")).map(b => text(b));
-  out.says = text(pick); out.sent = calls.filter(c => c[0] === "/api/sparks/plan").map(c => c[1])[0]; out.kept = calls.some(c => c[0] === "/api/sparks" && c[1] && c[1].sparks === 8);
+  out.says = text(pick); out.sent = calls.filter(c => c[0] === "/api/sparks/plan").map(c => c[1])[0]; out.kept = calls.some(c => c[0] === "/api/sparks" && c[1] && c[1].sparks === 5);
   tab = "Sparks"; out.page = text(viewSparks());
-  SPK.data = { supported: false, limit: 8, available: 1, note: "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine.", workers: [], this: {} }; spkSet(5);
+  SPK.data = { supported: false, limit: 5, available: 1, note: "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine.", workers: [], this: {} }; spkSet(5);
   const mac = sparksPick(); out.mac = [SPK.n, all(mac, "button").map(b => text(b)), text(mac)];
   console.log(JSON.stringify(out)); })().catch(e => { console.error(e); process.exit(1); });`);
 """
@@ -565,11 +565,11 @@ def test_the_page_draws_the_chooser_and_the_list():
         done = subprocess.run(["node", str(Path(scratch) / "harness.js"), str(ROOT / "app/static/sparks.js")], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr[-2000:]
     out = json.loads(done.stdout.strip().splitlines()[-1])
-    assert out["counts"] == ["this Spark alone", "5 of 5 available Sparks", "5 of 8 available", "this machine"]
-    assert out["buttons"] == list("12345678") and out["on"] == ["8"] and out["far"] == ["6", "7", "8"]
-    assert "5 of 8 available" in out["says"] and "One clip per Spark" in out["says"] and "spark-0060 (it stopped answering)" in out["says"] and "Estimate" in out["says"]
-    assert out["sent"] == {"sparks": 8, "kind": "video", "params": {}, "clips": 8, "seconds": 0} and out["kept"]
-    for words in ("gx10-5482", "10.100.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "5 available"):
+    assert out["counts"] == ["this Spark alone", "3 of 3 available Sparks", "3 of 5 available", "this machine"]
+    assert out["buttons"] == list("12345") and out["on"] == ["5"] and out["far"] == ["4", "5"]
+    assert "3 of 5 available" in out["says"] and "One clip per Spark" in out["says"] and "spark-0060 (it stopped answering)" in out["says"] and "Estimate" in out["says"]
+    assert out["sent"] == {"sparks": 5, "kind": "video", "params": {}, "clips": 8, "seconds": 0} and out["kept"]
+    for words in ("gx10-5482", "10.100.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "3 available"):
         assert words in out["page"], words
     assert out["mac"][0] == 1 and out["mac"][1] == ["1"] and "DGX Sparks" in out["mac"][2]
     # every job the page queues carries the number

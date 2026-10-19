@@ -49,7 +49,7 @@ from fastapi import APIRouter, HTTPException
 
 import remote
 
-LIMIT = 8        # the most Sparks a job may ask for. Five exist where this was written; six to eight are not measured.
+LIMIT = 5        # the most Sparks a job may ask for: five, the Sparks there are and the most that have been measured
 PORT = 7870      # a worker's app, on its own 127.0.0.1
 POLL = float(os.environ.get("STUDIO_SPARK_POLL", "2"))     # seconds between looks at a worker's job
 LOST = float(os.environ.get("STUDIO_SPARK_LOST", "60"))    # a worker silent this long while it renders is down
