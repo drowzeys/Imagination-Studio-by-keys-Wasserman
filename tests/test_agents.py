@@ -187,7 +187,10 @@ def fake(tmp_path, monkeypatch):
     shutil_rmtree(agents.HOME / ".studio-agents")
     (agents.HOME / "settings.json").unlink(missing_ok=True)
     agents.probes.clear()
+    agents.answering.clear()
     agents.threads.clear()
+    for name in ("STUDIO_DEFAULT_BRAIN", "STUDIO_LOCAL_ENDPOINT", "STUDIO_LOCAL_MODEL"):
+        monkeypatch.delenv(name, raising=False)
     yield {"bin": bin_, "log": log, "tmp": tmp_path, "calls": lambda: [json.loads(l) for l in log.read_text().splitlines()]}
     for task in list(agents.tasks.values()):  # nothing of one test runs into the next
         if task["status"] in ("queued", "running"):
@@ -342,6 +345,55 @@ def test_the_local_server(fake, monkeypatch):
         assert local["found"] and local["models"] == ["qwen3:8b"] and local["endpoint"] == url + "/v1"
     finally:
         httpd.shutdown()
+
+
+def test_a_local_server_that_answers_is_the_default_until_one_is_chosen(fake, monkeypatch):
+    up = {"http://studio-box:8091": ["nvidia-nemotron-3.5-bolt"]}
+    asked = []
+    monkeypatch.setattr(slate, "find_local", lambda given="": asked.append(given) or (
+        (slate.endpoint_of(given), up[given]) if given in up else (None, [])))
+    # nothing set: Claude Code, as before, and no address is guessed
+    assert agents.saved_settings()["default"] == "claude" and agents.default_brain()["backend"] == "claude" and asked == []
+    # the set server answers: it leads, for a new film too, and the page is told it was not chosen
+    post("/api/brains/settings", {"local_endpoint": "http://studio-box:8091"})
+    assert agents.default_brain() == {"backend": "local", "endpoint": "http://studio-box:8091", "model": ""}
+    assert slate.blank("A film")["defaults"]["brain"] == "local"
+    answer = client.get("/api/brains").json()
+    assert answer["default"] == "local" and answer["automatic"] is True
+    file = agents.HOME / ".studio-agents/settings.json"
+    assert "default" not in json.loads(file.read_text())  # an automatic default is never written down as a choice
+    # asked once a minute, not on every look
+    calls = len(asked)
+    agents.saved_settings(), agents.saved_settings()
+    assert len(asked) == calls
+    # a brain the user picks always wins, even with the local server up
+    post("/api/brains/codex/default")
+    assert agents.default_brain()["backend"] == "codex" and client.get("/api/brains").json()["automatic"] is False
+    assert json.loads(file.read_text())["default"] == "codex"
+    # and an empty choice goes back to automatic
+    assert post("/api/brains/settings", {"default": ""}).json()["settings"]["default"] == "local"
+    # the server stops answering: back to Claude Code
+    up.clear()
+    post("/api/brains/settings", {"local_endpoint": "http://studio-box:8091"})
+    assert agents.default_brain()["backend"] == "claude"
+
+
+def test_the_environment_choice_wins_over_the_automatic_default(fake, monkeypatch):
+    monkeypatch.setattr(slate, "find_local", lambda given="": (slate.endpoint_of(given), ["some-model"]) if given else (None, []))
+    monkeypatch.setenv("STUDIO_LOCAL_ENDPOINT", "http://studio-box:8091")
+    assert agents.default_brain()["backend"] == "local"
+    monkeypatch.setenv("STUDIO_DEFAULT_BRAIN", "gemini")
+    assert agents.default_brain()["backend"] == "gemini" and agents.default_automatic() is False
+
+
+def test_the_local_brain_is_named_by_its_model(fake, monkeypatch):
+    assert agents.local_label(["NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf"]) == "NVIDIA Nemotron 3.5 Bolt (local)"
+    assert agents.local_label(["nvidia-nemotron-3.5-bolt", "qwen3:8b"], "qwen3:8b") == "Local model server"  # it answers with Qwen
+    assert agents.local_label(["qwen3:8b"]) == agents.local_label([]) == "Local model server"
+    monkeypatch.setattr(slate, "find_local", lambda given="": ("http://studio-box:8091/v1", ["nvidia-nemotron-3.5-bolt"]))
+    local = client.get("/api/brains").json()["backends"][-1]
+    assert local["label"] == "NVIDIA Nemotron 3.5 Bolt (local)" and local["named"] is True
+    assert client.get("/api/slate/brain").json()["localLabel"] == "NVIDIA Nemotron 3.5 Bolt (local)"
 
 
 def test_slate_brain_goes_through_agents(fake):

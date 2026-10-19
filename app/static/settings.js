@@ -133,7 +133,7 @@ function localModelsCard() {
       el("button", { type: "button", class: "small", onclick: () => save1({ local_endpoint: L.endpoint.trim() }) }, "Save"),
       el("button", { type: "button", class: "small", disabled: L.testing || !(found && found.found), onclick: async () => { L.testing = true; render();
         try { L.said = await api("/api/brains/test", { backend: "local" }); } catch (e) { L.said = { ok: false, error: e.message }; } L.testing = false; render(); } }, L.testing ? "Asking…" : "Test")),
-    found ? el("div", { class: "note m-flat " + (found.found ? "vt-ok" : "") }, found.found ? "Found at " + found.endpoint + " · " + found.models.length + " model" + (found.models.length === 1 ? "" : "s") : found.error || "Nothing answered there. Left empty, the studio looks on 11434, 1234, 8000 and 8080.") : null,
+    found ? el("div", { class: "note m-flat " + (found.found ? "vt-ok" : "") }, found.found ? (b && b.named && b.endpoint === found.endpoint ? b.label + " · " : "") + "Found at " + found.endpoint + " · " + found.models.length + " model" + (found.models.length === 1 ? "" : "s") : found.error || "Nothing answered there. Left empty, the studio looks on 11434, 1234, 8000 and 8080.") : null,
     model ? el("div", { class: "st-lrow" }, el("span", { class: "note m-flat" }, "Model"), model) : null,
     L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null); }
 const setWhere = b => b.found ? (b.where && b.where !== "here" ? "on " + b.where.replace(/^ssh:/, "") : "found here") + (b.version ? " · " + b.version : "") : b.error || (b.where && b.where !== "here" ? "not found on " + b.where.replace(/^ssh:/, "") : "not found");

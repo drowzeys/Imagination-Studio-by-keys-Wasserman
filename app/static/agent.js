@@ -284,7 +284,7 @@ function agChooser(found) {
       title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : ((b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it")) +
         (fix ? " · Click to connect it: the studio installs it if needed, signs you in and checks it answers." : ""),
       onclick: () => { if (!ready) { if (fix) connectOpen(id); else if (typeof goSettings === "function") goSettings("connections"); return; } AG.backend = id; render(); } },
-      el("span", { class: "agr-top" }, agBadge(id), (b && b.label && !["codex", "local"].includes(id) ? b.label : name)),
+      el("span", { class: "agr-top" }, agBadge(id), (b && b.label && (!["codex", "local"].includes(id) || b.named) ? b.label : name)),
       el("span", { class: "agr-state" }, el("span", { class: "dotl" + (ready ? (on ? " t" : "") : " o") }), state),
       !ready && fix ? el("span", { class: "agr-can agr-fix" }, "Click to connect") : el("span", { class: "agr-can" + (ready && AG_HARNESS.includes(id) ? " t" : "") }, can)); }));
 }
@@ -348,7 +348,9 @@ function viewAgent() {
   if (!agReady(found.find(b => b.id === AG.backend))) {
     const chosen0 = BR.data && BR.data.settings && BR.data.settings.agent;  // the Agent room's own default (Connect sets it)
     const def = BR.data && (found.find(b => b.id === chosen0 && agReady(b)) || found.find(b => b.id === BR.data.default && agReady(b)));
-    AG.backend = ((def && (AG_HARNESS.includes(def.id) || !harnesses.some(agReady)) ? def : null) || harnesses.find(agReady) || found.find(b => agReady(b) && AG_AGENTS.some(a => a[0] === b.id)) || { id: AG.backend || "claude" }).id;
+    // nobody chose a brain or an agent, and the set local server answers: it is the room's first choice
+    const auto = BR.data && BR.data.automatic && !chosen0 && BR.data.default === "local" ? found.find(b => b.id === "local" && agReady(b)) : null;
+    AG.backend = (auto || ((def && (AG_HARNESS.includes(def.id) || !harnesses.some(agReady))) ? def : null) || harnesses.find(agReady) || found.find(b => agReady(b) && AG_AGENTS.some(a => a[0] === b.id)) || { id: AG.backend || "claude" }).id;
   }
   const missing = harnesses.filter(b => !agReady(b));
   const toolList = BR.tools ? (BR.tools.tools || BR.tools) : [{ id: "blender", label: "Blender" }, { id: "blockout", label: "Blockout" }, { id: "studio", label: "Studio" }];
