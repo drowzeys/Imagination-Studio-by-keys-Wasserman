@@ -241,7 +241,9 @@ def look(picture: Path, brain: dict) -> tuple[str, str]:
                         return last.read_text(), "Codex"
                     tried.append("Codex gave no answer")
                     continue
-                done = subprocess.run([cli, "-p", "--output-format", "json", "--allowedTools", "Read", "--model", "sonnet"],
+                # Read only, and only in this scratch folder (Claude Code's blockReadsOutsideWorkingDirectories)
+                done = subprocess.run([cli, "-p", "--output-format", "json", "--tools", "Read", "--permission-mode", "acceptEdits",
+                                       "--settings", '{"permissions": {"blockReadsOutsideWorkingDirectories": true}}', "--model", "sonnet"],
                                       input="Read the image file sheet.jpg in the current folder, then: " + VISION,
                                       capture_output=True, text=True, timeout=300, cwd=scratch, env=ENV)
                 try:

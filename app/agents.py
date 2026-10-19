@@ -1277,14 +1277,20 @@ def toml_value(value) -> str:
     return json.dumps(value)  # a JSON string or list of strings is TOML too
 
 
+CLAUDE_FILES = json.dumps({"permissions": {"blockReadsOutsideWorkingDirectories": True}})
+
+
 def harness_args(task: dict, tool: str, config_path: str, servers: dict, system: str, session: str | None = None) -> list[str]:
     """The harness's command line; `session` is the id of the thread's session to continue, None for a first turn."""
 
     if task["backend"] == "claude":
-        allowed = [f"mcp__{name}" for name in servers] + ["Read", "Write", "Glob"]
+        # Read, Write and Glob only inside the work folder: acceptEdits approves them there, nothing pre-approves them
+        # anywhere else, and CLAUDE_FILES makes the file tools refuse reads outside it (checked with Claude Code 2.1.293:
+        # a read of a file beside the work folder was denied, one inside it answered)
+        allowed = [f"mcp__{name}" for name in servers]
         args = [tool, "-p", "--output-format", "stream-json", "--verbose", "--mcp-config", config_path, "--strict-mcp-config",
                 "--tools", "Read,Write,Glob", "--allowedTools", ",".join(allowed), "--permission-mode", "acceptEdits",
-                "--append-system-prompt", system]
+                "--settings", CLAUDE_FILES, "--append-system-prompt", system]
         if task.get("thread"):  # a session of its own, named by the Studio on the first turn and resumed after
             args += ["--resume", session] if session else ["--session-id", task["_session"]["id"]]
         return args
@@ -2355,8 +2361,55 @@ def public_key() -> tuple[Path | None, str | None]:
     return None, None
 
 
+# The addresses a machine has, for the from= of an authorized_keys line: what `ip -o addr` (Linux) or `ifconfig` (a Mac)
+# lists, loopback and link-local left out. The same script runs here and, over ssh, on the linked computer.
+ADDRESSES = ("{ ip -o addr show 2>/dev/null | awk '{print $4}'; ifconfig 2>/dev/null | awk '$1==\"inet\"||$1==\"inet6\"{print $2}'; } "
+             "| sed 's,/.*,,; s,%.*,,' | sort -u")
+
+
+def usable_addresses(text: str) -> list[str]:
+    """from= entries that stay true: IPv4 addresses (a private LAN one as its /24, which DHCP keeps it in) and Tailscale's
+    own IPv6; other IPv6 addresses are left out, as most of them are temporary and change."""
+
+    import ipaddress
+    out = []
+    for word in text.split():
+        try:
+            ip = ipaddress.ip_address(word)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+            continue
+        if ip.version == 6:
+            if ip in ipaddress.ip_network("fd7a:115c:a1e0::/48"):
+                out.append(str(ip))
+        elif ip.is_private and ip not in ipaddress.ip_network("100.64.0.0/10"):
+            out.append(str(ipaddress.ip_network(f"{ip}/24", strict=False)))
+        else:
+            out.append(str(ip))
+    return list(dict.fromkeys(out))[:16]
+
+
+def my_addresses() -> list[str]:
+    try:
+        done = subprocess.run(["sh", "-c", ADDRESSES], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return usable_addresses(done.stdout)
+
+
+def key_options(addresses: list[str], forward: bool) -> str:
+    """authorized_keys options for a key the Studio adds: `restrict` (no forwarding, agent, X11 or ~/.ssh/rc), from= the
+    other machine's own addresses when they are known; the studio's key keeps a pty (claude setup-token runs in one)
+    and forwarding to that machine's own loopback only (a Spark's app is reached through such a tunnel)."""
+
+    options = "restrict" + (',pty,port-forwarding,permitopen="127.0.0.1:*"' if forward else "")
+    return options + (',from="' + ",".join(addresses) + '"' if addresses else "")
+
+
 def authorize_line(key: str) -> str:
-    return ("mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF '" + key + "' ~/.ssh/authorized_keys 2>/dev/null || echo '" + key +
+    line = key_options(my_addresses(), forward=True) + " " + key
+    return ("mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF '" + line + "' ~/.ssh/authorized_keys 2>/dev/null || echo '" + line +
             "' >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys")
 
 
@@ -2491,7 +2544,7 @@ def reach_back(host: str, allow: bool = False) -> dict:
         key = remote_key(host)
         if not key:
             return {"ok": False, "state": "no_key", "detail": f"{host} has no SSH key to allow, and could not make one."}
-        authorize_here(key)
+        authorize_here(key, remote_addresses(host))
     script = ('for a in $(awk \'tolower($1)=="host"{for(i=2;i<=NF;i++) if ($i !~ /[*?!]/) print $i}\' ~/.ssh/config 2>/dev/null); do '
               'h=$(ssh -G "$a" 2>/dev/null | awk \'$1=="hostname"{print $2}\'); echo "alias $a $h"; done')
     try:
@@ -2539,18 +2592,39 @@ def remote_key(host: str) -> str | None:
     return key if re.fullmatch(r"(ssh-ed25519|ecdsa-sha2-nistp\d+|ssh-rsa) [A-Za-z0-9+/=]+( .*)?", key) else None
 
 
-def authorize_here(key: str) -> None:
-    """The key in this machine's ~/.ssh/authorized_keys once (0600), its comment left as the other computer wrote it."""
+def remote_addresses(host: str) -> list[str]:
+    """The linked computer's own addresses (the from= of its key here); [] when they cannot be read."""
+
+    try:
+        done = subprocess.run([*ssh_of(host), ADDRESSES], capture_output=True, text=True, timeout=PROBE_TIMEOUT + 4, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return usable_addresses(done.stdout)
+
+
+def authorize_here(key: str, addresses: list[str] | None = None) -> None:
+    """The key in this machine's ~/.ssh/authorized_keys once (0600), tagged imagination-studio-link, limited by
+    key_options: only to run commands, from the linked computer's addresses. A line the Studio wrote before those
+    limits is rewritten with them; a line the person wrote for the same key is left as it is."""
 
     kind, body = key.split()[:2]
     folder = Path.home() / ".ssh"
     folder.mkdir(mode=0o700, exist_ok=True)
     keys = folder / "authorized_keys"
     have = keys.read_text() if keys.is_file() else ""
-    if any(line.split()[1:2] == [body] for line in have.splitlines() if len(line.split()) >= 2):
-        return
-    with open(keys, "a") as out:
-        out.write(("" if not have or have.endswith("\n") else "\n") + f"{kind} {body} imagination-studio-link\n")
+    line = f"{key_options(addresses or [], forward=False)} {kind} {body} imagination-studio-link"
+    lines, found = have.splitlines(), False
+    for i, old in enumerate(lines):
+        words = old.split()
+        if body in words:
+            found = True
+            if words[-1] == "imagination-studio-link" and old != line:
+                lines[i] = line
+    if not found:
+        lines.append(line)
+    text = "\n".join(lines) + "\n"
+    if text != (have if have.endswith("\n") else have + "\n"):
+        keys.write_text(text)
     os.chmod(keys, 0o600)
 
 
