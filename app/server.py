@@ -1909,21 +1909,32 @@ def cancel(job_id: str) -> dict:
 NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa")  # jobs a Spark runs without its ComfyUI server
 
 
+COMFY_PROMPT = re.compile(r"^\[tensorfold\] comfy prompt ([0-9a-f-]{8,64})$", re.M)
+
+
 def stop_comfy(job: dict) -> bool:
     """On a DGX Spark the render runs inside the ComfyUI server (spark/comfy.sh), not in the script the job started:
-    killing the script leaves the prompt it queued running on the GPU. Ask the server to stop its current prompt
-    (its /interrupt, 2 s, best effort) and say in the job's log what it answered.
+    killing the script leaves the prompt it queued running on the GPU. The runner prints the id of every prompt it
+    queues ("[tensorfold] comfy prompt <id>"); the last one is this job's. It is taken out of ComfyUI's queue if it is
+    still waiting and interrupted only if it is the one running (ComfyUI's /interrupt with its prompt_id), so another
+    job's prompt is never stopped. A job that never reached ComfyUI sends nothing. Best effort, 2 s each; the job's
+    log says what happened."""
 
-    The prompt id is not known here (spark_generate.py keeps it to itself and does not print it), so a prompt still
-    waiting in ComfyUI's queue is not deleted: the script is stopped before it queues another, and the runner only
-    queues one prompt at a time, so the one that runs is this job's."""
+    found = COMFY_PROMPT.findall(job.get("log") or "")
+    if not found:
+        job["log"] = (job["log"] + "[studio] cancelled before it reached ComfyUI: nothing to stop there\n")[-20000:]
+        return True
+    prompt_id, base = found[-1], os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190"))
 
-    url = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190")) + "/interrupt"
-    try:
-        request = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+    def post(path: str, body: dict) -> int:
+        request = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(request, timeout=2) as answer:
-            said = f"ComfyUI stopped the prompt it was running (it answered {answer.status})"
-            stopped = True
+            return answer.status
+
+    try:
+        post("/queue", {"delete": [prompt_id]})  # if it is still waiting
+        status = post("/interrupt", {"prompt_id": prompt_id})  # if it is the one running; otherwise ComfyUI does nothing
+        said, stopped = f"ComfyUI was asked to stop this job's prompt {prompt_id[:8]} (it answered {status})", True
     except urllib.error.HTTPError as error:
         said, stopped = f"ComfyUI did not stop the prompt: it answered {error.code}", False
     except (OSError, ValueError) as error:

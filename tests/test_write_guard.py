@@ -283,10 +283,11 @@ def test_the_scene_and_the_action_are_two_sentences():
 
 class Comfy(http.server.BaseHTTPRequestHandler):
     seen: list = []
+    bodies: list = []
     status = 200
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        Comfy.bodies.append(json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}"))
         Comfy.seen.append(self.path)
         self.send_response(Comfy.status)
         self.send_header("Content-Length", "0")
@@ -300,16 +301,19 @@ class Comfy(http.server.BaseHTTPRequestHandler):
 def comfy(monkeypatch):
     stand_in = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Comfy)
     threading.Thread(target=stand_in.serve_forever, daemon=True).start()
-    Comfy.seen, Comfy.status = [], 200
+    Comfy.seen, Comfy.bodies, Comfy.status = [], [], 200
     monkeypatch.setenv("SPARK_COMFY_URL", f"http://127.0.0.1:{stand_in.server_address[1]}")
     yield stand_in
     stand_in.shutdown()
 
 
-def running_job(kind: str = "video") -> str:
+PROMPT = "8c1f2a3b-4d5e-6f70-8192-a3b4c5d6e7f8"
+
+
+def running_job(kind: str = "video", log: str = f"[tensorfold] comfy prompt {PROMPT}\n") -> str:
     job_id = f"t{time.time_ns()}"
     server.jobs[job_id] = {"id": job_id, "kind": kind, "status": "running", "title": "t", "params": {}, "outputs": [],
-                           "log": "", "created": time.time(), "started": time.time()}
+                           "log": log, "created": time.time(), "started": time.time()}
     process = subprocess.Popen(["sleep", "30"], start_new_session=True)
     server.running.update(process=process, id=job_id)
     return job_id
@@ -323,14 +327,24 @@ def finish(job_id: str):
     return process
 
 
-def test_cancel_on_a_spark_stops_the_prompt_comfyui_is_running(comfy, monkeypatch):
+def test_cancel_on_a_spark_stops_only_this_jobs_prompt(comfy, monkeypatch):
     monkeypatch.setattr(server, "SPARK", True)
-    job_id = running_job()
+    job_id = running_job(log=f"[tensorfold] comfy prompt 00000000-1111-2222-3333-444444444444\nstep\n[tensorfold] comfy prompt {PROMPT}\n")
     reply = client.post(f"/api/jobs/{job_id}/cancel")
     assert reply.json()["status"] == "cancelled"
-    assert Comfy.seen == ["/interrupt"]
-    assert "ComfyUI stopped the prompt" in reply.json()["log"]
+    # out of the queue if it waits, interrupted only if it is the one running: never another job's prompt
+    assert Comfy.seen == ["/queue", "/interrupt"]
+    assert Comfy.bodies == [{"delete": [PROMPT]}, {"prompt_id": PROMPT}]
+    assert "asked to stop this job's prompt 8c1f2a3b" in reply.json()["log"]
     assert finish(job_id).returncode is not None  # the script is stopped too, as before
+
+
+def test_cancel_before_comfyui_sends_nothing(comfy, monkeypatch):
+    monkeypatch.setattr(server, "SPARK", True)
+    job_id = running_job(log="[tensorfold] loading\n")
+    reply = client.post(f"/api/jobs/{job_id}/cancel")
+    assert Comfy.seen == [] and "before it reached ComfyUI" in reply.json()["log"]
+    finish(job_id)
 
 
 def test_cancel_says_so_when_comfyui_does_not_answer(monkeypatch):
