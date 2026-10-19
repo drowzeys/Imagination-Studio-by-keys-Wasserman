@@ -32,6 +32,7 @@ another machine (remote) needs every command to be valid there, so a tool is res
 """
 from __future__ import annotations
 
+import atexit
 import concurrent.futures
 import json
 import os
@@ -66,7 +67,10 @@ LOG_LIMIT = 20000
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 # where coding CLIs install themselves on a remote machine whose non-interactive shell does not have them on PATH
 REMOTE_PATH = 'PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.claude/local:$HOME/.npm-global/bin:$HOME/.bun/bin"; export PATH; '
-MAC_CODEX = ("/Applications/ChatGPT.app/Contents/Resources/codex", "/Applications/Codex.app/Contents/Resources/codex")
+# a Codex CLI a Mac app carries, used when no codex is on PATH. The ChatGPT desktop app's is a folder, Resources/codex-cli,
+# whose codex-package.json names the entrypoint (bin/codex); its sign-in is the ChatGPT app's (as in Sam Wasserman's Slate)
+MAC_CODEX = ("/Applications/ChatGPT.app/Contents/Resources/codex-cli", "/Applications/ChatGPT.app/Contents/Resources/codex",
+             "/Applications/Codex.app/Contents/Resources/codex")
 HOST = re.compile(r"(?:[A-Za-z0-9._-]{1,64}@)?[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252})(?::[0-9]{1,5})?")
 TOOL_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
@@ -285,8 +289,24 @@ def cli(name: str) -> str | None:
         return studio_settings()["hermes_command"]
     found = shutil.which(CLIS[name][1] if name in CLIS else name, path=search_path())
     if not found and name == "codex" and sys.platform == "darwin":
-        found = next((p for p in MAC_CODEX if os.access(p, os.X_OK)), None)
+        found = next(filter(None, (bundled_codex(p) if os.path.isdir(p) else p if os.access(p, os.X_OK) else None for p in MAC_CODEX)), None)
     return found
+
+
+def bundled_codex(base: str) -> str | None:
+    """The binary inside an app's codex-cli folder: codex-package.json's entrypoint, else bin/codex."""
+
+    entry = read_json(Path(base) / "codex-package.json", {})
+    entry = str(entry.get("entrypoint") or "") if isinstance(entry, dict) else ""
+    for rel in ([entry] if entry and not entry.startswith("/") and ".." not in Path(entry).parts else []) + ["bin/codex"]:
+        path = Path(base) / rel
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
+def from_chatgpt(path: str | None) -> bool:
+    return bool(path) and "/ChatGPT.app/" in path
 
 
 def version_of(path: str) -> str | None:
@@ -308,7 +328,7 @@ def probe_remote(host: str, names: list[str]) -> dict:
 
     looks = []
     for name in names:
-        extra = " || ls " + " ".join(MAC_CODEX) + " 2>/dev/null | head -1" if name == "codex" else ""
+        extra = " || ls " + " ".join(p + "/bin/codex" if p.endswith("codex-cli") else p for p in MAC_CODEX) + " 2>/dev/null | head -1" if name == "codex" else ""
         looks.append(f'p=$(command -v {shlex.quote(CLIS[name][1])}{extra}) && [ -n "$p" ] && '
                       f'printf "%s\\t%s\\t%s\\n" {name} "$p" "$("$p" --version 2>/dev/null | head -1)"')
     script = REMOTE_PATH + "; ".join(f"( {look} )" for look in looks) + "; true"
@@ -372,6 +392,10 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
         else:
             path, version = seen.get(("", name)) or (None, None)
             item.update(found=bool(path), path=path, version=version)
+        if name == "codex" and from_chatgpt(item["path"]):
+            item["label"] = "Codex (from the ChatGPT app)"
+        item.update(signin_flow=recipe_of(name, item["where"] != "here")["flow"], signin_command=terminal_line(name),
+                    signin_note=SIGNIN_NOTES.get(name))
         out.append(item)
     base, models = seen.get(("local", "")) or (None, [])
     out.append({"id": "local", "label": "Local model server", "kind": "http", "found": bool(base), "harness": False, "session": False,
@@ -1420,6 +1444,399 @@ def perform(task: dict) -> None:
         task.pop("_error", None)
 
 
+# ---------- signing a brain in: the CLI's own login, in a pseudo-terminal ----------
+#
+# The Studio never sees a password or keeps a token: it starts the CLI's own login command (here, or on the brains'
+# SSH host with `ssh -tt`) in a pty, reads what it prints and shows the page the parts a person acts on, the sign-in
+# address, a device code to type there, or a field for the code the sign-in page hands back, which goes to the CLI's
+# terminal and nowhere else. The CLI stores its own credentials where it always does. One sign-in at a time, stopped
+# after SIGNIN_TIMEOUT; nothing of it is written to disk. States: starting, needs_browser {url}, needs_code {url,
+# prompt}, device_code {url, code}, verifying (a code was sent), done, failed {reason}.
+#
+# The recipes (from each CLI's --help on a Mac, October 2026):
+#   claude  `claude auth login --claudeai`: prints a claude.ai address and asks for the code that page shows.
+#   codex   `codex login`: a browser sign-in whose callback lands on localhost of the CLI's machine, so only when the
+#           CLI runs here; `codex login --device-auth` (an address and a one-time code) on another machine or with
+#           STUDIO_SIGNIN_DEVICE=1.
+#   grok    `grok login --device-auth`: an address and a code, for headless and remote machines.
+#   hermes  `hermes auth add <provider> --type oauth --no-browser`, one of HERMES_PROVIDERS.
+#   gemini  signs in inside its own first interactive run: the page shows the Terminal command.
+SIGNIN_TIMEOUT = 6 * 60
+STATUS_TIMEOUT = 15
+STATUS_TTL = 30
+HERMES_PROVIDERS = ("openai-codex", "anthropic", "nous")
+SIGNIN_NOTES = {
+    "claude": "Opens claude.ai for your Claude subscription; paste the code it shows back here.",
+    "codex": "Signs in with ChatGPT. On another computer it gives you a one-time code to enter at openai.com.",
+    "grok": "Gives you a one-time code to enter at x.ai.",
+    "hermes": "Adds a provider sign-in to Hermes' own credential pool.",
+    "gemini": "Gemini CLI signs in with Google the first time it runs in a terminal.",
+}
+ANSI = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b[()][A-Za-z0-9]|\x1b[=>78DEHMNOZc]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+OSC_LINK = re.compile(r"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]+)(?:\x07|\x1b\\)")
+URL = re.compile(r"https?://[^\s\"'<>`\x07\x1b]+")
+DEVICE_CODE = re.compile(r"(?<![A-Za-z0-9-])([A-Z0-9]{3,8}(?:-[A-Z0-9]{3,8}){1,3})(?![A-Za-z0-9-])")
+CODE_PROMPT = re.compile(r"paste|enter (?:the |your )?(?:authori[sz]ation |verification )?code|code here|authentication code|code:", re.I)
+SECRETISH = re.compile(r"\b(?=[A-Za-z0-9_\-+/=.]*[0-9])(?=[A-Za-z0-9_\-+/=.]*[A-Za-z])[A-Za-z0-9_\-+/=.]{24,}\b")
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+signin: dict = {"backend": None}  # the one running sign-in, its process, pty and what it printed
+statuses: dict = {}  # (backend, host) -> (monotonic time, answer)
+
+
+def end_signin() -> None:
+    """A sign-in still running when the Studio stops goes with it."""
+
+    process = signin.get("process")
+    if process is not None and process.poll() is None:
+        stop(process)
+
+
+atexit.register(end_signin)
+
+
+def terminal_line(backend: str) -> str:
+    """What to type in a terminal instead, shown on the card for every brain."""
+
+    return {"claude": "claude auth login", "codex": "codex login", "grok": "grok login", "gemini": "gemini",
+            "hermes": " ".join(["hermes", *profile_args(), "setup"])}.get(backend, "")
+
+
+def recipe_of(backend: str, remote: bool, body: dict | None = None) -> dict:
+    body = body or {}
+    if backend == "claude":
+        return {"flow": "pty", "args": ["auth", "login", "--claudeai"]}
+    if backend == "codex":
+        device = remote or os.environ.get("STUDIO_SIGNIN_DEVICE") == "1" or body.get("device") is True
+        return {"flow": "pty", "args": ["login", "--device-auth"] if device else ["login"], "device": device}
+    if backend == "grok":
+        return {"flow": "pty", "args": ["login", "--device-auth"]}
+    if backend == "hermes":
+        provider = body.get("provider") or HERMES_PROVIDERS[0]
+        if provider not in HERMES_PROVIDERS:
+            raise HTTPException(400, "provider is one of " + ", ".join(HERMES_PROVIDERS))
+        return {"flow": "pty", "args": [*profile_args(), "auth", "add", provider, "--type", "oauth", "--no-browser"]}
+    return {"flow": "terminal", "args": []}
+
+
+def plain(raw: str) -> str:
+    return ANSI.sub("", raw.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def sign_url(urls: list[str]) -> str | None:
+    """The address a person opens: the provider's own page before a localhost callback, the first one printed."""
+
+    urls = [u.rstrip(".,;:)]}") for u in urls]
+    away = [u for u in urls if (urlsplit(u).hostname or "") not in ("localhost", "127.0.0.1", "::1", "0.0.0.0")]
+    return (away or urls or [None])[0]
+
+
+def device_code_in(text: str) -> str | None:
+    lines = URL.sub(" ", text).splitlines()
+    for i, line in enumerate(lines):
+        near = " ".join(lines[max(0, i - 2):i + 1])
+        if re.search(r"code", near, re.I):
+            match = DEVICE_CODE.search(line)
+            if match and re.search(r"[0-9]", match.group(1)) or match and len(match.group(1)) >= 8 and "-" in match.group(1):
+                return match.group(1)
+    return None
+
+
+def redact(text: str, secrets=()) -> str:
+    """What the log may show: addresses without their query, no codes, tokens or email addresses."""
+
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "[code]")
+    text = URL.sub(lambda m: m.group(0).split("?")[0].split("#")[0] + ("?…" if "?" in m.group(0) else ""), text)
+    text = DEVICE_CODE.sub(lambda m: "[code]" if re.search(r"[0-9]", m.group(1)) else m.group(1), text)
+    text = SECRETISH.sub("[hidden]", text)
+    return EMAIL.sub("[email]", text)
+
+
+def read_signin(state: dict) -> dict:
+    """The page's view of a sign-in from what its CLI printed so far."""
+
+    raw = state.get("raw", "")
+    text = plain(raw)
+    url = sign_url(OSC_LINK.findall(raw) + URL.findall(text))
+    secrets = [state.get("sent") or "", state.get("code") or ""]
+    out = {"backend": state.get("backend"), "where": state.get("where") or "here", "started": state.get("started"),
+           "command": state.get("command")}
+    if state.get("ended"):
+        out["state"] = state["ended"]
+        if state.get("reason"):
+            out["reason"] = state["reason"]
+    elif state.get("sent"):
+        out["state"] = "verifying"
+    else:
+        code = device_code_in(text) if url else None
+        if code:
+            state["code"] = code
+            out.update(state="device_code", url=url, code=code)
+        elif url and CODE_PROMPT.search(text[max(0, text.find(url.split("?")[0])):]):
+            prompt = next((line.strip() for line in reversed(text.splitlines()) if CODE_PROMPT.search(line)), "Paste the code")
+            out.update(state="needs_code", url=url, prompt=redact(prompt)[:120])
+        elif url:
+            out.update(state="needs_browser", url=url)
+        else:
+            out["state"] = "starting"
+    if out["state"] in ("verifying", "done", "failed") and url:
+        out["url"] = url
+    lines = [redact(line.strip(), secrets)[:240] for line in text.splitlines() if line.strip()]
+    out["lines"] = lines[-12:]
+    return out
+
+
+def signin_argv(backend: str, host: str, args: list[str]) -> list[str]:
+    if host:
+        name, _, port = host.partition(":")
+        return [*SSH, "-tt", *(["-p", port] if port else []), name, "--", REMOTE_PATH + remote_line([remote_cli(host, backend), *args])]
+    path = cli(backend)
+    if not path:
+        raise HTTPException(400, f"{CLIS[backend][0]} is not installed on this machine")
+    return [path, *args]
+
+
+def pump(state: dict, fd: int, process) -> None:
+    """Read the pty until the CLI ends, the deadline passes or the page cancels."""
+
+    import select
+    deadline, eof = state["deadline"], False
+    try:
+        while True:
+            if state.get("cancelled"):
+                stop(process)
+                finish(state, "failed", "Cancelled.")
+                break
+            if time.monotonic() > deadline:
+                stop(process)
+                finish(state, "failed", f"No sign-in after {SIGNIN_TIMEOUT // 60} minutes: start again when you are ready.")
+                break
+            ready, _, _ = select.select([fd], [], [], 0.25)
+            if ready:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:  # the pty's other end is closed: the CLI has ended or is ending
+                    chunk = b""
+                if chunk:
+                    with lock:
+                        state["raw"] = (state.get("raw", "") + chunk.decode("utf-8", "replace"))[-65536:]
+                    continue
+                eof = True
+            if process.poll() is None:
+                if eof:
+                    time.sleep(0.1)
+                continue
+            code = process.returncode
+            if code == 0:
+                finish(state, "done", None)
+            else:
+                text = [redact(line.strip(), [state.get("sent") or ""]) for line in plain(state.get("raw", "")).splitlines() if line.strip()]
+                where = f"on {state['where'][4:]}" if state.get("where", "here") != "here" else "on this machine"
+                finish(state, "failed", (text[-1][:240] if text else f"{CLIS[state['backend']][0]} stopped") +
+                       f" (exit {code} {where})" + (" · ssh could not reach the computer" if code == 255 and state.get("where") != "here" else ""))
+            break
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def finish(state: dict, ended: str, reason: str | None) -> None:
+    with lock:
+        if not state.get("ended"):
+            state.update(ended=ended, reason=reason, process=None)
+        probes.clear()
+        statuses.clear()
+
+
+def start_signin(backend: str, body: dict) -> dict:
+    import pty  # noqa: F401  (POSIX only; the import fails loudly on a machine without ptys)
+    import termios
+    import fcntl
+    import struct
+    if backend not in CLIS:
+        raise HTTPException(404, "no such brain")
+    host = where_of(backend)
+    recipe = recipe_of(backend, bool(host), body)
+    if recipe["flow"] != "pty":
+        raise HTTPException(400, f"{CLIS[backend][0]} signs in inside its own terminal: run `{terminal_line(backend)}` there")
+    with lock:
+        if signin.get("process") is not None and not signin.get("ended"):
+            raise HTTPException(409, f"{CLIS[signin['backend']][0]} is signing in: finish or cancel that first")
+    try:
+        argv = signin_argv(backend, host, recipe["args"])
+    except RuntimeError as error:
+        raise HTTPException(400, str(error))
+    master, slave = os.openpty()
+    attrs = termios.tcgetattr(slave)
+    attrs[3] &= ~termios.ECHO  # a pasted code is not printed back
+    termios.tcsetattr(slave, termios.TCSANOW, attrs)
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 60, 1000, 0, 0))  # wide enough that an address never wraps
+    env = child_env({"TERM": "dumb", "NO_COLOR": "1", "COLUMNS": "1000", "LINES": "60"})
+    try:
+        process = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, env=env, start_new_session=True,
+                                   cwd=str(HOME) if HOME else None, close_fds=True)
+    except OSError as error:
+        os.close(master)
+        os.close(slave)
+        raise HTTPException(400, f"could not start {CLIS[backend][0]}: {error}")
+    os.close(slave)
+    state = {"backend": backend, "where": f"ssh:{host}" if host else "here", "process": process, "fd": master, "raw": "",
+             "started": time.time(), "deadline": time.monotonic() + SIGNIN_TIMEOUT, "command": " ".join([CLIS[backend][1], *recipe["args"]])}
+    with lock:
+        signin.clear()
+        signin.update(state)
+        state = signin
+    threading.Thread(target=pump, args=(state, master, process), daemon=True).start()
+    return read_signin(state)
+
+
+def signin_of(backend: str) -> dict:
+    with lock:
+        if signin.get("backend") != backend:
+            return {"backend": backend, "state": "idle", "lines": []}
+        return read_signin(signin)
+
+
+def send_code(backend: str, body: dict) -> dict:
+    code = body.get("code")
+    if not isinstance(code, str) or not code.strip() or len(code) > 2048 or any(c in code for c in "\r\n\0\x1b"):
+        raise HTTPException(400, "code is the text the sign-in page showed, on one line")
+    with lock:
+        if signin.get("backend") != backend or signin.get("ended") or signin.get("process") is None:
+            raise HTTPException(409, "no sign-in is waiting for a code")
+        fd = signin["fd"]
+        signin["sent"] = code.strip()
+    try:
+        os.write(fd, (code.strip() + "\r").encode())
+    except OSError:
+        raise HTTPException(409, "the sign-in has already ended")
+    return signin_of(backend)
+
+
+def cancel_signin(backend: str) -> dict:
+    with lock:
+        if signin.get("backend") == backend and not signin.get("ended"):
+            signin["cancelled"] = True
+            process = signin.get("process")
+        else:
+            process = None
+    if process is not None:
+        for _ in range(40):  # the reader stops it within a quarter of a second
+            if signin.get("ended"):
+                break
+            time.sleep(0.1)
+    return signin_of(backend)
+
+
+def status_args(backend: str) -> list[str]:
+    return {"claude": ["auth", "status", "--json"], "codex": ["login", "status"], "grok": ["models"],
+            "hermes": [*profile_args(), "auth", "list"]}.get(backend, [])
+
+
+def run_short(argv_tail: list[str], backend: str, host: str, timeout: int = STATUS_TIMEOUT) -> subprocess.CompletedProcess:
+    if host:
+        line = REMOTE_PATH + remote_line([remote_cli(host, backend), *argv_tail]) + " </dev/null"
+        return subprocess.run([*ssh_of(host), line], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    path = cli(backend)
+    if not path:
+        raise RuntimeError(f"{CLIS[backend][0]} is not installed on this machine")
+    return subprocess.run([path, *argv_tail], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
+                          env=child_env(), cwd=str(HOME) if HOME else None)
+
+
+def read_status(backend: str, done: subprocess.CompletedProcess) -> dict:
+    said = plain((done.stdout or "") + "\n" + (done.stderr or ""))
+    if backend == "claude":
+        try:
+            info = json.loads(done.stdout)
+        except ValueError:
+            return {"state": "unknown", "detail": redact(said.strip()[-160:])}
+        how = {"claude.ai": "Claude subscription", "oauth_token": "Claude subscription", "console": "Anthropic Console"}.get(
+            str(info.get("authMethod") or ""), str(info.get("authMethod") or ""))
+        plan = str(info.get("subscriptionType") or "")
+        return {"state": "signed_in", "detail": " · ".join(x for x in (how, plan) if x)} if info.get("loggedIn") else \
+            {"state": "signed_out", "detail": "Not signed in"}
+    if backend == "codex":
+        if re.search(r"not logged in", said, re.I):
+            return {"state": "signed_out", "detail": "Not signed in"}
+        found = re.search(r"logged in using ([^\n]+)", said, re.I)
+        if found:
+            return {"state": "signed_in", "detail": redact(found.group(1).strip())[:60]}
+    if backend == "grok":
+        found = re.search(r"logged in with ([^\s\n]+)", said, re.I)
+        if found:
+            return {"state": "signed_in", "detail": redact(found.group(1).rstrip("."))[:60]}
+        if re.search(r"not logged in|not signed in|grok login|unauthori[sz]ed|401", said, re.I):
+            return {"state": "signed_out", "detail": "Not signed in"}
+    if backend == "hermes":
+        pools = re.findall(r"^([a-z0-9][a-z0-9_.-]*) \((\d+) credentials?\)", said, re.M)
+        names = [name for name, count in pools if int(count)]
+        return {"state": "signed_in", "detail": "Providers: " + ", ".join(names)} if names else {"state": "signed_out", "detail": "No provider signed in"}
+    tail = [line for line in said.splitlines() if line.strip()]
+    return {"state": "unknown", "detail": redact(tail[-1].strip())[:160] if tail else "No answer"}
+
+
+def gemini_status(host: str) -> dict:
+    look = 'test -f "$HOME/.gemini/oauth_creds.json" && echo yes || echo no'
+    try:
+        done = subprocess.run([*ssh_of(host), look] if host else ["sh", "-c", look], capture_output=True, text=True,
+                              timeout=PROBE_TIMEOUT + 2, stdin=subprocess.DEVNULL, env=None if host else child_env())
+    except (OSError, subprocess.TimeoutExpired):
+        return {"state": "unknown", "detail": "Unknown until its first use"}
+    return {"state": "signed_in", "detail": "Google"} if done.stdout.strip() == "yes" else \
+        {"state": "unknown", "detail": "Unknown until its first use: Gemini CLI signs in when it first runs"}
+
+
+def status_of(backend: str) -> dict:
+    """The CLI's own word on its sign-in (kept STATUS_TTL seconds): {state: signed_in|signed_out|unknown, detail}."""
+
+    if backend not in CLIS:
+        raise HTTPException(404, "no such brain")
+    host = where_of(backend)
+    with lock:
+        cached = statuses.get((backend, host))
+    if cached and time.monotonic() - cached[0] < STATUS_TTL:
+        return cached[1]
+    where = {"where": f"ssh:{host}" if host else "here"}
+    try:
+        answer = gemini_status(host) if backend == "gemini" else read_status(backend, run_short(status_args(backend), backend, host))
+    except subprocess.TimeoutExpired:
+        answer = {"state": "unknown", "detail": f"No answer in {STATUS_TIMEOUT} seconds"}
+    except (OSError, RuntimeError) as error:
+        answer = {"state": "missing", "detail": str(error)[:200]}
+    answer = {"backend": backend, **where, **answer}
+    with lock:
+        statuses[(backend, host)] = (time.monotonic(), answer)
+    return answer
+
+
+def sign_out(backend: str, body: dict | None = None) -> dict:
+    if backend not in CLIS:
+        raise HTTPException(404, "no such brain")
+    args = {"claude": ["auth", "logout"], "codex": ["logout"], "grok": ["logout"]}.get(backend)
+    if backend == "hermes":
+        provider = (body or {}).get("provider")
+        if provider not in HERMES_PROVIDERS:
+            raise HTTPException(400, "Hermes signs out one provider at a time: provider is one of " + ", ".join(HERMES_PROVIDERS))
+        args = [*profile_args(), "auth", "logout", provider]
+    if not args:
+        raise HTTPException(400, f"{CLIS[backend][0]} signs out inside its own terminal")
+    try:
+        done = run_short(args, backend, where_of(backend))
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, f"{CLIS[backend][0]} did not sign out in {STATUS_TIMEOUT} seconds")
+    except (OSError, RuntimeError) as error:
+        raise HTTPException(400, str(error)[:200])
+    with lock:
+        statuses.clear()
+        probes.clear()
+    said = [redact(line.strip()) for line in plain(done.stdout + "\n" + done.stderr).splitlines() if line.strip()]
+    return {"ok": done.returncode == 0, "lines": said[-6:], **status_of(backend)}
+
+
 # ---------- the routes ----------
 
 def local(request: Request, mutation: bool = False):
@@ -1476,6 +1893,37 @@ def attach(home: Path) -> APIRouter:
         except Exception as error:  # the reason goes to the page as it is
             out = {"ok": False, "text": "", "error": str(error)[:600]}
         return {**out, "backend": backend, "elapsedMs": int(1000 * (time.time() - started))}
+
+    # signing a brain in with the CLI's own login (start, follow, a pasted code, cancel), its status and signing out
+    @router.get("/api/brains/{backend}/status")
+    def brain_status(backend: str, request: Request):
+        local(request)
+        return status_of(backend)
+
+    @router.post("/api/brains/{backend}/signin")
+    def brain_signin(backend: str, body: dict, request: Request):
+        local(request, True)
+        return start_signin(backend, body)
+
+    @router.get("/api/brains/{backend}/signin")
+    def brain_signin_state(backend: str, request: Request):
+        local(request)
+        return signin_of(backend)
+
+    @router.post("/api/brains/{backend}/signin/code")
+    def brain_signin_code(backend: str, body: dict, request: Request):
+        local(request, True)
+        return send_code(backend, body)
+
+    @router.post("/api/brains/{backend}/signin/cancel")
+    def brain_signin_cancel(backend: str, body: dict, request: Request):
+        local(request, True)
+        return cancel_signin(backend)
+
+    @router.post("/api/brains/{backend}/signout")
+    def brain_signout(backend: str, body: dict, request: Request):
+        local(request, True)
+        return sign_out(backend, body)
 
     @router.get("/api/agent/tools")
     def list_tools(request: Request):
