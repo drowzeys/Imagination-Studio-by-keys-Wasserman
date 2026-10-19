@@ -1,13 +1,13 @@
-# keys+Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3 (Mac + DGX Spark)
+# Imagination Studio by Keys + Wasserman, powered by TensorFold (Mac + DGX Spark)
+
+*Formerly keys+Wasserman Slate AI Studio, built with integrated Fish Audio Drama 3.*
 
 **An AI film studio on your own machine: plan a film the way a crew does in the Wasserman Slate AI Studio, and render
 it here. Pictures from Qwen-Image-2.1-Turbo or FLUX3-K (Black Forest Labs' FLUX 3 Image Klein), MiniMax H3 / FastH3
 video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Macs (Metal) and the NVIDIA DGX Spark
 (CUDA).**
 
-[![Wasserman Slate AI Studio, powered by TensorFold, built with integrated Fish Audio Drama 3: an AI film studio for Mac and NVIDIA DGX Spark](samples/banner.jpg)](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3)
-
-*Banner art made with this studio's own Qwen-Image-2.1 step (1664x928, seed 25); the lettering was set afterwards.*
+![Imagination Studio by Keys + Wasserman: a local creative all-in-one studio for NVIDIA DGX Spark or Apple silicon, powered by TensorFold](docs/screenshots/imagination-studio.webp)
 
 *Named at the request of the TensorFold project: this is an app built on TensorFold, not a TensorFold product.*
 
@@ -16,12 +16,72 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 *Credit first: Sam Wasserman shaped the production side of this studio (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman](#big-credit-sam-wasserman-wassermanproductionscom), below the release notes.*
 
-**2.9.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**3.0.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 3.0 (since 2.9.2)
+
+**A new studio around the same engines**
+- **Imagination Studio**: a new look (the poster's serif, blue, green and amber; Geist and Instrument Serif), Sam's
+  art on every engine, card and look, and a sidebar of **Creative Engines** and **Studio Vaults** with Home on top.
+- **Six engines, one page each**: Story, Image, Video, Previs, Sound and Edit, each opening on its own cards.
+- **Home**: one composer makes a clip, a picture, a voice line or a song straight away; start cards, recent takes,
+  the machine in one line.
+- **Settings**: the look, which rooms show, what a new take starts from, every connection, and Models & weights,
+  Sparks, Brains & tools and Updates in one place.
+- **Phones**: a bottom bar, a More sheet for the vaults, search and updates.
+
+**Agents and your own sign-ins**
+- **The Agent room**: pick Claude Code, Codex, Hermes, Gemini, Grok or a local model and talk it through; it keeps
+  its own session, asks when a choice matters and drives the studio's tools (stills, clips, voice, songs, the
+  timeline), Blender and Blockout.
+- **One-click Connect** for every agent, from any page that needs one: finds it or installs it, runs its own
+  sign-in (the page opens by itself, with the code, a QR code and Copy link), checks it answers, makes it the default.
+- **Link another computer**: a DGX Spark uses the agents signed in on your Mac over SSH, and the studio sets up both
+  directions itself. Claude Code's Mac Keychain over SSH is solved with **Allow over SSH** (`BRAINS.md`).
+- The ChatGPT app's own Codex is used when the one on PATH is older, here or over SSH.
+
+**Models, looks and installs**
+- **Models & weights** finds every model the studio needs anywhere on the machine and links it instead of
+  downloading it again (**Use everything found here**), and **Install** runs the right installer for what is missing.
+- **Gated weights** (Keyframe Animation, 3D Animation Style, Stable Audio Open): Install signs you in to Hugging Face
+  once, opens the licence page, and downloads by itself once access is granted.
+- **Looks**: the LoRA hub as a style library, one card a look.
+
+**Sound, previs and the library**
+- **Sound effects and foley**: MMAudio makes a clip's own sound from its picture, Stable Audio Open makes a sound from
+  words (Mac; on a DGX Spark through ComfyUI once its memory is measured).
+- **Motion Previs from a link**: paste a video page or a video file's address and its depth, pose and camera are read.
+- **The Library** lists voice lines, songs and sound effects beside clips and stills, each with its own filter.
+- **Nodes**: a ComfyUI-style canvas over the studio's own jobs, run in order.
+- **Wasserman's Filmmaker Suite** built in: bring work in from Sam's apps, send the cut to Resolve as a ZIP with media.
+
+**Machine, updates and safety**
+- **Machine**: live GPU, memory, temperature, power and storage; Sparks; an optional workload governor for a shared Spark.
+- **Updates** in the app: follows the installed branch, waits for idle, shows the latest release.
+- Everything is kept in **`~/ImaginationStudio`** (an older `~/TensorFoldStudio` is moved there once, with a link left behind).
+- Tighter safety: this computer or its Tailscale name only, same-origin writes, size limits, no hidden files served.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Home: the composer, start cards and the machine](docs/screenshots/home.webp) | ![Story: the film board, Wasserman Slate, First AD](docs/screenshots/story.webp) |
+| **Home** | **Story** |
+| ![Image: stills, scouts, edits and looks](docs/screenshots/image.webp) | ![Video: clips with sound, long takes, references, Sharp Spec](docs/screenshots/video.webp) |
+| **Image** | **Video** |
+| ![Previs: Motion Previs and your agent](docs/screenshots/previs.webp) | ![Sound: voice lines and songs](docs/screenshots/sound.webp) |
+| **Previs** | **Sound** |
+| ![Edit: timeline, Resolve, dailies, Library](docs/screenshots/edit.webp) | ![Nodes: a canvas over the studio's jobs](docs/screenshots/nodes.webp) |
+| **Edit** | **Nodes** |
+| ![Looks: the LoRA hub as a style library](docs/screenshots/looks.webp) | ![Looks: one card a look, with its licence and size](docs/screenshots/looks-cards.webp) |
+| **Looks** | **Looks, the cards** |
+| ![Wasserman's Filmmaker Suite, built in](docs/screenshots/filmmaker-suite.webp) | ![Machine: live readings and storage on a DGX Spark](docs/screenshots/machine.png) |
+| **Wasserman's Filmmaker Suite** | **Machine** |
 
 ## New in 2.9.2
 
