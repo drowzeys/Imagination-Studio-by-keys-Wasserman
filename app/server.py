@@ -1677,6 +1677,18 @@ def perform(job: dict, worker: dict | None = None) -> None:
             job["finished"] = time.time()
 
 
+def free_comfy() -> None:
+    """Ask the studio's ComfyUI server to unload its models and give their memory back (best effort, 10 s)."""
+
+    url = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190")) + "/free"
+    request = urllib.request.Request(url, data=json.dumps({"unload_models": True, "free_memory": True}).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(request, timeout=10).close()
+    except (OSError, ValueError):
+        pass  # not running: nothing to free
+
+
 def work() -> None:
     while True:
         wake.wait()
@@ -1685,7 +1697,9 @@ def work() -> None:
             if job is None:
                 wake.clear()
         if job is None:
-            local_server.resume()  # the queue is empty: a local model server stopped for its jobs comes back
+            # the queue is empty: a local model server stopped for its jobs comes back, after ComfyUI's model cache is
+            # given back (the server needs that memory to load; the next render loads its models again)
+            local_server.resume(free_comfy if SPARK else None)
             continue
         perform(job)
         hub.kick.set()

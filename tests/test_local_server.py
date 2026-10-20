@@ -72,9 +72,39 @@ def test_the_queue_stops_it_before_a_job_and_brings_it_back_when_empty(tmp_path,
             started.append((job["id"], L.release(f"a {job['kind']} job needs the GPU")))
     # the hook is in server.perform: check it is there, then the order the queue gives
     source = (ROOT / "app" / "server.py").read_text()
-    assert "local_server.release(" in source and "local_server.resume()" in source
+    assert "local_server.release(" in source and "local_server.resume(free_comfy" in source
     assert "local_server.room_mb()" in source
     fake_perform({"id": "j1", "kind": "video", "params": {}})
     assert started == [("j1", True)] and (folder / "state").read_text().strip() == "down"
     L.resume()
     assert (folder / "state").read_text().strip() == "up"
+
+
+def test_a_containers_server_is_counted_by_its_whole_process_tree():
+    import os
+    import pytest
+    if not os.path.isdir("/proc"):
+        pytest.skip("no /proc on this machine (a Mac): the process tree is read on Linux")
+    # this test's own process tree: the Python running it holds no GPU, so its resident size is what is counted
+    assert os.getpid() in L.tree(os.getppid()) and L.tree(os.getpid()) >= {os.getpid()}
+
+
+def test_memory_is_freed_before_the_server_starts_again_and_a_failed_start_is_said(tmp_path, monkeypatch, capsys):
+    folder = stand_in(tmp_path, monkeypatch)
+    order = []
+    assert L.release("a video job needs the GPU")
+    real = L.run
+    monkeypatch.setattr(L, "run", lambda word, timeout=10: order.append(word) or real(word, timeout))
+    assert L.resume(lambda: order.append("free")) is True and order[:2] == ["free", "start"]
+    assert "started again" in capsys.readouterr().out
+    (tmp_path / "control").write_text("#!/bin/sh\n[ \"$1\" = start ] && { echo 'not enough memory: 40 GiB free' >&2; exit 1; }\n[ \"$1\" = status ] && exit 0\nexit 0\n")
+    L.state["stopped_by_us"] = True
+    assert L.resume() is False and "not enough memory: 40 GiB free" in capsys.readouterr().out
+
+
+def test_the_studios_own_port_is_not_passed_to_the_control(tmp_path, monkeypatch):
+    stand_in(tmp_path, monkeypatch)
+    (tmp_path / "control").write_text('#!/bin/sh\necho "port=${PORT:-unset} host=${HOST:-unset}"\n')
+    monkeypatch.setenv("PORT", "7871")
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    assert L.run("pid").stdout.strip() == "port=unset host=unset"

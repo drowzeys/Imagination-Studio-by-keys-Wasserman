@@ -230,7 +230,8 @@ Rules:
   renders*): stopped before any job of this machine's queue (`local_server.release` in `server.perform`), its memory
   counted as the job's (`held_room`), started again only when the queue is empty and only if the Studio stopped it
   (`resume`). Unset, nothing runs. Keep it beside Drama 3's and Music's release: a model server and H3 never share a
-  Spark's memory during a render.
+  Spark's memory during a render. An agent turn on the local harness waits for the server through a render it queued
+  (`agents.answer_of`, `wait_back`) and asks an answer cut off by the stop again: never skip the stop for a turn.
 - Music (`app/music.py`, `app/static/music.js`, README *Music (MiniMax Music 3)*): MiniMax-Music3 makes a song from
   lyrics (section tags) and a style caption, on this machine only, never imported into the app's venv. The tab, every
   song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a

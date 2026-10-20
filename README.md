@@ -2013,13 +2013,32 @@ downloads from the Bible and opens in Slate (what this port adds sits under `tf`
 the model takes (their seconds, or their slot in bars) and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
 
 **A local model beside renders (`STUDIO_LOCAL_CONTROL`).** A local model server on the same DGX Spark holds its memory
-while it runs (NVIDIA Nemotron 3.5 Bolt in llama.cpp: about 26 GB), which larger clips need back. Set
-`STUDIO_LOCAL_CONTROL` to a program that takes one word: `status` (exits 0 while the server runs), `stop`, `start` and
-`pid` (prints its process id). The Studio then stops the server before any job of its queue, counts its memory as the
-job's when a clip is checked against the machine's memory, and starts it again when the queue is empty. A server you
-stopped yourself stays stopped. While a render runs the brain has no server: ask again after it. For example, a script
-that runs llama.cpp's `llama-server --model … --host 127.0.0.1 --port 8095` with a pid file, its address set as the
-local server in Settings → Connections.
+while it runs: NVIDIA Nemotron 3.5 Bolt on TensorFold (Mia's recipe, about 51 GB) takes memory that larger clips need back.
+Set `STUDIO_LOCAL_CONTROL` to a program that takes one word: `status` (exits 0 while the server runs), `stop`, `start` and
+`pid` (prints a process id; the memory of it and every process under it is counted). The Studio then stops the server
+before any job of its queue, counts its memory as the job's when a clip is checked against the machine's memory, and
+starts it again when the queue is empty. A server you stopped yourself stays stopped. An agent turn on the local model
+that queues a render keeps going: its next answer waits until the render is done and the model answers again (the page
+says it is waiting), and an answer cut off by the stop is asked again. A single brain question asked during a render
+finds no server: ask again after it. For Bolt from
+[MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark](https://github.com/MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark),
+cloned in `~/bolt-tf` with `HOST=127.0.0.1` in its `.env`:
+
+```bash
+#!/bin/bash
+# STUDIO_LOCAL_CONTROL for Bolt on TensorFold (Mia's start.sh / stop.sh, container nemotron35-bolt-tf, port 8888)
+cd ~/bolt-tf || exit 2
+export PORT=8888 HOST=127.0.0.1  # Bolt's own address, never the Studio's
+case "$1" in
+  status) [ "$(docker inspect -f '{{.State.Running}}' nemotron35-bolt-tf 2>/dev/null)" = true ];;
+  pid) docker inspect -f '{{.State.Pid}}' nemotron35-bolt-tf;;
+  stop) ./stop.sh > /dev/null;;
+  start) SERVE=1 ./start.sh > /dev/null;;
+  *) exit 2;;
+esac
+```
+
+Its address in Settings → Connections is `http://127.0.0.1:8888/v1`. Measured on one DGX Spark (2026-10-20, Mia's recipe with `PARALLEL=2`): stopped about 1 s after a render was queued; loaded in 23 s with its files in the page cache and in 81 s after renders had pushed them out. Before it starts again the Studio frees ComfyUI's model cache, which the server needs back (`start.sh` asks for about 48 GB free).
 
 **What a shot sends to the model.** A shot's *intent* is a note for people and stays out of the prompt (it used to
 stand in as the action when a shot had no beat sheet, which put a run's timecodes into its prompts): what happens is

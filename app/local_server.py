@@ -21,7 +21,7 @@ import subprocess
 import threading
 import time
 
-TIMEOUT = 120  # seconds for the control program's stop or start
+TIMEOUT = 600  # seconds for the control program's stop or start (Bolt on TensorFold loads in about 25 to 140 s)
 mutex = threading.Lock()
 state = {"stopped_by_us": False, "starting": False, "stops": 0}
 
@@ -34,8 +34,11 @@ def run(word: str, timeout: int = 10) -> subprocess.CompletedProcess | None:
     argv = control()
     if not argv:
         return None
+    # the Studio's own server settings are not the model server's: a start script that reads PORT or HOST (Mia's
+    # start.sh does) would otherwise start on the Studio's port
+    env = {k: v for k, v in os.environ.items() if k not in ("PORT", "HOST")}
     try:
-        return subprocess.run([*argv, word], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        return subprocess.run([*argv, word], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -56,31 +59,56 @@ def available_mb() -> int | None:
     return None
 
 
+def tree(root: int) -> set[int]:
+    """The process and every process under it (a container's server runs below the process Docker names)."""
+
+    children: dict[int, list[int]] = {}
+    for entry in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if entry.isdigit():
+            try:
+                with open(f"/proc/{entry}/stat") as handle:
+                    parent = int(handle.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, ValueError, IndexError):
+                continue
+            children.setdefault(parent, []).append(int(entry))
+    found, todo = set(), [root]
+    while todo:
+        one = todo.pop()
+        if one not in found:
+            found.add(one)
+            todo.extend(children.get(one, []))
+    return found
+
+
 def held_mb() -> int:
-    """The memory the server's process holds (on a GB10 its GPU memory is the machine's own): nvidia-smi's answer for
-    its pid, else its resident size."""
+    """The memory the server holds (on a GB10 its GPU memory is the machine's own): nvidia-smi's answers for its process
+    and every process under it, else their resident size."""
 
     done = run("pid")
     pid = done.stdout.strip().splitlines()[-1].strip() if done and done.returncode == 0 and done.stdout.strip() else ""
-    if not pid.isdigit():
+    if not pid.isdigit() or int(pid) <= 0:
         return 0
+    mine = tree(int(pid))
     try:
         smi = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
                              capture_output=True, text=True, timeout=5)
+        gpu = 0
         for line in smi.stdout.splitlines():
             parts = [part.strip() for part in line.split(",")]
-            if len(parts) == 2 and parts[0] == pid and parts[1].isdigit():
-                return int(parts[1])
+            if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) in mine and parts[1].isdigit():
+                gpu += int(parts[1])
+        if gpu:
+            return gpu
     except (OSError, subprocess.TimeoutExpired):
         pass
-    try:
-        with open(f"/proc/{pid}/status") as handle:
-            for line in handle:
-                if line.startswith("VmRSS:"):
-                    return int(line.split()[1]) // 1024
-    except OSError:
-        pass
-    return 0
+    rss = 0
+    for one in mine:
+        try:
+            with open(f"/proc/{one}/status") as handle:
+                rss += next((int(line.split()[1]) for line in handle if line.startswith("VmRSS:")), 0) // 1024
+        except OSError:
+            pass
+    return rss
 
 
 def room_mb() -> int | None:
@@ -115,8 +143,13 @@ def release(why: str) -> bool:
         return True
 
 
-def resume() -> bool:
-    """When the queue is empty: start the server again if the Studio stopped it. True when it was started."""
+def say(text: str) -> None:
+    print("[studio] local model server: " + text, flush=True)
+
+
+def resume(before=None) -> bool:
+    """When the queue is empty: start the server again if the Studio stopped it. True when it was started.
+    ``before`` runs first (server.py: ComfyUI's model cache is freed, which the server needs back to load)."""
 
     if not control():
         return False
@@ -125,8 +158,19 @@ def resume() -> bool:
             return False
         state["stopped_by_us"], state["starting"] = False, True
     try:
+        if before:
+            try:
+                before()
+            except Exception as error:  # noqa: BLE001 - the start is still tried
+                say(f"could not free memory first ({error})")
+        began = time.time()
         done = run("start", TIMEOUT)
-        return bool(done and done.returncode == 0)
+        if done and done.returncode == 0:
+            say(f"started again after the queue emptied, in {time.time() - began:.0f} s")
+            return True
+        said = ((done.stderr or done.stdout) if done else "no answer in time").strip().splitlines()[-3:]
+        say("did not start again: " + " / ".join(said)[-400:])
+        return False
     finally:
         state["starting"] = False
 

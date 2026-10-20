@@ -314,7 +314,8 @@ class Hub:
 
     def keep(self, found: dict) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
-        part = self.book.with_suffix(".part")
+        # a name of its own for each write: two saves at once (the page and a worker's check) never move each other's file
+        part = self.book.with_name(f"{self.book.stem}.{os.getpid()}.{threading.get_ident()}.part")
         part.write_text(json.dumps(found, indent=1))
         part.replace(self.book)
 
