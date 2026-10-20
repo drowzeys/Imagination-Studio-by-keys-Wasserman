@@ -51,7 +51,11 @@ def test_a_thread_is_stored_with_its_turns_and_read_back(fake):
     assert "→ fake · make" in tool_lines and "video queued: agent: clip" in tool_lines
     assert done["session"] is True and done["status"] == "idle" and done["waiting"] is False
     # the file holds the harness's session id, never anything else of the sign-in
-    record = json.loads((agents.HOME / ".studio-agents/threads" / f"{thread['id']}.json").read_text())
+    path, until = agents.HOME / ".studio-agents/threads" / f"{thread['id']}.json", time.time() + 10
+    record = json.loads(path.read_text())
+    while record.get("session") is None and time.time() < until:  # the file is written a moment after the turn ends
+        time.sleep(0.05)
+        record = json.loads(path.read_text())
     assert set(record["session"]) == {"backend", "id", "where"} and record["session"]["backend"] == "claude"
     assert set(record) >= {"id", "title", "backend", "tools", "created", "updated", "turns", "pending"}
     listed = client.get("/api/agent/threads").json()["threads"]
