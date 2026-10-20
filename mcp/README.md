@@ -91,11 +91,18 @@ from an agent on your Mac, run the server there over ssh, so nothing is opened t
 | `queue_still` | `prompt`, `count?`, `preset?`, `width?`, `height?`, `seed?`, `image_model?` | Queues stills: `count` candidates (1 to 12, default 4) and a contact sheet. |
 | `queue_clip` | `prompt`, `first_frame?`, `image_prompt?`, `preset?`, `quality?`, `seconds?`, `seed?`, `title?` | Queues a clip with sound: from a Library picture (`first_frame`), from a picture it makes first (`image_prompt`), or from text alone. |
 | `job_status` | `id` | Status (`queued`, `running`, `done`, `failed`, `cancelled`), progress, outputs, error. |
+| `wait_for_jobs` | `ids`, `seconds?` | Waits until the jobs are done, failed or cancelled, at most `seconds` (default 50, up to 600), and returns them as `job_status` does. |
 | `list_jobs` | `limit?` | The queue and finished jobs, newest first. |
+| `slate_films` | — | Slate's films (the Production tab), newest first. |
+| `slate_film` | `film` | One film by id or name: its scenes and shots with their ids, and each shot's takes with their paths and job ids. |
+| `slate_new_film` | `name`, `logline?` | Makes a film and returns its id. |
+| `slate_add_scene` | `film`, `name`, `synopsis?` | Adds a scene and returns its id. |
+| `slate_add_shot` | `film`, `scene`, `prompt`, `name?`, `intent?`, `seconds?`, `size?`, `angle?`, `movement?`, `soundscape?` | Adds a shot (a sectioned prompt: `# Subject`, `# Composition`, ...; no spoken words) and returns its id. |
+| `slate_render_shot` | `film`, `shot`, `first_frame?` | Compiles the shot as the page does, queues its clip into the film's takes folder and logs the take in the shot; `first_frame` opens it on a finished Library picture. |
 | `upload_file` | `path` | Copies a file from the agent's machine into the Library (pictures, video, sound) and returns its path. |
 
-Jobs run one at a time, in the order queued. A queued job returns at once with its `id`; poll `job_status` until it is
-`done`, then use its `outputs`. Clip lengths are brought to the nearest the model takes (up to 15 seconds); sizes the
+Jobs run one at a time, in the order queued. A queued job returns at once with its `id`; follow it with `wait_for_jobs`
+(or poll `job_status`) until it is `done`, then use its `outputs`. Clip lengths are brought to the nearest the model takes (up to 15 seconds); sizes the
 model cannot take are refused with the reason, as on the page.
 
 ---

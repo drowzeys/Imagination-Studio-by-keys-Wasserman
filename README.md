@@ -1998,7 +1998,12 @@ starts from the brain chosen in Brains & tools; an install with nothing chosen t
 (`local`, `claude`, `codex`, ...), `STUDIO_LOCAL_ENDPOINT` and `STUDIO_LOCAL_MODEL` from its environment. When nobody
 chose a brain (in Brains & tools or `STUDIO_DEFAULT_BRAIN`) and the local server set there (or in `STUDIO_LOCAL_ENDPOINT`)
 answers, that server is the default for prompt and scene help, the Agent room's first choice included; otherwise Claude
-Code. Only the address that was set is asked, once a minute. The local brain is always shown by the model the server
+Code. Only the address that was set is asked, once a minute. A local server that takes OpenAI tool calls (llama.cpp
+with `--jinja` says so in `/props`; any other is offered one tool in a small call) drives the Studio's tools in the
+Agent room like Claude Code and Codex: the Studio runs the loop itself (`drive` in `app/agents.py`) with the same MCP
+servers, at most 40 answers and two hours a turn, no shell and no file tools, and a path a call names held to the
+conversation's folder and the Library. One without tool calls stays a conversation. `STUDIO_LOCAL_TOOLS=0|1` overrides
+the check. The local brain is always shown by the model the server
 runs (NVIDIA Nemotron 3.5 Bolt by that name, any other by the name the server lists), and that is the model asked for:
 a model set in Settings that the server no longer runs is replaced by the one it does, and Settings says so. When a film's
 brain is the local model, its frames are only ever shown to that model: the QA look is skipped rather than sent to a
