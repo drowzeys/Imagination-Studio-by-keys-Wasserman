@@ -415,6 +415,24 @@ def test_a_clip_a_workers_memory_guard_refuses_is_not_sent_and_a_failed_one_move
     assert any("memory floor" in m["why"] for job in done for m in job["moved"] or [])
 
 
+def test_a_clip_too_big_for_this_spark_is_taken_and_left_to_a_worker():
+    """A head whose memory is held (its brain, a picture model) still takes a clip a worker can render: the clip is held
+    to the worker's guard at submit time, and this Spark does not claim it while it does not fit here."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    had = server.memory_of
+    server.memory_of = lambda *args, **kwargs: {"fits": False, "reason": "this machine has 43 GB for it"}
+    try:
+        refused = client.post("/api/jobs", json={"kind": "video", "title": "clip", "sparks": 1, "params": {
+            "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "frames": 22, "shot_check": False}})
+        assert refused.status_code == 400 and "43 GB" in refused.text  # on this Spark alone it is refused as before
+        done = finished([queue(2)["id"] for _ in range(3)])
+        assert all(job["status"] == "done" and job["spark"] == "spark-a" for job in done) and len(one.jobs) == 3
+    finally:
+        server.memory_of = had
+
+
 def test_cancel_reaches_the_worker():
     one = Worker("spark-a")
     one.takes = 30
