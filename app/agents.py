@@ -809,8 +809,7 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
             with urllib.request.urlopen(request, timeout=timeout) as answer:
                 return json.loads(answer.read())["choices"][0]["message"]["content"]
         if base == bolt.ENDPOINT:  # the Studio's engine: loaded on this first question; refused (with why) while a job holds its memory
-            with bolt.request(wait=False) as live:
-                return asked(live)
+            return bolt.answered(asked, wait=False)
         return asked(base)
     if backend not in CLIS:
         raise RuntimeError("pick a brain: " + ", ".join(BACKENDS))
@@ -2260,8 +2259,8 @@ def drive_on(task: dict, thread: dict | None, log, config: dict, work_: Path, na
                     **({} if last else {"tools": functions})}
             if base == bolt.ENDPOINT:
                 try:
-                    with bolt.request(stopped, wait=True, say=lambda text: say(text, text.strip("[]"))) as live:
-                        answer = answer_of(live, body, stopped)
+                    answer = bolt.answered(lambda live: answer_of(live, body, stopped), stopped, True,
+                                           lambda text: say(text, text.strip("[]")))
                 except InterruptedError:
                     return
             else:

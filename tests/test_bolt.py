@@ -51,6 +51,11 @@ class Handler(BaseHTTPRequestHandler):
             open(log, "a").write("asked\n")
         if "slowly" in text:
             time.sleep(1.5)
+        failed = os.environ.get("FAKE_FAILED", "")
+        if "fail always" in text or ("fail once" in text and failed and not os.path.exists(failed)):
+            if failed:
+                open(failed, "w").close()  # outlives this process: the restarted one answers
+            return self.send(500, {"error": {"message": "Bolt's forward failed"}})
         self.send(200, {"choices": [{"message": {"role": "assistant", "content": "ready"}, "finish_reason": "stop"}]})
 print("[fake bolt] listening on", port, file=sys.stderr, flush=True)
 ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
@@ -77,7 +82,8 @@ class Fake(bolt.Engine):
         return [sys.executable, str(self.script), "--port", str(port)]
 
     def environment(self) -> dict:
-        return {**os.environ, "FAKE_LOAD_S": str(self.fake_load), "FAKE_LOG": str(self.asked)}
+        return {**os.environ, "FAKE_LOAD_S": str(self.fake_load), "FAKE_LOG": str(self.asked),
+                "FAKE_FAILED": str(self.asked.with_name("failed"))}
 
 
 @pytest.fixture
@@ -185,6 +191,15 @@ def test_the_engines_output_is_kept_in_the_studio_folder(fake):
         time.sleep(0.05)
     text = log.read_text()
     assert "engine started" in text and "[fake bolt] listening on" in text  # its stderr, beside its stdout
+
+
+def test_a_failed_forward_pass_restarts_the_engine_once(fake):
+    settings = {**agents.saved_settings(), "local_endpoint": ""}
+    assert agents.ask("local", "", "fail once, then answer", settings=settings) == "ready"
+    assert any(e["what"] == "unloaded" and "forward pass failed" in e.get("why", "") for e in fake.events)
+    assert fake.loaded()  # loaded again for the second try
+    with pytest.raises(RuntimeError, match="forward failed"):  # failing again is the caller's error, not a loop
+        agents.ask("local", "", "fail always", settings=settings)
 
 
 def test_a_cancelled_turn_stops_waiting(fake):
