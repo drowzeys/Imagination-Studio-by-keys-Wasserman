@@ -408,6 +408,9 @@ class Hub:
         # True while this Studio installs its own updates by itself (updates.Manager.automatic): a worker whose code
         # is behind is then brought level the same way, once per version of this Spark's code (catch_up)
         self.follow = lambda: False
+        # whether a queued job fits this Spark's own memory now (server.fits_here): one that does not is left to the
+        # workers that can take it, instead of failing here
+        self.fits_here = lambda job: True
         self.started = False
 
     # ---- the list ---------------------------------------------------------------------------------------------
@@ -797,7 +800,8 @@ class Hub:
         ready = [self.jobs[i] for i in self.order if self.jobs[i]["status"] == "queued" and not self.waits(self.jobs[i])]
         if address is None:
             idle = {worker["address"] for worker in self.workers() if not self.usable(worker) and not self.state(worker["address"])["job"]}
-            job = next((job for job in ready if not idle.intersection(self.team(job))), None) or (ready[0] if ready else None)
+            ours = [job for job in ready if not self.team(job) or self.fits_here(job)]  # a clip too big here waits for a worker
+            job = next((job for job in ours if not idle.intersection(self.team(job))), None) or (ours[0] if ours else None)
         else:
             job = next((job for job in ready if address in self.team(job)), None)
         if job is None:
