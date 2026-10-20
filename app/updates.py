@@ -434,6 +434,59 @@ class Manager:
         return router
 
 
+# What oneshot-setup.sh copies into PREFIX (its "cp ... $PREFIX/" line): the renderers run those copies, so an update
+# that changes one must refresh it, or the new scripts call an old renderer (seen with zig_fasth3.py --lora, 3.0.1).
+PREFIX_COPIES = ("h3_generate.py", "qwen_image_generate.py", "zig_fasth3.py", "fasth3_q8.py")
+ENGINE_PIN = re.compile(r'ZIG_COMMIT="\$\{ZIG_COMMIT:-([0-9a-f]{40})\}"')
+
+
+def prefix_of() -> Path:
+    return Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
+
+
+def sync_prefix(pack: Path, old: str, prefix: Path | None = None) -> list[str]:
+    """After an update: each PREFIX copy the update changed is replaced by the new version, the one it replaced kept
+    beside it as NAME.before-update. A copy that matches neither the old nor the new version was edited by a person and
+    is left as it is. Returns the names refreshed."""
+
+    prefix = prefix or prefix_of()
+    done = []
+    for name in PREFIX_COPIES:
+        mine, new = prefix / name, pack / name
+        if not mine.is_file() or not new.is_file():
+            continue
+        now, want = mine.read_bytes(), new.read_bytes()
+        if now == want:
+            continue
+        try:
+            before = git(pack, "show", f"{old}:{name}", timeout=10)
+        except UpdateError:
+            continue
+        if now.decode(errors="replace").strip() != before:
+            continue  # edited here: not ours to replace
+        mine.with_name(name + ".before-update").write_bytes(now)
+        temp = mine.with_name(name + "." + uuid.uuid4().hex + ".tmp")
+        temp.write_bytes(want)
+        os.chmod(temp, mine.stat().st_mode & 0o777)
+        temp.replace(mine)
+        done.append(name)
+    return done
+
+
+def engine_stale(pack: Path, prefix: Path | None = None) -> str | None:
+    """On a Mac with the native FastH3 engine: the commit scripts/build-zig-engine.sh pins, when PREFIX's engine was
+    built from another one (its COMMIT file); else None."""
+
+    prefix = prefix or prefix_of()
+    installed = prefix / "zig-engine" / "COMMIT"
+    try:
+        pin = ENGINE_PIN.search((pack / "scripts/build-zig-engine.sh").read_text())
+        have = installed.read_text().strip()
+    except OSError:
+        return None
+    return pin[1] if pin and have and have != pin[1] else None
+
+
 def apply_stopped(pack: Path, request: dict) -> tuple[str, str]:
     """Only called by the launcher after its own server child has exited."""
     found = inspect(pack, fetch=True)
