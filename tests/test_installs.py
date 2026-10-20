@@ -34,7 +34,8 @@ def item(download, nid="x", expected="/tmp/nowhere/x", kind="file"):
     return discover.need(nid, "A model", "Engine", Path(expected), kind, download=download)
 
 
-def test_each_needs_words_become_the_installer_that_does_it():
+def test_each_needs_words_become_the_installer_that_does_it(monkeypatch):
+    monkeypatch.setattr(installs, "SPARK", False)  # a Mac's plans; a Spark's are below
     assert installs.plan_of(item("scripts/setup-voice.sh"))["command"][1:] == [str(ROOT / "scripts/setup-voice.sh")]
     music = installs.plan_of(item("oneshot-setup.sh --music (22 GB)"))
     assert music["how"] == "script" and music["command"][1].endswith("scripts/setup-music.sh") and music["size_gb"] == 22  # its own setup, not the whole one-shot
@@ -48,6 +49,17 @@ def test_each_needs_words_become_the_installer_that_does_it():
     for need in discover.all_needs():  # every need of this machine has a plan, and none runs as root
         plan = installs.plan_of(need)
         assert plan["how"] in ("script", "oneshot", "hf", "lora", "first_use", "manual") and "sudo" not in " ".join(plan["command"] or [])
+
+
+def test_on_a_dgx_spark_every_install_goes_through_its_own_installer(monkeypatch):
+    monkeypatch.setattr(installs, "SPARK", True)
+    for words, flags in (("oneshot-setup.sh --ref2va (62 GB)", ["--ref2va"]), ("oneshot-setup.sh --music (22 GB)", ["--music"]),
+                         ("bash oneshot-setup-spark.sh --sound", ["--sound"]), ("oneshot-setup-spark.sh --moss --turbo", ["--moss"])):
+        plan = installs.plan_of(item(words))
+        assert plan["how"] == "oneshot" and plan["command"][1].endswith("oneshot-setup-spark.sh"), words
+        assert plan["command"][2:] == ["--no-render", *flags], words  # the Mac-only --turbo is left out
+    built = installs.plan_of(item("bash spark/build-music3.sh"))
+    assert built["how"] == "script" and built["command"][1].endswith("spark/build-music3.sh")
 
 
 def wait():
