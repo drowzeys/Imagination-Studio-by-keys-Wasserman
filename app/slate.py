@@ -78,13 +78,13 @@ def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
 
 
-def blank(name: str) -> dict:
-    import agents  # the brain saved in Brains & tools, or the environment's when nothing is saved
+AUTO = "auto"  # a film's brain that follows the Studio's own (Brains & tools: NVIDIA Bolt when its server answers)
 
-    brain = agents.default_brain()
+
+def blank(name: str) -> dict:
     return {"id": new_id(), "name": name, "logline": "", "world": "",
-            "defaults": {"aspectRatio": "16:9", "fps": 24, "durationSec": 8, "targetModel": "minimax-h3", "brain": brain["backend"],
-                         "localEndpoint": brain["endpoint"], "localModel": brain["model"]},
+            "defaults": {"aspectRatio": "16:9", "fps": 24, "durationSec": 8, "targetModel": "minimax-h3", "brain": AUTO,
+                         "localEndpoint": "", "localModel": ""},
             "scenes": [], "characters": [], "artDept": [], "locations": [], "lookbook": [], "references": [], "mySetups": [],
             "music": [], "voices": [], "copilot": [], "createdAt": now(), "updatedAt": now()}
 
@@ -308,10 +308,22 @@ def extract_json(text: str):
     raise ValueError("no valid JSON in the reply")
 
 
-def ask(backend: str, system: str, prompt: str, tier: str, endpoint: str = "", model: str = "") -> str:
+def resolve_brain(backend: str, endpoint: str = "", model: str = "") -> tuple[str, str, str]:
+    """(backend, endpoint, model) a film's brain asks: its own when it names one, else (AUTO, empty or unknown) the
+    Studio's default brain with that brain's server and model."""
     import agents  # the brains (agents.py): Claude Code, Codex, Gemini CLI, Grok CLI here or over ssh, or a local server
 
-    return agents.ask(backend if backend in agents.BACKENDS else "claude", system, prompt, tier, endpoint, model)
+    if backend in agents.BACKENDS:
+        return backend, endpoint, model
+    now = agents.default_brain()
+    return now["backend"], now["endpoint"] or "", now["model"] or ""
+
+
+def ask(backend: str, system: str, prompt: str, tier: str, endpoint: str = "", model: str = "") -> str:
+    import agents
+
+    backend, endpoint, model = resolve_brain(backend, endpoint, model)
+    return agents.ask(backend, system, prompt, tier, endpoint, model)
 
 
 NEARBY = [ipaddress.ip_network(net) for net in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
@@ -352,7 +364,8 @@ def brain_status(endpoint: str = "") -> dict:
     found = {b["id"]: b for b in agents.detect(endpoint=endpoint)}
     local = found["local"]
     return {**{name: found[name]["found"] for name in agents.CLIS}, "local": local["found"], "localLabel": local["label"],
-            "endpoint": local["endpoint"] if local["found"] else None, "models": local["models"]}
+            "endpoint": local["endpoint"] if local["found"] else None, "models": local["models"],
+            "default": agents.default_brain()["backend"]}  # what a film on AUTO asks
 
 
 @router.post("/api/slate/brain")
@@ -362,7 +375,7 @@ def brain(body: dict, request: Request) -> dict:
     agents.local(request, True)  # runs the user's CLI sign-ins: the same check as the brains and agents routes
     started = time.time()
     try:
-        text = ask(body.get("backend") or "claude", body.get("system") or "", body.get("prompt") or "", body.get("tier") or "top",
+        text = ask(body.get("backend") or AUTO, body.get("system") or "", body.get("prompt") or "", body.get("tier") or "top",
                    body.get("localEndpoint") or "", body.get("localModel") or "")
         out = {"ok": True, "text": text}
         if body.get("expectJson"):
