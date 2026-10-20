@@ -226,6 +226,11 @@ Rules:
   later, `COMFY_COMMIT`), never as standalone code. It is offered only where its files and ComfyUI's
   `nodes_moss_image.py` are (`moss_ready`). The settings are ComfyUI's template's (25 steps er_sde, CFG 2.5, its
   negative prompt): change them only with new measurements. It does not edit pictures; the prompt goes as written.
+- A local model server beside renders (`app/local_server.py`, `STUDIO_LOCAL_CONTROL`, README *A local model beside
+  renders*): stopped before any job of this machine's queue (`local_server.release` in `server.perform`), its memory
+  counted as the job's (`held_room`), started again only when the queue is empty and only if the Studio stopped it
+  (`resume`). Unset, nothing runs. Keep it beside Drama 3's and Music's release: a model server and H3 never share a
+  Spark's memory during a render.
 - Music (`app/music.py`, `app/static/music.js`, README *Music (MiniMax Music 3)*): MiniMax-Music3 makes a song from
   lyrics (section tags) and a style caption, on this machine only, never imported into the app's venv. The tab, every
   song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a

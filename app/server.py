@@ -1165,7 +1165,7 @@ def held_room() -> int | None:
     """What this machine has for a render while Drama 3 or MiniMax Music 3's CUDA engine is loaded (both are unloaded
     before any other job starts, so their memory counts as that job's, like the ComfyUI server's own); None otherwise."""
 
-    held = [one for one in (voice.room_mb(), music.room_mb()) if one]
+    held = [one for one in (voice.room_mb(), music.room_mb(), local_server.room_mb()) if one]
     return max([memory_guard.room_mb() or 0] + held) if held else None
 
 
@@ -1608,6 +1608,11 @@ def perform(job: dict, worker: dict | None = None) -> None:
         if job["kind"] not in ("music", "export", "soundtrack") and worker is None and not job.get("remote"):
             if music.release(f"a {job['kind']} job needs the GPU"):
                 job["log"] += "[tensorfold] MiniMax Music 3 was unloaded to give this job its memory\n"
+        # a local model server that steps aside for renders (STUDIO_LOCAL_CONTROL, local_server.py), started again
+        # once the queue is empty
+        if job["kind"] not in ("export", "soundtrack") and worker is None and not job.get("remote"):
+            if local_server.release(f"a {job['kind']} job needs the GPU"):
+                job["log"] += "[tensorfold] the local model server was stopped to give this job its memory; it starts again when the queue is empty\n"
         if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
             source = inside(params["first_frame_from"])
             if not source.is_file():
@@ -1679,7 +1684,9 @@ def work() -> None:
             job = hub.claim()  # the next job for this machine; on a DGX Spark a worker may have taken others (sparks.py)
             if job is None:
                 wake.clear()
-                continue
+        if job is None:
+            local_server.resume()  # the queue is empty: a local model server stopped for its jobs comes back
+            continue
         perform(job)
         hub.kick.set()
 
@@ -2356,6 +2363,7 @@ import shot  # noqa: E402  (a clip's keyframes held and no cut inside it, beside
 import qa  # noqa: E402  (Sam Wasserman's QA gate, beside this file)
 import remote  # noqa: E402  (another machine's Studio app, read over its own API, beside this file)
 import slate  # noqa: E402  (Wasserman Slate AI Studio, beside this file)
+import local_server  # noqa: E402  (a local model server that steps aside for renders, STUDIO_LOCAL_CONTROL)
 import voice  # noqa: E402  (Voice: Fish Audio Drama 3 text to speech, run locally, beside this file)
 
 

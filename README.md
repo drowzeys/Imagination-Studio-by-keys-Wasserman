@@ -2012,6 +2012,15 @@ Slate's own `project.json` under `~/ImaginationStudio/slate/`: a project made in
 downloads from the Bible and opens in Slate (what this port adds sits under `tf` keys). Shots render at any length
 the model takes (their seconds, or their slot in bars) and the aspect ratios 16:9, 9:16, 1:1, 4:3, 3:4 and 21:9.
 
+**A local model beside renders (`STUDIO_LOCAL_CONTROL`).** A local model server on the same DGX Spark holds its memory
+while it runs (NVIDIA Nemotron 3.5 Bolt in llama.cpp: about 26 GB), which larger clips need back. Set
+`STUDIO_LOCAL_CONTROL` to a program that takes one word: `status` (exits 0 while the server runs), `stop`, `start` and
+`pid` (prints its process id). The Studio then stops the server before any job of its queue, counts its memory as the
+job's when a clip is checked against the machine's memory, and starts it again when the queue is empty. A server you
+stopped yourself stays stopped. While a render runs the brain has no server: ask again after it. For example, a script
+that runs llama.cpp's `llama-server --model … --host 127.0.0.1 --port 8095` with a pid file, its address set as the
+local server in Settings → Connections.
+
 **What a shot sends to the model.** A shot's *intent* is a note for people and stays out of the prompt (it used to
 stand in as the action when a shot had no beat sheet, which put a run's timecodes into its prompts): what happens is
 the Subject section's, or the beat sheet's.
