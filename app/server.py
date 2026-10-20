@@ -1340,7 +1340,7 @@ def mac_comfy_room(what: str) -> None:
         return
     held = 0.0
     try:
-        said = subprocess.run(["pgrep", "-f", "main.py --listen 127.0.0.1 --port " + os.environ.get("MAC_COMFY_PORT", "8191")],
+        said = subprocess.run(["pgrep", "-f", "[m]ain.py --listen 127.0.0.1 --port " + os.environ.get("MAC_COMFY_PORT", "8191")],
                               capture_output=True, text=True, timeout=5).stdout.split()
         if said:
             rss = subprocess.run(["ps", "-o", "rss=", "-p", said[0]], capture_output=True, text=True, timeout=5).stdout.strip()
