@@ -272,6 +272,10 @@ def local_models(endpoint: str) -> list[str] | None:
 
 
 def find_local(given: str = "") -> tuple[str | None, list[str]]:
+    import bolt  # NVIDIA Nemotron 3.5 Bolt as the Studio's own engine (bolt.py): its address is bolt.ENDPOINT
+
+    if bolt.serves(given):
+        return bolt.ENDPOINT, [bolt.SERVED]
     for endpoint in ([endpoint_of(given)] if given.strip() else [f"http://127.0.0.1:{port}/v1" for port in (11434, 1234, 8000, 8080)]):
         models = local_models(endpoint)
         if models is not None:
@@ -339,6 +343,8 @@ def nearby_endpoint(given: str) -> str:
     text = (given or "").strip()
     if not text:
         return ""
+    if text.lower() == "studio:bolt":  # the Studio's own engine (bolt.ENDPOINT): nothing is fetched by name
+        return text
     parts = urllib.parse.urlsplit(text if "://" in text else "http://" + text)
     try:
         name = (parts.hostname or "").rstrip(".").lower()

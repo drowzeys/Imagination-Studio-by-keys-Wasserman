@@ -42,9 +42,11 @@ function statusRows(t) { const row = (k, v, cls) => el("div", { class: "kv m-row
   return [row("Rolling", cur ? cur.title : "nothing"), row("Queue", (t.jobs ? t.jobs.queued : 0) + " waiting"),
     row("GPU lock", t.gpu_lock ? (t.gpu_lock.held ? "held" + (t.gpu_lock.holder ? " by " + t.gpu_lock.holder : "") : "free") : "–"),
     row("Renderer", t.renderer && t.renderer.comfy ? (t.renderer.comfy.running ? "ComfyUI up on " + t.renderer.comfy.port : "idle, models unloaded") : "–"),
+    // NVIDIA Nemotron 3.5 Bolt run by the Studio (app/bolt.py): what it holds of the memory, when loaded
+    t.engines && t.engines.bolt && t.engines.bolt.managed ? row("Bolt brain", boltLine(t.engines.bolt) + " · " + (t.engines.bolt.backend || "")) : null,
     row("Workload governor", t.governor ? (t.governor.status || "answering") + (Array.isArray(t.governor.reservations) ? " · " + count(t.governor.reservations.length, "reservation") : "") + (t.governor.alert_temperature_c ? " · alert at " + t.governor.alert_temperature_c + "°C" : "") : "not on this machine", t.governor && t.governor.status && t.governor.status !== "ok" ? "warn" : ""),
     row("Processor", t.cpu ? "load " + (t.cpu.load1 ?? "–") + " on " + (t.cpu.cores || "?") + " cores" : "–"),
-    row("Host", t.host || "–")]; }
+    row("Host", t.host || "–")].filter(Boolean); }
 // eight muted colours (--c1 to --c8 in studio.css), one a folder, in order of size
 const bucketTone = i => "c" + (i % 8 + 1);
 function storagePanel() {
@@ -464,6 +466,23 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
     el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
       order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small", onclick: () => connectGo(b) }, b.label)))); }
+// NVIDIA Nemotron 3.5 Bolt run by the Studio itself (app/bolt.py): its state and backend, what it holds, Load and Unload
+const BOLT_WORD = { loaded: "Loaded", unloaded: "Unloaded", loading: "Loading…", held: "Unloaded for a render", external: "Not managed here" };
+const gbOf = x => x == null ? "" : (Math.round(x * 10) / 10) + " GB";
+function boltLine(e) { return BOLT_WORD[e.state] + (e.state === "loaded" && e.memory_gb != null ? " · " + gbOf(e.memory_gb) : "") + (e.state === "held" && e.held_for ? " (" + e.held_for + ")" : ""); }
+function boltPanel(e) {
+  const act = async (what) => { BR.boltBusy = true; render();
+    try { const r = await api("/api/bolt/" + what, {}); toast(what === "load" ? (r.state === "loaded" ? "Bolt is loaded" : "Loading Bolt (about " + Math.round(r.load_s || 40) + " s)") : "Bolt unloaded: its memory is back");
+      BR.data = null; await brainsLoad(); } catch (err) { toast(err.message, 6000); } BR.boltBusy = false; render(); };
+  if (e.state === "loading" && !BR.boltTimer) BR.boltTimer = setTimeout(() => { BR.boltTimer = null; if (tab === "Brains") { BR.data = null; brainsLoad(); } }, 3000);
+  return el("div", { class: "stack m-bolt", "data-bolt": e.state },
+    el("div", { class: "kv m-row" }, el("span", {}, "Studio engine"), el("b", { class: e.state === "loaded" ? "vt-ok" : e.error ? "warn" : "" }, boltLine(e))),
+    el("div", { class: "kv m-row" }, el("span", {}, "Backend"), el("b", {}, e.backend_label || e.backend)),
+    el("div", { class: "note m-flat" }, e.available === false && e.why ? e.why : "Loaded on the first question (about " + Math.round(e.load_s || 40) + " s), unloaded " + (e.idle_unload_s ? "after " + Math.round(e.idle_unload_s / 60) + " idle minutes" : "only by hand") + " and before a render that needs its memory, never while it answers. Needs about " + Math.round(e.need_gb || 40) + " GB free to load; holds about " + Math.round(e.resident_gb || 28) + " GB."),
+    e.error && e.state !== "loaded" ? el("div", { class: "note m-flat vt-bad" }, e.error) : null,
+    el("div", { class: "m-acts" },
+      el("button", { class: "small", disabled: BR.boltBusy || e.state === "loaded" || e.state === "loading" || e.state === "held" || e.available === false, onclick: () => act("load") }, e.state === "loading" ? "Loading…" : "Load"),
+      el("button", { class: "small", disabled: BR.boltBusy || e.state !== "loaded" || e.in_flight > 0, title: e.in_flight > 0 ? "It is answering now" : "", onclick: () => act("unload") }, "Unload"))); }
 function viewBrains() {
   const wrap = el("div");
   const head = () => pageHead("Studio Vault", "Brains & tools", "Your own AI sign-ins, and the tools an agent may use.");
@@ -481,6 +500,7 @@ function viewBrains() {
     el("div", { class: "tri" }, clis.map(b => connectCard(b)),
       localB ? el("div", { class: "brain" + (d.default === "local" ? " on" : ""), "data-brain": "local" }, el("div", { class: "head" }, brainLogo("local"), el("div", { class: "m-min" }, el("b", {}, localB.label),
           el("span", { class: "cn-word " + (localB.found ? "ok" : "bad") }, localB.found ? "Ready" : "Not answering", localB.found && localB.model ? " · running " + localB.model : localB.models && localB.models.length ? " · " + localB.models.length + " models" : ""))),
+        localB.engine ? boltPanel(localB.engine) : null,
         el("div", { class: "m-acts" }, d.default === "local" ? el("span", { class: "tag2 t", title: d.automatic ? "Nobody chose a default brain, and this local server answers: it leads until you make another brain the default" : "" }, d.automatic ? "default · automatic" : "default") : el("button", { class: "small", disabled: !localB.found, onclick: () => save({ default: "local" }) }, "Make default"))) : null));
   put(wrap, el("div", { class: "m-gap" }, linkPanel(),
     el("details", { class: "fold m-fold", open: CN.linkOpen || false }, el("summary", {}, "Set the other computer by hand"),
