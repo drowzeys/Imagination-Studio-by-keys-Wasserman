@@ -244,7 +244,10 @@ Rules:
   `sfx` (Stable Audio Open 1.0, Stability AI Community License, gated on Hugging Face) and `foley` (MMAudio large_44k_v2,
   weights CC-BY-NC 4.0: non-commercial; say so when asked about commercial use) in `$PREFIX/sound-venv`, never the
   Studio's venv. Foley is laid under the clip's own sound (speech stays, peaks under -1 dBFS) unless asked to replace
-  it. On a DGX Spark (`oneshot-setup-spark.sh --sound`) both go through the ComfyUI server of `spark/comfy.sh` as
+  it. On a Mac Stable Audio Open's transformer runs in float16 and MMAudio's modules are built without random initial
+  values (`sound_generate.py`; measured on an M5 Ultra: 8 s of sfx in 16 s instead of 32 to 35 s, the same take within
+  0.1 dB of long-term spectrum; foley 17.6 s instead of 23.5 s, bit-identical); `SOUND_PRECISION=fp32` keeps float32.
+  On a DGX Spark (`oneshot-setup-spark.sh --sound`) both go through the ComfyUI server of `spark/comfy.sh` as
   `spark_generate.py sfx|foley` (the same flags as `sound_generate.py`): ComfyUI's own Stable Audio nodes
   (`sfx_workflow`), and kijai's ComfyUI-MMAudio (pinned `MMA_COMMIT`) with the Studio's `StudioMMAudioSampler`
   (`spark/studio_mmaudio`, `foley_workflow`): kijai's own sampler reads one frame stream as both 8 and 25 fps, so keep
