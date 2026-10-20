@@ -340,9 +340,11 @@ def test_the_local_server(fake, monkeypatch):
         url = f"http://127.0.0.1:{httpd.server_port}"
         assert agents.ask("local", "s", "p", endpoint=url) == "ready from qwen3:8b"
         post("/api/brains/settings", {"local_endpoint": url, "local_model": "other"})
-        assert agents.ask("local", "s", "p") == "ready from other"
+        # "other" is set, but the server runs only qwen3:8b: that is what is asked for and shown, and the page says so
+        assert agents.ask("local", "s", "p") == "ready from qwen3:8b"
         local = client.get("/api/brains").json()["backends"][-1]
         assert local["found"] and local["models"] == ["qwen3:8b"] and local["endpoint"] == url + "/v1"
+        assert local["model"] == "qwen3:8b" and local["label"] == "qwen3:8b (local)" and local["set_model"] == "other" and local["set_missing"]
     finally:
         httpd.shutdown()
 
@@ -388,8 +390,12 @@ def test_the_environment_choice_wins_over_the_automatic_default(fake, monkeypatc
 
 def test_the_local_brain_is_named_by_its_model(fake, monkeypatch):
     assert agents.local_label(["NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf"]) == "NVIDIA Nemotron 3.5 Bolt (local)"
-    assert agents.local_label(["nvidia-nemotron-3.5-bolt", "qwen3:8b"], "qwen3:8b") == "Local model server"  # it answers with Qwen
-    assert agents.local_label(["qwen3:8b"]) == agents.local_label([]) == "Local model server"
+    assert agents.local_label(["nvidia-nemotron-3.5-bolt", "qwen3:8b"], "qwen3:8b") == "qwen3:8b (local)"  # it answers with Qwen
+    assert agents.local_label(["qwen3:8b"]) == "qwen3:8b (local)" and agents.local_label([]) == "Local model server"
+    # a name set in Settings that the server no longer runs: the page shows, and the Studio asks for, what it does run
+    assert agents.local_label(["DeepSeek-V4.1-Flash"], "GLM-5.3-Flash") == "DeepSeek-V4.1-Flash (local)"
+    assert agents.answering_model(["DeepSeek-V4.1-Flash"], "GLM-5.3-Flash") == "DeepSeek-V4.1-Flash"
+    assert agents.answering_model(["a", "b"], "b") == "b" and agents.answering_model([], "GLM") == "GLM"
     monkeypatch.setattr(slate, "find_local", lambda given="": ("http://studio-box:8091/v1", ["nvidia-nemotron-3.5-bolt"]))
     local = client.get("/api/brains").json()["backends"][-1]
     assert local["label"] == "NVIDIA Nemotron 3.5 Bolt (local)" and local["named"] is True

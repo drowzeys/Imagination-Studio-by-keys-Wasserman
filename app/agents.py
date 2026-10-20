@@ -295,15 +295,23 @@ def default_automatic() -> bool:
     return not chosen_default(read_json(folder() / "settings.json" if folder() else None, {}))
 
 
-def local_label(models: list[str], model: str = "") -> str:
-    """The local brain's name on the pages: the model it answers with, when the Studio knows that model, e.g.
-    "NVIDIA Nemotron 3.5 Bolt (local)"; otherwise "Local model server"."""
+def answering_model(models: list[str], model: str = "") -> str:
+    """The model a local server answers with: the one set in Settings when the server lists it, else the first it lists
+    (a name set for a model the server no longer runs is not asked for); "" when it lists none."""
 
-    answers_with = model if model in (models or []) else (models or [""])[0]
+    return model if model in (models or []) else (models or [model or ""])[0]
+
+
+def local_label(models: list[str], model: str = "") -> str:
+    """The local brain's name on the pages: always the model the server actually answers with, by its own name when the
+    Studio knows it ("NVIDIA Nemotron 3.5 Bolt (local)"), else as the server lists it ("DeepSeek-V4.1-Flash (local)");
+    "Local model server" only when the server lists no model."""
+
+    answers_with = answering_model(models, model) if models else ""
     for pattern, name in LOCAL_NAMES:
-        if pattern.search(answers_with or ""):
+        if pattern.search(answers_with):
             return name + " (local)"
-    return "Local model server"
+    return answers_with + " (local)" if answers_with else "Local model server"
 
 
 def where_of(backend: str, config: dict | None = None) -> str:
@@ -548,8 +556,12 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
         out.append(item)
     base, models = seen.get(("local", "")) or (None, [])
     label = local_label(models, config["local_model"]) if base else "Local model server"
+    running = answering_model(models, config["local_model"]) if base and models else ""
     out.append({"id": "local", "label": label, "named": label != "Local model server", "kind": "http", "found": bool(base), "harness": False, "session": False,
-                "endpoint": base or slate.endpoint_of(endpoint or config["local_endpoint"]) or None, "models": models or []})
+                "endpoint": base or slate.endpoint_of(endpoint or config["local_endpoint"]) or None, "models": models or [],
+                # what it really runs, and the name set in Settings when the server no longer lists it
+                "model": running or None, "set_model": config["local_model"] or None,
+                "set_missing": bool(base and models and config["local_model"] and config["local_model"] not in models)})
     return out
 
 
@@ -646,7 +658,7 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
         base, models = slate.find_local(endpoint or config["local_endpoint"])
         if not base:
             raise RuntimeError("no local model server answers: start Ollama, LM Studio, vLLM or llama.cpp, or set its address in Settings → Connections")
-        body = json.dumps({"model": model or config["local_model"] or (models[0] if models else ""), "temperature": 0.7,
+        body = json.dumps({"model": answering_model(models, model or config["local_model"]), "temperature": 0.7,
                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}).encode()
         request = urllib.request.Request(base + "/chat/completions", body, {"Content-Type": "application/json"})
         with urllib.request.urlopen(request, timeout=timeout) as answer:
