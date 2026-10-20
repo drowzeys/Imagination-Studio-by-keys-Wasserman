@@ -1170,14 +1170,86 @@ def clip_seconds(params: dict) -> float:
 
 
 def held_room() -> int | None:
-    """What this machine has for a render while Drama 3 or MiniMax Music 3's CUDA engine is loaded (both are unloaded
-    before any other job starts, so their memory counts as that job's, like the ComfyUI server's own); None otherwise."""
+    """What this machine has for a render while Drama 3, MiniMax Music 3's CUDA engine or NVIDIA Nemotron 3.5 Bolt is
+    loaded (each is unloaded before a job that needs its memory starts, so their memory counts as that job's, like the
+    ComfyUI server's own); None otherwise."""
 
-    held = [one for one in (voice.room_mb(), music.room_mb()) if one]
+    held = [one for one in (voice.room_mb(), music.room_mb(), bolt.room_mb()) if one]
     return max([memory_guard.room_mb() or 0] + held) if held else None
 
 
-def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | None = None) -> dict:
+def bolt_room_mb(resident_gb: float) -> int | None:
+    """What this machine has for a job with Bolt resident beside it (MB): the memory guard's room (what is available,
+    or what ComfyUI's guard noted before its server loaded) less what Bolt holds, or would hold once loaded."""
+
+    room = memory_guard.room_mb()
+    if room is None:
+        return None
+    one = bolt.engine()
+    if not one.loaded():
+        return int(room - resident_gb * 1024)
+    now = memory_guard.meminfo().get("MemAvailable") or room
+    try:
+        noted = Path(memory_guard.state_file()).stat().st_mtime
+    except OSError:
+        noted = None
+    if room > now and noted is not None and noted < one.loaded_at:  # ComfyUI's note was made before Bolt loaded
+        room -= bolt.held_mb()
+    return int(room)
+
+
+def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
+    """Whether a job of this machine's queue fits with NVIDIA Nemotron 3.5 Bolt resident beside it (``resident_gb``
+    held by it), from the measured peaks: (fits, the figures said in the job's log), or None when the job's kind has no
+    measured peak here (Bolt then goes). On a DGX Spark the memory guard's estimate (clips, songs, sound; Drama 3's
+    NEED_GB); on a Mac the peaks measured on an M5 Ultra (bolt.MAC_PEAK_GB) against what vm_stat counts as available."""
+
+    kind, params = job["kind"], job["params"]
+    if not SPARK:
+        free = voice.mem_available_gb()
+        if free < 0:
+            return None
+        have = free if bolt.engine().loaded() else free - resident_gb
+        turbo = params.get("quality") == "turbo" or params.get("engine") == "turbo" or bool(params.get("references"))
+        peak = bolt.MAC_PEAK_GB["turbo"] if turbo and kind in ("video", "studio", "long") else bolt.MAC_PEAK_GB.get(kind, bolt.MAC_PEAK_UNKNOWN_GB)
+        left, floor = have - peak, bolt.engine().guard_gb
+        return left >= floor, (f"{have:.0f} GB available with Bolt loaded, the job's measured peak about {peak:.0f} GB, "
+                               f"{left:.0f} GB left against a floor of {floor:g}")
+    room = bolt_room_mb(resident_gb)
+    if room is None:
+        return None
+    floor = memory_guard.floor_mb()
+    try:
+        if kind in ("video", "studio", "long"):
+            chosen, _ = custom(params) if params.get("preset") == "custom" else ({}, False)
+            sized = {**(PRESETS[params["preset"]][2] if params.get("preset") in PRESETS else {}), **chosen}
+            frames = lengths.of({"frames": params.get("frames"), "seconds": min(float(params.get("seconds") or 5), LONGEST)})
+            pictures, videos = params.get("references") or [], params.get("reference_videos") or []
+            found = {"pictures": pictures, "videos": [str(inside(v)) for v in videos]} if pictures or videos else None
+            said = memory_of(params, sized, frames, bool(params.get("loras")), found, available_mb=room)
+        elif kind == "music":
+            said = memory_guard.music_check(float(params.get("seconds") or 60), available_mb=room,
+                                            route=getattr(music.engine(), "guard_route", "music"))
+        elif kind in sound.KINDS:
+            said = memory_guard.sound_check(kind, float(params.get("seconds") or 10), available_mb=room)
+            if said.get("need_mb") is None:
+                return None
+        elif kind == "voice":
+            one = voice.backend()
+            need = 0 if one.loaded() else int(float(getattr(one, "NEED_GB", 50)) * 1024)
+            said = {"fits": room - need >= floor, "need_mb": need, "available_mb": room}
+        else:
+            return None
+    except (HTTPException, ValueError, KeyError, TypeError):
+        return None
+    if said.get("route") is None and said.get("need_mb") is None:
+        return None
+    need, have = said.get("need_mb") or 0, said.get("available_mb") or room
+    return bool(said.get("fits")), (f"{have / 1000:.0f} GB for the job with Bolt resident, the job's estimated peak about "
+                                    f"{need / 1000:.0f} GB, the floor {floor / 1000:.0f} GB")
+
+
+def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | None = None, available_mb: int | None = None) -> dict:
     """Whether a clip fits this machine's memory (spark/memory_guard.py; a DGX Spark only, everything fits on a Mac):
     the size it is generated at, its frames, whether references put it on ComfyUI's own bfloat16 blocks and whether a
     LoRA is merged into TensorFold's engine (or, with an engine build that cannot take one, goes to those blocks too)."""
@@ -1193,8 +1265,9 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
     lora = lora or bool(found and params.get("ref_turbo"))
     engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
     # a Drama 3 server kept loaded after a voice take is unloaded before this job starts (voice.release): its memory
-    # counts as this job's, like the ComfyUI server's own; so does MiniMax Music 3's CUDA engine (music.release)
-    room = held_room()
+    # counts as this job's, like the ComfyUI server's own; so does MiniMax Music 3's CUDA engine (music.release), and
+    # NVIDIA Nemotron 3.5 Bolt's (bolt.admit unloads it when the job does not fit beside it)
+    room = held_room() if available_mb is None else available_mb
     return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room,
                               base=env.get("SPARK_BASE") == "h3", engine=engine,
                               pictures=len(found.get("pictures") or []),
@@ -1616,6 +1689,10 @@ def perform(job: dict, worker: dict | None = None) -> None:
         if job["kind"] not in ("music", "export", "soundtrack") and worker is None and not job.get("remote"):
             if music.release(f"a {job['kind']} job needs the GPU"):
                 job["log"] += "[tensorfold] MiniMax Music 3 was unloaded to give this job its memory\n"
+        # NVIDIA Nemotron 3.5 Bolt (bolt.py), the Studio's brain engine: unloaded before this job when the job's measured
+        # peak does not fit beside it (bolt_need), after the answers in flight; held until the queue is empty
+        if job["kind"] not in ("export", "soundtrack") and worker is None and not job.get("remote"):
+            job["log"] += bolt.admit(job, lambda resident: bolt_need(job, resident))
         if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
             source = inside(params["first_frame_from"])
             if not source.is_file():
@@ -1687,7 +1764,9 @@ def work() -> None:
             job = hub.claim()  # the next job for this machine; on a DGX Spark a worker may have taken others (sparks.py)
             if job is None:
                 wake.clear()
-                continue
+        if job is None:
+            bolt.queue_empty()  # nothing for this machine: a Bolt unloaded for the queue's jobs may load again
+            continue
         perform(job)
         hub.kick.set()
 
@@ -1733,6 +1812,8 @@ def state() -> dict:
             "voice": voice.state(),
             # Music: MiniMax Music 3 (MiniMax-Music3) on this machine (music.py): MLX on a Mac, ComfyUI on a DGX Spark
             "music": music.state(),
+            # NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine (bolt.py): its state, backend and memory
+            "bolt": bolt.summary(),
             "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
 
 
@@ -2365,6 +2446,17 @@ import qa  # noqa: E402  (Sam Wasserman's QA gate, beside this file)
 import remote  # noqa: E402  (another machine's Studio app, read over its own API, beside this file)
 import slate  # noqa: E402  (Wasserman Slate AI Studio, beside this file)
 import voice  # noqa: E402  (Voice: Fish Audio Drama 3 text to speech, run locally, beside this file)
+import bolt  # noqa: E402  (NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine, beside this file)
+
+
+def local_running() -> bool:
+    """Whether a job of the queue renders on this machine now (bolt.make_room leaves ComfyUI alone then)."""
+
+    with lock:
+        return any(job["status"] == "running" and not job.get("remote") for job in jobs.values())
+
+
+bolt.busy = local_running
 
 
 def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) -> dict:
@@ -2406,6 +2498,35 @@ app.include_router(slate.attach(HOME, DURATIONS, compose, compose_references, RE
                                 lambda: {"ref2va": ref2va_ready(), "ref2va_turbo": ref2va_turbo_ready()}, slate_room))
 import agents  # noqa: E402  (Brains and agents: the user's own CLI sign-ins and MCP tools, beside this file)
 app.include_router(agents.attach(HOME))
+
+
+@app.get("/api/bolt/state")
+def bolt_state() -> dict:
+    """NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine (bolt.py): state, backend, memory, why not."""
+
+    return bolt.state()
+
+
+@app.post("/api/bolt/load")
+def bolt_load(request: Request) -> dict:
+    """The Brains page's Load: starts the engine aside (about 40 s) and answers at once with its state."""
+
+    agents.local(request)
+    try:
+        return bolt.load_async()
+    except RuntimeError as error:
+        raise HTTPException(409, str(error))
+
+
+@app.post("/api/bolt/unload")
+def bolt_unload(request: Request) -> dict:
+    """The Brains page's Unload: the engine stopped now and its memory given back (refused while it answers)."""
+
+    agents.local(request)
+    try:
+        return bolt.unload()
+    except RuntimeError as error:
+        raise HTTPException(409, str(error))
 import motion  # noqa: E402  (Motion Previs: a Python port of Sam Wasserman's Motion Previs Studio analysis, beside this file)
 app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)
@@ -2457,6 +2578,7 @@ def update_busy():
     return (update_writes > 0 or workers_active
             or any(job["status"] in ("queued", "running") for job in jobs.values())
             or running.get("process") is not None
+            or bool(bolt.summary().get("in_flight"))  # an answer of the Studio's Bolt engine (an agent turn) in flight
             or Path(os.environ.get("STUDIO_GPU_LOCK", Path.home() / "studio-gpu.lock.d")).exists())
 
 
@@ -2466,9 +2588,10 @@ app.include_router(updater.router())
 app.router.on_startup.append(updater.start)
 app.router.on_shutdown.append(updater.stop.set)
 if hasattr(app.router, "on_shutdown"):
-    app.router.on_shutdown.append(hub.close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
+    app.router.on_shutdown.append(hub.close)
+    app.router.on_shutdown.append(bolt.shutdown)  # the Studio's Bolt engine ends with the app (its leash also sees the pipe close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
 import telemetry  # noqa: E402  (this machine's readings for the status bar: GPU, memory, disk, queue, beside this file)
-app.include_router(telemetry.attach(HOME, jobs, order, lock, memory_guard))
+app.include_router(telemetry.attach(HOME, jobs, order, lock, memory_guard, engines=lambda: {"bolt": bolt.summary()}))
 import suite  # noqa: E402  (the filmmaker suite's files in and out: imports, timeline, dailies, beside this file)
 app.include_router(suite.attach(HOME, jobs, lock, PRESETS, app))
 app.include_router(settings.attach(HOME))

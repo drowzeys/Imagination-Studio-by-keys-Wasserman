@@ -162,7 +162,10 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   $("#mtxt").textContent = gpu != null ? gpu + "% GPU" : t.memory ? Math.round(t.memory.available_mb / 1024) + " GB free" : "";
   const gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1);
   const say = [(S && S.platform_label) || platName(), busy ? "rolling" : "ready", "GPU " + (gpu == null ? "n/a" : gpu + "%" + (t.gpu && t.gpu.temp_c != null ? " at " + t.gpu.temp_c + "°C" : "")),
-    t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : "", t.disk ? Math.round(t.disk.free_gb) + " GB disk free" : "",
+    t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : "",
+    // the Studio's Bolt brain (app/bolt.py) while it holds memory
+    t.engines && t.engines.bolt && t.engines.bolt.state === "loaded" ? "Bolt brain " + (t.engines.bolt.memory_gb != null ? t.engines.bolt.memory_gb + " GB" : "loaded") : "",
+    t.disk ? Math.round(t.disk.free_gb) + " GB disk free" : "",
     warn ? t.warnings[0] : ""].filter(Boolean).join(" · ");
   $("#mpill").title = say + " · open the Machine room"; $("#mpill").setAttribute("aria-label", say);
   if (tab === "Machine" && typeof machineLive === "function") machineLive(t);

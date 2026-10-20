@@ -109,7 +109,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
     setRow("Renders go to", "The studio folder, set when the studio starts (STUDIO_HOME)", el("code", { class: "st-path" }, (S && S.home) || "the studio folder")))]; }
 
 /* ---------- 4. Connections ---------- */
-const LOCAL_PRESETS = [["Ollama", "http://127.0.0.1:11434/v1"], ["LM Studio", "http://127.0.0.1:1234/v1"], ["vLLM", "http://127.0.0.1:8000/v1"], ["llama.cpp", "http://127.0.0.1:8080/v1"], ["Hermes proxy", ""]];
+const LOCAL_PRESETS = [["Studio engine · Bolt", "studio:bolt"], ["Ollama", "http://127.0.0.1:11434/v1"], ["LM Studio", "http://127.0.0.1:1234/v1"], ["vLLM", "http://127.0.0.1:8000/v1"], ["llama.cpp", "http://127.0.0.1:8080/v1"], ["Hermes proxy", ""]];
 // the Local models card: on Settings → Connections and at the top of Machine → Brains & tools
 function localModelsCard() {
   const b = (typeof BR !== "undefined" && BR.data && BR.data.backends || []).find(x => x.id === "local"), set = typeof BR !== "undefined" && BR.data && BR.data.settings || {};
