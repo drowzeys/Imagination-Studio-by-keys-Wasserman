@@ -88,9 +88,16 @@ from an agent on your Mac, run the server there over ssh, so nothing is opened t
 |---|---|---|
 | `studio_state` | — | **Call first.** Presets (sizes), qualities, clip lengths, picture models and the machine. |
 | `list_library` | `kind?` (`video` / `image`), `limit?` | Clips and stills, newest first, with their paths. |
-| `queue_still` | `prompt`, `count?`, `preset?`, `width?`, `height?`, `seed?`, `image_model?` | Queues stills: `count` candidates (1 to 12, default 4) and a contact sheet. |
-| `queue_clip` | `prompt`, `first_frame?`, `image_prompt?`, `preset?`, `quality?`, `seconds?`, `seed?`, `title?` | Queues a clip with sound: from a Library picture (`first_frame`), from a picture it makes first (`image_prompt`), or from text alone. |
-| `job_status` | `id` | Status (`queued`, `running`, `done`, `failed`, `cancelled`), progress, outputs, error. |
+| `queue_still` | `prompt`, `count?`, `preset?`, `width?`, `height?`, `seed?`, `image_model?` | Queues stills: `count` pictures (1 to 12, default 1: an agent's "a picture" is one) and a contact sheet. |
+| `queue_clip` | `prompt`, `first_frame?`, `image_prompt?`, `references?`, `preset?`, `quality?`, `seconds?`, `seed?`, `title?` | Queues a clip with sound: from a Library picture (`first_frame`), from a picture it makes first (`image_prompt`), from up to nine reference pictures (`references`, Ref2VA: named `<Picture 1>`... in the prompt), or from text alone. |
+| `queue_edit` | `image`, `prompt`, `image_model?`, `seed?`, `title?` | Queues an edit of a Library picture by the image model; the prompt says what it should become. |
+| `queue_long` | `prompt`, `total_seconds`, `segment_seconds?`, `beats?`, `first_frame?`, `preset?`, `quality?`, `seed?`, `title?` | Queues a long take (over 15 s, up to 30 min): a chain of clips, each opening on the last frame of the one before, joined; `beats` is one line per part. |
+| `queue_sound` | `kind` (`sfx` / `foley`), `prompt?`, `seconds?`, `video?`, `keep_sound?`, `seed?`, `title?` | Queues a sound effect from words (`sfx`, 1 to 47 s) or a clip's foley (`foley`, its `video`). |
+| `queue_soundtrack` | `song`, `video`, `music_db?` | Lays a finished song (its job id) under a clip, ducked under the dialogue: a new .mp4. |
+| `check_clip` | `path`, `prompt?` | Runs the QA gate on a clip (sound, identity, sharpness); its job's `qa` is the report. |
+| `motion_previs` | `clip`, `start?`, `end?`, `mode?`, `title?` | Motion Previs: analyses a 2 to 15 s range of a clip into a production pack; its job's `pack` is the pack. |
+| `cancel_job` | `id` | Cancels a queued or running job (a render or a Motion Previs analysis). |
+| `job_status` | `id` | Status (`queued`, `running`, `done`, `failed`, `cancelled`), progress, outputs, error (a Motion Previs job too). |
 | `wait_for_jobs` | `ids`, `seconds?` | Waits until the jobs are done, failed or cancelled, at most `seconds` (default 50, up to 600), and returns them as `job_status` does. |
 | `list_jobs` | `limit?` | The queue and finished jobs, newest first. |
 | `slate_films` | — | Slate's films (the Production tab), newest first. |

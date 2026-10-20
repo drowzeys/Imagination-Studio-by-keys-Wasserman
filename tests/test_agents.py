@@ -447,7 +447,8 @@ def test_the_studio_mcp_server_shakes_hands():
     tool = {"id": "studio", "label": "Studio", "command": [PY, str(ROOT / "mcp/studio-mcp.py")], "env": {"STUDIO_URL": "http://127.0.0.1:9"},
             "via": "here", "host": "", "enabled": True}
     check = agents.check_tool(tool)
-    assert check["ok"] and check["tools"] == ["studio_state", "list_library", "queue_still", "queue_clip", "queue_voice", "queue_song", "list_projects",
+    assert check["ok"] and check["tools"] == ["studio_state", "list_library", "queue_still", "queue_clip", "queue_voice", "queue_song", "queue_edit",
+                                             "queue_long", "queue_sound", "queue_soundtrack", "check_clip", "motion_previs", "cancel_job", "list_projects",
                                              "add_to_timeline", "export_timeline", "job_status", "wait_for_jobs", "list_jobs", "slate_films",
                                              "slate_film", "slate_new_film", "slate_add_scene", "slate_add_shot", "slate_render_shot", "upload_file"]
 
