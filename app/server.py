@@ -1725,8 +1725,8 @@ def state() -> dict:
                         "presets": {k: longest_frames(v[2]) for k, v in PRESETS.items()}, "custom": longest_frames({"WIDTH": 1344, "HEIGHT": 768})},
             "ffmpeg": media_tools()["ffmpeg"], "ffmpeg_note": "" if media_tools()["ffmpeg"] else FFMPEG_NOTE,
             "shot_check": True, "negation_reason": negation.REASON,
-            # how many DGX Sparks a job may use (sparks.py); a Mac renders on itself
-            "sparks": {"supported": SPARK, "limit": sparks.LIMIT},
+            # how many DGX Sparks a job may use (sparks.py), this machine counted: a Spark or a Mac at the head
+            "sparks": {"supported": True, "limit": sparks.LIMIT},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
             # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py): MLX on a Mac, CUDA on a DGX Spark
@@ -1923,7 +1923,7 @@ def queue_job(body: dict) -> dict:
     if not 1 <= chosen <= sparks.LIMIT:
         raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
     said = hub.plan({"sparks": chosen, "kind": kind, "params": params})
-    job["sparks"] = {"chosen": chosen if SPARK else 1, "available": said["available"], "used": said["used"], "says": said["says"]}
+    job["sparks"] = {"chosen": chosen, "available": said["available"], "used": said["used"], "says": said["says"]}
     with lock:
         accepting_jobs()
         waiting = sum(1 for one in jobs.values() if one["status"] in ("queued", "running"))
@@ -2428,7 +2428,12 @@ def about_this_spark() -> dict:
               "floor_mb": memory_guard.floor_mb(info.get("MemTotal"))} if SPARK and info else {}
     with lock:
         active = sum(1 for job in jobs.values() if job["status"] in ("queued", "running"))
-    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent)
+    # what it renders with its own settings: a head on a Mac hands a Spark only these (sparks.capable)
+    renders = {"presets": [name for name, (_, _, env) in PRESETS.items() if not SPARK or not {"X2", "TWOK", "QHD"} & set(env)] + ["custom"],
+               "qualities": [name for name in QUALITIES if name.startswith("fh") or (turbo_ready() and not SPARK)]}
+    if not SPARK:  # a Mac's models are not in ComfyUI's folders: what its own row on the Sparks tab says it renders
+        renders.update(fasth3=Path(os.environ.get("FASTH3_DIR", Path.home() / "h3-models/FastH3-8-Step-V2")).is_dir(), image=bool(image_models()))
+    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent, renders)
 
 
 def clip_time(kind: str, params: dict) -> int | None:

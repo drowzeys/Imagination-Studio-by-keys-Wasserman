@@ -709,8 +709,8 @@ check("action-remove", "short")(lambda r: action(r, "remove", {"person": "the pe
 
 @check("sparks", "api")
 def c_sparks(r: Run):
-    if r.platform != "spark":
-        raise NotHere("more than one DGX Spark is a DGX Spark feature")
+    if not (r.state.get("sparks") or {}).get("supported"):
+        raise NotHere("this app has no Sparks setting (on a Mac, a Studio from before a Mac could lead Sparks)")
     me = r.api.get("/api/spark/self")
     hub = r.api.get("/api/sparks")
     plan = r.api.post("/api/sparks/plan", {"sparks": 1, "kind": "video", "params": {**SMALL, "prompt": "x"}})
