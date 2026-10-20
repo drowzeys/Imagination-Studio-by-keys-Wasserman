@@ -2,12 +2,14 @@
 /* Sparks: how many DGX Sparks a job may use, and the worker Sparks behind this queue (app/sparks.py).
    SPK.n is the number every job queued from this page carries ("sparks"); the chooser is the same control wherever
    it is drawn (the queue, the last step of Create, Production, Slate, the Sparks tab). */
-const SPK = { data: null, n: 1, form: { address: "", folder: "" }, plans: {}, takes: {}, ticks: 0 };
+const SPK = { data: null, n: 1, form: { address: "", folder: "", via: null }, plans: {}, takes: {}, ticks: 0 };
+// what this machine is called on the page: a DGX Spark, or a Mac that leads the Sparks (app/sparks.py)
+const spkHere = d => "this " + ((d && d.this && d.this.kind) || "Spark");
 // which Spark rendered a clip (sparks/takes.jsonl in the studio folder), for a take's line
 const spkTake = path => { const t = SPK.takes[path]; return t && t.spark ? "on " + t.spark : null; };
 const spkLimit = () => (SPK.data && SPK.data.limit) || 5;
 // "5 of 8 available" when more are asked for than there are; else how many will be used
-const spkCount = (d, n) => !d || !d.supported ? "this machine" : n > d.available ? d.available + " of " + n + " available" : n === 1 ? "this Spark alone" : n + " of " + d.available + " available Sparks";
+const spkCount = (d, n) => !d || !d.supported ? "this machine" : n > d.available ? d.available + " of " + n + " available" : n === 1 ? spkHere(d) + " alone" : n + " of " + d.available + " available Sparks";
 const spkSig = d => !d ? "" : JSON.stringify([d.available, d.default, d.workers.map(w => [w.address, w.name, w.state, w.working, w.enabled, w.why, w.job, w.memory_gb, w.usable]), d.this && d.this.job]);
 async function spkLoad(draw) { const was = spkSig(SPK.data); try { const first = !SPK.data; SPK.data = await api("/api/sparks");
     if (first) { let kept = null; try { kept = Number(localStorage.getItem("sparks")); } catch {} SPK.n = SPK.data.supported ? Math.max(1, Math.min(kept || SPK.data.default || 1, SPK.data.limit)) : 1; }
@@ -49,28 +51,32 @@ const spkDot = state => el("span", { style: "display:inline-block;width:9px;heig
 function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}, "Sparks")), d = SPK.data;
   if (!d) { spkLoad(true).then(() => { if (SPK.data && tab === "Sparks") render(); }); return put(box, el("div", { class: "note" }, "Loading…")), box; }
   if (!d.supported) return put(box, el("div", { class: "note" }, d.note), sparksPick()), box;
-  const f = SPK.form, a = encodeURIComponent;
-  const row = w => el("div", { class: "seg" }, el("div", { class: "seghead" }, spkDot(w.working ? "busy" : w.state), el("b", {}, w.name), el("span", { class: "note" }, w.address),
+  const f = SPK.form, a = encodeURIComponent, mac = d.head === "mac", here = spkHere(d);
+  if (mac && f.via === null) f.via = d.via || "";
+  const row = w => el("div", { class: "seg" }, el("div", { class: "seghead" }, spkDot(w.working ? "busy" : w.state), el("b", {}, w.name), el("span", { class: "note" }, w.address + (w.via ? " through " + w.via : "")),
       el("span", { class: "pill " + (w.state === "ready" ? "done" : w.state === "busy" || w.working ? "running" : w.state === "new" || w.state === "stopped" ? "queued" : "failed") }, w.working || w.says), el("span", { style: "flex:1" }),
       el("label", { class: "note fit", style: "display:flex;gap:5px;align-items:center;margin:0", title: "Unticked, this Spark is given no clips; it stays in the list" }, el("input", { type: "checkbox", style: "width:auto", checked: w.enabled, onchange: e => spkDo("/api/sparks/workers/" + a(w.address), { enabled: e.target.checked }) }), "use"),
       el("button", { class: "small", disabled: !!w.working, title: "Look at this Spark: reachable, its Studio's version, what it can render, free memory, busy or idle. Nothing on it is changed.", onclick: () => spkDo("/api/sparks/workers/" + a(w.address) + "/check", {}) }, "Check"),
-      el("button", { class: "small", disabled: !!w.working, title: "Send this Spark's Studio code to it (rsync over ssh, as you), start its app on its own 127.0.0.1, and check it again. Models are not sent.", onclick: () => spkDo("/api/sparks/workers/" + a(w.address) + "/update", {}) }, "Update and start"),
+      el("button", { class: "small", disabled: !!w.working, title: "Send " + here + "'s Studio code to it (rsync over ssh, as you), start its app on its own 127.0.0.1, and check it again. Models are not sent.", onclick: () => spkDo("/api/sparks/workers/" + a(w.address) + "/update", {}) }, "Update and start"),
       el("button", { class: "small", disabled: !!w.working, title: "Stop its Studio app and its ComfyUI server: its memory is free again", onclick: () => confirm("Stop the Studio app on " + w.name + " and free its memory?") && spkDo("/api/sparks/workers/" + a(w.address) + "/stop", {}) }, "Stop"),
       el("button", { class: "small", title: "Take this Spark off the list (what runs on it is left as it is)", onclick: () => confirm("Remove " + w.name + " from the list?") && spkDo("/api/sparks/workers/" + a(w.address), undefined, "DELETE") }, "Remove")),
     el("div", { class: "note" }, [w.version ? "Studio " + w.version : null, w.guard ? "memory guard" : w.state === "ready" || w.state === "busy" ? null : w.version ? "memory guard not confirmed" : null, w.memory_gb != null ? w.memory_gb + " GB of memory available" : null,
       w.disk_gb != null ? w.disk_gb + " GB of disk free" : null, w.job ? "rendering job " + w.job : null].filter(Boolean).join(" · ")),
     w.can ? el("div", { class: "note" }, "Renders: " + spkHas(w.can)) : null,
     w.why || (w.unusable && w.state === "ready") ? el("div", { class: "note", style: "color:var(--warn)" }, w.why || w.unusable) : null);
-  put(box, el("div", { class: "note" }, "A job may use more than one DGX Spark. Choose how many here, in the queue, or where you queue a job: this Spark counts as one. Several clips render one per Spark, side by side; one clip renders on one Spark. Each other Spark runs its own copy of this Studio, closed to the network: this app reaches it through an ssh tunnel it opens itself, so you need a key login to it as the user who runs this app."),
+  put(box, el("div", { class: "note" }, "A job may use more than one DGX Spark. Choose how many here, in the queue, or where you queue a job: " + here + " counts as one. Several clips render one per Spark, side by side; one clip renders on one Spark. Each other Spark runs its own copy of this Studio, closed to the network: this app reaches it through an ssh tunnel it opens itself, so you need a key login to it as the user who runs this app."
+      + (mac ? " From a Mac only single FastH3 clips a Spark makes with its own settings go to a Spark (no MiniMax H3 Turbo quality, no 2x decoder preset, no text encoder file of this Mac's); the rest renders on this Mac, and the page says why. A Spark this Mac cannot reach goes through one that can (“Through”): that Spark logs in to it with its own key." : "")),
     sparksPick({ clips: 8 }, "Sparks for new jobs"),
-    el("h3", {}, "This Spark and " + (d.listed - 1) + " other" + (d.listed === 2 ? "" : "s") + " · " + d.available + " available"),
-    el("div", { class: "seg" }, el("div", { class: "seghead" }, spkDot(d.this.state), el("b", {}, d.this.name), el("span", { class: "note" }, "this Spark"), el("span", { class: "pill " + (d.this.job ? "running" : "done") }, d.this.job ? "rendering" : "idle")),
-      el("div", { class: "note" }, "Studio " + d.this.version + " · memory guard · " + d.this.memory_gb + " GB of memory available · " + d.this.disk_gb + " GB of disk free"), el("div", { class: "note" }, "Renders: " + spkHas(d.this.can))),
+    el("h3", {}, here[0].toUpperCase() + here.slice(1) + " and " + (d.listed - 1) + " other" + (d.listed === 2 ? "" : "s") + " · " + d.available + " available"),
+    el("div", { class: "seg" }, el("div", { class: "seghead" }, spkDot(d.this.state), el("b", {}, d.this.name), el("span", { class: "note" }, here), el("span", { class: "pill " + (d.this.job ? "running" : "done") }, d.this.job ? "rendering" : "idle")),
+      el("div", { class: "note" }, ["Studio " + d.this.version, d.this.guard !== false ? "memory guard" : null, d.this.memory_gb != null ? d.this.memory_gb + " GB of memory available" : null, d.this.disk_gb != null ? d.this.disk_gb + " GB of disk free" : null].filter(Boolean).join(" · ")), el("div", { class: "note" }, "Renders: " + spkHas(d.this.can))),
     d.workers.map(row),
     el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "fit", disabled: !d.workers.length, onclick: () => spkDo("/api/sparks/check", {}) }, "Check all"), el("span")),
     el("h3", {}, "Add a Spark"),
-    el("div", { class: "note" }, "Its address as you would type it after ssh. It needs the Studio installed once (oneshot-setup-spark.sh, with the FastH3 models); “Update and start” then sends this Spark's Studio code and starts its app. No password is asked and nothing is installed as root: if ssh asks for a password, set up a key login first."),
+    el("div", { class: "note" }, "Its address as you would type it after ssh. It needs the Studio installed once (oneshot-setup-spark.sh, with the FastH3 models); “Update and start” then sends " + here + "'s Studio code and starts its app. No password is asked and nothing is installed as root: if ssh asks for a password, set up a key login first."
+      + (mac ? " Through: a Spark this Mac reaches by ssh and that reaches the other Spark by its own key login (the Spark that leads them, user@192.168.1.10); leave it empty when this Mac reaches the Spark itself." : "")),
     el("div", { class: "row" }, field("Address", bind(f, "address", el("input", { placeholder: "10.0.10.5  or  user@spark-5" }))), field("Studio folder there, under the home folder", bind(f, "folder", el("input", { placeholder: d.folder }))),
-      el("button", { class: "primary fit", onclick: async () => { if (!f.address.trim()) return toast("Give the Spark's address"); await spkDo("/api/sparks/workers", { address: f.address.trim(), folder: f.folder.trim() || null }); f.address = ""; } }, "Add")));
+      mac ? field("Through", bind(f, "via", el("input", { placeholder: "user@the-spark-that-leads" }))) : null,
+      el("button", { class: "primary fit", onclick: async () => { if (!f.address.trim()) return toast("Give the Spark's address"); await spkDo("/api/sparks/workers", { address: f.address.trim(), folder: f.folder.trim() || null, ...(mac && (f.via || "").trim() ? { via: f.via.trim() } : {}) }); f.address = ""; } }, "Add")));
   return box; }
 if (typeof window !== "undefined" && window.addEventListener) { window.addEventListener("load", () => setTimeout(() => spkLoad(true), 400)); setInterval(() => spkLoad(true), 4000); }
