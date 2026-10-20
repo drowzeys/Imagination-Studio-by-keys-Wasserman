@@ -2050,7 +2050,12 @@ Code. Only the address that was set is asked, once a minute. A local server that
 with `--jinja` says so in `/props`; any other is offered one tool in a small call) drives the Studio's tools in the
 Agent room like Claude Code and Codex: the Studio runs the loop itself (`drive` in `app/agents.py`) with the same MCP
 servers, at most 40 answers and two hours a turn, no shell and no file tools, and a path a call names held to the
-conversation's folder and the Library. One without tool calls stays a conversation. `STUDIO_LOCAL_TOOLS=0|1` overrides
+conversation's folder and the Library. Around the model the loop keeps it to the brief: rules (one call per thing asked,
+the count asked, the fastest models unless named, nothing unasked, which tool makes what), hints in the tools' settings,
+compact tool answers, greedy sampling, a failing call never sent twice unchanged, and the Studio's own records of what
+was made under its answer; on the agent benchmark (`scripts/agent-bench`, 38 briefs) this took NVIDIA Nemotron 3.5 Bolt
+from 37-39% to 97-100% of briefs done exactly as asked (on the Mac and on the head), and cut its time on the Mac
+from 56 to 14 s a brief. `STUDIO_LOCAL_AGENT` turns the parts off or on for measuring. One without tool calls stays a conversation. `STUDIO_LOCAL_TOOLS=0|1` overrides
 the check. The local brain is always shown by the model the server
 runs (NVIDIA Nemotron 3.5 Bolt by that name, any other by the name the server lists), and that is the model asked for:
 a model set in Settings that the server no longer runs is replaced by the one it does, and Settings says so. When a film's
