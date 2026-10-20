@@ -92,6 +92,13 @@ def server(action: str) -> None:
                 break
             time.sleep(1)
         time.sleep(5)
+    if not sg.MAC:
+        # the actions load 64 to 75 GB at once (MiniMax H3's Ref2VA transformer and text encoder): the model files' page
+        # cache is given back first, so the load lands in free memory instead of the kernel reclaiming cache while it
+        # streams in. That reclaim, on a head with 57 GB of cache and Bolt's weights read once, made the memory floor
+        # stop the server with 38 GB still available (2026-10-20). A model another job had cached is read again.
+        count = sg.memory_guard.release_cache(sg.memory_guard.model_files())
+        say(f"[tensorfold] gave back the page cache of {count} model files before loading")
     sg.ensure_server("workflow-" + action)
     have = sg.call("/object_info")
     missing = [n for n in NODES[action] if n not in have]

@@ -242,8 +242,12 @@ def test_an_action_starts_from_an_empty_server_after_another_kind_of_job(monkeyp
     monkeypatch.setattr(W, "comfy_pid", lambda: "1")
     monkeypatch.setattr(W.time, "sleep", lambda s: None)
     monkeypatch.setattr(W.subprocess, "run", lambda cmd, **k: stops.append(cmd))
+    released = []
+    monkeypatch.setattr(W.sg.memory_guard, "release_cache", lambda paths: released.append(1) or 0)
+    monkeypatch.setattr(W.sg, "MAC", False)
     for last, restarted in (("flux3", True), ("image", True), ("video-int8", True), ("workflow-upscale", False), ("", False)):
         stops.clear()
         (tmp_path / "comfy.kind").write_text(last)
         W.server("turnaround")
         assert bool(stops) == restarted, last
+    assert len(released) == 5  # on a Spark the model files' page cache is given back before every action loads
