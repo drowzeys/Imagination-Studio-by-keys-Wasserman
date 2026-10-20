@@ -47,15 +47,16 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # One command on either machine: on Linux with an NVIDIA GPU this hands over to the DGX Spark installer (CUDA build).
-# The options both know (--image-only, --no-render, --verify, --motion, --upgrade) pass through; the Mac-only ones are dropped with a note.
+# The options both know pass through to oneshot-setup-spark.sh (it adds --h3-base, which is the Spark's own); --upscale and
+# --remove come with the Spark's --ref2va; the Mac-only ones (--turbo, --app) are dropped with a note.
 if [ "$(uname -s)" = Linux ]; then
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
-      --upscale|--remove) echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh)";;
+      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--sound|--ref2va|--image-edit|--h3-base|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
+      --upscale|--remove) echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"; SPARK_ARGS+=("--ref2va");;
       --fasth3) ;;
-      --turbo|--app|--ref2va|--sound) echo "note: $arg is for the Mac build and does nothing on a DGX Spark";;
+      --turbo|--app) echo "note: $arg is for the Mac build and does nothing on a DGX Spark";;
       *) echo "unknown option $arg" >&2; exit 2;;
     esac
   done
