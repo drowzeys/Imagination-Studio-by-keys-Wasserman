@@ -679,18 +679,21 @@ def c_turn(r: Run):
 
 @check("actions-refused", "api")
 def c_actions_refused(r: Run):
-    """An action this machine does not offer (upscale, mask and remove where ComfyUI and their models are not installed) is refused when queued."""
-    out = {}
+    """Every Library action refuses what it cannot do, with nothing queued: one this machine does not offer (ComfyUI and
+    its models not installed) is refused outright; one it offers refuses a clip from outside the studio folder, and
+    Upscale a size it does not make."""
+    out, clip = {}, r.ctx.get("up_clip")
     for kind in ("upscale", "mask", "remove"):
-        if (r.ctx.get("actions") or {}).get(kind, {}).get("ready"):
-            continue
-        status, data = r.api.call("POST", "/api/jobs", {"kind": kind, "params": {"video": r.ctx.get("up_clip"), "image": r.ctx.get("up_still"), "person": "the person"}})
-        if status < 400:
-            r.jobs.append(data.get("id"))
-            raise Fail(f"{kind} is not ready here but was queued")
-        out[kind] = status
-    if not out:
-        raise NotHere("every action is offered here")
+        offered = (r.ctx.get("actions") or {}).get(kind, {}).get("ready")
+        asks = [("not offered", {"video": clip, "image": r.ctx.get("up_still"), "person": "the person"})] if not offered else [
+            ("outside the folder", {"video": "/etc/hosts", "person": "the person"})] + (
+            [("9 megapixels", {"video": clip, "megapixels": 9})] if kind == "upscale" else [])
+        for why, params in asks:
+            status, data = r.api.call("POST", "/api/jobs", {"kind": kind, "params": params})
+            if status < 400:
+                r.jobs.append(data.get("id"))
+                raise Fail(f"{kind} ({why}) was queued instead of refused")
+            out[f"{kind}: {why}"] = status
     return out
 
 
