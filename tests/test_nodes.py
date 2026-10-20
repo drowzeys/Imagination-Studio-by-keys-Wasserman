@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp()) / "TensorFoldStudio"))
 sys.path.insert(0, str(ROOT / "app"))
 import nodes  # noqa: E402
-from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi import APIRouter, FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 
@@ -274,6 +274,35 @@ def test_without_the_apps_route_a_card_fails_and_nothing_is_queued_unchecked():
     run = studio.settle(run["id"])
     assert run["status"] == "failed" and studio.queued == []
     assert "/api/voice/takes" in run["nodes"]["v"]["error"] and "not queued" in run["nodes"]["v"]["error"]
+
+
+def test_a_voice_and_a_song_card_find_their_routes_in_an_included_router():
+    """server.py includes Voice's and Music's routes as routers (voice_router, music_router): FastAPI 0.142 keeps an
+    included router as one entry of app.routes, and a card that looked only at the top level failed on every machine
+    with "this studio has no /api/voice/takes" (found on the Mac by scripts/studio-check.py)."""
+    studio = Studio(routes=False)
+
+    @studio.app.post("/api/estimate")
+    def estimate(body: dict) -> dict:
+        return {"seconds": 60, "memory": {"fits": True}}
+
+    router = APIRouter()
+
+    @router.post("/api/voice/takes")
+    def voice(body: dict) -> dict:
+        return studio.enqueue("voice", body["title"], {"text": body["text"], "seed": body["seed"]}, None, via="router")
+
+    @router.post("/api/music/takes")
+    def music(body: dict) -> dict:
+        return studio.enqueue("music", body["title"], {k: body[k] for k in ("caption", "lyrics", "seconds", "seed")}, None, via="router")
+
+    studio.app.include_router(router)
+    graph = {"nodes": [node("t", "text", text="We leave at first light."), node("v", "voice", seed=4)], "edges": [edge("t", "text", "v", "text")]}
+    run = studio.run(graph)
+    studio.finish(["voice/j1.wav"])
+    run = studio.settle(run["id"])
+    assert run["nodes"]["v"]["error"] is None and run["status"] == "done", run
+    assert [(kind, via) for kind, _, via in studio.queued] == [("voice", "router")]
 
 
 def test_a_clip_is_not_run_without_the_memory_guards_answer():

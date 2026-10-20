@@ -410,9 +410,17 @@ def attach(home: Path, enqueue, jobs: dict, lock, inside, relative) -> APIRouter
     # ---------- runs ----------
 
     def route(app, path: str):
+        """The POST route's function at ``path``, in the app and the routers included in it: FastAPI 0.142 (the
+        lock's) keeps an included router whole, as one entry, so Voice's and Music's routes are found only inside."""
+
         for one in getattr(app, "routes", []) or []:
             if getattr(one, "path", None) == path and "POST" in (getattr(one, "methods", None) or ()):
                 return one.endpoint
+            inner = getattr(one, "original_router", None)
+            if inner is not None and inner is not one:
+                found = route(inner, path)
+                if found is not None:
+                    return found
         return None
 
     def public(run: dict) -> dict:

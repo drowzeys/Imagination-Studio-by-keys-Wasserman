@@ -146,6 +146,12 @@ Rules:
   `shot_frames`; the tempo is the user's. `tests/test_slate_page.py` runs the page code in node: keep it passing.
 - A clip from another machine's app is read through `app/remote.py` (`/api/qa`, `/api/slate/takes`): addresses are
   `http://host:port` only and paths are media files inside that app's folder. Do not widen either.
+- Checking every feature on a running app (a Mac or a DGX Spark): `python3 scripts/studio-check.py` on that machine
+  queues the jobs each tab queues (smallest sizes, one realistic clip and song), checks the files with ffprobe and
+  writes `report.json` and `report.md`; what the platform does not offer is n/a with the app's reason, never a pass.
+  `--base` twice runs two machines at once, `--merge` puts two reports side by side. `scripts/studio-check-ui.cjs`
+  opens every tab and clicks every button with writes blocked (open it through 127.0.0.1, e.g. `ssh -L`, so the
+  local-only routes answer). The first clears what it made, the second writes nothing.
 - Nothing a request handler calls may run a tool without a time limit (`tests/test_api_answers.py`); the GPU's name
   is asked of nvidia-smi once and kept.
 - `app/shot.py` checks a finished single clip: first and last frame held, no cut inside one shot. Its thresholds are
