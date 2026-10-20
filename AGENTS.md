@@ -50,6 +50,13 @@ to video and for clips from an image alike, and prints `[tensorfold] engine: zig
 generation and the Turbo path are MLX. Do not apply the base-model audio step to FastH3 clips:
 the owner compared it by ear and chose FastH3's own sound. Use 20 passes when a prompt has several actions.
 `scripts/build-zig-engine.sh` builds the payload on a Mac (zig 0.17); never commit the binary.
+A style LoRA on FastH3 stays on the native engine when its `h3_case.py` takes `--lora`: the block projections'
+factors are added to the bf16 weights in float32 on the GPU and rounded to int8 with them, in memory, as the MLX
+engine merges them (never into a saved copy). Measured at 864x480, 22 frames, 4 passes: 16.9 s against 24.3 s on MLX (1.01 s a pass against 1.71 s; the MLX merge took 7.4 to 41.6 s of load);
+the merged weights equal the MLX merge's exactly, and the first velocity's error against a float32 reference with
+the LoRA (relative 0.378) stays near the engine's own without one (0.337; 0.579 when the LoRA is left out). An
+adapter that changes anything else the native tool reads (a norm, a dense correction) is refused there (status 3)
+and the clip renders on MLX.
 
 FastH3 and long videos: `scripts/fast.sh` (STEPS=4|8|20, RES=480p|720p, UPSCALE=1); `ENGINE=fasth3` works with
 `studio.sh` and `FIRST_FRAME` too, though FastVideo trained it on text to video only. Videos over 15 s are chains of

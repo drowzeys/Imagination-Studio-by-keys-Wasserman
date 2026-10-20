@@ -4,6 +4,12 @@ Three stages: the engine's h3_case.py exports the prompt's rows, tables and nois
 checkpoint's small projections), tf-h3-dit runs every pass on the GPU, and the rows are decoded here to an MP4 with
 sound (Python: the video and audio decoders, the same ones h3_generate.py uses). --first-frame starts the clip from
 an image: the export encodes it and the native passes carry its rows, held, ahead of the audio.
+
+With an engine that can (its h3_case.py writes the case under another name and renames it when complete), the
+native tool starts at once and rounds the checkpoint to int8 while the prompt is being encoded. --lora merges style adapters into the native engine's weights: their block factors are added
+to the bf16 projections in float32 before the int8 rounding, as the MLX engine merges them, never into a saved copy.
+An adapter the native engine cannot apply ends the run with exit status 3 before any pass (scripts/video.sh then
+renders on the MLX engine).
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from types import SimpleNamespace
 
 TILE_PIXELS = 128  # one routing tile is 4 tokens a side, a token 32 pixels
 STEP = re.compile(r"^step (\d+)/(\d+): ([0-9.]+) s wall")
+REFUSED = 3  # h3_case.py's exit status for an adapter the native engine cannot apply
 
 
 def aligned(value: int) -> int:
@@ -46,6 +53,8 @@ def main() -> int:
     parser.add_argument("--upscale-vae", help="safetensors of a packed-head (2x) video decoder; frames come out larger")
     parser.add_argument("--crop", help="WxH: centre-crop the decoded frames before the MP4 is written")
     parser.add_argument("--options", default="", help="tf-h3-dit's kernel options, if any")
+    parser.add_argument("--lora", action="append", default=[], metavar="PATH[:STRENGTH]",
+                        help="a style adapter merged into the native engine's weights (repeat for several)")
     parser.add_argument("--keep", action="store_true", help="keep the case folder beside the clip")
     args = parser.parse_args()
     if (args.prompt is None) == (args.prompt_file is None):
@@ -71,6 +80,13 @@ def main() -> int:
     print(f"[tensorfold] engine: zig (TensorFold native runtime), generating {width}x{height}, {args.frames} frames"
           + (f", cropped to {crop}" if crop else ""), flush=True)
 
+    tool_text = case_py.read_text()
+    overlap = "case.partial.safetensors" in tool_text  # an engine that renames its case into place when complete
+    if args.lora and "--lora" not in tool_text:
+        print("[tensorfold] this native engine cannot merge a LoRA", file=sys.stderr)
+        shutil.rmtree(case, ignore_errors=True)
+        return REFUSED
+
     started = time.perf_counter()
     export = [sys.executable, str(case_py), args.model_dir, args.fasth3, str(case), "--tools", str(engine),
               "--prompt-file", str(prompt), "--seed", str(args.seed), "--no-reference", *size]
@@ -78,25 +94,47 @@ def main() -> int:
         export += ["--steps", str(args.steps)]
     if args.first_frame:
         export += ["--first-frame", args.first_frame]
-    done = subprocess.run(export, capture_output=True, text=True)
-    if done.returncode:
-        sys.stderr.write(done.stdout[-2000:] + done.stderr[-4000:])
-        raise SystemExit("the export stage failed")
-    rows = json.loads(done.stdout.strip().splitlines()[-1])
-    export_seconds = time.perf_counter() - started
-
-    started = time.perf_counter()
+    for spec in args.lora:
+        export += ["--lora", spec]
+    options = [word for word in args.options.split(",") if word]
+    if overlap:
+        options.append("wait")
+    if args.lora:
+        options.append(f"lora={case / 'lora.safetensors'}")
     command = [str(native), str(Path(args.fasth3) / "transformer"), str(shards), str(case / "case.safetensors"),
-               str(case / "zig")] + ([args.options] if args.options else [])
-    passes: list[float] = []
-    tail: list[str] = []
-    with subprocess.Popen(command, stderr=subprocess.PIPE, text=True) as process:
+               str(case / "zig")] + ([",".join(options)] if options else [])
+    process = None
+    try:
+        exporter = subprocess.Popen(export, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if overlap:  # the native tool reads the checkpoint while the prompt is encoded, and waits for the case
+            process = subprocess.Popen(command, stderr=subprocess.PIPE, text=True)
+        out_text, err_text = exporter.communicate()
+        if exporter.returncode:
+            sys.stderr.write(out_text[-2000:] + err_text[-4000:])
+            if exporter.returncode == REFUSED:
+                shutil.rmtree(case, ignore_errors=True)
+                return REFUSED
+            raise SystemExit("the export stage failed")
+        rows = json.loads(out_text.strip().splitlines()[-1])
+        export_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        if process is None:
+            process = subprocess.Popen(command, stderr=subprocess.PIPE, text=True)
+        passes: list[float] = []
+        tail: list[str] = []
         for line in process.stderr:
             tail = (tail + [line])[-20:]
             found = STEP.match(line)
             if found:
                 passes.append(float(found.group(3)))
                 print(f"[tensorfold] step {found.group(1)}/{found.group(2)} {found.group(3)}s", flush=True)
+            elif line.startswith("weights in") and args.lora:
+                print(f"[tensorfold] {line.strip()}", flush=True)
+        process.wait()
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
     if process.returncode or not passes:
         sys.stderr.write("".join(tail))
         raise SystemExit("the native transformer failed")
@@ -137,6 +175,7 @@ def main() -> int:
         shutil.rmtree(case, ignore_errors=True)
     print("[tensorfold] " + json.dumps({
         "output": str(out), "engine": "zig", "rows": rows.get("rows"), "forwards": len(passes),
+        "loras": len(args.lora),
         "export_s": round(export_seconds, 1), "denoise_s": round(denoise_seconds, 1),
         "decode_s": round(decode_seconds, 1), "per_forward_s": round(float(np.median(passes)), 2),
         "frames": int(frames.shape[0]), "size": [int(frames.shape[2]), int(frames.shape[1])]}), flush=True)
