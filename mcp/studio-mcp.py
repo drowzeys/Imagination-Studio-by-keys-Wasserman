@@ -33,7 +33,7 @@ TOOLS = [
      "inputSchema": text_schema({"kind": {"type": "string", "enum": ["video", "image"], "description": "only videos or only images"},
                                  "limit": {"type": "integer", "description": "at most this many (default 50)"}})},
     {"name": "queue_still", "description": "Queue still pictures from a prompt (a scout job: several candidates and a contact sheet).",
-     "inputSchema": text_schema({"prompt": {"type": "string"}, "count": {"type": "integer", "description": "1 to 12, default 4"},
+     "inputSchema": text_schema({"prompt": {"type": "string"}, "count": {"type": "integer", "description": "how many pictures, 1 to 12 (default 1); several only when the filmmaker asks for options or a number"},
                                  "preset": {"type": "string", "description": "a preset from studio_state; sets the picture size (default 2k: 1024x576)"},
                                  "width": {"type": "integer", "description": "with height: a size of its own, multiples of 16, 256 to 2048"},
                                  "height": {"type": "integer"}, "seed": {"type": "integer"},
@@ -41,11 +41,17 @@ TOOLS = [
     {"name": "queue_clip", "description": "Queue a video clip with sound. Give first_frame (a Library picture) to start from it, or "
                                           "image_prompt to make the first frame and the clip in one job, or neither for text to video.",
      "inputSchema": text_schema({"prompt": {"type": "string", "description": "what happens in the clip, its camera and sound"},
-                                 "first_frame": {"type": "string", "description": "Library path of the opening picture"},
+                                 "first_frame": {"type": "string", "description": "Library path of the opening picture: always given when the "
+                                                                                 "clip is made from a picture (one made earlier, e.g. "
+                                                                                 "scouts/<job>/scout_s1.png, or one the filmmaker names)"},
                                  "image_prompt": {"type": "string", "description": "the opening picture's prompt (text to image to video)"},
                                  "preset": {"type": "string", "description": "a preset from studio_state"},
                                  "quality": {"type": "string", "description": "a quality from studio_state"},
                                  "seconds": {"type": "number", "description": "length, brought to the nearest the model takes (up to 15)"},
+                                 "references": {"type": "array", "items": {"type": "string"},
+                                                "description": "Ref2VA: up to 9 Library pictures the clip takes its people, things and places "
+                                                               "from; the prompt must name them <Picture 1>, <Picture 2>... in this "
+                                                               "order (\"<Picture 1> walks beside <Picture 2>\"); no first_frame then"},
                                  "seed": {"type": "integer"}, "title": {"type": "string"}}, ("prompt",))},
     {"name": "queue_voice", "description": "Queue a spoken line with Fish Audio Drama 3 (a voice take). Describe the voice and delivery in "
                                            "brackets before the words, e.g. \"[a tired older man, quiet] We should go.\". No voice cloning here: "
@@ -58,6 +64,52 @@ TOOLS = [
                                  "lyrics": {"type": "string", "description": "lyrics with [Verse] / [Chorus] tags, or empty for an instrumental"},
                                  "seconds": {"type": "number", "description": "length in seconds (default 60)"},
                                  "seed": {"type": "integer"}, "title": {"type": "string"}}, ("caption",))},
+    {"name": "queue_edit", "description": "Queue an edit of a Library picture by the image model: the prompt says what the picture "
+                                          "should become (\"make it night, rain on the street\"). One edited picture.",
+     "inputSchema": text_schema({"image": {"type": "string", "description": "Library path of the picture to edit"},
+                                 "prompt": {"type": "string", "description": "the change, described as the result"},
+                                 "image_model": {"type": "string", "description": "an id from studio_state's image_models"},
+                                 "seed": {"type": "integer"}, "title": {"type": "string"}}, ("image", "prompt"))},
+    {"name": "queue_long", "description": "Queue a long take: one video over 15 seconds, made as a chain of clips that each open on "
+                                          "the last frame of the one before, then joined. A 'long take' is this one job, not Slate "
+                                          "shots or several clips.",
+     "inputSchema": text_schema({"prompt": {"type": "string", "description": "what happens, its camera and sound"},
+                                 "total_seconds": {"type": "integer", "description": "the whole length, 16 to 1800 seconds"},
+                                 "segment_seconds": {"type": "integer", "enum": [5, 8, 10, 15], "description": "each part's length (default 15)"},
+                                 "beats": {"type": "array", "items": {"type": "string"}, "description": "what happens in each part, one line "
+                                                                                               "per part in order (optional): the beats of one long take go here, in one call"},
+                                 "first_frame": {"type": "string", "description": "Library path of the opening picture"},
+                                 "preset": {"type": "string", "description": "a preset from studio_state"},
+                                 "quality": {"type": "string", "description": "a quality from studio_state"},
+                                 "seed": {"type": "integer"}, "title": {"type": "string"}}, ("prompt", "total_seconds"))},
+    {"name": "queue_sound", "description": "Queue a sound: kind sfx is a sound effect from words (Stable Audio Open, 1 to 47 s, a .wav); "
+                                           "kind foley makes a clip's sound for its picture (MMAudio: a .wav and the clip with it).",
+     "inputSchema": text_schema({"kind": {"type": "string", "enum": ["sfx", "foley"]},
+                                 "prompt": {"type": "string", "description": "the sound in words (needed for sfx)"},
+                                 "seconds": {"type": "number", "description": "sfx only: length, 1 to 47 (default 6)"},
+                                 "video": {"type": "string", "description": "foley only: Library path of the clip"},
+                                 "keep_sound": {"type": "boolean", "description": "foley only: under the clip's own sound (default true) or in place of it"},
+                                 "seed": {"type": "integer"}, "title": {"type": "string"}}, ("kind",))},
+    {"name": "queue_soundtrack", "description": "Lay a finished song under a clip, ducked under its dialogue. Makes a new .mp4. The "
+                                                "song is a queue_song job's id: one the filmmaker names is found by its title in list_jobs "
+                                                "(kind music), not made again.",
+     "inputSchema": text_schema({"song": {"type": "string", "description": "the song's job id"},
+                                 "video": {"type": "string", "description": "Library path of the clip"},
+                                 "music_db": {"type": "number", "description": "the song's level, -30 to 0 dB (default -10)"}}, ("song", "video"))},
+    {"name": "check_clip", "description": "Run the QA gate on a finished clip: its sound, the people's identity across the clip and its "
+                                          "sharpness. Returns a job; its qa holds the report (passed and each check).",
+     "inputSchema": text_schema({"path": {"type": "string", "description": "Library path of the clip"},
+                                 "prompt": {"type": "string", "description": "the prompt it was made from (its spoken lines are listened for)"}},
+                                ("path",))},
+    {"name": "motion_previs", "description": "Motion Previs: analyse a 2 to 15 s range of a clip into a production pack (depth, pose, "
+                                             "camera, edges, masks). Returns a job; when done its pack is the pack's id.",
+     "inputSchema": text_schema({"clip": {"type": "string", "description": "Library path of the clip"},
+                                 "start": {"type": "number", "description": "seconds (default 0)"},
+                                 "end": {"type": "number", "description": "seconds (default: the clip's end, at most 15 s after start)"},
+                                 "mode": {"type": "string", "enum": ["full-scene", "camera-only", "actor-motion", "object-motion"]},
+                                 "title": {"type": "string"}}, ("clip",))},
+    {"name": "cancel_job", "description": "Cancel a queued or running job (one queued by mistake).",
+     "inputSchema": text_schema({"id": {"type": "string"}}, ("id",))},
     {"name": "list_projects", "description": "The Editor's projects (timelines), newest first.",
      "inputSchema": text_schema({})},
     {"name": "add_to_timeline", "description": "Put a finished clip (a Library path) at the end of an Editor timeline. Without a project, "
@@ -139,7 +191,26 @@ def call(method: str, path: str, body=None, raw: bytes | None = None, kind: str 
 
 
 def job_summary(job: dict) -> dict:
-    return {k: job.get(k) for k in ("id", "kind", "status", "title", "progress", "outputs", "error", "elapsed", "estimate")}
+    out = {k: job.get(k) for k in ("id", "kind", "status", "title", "progress", "outputs", "error", "elapsed", "estimate")}
+    out.update({k: job[k] for k in ("qa", "pack") if job.get(k)})
+    if "stages" in job and "kind" not in job:  # a Motion Previs analysis
+        out["kind"] = "motion"
+    return out
+
+
+def job_of(job_id) -> dict:
+    """A job of the render queue, else a Motion Previs analysis."""
+
+    quoted = urllib.request.quote(str(job_id), safe="")
+    try:
+        return call("GET", "/api/jobs/" + quoted)
+    except StudioError as error:
+        if "(404)" not in str(error):
+            raise
+        try:
+            return call("GET", "/api/motion/jobs/" + quoted)
+        except StudioError:
+            raise error from None
 
 
 FINISHED = ("done", "failed", "cancelled")
@@ -148,7 +219,7 @@ FINISHED = ("done", "failed", "cancelled")
 def wait_for(ids: list, seconds: float) -> list:
     ends = time.time() + max(0.0, min(float(seconds), 600.0))
     while True:
-        now = [job_summary(call("GET", "/api/jobs/" + urllib.request.quote(str(i), safe=""))) for i in ids]
+        now = [job_summary(job_of(i)) for i in ids]
         if all(job.get("status") in FINISHED for job in now) or time.time() >= ends:
             return now
         time.sleep(min(3.0, max(0.1, ends - time.time())))
@@ -233,6 +304,7 @@ def run(name: str, args: dict):
         return items[:int(args.get("limit") or 50)]
     if name == "queue_still":
         params = {k: args[k] for k in ("prompt", "count", "preset", "width", "height", "seed", "image_model") if args.get(k) not in (None, "")}
+        params.setdefault("count", 1)  # a picture asked of an agent is one picture; the page's scout of four is for browsing
         return job_summary(call("POST", "/api/jobs", {"kind": "scout", "title": "agent: still", "params": params}))
     if name == "queue_clip":
         params = {k: args[k] for k in ("prompt", "preset", "quality", "seconds", "seed") if args.get(k) not in (None, "")}
@@ -244,6 +316,12 @@ def run(name: str, args: dict):
             kind = "video"
             if args.get("first_frame"):
                 params["image"] = args["first_frame"]
+        if args.get("references"):
+            references = args["references"] if isinstance(args["references"], list) else [args["references"]]
+            if kind != "video" or params.get("image"):
+                raise StudioError("references make the clip from pictures: give them without first_frame or image_prompt")
+            params["references"] = [str(r) for r in references]
+            params.pop("quality", None)
         return job_summary(call("POST", "/api/jobs", {"kind": kind, "title": args.get("title") or "agent: clip", "params": params}))
     if name == "queue_voice":
         body = {k: args[k] for k in ("text", "seed", "title") if args.get(k) not in (None, "")}
@@ -251,14 +329,59 @@ def run(name: str, args: dict):
     if name == "queue_song":
         body = {k: args[k] for k in ("caption", "lyrics", "seconds", "seed", "title") if args.get(k) not in (None, "")}
         return job_summary(call("POST", "/api/music/takes", body))
+    if name == "queue_edit":
+        params = {k: args[k] for k in ("image", "prompt", "image_model", "seed") if args.get(k) not in (None, "")}
+        return job_summary(call("POST", "/api/jobs", {"kind": "edit", "title": args.get("title") or "agent: edit", "params": params}))
+    if name == "queue_long":
+        params = {k: args[k] for k in ("prompt", "total_seconds", "segment_seconds", "beats", "preset", "quality", "seed") if args.get(k) not in (None, "")}
+        if args.get("first_frame"):
+            params["image"] = args["first_frame"]
+        return job_summary(call("POST", "/api/jobs", {"kind": "long", "title": args.get("title") or "agent: long take", "params": params}))
+    if name == "queue_sound":
+        kind = args.get("kind")
+        if kind not in ("sfx", "foley"):
+            raise StudioError("kind is sfx (a sound effect from words) or foley (a clip's sound)")
+        keys = ("prompt", "seconds", "seed") if kind == "sfx" else ("prompt", "video", "keep_sound", "seed")
+        params = {k: args[k] for k in keys if args.get(k) not in (None, "")}
+        return job_summary(call("POST", "/api/jobs", {"kind": kind, **({"title": args["title"]} if args.get("title") else {}), "params": params}))
+    if name == "queue_soundtrack":
+        body = {"take": str(args["song"]), "video": str(args["video"]), **({"music_db": args["music_db"]} if args.get("music_db") not in (None, "") else {})}
+        return job_summary(call("POST", "/api/music/soundtrack", body))
+    if name == "check_clip":
+        body = {k: args[k] for k in ("path", "prompt") if args.get(k) not in (None, "")}
+        return job_summary(call("POST", "/api/qa", body))
+    if name == "motion_previs":
+        clip = str(args["clip"])
+        start = float(args.get("start") or 0)
+        if args.get("end") not in (None, ""):
+            end = float(args["end"])
+        else:
+            try:
+                length = float(call("GET", "/api/probe?path=" + urllib.request.quote(clip, safe="")).get("duration") or 0)
+            except StudioError:
+                length = 0
+            end = min(length, start + 15) if length else start + 5
+        body = {"source": clip, "start": start, "end": end, **{k: args[k] for k in ("mode", "title") if args.get(k)}}
+        return job_summary(call("POST", "/api/motion/jobs", body))
+    if name == "cancel_job":
+        quoted = urllib.request.quote(str(args["id"]), safe="")
+        try:
+            return job_summary(call("POST", f"/api/jobs/{quoted}/cancel"))
+        except StudioError as error:
+            if "(404)" not in str(error):
+                raise
+            return job_summary(call("POST", f"/api/motion/jobs/{quoted}/cancel"))
     if name == "list_projects":
         return call("GET", "/api/projects")
     if name == "add_to_timeline":
         project, path = project_of(args.get("project")), str(args["path"])
         try:
-            duration = call("GET", "/api/probe?path=" + urllib.request.quote(path, safe="")).get("duration") or 5
+            probed = call("GET", "/api/probe?path=" + urllib.request.quote(path, safe=""))
         except StudioError:
-            duration = 5
+            probed = {"duration": 5}  # no ffprobe here: the Editor measures it
+        if not probed.get("duration"):
+            raise StudioError(f"no finished clip at {path}: give its Library path as the Library or a job's outputs show it (renders/...)")
+        duration = probed["duration"]
         project.setdefault("timeline", []).append({"path": path, "in": float(args.get("in") or 0), "out": float(args.get("out") or 0),
                                                    "duration": duration})
         saved = call("PUT", "/api/projects/" + urllib.request.quote(project["id"], safe=""), project)
@@ -271,7 +394,7 @@ def run(name: str, args: dict):
         params = {"clips": project["timeline"], "width": width, "height": height, **({"soundtrack": project["soundtrack"]} if project.get("soundtrack") else {})}
         return job_summary(call("POST", "/api/jobs", {"kind": "export", "title": "Export " + str(project.get("name") or project["id"]), "params": params}))
     if name == "job_status":
-        return job_summary(call("GET", "/api/jobs/" + urllib.request.quote(str(args["id"]), safe="")))
+        return job_summary(job_of(args["id"]))
     if name == "wait_for_jobs":
         ids = args["ids"] if isinstance(args["ids"], list) else [args["ids"]]
         if not ids or len(ids) > 20:

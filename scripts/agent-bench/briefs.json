@@ -1,0 +1,935 @@
+{
+ "about": "Briefs for the agent benchmark (bench.py). Each has a machine-checkable spec: the jobs that must exist (kind, how many, their settings), what Slate and the Editor must hold afterwards, and nothing else made. Fixtures are made before the agent starts and are not counted. Matchers: see bench.py (check_value). Subjects are cinematic on purpose (neon night cities, dance battles, chases, portraits, music videos).",
+ "briefs": [
+  {
+   "id": "pic-one",
+   "feature": "pictures",
+   "brief": "Make one picture of a rain-soaked neon street in a night city, a lone figure under a red umbrella.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "neon"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "pic-options",
+   "feature": "pictures",
+   "brief": "Give me four options for a poster of a street-dance battle under stadium lights.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 4,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "dance"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "pic-two-separate",
+   "feature": "pictures",
+   "brief": "Make two separate stills, one picture each: a hover-bike chase through a neon canyon of skyscrapers, and the same chase in a sandstorm.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "neon"
+      ]
+     },
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "sandstorm"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "pic-named-model",
+   "feature": "pictures",
+   "brief": "Make one picture of a cyberpunk DJ on a rooftop stage in the rain, with FLUX3-K Fast.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "flux3k-fast"
+      },
+      "prompt_has": [
+       "DJ"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "pic-square",
+   "feature": "pictures",
+   "brief": "One square picture, 1024 by 1024, of a dramatic portrait: a boxer in a smoky gym, hard rim light.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "width": 1024,
+       "height": 1024,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "boxer"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "pic-small-three",
+   "feature": "pictures",
+   "brief": "Make 3 pictures of a cyberpunk night market in the rain at the small size (864x480).",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 3,
+       "image_model": "qwen",
+       "size": "864x480"
+      },
+      "prompt_has": [
+       "market"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "plan-prompts",
+   "feature": "planning",
+   "brief": "Write me three picture prompts for a noir rooftop chase in the rain. Don't make anything yet.",
+   "spec": {
+    "jobs": []
+   }
+  },
+  {
+   "id": "edit-night",
+   "feature": "edits",
+   "fixtures": {
+    "library": [
+     "uploads/street.png"
+    ]
+   },
+   "brief": "Edit uploads/street.png so it is night in a neon city, with rain on the street.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "edit",
+      "n": 1,
+      "params": {
+       "image": "uploads/street.png",
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "neon"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "edit-two-coats",
+   "feature": "edits",
+   "fixtures": {
+    "library": [
+     "uploads/portrait.png"
+    ]
+   },
+   "brief": "Take uploads/portrait.png and make two edited versions for a music video: one where she wears a red leather jacket, one where she wears a silver jacket.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "edit",
+      "n": 1,
+      "params": {
+       "image": "uploads/portrait.png"
+      },
+      "prompt_has": [
+       "red"
+      ]
+     },
+     {
+      "kind": "edit",
+      "n": 1,
+      "params": {
+       "image": "uploads/portrait.png"
+      },
+      "prompt_has": [
+       "silver"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "clip-test",
+   "feature": "clips",
+   "brief": "Make one short test clip of a dancer spinning under a strobe light: the shortest length (22 frames) at the small size.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": [
+       "video",
+       "studio"
+      ],
+      "n": 1,
+      "params": {
+       "preset": "small",
+       "seconds": {
+        "max": 1.2
+       },
+       "quality": {
+        "in": [
+         "fh4",
+         "fh8"
+        ]
+       }
+      },
+      "prompt_has": [
+       "dancer"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "clip-from-picture",
+   "feature": "clips",
+   "fixtures": {
+    "library": [
+     "uploads/street.png"
+    ]
+   },
+   "brief": "Animate uploads/street.png into a 5 second clip: neon signs flicker as a motorbike tears past in the rain.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "video",
+      "n": 1,
+      "params": {
+       "image": "uploads/street.png",
+       "seconds": {
+        "approx": 5,
+        "tol": 0.6
+       },
+       "quality": {
+        "in": [
+         "fh4",
+         "fh8"
+        ]
+       }
+      },
+      "prompt_has": [
+       "motorbike"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "clip-chain",
+   "feature": "clips",
+   "brief": "Make one picture of a samurai on a neon-lit rooftop in the rain, then, when it is done, turn that picture into a 22-frame clip at the small size.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "samurai"
+      ]
+     },
+     {
+      "kind": "video",
+      "n": 1,
+      "image_from": "scout",
+      "params": {
+       "preset": "small",
+       "seconds": {
+        "max": 1.2
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "clip-quality",
+   "feature": "clips",
+   "brief": "Make a 22-frame clip at the small size of a breakdancer freezing mid-move in a spotlight, with FastH3 at 20 passes (fh20).",
+   "spec": {
+    "jobs": [
+     {
+      "kind": [
+       "video",
+       "studio"
+      ],
+      "n": 1,
+      "params": {
+       "preset": "small",
+       "quality": "fh20",
+       "seconds": {
+        "max": 1.2
+       }
+      },
+      "prompt_has": [
+       "breakdancer"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "long-30",
+   "feature": "long takes",
+   "brief": "Make a 30 second long take of a police drone chasing a getaway car through a neon city at night, at the small size and the fastest quality.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "long",
+      "n": 1,
+      "params": {
+       "total_seconds": 30,
+       "preset": "small",
+       "quality": "fh4"
+      },
+      "prompt_has": [
+       "drone"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "long-beats",
+   "feature": "long takes",
+   "brief": "A one-minute music-video long take of a singer walking through a rainy neon city, in 15-second parts, with these beats: she steps out of a taxi; she sings under a flickering sign; a crowd of dancers joins her; she climbs onto a car roof.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "long",
+      "n": 1,
+      "params": {
+       "total_seconds": 60,
+       "segment_seconds": 15,
+       "beats": {
+        "len": 4
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "ref2va-two",
+   "feature": "Ref2VA",
+   "fixtures": {
+    "library": [
+     "uploads/hero.png",
+     "uploads/robot.png"
+    ]
+   },
+   "brief": "Make a 5 second clip of the woman in uploads/hero.png and the robot in uploads/robot.png sprinting through a neon night market in a chase. Use the two pictures as references.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "video",
+      "n": 1,
+      "params": {
+       "references": {
+        "set": [
+         "uploads/hero.png",
+         "uploads/robot.png"
+        ]
+       },
+       "image": {
+        "absent": true
+       }
+      },
+      "prompt_has": [
+       "<Picture 1>",
+       "<Picture 2>"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "voice-one",
+   "feature": "voice",
+   "brief": "Record a voice line: a hard-boiled detective, low and gravelly, says \"The city never sleeps, and neither do I.\"",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "voice",
+      "n": 1,
+      "prompt_has": [
+       "The city never sleeps"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "voice-three-takes",
+   "feature": "voice",
+   "brief": "Make three voice takes of a starship pilot shouting \"Hold on!\", so I can choose one.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "voice",
+      "n": 3,
+      "prompt_has": [
+       "Hold on"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "voice-dialogue",
+   "feature": "voice",
+   "brief": "Two voice lines for my heist scene: the leader says \"Nobody moves.\" coldly, and the rookie answers \"Copy that!\" nervously.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "voice",
+      "n": 1,
+      "prompt_has": [
+       "Nobody moves"
+      ]
+     },
+     {
+      "kind": "voice",
+      "n": 1,
+      "prompt_has": [
+       "Copy that"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "music-instrumental",
+   "feature": "music",
+   "brief": "Make a 30 second dark synthwave instrumental for a night chase.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "music",
+      "n": 1,
+      "params": {
+       "seconds": 30,
+       "lyrics": {
+        "in": [
+         null,
+         "",
+         "[Instrumental]"
+        ]
+       }
+      },
+      "prompt_has": [
+       "synthwave"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "music-song",
+   "feature": "music",
+   "brief": "Write and make a 60 second hip-hop track for a dance-battle music video, with a verse and a chorus.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "music",
+      "n": 1,
+      "params": {
+       "seconds": 60,
+       "lyrics": {
+        "has": [
+         "[Verse",
+         "[Chorus"
+        ]
+       }
+      },
+      "prompt_has": [
+       "hip-hop"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "sfx-door",
+   "feature": "sfx",
+   "brief": "Make a 4 second sound effect of a spaceship engine roaring to life.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "sfx",
+      "n": 1,
+      "params": {
+       "seconds": 4
+      },
+      "prompt_has": [
+       "engine"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "sfx-two",
+   "feature": "sfx",
+   "brief": "Make two sound effects: a laser blast volley, 8 seconds, and heavy rain on neon-lit streets, 10 seconds.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "sfx",
+      "n": 1,
+      "params": {
+       "seconds": 8
+      },
+      "prompt_has": [
+       "laser"
+      ]
+     },
+     {
+      "kind": "sfx",
+      "n": 1,
+      "params": {
+       "seconds": 10
+      },
+      "prompt_has": [
+       "rain"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "foley-walk",
+   "feature": "foley",
+   "fixtures": {
+    "library": [
+     "renders/walk.mp4"
+    ]
+   },
+   "brief": "Add foley to renders/walk.mp4: boots splashing through puddles on wet asphalt.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "foley",
+      "n": 1,
+      "params": {
+       "video": "renders/walk.mp4"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "soundtrack",
+   "feature": "music",
+   "fixtures": {
+    "library": [
+     "renders/walk.mp4"
+    ],
+    "songs": [
+     {
+      "title": "Neon Pulse",
+      "caption": "dark synthwave, driving bass",
+      "seconds": 30
+     }
+    ]
+   },
+   "brief": "Lay my song Neon Pulse under renders/walk.mp4.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "soundtrack",
+      "n": 1,
+      "params": {
+       "video": "renders/walk.mp4",
+       "song_title": "Neon Pulse"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "slate-scene",
+   "feature": "Slate",
+   "brief": "Make a 3-shot Slate scene of a street-dance battle at night under a highway bridge. Don't render anything yet.",
+   "spec": {
+    "jobs": [],
+    "films": [
+     {
+      "new": true,
+      "scenes": 1,
+      "shots": 3
+     }
+    ]
+   }
+  },
+  {
+   "id": "slate-names",
+   "feature": "Slate",
+   "brief": "Create a Slate film called \"Chrome Run\" with two scenes, \"Rooftop\" and \"Subway\", each with two shots. Don't render.",
+   "spec": {
+    "jobs": [],
+    "films": [
+     {
+      "new": true,
+      "name": "Chrome Run",
+      "scene_names": [
+       "Rooftop",
+       "Subway"
+      ],
+      "shots_per_scene": [
+       2,
+       2
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "slate-add-shot",
+   "feature": "Slate",
+   "fixtures": {
+    "film": "neon-rain"
+   },
+   "brief": "Add a shot called \"Blade Insert\" to the Alley scene of Neon Rain: a close-up of a katana catching neon light, 4 seconds. Don't render it.",
+   "spec": {
+    "jobs": [],
+    "films": [
+     {
+      "name": "Neon Rain",
+      "scene_names": [
+       "Alley"
+      ],
+      "shots_per_scene": [
+       3
+      ],
+      "shot": {
+       "name": "Blade Insert",
+       "seconds": 4
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "slate-render",
+   "feature": "Slate",
+   "fixtures": {
+    "film": "neon-rain"
+   },
+   "brief": "Render Shot 02 of Neon Rain as a clip.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "video",
+      "n": 1,
+      "slate_shot": "Shot 02"
+     }
+    ],
+    "films": [
+     {
+      "name": "Neon Rain",
+      "scene_names": [
+       "Alley"
+      ],
+      "shots_per_scene": [
+       2
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "slate-full",
+   "feature": "Slate",
+   "brief": "Make a Slate film \"Night Drive\" with one scene and one shot of a muscle car drifting through a neon tunnel. Make one picture for the shot, then render the shot from that picture.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "car"
+      ]
+     },
+     {
+      "kind": "video",
+      "n": 1,
+      "slate_shot": "*",
+      "image_from": "scout"
+     }
+    ],
+    "films": [
+     {
+      "new": true,
+      "name": "Night Drive",
+      "scenes": 1,
+      "shots": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "qa-gate",
+   "feature": "QA",
+   "fixtures": {
+    "library": [
+     "renders/walk.mp4"
+    ]
+   },
+   "brief": "Run the QA gate on renders/walk.mp4 and tell me whether it passes.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "qa",
+      "n": 1,
+      "params": {
+       "path": "renders/walk.mp4"
+      }
+     }
+    ],
+    "reply_has": [
+     "pass"
+    ]
+   }
+  },
+  {
+   "id": "editor-export",
+   "feature": "editor",
+   "fixtures": {
+    "library": [
+     "renders/a.mp4",
+     "renders/b.mp4"
+    ]
+   },
+   "brief": "Put renders/a.mp4 and then renders/b.mp4 on a timeline and export it at 1920x1080.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "export",
+      "n": 1,
+      "params": {
+       "width": 1920,
+       "height": 1080
+      }
+     }
+    ],
+    "timeline": [
+     "renders/a.mp4",
+     "renders/b.mp4"
+    ]
+   }
+  },
+  {
+   "id": "editor-add",
+   "feature": "editor",
+   "fixtures": {
+    "library": [
+     "renders/a.mp4"
+    ]
+   },
+   "brief": "Put renders/a.mp4 on the timeline. Don't export anything.",
+   "spec": {
+    "jobs": [],
+    "timeline": [
+     "renders/a.mp4"
+    ]
+   }
+  },
+  {
+   "id": "motion-camera",
+   "feature": "Motion Previs",
+   "fixtures": {
+    "library": [
+     "renders/walk.mp4"
+    ]
+   },
+   "brief": "Run Motion Previs on renders/walk.mp4, camera move only.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "motion",
+      "n": 1,
+      "params": {
+       "source": "renders/walk.mp4",
+       "mode": "camera-only"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "multi-jazz",
+   "feature": "multi-step",
+   "brief": "For a music video: one picture of a neon-lit club stage with a singer, a 30 second moody R&B instrumental, and a voice line of the host saying \"Ladies and gentlemen, the Midnight Static.\"",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "qwen"
+      }
+     },
+     {
+      "kind": "music",
+      "n": 1,
+      "params": {
+       "seconds": 30
+      },
+      "prompt_has": [
+       "R&B"
+      ]
+     },
+     {
+      "kind": "voice",
+      "n": 1,
+      "prompt_has": [
+       "the Midnight Static"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "multi-teaser",
+   "feature": "multi-step",
+   "brief": "For a sci-fi teaser: one picture of a starfighter chase through an asteroid field, then a 22-frame clip from it at the small size, then a 3 second sound effect of a sonic boom.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": "scout",
+      "n": 1,
+      "params": {
+       "count": 1,
+       "image_model": "qwen"
+      },
+      "prompt_has": [
+       "asteroid"
+      ]
+     },
+     {
+      "kind": "video",
+      "n": 1,
+      "image_from": "scout",
+      "params": {
+       "preset": "small",
+       "seconds": {
+        "max": 1.2
+       }
+      }
+     },
+     {
+      "kind": "sfx",
+      "n": 1,
+      "params": {
+       "seconds": 3
+      },
+      "prompt_has": [
+       "boom"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "ask-models",
+   "feature": "planning",
+   "brief": "Which models can make pictures here, and which is the fastest? Don't make anything.",
+   "spec": {
+    "jobs": [],
+    "reply_has": [
+     "Qwen"
+    ]
+   }
+  },
+  {
+   "id": "cancel",
+   "feature": "multi-step",
+   "fixtures": {
+    "job_seconds": 120
+   },
+   "brief": "Queue a 22-frame clip of a parkour runner leaping between rooftops at the small size, then cancel it: I changed my mind.",
+   "spec": {
+    "jobs": [
+     {
+      "kind": [
+       "video",
+       "studio"
+      ],
+      "n": 1,
+      "status": "cancelled",
+      "prompt_has": [
+       "parkour"
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "real": [
+  "pic-one",
+  "clip-test",
+  "voice-one"
+ ]
+}
