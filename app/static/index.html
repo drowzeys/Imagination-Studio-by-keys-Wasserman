@@ -807,7 +807,7 @@ function viewEditor() {
     const lib = (await api("/api/library")).filter(m => m.kind === "video"); const tl = project.timeline; let at = 0;
     const player = el("video", { class: "main", controls: true }); const info = el("div", { class: "note" });
     const span = c => [Number(c.in) || 0, Number(c.out) > Number(c.in) ? Number(c.out) : c.duration];
-    const load = (i, play) => { at = i; if (!tl[i]) return; const [a] = span(tl[i]); player.src = file(tl[i].path) + "#t=" + a; player.currentTime = a; if (play) player.play(); mark(); };
+    const load = (i, play) => { at = i; if (!tl[i]) return; const [a] = span(tl[i]); player.src = file(tl[i].path) + "#t=" + a; player.currentTime = a; if (play) player.play().catch(() => {}); mark(); };
     const strip = el("div", { class: "tl" }); const mark = () => [...strip.children].forEach((n, i) => n.classList.toggle("on", i === at));
     player.addEventListener("timeupdate", () => { const c = tl[at]; if (!c) return; const [, b] = span(c); if (player.currentTime >= b - 0.04 && !player.paused) { if (at + 1 < tl.length) load(at + 1, true); else player.pause(); } });
     player.addEventListener("ended", () => { if (at + 1 < tl.length) load(at + 1, true); });
