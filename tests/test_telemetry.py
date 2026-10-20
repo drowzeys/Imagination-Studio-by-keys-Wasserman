@@ -35,7 +35,11 @@ def test_a_gb10_line_parses():
 def test_vm_stat_parses():
     text = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 1000.\nPages active: 5000.\n"
             "Pages inactive: 2000.\nPages speculative: 100.\nPages purgeable: 0.\n")
-    assert telemetry.parse_vm_stat(text, 36864) == 3100 * 16384 // 2 ** 20
+    assert telemetry.parse_vm_stat(text, 36864) == 3100 * 16384 // 2 ** 20  # an older vm_stat: as before
+    # with the file-backed line, inactive anonymous pages are not available: the figures at the 2026-10-20 panic
+    panic = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 926.\nPages active: 3736622.\n"
+             "Pages inactive: 3735636.\nPages speculative: 986.\nPages purgeable: 0.\nFile-backed pages: 6604.\n")
+    assert telemetry.parse_vm_stat(panic, 262144) == (926 + 6604) * 16384 // 2 ** 20  # 117 MB, not 57 GB
 
 
 def test_the_snapshot_answers_fast_with_every_field():

@@ -66,7 +66,11 @@ def parse_gpu(line: str) -> dict | None:
 
 
 def parse_vm_stat(text: str, total_mb: int) -> int | None:
-    """A Mac's available memory from vm_stat: free, inactive, speculative and purgeable pages."""
+    """A Mac's available memory from vm_stat, in MB: free, file-backed and purgeable pages, what the kernel gets back
+    without compressing anything. Inactive pages are not counted: most are a process's own memory, which macOS must
+    compress before it can reuse them (at the Studio's panic of 2026-10-20, 57 GB of them stood "inactive" while 138 GB
+    was compressed and 15 MB was free). A vm_stat without the file-backed line (an older macOS) counts free, inactive,
+    speculative and purgeable as before."""
 
     size, pages = 16384, {}
     for line in text.splitlines():
@@ -78,8 +82,21 @@ def parse_vm_stat(text: str, total_mb: int) -> int | None:
         name, _, value = line.partition(":")
         if value.strip().rstrip(".").isdigit():
             pages[name.strip()] = int(value.strip().rstrip("."))
-    free = sum(pages.get(name, 0) for name in ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"))
+    names = (("Pages free", "File-backed pages", "Pages purgeable") if "File-backed pages" in pages
+             else ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"))
+    free = sum(pages.get(name, 0) for name in names)
     return min(total_mb, free * size // 2 ** 20) if pages else None
+
+
+def mac_pressure_critical() -> bool:
+    """Whether macOS says its memory pressure is critical (kern.memorystatus_vm_pressure_level 4): it is compressing
+    and swapping to keep going, and the Studio's renders must stop before the window server stalls."""
+
+    try:
+        done = subprocess.run(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"], capture_output=True, text=True, timeout=2)
+        return int(done.stdout.strip() or 0) >= 4
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
 
 
 def walk(path: Path, seen: set) -> tuple[int, int]:
