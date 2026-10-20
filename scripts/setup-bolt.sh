@@ -13,9 +13,9 @@
 # agreement and NVIDIA's notices; no warranty.
 # DGX Spark: the engine is TensorFold's native server with Mia's Bolt backend (MiaAI-Lab's recipe, MIT), installed into
 #   $PREFIX/bolt by spark/build-bolt.sh. It needs about 43 GB free to load and holds about 28 GB.
-# Mac: TensorFold's Metal Bolt engine (branch nemotron-bolt-metal) is not released yet. Until it is, the Studio runs Bolt
-#   through llama.cpp's server with NVIDIA's GGUF when BOLT_BACKEND=llamacpp (BOLT_LLAMACPP_BIN, BOLT_GGUF), which this
-#   script checks but does not install.
+# Mac: TensorFold's Metal Bolt engine (branch nemotron-bolt-metal), prebuilt, a checksummed release download into
+#   $PREFIX/bolt-metal (5 MB). Without it, BOLT_BACKEND=llamacpp runs Bolt through llama.cpp's server with NVIDIA's GGUF
+#   (BOLT_LLAMACPP_BIN, BOLT_GGUF), which this script checks but does not install.
 # Environment: PREFIX, BOLT_MODELS (default $SPARK_MODELS on a Spark, ~/bolt-models on a Mac).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +23,10 @@ PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 MODEL_REPO=nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB; MODEL_REVISION=a326822af111290f2af5ac59ef4b5040347dabc4
 DRAFT_REPO=nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr; DRAFT_REVISION=4c6a5613b6d887194a3a5493e3a18a5b3930bb86
 if [ "$(uname -s)" = Linux ]; then MODELS="${BOLT_MODELS:-${SPARK_MODELS:-$HOME/spark-studio-models}}"; else MODELS="${BOLT_MODELS:-$HOME/bolt-models}"; fi
+# Mac: TensorFold's Metal Bolt engine (tensorfold-native with libbolt for Apple GPUs), prebuilt as a release asset
+METAL_COMMIT="b4edaea53e3c0624e9fce06f0c9f33150e58cde3"
+METAL_URL="https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v3.1.0/bolt-metal-b4edaea5-macos-arm64.tar.gz"
+METAL_SHA256="58203b65ec8d7dce6c87b06c7889967583d6148ecb13fcada2da754c384e8a49"
 CKPT="$MODELS/Nemotron-3.5-Bolt-24GB"; DRAFT="$MODELS/Nemotron-3.5-Bolt-24GB-LiLiCorr"
 VERIFY=0
 for arg in "$@"; do
@@ -78,12 +82,24 @@ if [ "$(uname -s)" = Linux ]; then
   echo "  The Studio runs it as its brain when Settings → Connections leaves the local server's address empty (or picks"
   echo "  \"Studio engine · Bolt\"). BOLT_MODELS=$MODELS if you moved the weights; BOLT_IDLE_S=never on a head that never renders."
 else
-  step "The Bolt engine on this Mac"
-  if [ -x "$PREFIX/bolt-metal/native/bin/tensorfold-native" ]; then
-    ok "TensorFold's Metal Bolt engine in $PREFIX/bolt-metal (BOLT_BACKEND=metal, the default)"
+  step "The Bolt engine on this Mac: TensorFold's Metal engine (branch nemotron-bolt-metal at ${METAL_COMMIT:0:8}) -> $PREFIX/bolt-metal"
+  metal_ok() { [ -x "$PREFIX/bolt-metal/native/bin/tensorfold-native" ] && [ "$(cat "$PREFIX/bolt-metal/COMMIT" 2>/dev/null)" = "$METAL_COMMIT" ] \
+               && ( cd "$PREFIX/bolt-metal" && shasum -a 256 -c SHA256SUMS >/dev/null 2>&1 ); }
+  if ! metal_ok && [ "$VERIFY" = 0 ]; then  # the prebuilt engine, a checksummed release download (5 MB)
+    T="$(mktemp -d)"
+    if curl -fsSL -o "$T/metal.tgz" "$METAL_URL" && [ "$(shasum -a 256 "$T/metal.tgz" | cut -d' ' -f1)" = "$METAL_SHA256" ] \
+       && tar -xzf "$T/metal.tgz" -C "$T"; then
+      mkdir -p "$PREFIX"
+      [ ! -e "$PREFIX/bolt-metal" ] || mv "$PREFIX/bolt-metal" "$T/bolt-metal.before"  # an older one goes with the download's folder
+      mv "$T/bolt-metal" "$PREFIX/bolt-metal"
+    else echo "  ! the Metal engine did not download from $METAL_URL"; fi
+    rm -r "$T"
+  fi
+  if metal_ok; then
+    ok "TensorFold's Metal Bolt engine in $PREFIX/bolt-metal (BOLT_BACKEND=metal, the default; measured on an M5 Ultra)"
   else
-    echo "  TensorFold's Metal Bolt engine is not released yet (branch nemotron-bolt-metal). Until it is, the Studio can"
-    echo "  run Bolt through llama.cpp's server: BOLT_BACKEND=llamacpp, with BOLT_LLAMACPP_BIN (a llama-server built"
+    echo "  ! no Metal Bolt engine in $PREFIX/bolt-metal. The Studio can run Bolt through llama.cpp's server instead:"
+    echo "  BOLT_BACKEND=llamacpp, with BOLT_LLAMACPP_BIN (a llama-server built"
     echo "  with Metal) and BOLT_GGUF (nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-GGUF; same licence)."
     BIN="${BOLT_LLAMACPP_BIN:-$HOME/bolt/llama.cpp/build/bin/llama-server}"
     [ -x "$BIN" ] && ok "llama-server at $BIN" || echo "  - no llama-server at $BIN"
