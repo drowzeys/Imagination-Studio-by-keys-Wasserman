@@ -137,6 +137,7 @@ class Engine:
         self.loaded_at = self.last_used = 0.0
         self.before_gb = -1.0  # available just before it started: what a job has once it is unloaded
         self.held_gb: float | None = None  # what loading it took from the machine (before less after, settled)
+        self.uncounted_gb = 0.0  # what it holds that the available memory still counts (a Mac's mapped weights)
         self.load_s_measured: float | None = None
         self.killed = ""
         self.error = ""  # why the last load failed
@@ -283,8 +284,14 @@ class Engine:
             self.load_s_measured = round(self.loaded_at - began, 1)
             voice.settle()
             after = voice.mem_available_gb()
-            if self.before_gb >= 0 and after >= 0:
-                self.held_gb = max(0.0, self.before_gb - after)
+            # what it took: the fall of the available memory (a GB10's GPU memory is the machine's), or its processes'
+            # resident memory where that is more (a Mac counts llama.cpp's mapped weights as available: 2.7 GB fell, 24.8
+            # GB resident, measured on the M5 Ultra)
+            fell = self.before_gb - after if self.before_gb >= 0 and after >= 0 else None
+            rss = group_rss_gb(process.pid)
+            if fell is not None or rss is not None:
+                self.held_gb = max(0.0, fell or 0.0, rss or 0.0)
+                self.uncounted_gb = max(0.0, (rss or 0.0) - max(0.0, fell or 0.0))  # held, yet counted as available
             self.note("loaded", seconds=self.load_s_measured, held_gb=round(self.held_gb, 1) if self.held_gb is not None else None,
                       port=self.port)
             self.changed.notify_all()
@@ -419,6 +426,21 @@ class Engine:
                 self.note("free to load again", why=why or "the queue is empty")
             self.hold = ""
             self.changed.notify_all()
+
+
+def group_rss_gb(group: int) -> float | None:
+    """The resident memory of a process group (the leash and its server), GB; None when ps cannot say."""
+
+    try:
+        said = subprocess.run(["ps", "-A", "-o", "pgid=,rss="], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    total = 0
+    for line in said.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == str(group) and parts[1].isdigit():
+            total += int(parts[1])
+    return total / 1024 ** 2 if total else None
 
 
 def kill_group(process: subprocess.Popen) -> None:
