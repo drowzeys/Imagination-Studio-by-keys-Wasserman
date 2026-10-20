@@ -14,7 +14,7 @@ if [ -s "$OUT/libtf_h3.so" ] && [ "$(cat "$OUT/commit" 2>/dev/null)" = "$TF_COMM
   echo "[tensorfold] engine already built at ${TF_COMMIT:0:8}"; exit 0
 fi
 # the prebuilt engine from the carrier image, when Docker is here and the image holds this commit's build
-IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1}"
+IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:3.1.0}"
 if [ -z "${TF_SOURCE:-}" ] && [ "${ENGINE_FROM_SOURCE:-0}" != 1 ] && [ "$(uname -m)" = aarch64 ] && command -v docker >/dev/null 2>&1 \
    && docker info >/dev/null 2>&1 && docker pull -q "$IMAGE" >/dev/null 2>&1; then
   TMP="$PREFIX/tf-h3.fetch"

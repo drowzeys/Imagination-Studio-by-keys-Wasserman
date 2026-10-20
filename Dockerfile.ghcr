@@ -5,9 +5,9 @@
 # the pinned TensorFold wheel (with the H3 and Qwen-Image families), the dependency lock and the render scripts;
 # oneshot-setup.sh copies them out and installs natively on the Mac. It holds no model weights.
 #
-#   docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1 cp -a /payload/. /out/
+#   docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:3.1.0 cp -a /payload/. /out/
 FROM busybox:1.37
 LABEL org.opencontainers.image.source="https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3"
-LABEL org.opencontainers.image.description="Carrier (not a runtime): Wasserman Slate AI Studio, powered by TensorFold (Mac + DGX Spark) 2.9.1, both builds: the DGX Spark's prebuilt CUDA H3 engine (with LoRA support) and MiniMax Music 3 engine (music3-generate); for Macs the TensorFold wheel with the MiniMax H3 and Qwen-Image-2.1 families, the prebuilt native Zig + Metal FastH3 engine, dependency lock and render scripts for Apple Silicon"
+LABEL org.opencontainers.image.description="Carrier (not a runtime): Wasserman Slate AI Studio, powered by TensorFold (Mac + DGX Spark) 3.1.0, both builds: the DGX Spark's prebuilt CUDA engines (H3 with LoRA support, MiniMax Music 3, NVIDIA Nemotron 3.5 Bolt, Fish Audio Drama 3); for Macs the TensorFold wheel with the MiniMax H3 and Qwen-Image-2.1 families, the prebuilt native Zig + Metal FastH3 engine, dependency lock and render scripts for Apple Silicon"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 COPY payload/ /payload/

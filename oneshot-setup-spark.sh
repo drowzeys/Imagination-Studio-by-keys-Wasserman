@@ -1,6 +1,7 @@
 #!/bin/bash
 # TensorFold Studio on an NVIDIA DGX Spark (GB10, 128 GB, CUDA 13): one-shot install.
-#   bash oneshot-setup-spark.sh               # everything, then a 5 second test clip
+#   bash oneshot-setup-spark.sh --all         # every feature below in one go (about 400 GB of disk), then a test clip
+#   bash oneshot-setup-spark.sh               # the core (pictures and FastH3 video with sound), then a 5 second test clip
 #   bash oneshot-setup-spark.sh --image-only  # Qwen-Image-2.1 only (26 GB)
 #   bash oneshot-setup-spark.sh --no-render   # skip the test clip
 #   bash oneshot-setup-spark.sh --ref2va      # add MiniMax H3 Ref2VA (reference pictures hold a face), 39 GB more
@@ -64,6 +65,7 @@ IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=
 for arg in "$@"; do
   case "$arg" in
     --ref2va) REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --bolt) BOLT=1;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
+    --all) REF2VA=1; H3_BASE=1; IMAGE_EDIT=1; FLUX3=1; MOSS=1; MUSIC=1; SOUND=1; BOLT=1; VOICE=1; MOTION=1;;  # every feature
     --no-workflows) WORKFLOWS=0;;
     --loras) LORAS=all;; --loras=*) LORAS="${arg#--loras=}";; --no-loras) LORAS=none;; --lora-bundle=*) LORA_BUNDLE="${arg#--lora-bundle=}";;
     *) echo "unknown option $arg" >&2; exit 2;;
@@ -104,7 +106,9 @@ if ! command -v uv >/dev/null; then
   [ "$VERIFY" = 0 ] || die "no uv"
   curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
 fi
+# disk for what was asked (GB, with room): the base, then each option's own (the sizes in the header above)
 NEED=$([ "$IMAGE_ONLY" = 1 ] && echo 40 || echo 125)
+[ "$IMAGE_ONLY" = 1 ] || NEED=$(( NEED + 40 * REF2VA + 42 * H3_BASE + 15 * IMAGE_EDIT + 42 * FLUX3 + 31 * MOSS + 23 * MUSIC + 12 * SOUND + 26 * BOLT + 45 * VOICE + 1 * MOTION ))
 if [ "$VERIFY" = 0 ]; then
   mkdir -p "$PREFIX" "$MODELS"
   FREE=$(df -BG --output=avail "$MODELS" | tail -1 | tr -dc 0-9)
