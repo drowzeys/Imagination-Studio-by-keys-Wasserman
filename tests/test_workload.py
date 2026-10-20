@@ -417,17 +417,24 @@ def test_the_environment_fills_only_what_was_never_saved(agents_home, monkeypatc
     assert agents.default_brain()["backend"] == "claude"
 
 
-def test_a_new_film_starts_from_the_default_brain(agents_home, monkeypatch):
+def test_a_new_film_follows_the_default_brain(agents_home, monkeypatch):
     import slate
 
+    film = slate.blank("A test film")
+    assert (film["defaults"]["brain"], film["defaults"]["localEndpoint"], film["defaults"]["localModel"]) == ("auto", "", "")
     monkeypatch.setenv("STUDIO_DEFAULT_BRAIN", "local")
     monkeypatch.setenv("STUDIO_LOCAL_ENDPOINT", "http://127.0.0.1:8080/v1")
     monkeypatch.setenv("STUDIO_LOCAL_MODEL", "example-vision-model")
-    film = slate.blank("A test film")
-    assert (film["defaults"]["brain"], film["defaults"]["localEndpoint"], film["defaults"]["localModel"]) == \
-        ("local", "http://127.0.0.1:8080/v1", "example-vision-model")
+    # asked when the film asks, not when it was made: the Studio's brain of the moment, with its server and model
+    assert slate.resolve_brain("auto") == ("local", "http://127.0.0.1:8080/v1", "example-vision-model")
+    assert slate.resolve_brain("") == slate.resolve_brain("not-a-brain") == slate.resolve_brain("auto")
+    # a film that names a brain keeps it
+    assert slate.resolve_brain("codex", "x", "y") == ("codex", "x", "y")
     monkeypatch.delenv("STUDIO_DEFAULT_BRAIN")
-    assert slate.blank("Another")["defaults"]["brain"] == "claude"
+    assert slate.resolve_brain("auto")[0] == "claude"
+    asked = []
+    monkeypatch.setattr(agents_home, "ask", lambda *a: asked.append(a) or "ok")
+    assert slate.ask("auto", "sys", "hi", "top") == "ok" and asked[-1][0] == "claude"
 
 
 def test_a_local_brain_never_sends_frames_to_a_cloud_cli(agents_home, monkeypatch):
