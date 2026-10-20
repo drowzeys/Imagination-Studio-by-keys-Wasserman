@@ -8,12 +8,18 @@ sfx is Stability AI's Stable Audio Open 1.0 through diffusers' StableAudioPipeli
 foley is MMAudio large_44k_v2 (Ho Kei Cheng et al., code MIT, weights CC-BY-NC 4.0), as its demo.py runs it at the
 commit setup-sound.sh pins, with the weights in M/mmaudio rather than the working folder; the sound is then laid
 under the clip's own sound (its speech stays, peaks under -1 dBFS) or in place of it, with ffmpeg.
-Runs in $PREFIX/sound-venv only, on Metal (MPS) in float32, else CUDA, else the processor.
+Runs in $PREFIX/sound-venv only, on Metal (MPS) in float32, else CUDA, else the processor. On Metal two things are
+faster with the same sound (measured on an M5 Ultra, same seeds, against the float32 takes): Stable Audio Open's
+transformer runs in float16 (100 passes for 8 s in 11.1 s instead of 27.3 s; the take's long-term spectrum within
+0.1 dB, waveform SNR 23 dB), and MMAudio's modules are built without random initial values, which their checkpoints
+replace anyway (the take is bit-identical; 6 s less). SOUND_PRECISION=fp32 keeps every network in float32.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -62,6 +68,68 @@ def has_sound(video: Path) -> bool:
     return bool(done.stdout.strip())
 
 
+def half_on_metal(module) -> None:
+    """``module``'s weights in float16, its floating inputs cast to float16 and its outputs back to float32: the
+    pipeline around it (the solver's sums, the decoder) keeps float32."""
+
+    import torch
+    module.to(torch.float16)
+    forward = module.forward
+
+    def cast(value, dtype):
+        return value.to(dtype) if torch.is_tensor(value) and value.is_floating_point() else value
+
+    def wrapped(*args, **kwargs):
+        out = forward(*[cast(v, torch.float16) for v in args], **{k: cast(v, torch.float16) for k, v in kwargs.items()})
+        if isinstance(out, tuple):
+            return tuple(cast(v, torch.float32) for v in out)
+        if hasattr(out, "sample"):
+            out.sample = cast(out.sample, torch.float32)
+            return out
+        return cast(out, torch.float32)
+
+    module.forward = wrapped
+
+
+@contextlib.contextmanager
+def without_initial_values():
+    """Modules built without drawing their random initial values (torch.nn.init and Tensor.normal_/uniform_ return
+    the tensor as it is): for networks whose every weight a checkpoint then replaces. MMAudio's feature extractors
+    spent 6 s of a foley take drawing them on the processor."""
+
+    import torch
+    import torch.nn.init as init
+    kept = {}
+
+    def as_is(tensor, *args, **kwargs):
+        return tensor
+
+    for name in ("normal_", "uniform_", "trunc_normal_", "kaiming_uniform_", "kaiming_normal_", "xavier_uniform_",
+                 "xavier_normal_", "orthogonal_"):
+        kept[(init, name)] = getattr(init, name)
+        setattr(init, name, as_is)
+    for name in ("normal_", "uniform_"):
+        kept[(torch.Tensor, name)] = getattr(torch.Tensor, name)
+        setattr(torch.Tensor, name, as_is)
+    try:
+        yield
+    finally:
+        for (owner, name), original in kept.items():
+            setattr(owner, name, original)
+
+
+def hub_offline_when_cached(*files: tuple[str, str]) -> None:
+    """Hugging Face's hub asks the network about every model it loads (1 s a take); when every (repo, file) the take
+    reads is cached already, it is told not to."""
+
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return
+    if all(isinstance(try_to_load_from_cache(repo, name), str) for repo, name in files):
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+
 def gaussian_noise_on_metal() -> None:
     """Stable Audio Open's solver (sde-dpmsolver++) draws its noise from a torchsde Brownian tree. On Metal the tree's
     interval search never ends inside the pipeline (RecursionError, measured on an M4 Max with torch 2.14), so there it
@@ -91,6 +159,8 @@ def sfx(args) -> dict:
     if device == "mps":
         gaussian_noise_on_metal()
     pipe = StableAudioPipeline.from_pretrained(str(folder), torch_dtype=torch.float16 if device == "cuda" else torch.float32).to(device)
+    if device == "mps" and os.environ.get("SOUND_PRECISION") != "fp32":
+        half_on_metal(pipe.transformer)  # the T5 text encoder and the decoder stay float32
     generator = torch.Generator("cpu").manual_seed(args.seed)
     say(f"{args.steps} passes for {args.seconds:g} s")
     out = pipe(args.prompt, negative_prompt=args.negative or None, num_inference_steps=args.steps, guidance_scale=args.cfg,
@@ -104,6 +174,10 @@ def sfx(args) -> dict:
 
 def foley(args) -> dict:
     import torch
+    hub_offline_when_cached(("nvidia/bigvgan_v2_44khz_128band_512x", "config.json"),
+                            ("nvidia/bigvgan_v2_44khz_128band_512x", "bigvgan_generator.pt"),
+                            ("apple/DFN5B-CLIP-ViT-H-14-384", "open_clip_config.json"),
+                            ("apple/DFN5B-CLIP-ViT-H-14-384", "open_clip_pytorch_model.bin"))
     from mmaudio.eval_utils import ModelConfig, generate, load_video
     from mmaudio.model.flow_matching import FlowMatching
     from mmaudio.model.networks import get_my_mmaudio
@@ -121,14 +195,19 @@ def foley(args) -> dict:
         raise SystemExit("the clip is shorter than a second")
     seq_cfg = model.seq_cfg
     say(f"MMAudio large_44k_v2 on {device}: loading")
+    quick = contextlib.nullcontext() if os.environ.get("SOUND_PRECISION") == "fp32" else without_initial_values()
     with torch.inference_mode():
-        net = get_my_mmaudio(model.model_name).to(device, dtype).eval()
+        with quick:
+            net = get_my_mmaudio(model.model_name).to(device, dtype).eval()
         net.load_weights(torch.load(model.model_path, map_location=device, weights_only=True))
         rng = torch.Generator(device=device)
         rng.manual_seed(args.seed)
         fm = FlowMatching(min_sigma=0, inference_mode="euler", num_steps=args.steps)
-        features = FeaturesUtils(tod_vae_ckpt=model.vae_path, synchformer_ckpt=model.synchformer_ckpt, enable_conditions=True,
-                                 mode=model.mode, bigvgan_vocoder_ckpt=model.bigvgan_16k_path, need_vae_encoder=False).to(device, dtype).eval()
+        quick = contextlib.nullcontext() if os.environ.get("SOUND_PRECISION") == "fp32" else without_initial_values()
+        with quick:
+            features = FeaturesUtils(tod_vae_ckpt=model.vae_path, synchformer_ckpt=model.synchformer_ckpt, enable_conditions=True,
+                                     mode=model.mode, bigvgan_vocoder_ckpt=model.bigvgan_16k_path,
+                                     need_vae_encoder=False).to(device, dtype).eval()
         info = load_video(video, duration)
         seq_cfg.duration = info.duration_sec
         net.update_seq_lengths(seq_cfg.latent_seq_len, seq_cfg.clip_seq_len, seq_cfg.sync_seq_len)
