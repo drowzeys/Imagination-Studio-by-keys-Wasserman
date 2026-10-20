@@ -2427,6 +2427,44 @@ product or service must display "MiniMax-Music3" in its user interface; a licens
 revenue needs MiniMax's prior written authorisation; a hosted service must keep safeguards against misuse. Do not
 redistribute the weights.
 
+## The brain engine (NVIDIA Nemotron 3.5 Bolt)
+
+The brains (Slate's prompt help, the QA look, the Agent room) can run on **NVIDIA Nemotron 3.5 Bolt**, loaded by the
+Studio itself on this machine, the way Voice runs Drama 3 and Music runs MiniMax Music 3: no separate server to start.
+
+```bash
+bash oneshot-setup-spark.sh --bolt   # DGX Spark: NVIDIA's 24 GB checkpoint and LiLiCorr drafter (~25 GB) and the engine
+bash oneshot-setup.sh --bolt         # Mac: the same weights; the engine is TensorFold's Metal port when it lands
+```
+
+The weights are NVIDIA's (OpenMDW License Agreement 1.1: commercial use allowed; a copy passed on keeps the licence and
+NVIDIA's notices). On a DGX Spark the engine is TensorFold's native server with **Mia's Bolt backend**
+(MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark, MIT): `spark/build-bolt.sh` copies the build out of the carrier or
+Mia's image into `$PREFIX/bolt` (Docker only copies files; nothing runs in a container).
+
+- **Which engine** (`BOLT_BACKEND`): `cuda` on a DGX Spark where it is built; `metal` on a Mac once TensorFold's Metal
+  Bolt engine is built into `$PREFIX/bolt-metal`; `llamacpp` on a Mac only when set (llama.cpp's `llama-server` with
+  NVIDIA's GGUF: `BOLT_LLAMACPP_BIN`, `BOLT_GGUF`); `external` for a server the Studio does not manage. Unset, the
+  Studio takes the built TensorFold engine, else nothing changes.
+- **Which address**: the brains use the engine when Settings → Connections leaves the local server's address empty or
+  picks **Studio engine · Bolt** (`studio:bolt`). An address you type is your own server, asked as before.
+- **When it loads**: on the first brain question or agent answer, on a loopback port of its own (about 40 s on a
+  Spark from the page cache). The Brains page shows *NVIDIA Nemotron 3.5 Bolt (Studio engine)*, its state (loaded,
+  unloaded, loading, unloaded for a render) and backend, with **Load** and **Unload**; the Machine room and the status
+  bar show what it holds.
+- **When it unloads**: after `BOLT_IDLE_S` (600) idle seconds (`never` for a head that never renders), and before a job
+  of this machine's queue whose measured peak does not fit beside it: on a Spark the memory guard's estimate for the
+  job with Bolt resident (clips, songs, sound, Drama 3), on a Mac the peaks measured on an M5 Ultra against what
+  vm_stat counts as free. A job without a measured peak unloads it. Clips sent to worker Sparks never unload it.
+  Unloaded for a job, it stays unloaded until the queue is empty.
+- **Agent turns**: an answer in flight is never cut: a job that needs the memory waits for it, then unloads Bolt.
+  An agent's turn that queued a clip waits for it with Bolt unloaded, and Bolt loads again for the turn's next
+  answer. A question from a page while Bolt is unloaded for a render is answered with the reason, at once.
+- **Memory**: it needs about 43 GB free to load on a Spark and holds about 28 GB (4 streams, 65,536 tokens each,
+  2 GiB of prompt cache, pictures on, thinking off: `BOLT_PARALLEL`, `BOLT_CONTEXT`, `BOLT_PROMPT_CACHE_GIB`,
+  `BOLT_VISION`, `BOLT_THINKING`). That memory counts as a render's when a clip is checked, since the render unloads
+  it. A kill-guard ends it under `BOLT_GUARD_GB` (8) available, and it ends with the app.
+
 ## Sound effects and foley (Stable Audio Open, MMAudio)
 
 Sound → **Sound effects** makes two kinds of take, each a job of the queue, on a Mac (`bash scripts/setup-sound.sh`,

@@ -9,10 +9,10 @@ machine's queue needs its memory, before that job. Four backends, ``BOLT_BACKEND
   serve``, with Mia's Bolt lane backend (libbolt.so and NVIDIA's LiLiCorr drafter), from MiaAI-Lab's
   Nemotron-3.5-Bolt-TensorFold-DGX-Spark recipe on TensorFold 46a08c18 and its patches; ``spark/build-bolt.sh``
   puts it in ``$PREFIX/bolt``. No Docker at run time.
-- ``metal`` (a Mac, preferred there when built): TensorFold's Metal port of the same engine (fork branch
-  ``nemotron-bolt-metal``, not released yet), the same ``tensorfold-native serve`` command line. Where it is not
-  built a Mac falls back to ``llamacpp``.
-- ``llamacpp`` (a Mac): llama.cpp's ``llama-server`` with NVIDIA's GGUF, until the Metal engine lands.
+- ``metal`` (a Mac, the default there when built): TensorFold's Metal port of the same engine (fork branch
+  ``nemotron-bolt-metal``, not released yet), the same ``tensorfold-native serve`` command line.
+- ``llamacpp`` (a Mac, when ``BOLT_BACKEND`` says so): llama.cpp's ``llama-server`` with NVIDIA's GGUF, until the
+  Metal engine lands. Never chosen by itself (a Mac may already run Bolt in a llama.cpp service of its own).
 - ``external``: a server the Studio does not manage (the address in Settings → Connections), as before.
 
 The engine serves the local brain when the brains' address is empty or ``studio:bolt`` (``ENDPOINT``); an address
@@ -540,8 +540,8 @@ class Cuda(Engine):
 class Metal(Cuda):
     """TensorFold's Metal port of the Bolt engine on a Mac (fork branch ``nemotron-bolt-metal``, the same
     ``tensorfold-native serve`` command line), from ``$PREFIX/bolt-metal``. Not released yet: until it is built there,
-    a Mac runs Bolt through llama.cpp (``Llamacpp``). Swapping it in is building it into that folder (or naming it with
-    BOLT_BIN) and, where BOLT_BACKEND was set to llamacpp, setting it to metal: nothing else changes."""
+    a Mac runs Bolt through llama.cpp (``Llamacpp``, BOLT_BACKEND=llamacpp). Swapping it in is building it into that
+    folder (or naming it with BOLT_BIN) and setting BOLT_BACKEND=metal, or leaving it unset: nothing else changes."""
 
     name, label = "metal", "TensorFold Metal · Apple Silicon"
     # not measured yet: the CUDA engine's figures until the Metal port has its own
@@ -642,7 +642,8 @@ busy = lambda: False  # noqa: E731 - whether the queue runs a job here (server.p
 
 def choose() -> tuple[type, str]:
     """``BOLT_BACKEND`` when set; else TensorFold's engine where it is built (CUDA on a DGX Spark, Metal on a Mac), else
-    llama.cpp on a Mac where its server and the GGUF are, else external (nothing managed, as before)."""
+    external (nothing managed, as before). llama.cpp is never chosen by itself: a Mac that already runs Bolt in its own
+    llama.cpp service would load a second copy beside it; ``BOLT_BACKEND=llamacpp`` asks for it."""
 
     told = (os.environ.get("BOLT_BACKEND") or "").strip().lower()
     if told in BACKENDS:
@@ -652,10 +653,7 @@ def choose() -> tuple[type, str]:
         return (External, why) if why else (Cuda, "")
     if MAC:
         why = Metal().present()
-        if not why:
-            return Metal, ""
-        other = Llamacpp().present()
-        return (External, why + " " + other) if other else (Llamacpp, why)
+        return (External, why + " BOLT_BACKEND=llamacpp runs it through llama.cpp until then.") if why else (Metal, "")
     return External, "no Studio engine for this platform"
 
 

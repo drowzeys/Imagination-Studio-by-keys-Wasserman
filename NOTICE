@@ -36,6 +36,13 @@ generation to third parties (a Hosted Service) needs a separate licence from Fis
 without their consent is not allowed. This pack ships no Drama 3 weights: they are downloaded from Fish Audio's
 release (huggingface.co/fishaudio/drama-3) when a user installs them.
 
+NVIDIA Nemotron 3.5 Bolt and its LiLiCorr drafter are licensed under the OpenMDW License Agreement, version 1.1, by
+NVIDIA. Use, modification and redistribution are free, commercial use included; a distribution keeps a copy of the
+agreement and NVIDIA's copyright and origin notices. This pack ships no Bolt weights: they are downloaded from
+NVIDIA's release (huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB) when a user installs them with --bolt.
+The DGX Spark's Bolt engine is MiaAI-Lab's Nemotron-3.5-Bolt-TensorFold-DGX-Spark (MIT License, Copyright (c) 2026
+MiaAI-Lab) built on TensorFold (Apache-2.0); its notices are in THIRD_PARTY_NOTICES.md.
+
 Read these licences before downloading the weights.
 
 Engine source: TensorFold (Apache-2.0, Ash Hart and contributors) with

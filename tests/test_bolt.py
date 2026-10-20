@@ -277,7 +277,7 @@ def test_on_a_mac_the_measured_peaks_decide(fake):
     fits, said = server.bolt_need({"kind": "video", "params": {}}, 28.0)
     assert fits and "33 GB" in said
     assert server.bolt_need({"kind": "video", "params": {"quality": "turbo"}}, 28.0)[0]
-    fake.memory["gb"] = 60.0  # a 96 GB Mac
+    fake.memory["gb"] = 58.0  # a 96 GB Mac
     assert server.bolt_need({"kind": "video", "params": {}}, 28.0)[0]
     assert not server.bolt_need({"kind": "voice", "params": {}}, 28.0)[0]  # Drama 3's 52 GB leaves under 8
     assert not server.bolt_need({"kind": "something-new", "params": {}}, 28.0)[0]  # unmeasured: the largest peak
