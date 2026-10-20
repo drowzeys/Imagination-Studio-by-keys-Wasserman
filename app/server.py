@@ -2448,6 +2448,7 @@ def update_busy():
 
 
 updater = updates.Manager(PACK, HOME, lock, update_busy)
+hub.follow = updater.automatic  # automatic updates here bring the workers to this code too (sparks.Hub.catch_up)
 app.include_router(updater.router())
 app.router.on_startup.append(updater.start)
 app.router.on_shutdown.append(updater.stop.set)
