@@ -106,14 +106,29 @@ if ! command -v uv >/dev/null; then
   [ "$VERIFY" = 0 ] || die "no uv"
   curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
 fi
-# disk for what was asked (GB, with room): the base, then each option's own (the sizes in the header above)
-NEED=$([ "$IMAGE_ONLY" = 1 ] && echo 40 || echo 125)
-[ "$IMAGE_ONLY" = 1 ] || NEED=$(( NEED + 40 * REF2VA + 42 * H3_BASE + 15 * IMAGE_EDIT + 42 * FLUX3 + 31 * MOSS + 23 * MUSIC + 12 * SOUND + 26 * BOLT + 45 * VOICE + 1 * MOTION ))
+# disk for what is still to fetch (GB, with room): each part asked for whose weights are not here yet, by the file that
+# says it is (the sizes in the header above); a machine that holds some of them already needs only the rest
+missing() { [ ! -s "$1" ]; }
+NEED=5
+missing "$MODELS/Qwen-Image-2.1-Comfy/diffusion_models/qwen_image_2.1_turbo_bf16.safetensors" && NEED=$((NEED + 26))
+if [ "$IMAGE_ONLY" = 0 ]; then
+  missing "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" && NEED=$((NEED + 75))
+  [ "$REF2VA" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" || NEED=$((NEED + 40))
+  [ "$H3_BASE" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors" || NEED=$((NEED + 42))
+  [ "$IMAGE_EDIT" = 0 ] || ! missing "$MODELS/Qwen-Image-2.1-Comfy/diffusion_models/qwen_image_2.1_bf16.safetensors" || NEED=$((NEED + 15))
+  [ "$FLUX3" = 0 ] || [ -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] \
+    || [ -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || NEED=$((NEED + 42))
+  [ "$MOSS" = 0 ] || ! missing "$MODELS/MOSS-Image-Comfy/diffusion_models/moss_image_sft_bf16.safetensors" || NEED=$((NEED + 31))
+  [ "$MUSIC" = 0 ] || ! missing "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" || NEED=$((NEED + 23))
+  [ "$SOUND" = 0 ] || ! missing "$MODELS/Sound-Comfy/stable-audio-open-1.0/model.safetensors" || NEED=$((NEED + 12))
+  [ "$BOLT" = 0 ] || ! missing "${BOLT_MODELS:-$MODELS}/Nemotron-3.5-Bolt-24GB/model.safetensors.index.json" || NEED=$((NEED + 26))
+  [ "$VOICE" = 0 ] || ! missing "${DRAMA3_CUDA_MODEL:-${DRAMA3_CHECKPOINT:-$HOME/models/drama-3}}/config.json" || NEED=$((NEED + 45))
+fi
 if [ "$VERIFY" = 0 ]; then
   mkdir -p "$PREFIX" "$MODELS"
   FREE=$(df -BG --output=avail "$MODELS" | tail -1 | tr -dc 0-9)
-  HAVE=$(du -sBG "$MODELS" 2>/dev/null | cut -f1 | tr -dc 0-9)
-  [ $((FREE + HAVE)) -ge "$NEED" ] || die "$MODELS has ${FREE} GB free; the install needs about ${NEED} GB"
+  [ "$FREE" -ge "$NEED" ] || die "$MODELS has ${FREE} GB free; what is not here yet needs about ${NEED} GB"
+  ok "disk: ${FREE} GB free, about ${NEED} GB to fetch"
 fi
 
 say "Environment: Python 3.12 and PyTorch for CUDA 13 -> $PREFIX/venv"
