@@ -8,8 +8,9 @@
 # - attention is PyTorch's own (--use-pytorch-cross-attention). Without it ComfyUI on a Mac takes its sub-quadratic
 #   attention, which adds a text mask to the scores as a bias and gave wrong pictures for Qwen-Image.
 # - MiniMax H3 is read from the Mac's own files in H3_MODEL_DIR through pointer files (mac/studio_files), not copied.
-# A kill-guard stands beside the server: it stops it when what vm_stat counts as free, inactive, speculative and
-# purgeable memory falls under MAC_COMFY_GUARD_GB (default 16).
+# A kill-guard stands beside the server: it stops it when vm_stat's free, file-backed and purgeable memory falls under
+# MAC_COMFY_GUARD_GB (default 16), or macOS says its memory pressure is critical. Inactive pages are not counted: at
+# a panic on 2026-10-20 (the window server stalled 125 s) 57 GB stood "inactive" while 15 MB was free.
 # Environment: PREFIX, MAC_COMFY_PORT (8191), MAC_COMFY_MODELS ($PREFIX/comfy-models), H3_MODEL_DIR, MAC_COMFY_ARGS.
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
@@ -34,9 +35,11 @@ case "${1:-start}" in
     trap 'kill $pid 2>/dev/null' TERM INT
     GUARD="${MAC_COMFY_GUARD_GB:-16}"
     while kill -0 $pid 2>/dev/null; do
-      free=$(vm_stat | awk '/page size of/ {size=$8} /Pages (free|inactive|speculative|purgeable):/ {gsub("\\.","",$NF); pages+=$NF} END {printf "%d", pages*size/1073741824}')
-      if [ "${free:-999}" -lt "$GUARD" ]; then
-        echo "[tensorfold] memory guard: ${free} GB free, under ${GUARD} GB: stopping ComfyUI"; kill -9 $pid; break
+      # free, file-backed and purgeable pages: what macOS gets back without compressing (app/telemetry.py)
+      free=$(vm_stat | awk '/page size of/ {size=$8} /^(Pages free|File-backed pages|Pages purgeable):/ {gsub("\\.","",$NF); pages+=$NF} END {printf "%d", pages*size/1073741824}')
+      level=$(sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null || echo 1)
+      if [ "${free:-999}" -lt "$GUARD" ] || [ "${level:-1}" -ge 4 ]; then
+        echo "[tensorfold] memory guard: ${free} GB free, pressure level ${level}: stopping ComfyUI"; kill -9 $pid; break
       fi
       sleep 1
     done

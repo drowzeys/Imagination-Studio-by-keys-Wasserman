@@ -1304,13 +1304,67 @@ def without_ffmpeg(kind: str, params: dict) -> str:
     return f"{what} needs ffmpeg, which is not installed on this machine: {FFMPEG_HOW}" if what else ""
 
 
+# A Mac's ComfyUI jobs (mac/comfy.sh: Upscale, Find and Remove a person, MOSS-Image): their peaks, measured on the
+# M5 Ultra (GB, the ComfyUI server's own memory at its highest, models loaded from nothing). Remove a person and Upscale
+# hold MiniMax H3's bf16 Ref2VA transformer and text encoder (62 GB each) at once.
+MAC_COMFY_PEAK_GB = {"upscale": 125.0, "mask": 12.0, "remove": 135.0, "moss-image": 40.0}  # measured 118, SAM only, 127, 36
+MAC_COMFY_FLOOR_GB = 16.0  # what stays available beside it: mac/comfy.sh's kill-guard stops the server under this
+
+
+def mac_heaviest(limit: int = 3, least_gb: float = 4.0) -> str:
+    """The processes holding the most memory on this Mac other than the Studio's ComfyUI, for a refusal's reason:
+    "ollama 114 GB, tensorfold-native 34 GB"."""
+
+    try:
+        said = subprocess.run(["ps", "-axo", "rss=,comm="], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    rows = []
+    for line in said.splitlines():
+        size, _, name = line.strip().partition(" ")
+        if size.isdigit() and int(size) / 1024 ** 2 >= least_gb and "comfy-venv" not in name:
+            rows.append((int(size) / 1024 ** 2, Path(name.strip()).name))
+    return ", ".join(f"{name} {gb:.0f} GB" for gb, name in sorted(rows, reverse=True)[:limit])
+
+
+def mac_comfy_room(what: str) -> None:
+    """On a Mac, refuses a ComfyUI job whose measured peak does not fit: what is available now (voice.mem_available_gb:
+    what macOS gets back without compressing) and what the Studio's ComfyUI server already holds, less the floor. A job
+    that did not fit stalled the window server for 125 s and the Mac restarted (2026-10-20: ollama held 114 GB)."""
+
+    peak = MAC_COMFY_PEAK_GB.get(what)
+    if SPARK or not peak:
+        return
+    free = voice.mem_available_gb()
+    if free < 0:
+        return
+    held = 0.0
+    try:
+        said = subprocess.run(["pgrep", "-f", "[m]ain.py --listen 127.0.0.1 --port " + os.environ.get("MAC_COMFY_PORT", "8191")],
+                              capture_output=True, text=True, timeout=5).stdout.split()
+        if said:
+            rss = subprocess.run(["ps", "-o", "rss=", "-p", said[0]], capture_output=True, text=True, timeout=5).stdout.strip()
+            held = int(rss) / 1024 ** 2 if rss.isdigit() else 0.0
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    have = free + held
+    if have - peak < MAC_COMFY_FLOOR_GB:
+        others = mac_heaviest()
+        raise HTTPException(400, f"this needs about {peak:.0f} GB and this Mac has {have:.0f} GB for it (keeping "
+                                 f"{MAC_COMFY_FLOOR_GB:.0f} GB free), so it is not started"
+                            + (f": the most memory is held by {others}. Quit what you do not need and try again" if others else ""))
+
+
 def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list[str], dict, list[str]]:
     """(command, environment, output paths) for one job. ``room`` False leaves this machine's memory out of it: the
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
     scripts = PACK / "scripts"
     if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove
-        return action_build(kind, params, job_id)
+        built = action_build(kind, params, job_id)
+        if room:
+            mac_comfy_room(kind)
+        return built
     if kind in sound.KINDS:  # a sound effect or a clip's foley (sound.py)
         return sound_build(kind, params, job_id)
     seed = str(int(params.get("seed", 0)))
@@ -1325,6 +1379,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
             if width % 16 or height % 16 or not (256 <= width <= 2048 and 256 <= height <= 2048):
                 raise HTTPException(400, "image sides are multiples of 16 between 256 and 2048")
         env = {"SEED": seed, "WIDTH": width, "HEIGHT": height, **image_model_env(params)}
+        if room:
+            mac_comfy_room(params.get("image_model") or "")
         first = int(seed)
         outputs = [str(folder / f"scout_s{first + i}.png") for i in range(count)] + [str(folder / "sheet.jpg")]
         return ["bash", str(scripts / "scout.sh"), prompt, str(count), str(folder)], env, outputs
