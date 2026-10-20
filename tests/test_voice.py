@@ -142,7 +142,7 @@ def test_the_cuda_backend_says_what_is_missing():
     assert one.argv() == [str(one.bin), "--model", str(one.model), "--codec", str(one.codec), "--serve", "1"]
     (folder / "codec-v1.safetensors").unlink()
     one.known = None
-    assert "codec_convert.py" in one.check() and "DRAMA3_CUDA_CODEC" in one.check()
+    assert "drama3_codec.py" in one.check() and "oneshot-setup-spark.sh --voice" in one.check() and "DRAMA3_CUDA_CODEC" in one.check()
     one.known, one.model = None, folder / "nowhere"
     assert "No Drama 3 checkpoint" in one.check()
     one.known, one.bin = None, folder / "nothing"
