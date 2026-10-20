@@ -113,7 +113,7 @@ def test_the_scan_finds_proves_and_ignores_decoys(machine):
     assert out["needs"]["drama3-codec"]["candidates"] == []
     # the codec is there only as the checkpoint's codec.pth: that needs a conversion, said with the command
     conv = out["needs"]["drama3-codec"]["conversions"]
-    assert conv and conv[0]["path"].endswith("fishaudio/drama-3/codec.pth") and "codec_convert.py" in conv[0]["convert"]
+    assert conv and conv[0]["path"].endswith("fishaudio/drama-3/codec.pth") and "drama3_codec.py" in conv[0]["convert"]
     assert str(home / "models/fishaudio/drama-3") in conv[0]["convert"]
     assert row("drama3-codec")["state"] == "needs-conversion" and row("drama3-checkpoint")["state"] == "found"
     assert out["scan"]["complete"] and (machine["studio"] / ".discovery.json").is_file()
@@ -278,7 +278,7 @@ def test_the_hooks_consult_it(machine, monkeypatch):
     monkeypatch.setattr(voice, "discover", discover)
     hint = voice.found_hint("drama3-checkpoint")
     assert "Not at ~/models/drama-3; found at ~/elsewhere/drama-3" in hint and "Models & weights" in hint
-    assert "codec_convert.py" in voice.found_hint("drama3-codec")
+    assert "drama3_codec.py" in voice.found_hint("drama3-codec")
     assert "Not found on this machine after a scan at" in voice.found_hint("drama3-binary")
     discover.use("drama3-checkpoint", str(home / "elsewhere/drama-3"))
     there = lambda p: (p / "config.json").is_file()  # noqa: E731
@@ -292,7 +292,7 @@ def test_the_hooks_consult_it(machine, monkeypatch):
     binary.chmod(0o755)
     one.bin, one.lib, one.model = binary, binary, home / "missing"
     why = one.look()
-    assert one.model == home / "models/drama-3" and "No converted codec" in why and "codec_convert.py" in why
+    assert one.model == home / "models/drama-3" and "No converted codec" in why and "drama3_codec.py" in why
     # music: the weights a scan linked are what the CUDA route reads
     weights = music.WEIGHTS
     for part in weights:
