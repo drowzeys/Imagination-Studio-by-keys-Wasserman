@@ -359,7 +359,8 @@ def test_a_local_server_that_answers_is_the_default_until_one_is_chosen(fake, mo
     # the set server answers: it leads, for a new film too, and the page is told it was not chosen
     post("/api/brains/settings", {"local_endpoint": "http://studio-box:8091"})
     assert agents.default_brain() == {"backend": "local", "endpoint": "http://studio-box:8091", "model": ""}
-    assert slate.blank("A film")["defaults"]["brain"] == "local"
+    assert slate.blank("A film")["defaults"]["brain"] == "auto" and slate.resolve_brain("auto")[0] == "local"
+    assert client.get("/api/slate/brain").json()["default"] == "local"
     answer = client.get("/api/brains").json()
     assert answer["default"] == "local" and answer["automatic"] is True
     file = agents.HOME / ".studio-agents/settings.json"
