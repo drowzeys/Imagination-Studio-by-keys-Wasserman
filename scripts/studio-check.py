@@ -343,6 +343,10 @@ class Run:
                     if leftover.is_file():
                         leftover.unlink()
                         erased += 1
+        for pack in self.packs:  # a deleted Motion pack goes to the trash as <time>-motion__<id>[.zip]
+            for found in (self.home / "trash").glob(f"*-motion__{pack}*"):
+                if re.fullmatch(r"[\w-]{1,64}", pack):
+                    shutil.rmtree(found) if found.is_dir() else found.unlink()
         for film in self.slate:  # a deleted film goes to the trash as slate-<id>-<time>
             for folder in (self.home / "trash").glob(f"slate-{film}-*"):
                 if folder.is_dir() and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", film):
