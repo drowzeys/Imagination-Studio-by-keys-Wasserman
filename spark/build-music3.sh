@@ -21,7 +21,7 @@ case "$GPU" in *GB10*) ;; *)
 esac
 # the prebuilt engine from the carrier image (one already here, else pulled), when Docker is here and the image holds
 # this commit's build: its commit file and checksums decide
-IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1}"
+IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:3.1.0}"
 if [ -z "${MUSIC3_SOURCE:-}" ] && [ "${ENGINE_FROM_SOURCE:-0}" != 1 ] && [ "$(uname -m)" = aarch64 ] && command -v docker >/dev/null 2>&1 \
    && docker info >/dev/null 2>&1 && { docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null 2>&1; }; then
   TMP="$PREFIX/music3.fetch"
