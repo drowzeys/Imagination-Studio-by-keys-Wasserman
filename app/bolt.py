@@ -58,6 +58,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -730,6 +731,31 @@ def serves(endpoint: str) -> bool:
 
 def request(stopped=lambda: False, wait: bool = True, say=None):
     return engine().request(stopped, wait, say)
+
+
+FORWARD_FAILED = "Bolt's forward failed"  # the engine's 500 when one of its forward passes failed (bolt_native.zig)
+
+
+def answered(call, stopped=lambda: False, wait: bool = True, say=None):
+    """``call(base)`` against the engine, held as ``request`` holds it. When the engine answers that its forward pass
+    failed, it is restarted and the call made once more: a failed pass may leave its state wrong, and it happened once
+    in seven checklist runs on a DGX Spark (2026-10-20) and not again when repeated. Its output says why
+    ($STUDIO_HOME/bolt/engine.log.1 after the restart). A second failure is the caller's error. An HTTP error from the
+    engine comes back as RuntimeError("the local model server said <code>: <its answer>")."""
+
+    for attempt in (0, 1):
+        try:
+            with request(stopped, wait, say) as live:
+                return call(live)
+        except urllib.error.HTTPError as error:
+            failed = RuntimeError(f"the local model server said {error.code}: " + error.read().decode(errors="replace")[:400])
+        except RuntimeError as error:
+            failed = error
+        if attempt or FORWARD_FAILED not in str(failed):
+            raise failed
+        engine().stop("its forward pass failed: restarted for this answer")
+        if say:
+            say("[Bolt's forward pass failed: restarting it and asking once more]")
 
 
 def turn():
