@@ -176,6 +176,17 @@ def test_an_agent_turn_waits_for_its_render_with_bolt_unloaded_then_bolt_loads_a
     assert any("unloaded while a video job" in step for step in steps)
 
 
+def test_the_engines_output_is_kept_in_the_studio_folder(fake):
+    with bolt.request():
+        pass
+    log = Path(os.environ["STUDIO_HOME"]) / "bolt" / "engine.log"
+    deadline = time.time() + 5
+    while time.time() < deadline and "[fake bolt] listening on" not in (log.read_text() if log.exists() else ""):
+        time.sleep(0.05)
+    text = log.read_text()
+    assert "engine started" in text and "[fake bolt] listening on" in text  # its stderr, beside its stdout
+
+
 def test_a_cancelled_turn_stops_waiting(fake):
     fake.release("a video job")
     with pytest.raises(InterruptedError):
