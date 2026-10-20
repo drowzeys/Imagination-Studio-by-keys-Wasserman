@@ -278,16 +278,18 @@ def attach(home: Path, pack: Path, spark: bool):
     def source(lora_id: str) -> Path:
         return folder / f"{lora_id}.safetensors"
 
-    def images(lora_id: str) -> bool:
-        """Whether this is a LoRA for the image model (Edit a picture), not for a clip."""
+    def as_written(lora_id: str) -> bool:
+        """Read as its author wrote it on both machines: a LoRA for the image model, and on a Mac one that a Library
+        action runs on the Mac's ComfyUI (Upscale, Remove a person: actions.py), as a Spark's ComfyUI reads it."""
 
-        return any(r["id"] == lora_id and r.get("target") == "image" for r in recipes())
+        return any(r["id"] == lora_id and (r.get("target") == "image" or (not spark and r.get("action") in ("upscale", "remove")))
+                   for r in recipes())
 
     def ready(lora_id: str) -> Path:
-        """The file a render reads: the author's on a Spark, the rewritten one on a Mac. An image LoRA is read as its
-        author wrote it on both."""
+        """The file a render reads: the author's on a Spark, the rewritten one on a Mac. An image LoRA, and a Mac's
+        LoRA for an action on its ComfyUI, are read as their authors wrote them."""
 
-        if images(lora_id):
+        if as_written(lora_id):
             return source(lora_id)
         if not spark:
             return folder / f"{lora_id}.mlx.safetensors"
@@ -308,7 +310,7 @@ def attach(home: Path, pack: Path, spark: bool):
                 "found": {"path": here["shown"], "proof": here.get("proof", "")} if here else None}
 
     def prepare(lora_id: str) -> None:
-        if ready(lora_id).is_file() or images(lora_id):
+        if ready(lora_id).is_file() or as_written(lora_id):
             return
         if not spark:
             convert(source(lora_id), ready(lora_id), pack)
@@ -321,7 +323,7 @@ def attach(home: Path, pack: Path, spark: bool):
     def prebuilt(recipe: dict, state: dict) -> bool:
         """On a Mac with no file from a bundle: the hosted build already in the MLX engine's layout, when there is one."""
 
-        if recipe.get("target") == "image":
+        if as_written(recipe["id"]):
             return False  # read as its author wrote it: there is no build to fetch
         if not spark and not source(recipe["id"]).is_file():  # a Mac build an essential package put in the bundle
             where, name = bundle(), recipe["id"] + ".mlx.safetensors"

@@ -326,9 +326,9 @@
   "notes": "Strength 1.0, 12 passes, windows of 22 frames, as its author set them.",
   "action": "remove",
   "platforms": [
+   "mac",
    "spark"
-  ],
-  "mac": "DGX Spark only. The removal needs SAM 3.1 to track the person, a source clip fed in as a frame-aligned guide and windows that carry 18 frames of history; the Mac's MLX engine has no segmentation model, no aligned guide and no history relay."
+  ]
  },
  {
   "id": "natural-face-speech",
@@ -596,9 +596,9 @@
   "notes": "620 MB. Re-draw 0.1 is the author's tested setting.",
   "action": "upscale",
   "platforms": [
+   "mac",
    "spark"
-  ],
-  "mac": "DGX Spark only. The upscaler is a ComfyUI node pack in PyTorch (a latent upscaler network, then a re-draw in tiles guided through the LoRA's own layout); the Mac build has no ComfyUI and its MLX engine has neither. On a Mac the 2K and QHD sizes double a clip with the 2x decoder."
+  ]
  },
  {
   "id": "vh5tape-vhs",
