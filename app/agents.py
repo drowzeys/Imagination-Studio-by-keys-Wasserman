@@ -56,6 +56,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 
+import local_server as aside  # a local model server that steps aside for renders (STUDIO_LOCAL_CONTROL), beside this file
 import slate  # the brain's local server lookup and CLI folders, beside this file
 
 HOME: Path | None = None
@@ -1961,8 +1962,46 @@ def function_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", name)[:64]
 
 
-def answer_of(base: str, body: dict, stopped) -> dict | None:
-    """One answer from the local server, or None when the turn was stopped first (the call is left to end)."""
+LOCAL_BACK_POLL = 2.0  # seconds between looks for a local server that stepped aside for renders
+LOCAL_RETRIES = 5  # answers cut off by a stop for renders, asked again
+
+
+def wait_back(base: str, stopped, note=None) -> bool:
+    """While the local server is stepped aside for renders (local_server.py): wait until the queue is empty and the
+    server answers again. False when the turn was stopped first."""
+
+    said = False
+    while aside.away() or slate.local_models(base) is None:
+        if stopped():
+            return False
+        if not said and note:
+            note("waiting: the local model stepped aside while the Studio renders, and carries on when it is back")
+            said = True
+        time.sleep(LOCAL_BACK_POLL)
+    return True
+
+
+def answer_of(base: str, body: dict, stopped, note=None) -> dict | None:
+    """One answer from the local server, or None when the turn was stopped first (the call is left to end). With
+    STUDIO_LOCAL_CONTROL, a render the turn queued stops the server: the answer waits for it to come back, and an
+    answer cut off by that stop is asked again."""
+
+    for _ in range(LOCAL_RETRIES + 1):
+        if aside.away() and not wait_back(base, stopped, note):
+            return None
+        stops = aside.state["stops"]
+        try:
+            return answer_once(base, body, stopped)
+        except RuntimeError:
+            if not aside.control() or (aside.state["stops"] == stops and not aside.away()):
+                raise  # not a stop for renders: the reason goes to the page
+            if not wait_back(base, stopped, note):  # cut off by a stop: asked again once it answers
+                return None
+    raise RuntimeError("the local model server stopped for renders again and again: ask again when the queue is empty")
+
+
+def answer_once(base: str, body: dict, stopped) -> dict | None:
+    """One request to the local server, or None when the turn was stopped first (the call is left to end)."""
 
     out: dict = {}
     def run():
@@ -2059,7 +2098,7 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                                                             "(with the Library paths of what was made) and what is not."})
             body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 4096,
                     **({} if last else {"tools": functions})}
-            answer = answer_of(base, body, stopped)
+            answer = answer_of(base, body, stopped, lambda text: say(f"[{text}]", text))
             if answer is None:
                 return
             calls["answers"] += 1

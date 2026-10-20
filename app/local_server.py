@@ -10,7 +10,9 @@ Drama 3 and MiniMax Music 3 kept loaded (voice.py, music.py):
 - when the queue is empty again, a server the Studio stopped is started again (``resume``); one the person stopped
   stays stopped.
 
-A brain question asked while a render runs finds no server: it answers again after the render."""
+An agent turn on the local harness (agents.drive) that asks the server while it is stepped aside waits for it
+(``away``, ``stops``): its next answer comes once the queue is empty and the server answers again, and an answer cut
+off by a stop is asked again. A single brain question asked during a render finds no server: it answers after."""
 from __future__ import annotations
 
 import os
@@ -21,7 +23,7 @@ import time
 
 TIMEOUT = 120  # seconds for the control program's stop or start
 mutex = threading.Lock()
-state = {"stopped_by_us": False}
+state = {"stopped_by_us": False, "starting": False, "stops": 0}
 
 
 def control() -> list[str]:
@@ -102,6 +104,7 @@ def release(why: str) -> bool:
         if not done or done.returncode != 0:
             return False
         state["stopped_by_us"] = True
+        state["stops"] += 1
         before = None
         for _ in range(30):  # the memory comes back a little after the process ends
             now = available_mb()
@@ -120,6 +123,15 @@ def resume() -> bool:
     with mutex:
         if not state["stopped_by_us"]:
             return False
-        state["stopped_by_us"] = False
+        state["stopped_by_us"], state["starting"] = False, True
+    try:
         done = run("start", TIMEOUT)
         return bool(done and done.returncode == 0)
+    finally:
+        state["starting"] = False
+
+
+def away() -> bool:
+    """The server is stepped aside for renders, or being started again after them (a turn waits; it did not fail)."""
+
+    return bool(control()) and (state["stopped_by_us"] or state["starting"])

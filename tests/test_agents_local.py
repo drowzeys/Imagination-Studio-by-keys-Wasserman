@@ -16,6 +16,7 @@ class Model:
 
     def __init__(self, reply, tools=True):  # tools None: no /props (not llama.cpp), so the Studio asks with a small call
         self.asked, self.reply, self.tools = [], reply, tools
+        self.down = False  # stepped aside for a render (local_server.py): every request is refused until it is back
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -31,6 +32,8 @@ class Model:
                 self.wfile.write(data)
 
             def do_GET(self):
+                if outer.down:
+                    return self.send({"error": {"message": "Loading model"}}, 503)
                 if self.path == "/v1/models":
                     return self.send({"data": [{"id": "nvidia-nemotron-3.5-bolt"}]})
                 if self.path == "/props" and outer.tools is not None:
@@ -39,6 +42,8 @@ class Model:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if outer.down:
+                    return self.send({"error": {"message": "the server is stopped"}}, 503)
                 outer.asked.append(body)
                 message = outer.reply(body, len(outer.asked))
                 self.send({"choices": [{"message": {"role": "assistant", **message},
@@ -209,3 +214,81 @@ def test_a_server_without_props_is_asked_aside_with_one_small_call(local):
         time.sleep(0.1)
     assert {b["id"]: b for b in client.get("/api/brains").json()["backends"]}["local"]["harness"] is True
     assert sum(1 for body in model.asked if body["messages"][-1]["content"] == "Call the ready tool.") == 1  # asked once, then kept
+
+
+def test_a_render_the_turn_queues_stops_the_local_model_and_the_turn_carries_on_when_it_is_back(local, monkeypatch):
+    """STUDIO_LOCAL_CONTROL set: the render the agent queued stops the model's server (local_server.release) while the
+    turn is running. The turn's next answer waits for the server to come back, then the turn carries on to its end."""
+    import local_server
+    monkeypatch.setenv("STUDIO_LOCAL_CONTROL", "true")  # set: the state below is what the queue would have done
+    monkeypatch.setattr(agents, "LOCAL_BACK_POLL", 0.05)
+    monkeypatch.setitem(local_server.state, "stopped_by_us", False)
+    monkeypatch.setitem(local_server.state, "starting", False)
+    holder = {}
+
+    def queue_empties():  # the render is done: the queue starts the server again (local_server.resume)
+        time.sleep(1.0)
+        local_server.state["starting"] = True
+        holder["model"].down = False
+        local_server.state["stopped_by_us"] = False
+        time.sleep(0.2)
+        local_server.state["starting"] = False
+
+    def reply(body, n):
+        if body["messages"][-1]["role"] == "tool":
+            return {"content": "Queued the clip and it is done: clip.mp4 is in the Library."}
+        # the tool call is the render: once it is made, the queue stops this server for it
+        local_server.state["stopped_by_us"] = True
+        local_server.state["stops"] += 1
+        holder["model"].down = True
+        threading.Thread(target=queue_empties, daemon=True).start()
+        return {"content": "", "tool_calls": [call("get_scene_info", {})]}
+    holder["model"] = model = local(reply)
+    answer = post("/api/agent/threads", {"text": "Make a clip of a diner", "tools": ["fake"]}).json()
+    thread = settled(answer["thread"]["id"])
+    assert thread["turns"][-1]["text"] == "Queued the clip and it is done: clip.mp4 is in the Library."
+    task = record(answer["task"]["id"])
+    assert task["status"] == "done" and task["calls"]["answers"] == 2  # no answer lost, none asked twice
+    assert any("stepped aside while the Studio renders" in step["text"] for step in task.get("steps") or [])
+    assert len(model.asked) == 2 and model.asked[1]["messages"][-1]["role"] == "tool"
+
+
+def test_an_answer_cut_off_by_a_stop_for_renders_is_asked_again(local, monkeypatch):
+    import local_server
+    monkeypatch.setenv("STUDIO_LOCAL_CONTROL", "true")
+    monkeypatch.setattr(agents, "LOCAL_BACK_POLL", 0.05)
+    monkeypatch.setitem(local_server.state, "stopped_by_us", False)
+    monkeypatch.setitem(local_server.state, "starting", False)
+    holder = {"cut": False}
+
+    def reply(body, n):
+        if not holder["cut"]:  # this answer is cut off: a render stops the server while it is being made
+            holder["cut"] = True
+            local_server.state["stops"] += 1
+            holder["model"].down = True
+
+            def back():
+                time.sleep(0.5)
+                holder["model"].down = False
+            threading.Thread(target=back, daemon=True).start()
+            raise ConnectionResetError("stopped mid-answer")
+        return {"content": "Here is the plan."}
+    holder["model"] = local(reply)
+    answer = post("/api/agent/threads", {"text": "Plan a diner scene", "tools": ["fake"]}).json()
+    thread = settled(answer["thread"]["id"])
+    assert thread["turns"][-1]["text"] == "Here is the plan." and record(answer["task"]["id"])["status"] == "done"
+
+
+def test_without_the_control_a_server_that_does_not_answer_still_fails_the_turn(local, monkeypatch):
+    monkeypatch.delenv("STUDIO_LOCAL_CONTROL", raising=False)
+    holder = {}
+
+    def reply(body, n):
+        holder["model"].down = True
+        return {"content": "never seen"}
+    holder["model"] = model = local(reply)
+    model.down = False
+    answer = post("/api/agent/threads", {"text": "Plan a diner scene", "tools": ["fake"]}).json()
+    thread = settled(answer["thread"]["id"])
+    task = record(answer["task"]["id"])
+    assert task["status"] in ("done", "failed")  # the first answer arrives; nothing waits for a server nobody stopped
