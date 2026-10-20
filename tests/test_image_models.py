@@ -8,6 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "app"))
 sys.path.insert(0, str(ROOT / "spark"))
@@ -226,6 +228,20 @@ def test_qwen_turbo_runs_its_saved_nodes_as_saved():
         assert "--raw-nodes --nodes 1.0,0.978453," in done.stdout, done.stdout
     script = (ROOT / "qwen_image_generate.py").read_text()
     assert "holder.text_encoder.norm = nn.Identity()" in script and "elif nodes and args.raw_nodes:" in script
+
+
+def test_qwen_on_the_mac_draws_the_sparks_noise_for_a_seed():
+    # ComfyUI on a Spark draws torch.randn((1, 64, rows, columns), generator=torch.manual_seed(seed)); the Mac draws the
+    # same, so a seed gives the Spark's picture (MLX's own draw gave another picture, with heavier texture at seed 77)
+    np = pytest.importorskip("numpy")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("qwen_image_generate", ROOT / "qwen_image_generate.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    noise = module.torch_cpu_randn(0, (1, 64, 2, 2)).reshape(-1)
+    expected = [-1.1258398, -1.1523602, -0.2505786, -0.4338788, 0.3222749, 1.9028565, 0.3903958]
+    assert np.allclose(noise[[0, 1, 2, 3, 8, -2, -1]], expected, atol=1e-5)
+    assert '"--noise", choices=("spark", "mlx"), default="spark"' in (ROOT / "qwen_image_generate.py").read_text()
 
 
 def test_a_spark_offers_moss_image_only_with_its_files_and_a_comfyui_that_knows_it():

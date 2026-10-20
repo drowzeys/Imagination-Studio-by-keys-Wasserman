@@ -50,7 +50,43 @@ def encode_prompt(model_dir: str, prompt: str):
     return embeds
 
 
-def saved_denoise(dit, text, width: int, height: int, nodes, seed: int, on_step):
+def torch_cpu_randn(seed: int, shape) -> "np.ndarray":
+    """torch.randn(shape, generator=torch.manual_seed(seed)) on the CPU, float32, in numpy (to 2e-6): the noise
+    ComfyUI's RandomNoise draws on the Sparks. torch seeds an MT19937 and fills a float tensor 16 values at a time:
+    16 uniforms from 24-bit draws, then Box-Muller on the pairs (j, j + 8)."""
+
+    import numpy as np
+
+    count = int(np.prod(shape))
+    if count % 16:
+        raise ValueError("the latent noise has a multiple of 16 values (64 channels)")
+    bits = np.random.MT19937(0)
+    bits._legacy_seeding(seed & 0xFFFFFFFF)  # torch seeds its MT19937 with the low 32 bits
+    uniform = ((bits.random_raw(count) & ((1 << 24) - 1)).astype(np.float64) * 2.0**-24).astype(np.float32)
+    block = uniform.reshape(-1, 16)
+    radius = np.sqrt(np.float32(-2.0) * np.log(np.float32(1.0) - block[:, :8]))
+    theta = np.float32(2.0 * np.pi) * block[:, 8:]
+    return np.concatenate([radius * np.cos(theta), radius * np.sin(theta)], axis=1).reshape(shape)
+
+
+def start_noise(seed: int, width: int, height: int, channels: int, draw: str):
+    """The starting latents (1, rows * columns, channels) float32 for ``seed``. ``spark``: the draw ComfyUI makes on
+    the Sparks for the same seed (torch's CPU generator over (1, channels, rows, columns)), so a seed gives the same
+    picture on a Mac and on a Spark. ``mlx``: TensorFold's own draw (MLX's generator, bfloat16), the Mac's earlier
+    pictures."""
+
+    import mlx.core as mx
+    from tensorfold.families.qwen_image import sampler
+    from tensorfold.families.qwen_image.config import latent_grid
+
+    if draw == "mlx":
+        return sampler.start_noise(seed, width, height, channels).astype(mx.float32)
+    rows, columns = latent_grid(width, height)
+    noise = torch_cpu_randn(seed, (1, channels, rows, columns))
+    return mx.array(noise.transpose(0, 2, 3, 1).reshape(1, rows * columns, channels))
+
+
+def saved_denoise(dit, text, width: int, height: int, nodes, seed: int, on_step, draw: str = "spark"):
     """Euler over a checkpoint's own saved noise levels (Qwen-Image-2.1-Turbo's sample_sigmas) as saved, then 0: no
     resolution shift, as ComfyUI's ManualSigmas runs them on the Sparks. TensorFold's sampler shifts fixed nodes for
     the image size (right for an adapter's training nodes): on the Turbo nodes that starts the last step from 0.56
@@ -66,7 +102,7 @@ def saved_denoise(dit, text, width: int, height: int, nodes, seed: int, on_step)
     if levels[0] > 1 or np.any(np.diff(levels) >= 0):
         raise ValueError("nodes must fall from at most 1 towards 0")
     prefix = dit.prefix(text, rows, columns)
-    x = sampler.start_noise(seed, width, height, dit.config.in_channels).astype(mx.float32)
+    x = start_noise(seed, width, height, dit.config.in_channels, draw)
     for index in range(len(nodes)):
         velocity = dit(x, float(levels[index]), prefix)
         x = x + velocity.astype(mx.float32) * float(levels[index + 1] - levels[index])
@@ -75,7 +111,8 @@ def saved_denoise(dit, text, width: int, height: int, nodes, seed: int, on_step)
     return x.reshape(1, rows, columns, -1).transpose(0, 3, 1, 2)
 
 
-def guided_denoise(dit, text, negative, width: int, height: int, steps: int, seed: int, cfg: float, on_step):
+def guided_denoise(dit, text, negative, width: int, height: int, steps: int, seed: int, cfg: float, on_step,
+                   draw: str = "spark"):
     """The base model's Euler loop with true classifier-free guidance, as Qwen's own pipeline runs it: the prompt and
     the negative prompt each step, mixed by ``cfg`` and brought back to the prompt prediction's norm."""
 
@@ -87,7 +124,7 @@ def guided_denoise(dit, text, negative, width: int, height: int, steps: int, see
     rows, columns = latent_grid(width, height)
     levels = make_sigmas(steps, width, height, None)
     positive, opposite = dit.prefix(text, rows, columns), dit.prefix(negative, rows, columns)
-    x = sampler.start_noise(seed, width, height, dit.config.in_channels).astype(mx.float32)
+    x = start_noise(seed, width, height, dit.config.in_channels, draw)
     total = len(levels) - 1
     for index in range(total):
         level = float(levels[index])
@@ -111,6 +148,9 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=768)
     parser.add_argument("--steps", type=int, default=40)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--noise", choices=("spark", "mlx"), default="spark",
+                        help="spark: the starting noise ComfyUI draws for the seed on a DGX Spark, so a seed gives the "
+                        "Spark's picture (the default); mlx: TensorFold's own draw (the Mac's pictures before this option)")
     parser.add_argument("--seeds", help="comma-separated seeds: one image each from one load, written as NAME_s<seed>.png")
     parser.add_argument("--nodes", help="comma-separated noise levels: a distilled adapter's training nodes, shifted for "
                         "the image size; with --raw-nodes a checkpoint's own saved schedule, run as given")
@@ -159,11 +199,14 @@ def main() -> int:
     for seed in seeds:
         step = lambda i, n: print(f"[tensorfold] step {i + 1}/{n}", file=sys.stderr)  # noqa: E731
         if guided:
-            latents = guided_denoise(dit, text, negative, args.width, args.height, args.steps, seed, args.cfg, step)
+            latents = guided_denoise(dit, text, negative, args.width, args.height, args.steps, seed, args.cfg, step,
+                                         args.noise)
         elif nodes and args.raw_nodes:
-            latents = saved_denoise(dit, text, args.width, args.height, nodes, seed, step)
+            latents = saved_denoise(dit, text, args.width, args.height, nodes, seed, step, args.noise)
         else:
-            latents = sampler.denoise(dit, text, args.width, args.height, args.steps, seed, nodes, on_step=step)
+            latents = sampler.denoise(dit, text, args.width, args.height, args.steps, seed, nodes, on_step=step,
+                                          latents=start_noise(seed, args.width, args.height, dit.config.in_channels,
+                                                              args.noise))
         mx.eval(latents)
         drawn.append(latents)
     denoise_s = time.perf_counter() - mark
