@@ -1209,11 +1209,13 @@ def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
         free = voice.mem_available_gb()
         if free < 0:
             return None
-        have = free if bolt.engine().loaded() else free - resident_gb
+        one = bolt.engine()
+        # loaded, the available memory already lacks what it took, but not its mapped weights (counted as available)
+        have = free - getattr(one, "uncounted_gb", 0.0) if one.loaded() else free - resident_gb
         turbo = params.get("quality") == "turbo" or params.get("engine") == "turbo" or bool(params.get("references"))
         peak = bolt.MAC_PEAK_GB["turbo"] if turbo and kind in ("video", "studio", "long") else bolt.MAC_PEAK_GB.get(kind, bolt.MAC_PEAK_UNKNOWN_GB)
-        left, floor = have - peak, bolt.engine().guard_gb
-        return left >= floor, (f"{have:.0f} GB available with Bolt loaded, the job's measured peak about {peak:.0f} GB, "
+        left, floor = have - peak, one.guard_gb
+        return left >= floor, (f"{have:.0f} GB available with Bolt resident, the job's measured peak about {peak:.0f} GB, "
                                f"{left:.0f} GB left against a floor of {floor:g}")
     room = bolt_room_mb(resident_gb)
     if room is None:
