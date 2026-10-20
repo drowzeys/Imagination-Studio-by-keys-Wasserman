@@ -14,6 +14,40 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 ![Imagination Studio by keys+Wasserman, powered by TensorFold: a local creative all-in-one studio for NVIDIA DGX Spark or Apple silicon](docs/screenshots/imagination-studio.webp)
 
+## Minimum hardware requirements (read this first)
+
+One machine is a complete Studio: a DGX Spark **or** a Mac. You do not need both, and neither needs the other.
+The installers check memory and disk before they download anything and stop with the reason when the machine is
+too small.
+
+**NVIDIA DGX Spark** (GB10, 128 GB unified memory, DGX OS with CUDA 13 and Docker): every feature runs.
+
+| Install | Disk free | Command |
+|---|---|---|
+| Core: pictures and FastH3 video with sound | 125 GB | `bash oneshot-setup.sh` |
+| **Everything** | **about 400 GB** | `bash oneshot-setup.sh --all` |
+
+Other NVIDIA GPUs are untested: the CUDA engines are built and measured for the GB10.
+
+**Apple-silicon Mac** (macOS 26 or later, for Metal 4). What runs depends on the memory. Every figure was measured on
+a Mac Studio M5 Ultra with 256 GB; smaller Macs and M1 to M4 follow from those measurements and are untested.
+
+| Memory | M5 family | M1 to M4 | Disk free for `--all` |
+|---|---|---|---|
+| 48 GB | Pictures only | Pictures only | 40 GB |
+| 64 GB | Pictures, FastH3 video, voice, music, sound, MOSS-Image, FLUX3-K, the Bolt brain | The same, video on the slower MLX engine, no Bolt | about 400 GB (440 on M1 to M4) |
+| 128 GB | Everything above, plus MiniMax H3 Turbo and reference pictures to video (Ref2VA) | The same, slowly | about 530 GB |
+| 192 GB or more | **Everything**, including Upscale and Remove a person (peaks of 125 and 135 GB) | The same, slowly | about 535 GB |
+
+`bash oneshot-setup.sh --all --app` installs everything your Mac's memory runs and the double-clickable app. It says
+which features it left out and why. Before that, `brew install python@3.11 uv ffmpeg`.
+
+**Accounts:** FLUX3-K and Stable Audio Open (sound effects) are gated on Hugging Face. Accept their licences with your
+account and run `hf auth login` before installing them; the installer says so when access is missing.
+
+Full recipes, every option and the measured memory of each job: [Install, and the one-click app](#install-and-the-one-click-app)
+(Mac), [DGX Spark (CUDA) build](#dgx-spark-cuda-build).
+
 *Named at the request of the TensorFold project: this is an app built on TensorFold, not a TensorFold product.*
 
 *Name, credits, colours and voice for anything public: the [brand guide](docs/BRAND.md).*
