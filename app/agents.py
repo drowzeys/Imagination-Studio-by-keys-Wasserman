@@ -58,6 +58,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 
 import slate  # the brain's local server lookup and CLI folders, beside this file
+import bolt  # NVIDIA Nemotron 3.5 Bolt as the Studio's own engine: the local brain when no other server is set
 
 HOME: Path | None = None
 PACK = Path(__file__).resolve().parent.parent
@@ -226,6 +227,8 @@ def chosen_default(saved: dict) -> str:
 def local_server(endpoint: str) -> tuple[str | None, list[str]]:
     """slate.find_local (the server at this address, or "" for one found on this computer), asked at most once a minute."""
 
+    if bolt.serves(endpoint):  # the Studio's own engine: there whether loaded or not, started by the first request
+        return bolt.ENDPOINT, [bolt.SERVED]
     with lock:
         seen = answering.get(endpoint)
     if seen and time.monotonic() - seen[0] < PROBE_TTL:
@@ -239,7 +242,7 @@ def local_server(endpoint: str) -> tuple[str | None, list[str]]:
 def local_answers(endpoint: str) -> bool:
     """Whether the local model server at this address answers, asked at most once a minute (2 s at most)."""
 
-    return bool(endpoint) and bool(local_server(endpoint)[0])
+    return (bool(endpoint) or bolt.serves(endpoint)) and bool(local_server(endpoint)[0])
 
 
 def automatic_default(endpoint: str) -> str:
@@ -293,6 +296,8 @@ def tools_of(base: str, model: str, wait: bool = True) -> bool:
     forced = os.environ.get("STUDIO_LOCAL_TOOLS", "").strip()
     if forced in ("0", "1"):
         return forced == "1"
+    if base == bolt.ENDPOINT:  # the Studio's engine says so itself, without loading it to ask
+        return bool(getattr(bolt.engine(), "tools", False))
     key = (base, model)
     with lock:
         seen = tool_checks.get(key)
@@ -681,7 +686,8 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
                     signin_note=SIGNIN_NOTES.get(name))
         out.append(item)
     base, models, tools_ = seen.get(("local", "")) or (None, [], False)
-    label = local_label(models, config["local_model"]) if base else "Local model server"
+    engine = base == bolt.ENDPOINT
+    label = bolt.LABEL if engine else local_label(models, config["local_model"]) if base else "Local model server"
     running = answering_model(models, config["local_model"]) if base and models else ""
     # a harness when its server takes tool calls: the Studio runs its loop with the Studio's tools (drive)
     out.append({"id": "local", "label": label, "named": label != "Local model server", "kind": "http", "found": bool(base),
@@ -689,7 +695,9 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
                 "endpoint": base or slate.endpoint_of(endpoint or config["local_endpoint"]) or None, "models": models or [],
                 # what it really runs, and the name set in Settings when the server no longer lists it
                 "model": running or None, "set_model": config["local_model"] or None,
-                "set_missing": bool(base and models and config["local_model"] and config["local_model"] not in models)})
+                "set_missing": bool(base and models and config["local_model"] and config["local_model"] not in models),
+                # NVIDIA Nemotron 3.5 Bolt as the Studio's engine (bolt.py): its state, backend and memory, Load / Unload
+                "engine": bolt.state() if engine else None})
     return out
 
 
@@ -795,9 +803,15 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
             raise RuntimeError("no local model server answers: start Ollama, LM Studio, vLLM or llama.cpp, or set its address in Settings → Connections")
         body = json.dumps({"model": answering_model(models, model or config["local_model"]), "temperature": 0.7,
                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}).encode()
-        request = urllib.request.Request(base + "/chat/completions", body, {"Content-Type": "application/json"})
-        with urllib.request.urlopen(request, timeout=timeout) as answer:
-            return json.loads(answer.read())["choices"][0]["message"]["content"]
+
+        def asked(live: str) -> str:
+            request = urllib.request.Request(live + "/chat/completions", body, {"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=timeout) as answer:
+                return json.loads(answer.read())["choices"][0]["message"]["content"]
+        if base == bolt.ENDPOINT:  # the Studio's engine: loaded on this first question; refused (with why) while a job holds its memory
+            with bolt.request(wait=False) as live:
+                return asked(live)
+        return asked(base)
     if backend not in CLIS:
         raise RuntimeError("pick a brain: " + ", ".join(BACKENDS))
     host = where_of(backend, config)
@@ -2157,6 +2171,18 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
     if not base:
         raise RuntimeError("no local model server answers: start it, or set its address in Settings → Connections")
     model = answering_model(models, config["local_model"])
+    if base == bolt.ENDPOINT:  # the Studio's engine: the turn keeps it from the idle unload while it is open
+        with bolt.turn():
+            return drive_on(task, thread, log, config, work_, names, base, model, started, here, stopped)
+    return drive_on(task, thread, log, config, work_, names, base, model, started, here, stopped)
+
+
+def drive_on(task: dict, thread: dict | None, log, config: dict, work_: Path, names: list[str], base: str, model: str,
+             started: float, here: Path, stopped) -> None:
+    """The turn's loop on the server at ``base``. On the Studio's engine every answer is one request of its own
+    (bolt.request): loaded first if it is not, waiting while a job of the queue holds its memory (this turn's own clip,
+    say), and never cut by a release while it is answered."""
+
     raw = open(here / "stream.jsonl", "a")
     clients: list[Mcp] = []
     table: dict = {}  # function name -> (server, tool name, its required arguments)
@@ -2232,7 +2258,14 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                                                             "(with the Library paths of what was made) and what is not."})
             body = {"model": model, "messages": messages, "temperature": method["temperature"], "max_tokens": 4096, **extra,
                     **({} if last else {"tools": functions})}
-            answer = answer_of(base, body, stopped)
+            if base == bolt.ENDPOINT:
+                try:
+                    with bolt.request(stopped, wait=True, say=lambda text: say(text, text.strip("[]"))) as live:
+                        answer = answer_of(live, body, stopped)
+                except InterruptedError:
+                    return
+            else:
+                answer = answer_of(base, body, stopped)
             if answer is None:
                 return
             calls["answers"] += 1
