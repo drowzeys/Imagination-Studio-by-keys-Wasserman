@@ -80,8 +80,10 @@ def server(action: str) -> None:
     last = sg.STATE.read_text().strip() if sg.STATE.exists() else ""
     other = PATCHED.read_text().split() if PATCHED.exists() else []
     clash = action in PACK and len(other) == 2 and other[0] != PACK[action] and other[1] == comfy_pid()
-    if sg.up() and (last.startswith("video") or clash):
-        # as for a reference clip: TensorFold's engine keeps its 8-bit weights until the server is gone
+    # a server another kind of job used (a clip, a picture model, a song) starts again empty: ComfyUI kept FLUX3-K's
+    # weights beside the turnaround's Ref2VA transformer and text encoder (64 GB) and the memory floor stopped it
+    # (2026-10-20, a DGX Spark); as for a reference clip, TensorFold's engine keeps its 8-bit weights until it is gone
+    if sg.up() and ((last and not last.startswith("workflow-")) or clash):
         say("restarting ComfyUI: this starts from a server with nothing loaded" if not clash else
             "restarting ComfyUI: the upscaler's and the remover's node packs do not share one server")
         subprocess.run(["bash", str(sg.COMFY_SH), "stop"], check=False)
