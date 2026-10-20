@@ -29,6 +29,15 @@ runtime for FastH3 on Metal and on CUDA:
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
+## New on main: Upscale, Find and Remove a person on a Mac
+
+- **Upscale, Find a person and Remove a person now run on a Mac** (Mac Studio M5 Ultra), with the DGX Spark's own graphs
+  and the authors' node packs at the Spark's pins, on a ComfyUI of the Mac's own on PyTorch's Metal device
+  (`oneshot-setup.sh --upscale` and `--remove`; `scripts/setup-comfy.sh`). MiniMax H3 is read from the Mac's own Ref2VA
+  files (`--ref2va`), not downloaded again: 2.4 GB of models and a 1.6 GB environment. Measured against the DGX Spark on
+  the same clip and seeds: see [On a Mac](#on-a-mac-the-same-graphs-on-pytorchs-metal-device).
+- **MOSS-Image on a Mac** (`oneshot-setup.sh --moss`, 28 GB) is wired to the same ComfyUI, but not rendered on a Mac yet.
+
 ## New in 3.0.1
 
 - **MOSS-Image**, a fifth picture model, on a DGX Spark: OpenMOSS's 5B model (Apache 2.0, commercial use allowed),
@@ -492,7 +501,10 @@ edit pictures.
   and the FLUX.2 small decoder, from Comfy-Org/MOSS-Image). It needs ComfyUI v0.42.0 or later, which this setup moves to.
 - **Settings:** ComfyUI's own template: 25 steps of er_sde at CFG 2.5, with its negative prompt. The prompt goes to the
   model as written.
-- **Mac:** not available yet; there is no MLX build.
+- **Mac:** `bash oneshot-setup.sh --moss` installs the same files (28 GB) on the Mac's own ComfyUI (the one of
+  `--upscale` and `--remove`, PyTorch's Metal device, PyTorch's attention) and `scripts/image.sh` runs the Spark's graph
+  there. Not rendered on a Mac yet: the test Mac had not the 28 GB of disk to spare (2026-10-20); until a picture has
+  been compared with a Spark's, treat it as untested.
 
 Tested on one DGX Spark on 2026-10-19 (bf16, one seed per prompt, judged by eye):
 
@@ -1647,8 +1659,8 @@ bfloat16. Credit and licences: [CREDITS.md](CREDITS.md), [THIRD_PARTY_NOTICES.md
 | Action | On | Does | With | Mac | DGX Spark |
 |---|---|---|---|---|---|
 | **Turnaround** | a picture | Five views of the picture's subject, turning from where it faces now, made together so they agree. Each is a picture of its own: a first frame, or reference pictures of one character. | Turnaround LoRA by matlod; contact-sheet nodes by MATLOWAI | yes: the MLX engine packs and decodes the five views itself (`h3_generate.py --sheet`) | yes |
-| **Upscale** | a clip | The clip made larger and sharper: a latent upscale, then one light re-draw in tiles that the clip itself guides. Motion, mouths and the clip's own sound stay. | Video Upscaler LoRA and H3 Video Upsampler by dntpi; latent upscaler by LBH-123-AI | no: the upscaler is a ComfyUI node pack in PyTorch and the MLX engine has no latent upscaler or guide layout (a Mac doubles a clip with the 2x decoder: the 2K and QHD sizes) | yes |
-| **Remove a person** | a clip | One person taken out and the background drawn again. The person is found from a few words and followed through the clip; "1. Find the person" shows the mask alone first. | Person Remover LoRA and H3 Relay by Akatz Labs; SAM 3.1 by Meta | no: it needs SAM 3.1, a source clip fed in as a frame-aligned guide and windows that carry 18 frames of history, none of which the MLX engine has | yes |
+| **Upscale** | a clip | The clip made larger and sharper: a latent upscale, then one light re-draw in tiles that the clip itself guides. Motion, mouths and the clip's own sound stay. | Video Upscaler LoRA and H3 Video Upsampler by dntpi; latent upscaler by LBH-123-AI | yes: the same nodes on the Mac's ComfyUI (`oneshot-setup.sh --upscale`) | yes |
+| **Remove a person** | a clip | One person taken out and the background drawn again. The person is found from a few words and followed through the clip; "1. Find the person" shows the mask alone first. | Person Remover LoRA and H3 Relay by Akatz Labs; SAM 3.1 by Meta | yes: SAM 3.1 and the H3 Relay nodes on the Mac's ComfyUI (`oneshot-setup.sh --remove`) | yes |
 
 **Turnaround.** The LoRA's own instruction, "the camera orbits the subject of `<Picture 1>` ninety degrees
 clockwise", was read as a roll of the picture on some seeds, on both engines (the model without the LoRA always reads
@@ -1689,6 +1701,35 @@ already loaded unless said; the test pictures and the clip are generated ones):
 
 Not tested: 2048 views, clips longer than 5 seconds, a clip with two people where one is removed, windows of 39 and
 56 frames, and any of it on a machine other than these two.
+
+#### On a Mac: the same graphs on PyTorch's Metal device
+
+`bash oneshot-setup.sh --upscale` and `--remove` (after `--ref2va`) install a ComfyUI of the Mac's own
+(`scripts/setup-comfy.sh`): ComfyUI at the Spark's commit in `$PREFIX/comfy-venv`, the authors' node packs at the
+Spark's pins, SAM 3.1, the latent upscaler and H3's audio decoder in `$PREFIX/comfy-models` (2.4 GB, and 1.6 GB for the
+environment). The Library actions then run `spark/spark_workflows.py` there, the same graphs and settings as on a
+Spark. MiniMax H3 is not downloaded again: `mac/studio_files` reads the Mac's own Ref2VA transformer, text encoder and
+video decoder, put into the form ComfyUI's model expects (the q/k/v rows regrouped, the text encoder cut after layer 50,
+the adaLN projections on the same 8-curve basis as Comfy-Org's pruned file; without the first two the pictures were
+noise). The server starts for each job and stops after it (`mac/comfy.sh`), so its memory is back for the MLX jobs;
+the model load is part of every action's time. Turnaround stays on the MLX engine.
+
+Measured on the Mac Studio M5 Ultra (2026-10-20) on the DGX Spark's own test clip (the 5 s wooden-dummy rooftop clip,
+864x480) with the same settings and seeds, compared with the Spark's results of 2026-10-13:
+
+| Action | Mac | DGX Spark | Mac against Spark |
+|---|---|---|---|
+| Upscale to 2 megapixels | 480 s with the model load (two tiles: 73 s and 44 s) | 303 s | 40.5 dB PSNR over the clip, sharpness (Laplacian variance) 73.6 against 73.5 (the source enlarged: 27.8); same size, frames and sound |
+| Upscale to 1 megapixel, through the app's queue | 286 s | 190 s | 39.4 dB, sharpness 164.8 against 165.2 |
+| Find the person ("man in a blue shirt") | 38 s; 50 s through the app's queue | 40 s | mask overlap (IoU) 0.998 on average, 0.990 at worst; the same share of every frame (16.5 %) |
+| Remove a person, clean frame built, second look | 1179 s with the model loads (mask 36 s, clean frame 277 s, second look 276 s) | 1051 s through the app | the man gone from all 121 frames on both, no frame left with the mask's green on either; greenish tint 7.2 % of the pixels against 7.8 %, the same change outside the mask (12.2 of 255 on average on both); the two results differ by 4.5 of 255 |
+| Turnaround through ComfyUI (a check of the H3 files, not the Mac's route) | 105 s with the load (28 passes, 33 s) | 77 to 81 s with the load | the same robot, upright, turning the same way in all five views |
+
+Memory: ComfyUI held 68 GB during the removal windows and up to 155 GB at an Upscale's decode. Each Mac-only change in
+`mac/studio_files` was measured as the reason a run failed: see AGENTS.md. Two runs were killed by macOS when other
+programs on the same Mac loaded 70 to 140 GB beside them; on a Mac that runs nothing else beside the Studio there is
+room. The ComfyUI of a Mac has the kill-guard of `mac/comfy.sh` (16 GB available, `MAC_COMFY_GUARD_GB`), not the
+Spark's memory guard.
 
 ### Clearing prompts and deleting clips
 

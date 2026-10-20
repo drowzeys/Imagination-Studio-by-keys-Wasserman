@@ -18,6 +18,11 @@
 #                                       # Stability AI Community License, gated; MMAudio, weights CC-BY-NC 4.0; about 13 GB)
 #   bash oneshot-setup.sh --flux3       # also FLUX3-K (BFL's FLUX 3 Image Klein) as picture models beside Qwen-Image
 #                                       # (scripts/setup-flux3.sh: flux3-mlx in its own venv, 41 GB; FLUX Kommunity License)
+#   bash oneshot-setup.sh --upscale     # also the Library's Upscale (scripts/setup-comfy.sh: ComfyUI on PyTorch's Metal device in
+#                                       # its own venv, dntpi's H3 Video Upsampler, 2.3 GB with the venv; needs --ref2va)
+#   bash oneshot-setup.sh --remove      # also Find a person and Remove a person (the same ComfyUI, Akatz Labs' H3 Relay, Meta's
+#                                       # SAM 3.1: 1.7 GB more; needs --ref2va)
+#   bash oneshot-setup.sh --moss        # also MOSS-Image (OpenMOSS, Apache 2.0) as a picture model, on the same ComfyUI (28 GB)
 #   bash oneshot-setup.sh --image-only  # the image model only (33 GB), render a test image
 #   bash oneshot-setup.sh --no-render   # install and fetch only
 #   bash oneshot-setup.sh --no-loras    # skip the essential LoRA bundle (about 4 GB from the LoRAs' authors; --loras=camera,style
@@ -43,7 +48,8 @@ if [ "$(uname -s)" = Linux ]; then
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
+      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
+      --upscale|--remove) echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh)";;
       --fasth3) ;;
       --turbo|--app|--ref2va|--sound) echo "note: $arg is for the Mac build and does nothing on a DGX Spark";;
       *) echo "unknown option $arg" >&2; exit 2;;
@@ -81,7 +87,7 @@ REF_ADAPTER_NAME="lightx2v_ref2v_4step_v0.1_ourlayout.safetensors"
 X2_REPO="speach1sdef178/MiniMax-H3-X2-Detail-VAE"
 X2_NAME="MiniMax-H3-X2-Detail-v1.safetensors"
 X2_SHA256="2296840f4acedcaa976688e7d7b97f7bf570b136e400385d3f46224011897aac"
-MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0
+MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; COMFY_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --image-only) VIDEO=0;;
@@ -93,6 +99,7 @@ for arg in "$@"; do
     --flux3) FLUX3=1;;
     --music) MUSIC=1;;
     --sound) SOUND=1;;
+    --upscale|--remove|--moss) COMFY_ARGS+=("$arg");;
     --image-edit) IMAGE_EDIT=1;;
     --app) APP=1;;
     --verify|--no-render) MODE="$arg";;
@@ -422,6 +429,11 @@ fi
 if [ "$FLUX3" = 1 ] || [ -x "$PREFIX/flux3-venv/bin/python" ]; then  # FLUX3-K picture models: their own venv and weights
   PREFIX="$PREFIX" bash "$HERE/scripts/setup-flux3.sh" $([ "$MODE" = "--verify" ] || [ "$UPGRADE" = 1 ] && echo --verify) \
     || [ "$FLUX3" = 1 ] || echo "  ! FLUX3-K is not fully set up: bash scripts/setup-flux3.sh"
+fi
+if [ ${#COMFY_ARGS[@]} -gt 0 ] || [ -d "$PREFIX/ComfyUI" ]; then  # Upscale, Remove a person, MOSS-Image: ComfyUI in its own venv
+  PREFIX="$PREFIX" H3_MODEL_DIR="$H3_MODEL_DIR" bash "$HERE/scripts/setup-comfy.sh" ${COMFY_ARGS[@]+"${COMFY_ARGS[@]}"} \
+    $([ "$MODE" = "--verify" ] || [ "$UPGRADE" = 1 ] || [ ${#COMFY_ARGS[@]} = 0 ] && echo --verify) \
+    || [ ${#COMFY_ARGS[@]} -gt 0 ] || echo "  ! ComfyUI's actions are not fully set up: bash scripts/setup-comfy.sh --verify says what is missing"
 fi
 if [ "$MODE" = "--verify" ] || [ "$MODE" = "--no-render" ]; then
   echo; echo "DONE. Image: bash $HERE/scripts/image.sh \"a prompt\" out.png"

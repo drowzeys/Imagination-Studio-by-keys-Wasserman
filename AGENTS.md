@@ -222,10 +222,23 @@ Rules:
   Qwen's and a FLUX3-K edit refuses them. FLUX Kommunity
   License: say so when asked about commercial use, and do not redistribute the weights.
 - MOSS-Image (`moss-image` in `IMAGE_MODELS`, `oneshot-setup-spark.sh --moss`, `moss_workflow` in
-  `spark/spark_generate.py`): OpenMOSS's model, Apache 2.0, on a DGX Spark only, inside ComfyUI's workflow (v0.42.0 and
-  later, `COMFY_COMMIT`), never as standalone code. It is offered only where its files and ComfyUI's
+  `spark/spark_generate.py`): OpenMOSS's model, Apache 2.0, inside ComfyUI's workflow (v0.42.0 and
+  later, `COMFY_COMMIT`) on both machines (on a Mac the ComfyUI of the next rule, `oneshot-setup.sh --moss`, through
+  `scripts/image.sh`), never as standalone code. It is offered only where its files and ComfyUI's
   `nodes_moss_image.py` are (`moss_ready`). The settings are ComfyUI's template's (25 steps er_sde, CFG 2.5, its
   negative prompt): change them only with new measurements. It does not edit pictures; the prompt goes as written.
+- A Mac's ComfyUI (`mac/comfy.sh`, `scripts/setup-comfy.sh`, `oneshot-setup.sh --upscale | --remove | --moss`): Upscale,
+  Find and Remove a person and MOSS-Image run the Spark's own graphs (`spark/spark_workflows.py`,
+  `spark/spark_generate.py`, `MAC`) and the authors' node packs at the Spark's pins, on PyTorch's Metal device in
+  `$PREFIX/comfy-venv`, never in the Studio's MLX venv and never as standalone model code. Keep
+  `--use-pytorch-cross-attention`: ComfyUI's default attention on a Mac adds the text mask as a bias. MiniMax H3 is read
+  from the Mac's own files through pointer files (`mac/comfy_files.py`, `mac/studio_files`): its fused q/k/v rows are
+  regrouped into ComfyUI's order and its text encoder is cut after layer 50 (without either, the pictures are noise);
+  the text encoder's tensors are assigned from the file, a LoRA's backup and an unloaded transformer go back to the
+  file's pages, and a 3D convolution on Metal is a sum of 2D ones (PyTorch's own took 177 GB for nine frames). Each was
+  measured as the reason a run failed or was killed: keep them. The server is stopped after every job
+  (`mac_release`, `MAC_COMFY_KEEP=1` keeps it) and holds a kill-guard (`MAC_COMFY_GUARD_GB`, 16). The turnaround sheet
+  stays the MLX engine's.
 - Music (`app/music.py`, `app/static/music.js`, README *Music (MiniMax Music 3)*): MiniMax-Music3 makes a song from
   lyrics (section tags) and a style caption, on this machine only, never imported into the app's venv. The tab, every
   song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a

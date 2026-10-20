@@ -84,7 +84,7 @@ def server(action: str) -> None:
         # as for a reference clip: TensorFold's engine keeps its 8-bit weights until the server is gone
         say("restarting ComfyUI: this starts from a server with nothing loaded" if not clash else
             "restarting ComfyUI: the upscaler's and the remover's node packs do not share one server")
-        subprocess.run(["bash", str(sg.HERE / "comfy.sh"), "stop"], check=False)
+        subprocess.run(["bash", str(sg.COMFY_SH), "stop"], check=False)
         for _ in range(60):
             if not sg.up():
                 break
@@ -94,7 +94,8 @@ def server(action: str) -> None:
     have = sg.call("/object_info")
     missing = [n for n in NODES[action] if n not in have]
     if missing:
-        sys.exit(f"ComfyUI has no node {', '.join(missing)}: run `bash spark/setup-workflows.sh`, then `bash spark/comfy.sh stop`")
+        sys.exit(f"ComfyUI has no node {', '.join(missing)}: run `bash {'scripts/setup-comfy.sh' if sg.MAC else 'spark/setup-workflows.sh'}`, "
+                 f"then `bash {'mac' if sg.MAC else 'spark'}/comfy.sh stop`")
     if sg.REF2VA["bf16"] not in listed("UNETLoader", "unet_name"):
         sys.exit("MiniMax H3 Ref2VA is not installed: bash oneshot-setup-spark.sh --ref2va")
     if action in PACK:
@@ -241,7 +242,7 @@ def turnaround(args) -> None:
         "14": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": prefix + "_view"}},
         "15": {"class_type": "SaveImage", "inputs": {"images": ["13", 1], "filename_prefix": prefix + "_sheet"}},
     })
-    say(f"engine: cuda (ComfyUI, MiniMax H3 Ref2VA bf16 with the Turnaround LoRA at {strength:g}), five views of "
+    say(f"engine: {sg.ENGINE} (ComfyUI, MiniMax H3 Ref2VA bf16 with the Turnaround LoRA at {strength:g}), five views of "
         f"{args.size}x{args.size}, {args.steps} passes")
     try:
         saved, seconds = execute(w, "12")
@@ -256,7 +257,7 @@ def turnaround(args) -> None:
     take(sheet[0], Path(outputs[0]))
     for item, target in zip(views, outputs[1:]):
         take(item, Path(target))
-    say(json.dumps({"outputs": outputs, "engine": "cuda", "action": "turnaround", "size": args.size, "forwards": args.steps,
+    say(json.dumps({"outputs": outputs, "engine": sg.ENGINE, "action": "turnaround", "size": args.size, "forwards": args.steps,
                     "total_s": round(seconds, 1)}))
 
 
@@ -289,7 +290,7 @@ def upscale(args) -> None:
         w["8"]["inputs"].update(audio=["7", 1], audio_vae=["5", 0])
         w["10"]["inputs"]["audio"] = ["8", 1]
     width, height = probe["video"]
-    say(f"engine: cuda (ComfyUI, H3 Video Upsampler on MiniMax H3 Ref2VA bf16 with the h3upscale LoRA), {width}x{height} "
+    say(f"engine: {sg.ENGINE} (ComfyUI, H3 Video Upsampler on MiniMax H3 Ref2VA bf16 with the h3upscale LoRA), {width}x{height} "
         f"to {args.megapixels:g} megapixels, re-draw {args.denoise:g}, tiles of {args.tile_tokens} tokens")
     try:
         saved, seconds = execute(w, "8")
@@ -301,7 +302,7 @@ def upscale(args) -> None:
     target = Path(args.output)
     take(clips[0], target)
     after = sg.probe_media(str(target))
-    say(json.dumps({"output": str(target), "engine": "cuda", "action": "upscale", "from": [width, height],
+    say(json.dumps({"output": str(target), "engine": sg.ENGINE, "action": "upscale", "from": [width, height],
                     "size": list(after["video"] or ()), "total_s": round(seconds, 1)}))
 
 
@@ -653,7 +654,7 @@ def find_person(args, scratch: Path) -> tuple[str, dict, Path, Path]:
         "43": {"class_type": "CreateVideo", "inputs": {"images": ["42", 0], "fps": ["21", 2]}},
         "44": {"class_type": "SaveVideo", "inputs": {"video": ["43", 0], "filename_prefix": prefix + "_matte", "format": "auto", "codec": "auto"}},
     })
-    say(f"engine: cuda (ComfyUI, SAM 3.1), finding \"{args.person}\" in {size['frames']} frames of {size['width']}x{size['height']}")
+    say(f"engine: {sg.ENGINE} (ComfyUI, SAM 3.1), finding \"{args.person}\" in {size['frames']} frames of {size['width']}x{size['height']}")
     saved, seconds = execute(w, "26")
     if not saved.get("41") or not saved.get("44"):
         sys.exit("ComfyUI finished without the mask")
@@ -690,7 +691,7 @@ def mask(args) -> None:
             green.replace(outputs[0]); matte.replace(outputs[1])
     finally:
         sg.forget_uploads()
-    say(json.dumps({"outputs": outputs, "engine": "cuda", "action": "mask", **size}))
+    say(json.dumps({"outputs": outputs, "engine": sg.ENGINE, "action": "mask", **size}))
 
 
 def remover_nodes(w: dict, lora: tuple[str, float], anchor: str, frames_from: list, args, window: int, seed: int) -> None:
@@ -760,7 +761,7 @@ def remove(args) -> None:
             w["37"] = {"class_type": "CreateVideo", "inputs": {"images": ["31", 0], "fps": ["21", 2]}}
             w["38"] = {"class_type": "SaveVideo", "inputs": {"video": ["37", 0], "filename_prefix": f"studio/clean_{uuid.uuid4().hex[:8]}",
                                                              "format": "auto", "codec": "auto"}}
-            say(f"engine: cuda (ComfyUI, MiniMax H3 Ref2VA bf16 with the Person Remover LoRA at {lora[1]:g}), "
+            say(f"engine: {sg.ENGINE} (ComfyUI, MiniMax H3 Ref2VA bf16 with the Person Remover LoRA at {lora[1]:g}), "
                 f"{size['frames']} frames of {size['width']}x{size['height']} in {len(starts)} windows of {window}, {args.steps} passes each")
             saved, seconds = execute(w, "31", len(starts))
             if not saved.get("38"):
@@ -801,7 +802,7 @@ def remove(args) -> None:
                 report["kept"] = [str(keep.parent / f"{keep.name}_mask.mp4"), str(keep.parent / f"{keep.name}_clean.png")]
     finally:
         sg.forget_uploads()
-    say(json.dumps({"output": str(target), "engine": "cuda", "action": "remove", "windows": len(starts), "window": window,
+    say(json.dumps({"output": str(target), "engine": sg.ENGINE, "action": "remove", "windows": len(starts), "window": window,
                     "forwards": args.steps, "total_s": round(seconds, 1), **size, **report}))
 
 
@@ -832,7 +833,10 @@ def main() -> None:
             m.add_argument("--again", type=int, default=3, help="stretches of 22 frames to run a second time where green was left (0: none)")
             m.add_argument("--keep", default="", help="folder/name: keep the green clip and the clean frame beside the result")
     args = parser.parse_args()
-    {"turnaround": turnaround, "upscale": upscale, "mask": mask, "remove": remove}[args.action](args)
+    try:
+        {"turnaround": turnaround, "upscale": upscale, "mask": mask, "remove": remove}[args.action](args)
+    finally:
+        sg.mac_release()
 
 
 if __name__ == "__main__":

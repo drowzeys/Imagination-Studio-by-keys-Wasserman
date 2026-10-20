@@ -6,9 +6,10 @@
     Find a person      the first half of the removal alone: the mask, to look at before the long render
 
 They run as jobs in the Studio's queue (kinds turnaround, upscale, mask, remove). On a DGX Spark each goes through its
-author's own ComfyUI nodes (spark/spark_workflows.py, installed by spark/setup-workflows.sh). On a Mac they are not
-available, except the turnaround sheet, which the MLX engine makes itself (h3_generate.py --sheet): `why` says what
-it lacks for the other two.
+author's own ComfyUI nodes (spark/spark_workflows.py, installed by spark/setup-workflows.sh). On a Mac the turnaround
+sheet is the MLX engine's own (h3_generate.py --sheet); Upscale, Find and Remove a person run the same
+spark/spark_workflows.py graphs on a ComfyUI of the Mac's own, on PyTorch's Metal device (mac/comfy.sh, installed by
+scripts/setup-comfy.sh, `oneshot-setup.sh --upscale` and `--remove`), reading MiniMax H3 from the Mac's own files.
 """
 
 from __future__ import annotations
@@ -28,15 +29,15 @@ TITLES = {"turnaround": "Turnaround sheet", "upscale": "Upscale", "remove": "Rem
 SIZES = (512, 1024, 2048)                 # a turnaround view's side: 512 is what the LoRA was trained at
 MEGAPIXELS = (1.0, 2.0, 3.0, 4.0)         # an upscale's area: 2 is about 1920x1080
 WINDOWS = (22, 39, 56)                    # the remover's window: 22 is the author's proven default
-MAC = {
-    "upscale": "DGX Spark only. The upscaler is a ComfyUI node pack in PyTorch (a latent upscaler network, then a "
-               "re-draw in tiles guided through the LoRA's own layout); the Mac build has no ComfyUI and its MLX "
-               "engine has neither. On a Mac the 2K and QHD sizes double a clip with the 2x decoder.",
-    "remove": "DGX Spark only. The removal needs SAM 3.1 to track the person, a source clip fed in as a frame-aligned "
-              "guide and windows that carry 18 frames of history; the Mac's MLX engine has no segmentation model, no "
-              "aligned guide and no history relay.",
-}
-MAC["mask"] = MAC["remove"]
+# On a Mac: the node pack and the files under $MAC_COMFY_MODELS each action needs, and the option that installs them
+MAC_NODES = {"upscale": "ComfyUI-H3-Video-Upsampler", "remove": "h3-relay", "mask": "h3-relay"}
+MAC_FILES = {"upscale": ["latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors",
+                         "vae/minimax_h3_audio_vae_fp32.safetensors"],
+             "remove": ["checkpoints/sam3.1_multiplex_fp16.safetensors", "vae/minimax_h3_audio_vae_fp32.safetensors"],
+             "mask": ["checkpoints/sam3.1_multiplex_fp16.safetensors"]}
+MAC_OPTION = {"upscale": "--upscale", "remove": "--remove", "mask": "--remove"}
+# MiniMax's own files the Mac's ComfyUI reads in their place (mac/studio_files): Ref2VA, its text encoder and decoder
+MAC_H3 = ("Ref2VA/transformer", "FL2VA/text_encoder", "FL2VA/video_vae")
 
 
 def attach(home: Path, pack: Path, spark: bool, inside, relative):
@@ -47,12 +48,14 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
     def recipe(lora_id: str) -> dict:
         return next((r for r in json.loads(PRESETS.read_text()) if r["id"] == lora_id), {})
 
-    def lora_file(lora_id: str) -> Path | None:
-        """The LoRA's own file: installed in the hub (on a Mac, the copy rewritten for the MLX engine), or, on a
-        Spark, still in a LoRA bundle on this machine."""
+    def lora_file(lora_id: str, comfy: bool = False) -> Path | None:
+        """The LoRA's own file: installed in the hub (on a Mac, the copy rewritten for the MLX engine, unless the
+        action runs on the Mac's ComfyUI, which reads the author's file as a Spark does), or still in a LoRA bundle on
+        this machine."""
 
-        hub = home / "loras" / (f"{lora_id}.safetensors" if spark else f"{lora_id}.mlx.safetensors")
-        if not spark:
+        comfy = comfy or spark
+        hub = home / "loras" / (f"{lora_id}.safetensors" if comfy else f"{lora_id}.mlx.safetensors")
+        if not comfy:
             return hub if hub.is_file() else None
         if hub.is_file():
             return hub
@@ -66,12 +69,22 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
         """Why an action cannot run here, or '' when it can."""
 
         if not spark:
-            if kind != "turnaround":
-                return MAC[kind]
             model = Path(os.environ.get("H3_MODEL_DIR", Path.home() / "h3-models/MiniMax-H3"))
             if not (model / "Ref2VA/transformer").is_dir():
                 return "MiniMax H3 Ref2VA is not installed: run `bash oneshot-setup.sh --ref2va`."
-            return "" if lora_file("turnaround") else "Install Turnaround in the LoRA hub first."
+            if kind == "turnaround":
+                return "" if lora_file("turnaround") else "Install Turnaround in the LoRA hub first."
+            files = Path(os.environ.get("MAC_COMFY_MODELS") or prefix / "comfy-models")
+            if (not (prefix / "comfy-venv/bin/python").exists() or not (prefix / "ComfyUI/main.py").is_file()
+                    or not (prefix / "ComfyUI/custom_nodes" / MAC_NODES[kind]).is_dir()
+                    or any(not (files / f).is_file() for f in MAC_FILES[kind])):
+                return (f"Not installed yet: run `bash oneshot-setup.sh {MAC_OPTION[kind]}` (ComfyUI in its own environment "
+                        "on this Mac, the authors' node pack and their models).")
+            if any(not (model / part).is_dir() for part in MAC_H3):
+                return "MiniMax H3's text encoder or video decoder is missing: run `bash oneshot-setup.sh --ref2va`."
+            if LORA[kind] and lora_file(LORA[kind], comfy=True) is None:
+                return f"Install {recipe(LORA[kind]).get('name', LORA[kind])} in the LoRA hub first."
+            return ""
         nodes = prefix / "ComfyUI" / "custom_nodes"
         need = {"turnaround": ["ComfyUI-H3-ContactSheet"], "upscale": ["ComfyUI-H3-Video-Upsampler"],
                 "remove": ["h3-relay"], "mask": ["h3-relay"]}[kind]
@@ -119,10 +132,11 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
         why = missing(kind)
         if why:
             raise HTTPException(400, why)
-        python = str(prefix / "venv/bin/python")
+        comfy = spark or kind != "turnaround"     # on a Mac the turnaround sheet is the MLX engine's
+        python = str(prefix / ("venv/bin/python" if spark else "comfy-venv/bin/python"))
         script = [python, str(pack / "spark/spark_workflows.py"), kind]
-        env = {"PREFIX": str(prefix)} if spark else {}
-        lora = lora_file(LORA[kind]) if LORA[kind] else None
+        env = {"PREFIX": str(prefix)} if comfy else {}
+        lora = lora_file(LORA[kind], comfy=comfy) if LORA[kind] else None
         if kind == "turnaround":
             picture = media(params, "image", (".png", ".jpg", ".jpeg", ".webp"))
             size = number(params, "size", 1024, int)
