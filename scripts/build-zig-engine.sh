@@ -8,7 +8,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_REPO="${TF_REPO:-https://github.com/drowzeys/TensorFold.git}"
-ZIG_COMMIT="${ZIG_COMMIT:-b7e309e042e48b72e75e9fb87342df4e9bf22f37}"
+ZIG_COMMIT="${ZIG_COMMIT:-b19753ab01beedb04b3b691c9d50023ccfe09f62}"
 export PATH="/opt/homebrew/bin:$PATH"
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || { echo "the engine builds on Apple silicon macOS only" >&2; exit 1; }
 command -v zig >/dev/null || { echo "zig 0.17 required: brew install zig" >&2; exit 1; }
