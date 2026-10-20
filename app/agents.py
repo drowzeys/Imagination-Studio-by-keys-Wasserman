@@ -1942,7 +1942,8 @@ def confine(args: dict, work_: Path) -> str | None:
         elif isinstance(value, list):
             for v in value:
                 yield from paths(v, key)
-        elif isinstance(value, str) and PATHISH.search(key) and "prompt" not in key.lower() and value.strip():
+        elif isinstance(value, str) and value.strip() and "prompt" not in key.lower() and (
+                PATHISH.search(key) or value.strip().startswith(("/", "~"))):  # any absolute path, whatever its key
             yield key, value.strip()
     for key, value in paths(args):
         text = os.path.expanduser(value)

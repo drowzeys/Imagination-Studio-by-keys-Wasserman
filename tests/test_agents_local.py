@@ -144,6 +144,9 @@ def test_bad_calls_are_answered_and_paths_stay_in_the_folders(local):
     work = agents.HOME / "agent" / answer["thread"]["id"]
     assert agents.confine({"path": str(work / "a.png")}, work) is None and agents.confine({"path": str(agents.HOME / "renders/a.png")}, work) is None
     assert agents.confine({"path": str(agents.HOME / ".studio-agents/settings.json")}, work)
+    # an absolute path is checked under any key, not only one that reads like a path
+    assert agents.confine({"video": "/etc/passwd"}, work) and agents.confine({"source": "~/.ssh/id_ed25519"}, work)
+    assert agents.confine({"prompt": "/imagine a lighthouse"}, work) is None  # a prompt is words, never a path
 
 
 def test_the_step_limit_ends_the_turn_with_a_summary(local, monkeypatch):
