@@ -85,6 +85,7 @@ RELEASE_WAIT_S = 600  # the most a release waits for an answer in flight (agents
 MAC_PEAK_GB = {"video": 33.0, "studio": 33.0, "long": 33.0, "scout": 28.0, "image": 28.0, "edit": 28.0, "voice": 52.0,
                "music": 33.0, "turbo": 103.0}
 MAC_PEAK_UNKNOWN_GB = 103.0
+LOG_BYTES = 50 * 1024 ** 2  # $STUDIO_HOME/bolt/engine.log starts again past this (the one before kept as engine.log.1)
 
 
 def free_port() -> int:
@@ -207,8 +208,32 @@ class Engine:
                 "killed": self.killed or None, "events": self.events[-6:]}
 
     def read(self, process: subprocess.Popen) -> None:
-        for line in process.stderr:
+        """The engine's own output: its last 200 lines here, and all of it in $STUDIO_HOME/bolt/engine.log (the run
+        before kept as engine.log.1), where the reason for an error it answers with ("Bolt's forward failed") is."""
+
+        from studio_home import studio_home
+        handle = None
+        try:
+            folder = studio_home() / "bolt"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / "engine.log"
+            if path.exists():
+                path.replace(folder / "engine.log.1")
+            handle = path.open("a", buffering=1)
+            handle.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')} {self.name} engine started\n")
+        except OSError:
+            handle = None
+        for line in process.stdout:  # its stderr joined to it
             self.log = (self.log + [line.rstrip("\n")])[-200:]
+            if handle is not None:
+                try:
+                    handle.write(time.strftime("%H:%M:%S ") + line if line.endswith("\n") else line + "\n")
+                    if handle.tell() > LOG_BYTES:  # a server kept for days: the newest part, the older one beside it
+                        handle.close()
+                        path.replace(folder / "engine.log.1")
+                        handle = path.open("a", buffering=1)
+                except OSError:
+                    handle = None
 
     def guard(self, process: subprocess.Popen) -> None:
         """The available memory four times a second (once on a Mac: vm_stat is a process); under the floor the
@@ -259,7 +284,7 @@ class Engine:
         began, self.before_gb = time.time(), voice.mem_available_gb()
         try:
             self.process = subprocess.Popen([sys.executable, "-I", str(Path(__file__).with_name("bolt_leash.py")), "--", *self.argv(self.port)],
-                                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                             bufsize=1, env=self.environment(), start_new_session=True)
             threading.Thread(target=self.read, args=(self.process,), daemon=True).start()
             threading.Thread(target=self.guard, args=(self.process,), daemon=True).start()
