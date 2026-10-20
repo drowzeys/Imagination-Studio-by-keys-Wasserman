@@ -728,7 +728,7 @@ def admit(job: dict, need) -> str:
     why = fits[1] if fits is not None else "this kind of job has no measured peak"
     if one.release(title + " (" + job.get("id", "") + ")" if job.get("id") else title):
         return f"[tensorfold] {NAME} was unloaded to give this job its memory ({why}); it loads again when the queue is empty\n"
-    return ""
+    return f"[tensorfold] {NAME} does not load beside this job ({why}): a brain question waits for the queue\n"
 
 
 def queue_empty() -> None:
@@ -800,9 +800,9 @@ def shutdown() -> None:
 def summary() -> dict:
     """For the telemetry (Machine room, the status bar): state, backend and memory, cheap."""
 
-    one = _engine
-    if one is None or isinstance(one, External):
-        return {"state": "external" if isinstance(one, External) else "unloaded", "managed": False}
+    one = engine()
+    if isinstance(one, External):
+        return {"state": "external", "managed": False}
     loaded = one.loaded()
     return {"state": one.state(), "managed": True, "backend": one.name, "label": one.label,
             "memory_gb": round(one.held_gb if one.held_gb is not None else one.RESIDENT_GB, 1) if loaded else None,
