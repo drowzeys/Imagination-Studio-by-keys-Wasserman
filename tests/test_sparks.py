@@ -486,6 +486,39 @@ def test_a_worker_with_other_code_is_updated_before_it_is_used():
     assert client.delete(f"/api/sparks/workers/{one.address}").json()["listed"] == 1
 
 
+def test_automatic_updates_bring_a_worker_level_once():
+    one = Worker("spark-a")
+    one.code = {**hub.code(), "app/server.py": "an older one"}
+    had, copy = hub.follow, hub.copy
+    hub.follow = lambda: True
+    hub.copy = lambda pack, address, folder: (setattr(WORKERS[address], "code", None), copy(pack, address, folder))[1]  # the copy brings the code
+    try:
+        SENT.clear()
+        fresh(one)
+        # behind in its code only: sent this Spark's code and started, as “Update and start” does, without a person
+        settle(40)
+        assert SENT == [(one.address, hub.default_folder())]
+        until = time.time() + 40
+        while time.time() < until and client.get("/api/sparks").json()["workers"][0]["state"] != "ready":
+            time.sleep(0.05)
+        assert client.get("/api/sparks").json()["workers"][0]["state"] == "ready"
+        # the same version is never sent again, even when the worker falls behind again: a person decides then
+        one.code = {**hub.code(), "app/server.py": "an older one"}
+        SENT.clear()
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        settle()
+        assert client.get("/api/sparks").json()["workers"][0]["state"] == "update" and SENT == []
+    finally:
+        hub.follow, hub.copy = had, copy
+    # automatic updates off (the default): a worker behind is left for a person's “Update and start”
+    two = Worker("spark-b")
+    two.code = {**hub.code(), "app/server.py": "an older one"}
+    SENT.clear()
+    fresh(two)
+    assert client.get("/api/sparks").json()["workers"][0]["state"] == "update" and SENT == []
+    client.delete(f"/api/sparks/workers/{two.address}")
+
+
 def test_the_tunnel_ends_on_the_workers_own_loopback_and_is_closed():
     """The command a tunnel is: local 127.0.0.1 to the worker's 127.0.0.1:7870, key login only, nothing else."""
 
