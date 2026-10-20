@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import atexit
 import concurrent.futures
+import difflib
 import json
 import os
 import queue
@@ -1999,7 +2000,8 @@ def answer_of(base: str, body: dict, stopped) -> dict | None:
 #            named (Qwen 2.1 Turbo and FastH3 4 passes, the fastest), 22 frames is 0.92 s
 #   compact  tool answers as compact JSON without empty fields, and studio_state cut to the ids (and labels) it needs
 #   report   the final answer ends with what the Studio's records say was made (each job's outputs, the Slate ids), so
-#            what it says about files can be checked against the records beside it
+#            what it says about files can be checked against the records beside it; a path it names with a slip in it
+#            (Bolt doubles a pair of characters in a long id now and then) is put right from the records
 #   temp=0   greedy sampling (0.3 before; 0 was the more exact of the two)
 # A call that failed is never sent again unchanged (the model is told so instead): that stopped loops of the same error.
 # Measured and left out: a checklist the model writes first in a JSON schema with a check of the calls against it
@@ -2078,6 +2080,9 @@ def compact_result(tool: str, text: str) -> str:
     return json.dumps(pruned(value), separators=(",", ":"), ensure_ascii=False)
 
 
+LIBRARY_PATH = re.compile(r"(?<![\w./-])(?:scouts|renders|slate|exports|sound|voice|music|motion|uploads|projects|qa)/[\w./-]+\.[A-Za-z0-9]{2,4}\b")
+
+
 class Ledger:
     """What the turn's tool calls made, from their answers: the jobs by id (as last seen) and the Slate and Editor ids."""
 
@@ -2106,6 +2111,22 @@ class Ledger:
                     self.made.append(f"Slate shot {one.get('name')} ({one.get('shot')}), {one.get('seconds')} s, not rendered")
                 elif tool == "add_to_timeline":
                     self.made.append(f"Editor timeline {one.get('name') or one.get('project')}: {one.get('clips')} clip(s)")
+
+    def paths(self) -> list[str]:
+        return [str(o) for job in self.jobs.values() for o in job.get("outputs") or []]
+
+    def mended(self, said: str) -> str:
+        """The answer with each Library path it names that the records do not have, but one of theirs differs from it by
+        a slip (a doubled or dropped character of an id: p-1a1a15... for p-1a15...), put right."""
+
+        known = self.paths()
+        def mend(match):
+            path = match.group(0)
+            if path in known or not known:
+                return path
+            near = difflib.get_close_matches(path, known, n=1, cutoff=0.9)
+            return near[0] if near and len(path) > 12 else path
+        return LIBRARY_PATH.sub(mend, said)
 
     def running(self) -> list[str]:
         return [i for i, job in self.jobs.items() if job.get("status") in ("queued", "running") and i not in self.cancelled]
@@ -2240,7 +2261,7 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                     except (TimeoutError, EOFError, RuntimeError, OSError, InterruptedError):
                         pass
                 if "report" in method["parts"] and ledger.lines():
-                    task["reply"] = said.rstrip() + "\n\nWhat the Studio's records say was made:\n" + "\n".join("- " + l for l in ledger.lines())
+                    task["reply"] = ledger.mended(said).rstrip() + "\n\nWhat the Studio's records say was made:\n" + "\n".join("- " + l for l in ledger.lines())
                 break
             messages.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": wanted})
             for one in wanted:
