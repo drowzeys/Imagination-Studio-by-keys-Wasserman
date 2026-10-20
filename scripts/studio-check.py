@@ -129,7 +129,7 @@ class Api:
 # ---------- media checks ----------
 
 def run(command: list[str], timeout: float = 120) -> subprocess.CompletedProcess:
-    return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=timeout)  # a picture's metadata can be any bytes
 
 
 def probe(file: Path) -> dict:
@@ -375,7 +375,7 @@ def make_fixtures(r: Run):
         done = run(["ffmpeg", "-v", "error", "-y"] + args + [str(d / name)])
         if done.returncode:
             raise Fail(f"ffmpeg could not make the fixture {name}: {done.stderr[:200]}")
-    (d / "film.fountain").write_text("Title: Mac Check\n\nEXT. HARBOUR - NIGHT\n\nA lighthouse beam sweeps the fog.\n\n"
+    (d / "film.fountain").write_text("Title: Mac Check\n\nEXT. NEO-TOKYO ROOFTOP - NIGHT\n\nA cyborg courier sprints between holographic billboards.\n\n"
                                      "MARA\nWe should not be here.\n\nINT. CABIN - NIGHT\n\nRain on the window.\n")
     for name in ("clip.mp4", "still.png", "tone.wav"):
         r.ctx["up_" + name.split(".")[0]] = r.api.upload(d / name)["path"]
@@ -447,7 +447,7 @@ def c_states(r: Run):
 
 @check("compose-check-estimate")
 def c_compose(r: Run):
-    composed = r.api.post("/api/compose", {"fields": {"scene": "A lighthouse on a cliff at dusk", "action": "the beam sweeps",
+    composed = r.api.post("/api/compose", {"fields": {"scene": "A neon-lit rooftop in rain-soaked Neo-Tokyo", "action": "a cyborg courier leaps the gap",
                                                       "camera": "", "dialogue": [], "soundscape": "", "music": "N/A"},
                                            "first_frame": False, "last_frame": False, "seconds": 5})
     if not composed.get("prompt"):
@@ -504,7 +504,7 @@ def c_slate(r: Run):
     up_clip, = need(r, "up_clip")
     film = r.api.post("/api/slate/projects", {"name": "studio-check film"})
     r.slate.append(film["id"])
-    film["scenes"] = [{"id": "sc1", "name": "Harbour", "shots": [{"id": "sh1", "name": "Beam", "prompt": "A lighthouse beam sweeps the fog over a dark harbour.",
+    film["scenes"] = [{"id": "sc1", "name": "Rooftop", "shots": [{"id": "sh1", "name": "Leap", "prompt": "A cyborg courier leaps between neon rooftops in the rain.",
                                                                     "spec": {"durationSec": 1}, "takes": []}]}]
     r.api.ok("PUT", f"/api/slate/projects/{film['id']}", film)
     compiled = r.api.post("/api/slate/compile", {"project": film, "shotId": "sh1"})
@@ -617,7 +617,7 @@ def scout(r: Run, model: str, w: int, h: int, key: str | None = None):
     models = [m["id"] for m in r.state.get("image_models", [])]
     if model not in models:
         raise NotHere(f"{model} is not installed or not offered on a {r.platform}")
-    job = r.job({"kind": "scout", "title": f"studio-check {model}", "params": {"prompt": "A red lighthouse on a green cliff above a stormy sea, golden hour",
+    job = r.job({"kind": "scout", "title": f"studio-check {model}", "params": {"prompt": "A cyborg courier in a chrome jacket on a neon-lit rooftop in rain-soaked Neo-Tokyo, holographic billboards, cinematic night",
                                                                            "count": 1, "seed": 1, "width": w, "height": h, "image_model": model}})
     out = r.output(job, r"scout_s\d+\.png$")
     if key:
@@ -702,9 +702,6 @@ def action(r: Run, kind: str, params: dict, pattern: str):
     return (clip(out, 22 / 24, sound=False) if out.suffix == ".mp4" else picture(out)) | {"outputs": len(job.get("outputs") or []), "_job": job}
 
 
-check("action-upscale", "short")(lambda r: action(r, "upscale", {"megapixels": 1.0, "denoise": 0.1}, r"\.mp4$"))
-check("action-mask", "short")(lambda r: action(r, "mask", {"person": "the person"}, r"person_mask\.mp4$"))
-check("action-remove", "short")(lambda r: action(r, "remove", {"person": "the person", "window": 22, "steps": 4}, r"renders/.*\.mp4$"))
 
 
 @check("sparks", "api")
@@ -721,7 +718,7 @@ def c_sparks(r: Run):
 
 @check("video-text-fh4", "short")
 def c_video(r: Run):
-    job = r.job({"kind": "video", "title": "studio-check text", "params": {"prompt": r.ctx.get("prompt") or "A lighthouse beam sweeps the fog.", "image": None, **SMALL}})
+    job = r.job({"kind": "video", "title": "studio-check text", "params": {"prompt": r.ctx.get("prompt") or "A cyborg courier sprints across a neon rooftop in the rain.", "image": None, **SMALL}})
     out = r.output(job, r"\.mp4$")
     r.ctx["clip"] = r.rel(out)
     return clip(out, 22 / 24, SMALL_SIZE) | {"engine": job.get("engine"), "shot": (job.get("shot") or {}).get("passed"), "_job": job}
@@ -748,7 +745,7 @@ def c_video_std(r: Run):
 
 @check("video-from-picture", "short")
 def c_video_image(r: Run):
-    job = r.job({"kind": "video", "title": "studio-check from picture", "params": {"prompt": "The waves crash against the cliff below the lighthouse.",
+    job = r.job({"kind": "video", "title": "studio-check from picture", "params": {"prompt": "The courier turns as a police drone sweeps its searchlight across the rooftop.",
                                                                                "image": picture_in(r), **SMALL}})
     return clip(r.output(job, r"\.mp4$"), 22 / 24) | {"engine": job.get("engine"), "_job": job}
 
@@ -756,14 +753,14 @@ def c_video_image(r: Run):
 @check("video-continuity", "short")
 def c_video_cont(r: Run):
     source, = need(r, "clip")
-    job = r.job({"kind": "video", "title": "studio-check continues", "params": {"prompt": "The beam keeps sweeping as the fog thickens.",
+    job = r.job({"kind": "video", "title": "studio-check continues", "params": {"prompt": "The courier sprints toward the edge as the drone closes in.",
                                                                             "first_frame_from": source, **SMALL}})
     return clip(r.output(job, r"\.mp4$"), 22 / 24) | {"_job": job}
 
 
 @check("video-first-last", "short")
 def c_video_last(r: Run):
-    job = r.job({"kind": "video", "title": "studio-check first+last", "params": {"prompt": "The camera slowly circles the lighthouse.",
+    job = r.job({"kind": "video", "title": "studio-check first+last", "params": {"prompt": "The camera slowly circles the courier under the holographic billboards.",
                                                                              "image": picture_in(r), "last_same": True, **SMALL}})
     return clip(r.output(job, r"\.mp4$"), 22 / 24) | {"_job": job}
 
@@ -809,7 +806,7 @@ def c_long(r: Run):
 def c_ref2va(r: Run):
     if not r.state.get("ref2va"):
         raise Skip("Ref2VA is not installed")
-    job = r.job({"kind": "video", "title": "studio-check ref2va", "params": {"prompt": "<Picture 1> stands in the rain as the lighthouse beam passes.",
+    job = r.job({"kind": "video", "title": "studio-check ref2va", "params": {"prompt": "<Picture 1> stands in the rain as a police drone's searchlight passes.",
                                                                          "references": [picture_in(r)], "ref_turbo": bool(r.state.get("ref2va_turbo")),
                                                                          "preset": "small", "frames": 22, "seconds": 22 / 24, "seed": 1}})
     out = r.output(job, r"\.mp4$")
@@ -829,13 +826,19 @@ def c_ref_media(r: Run):
     return clip(r.output(job, r"\.mp4$"), 22 / 24) | {"pace": (job.get("pace") or {}).get("verdict"), "_job": job}
 
 
+# the Library actions take the person clip that Ref2VA made above
+check("action-upscale", "short")(lambda r: action(r, "upscale", {"megapixels": 1.0, "denoise": 0.1}, r"\.mp4$"))
+check("action-mask", "short")(lambda r: action(r, "mask", {"person": "the person"}, r"person_mask\.mp4$"))
+check("action-remove", "short")(lambda r: action(r, "remove", {"person": "the person", "window": 22, "steps": 4}, r"renders/.*\.mp4$"))
+
+
 # ----- voice, music, nodes, motion -----
 
 @check("voice-take", "short")
 def c_voice(r: Run):
     if not (r.ctx.get("voice_state") or {}).get("available"):
         raise Skip((r.ctx.get("voice_state") or {}).get("why") or "voice not available")
-    job = r.job({"text": "The lighthouse keeper counted every ship that passed in the night.", "seed": 1, "live": False}, path="/api/voice/takes")
+    job = r.job({"text": "The courier never looked back: the package was worth more than the city.", "seed": 1, "live": False}, path="/api/voice/takes")
     out = r.output(job, r"\.wav$")
     r.ctx["voice_wav"] = r.rel(out)
     return sound(out) | {"score": (job.get("voice") or {}).get("score"), "_job": job}
@@ -961,7 +964,7 @@ def c_song(r: Run):
     if not st.get("available"):
         raise Skip("music not available")
     job = r.job({"caption": "A warm, cinematic song with a clear lead vocal.", "lyrics": "[Verse]\nThe light is turning on the hill\n"
-                 "The harbour sleeps, the sea is still\n[Chorus]\nCarry me home, carry me home\nOver the water, I'm never alone",
+                 "The city burns in neon light\n[Chorus]\nCarry me home, carry me home\nOver the water, I'm never alone",
                  "seconds": 30, "seed": 1, "live": False}, path="/api/music/takes")
     return sound(r.output(job, r"\.wav$"), 30, 4.0) | {"_job": job}
 
