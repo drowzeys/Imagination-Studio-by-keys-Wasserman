@@ -283,6 +283,11 @@ class Served:
             settle()
             free = mem_available_gb()
             self.note("stopped ComfyUI before loading", available_gb=round(free, 1))
+        elif 0 <= free < self.NEED_GB:
+            # a server that has just ended (ComfyUI stopped by its memory floor, a render's process) gives its memory
+            # back over some seconds: a voice take queued right after one was refused with half of it still away
+            settle()
+            free = mem_available_gb()
         if 0 <= free < self.NEED_GB:
             raise RuntimeError(f"{self.title} needs about {self.NEED_GB:.0f} GB of free memory to load and this machine has "
                                f"{free:.0f} GB available")
