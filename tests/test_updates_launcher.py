@@ -90,6 +90,8 @@ def wait_for(check, timeout=30, process=None):
 
 def publish(upstream, broken=False):
     (upstream / "VERSION").write_text("updater-test-2\n")
+    with (upstream / "zig_fasth3.py").open("a") as output:  # a renderer setup copies into PREFIX
+        output.write("\n# updater-test-2\n")
     if broken:
         with (upstream / "app/server.py").open("a") as output:
             output.write("\nthis is deliberately invalid Python !!!\n")
@@ -98,8 +100,19 @@ def publish(upstream, broken=False):
     return git(upstream, "rev-parse", "HEAD")
 
 
+def prefix_copies(folder, clone):
+    """PREFIX as oneshot-setup.sh leaves it: the renderers' copies; qwen_image_generate.py edited by hand there."""
+    runtime = folder / "runtime"
+    runtime.mkdir(exist_ok=True)
+    shutil.copy2(clone / "zig_fasth3.py", runtime / "zig_fasth3.py")
+    (runtime / "qwen_image_generate.py").write_text("# a person's own edit\n")
+    return runtime
+
+
 def test_real_install_restarts_and_keeps_projects_and_settings(tmp_path):
     upstream, clone, home = installation(tmp_path)
+    runtime = prefix_copies(tmp_path, clone)
+    installed = (runtime / "zig_fasth3.py").read_bytes()
     with running(tmp_path, clone, home) as (url, process, _env):
         assert not api(url)["automatic"]
         api(url, "/api/updates/settings", {"automatic": True})
@@ -117,10 +130,17 @@ def test_real_install_restarts_and_keeps_projects_and_settings(tmp_path):
         assert project.read_bytes() == original
         assert git(clone, "rev-parse", state["last_result"]["backup"]) != target
         assert api(url, "/api/state")["version"] == "updater-test-2"
+        # the renderer copy in PREFIX follows the code; the one edited by hand is left alone
+        assert (runtime / "zig_fasth3.py").read_bytes() == (clone / "zig_fasth3.py").read_bytes() != installed
+        assert (runtime / "zig_fasth3.py.before-update").read_bytes() == installed
+        assert (runtime / "qwen_image_generate.py").read_text() == "# a person's own edit\n"
+        assert "zig_fasth3.py" in state["last_result"]["message"]
 
 
 def test_broken_update_restores_running_version_and_turns_automatic_off(tmp_path):
     upstream, clone, home = installation(tmp_path)
+    runtime = prefix_copies(tmp_path, clone)
+    installed = (runtime / "zig_fasth3.py").read_bytes()
     old = git(clone, "rev-parse", "HEAD")
     with running(tmp_path, clone, home) as (url, process, _env):
         api(url, "/api/updates/settings", {"automatic": True})
@@ -132,6 +152,7 @@ def test_broken_update_restores_running_version_and_turns_automatic_off(tmp_path
         assert not state["last_result"]["ok"] and "restored" in state["last_result"]["message"]
         assert not state["automatic"] and git(clone, "rev-parse", "HEAD") == old
         assert api(url, "/api/state")["version"] == "updater-test-1"
+        assert (runtime / "zig_fasth3.py").read_bytes() == installed  # its PREFIX copy is put back too
 
 
 def test_second_launcher_cannot_share_a_running_checkout(tmp_path):
@@ -141,3 +162,16 @@ def test_second_launcher_cannot_share_a_running_checkout(tmp_path):
                                capture_output=True, text=True, timeout=10)
         assert other.returncode == 1 and "already has a running Studio" in other.stderr
         assert api(url, "/api/updates/health")["session"]
+
+
+def test_a_mac_engine_built_from_another_commit_is_stale(tmp_path):
+    sys.path.insert(0, str(ROOT / "app"))
+    import updates
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/build-zig-engine.sh").write_text('ZIG_COMMIT="${ZIG_COMMIT:-' + "b" * 40 + '}"\n')
+    (tmp_path / "prefix/zig-engine").mkdir(parents=True)
+    (tmp_path / "prefix/zig-engine/COMMIT").write_text("a" * 40 + "\n")
+    assert updates.engine_stale(tmp_path, tmp_path / "prefix") == "b" * 40
+    (tmp_path / "prefix/zig-engine/COMMIT").write_text("b" * 40 + "\n")
+    assert updates.engine_stale(tmp_path, tmp_path / "prefix") is None
+    assert updates.engine_stale(tmp_path, tmp_path / "nowhere") is None  # no engine installed: nothing to rebuild
