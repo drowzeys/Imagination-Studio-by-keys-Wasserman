@@ -719,6 +719,11 @@ and uses five.
   Each row shows whether the Spark answers, its Studio's version, memory and disk free, what it can render
   (FastH3 clips, Ref2VA, the image model, LoRAs, ffmpeg) and whether it is busy. It needs a key login to each Spark
   and the Studio installed there once; nothing runs as root.
+- **From a Mac** the Studio leads the Sparks the same way. A Spark is given the single clips it renders with its own
+  settings (FastH3 at the sizes made without the 2x decoder); MiniMax H3 Turbo qualities, the 2x decoder presets and a
+  text encoder file of the Mac's stay on the Mac, and the page says why. A Mac that reaches only the Spark that leads
+  the others gives it as **Through**: that Spark logs in to each worker with its own key, so no key is added to a
+  worker. One-time setup and the measured run: [A Mac at the head](docs/multi-spark.md#a-mac-at-the-head).
 - **Safe by construction.** A worker's app listens only on its own `127.0.0.1`; this app reaches it through an ssh
   tunnel it opens and closes itself. One job runs on a Spark at a time. Every clip passes the worker's own memory
   guard before it is sent, and a clip with a LoRA goes only to a Spark that has the LoRA and whose guard accepts it.

@@ -308,7 +308,7 @@ def test_the_number_is_held_to_the_sparks_there_are():
     job = queue(5)
     assert job["sparks"]["chosen"] == 5 and job["sparks"]["available"] == 3 and job["sparks"]["used"] == 3
     finished([job["id"]])
-    assert client.get("/api/state").json()["sparks"] == {"supported": server.SPARK, "limit": 5}
+    assert client.get("/api/state").json()["sparks"] == {"supported": True, "limit": 5}  # a Spark or a Mac at the head
 
 
 def test_queued_clips_render_one_per_spark_and_come_back_here():
@@ -563,18 +563,6 @@ def test_the_tunnel_ends_on_the_workers_own_loopback_and_is_closed():
     assert not line.up and hub.state(one.address)["tunnel"] is None
 
 
-def test_a_mac_shows_one_and_says_why():
-    mac = sparks.Hub(server.HOME, ROOT, False, {}, [], threading.Lock(), threading.Event(), lambda: {}, server.inside, lambda job, worker: None)
-    seen = mac.overview()
-    assert seen["supported"] is False and seen["available"] == 1 and seen["workers"] == [] and "DGX Sparks" in seen["note"]
-    said = mac.plan({"sparks": 5, "clips": 8})
-    assert said["used"] == 1 and said["chosen"] == 1 and "Mac" in said["says"]
-    job = {"kind": "video", "params": {}, "sparks": {"chosen": 5}}
-    assert mac.team(job) == []
-    mac.start()
-    assert not mac.started  # no loop, no ssh, on a Mac
-
-
 def test_nothing_here_runs_a_tool_without_a_time_limit():
     tree = ast.parse((ROOT / "app/sparks.py").read_text())
     for call in [node for node in ast.walk(tree) if isinstance(node, ast.Call)]:
@@ -607,6 +595,11 @@ vm.runInThisContext(`(async () => { const out = {};
   out.buttons = buttons.map(b => text(b)); out.on = buttons.filter(b => b.attrs.class.includes(" on")).map(b => text(b)); out.far = buttons.filter(b => b.attrs.class.includes(" far")).map(b => text(b));
   out.says = text(pick); out.sent = calls.filter(c => c[0] === "/api/sparks/plan").map(c => c[1])[0]; out.kept = calls.some(c => c[0] === "/api/sparks" && c[1] && c[1].sparks === 5);
   tab = "Sparks"; out.page = text(viewSparks());
+  /* a Mac at the head: the same list, "this Mac", and where a Spark it cannot reach is reached through */
+  const macHead = { ...five, listed: 2, available: 2, head: "mac", via: "keyspark@192.168.4.174", this: { ...five.this, name: "Mac-Studio", kind: "Mac", guard: false, memory_gb: null },
+    workers: [{ ...five.workers[0], via: "keyspark@192.168.4.174" }] };
+  SPK.data = macHead; out.macCount = spkCount(macHead, 1); out.macPage = text(viewSparks()); out.macFields = all(viewSparks(), "input").length;
+  /* an older app on a Mac: one machine */
   SPK.data = { supported: false, limit: 5, available: 1, note: "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine.", workers: [], this: {} }; spkSet(5);
   const mac = sparksPick(); out.mac = [SPK.n, all(mac, "button").map(b => text(b)), text(mac)];
   console.log(JSON.stringify(out)); })().catch(e => { console.error(e); process.exit(1); });`);
@@ -627,6 +620,10 @@ def test_the_page_draws_the_chooser_and_the_list():
     for words in ("gx10-5482", "10.100.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "3 available"):
         assert words in out["page"], words
     assert out["mac"][0] == 1 and out["mac"][1] == ["1"] and "DGX Sparks" in out["mac"][2]
+    # a Mac at the head: its own name, no memory guard of its own claimed, and the Through field
+    assert out["macCount"] == "this Mac alone" and "This Mac and 1 other" in out["macPage"] and "this Mac" in out["macPage"]
+    assert "10.100.10.5 through keyspark@192.168.4.174" in out["macPage"] and "Through" in out["macPage"] and "memory guard ·" not in out["macPage"].split("gx10-5482")[0]
+    assert out["macFields"] == 3 + 1  # address, folder, through, and each worker's "use" box
     # every job the page queues carries the number
     page = (ROOT / "app/static/index.html").read_text()
     assert 'body = { sparks: SPK.n, ...body }' in page and '"Sparks"' in page and "Sparks: viewSparks" in page
