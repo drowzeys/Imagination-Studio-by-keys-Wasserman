@@ -23,7 +23,7 @@ BOLT_PATCHES="${BOLT_PATCHES:-5e11cf1ed295}"
 TF_REF=46a08c18608153bfc566703a88acc883bc6140f4
 MIA_IMAGE="${BOLT_IMAGE:-ghcr.io/miaai-lab/nemotron-3.5-bolt-tensorfold-dgx-spark:zig-${TF_REF:0:7}-$BOLT_PATCHES}"
 LOCAL_IMAGE="tensorfold-nemotron-bolt:zig-${TF_REF:0:7}"
-CARRIER="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1}"
+CARRIER="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:3.1.0}"
 OUT="$PREFIX/bolt"
 STAMP="$BOLT_RECIPE_COMMIT $BOLT_PATCHES"
 say() { echo "[tensorfold] $*"; }

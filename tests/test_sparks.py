@@ -2,6 +2,7 @@
 python3 tests/test_sparks.py. No GPU, no ssh, no other machine: a worker is a small stand-in for another Spark's app
 that answers the calls this app makes to one (its page's own API), and ssh, rsync and the tunnel are stood in for."""
 import ast
+import itertools
 import json
 import os
 import subprocess
@@ -29,6 +30,9 @@ hub = server.hub
 PRESET = "small" if "small" in server.PRESETS else next(iter(server.PRESETS))
 QUALITY = "fh8"
 TAKES = 0.35  # how long a stand-in render takes, here and on a worker
+
+
+ADDRESSES = itertools.count()
 
 
 class Worker:
@@ -110,7 +114,9 @@ class Worker:
 
         self.http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self.http.server_address[1]}"
-        self.address = f"10.9.9.{self.http.server_address[1] % 250 + 1}"
+        # one address each: from the port it collided whenever two ports were 250 apart ("already in the list", CI)
+        number = next(ADDRESSES)
+        self.address = f"10.9.{number // 250 % 250}.{number % 250 + 1}"
         threading.Thread(target=self.http.serve_forever, daemon=True).start()
 
 
