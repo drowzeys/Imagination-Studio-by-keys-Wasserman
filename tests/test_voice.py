@@ -609,3 +609,26 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_a_voice_take_waits_for_memory_a_stopped_server_is_giving_back(monkeypatch):
+    """ComfyUI stopped by its memory floor a moment before: its memory comes back over some seconds, and a take queued
+    then was refused with half of it still away (DGX Spark head, 2026-10-20). It is waited for now."""
+
+    voice = server.voice
+    readings = iter([40.0, 80.0])
+    monkeypatch.setattr(voice, "mem_available_gb", lambda: next(readings, 80.0))
+    monkeypatch.setattr(voice, "comfy_up", lambda port=None: False)
+    waited = []
+    monkeypatch.setattr(voice, "settle", lambda: waited.append(1))
+    one = voice.Served.__new__(voice.Served)
+    one.NEED_GB, one.title = 50.0, "Drama 3"
+    one.make_room({})  # 40 GB at first, 80 once it settled: no refusal
+    assert waited
+    readings = iter([40.0, 41.0])
+    monkeypatch.setattr(voice, "mem_available_gb", lambda: next(readings, 41.0))
+    try:
+        one.make_room({})
+        raise AssertionError("refused expected")
+    except RuntimeError as error:
+        assert "needs about 50 GB" in str(error)
