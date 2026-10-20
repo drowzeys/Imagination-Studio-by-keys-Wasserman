@@ -440,7 +440,7 @@ valid for a clip where the check picked a different fighter than in the source.
 ## 10. Voice: speech with Fish Audio Drama 3
 
 The **Voice** tab turns text into speech with Fish Audio Drama 3, on this machine, through TensorFold's port: MLX on a
-Mac (`bash oneshot-setup.sh --voice`), native CUDA on a DGX Spark (built by hand; the setup prints the steps). Nothing
+Mac (`bash oneshot-setup.sh --voice`), native CUDA on a DGX Spark (`bash oneshot-setup-spark.sh --voice`). Nothing
 is sent to Fish Audio. **Built with Fish Audio.**
 
 1. **What is said.** Type the words. Speaker tags switch voices, `<|speaker:0|>` to `<|speaker:15|>`, one turn on each

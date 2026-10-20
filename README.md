@@ -2250,27 +2250,52 @@ run time), with `libtensorfold_drama3.so` beside it.
 The cloned take came out at about 130 Hz against the clip's 125 Hz. Engine time is the requests' own (prefill,
 frames, codec); the app's time adds Whisper on the CPU (and, for a clip without its words, Whisper on the clip first).
 
-**Spark requirements.** A DGX Spark (GB10, 128 GB), the CUDA toolkit 12.9 or newer and zig 0.17 to build, 39 GB
-of disk for Fish's checkpoint and 1.6 GB for the converted codec, and about 50 GB of free memory when a take starts
-(nothing else of the studio runs beside it). The port is on the `drama3-cuda` branch of
-[drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) (81173e6c). The setup is by hand: the branch's build
-script carries its author's paths and its zig build embeds the kernel fatbins of TensorFold's whole CUDA engine
-(prebuilt, or every one built by nvcc), so there is no installer step yet; `bash oneshot-setup-spark.sh --voice` (or
-`scripts/setup-voice.sh`) checks what the app looks for and prints these steps for what is missing.
+**Spark requirements.** A DGX Spark (GB10, 128 GB), 39 GB of disk for Fish's checkpoint and 1.6 GB for the converted
+codec, and about 50 GB of free memory when a take starts (nothing else of the studio runs beside it). The port is on
+the `drama3-cuda` branch of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold) (81173e6c).
+
+**Install it with one command** (after the Spark's main install, or together with it):
 
 ```bash
-git clone -b drama3-cuda https://github.com/drowzeys/TensorFold.git ~/tf-drama3 && git -C ~/tf-drama3 checkout 81173e6c
-hf download fishaudio/drama-3 --local-dir ~/models/drama-3          # Fish Audio Community License: read it first
-# build as the branch's tools/drama3/build_local.sh does (it has its author's paths): nvcc makes drama3.fatbin,
-# drama3_fp8.fatbin and drama3_codec.fatbin for sm_121 beside the CUDA engine's other fatbins, then
-#   zig build -Dfatbins=FATBIN_DIR -Dsm=121 -Doptimize=ReleaseFast --prefix OUT drama3-generate drama3-lib
-mkdir -p ~/.local/opt/tensorfold-studio/drama3/{bin,lib}
-cp OUT/bin/drama3-generate ~/.local/opt/tensorfold-studio/drama3/bin/
-cp OUT/lib/libtensorfold_drama3.so ~/.local/opt/tensorfold-studio/drama3/lib/
-# once, offline: Fish's codec.pth into the native codec's layout (PyTorch and Fish's reference code, ORACLE_DIR)
-python3 ~/tf-drama3/tools/drama3/codec_convert.py ~/models/drama-3 ~/.local/opt/tensorfold-studio/drama3/codec-v1.safetensors
-~/.local/opt/tensorfold-studio/drama3/bin/drama3-generate --model ~/models/drama-3 \
-  --codec ~/.local/opt/tensorfold-studio/drama3/codec-v1.safetensors --text "Hello there." --wav hello.wav   # check
+bash oneshot-setup-spark.sh --voice      # Fish Audio Community License: read it first (https://huggingface.co/fishaudio/drama-3)
+```
+
+It runs `scripts/setup-voice.sh`, which on a Spark does, each step skipped when it is done already:
+
+1. **The engine** (`spark/build-drama3.sh`) into `$PREFIX/drama3`: `bin/drama3-generate`, `lib/libtensorfold_drama3.so`,
+   `commit` and `BUILD`. It first takes the prebuilt engine from the carrier image (`/payload/spark-drama3/`, used only
+   when its `commit` is the pinned one and its `SHA256SUMS` check), else builds it from source: TensorFold at
+   81173e6c, Zig 0.17.0 fetched under `$PREFIX`, every CUDA kernel fatbin compiled for sm_121 by the Spark's own nvcc
+   (12.9 or newer), then `zig build drama3-generate drama3-lib`. Measured on a GB10 from nothing: 1 min 43 s.
+2. **Fish's checkpoint** at `~/models/drama-3` (`DRAMA3_CUDA_MODEL` names another). A copy already on this machine (a
+   Hugging Face cache, another folder) is linked there instead (`app/discover.py`); otherwise it is downloaded from
+   `fishaudio/drama-3` at a pinned revision (39 GB). Should Fish ever gate the repo, the setup says whether to sign in,
+   accept the licence or wait for approval (`app/hf_gate.py`), as `--sound` does for Stable Audio Open.
+3. **The codec**, converted once on this machine: Fish's `codec.pth` into `codec-v1.safetensors` (1.6 GB), the layout
+   the native codec reads. `spark/drama3_codec.py` runs TensorFold's `tools/drama3/codec_convert.py` with Fish's
+   reference codec code (the Fish S2 DAC as packaged in sglang-omni 416a70c0, over descript-audio-codec 1.0.0), every
+   file fetched at a pinned commit and checked against its SHA-256, in the Studio's own PyTorch (`$PREFIX/venv`):
+   about 5 s. No converted Fish weights are published; each machine converts its own copy (measured: the result is
+   byte-identical to the one the engine was validated with).
+4. **A test line** (a noir narrator), checked to be a few seconds long and not silent, when 50 GB of memory and the
+   GPU lock are free (`--no-render` skips it).
+
+`--verify` only checks the four (nothing is built or downloaded); `--upgrade` moves an installed engine to this
+version's commit and fetches no weights. `scripts/setup-voice.sh` takes the same `--verify`, `--upgrade` and
+`--no-test` on its own. The Models & weights page's Install runs the same script for a missing engine or codec.
+
+**Building it yourself** (another commit, or no network for the script): `DRAMA3_SOURCE=~/tf-drama3 bash
+spark/build-drama3.sh` builds a checkout of the `drama3-cuda` branch you already have, `NVCC` names the compiler, and
+`ENGINE_FROM_SOURCE=1` skips the carrier image. By hand it is the same `zig build -Dnvcc=$(which nvcc) -Dsm=121
+-Doptimize=ReleaseFast drama3-generate drama3-lib` in the checkout, with `zig-out/bin/drama3-generate` and
+`zig-out/lib/libtensorfold_drama3.so` copied into `$PREFIX/drama3/{bin,lib}`, and the codec made with
+`$PREFIX/venv/bin/python -I spark/drama3_codec.py ~/models/drama-3 $PREFIX/drama3/codec-v1.safetensors`. To check an
+engine by hand:
+
+```bash
+LD_LIBRARY_PATH=~/.local/opt/tensorfold-studio/drama3/lib ~/.local/opt/tensorfold-studio/drama3/bin/drama3-generate \
+  --model ~/models/drama-3 --codec ~/.local/opt/tensorfold-studio/drama3/codec-v1.safetensors \
+  --text "The rain had not stopped in three days, and neither had the phone." --wav line.wav
 ```
 
 The app looks in `$PREFIX/drama3` (`~/.local/opt/tensorfold-studio/drama3`) and `~/models/drama-3`;
@@ -3377,10 +3402,12 @@ prebuilt native FastH3 engine (`zig-engine/tf-h3-dit`, built for Apple Silicon a
 For a DGX Spark it holds the prebuilt CUDA engine (`spark-engine/libtf_h3.so`, GB10, aarch64; since 2.8.0 the
 `h3-cuda-lora` build at `1f7ecc75`, with LoRA support, so a Spark install no longer builds it from source), which
 `spark/build-engine.sh` takes when Docker is there and otherwise builds from source; since 2.9.1 also MiniMax Music 3's
-`spark-music3/music3-generate` (`music3-cuda` at 6b714531), which `spark/build-music3.sh` takes the same way. The Mac's
+`spark-music3/music3-generate` (`music3-cuda` at 6b714531), which `spark/build-music3.sh` takes the same way, and
+from 3.1.0 Fish Audio Drama 3's `spark-drama3/` (`drama3-generate` and `libtensorfold_drama3.so`, `drama3-cuda` at
+81173e6c, the engine only: no codec, no weights), which `spark/build-drama3.sh` takes the same way. The Mac's
 Drama 3 and Music engines are not in it: their installers clone TensorFold at the pinned commits. **It is not a runtime**: neither
 Metal nor the Spark's models run in a container, so the setup installs natively. Rebuild it with
-`PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh` and `spark/build-music3.sh`, to include its engines). Up to 2.2
+`PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh`, `spark/build-music3.sh` and `spark/build-drama3.sh`, to include its engines). Up to 2.2
 the image was `ghcr.io/drowzeys/keys-mac-tensorfold-studio`; the Mac setup still falls back to it.
 
 ## Stack

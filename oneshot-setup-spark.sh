@@ -35,8 +35,12 @@
 #   bash oneshot-setup-spark.sh --motion      # add the Motion Previs tab's analysis: pose, camera solve and AI depth (0.5 GB, own environment)
 #   bash oneshot-setup-spark.sh --no-loras    # skip the essential LoRA bundle (about 4 GB from the LoRAs' authors; --loras=camera,style
 #                                       # takes some groups, --lora-bundle=PATH installs from a bundle on disk with no other network)
-#   bash oneshot-setup-spark.sh --voice       # check Fish Audio Drama 3 for the Voice tab (scripts/setup-voice.sh): its CUDA
-#                                             # engine is built by hand (README, Voice on a DGX Spark); this says what is missing
+#   bash oneshot-setup-spark.sh --voice       # add Fish Audio Drama 3 for the Voice tab, about 41 GB more (scripts/setup-voice.sh):
+#                                             # TensorFold's CUDA engine (spark/build-drama3.sh: prebuilt from the carrier, else
+#                                             # built), Fish's 39 GB checkpoint (fishaudio/drama-3, linked if a copy is already on
+#                                             # this machine) and its codec converted once here (1.6 GB), then a test line.
+#                                             # Fish Audio Community License v1.0: research, non-commercial and small-company
+#                                             # commercial use; a hosted TTS or voice-cloning service needs Fish Audio's licence
 #   bash oneshot-setup-spark.sh --verify      # check an existing install, download nothing
 #   bash oneshot-setup-spark.sh --upgrade     # after `git pull`: move an existing install to this version (environment, ComfyUI pin,
 #                                             # engine, Motion Previs environment), fetch no weights, then --verify. Safe to run twice.
@@ -87,6 +91,7 @@ if [ "$UPGRADE" = 1 ]; then
   [ ! -s "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" ] || MUSIC=1
   [ ! -d "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" ] || SOUND=1
   [ ! -s "${BOLT_MODELS:-$MODELS}/Nemotron-3.5-Bolt-24GB/model.safetensors.index.json" ] || BOLT=1
+  [ ! -x "$PREFIX/drama3/bin/drama3-generate" ] || VOICE=1
   ok "upgrade: installed $INSTALLED -> $(cat "$HERE/VERSION")$([ "$IMAGE_ONLY" = 0 ] || echo " (image-only install)")"
 else ok "version $(cat "$HERE/VERSION")$([ ! -f "$PREFIX/VERSION" ] || echo " (installed: $INSTALLED)")"; fi
 GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
@@ -385,10 +390,25 @@ if [ "$MOTION" = 1 ] || [ -x "$PREFIX/motion-venv/bin/python" ]; then
     || echo "  ! Motion Previs is not fully set up: its tab says which layers are not available on this machine"
 fi
 
+if [ "$VOICE" = 1 ]; then
+  # Fish Audio Drama 3 for the Voice tab (scripts/setup-voice.sh): TensorFold's CUDA engine (spark/build-drama3.sh),
+  # Fish's checkpoint (linked when a copy is on this machine, else downloaded) and its codec converted here once, then a
+  # test line. --verify checks only; --upgrade moves the engine to this version's commit and fetches no weights.
+  say "Fish Audio Drama 3 for the Voice tab: TensorFold's CUDA engine -> $PREFIX/drama3, Fish's checkpoint (39 GB), the codec"
+  if [ "$VERIFY" = 1 ]; then
+    PREFIX="$PREFIX" bash "$HERE/scripts/setup-voice.sh" --verify | sed 's/^/  /' || echo "  ! the Voice tab is not ready: bash oneshot-setup-spark.sh --voice"
+  elif [ "$UPGRADE" = 1 ]; then
+    PREFIX="$PREFIX" bash "$HERE/scripts/setup-voice.sh" --upgrade | sed 's/^/  /' || echo "  ! the voice engine was not updated: bash spark/build-drama3.sh"
+  else
+    PREFIX="$PREFIX" bash "$HERE/scripts/setup-voice.sh" $([ "$RENDER" = 1 ] || echo --no-test) | sed 's/^/  /' \
+      || echo "  ! the Voice tab is not fully set up (above): bash oneshot-setup-spark.sh --voice tries again"
+  fi
+fi
+
 [ "$VERIFY" = 1 ] || cp "$HERE/VERSION" "$PREFIX/VERSION"
 if [ "$UPGRADE" = 1 ]; then
   say "Upgraded: $INSTALLED -> $(cat "$PREFIX/VERSION"). Checking the install (restart the app to serve the new pages: scripts/app.sh)"
-  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$MUSIC" = 0 ] || echo --music) $([ "$SOUND" = 0 ] || echo --sound) $([ "$BOLT" = 0 ] || echo --bolt)
+  exec bash "$HERE/oneshot-setup-spark.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$MUSIC" = 0 ] || echo --music) $([ "$SOUND" = 0 ] || echo --sound) $([ "$BOLT" = 0 ] || echo --bolt) $([ "$VOICE" = 0 ] || echo --voice)
 fi
 # The essential LoRA bundle: every preset of the LoRA hub, fetched once from its author's page into one folder laid out
 # by the hub's groups, then installed (oneshot-essential-bundle.sh). --loras=GROUPS takes some groups, --lora-bundle=PATH
@@ -398,9 +418,6 @@ if [ "$LORAS" != none ] && [ "$IMAGE_ONLY" = 0 ] && [ "$VERIFY" != 1 ]; then
   PREFIX="$PREFIX" H3_MODEL_DIR="${H3_MODEL_DIR:-$HOME/h3-models/MiniMax-H3}" bash "$HERE/oneshot-essential-bundle.sh" \
     $([ -z "$LORAS" ] || [ "$LORAS" = all ] || echo "--categories=$LORAS") $([ -z "${LORA_BUNDLE:-}" ] || echo "--source=$LORA_BUNDLE") 2>&1 | sed 's/^/  /' \
     || echo "  ! some LoRAs could not be fetched (listed above): the rest are installed, and bash oneshot-essential-bundle.sh tries again"
-fi
-if [ "$VOICE" = 1 ]; then  # Fish Audio Drama 3: checked, and the hand steps printed when something is missing
-  PREFIX="$PREFIX" bash "$HERE/scripts/setup-voice.sh" $([ "$VERIFY" = 1 ] && echo --verify) || [ "$VERIFY" = 0 ]
 fi
 if [ "$RENDER" = 1 ]; then
   say "Test render"
