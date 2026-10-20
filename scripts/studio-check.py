@@ -576,41 +576,65 @@ def c_qa(r: Run):
 
 @check("brain-local", "short")
 def c_brain(r: Run):
+    """Settings' Test of the local brain, then a question a person asks it in the studio."""
     answer = r.api.post("/api/brains/test", {"backend": "local"}, timeout=200)
     if not answer.get("ok"):
-        raise Fail(f"the local brain did not answer: {answer.get('error')}")
-    return {"text": str(answer.get("text"))[:60], "ms": answer.get("elapsedMs")}
+        raise Fail(f"the local brain did not answer its test: {answer.get('error')}")
+    asked = r.api.post("/api/slate/brain", {"backend": "local", "system": "You help a filmmaker develop short films.",
+                                            "prompt": "Give a title and a one-sentence logline for a short film: a cyborg courier "
+                                                      "races across rain-soaked Neo-Tokyo rooftops to deliver a stolen memory."},
+                       timeout=300)
+    text = str(asked.get("text") or "").strip()
+    if not asked.get("ok") or len(text.split()) < 8:
+        raise Fail(f"the local brain gave no title and logline: {asked.get('error') or text[:200]}")
+    return {"test_ms": answer.get("elapsedMs"), "text": text[:100], "ms": asked.get("elapsedMs")}
 
 
 @check("slate-first-ad", "short")
 def c_first_ad(r: Run):
-    """The Production tab's First AD: the film's brain (Automatic follows the Studio's own), asked for JSON."""
-    answer = r.api.post("/api/slate/brain", {"prompt": 'Return JSON: {"reply": "ready"}', "system": "You are a film's First AD.",
-                                              "tier": "standard", "expectJson": True}, timeout=200)
+    """The Production tab's First AD: the film's brain (Automatic follows the Studio's own), asked for a shot plan as JSON."""
+    answer = r.api.post("/api/slate/brain", {
+        "system": "You are a film's First AD. Answer with JSON only.", "tier": "standard", "expectJson": True,
+        "prompt": "Plan the opening scene of a heist on a maglev train through a neon megacity at night as exactly 3 shots. "
+                  'Return JSON: {"shots": [{"name": "...", "prompt": "what the camera sees, for a video model", "seconds": 4}]}'},
+        timeout=300)
     if not answer.get("ok"):
         raise Fail(f"the First AD did not answer: {answer.get('error')}")
-    return {"text": str(answer.get("text"))[:60], "json": answer.get("json"), "ms": answer.get("elapsedMs")}
+    shots = (answer.get("json") or {}).get("shots") if isinstance(answer.get("json"), dict) else None
+    if not isinstance(shots, list) or len(shots) != 3 or not all(isinstance(x, dict) and str(x.get("prompt") or "").strip() for x in shots):
+        raise Fail(f"the First AD's plan is not 3 shots with prompts: {str(answer.get('text'))[:300]}")
+    return {"shots": [str(x.get("name"))[:30] for x in shots], "ms": answer.get("elapsedMs")}
 
 
 @check("agent-thread", "short")
 def c_agent(r: Run):
-    made = r.api.post("/api/agent/threads", {"prompt": "Reply with the single word: ok. Do not use any tool.", "backend": "local"}, timeout=60)
+    """The Agent room on the local brain, given a brief as a person types it: it has to make exactly the one picture asked
+    for through the Studio's tools and say which file it made."""
+    brief = "Make one picture: a samurai standing in a burning cathedral, slow-motion embers drifting, cinematic light."
+    made = r.api.post("/api/agent/threads", {"prompt": brief, "backend": "local"}, timeout=60)
     task, thread = made.get("task") or {}, made.get("thread") or {}
     start = time.time()
     while True:
         t = r.api.get(f"/api/agent/tasks/{task['id']}")
         if t.get("status") not in ("running", "queued"):
             break
-        if time.time() - start > 300:
+        if time.time() - start > 900:
             r.api.call("POST", f"/api/agent/tasks/{task['id']}/cancel", {})
-            raise Fail("the agent task ran over 300 s")
-        time.sleep(2)
+            raise Fail("the agent task ran over 900 s")
+        time.sleep(3)
+    jobs = [r.api.get(f"/api/jobs/{one}") for one in (t.get("jobs") or [])]
+    r.jobs.extend(job["id"] for job in jobs if job.get("id"))
     r.api.call("DELETE", f"/api/agent/threads/{thread.get('id')}")
     if t.get("status") != "done":
         raise Fail(f"agent task {t.get('status')}: {str(t.get('error'))[:300]}")
-    if not str(t.get("reply") or "").strip():
-        raise Fail("the agent task finished with an empty reply")
-    return {"answer": str(t.get("reply"))[:80], "seconds": round(time.time() - start, 1)}
+    reply = str(t.get("reply") or "")
+    pictures = [job for job in jobs if job.get("kind") == "scout"]
+    if len(jobs) != 1 or len(pictures) != 1 or pictures[0].get("status") != "done":
+        raise Fail(f"asked for one picture, the agent made {[(j.get('kind'), j.get('status')) for j in jobs]}: {reply[:200]}")
+    outputs = [o for o in pictures[0].get("outputs") or [] if o.endswith(".png")]
+    if not outputs or not any(Path(o).name in reply for o in outputs):
+        raise Fail(f"the agent's answer does not name the picture it made ({outputs[:1]}): {reply[:200]}")
+    return {"jobs": len(jobs), "picture": Path(outputs[0]).name, "answer": reply[:80], "seconds": round(time.time() - start, 1)}
 
 
 # ----- pictures -----
