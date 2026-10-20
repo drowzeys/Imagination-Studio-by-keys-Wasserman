@@ -404,3 +404,13 @@ def test_the_metal_engine_starts_without_the_vision_flags(monkeypatch):
     assert "--vision" in bolt.Cuda().argv(9999)
     monkeypatch.setenv("BOLT_VISION", "1")
     assert "--vision" in bolt.Metal().argv(9999)
+
+
+def test_the_engine_never_gets_the_studios_own_port_or_host(monkeypatch):
+    """A server or start script that reads PORT or HOST would take the Studio's (Sam Wasserman's finding, #74)."""
+
+    monkeypatch.setenv("PORT", "7870")
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    for engine in (bolt.Cuda(), bolt.Metal()):
+        env = engine.environment()
+        assert "PORT" not in env and "HOST" not in env and env.get("PATH") == os.environ["PATH"]
