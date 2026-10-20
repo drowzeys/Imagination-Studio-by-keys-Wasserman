@@ -265,6 +265,24 @@ Rules:
   `start_s` (the measured no-stall start, `NO_STALL_S`, and `HOLD_MARGIN_S`) and `lead_s`; those are measurements, change
   them only with new ones. The kept song is the engine's finished WAV. A Spark does not stream, on the CUDA engine or ComfyUI's route.
   Lyric accuracy is Whisper's rough count on sung words.
+- The brain engine (`app/bolt.py`, `app/bolt_leash.py`, README *The brain engine*): NVIDIA Nemotron 3.5 Bolt run by
+  the Studio as the brains' local server, the lifecycle of Voice and Music: loaded on the first brain or agent request
+  (`bolt.request`) on a loopback port, under the leash (it ends with the app) and a kill-guard (`BOLT_GUARD_GB`, 8;
+  MemAvailable, vm_stat on a Mac), unloaded after `BOLT_IDLE_S` (600, `never` allowed) and **before any other local
+  job of the queue whose measured peak does not fit beside it** (`bolt.admit` at the top of `server.perform`,
+  `server.bolt_need`: the memory guard's estimate on a Spark, `MAC_PEAK_GB` on a Mac; unmeasured kinds unload it),
+  then held until the queue is empty (`bolt.queue_empty` in `work`). A request in flight is never cut: a release
+  waits for it. A local-harness turn's answers wait while Bolt is held (the turn's own clip renders with Bolt
+  unloaded), and no idle unload runs while a turn is open (`bolt.turn`). Do not make the render wait for the turn: the
+  turn waits for its clip in `wait_for_jobs`, so that deadlocks. It never takes `~/studio-gpu.lock.d` (a resident brain
+  must not hold the updater or the render scripts). `BOLT_BACKEND=cuda|metal|llamacpp|external`: `cuda` is Mia's
+  recipe (MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark, MIT, TensorFold 46a08c18 + patches), installed by
+  `spark/build-bolt.sh` into `$PREFIX/bolt`, never run in Docker; `metal` is TensorFold's Metal port (branch
+  `nemotron-bolt-metal`, same command line) when built into `$PREFIX/bolt-metal`; `llamacpp` only when set (a Mac may
+  run Bolt in its own llama.cpp service). The engine serves when the brains' address is empty or `studio:bolt`; a
+  typed address stays external. Weights: NVIDIA's checkpoint a326822a and LiLiCorr drafter 4c6a5613
+  (`scripts/setup-bolt.sh`, `--bolt`), OpenMDW 1.1. `NEED_GB`, `RESIDENT_GB` and `MAC_PEAK_GB` are measurements:
+  change them only with new ones. Never start a second Bolt on a machine with `vm.panic_on_oom=1`.
 - Sound effects and foley (`app/sound.py`, `sound_generate.py`, `scripts/setup-sound.sh`, `app/static/sound.js`): jobs
   `sfx` (Stable Audio Open 1.0, Stability AI Community License, gated on Hugging Face) and `foley` (MMAudio large_44k_v2,
   weights CC-BY-NC 4.0: non-commercial; say so when asked about commercial use) in `$PREFIX/sound-venv`, never the
@@ -282,6 +300,6 @@ Rules:
   measurements, added only from runs on a worker Spark under the DGX Spark memory rules above.
 - mflux, minimax-h3-mlx, flux3-mlx, TensorFold's music3-mlx, MMAudio and ComfyUI-MMAudio are pinned by commit and used at run time. Do not unpin.
 
-**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), OpenMOSS (MOSS-Image), Stability AI (Stable Audio Open), Ho Kei Cheng et al. (MMAudio), kijai (ComfyUI-MMAudio), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), Ash Hart (TensorFold), antirez (h3.c),
+**Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), OpenMOSS (MOSS-Image), Stability AI (Stable Audio Open), Ho Kei Cheng et al. (MMAudio), kijai (ComfyUI-MMAudio), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), NVIDIA (Nemotron 3.5 Bolt), MiaAI-Lab (the Bolt TensorFold recipe), Ash Hart (TensorFold), antirez (h3.c),
 RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx / Phosphene), Filip Strand and mflux contributors, Viggle, speach1sdef178, LightX2V,
 NVIDIA Research, FastVideo, Sam Wasserman (Slate: the film workflow in Production; keep app/static/slate/NOTICE. Motion Previs Studio: the Motion Previs tab's analysis is a modified Python port of it; keep LICENSES/Motion-Previs-Studio-NOTICE, THIRD_PARTY_NOTICES.md and the headers of app/motion*.py, and keep the link to the original), Apple MLX. Authors only — no credit hyperlinks, except the link to Motion Previs Studio.
