@@ -707,8 +707,11 @@ def c_actions_refused(r: Run):
     its models not installed) is refused outright; one it offers refuses a clip from outside the studio folder, and
     Upscale a size it does not make."""
     out, clip = {}, r.ctx.get("up_clip")
+    # read now, not at the start: a new install fetches its essential LoRAs in the background after its first start,
+    # and an action becomes offered while the run goes on
+    actions = r.api.get("/api/actions")
     for kind in ("upscale", "mask", "remove"):
-        offered = (r.ctx.get("actions") or {}).get(kind, {}).get("ready")
+        offered = (actions or {}).get(kind, {}).get("ready")
         asks = [("not offered", {"video": clip, "image": r.ctx.get("up_still"), "person": "the person"})] if not offered else [
             ("outside the folder", {"video": "/etc/hosts", "person": "the person"})] + (
             [("9 megapixels", {"video": clip, "megapixels": 9})] if kind == "upscale" else [])
