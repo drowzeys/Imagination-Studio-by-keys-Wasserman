@@ -1987,8 +1987,18 @@ def queue_job(body: dict) -> dict:
     if kind in ("video", "studio", "long") and not referenced and not str(params.get("quality", "fh8" if SPARK else "standard")).startswith("fh") and not turbo_ready():
         raise HTTPException(400, "MiniMax H3 Turbo is not installed here (oneshot-setup.sh --turbo adds it): use FastH3, quality fh4, fh8 or fh20")
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+    # how many Sparks the job may use, this one counted (sparks.py): the number given, or the one set on the Sparks page
+    try:
+        chosen = int(body.get("sparks") or hub.config()["sparks"])
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
+    if not 1 <= chosen <= sparks.LIMIT:
+        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
+    said = hub.plan({"sparks": chosen, "kind": kind, "params": params})
     if kind not in ("export", "long"):
-        build(kind, params, job_id)  # reject bad settings now, not when the job's turn comes
+        # reject bad settings now, not when the job's turn comes; a clip other Sparks may take is held to their memory
+        # guards (asked before it is handed over), not to this one's
+        build(kind, params, job_id, room=not (kind in ("video", "studio") and said["used"] > 1))
     job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else sound_title(kind, params) if kind in sound.KINDS else kind), "params": params,
            "source": action_source(kind, params) if kind in actions.KINDS else sound_source(kind, params) if kind in sound.KINDS else None,
            "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(), "started": None,
@@ -1998,14 +2008,6 @@ def queue_job(body: dict) -> dict:
     if kind in ("video", "studio", "long"):
         # said beside the job too, for a prompt that did not come through the wizard; the prompt goes as written
         job["negations"] = negation.check(params.get("prompt") or "")["negations"] or None
-    # how many Sparks the job may use, this one counted (sparks.py): the number given, or the one set on the Sparks page
-    try:
-        chosen = int(body.get("sparks") or hub.config()["sparks"])
-    except (TypeError, ValueError):
-        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
-    if not 1 <= chosen <= sparks.LIMIT:
-        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
-    said = hub.plan({"sparks": chosen, "kind": kind, "params": params})
     job["sparks"] = {"chosen": chosen, "available": said["available"], "used": said["used"], "says": said["says"]}
     with lock:
         accepting_jobs()
@@ -2586,6 +2588,21 @@ def update_busy():
 
 updater = updates.Manager(PACK, HOME, lock, update_busy)
 hub.follow = updater.automatic  # automatic updates here bring the workers to this code too (sparks.Hub.catch_up)
+
+
+def fits_here(job: dict) -> bool:
+    """Whether a queued clip fits this machine's memory now (sparks.Hub.claim leaves one that does not to a worker)."""
+
+    if job["kind"] not in ("video", "studio"):
+        return True
+    try:
+        build(job["kind"], job["params"], job["id"])
+    except HTTPException:
+        return False
+    return True
+
+
+hub.fits_here = fits_here
 app.include_router(updater.router())
 app.router.on_startup.append(updater.start)
 app.router.on_shutdown.append(updater.stop.set)
