@@ -189,7 +189,12 @@ Rules:
   before a clip is sent. A worker silent for `LOST` seconds is marked down and its clip goes back to the queue; do
   not make that wait longer, and never retry a worker that went down without a person's *Check*. `MEASURED` is one
   measured run: change it only with a new one. One clip split across Sparks (the engine's `h3-cuda-multispark`
-  branch) is measured and is not in the app: do not wire part of it in.
+  branch) is measured and is not in the app: do not wire part of it in. The app on a Mac leads Sparks the same way
+  (`docs/multi-spark.md`, *A Mac at the head*): `capable` hands a Spark only what it renders with its own settings (the
+  presets and qualities its `/api/spark/self` lists; never a text encoder file of the Mac's), and a worker's `via` is
+  a Spark the Mac reaches that logs in to the worker with its own key (`Relay`: a socket in `~/.cache/studio-sparks`
+  there, ended with the Mac's ssh or its heartbeat). Never add the Mac's key to a worker for it, and never open the
+  relay to a network.
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
   cloud API. `DRAMA3_BACKEND=mlx|cuda` (`mlx` on a Mac, `cuda` on a DGX Spark). Both engines run as a persistent

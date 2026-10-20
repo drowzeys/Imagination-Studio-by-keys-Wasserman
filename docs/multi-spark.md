@@ -4,7 +4,7 @@ A job in the Studio can use more than one DGX Spark. You choose a number from 1 
 the job may use, the one the app runs on counted as one. The app shows how many are there and able, uses that many,
 and says what the number will do before you queue anything.
 
-On a Mac the setting shows 1: multi-Spark rendering is for DGX Sparks.
+The app on a Mac leads worker Sparks too: see *A Mac at the head* below.
 
 ## What you need
 
@@ -119,6 +119,70 @@ on five Sparks came to 4.09 times one Spark.
 
 The time the app shows at a number is worked out from this table: the clips' rounds at that number, less what the
 measured run lost at four. It is an estimate. Six to eight Sparks are not measured: five machines exist here.
+
+## A Mac at the head
+
+The Studio on a Mac uses the same Sparks tab, chooser and queue. The Mac is the machine the app runs on, counted as
+one; the workers are DGX Sparks running their own Studio, as above.
+
+**What goes to a Spark from a Mac.** Single FastH3 clips that a Spark renders with its own settings: the Small,
+Native, 720p, Sharp and custom sizes, 4, 8 or 20 passes (or passes set by hand), from text, a first frame or a first and
+last frame, with a LoRA the Spark has, and reference clips where the Spark has Ref2VA. These stay on the Mac, and the
+page says why beside each Spark:
+
+- MiniMax H3 Turbo's qualities (Standard, High, Full, Fast): a Spark renders FastH3 only;
+- the presets made with the 2x decoder (Draft, 2K, 2K 2560x1440, 960p): a Spark has no 2x decoder. A job that names
+  no preset is Draft on a Mac;
+- a text encoder file of the Mac's: it is an MLX file; a Spark reads only the files in its own ComfyUI folder.
+
+The same seed does not give the same frames on a Mac and on a Spark: they run different engines.
+
+**Reaching the Sparks.** When the Mac reaches each Spark with ssh itself, add a Spark as on a Spark head. When it
+reaches only the Spark that leads them (here the Mac reaches `192.168.4.174` but not the `10.100.10.x` fabric), give
+that Spark under **Through** (`keyspark@192.168.4.174`). The Mac then logs in there with its own key, and that Spark
+logs in to the worker with its own key: no key is added to any worker. The tunnel is one ssh from the Mac to that
+Spark, forwarding a local port to a socket in `~/.cache/studio-sparks` there (a folder only its user can open); on that
+Spark a second ssh forwards the socket to the worker's own `127.0.0.1:7870`. Nothing listens on a network on any of the
+three machines. The second ssh lives only as long as the first: it ends when the Mac's ssh closes, is killed or loses
+its network (the Mac sends a heartbeat every 10 s and the relay ends after 30 s without one), and its socket is removed
+with it. *Check*, *Update and start* and *Stop* go the same way (`ssh` to that Spark, then `ssh` from there).
+**Update and start** sends the Mac's code with macOS's own rsync (openrsync) through that Spark; a Mac and a Spark on
+the same commit have the same `CODE` files, so a worker that is level with one is level with the other.
+
+**Once, by hand, on the Mac:**
+
+1. A key login from the Mac to the Spark it goes through: `ssh keyspark@192.168.4.174 true` must answer without a
+   password. Add the Mac's public key (`~/.ssh/id_ed25519.pub`) to that Spark's `~/.ssh/authorized_keys` if it is not
+   there.
+2. That Spark's host key in the Mac's `~/.ssh/known_hosts`: the app uses ssh with `BatchMode`, which never asks. Run the
+   `ssh` of step 1 once in a terminal and answer yes after comparing the fingerprint with
+   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on that Spark.
+3. Nothing for the workers: the Spark that leads them already has a key login to each (it is how it leads them).
+
+Instead of **Through**, a person who prefers the Mac to log in to every worker itself can authorise the Mac's key on
+each worker (`ssh-copy-id -o ProxyJump=keyspark@192.168.4.174 keyspark@10.100.10.5`, after step 2) and put
+`ProxyJump keyspark@192.168.4.174` for `10.100.10.*` in `~/.ssh/config`: then add the workers with no Through, as if
+the Mac reached them.
+
+**Measured.** On 2026-10-19, a test app of this branch on a Mac Studio M5 Ultra (port 7871, its own folder), worker
+gx10-5482 (`10.100.10.5`) through the Spark at `192.168.4.174`, one run:
+
+| Step | Time |
+|---|---|
+| Add, then *Check* (ssh through the Spark, the relay, `/api/spark/self`): "differs in 5 files" | under 15 s |
+| *Update and start* (openrsync through the Spark, its app restarted, checked again): *idle* | 7 s |
+| A 5 s 864x480 FastH3 clip (8 passes, seed 7), `sparks` 2, the Mac's own queue busy: handed to gx10-5482 | 1.0 s after it was queued |
+| Rendered there (its memory guard: about 58 GB needed, 118 GB there) | 71 s |
+| Back in the Mac's folder and shot-checked on the Mac | 73.7 s after it was queued |
+
+The clip in the Mac's Library is byte for byte the worker's (SHA-256 `288513c0…`), 124 frames with sound, with the
+Spark and the seed in `sparks/takes.jsonl`. The app killed with `kill -9` left nothing: the Mac's ssh and the relay on
+the Spark were gone within 5 s. The table above, 1 to 5 Sparks, was measured with a Spark at the head; from a Mac the
+estimate is marked not measured and says so.
+
+**Not the same as a Spark at the head.** The time estimate multiplies the Mac's own time for one clip by the Spark
+table above: it was not measured with a Mac. A Mac has no memory guard of its own (its row shows none); every clip on a
+Spark still passes that Spark's. The Mac renders the clips no Spark can take, at the Mac's speed.
 
 ## What is not built
 
