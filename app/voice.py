@@ -77,16 +77,19 @@ def tool(name: str) -> str | None:
 # ---------- backends ----------
 
 def mem_available_gb() -> float:
-    """MemAvailable of this machine in GB (a DGX Spark's GPU and system share one pool); on a Mac what vm_stat counts
-    as free, inactive, speculative and purgeable; -1 when unknown."""
+    """MemAvailable of this machine in GB (a DGX Spark's GPU and system share one pool); on a Mac what the kernel gets
+    back without compressing (telemetry.parse_vm_stat: free, file-backed and purgeable pages), 0 while macOS says its
+    memory pressure is critical; -1 when unknown."""
 
     if sys.platform == "darwin":
+        import telemetry
         try:
             said = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=2).stdout
-            size = int(re.search(r"page size of (\d+) bytes", said).group(1))
-            pages = sum(int(found) for found in re.findall(r"Pages (?:free|inactive|speculative|purgeable):\s+(\d+)", said))
-            return pages * size / 1024 ** 3
-        except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+            mb = telemetry.parse_vm_stat(said, 1 << 40)
+            if mb is None:
+                return -1.0
+            return 0.0 if telemetry.mac_pressure_critical() else mb / 1024
+        except (OSError, ValueError, subprocess.TimeoutExpired):
             return -1.0
     try:
         with open("/proc/meminfo") as handle:
