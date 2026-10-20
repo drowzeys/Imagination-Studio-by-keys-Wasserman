@@ -848,7 +848,8 @@ def turbo_ready() -> bool:
 # the model loaded, bf16: Qwen 9.7 on an M5 Ultra; FLUX3-K Fast 10.5 on a DGX Spark (ComfyUI) and 14.9 on an M5 Ultra
 # (flux3-mlx), Full 57.5 on a Spark and 53.6 on an M5 Ultra; BFL's prompt upsampler adds about 18 s on a Spark (8-bit,
 # ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt. MOSS-Image (OpenMOSS, Apache 2.0, oneshot-setup-spark.sh
-# --moss) runs on a Spark only, on ComfyUI v0.42.0's own support: 45 s for 1344x768 with the model loaded.
+# --moss / oneshot-setup.sh --moss) runs on ComfyUI v0.42.0's own support on both machines, the Mac's ComfyUI on
+# PyTorch's Metal device (mac/comfy.sh): 45 s for 1344x768 on a Spark with the model loaded.
 IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Research License (non-commercial)"),
                 "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
@@ -875,19 +876,26 @@ def image_models() -> list[str]:
                      and (folder / ("FLUX3-K-Fast" if name == "flux3k-fast" else "FLUX3-K-Full") / "model.safetensors").is_file())
         if ready:
             found.append(name)
-    if SPARK and moss_ready():
+    if moss_ready():
         found.append("moss-image")
     return found
 
 
 def moss_ready() -> bool:
-    """MOSS-Image's ComfyUI files, and a ComfyUI that knows the model (v0.42.0 and later)."""
+    """MOSS-Image's ComfyUI files, and a ComfyUI that knows the model (v0.42.0 and later): a Spark's, or on a Mac the
+    ComfyUI of scripts/setup-comfy.sh in its own environment."""
 
-    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "MOSS-Image-Comfy"
-    comfy = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")) / "ComfyUI"
+    prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
+    if SPARK:
+        models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "MOSS-Image-Comfy"
+    else:
+        models = Path(os.environ.get("MAC_COMFY_MODELS") or prefix / "comfy-models")
+        if not (prefix / "comfy-venv/bin/python").exists():
+            return False
     return ((models / "diffusion_models/moss_image_sft_bf16.safetensors").is_file()
             and (models / "text_encoders/qwen3.5_9b_bf16.safetensors").is_file()
-            and (comfy / "comfy_extras/nodes_moss_image.py").is_file())
+            and (models / "vae/flux2-vae_small.safetensors").is_file()
+            and (prefix / "ComfyUI/comfy_extras/nodes_moss_image.py").is_file())
 
 
 def qwen_ready() -> bool:
@@ -920,7 +928,7 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
-        how = {"qwen": "", "qwen-full": " --image-edit", "moss-image": " --moss (on a DGX Spark)"}.get(name, " --flux3")
+        how = {"qwen": "", "qwen-full": " --image-edit", "moss-image": " --moss"}.get(name, " --flux3")
         raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh{how} adds it"
                                  + (" (Machine → Models & weights shows what is missing)" if name == "qwen" else ""))
     return {"IMAGE_MODEL": name}
