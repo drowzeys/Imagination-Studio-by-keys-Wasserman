@@ -36,7 +36,12 @@ cores · a 2x video decoder for 2K finals on the Mac
   (`oneshot-setup.sh --upscale` and `--remove`; `scripts/setup-comfy.sh`). MiniMax H3 is read from the Mac's own Ref2VA
   files (`--ref2va`), not downloaded again: 2.4 GB of models and a 1.6 GB environment. Measured against the DGX Spark on
   the same clip and seeds: see [On a Mac](#on-a-mac-the-same-graphs-on-pytorchs-metal-device).
-- **MOSS-Image on a Mac** (`oneshot-setup.sh --moss`, 28 GB) is wired to the same ComfyUI, but not rendered on a Mac yet.
+- **MOSS-Image on a Mac** (`oneshot-setup.sh --moss`, 28 GB) on the same ComfyUI: 59 s a 1344x768 picture with the
+  model loaded (44 s on a DGX Spark), the lettering as exact as on a Spark.
+
+![MOSS-Image: DGX Spark left, Mac right, same prompt and seed](docs/shootout/moss-mac-spark-poster.jpg)
+
+![MOSS-Image: DGX Spark left, Mac right, same prompt and seed](docs/shootout/moss-mac-spark-samurai.jpg)
 
 ## New in 3.0.1
 
@@ -503,8 +508,10 @@ edit pictures.
   model as written.
 - **Mac:** `bash oneshot-setup.sh --moss` installs the same files (28 GB) on the Mac's own ComfyUI (the one of
   `--upscale` and `--remove`, PyTorch's Metal device, PyTorch's attention) and `scripts/image.sh` runs the Spark's graph
-  there. Not rendered on a Mac yet: the test Mac had not the 28 GB of disk to spare (2026-10-20); until a picture has
-  been compared with a Spark's, treat it as untested.
+  there. Measured on 2026-10-20, 1344x768, seed 7, the same prompts on both machines: 71 s for the first picture with
+  the model load and 59 s for the next on a Mac Studio M5 Ultra, 44 s each on a DGX Spark. The lettering came out exactly
+  as written on both, and both are equally sharp; the compositions differ, because er_sde draws its noise during
+  sampling on each machine's own device, so a seed does not give the same picture on a Mac and a Spark.
 
 Tested on one DGX Spark on 2026-10-19 (bf16, one seed per prompt, judged by eye):
 
