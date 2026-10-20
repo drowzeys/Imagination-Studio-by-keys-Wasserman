@@ -801,7 +801,9 @@ class Hub:
         if address is None:
             idle = {worker["address"] for worker in self.workers() if not self.usable(worker) and not self.state(worker["address"])["job"]}
             ours = [job for job in ready if not self.team(job) or self.fits_here(job)]  # a clip too big here waits for a worker
-            job = next((job for job in ours if not idle.intersection(self.team(job))), None) or (ours[0] if ours else None)
+            # a clip an idle worker can render is left to it (the hub's loop hands it over); this Spark takes it once
+            # its workers are busy, and takes at once what only it can render
+            job = next((job for job in ours if not idle.intersection(self.team(job))), None)
         else:
             job = next((job for job in ready if address in self.team(job)), None)
         if job is None:

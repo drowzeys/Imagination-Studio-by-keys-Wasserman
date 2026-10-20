@@ -433,6 +433,17 @@ def test_a_clip_too_big_for_this_spark_is_taken_and_left_to_a_worker():
         server.memory_of = had
 
 
+def test_this_spark_leaves_a_clip_to_an_idle_worker():
+    """One clip at a time with a worker idle: the worker renders each one, this Spark (a head with its brain loaded,
+    pictures and Library actions to do) none."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    for _ in range(3):
+        done = finished([queue(2)["id"]])
+        assert done[0]["status"] == "done" and done[0]["spark"] == "spark-a"
+
+
 def test_cancel_reaches_the_worker():
     one = Worker("spark-a")
     one.takes = 30
@@ -473,7 +484,7 @@ def test_a_clip_that_opens_on_another_waits_for_it():
     assert done[1]["started"] >= done[0]["finished"] - 0.01  # it waited
     assert done[2]["started"] < done[0]["finished"]  # and the one behind it did not
     if done[1]["spark"] == "spark-a":  # the frame was cut here and sent
-        assert any(data.startswith(b"jpg of ") for data in one.uploads.values())
+        assert any(b"jpg of " in data for data in one.uploads.values())  # the stand-in keeps the multipart body
 
 
 def test_a_worker_with_other_code_is_updated_before_it_is_used():
