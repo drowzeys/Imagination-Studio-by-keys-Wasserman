@@ -184,3 +184,50 @@ each file):
 Audio, ComfyUI, TensorFold, and the agent brains), shown beside their names to identify them. They are trademarks of
 their owners; sources, licences of the drawings and each owner's usage notes are in
 `app/static/brand/THIRD-PARTY-MARKS.md`.
+
+# Third-party notices: the Studio's Bolt brain
+
+The Studio can run NVIDIA Nemotron 3.5 Bolt as its own brain (app/bolt.py, app/bolt_leash.py, spark/build-bolt.sh,
+scripts/setup-bolt.sh). Nothing of the model is in this pack: `oneshot-setup.sh --bolt` / `oneshot-setup-spark.sh --bolt`
+download it from Hugging Face.
+
+## NVIDIA Nemotron 3.5 Bolt and the LiLiCorr drafter (NVIDIA)
+
+nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB at a326822af111290f2af5ac59ef4b5040347dabc4 and
+nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr at 4c6a5613b6d887194a3a5493e3a18a5b3930bb86, and on a Mac
+NVIDIA's GGUF of the same model (nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-GGUF), under the OpenMDW License
+Agreement, version 1.1 (https://github.com/OpenMDW/OpenMDW/blob/main/1.1/LICENSE.OpenMDW-1.1):
+
+- permission to deal in the Model Materials without restriction, free of charge, commercial use included;
+- a distribution of any portion keeps a copy of the agreement and the copyright and origin notices that apply;
+- the rights end for whoever brings a patent or copyright suit claiming the Model Materials infringe;
+- no restriction on the outputs; no warranty.
+
+## Nemotron-3.5-Bolt-TensorFold-DGX-Spark (MiaAI-Lab)
+
+https://github.com/MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark at 6f61d7727ae3fac010f30e240799cc884d295f6e. MIT
+License, Copyright (c) 2026 MiaAI-Lab:
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+> documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+> rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+> permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright
+> notice and this permission notice shall be included in all copies or substantial portions of the Software.
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+> WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+> COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+> OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The engine the Studio runs on a DGX Spark is that recipe's build (`tensorfold-native` with `libbolt.so`): the recipe's
+`engine/` and `patches/` applied to TensorFold at 46a08c18608153bfc566703a88acc883bc6140f4 (Apache-2.0, code before
+0.6.0 MIT; Ash Hart and the TensorFold contributors). The build also carries, each under its own licence (listed in
+the recipe's NOTICE and kept in `$PREFIX/bolt/share/doc/tensorfold`): ggml's IQ2_XXS tables and block layouts (MIT),
+libjpeg-turbo 3.1.4.1 (BSD-3-Clause, IJG, zlib), FFmpeg 9.0.2's decoders in libtfvideo.so (LGPL 2.1 or later),
+xgrammar v0.2.8 with dlpack (Apache-2.0) and picojson (BSD-2-Clause) in libtfgrammar.so. Mia's image is based on
+NVIDIA's PyTorch container (NVIDIA Software License Agreement); the Studio copies only `/opt/tensorfold` out of it and
+runs nothing of the container.
+
+## llama.cpp
+
+On a Mac, with `BOLT_BACKEND=llamacpp`, Bolt runs in llama.cpp's `llama-server` (MIT, Georgi Gerganov and the ggml
+contributors), which the person builds; none of its code is in this pack.
