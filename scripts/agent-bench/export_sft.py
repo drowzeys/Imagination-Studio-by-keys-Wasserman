@@ -4,11 +4,11 @@ OpenAI messages format with its tools, ready for a LoRA or SFT run on NVIDIA Nem
 
     python3 scripts/agent-bench/export_sft.py ~/agent-bench-runs/E-full ~/agent-bench-runs/claude-* -o bolt-sft.jsonl
 
-Each line: {"messages": [...], "tools": [...], "meta": {run, brief, method, seconds, verified}}. The local harness's
+Each line: {"messages": [...], "tools": [...], "meta": {run, brief, method, seconds, bad}}. The local harness's
 turns come from the messages.json it keeps beside each turn (the system prompt, the brief, the checklist, every call
-and every tool answer as the model read them) with its own last answer appended. A turn the checker had to send back
-(a "verify" in its stream) is left out with --clean, so only turns that were right the first time teach. The checklist
-answer is written too, as a sample of its own ({"task": "plan"}), when the turn made one. Turns of the claude and codex
+and every tool answer as the model read them) with its own last answer appended (not the records the harness puts
+under it). With --clean a turn with a refused call (a bad one, or a failed call repeated) is left out too, so only turns
+that were right the first time teach. Turns of the claude and codex
 harnesses have no messages.json: their calls are in stream.jsonl in the CLI's own shape, to be replayed into this
 format by the stage-2 tooling (see scripts/agent-bench/README.md).
 """
@@ -21,9 +21,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runs", nargs="+", help="run folders (each with results.jsonl and turns/)")
     parser.add_argument("-o", "--out", default="bolt-sft.jsonl")
-    parser.add_argument("--clean", action="store_true", help="only turns the checker never sent back")
+    parser.add_argument("--clean", action="store_true", help="only turns without a refused call")
     args = parser.parse_args()
-    kept = plans = skipped = 0
+    kept = skipped = 0
     with open(args.out, "w") as out:
         for run in map(Path, args.runs):
             results = run / "results.jsonl"
@@ -35,23 +35,14 @@ def main() -> None:
                     skipped += 1
                     continue
                 saved = json.loads((turn / "messages.json").read_text())
-                stream = [json.loads(line) for line in (turn / "stream.jsonl").read_text().splitlines()] if (turn / "stream.jsonl").is_file() else []
-                verified = sum(1 for e in stream if e.get("type") == "verify")
-                if args.clean and verified:
+                if args.clean and row.get("bad"):
                     skipped += 1
                     continue
-                meta = {"run": run.name, "brief": row["id"], "method": saved.get("method"), "seconds": row.get("seconds"), "verified": verified}
+                meta = {"run": run.name, "brief": row["id"], "method": saved.get("method"), "seconds": row.get("seconds"), "bad": row.get("bad")}
                 messages = list(saved.get("messages") or []) + [{"role": "assistant", "content": saved.get("said") or saved.get("reply") or ""}]
-                out.write(json.dumps({"messages": messages, "tools": saved.get("tools") or [], "meta": {**meta, "task": "act"}}) + "\n")
+                out.write(json.dumps({"messages": messages, "tools": saved.get("tools") or [], "meta": meta}) + "\n")
                 kept += 1
-                plan = next((e for e in stream if e.get("type") == "plan"), None)
-                if plan and len(messages) > 2:
-                    from_plan = [m for m in messages[:2]]  # the system prompt and the brief, then the request for the checklist
-                    out.write(json.dumps({"messages": from_plan + [{"role": "user", "content": plan.get("ask") or ""},
-                                                                   {"role": "assistant", "content": plan.get("content") or ""}],
-                                          "tools": [], "meta": {**meta, "task": "plan"}}) + "\n")
-                    plans += 1
-    print(f"{kept} turns and {plans} checklists written to {args.out}; {skipped} left out")
+    print(f"{kept} turns written to {args.out}; {skipped} left out")
 
 
 if __name__ == "__main__":

@@ -153,7 +153,7 @@ LOCAL_DRIVE = (" You run the Studio's tools yourself, through function calls: ca
                "its Library path. A job that fails is reported with its reason, not queued again unchanged.")
 # the local harness's method (see "the local harness's method" below): the parts it runs, by name; STUDIO_LOCAL_AGENT
 # replaces the list (comma separated, "baseline" for none of them) so the agent benchmark can measure each one
-LOCAL_METHOD = ("rules", "hints", "compact", "plan", "verify", "report")
+LOCAL_METHOD = ("rules", "hints", "compact", "report", "temp=0")
 LOCAL_STEPS = 40  # the local model's answers in one turn (each may call several tools)
 LOCAL_ANSWER_TIMEOUT = 600  # one answer from the local server
 LOCAL_TOOL_TIMEOUT = 15 * 60  # one tool call (wait_for_jobs waits up to 10 minutes)
@@ -1990,22 +1990,21 @@ def answer_of(base: str, body: dict, stopped) -> dict | None:
 # ---------- the local harness's method ----------
 #
 # A small local model (NVIDIA Nemotron 3.5 Bolt) drives the Studio well when the loop around it keeps it to the brief.
-# Each part below was kept because it measurably helped on the agent benchmark (scripts/agent-bench), against the same
-# loop without it:
-#   rules    the system prompt's "do only what was asked" rules: one job per thing asked, the count asked, the names given,
-#            nothing rendered or added unasked, the fast settings unless others are named
+# Each part below was kept because it measurably helped on the agent benchmark (scripts/agent-bench, 38 briefs; on
+# Bolt it took exactness from 37-39% to 97%), against the same loop without it:
+#   rules    the system prompt's "do only what was asked" rules: one call per thing asked, the count asked, the names
+#            given, nothing rendered, checked or added unasked, the fast settings unless others are named, which tool
+#            makes what, and Library paths as the tools give them
 #   hints    the Studio tools' settings described for it: count is the number asked, no image_model / quality unless
-#            named (Qwen 2.1 Turbo and FastH3 4 passes, the fastest), no first_frame with references
-#   compact  tool answers as compact JSON without empty fields, and studio_state cut to the ids it needs
-#   plan     before acting, one answer in a JSON schema: the checklist of what the brief asks for, one line per tool call
-#            to make (the tool, how many, what), and what the filmmaker said not to do
-#   verify   when it stops, the calls it made are counted against the checklist; what is missing or extra, and jobs
-#            still running, go back to it as one message (twice at most) before it may finish
+#            named (Qwen 2.1 Turbo and FastH3 4 passes, the fastest), 22 frames is 0.92 s
+#   compact  tool answers as compact JSON without empty fields, and studio_state cut to the ids (and labels) it needs
 #   report   the final answer ends with what the Studio's records say was made (each job's outputs, the Slate ids), so
 #            what it says about files can be checked against the records beside it
-#   shots    two worked examples in the system prompt: measured, not in the default
-#   think    Bolt's reasoning (chat_template_kwargs enable_thinking): measured, not in the default
-#   temp=X   the sampling temperature (default 0.3)
+#   temp=0   greedy sampling (0.3 before; 0 was the more exact of the two)
+# A call that failed is never sent again unchanged (the model is told so instead): that stopped loops of the same error.
+# Measured and left out: a checklist the model writes first in a JSON schema with a check of the calls against it
+# before it may finish (it enforced the checklist's own mistakes: 87% against 95% without it), two worked examples in
+# the system prompt (no gain), and Bolt's reasoning, `think` (as exact, three times slower; kept as a part to turn on).
 
 MAKERS = ("queue_still", "queue_clip", "queue_voice", "queue_song", "queue_edit", "queue_long", "queue_sound", "queue_soundtrack",
           "check_clip", "motion_previs", "slate_new_film", "slate_add_scene", "slate_add_shot", "slate_render_shot",
@@ -2020,11 +2019,6 @@ LOCAL_RULES = (" Do only what the filmmaker asked, exactly: one call for each th
                "queue_sound, a song under a clip queue_soundtrack, Motion Previs motion_previs, a timeline add_to_timeline and "
                "export_timeline; the QA gate (check_clip) only when they ask for a check; Slate films, scenes and shots only when they say Slate, film, scene or shot. The Studio's tools take Library paths as the filmmaker or the tools give them "
                "(renders/a.mp4, scouts/<job>/scout_s1.png), never with a folder put in front. Name only files and ids the tools returned.")
-LOCAL_SHOTS = (" Two examples of doing exactly what was asked. 'One picture of a neon alley in the rain, then a 22-frame clip from it "
-               "at the small size': queue_still {prompt, count: 1}; wait_for_jobs [its id]; queue_clip {prompt, first_frame: the "
-               "scouts/<job>/scout_s1.png it returned, seconds: 0.92, preset: small}; wait_for_jobs; then the summary with both paths. "
-               "'Make a 2-shot Slate scene of a rooftop chase, don't render': slate_new_film; slate_add_scene; slate_add_shot twice; "
-               "no render; then the summary with the film's, scene's and shots' names.")
 LOCAL_HINTS = {
     "queue_still": {"count": "how many pictures: exactly the number asked for (1 for 'a picture', 'one picture', 'a still'); 4 only "
                              "when they ask for options or candidates without a number",
@@ -2036,19 +2030,6 @@ LOCAL_HINTS = {
     "queue_long": {"quality": "leave out (FastH3 4 passes, the fastest) unless the filmmaker names a quality"},
     "queue_edit": {"image_model": "leave out (Qwen 2.1 Turbo) unless the filmmaker names a model"},
 }
-PLAN_SCHEMA = {"type": "object", "properties": {
-    "do": {"type": "array", "items": {"type": "object", "properties": {
-        "tool": {"type": "string"}, "calls": {"type": "integer", "minimum": 0, "maximum": 20}, "what": {"type": "string"},
-        "quote": {"type": "string"}}, "required": ["tool", "calls", "what", "quote"]}},
-    "not_asked": {"type": "array", "items": {"type": "string"}}}, "required": ["do", "not_asked"]}
-PLAN_ASK = ("Before you act, write the checklist of this request as JSON: under \"do\", one entry for each tool you will call to make "
-            "what the filmmaker asked for (the tool's exact name, how many calls of it, and what each makes, with the names and "
-            "numbers they gave), in order; only tools that make or change something ({makers}), never look-up tools. In "
-            "\"quote\", copy the words of the request that ask for that entry, exactly as written: an entry the request has no "
-            "words for is not on the checklist (no timeline, export, QA check, song or render they did not ask for). Several "
-            "pictures or options of one thing are one queue_still call with that count, not several calls. Under \"not_asked\", "
-            "what they said not to do or did not ask for that you might be tempted to add. An empty \"do\" when they only ask "
-            "a question or for a plan in words.")
 
 
 def local_method() -> dict:
@@ -2101,7 +2082,6 @@ class Ledger:
     """What the turn's tool calls made, from their answers: the jobs by id (as last seen) and the Slate and Editor ids."""
 
     def __init__(self):
-        self.calls: list[tuple] = []  # (tool, arguments, its job's id or None) of each maker call that succeeded
         self.jobs: dict[str, dict] = {}
         self.cancelled: set = set()
         self.made: list[str] = []  # Slate films, scenes and shots, Editor timelines, by their ids
@@ -2110,9 +2090,6 @@ class Ledger:
         if failed:
             return
         values = results_in(text)
-        if tool in MAKERS:
-            first = values[0] if values and isinstance(values[0], dict) else {}
-            self.calls.append((tool, args, first.get("id") if isinstance(first.get("id"), str) and first.get("status") else None))
         if tool == "cancel_job":
             self.cancelled.add(str(args.get("id")))
         for value in values:
@@ -2121,7 +2098,7 @@ class Ledger:
                     continue
                 if isinstance(one.get("id"), str) and one.get("status") and (one.get("kind") or one.get("stages") is not None):
                     self.jobs[one["id"]] = {**self.jobs.get(one["id"], {}), **one}
-                if tool.startswith("slate_new_film"):
+                if tool == "slate_new_film":
                     self.made.append(f"Slate film {one.get('name')} ({one.get('film')})")
                 elif tool == "slate_add_scene":
                     self.made.append(f"Slate scene {one.get('name')} ({one.get('scene')}) in film {one.get('film')}")
@@ -2129,15 +2106,6 @@ class Ledger:
                     self.made.append(f"Slate shot {one.get('name')} ({one.get('shot')}), {one.get('seconds')} s, not rendered")
                 elif tool == "add_to_timeline":
                     self.made.append(f"Editor timeline {one.get('name') or one.get('project')}: {one.get('clips')} clip(s)")
-
-    def counts(self, live: bool = False) -> dict:
-        """Calls made of each tool; with ``live``, less those whose job was cancelled since."""
-
-        out: dict = {}
-        for tool, _, job_id in self.calls:
-            if not (live and job_id in self.cancelled):
-                out[tool] = out.get(tool, 0) + 1
-        return out
 
     def running(self) -> list[str]:
         return [i for i, job in self.jobs.items() if job.get("status") in ("queued", "running") and i not in self.cancelled]
@@ -2157,53 +2125,6 @@ class Ledger:
                 line += f" ({str(job['error'])[:200]})"
             out.append(line)
         return out + self.made
-
-
-def words_of(text: str) -> str:
-    return " ".join(re.findall(r"[a-z0-9<>]+", str(text).lower()))
-
-
-def checklist_of(plan: dict | None, functions: list[dict], asked: str = "") -> list[dict]:
-    """The checklist's entries for tools that exist and make something, merged by tool; with ``asked`` (the request),
-    only entries whose quote is words of it: a step the model added on its own is left off."""
-
-    known = {f["function"]["name"] for f in functions}
-    merged: dict = {}
-    request = words_of(asked)
-    for item in (plan or {}).get("do") or []:
-        if not isinstance(item, dict):
-            continue
-        if asked and not (words_of(item.get("quote") or "") and words_of(item.get("quote") or "") in request):
-            continue
-        tool = str(item.get("tool") or "").removeprefix("mcp__").split("__")[-1]
-        try:
-            calls = max(0, min(int(item.get("calls") or 0), 20))
-        except (TypeError, ValueError):
-            continue
-        if tool in known and tool in MAKERS and calls:
-            entry = merged.setdefault(tool, {"tool": tool, "calls": 0, "what": []})
-            entry["calls"] += calls
-            entry["what"].append(str(item.get("what") or "")[:300])
-    return list(merged.values())
-
-
-def verdict(checklist: list[dict], ledger: Ledger) -> str:
-    """What the turn still lacks or has too much of, against its checklist ("" when it matches)."""
-
-    made, live, notes = ledger.counts(), ledger.counts(live=True), []  # a job queued then cancelled as asked was still made
-    for entry in checklist:
-        got = made.get(entry["tool"], 0)
-        if got < entry["calls"]:
-            notes.append(f"- {entry['tool']}: {got} of the {entry['calls']} call(s) on the checklist made ({'; '.join(entry['what'])}). Make the rest now.")
-    listed = {e["tool"] for e in checklist}
-    for tool, got in live.items():
-        wanted = next((e["calls"] for e in checklist if e["tool"] == tool), 0)
-        if tool not in listed or got > wanted:
-            notes.append(f"- {tool}: {got} call(s) made, {wanted} on the checklist. If the filmmaker did not ask for "
-                         f"{'it' if not wanted else 'the extra ones'}, cancel those jobs with cancel_job (a Slate or Editor change stays: say so).")
-    if ledger.running():
-        notes.append("- jobs still queued or running: " + ", ".join(ledger.running()) + ". Call wait_for_jobs with their ids.")
-    return "\n".join(notes)
 
 
 def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names: list[str]) -> None:
@@ -2271,36 +2192,14 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
         if task.get("thread"):
             system += ROOM.format(tools=ROOM_TOOLS.format(names=STUDIO_TOOLS) if "studio" in task["tools"] else "")
         if not any(tool in MAKERS for _, tool, _ in table.values()):  # the method is for the Studio's tools: another server's run plain
-            method["parts"] -= {"rules", "shots", "plan", "verify", "report"}
-        system += LOCAL_DRIVE + (LOCAL_RULES if "rules" in method["parts"] else "") + (LOCAL_SHOTS if "shots" in method["parts"] else "")
+            method["parts"] -= {"rules", "report"}
+        system += LOCAL_DRIVE + (LOCAL_RULES if "rules" in method["parts"] else "")
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": with_history(thread, task["prompt"]) + attached_note(task, names)}]
         record({"type": "start", "model": model, "server": base, "tools": [f["function"]["name"] for f in functions],
                 "method": sorted(method["parts"]), "temperature": method["temperature"]})
         extra = {"chat_template_kwargs": {"enable_thinking": "think" in method["parts"]}}
-        checklist: list[dict] = []
-        if "plan" in method["parts"]:  # the checklist, in a JSON schema, before anything is called
-            asked = messages + [{"role": "user", "content": PLAN_ASK.format(makers=", ".join(t for t in MAKERS if t in table))}]
-            body = {"model": model, "messages": asked, "temperature": 0, "max_tokens": 1500, **extra,
-                    "response_format": {"type": "json_schema", "json_schema": {"name": "checklist", "schema": PLAN_SCHEMA}}}
-            answer = answer_of(base, body, stopped)
-            if answer is None:
-                return
-            calls["answers"] += 1
-            said = (((answer.get("choices") or [{}])[0].get("message")) or {}).get("content") or ""
-            try:
-                plan = json.loads(said[said.find("{"):said.rfind("}") + 1]) if "{" in said else None
-            except ValueError:
-                plan = None
-            checklist = checklist_of(plan if isinstance(plan, dict) else None, functions, task["prompt"])
-            record({"type": "plan", "ask": asked[-1]["content"], "content": said, "checklist": checklist})
-            if isinstance(plan, dict):
-                lines = [f"- {e['tool']} x{e['calls']}: {'; '.join(e['what'])}" for e in checklist] or ["- nothing to make: answer in words"]
-                lines += [f"- not asked: {n}" for n in (plan.get("not_asked") or [])[:8] if isinstance(n, str)]
-                messages.append({"role": "user", "content": "Your checklist for this request (make exactly this, nothing more; "
-                                                            "look-up tools as needed):\n" + "\n".join(lines)})
-                say("", "checklist: " + (", ".join(f"{e['tool']} x{e['calls']}" for e in checklist) or "nothing to make"))
-        nudged = verified = 0
+        nudged = 0
         for number in range(LOCAL_STEPS + 1):
             last = number == LOCAL_STEPS or time.time() - started > TASK_TIMEOUT
             if last:  # the limit: one more answer, without tools, that says what is done and what is not
@@ -2330,16 +2229,6 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                                  {"role": "user", "content": "Make the calls now through the tools (function calls), not as text. "
                                                              "If everything asked for is done, give your summary."}]
                     say("", "nudged to call its tools")
-                    continue
-                notes = verdict(checklist, ledger) if "verify" in method["parts"] and "plan" in method["parts"] and not last else ""
-                if notes and verified < 2 and not question_of(said)[0]:
-                    verified += 1  # the checklist against what was made: what is missing or extra goes back to it
-                    messages += [{"role": "assistant", "content": said},
-                                 {"role": "user", "content": "Checked against your checklist, before you finish:\n" + notes +
-                                                             "\nCall the tools for what is missing. If the checklist itself was "
-                                                             "wrong, say so in one line and give your summary."}]
-                    record({"type": "verify", "notes": notes})
-                    say("", "checked: " + notes.splitlines()[0][2:120])
                     continue
                 task["reply"] = said
                 studio_ = next((c for c in clients if c.id == "studio"), None)

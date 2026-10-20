@@ -45,5 +45,5 @@ Briefs live in `briefs.json`; a spec lists `jobs` (matchers: `kind`, `n`, `param
 
 ## Training data (stage 2)
 
-`export_sft.py` turns the exact and honest turns of runs into chats for a LoRA or SFT run (`--clean`: only turns the
-checker never sent back). See the stage-2 plan in the pull request that added this folder.
+`export_sft.py` turns the exact and honest turns of runs into chats for a LoRA or SFT run (`--clean`: only turns
+without a refused call). See the stage-2 plan in the pull request that added this folder.

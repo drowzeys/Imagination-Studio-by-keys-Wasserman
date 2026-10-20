@@ -257,54 +257,37 @@ def studio_tool(fake, local):
     return local
 
 
-def test_the_method_plans_checks_what_was_made_and_reports_the_records(studio_tool, monkeypatch):
+def test_the_method_keeps_the_model_to_the_brief_and_reports_the_records(studio_tool, monkeypatch):
     monkeypatch.delenv("STUDIO_LOCAL_AGENT", raising=False)
     def reply(body, n):
-        if body.get("response_format"):  # the checklist, in its JSON schema
-            return {"content": json.dumps({"do": [{"tool": "queue_still", "calls": 2, "what": "a samurai; a ninja, one picture each",
-                                                   "quote": "One picture of a samurai and one of a ninja"},
-                                                  {"tool": "studio_state", "calls": 1, "what": "look", "quote": "One picture"},
-                                                  {"tool": "export_timeline", "calls": 1, "what": "export", "quote": "and export it"}],
-                                           "not_asked": ["a clip"]})}
         last = body["messages"][-1]
-        if last["role"] == "tool" and '"status":"queued"' in last["content"]:
-            ids = [json.loads(m["content"])["id"] for m in body["messages"] if m["role"] == "tool" and '"status":"queued"' in m["content"]]
-            return {"content": "", "tool_calls": [call("wait_for_jobs", {"ids": ids}, n)]}
-        if last["role"] == "user" and "Checked against your checklist" in last["content"]:
-            return {"content": "", "tool_calls": [call("queue_still", {"prompt": "a ninja", "count": 1}, n)]}
         if last["role"] == "user":
-            return {"content": "", "tool_calls": [call("queue_still", {"prompt": "a samurai", "count": 1}, n)]}
+            return {"content": "", "tool_calls": [call("queue_still", {"prompt": "a samurai", "count": 1}, 1),
+                                                  call("queue_still", {"prompt": "a ninja", "count": 1}, 2)]}
+        if last["role"] == "tool" and '"status":"queued"' in last["content"]:
+            return {"content": "", "tool_calls": [call("wait_for_jobs", {"ids": ["j1"]}, 3)]}
         return {"content": "Made the samurai and the ninja: scouts/j1/scout_s1.png and scouts/j2/scout_s1.png."}
     model = studio_tool(reply)
     answer = post("/api/agent/threads", {"text": "One picture of a samurai and one of a ninja", "backend": "local", "tools": ["studio"]}).json()
     thread = settled(answer["thread"]["id"])
-    first, acting = model.asked[0], model.asked[1]
-    # the checklist first, without tools; a look-up tool on it is left out
-    assert first["response_format"]["type"] == "json_schema" and "tools" not in first and first["temperature"] == 0
-    assert "queue_still x2: a samurai; a ninja, one picture each" in acting["messages"][-1]["content"] and "studio_state" not in acting["messages"][-1]["content"]
-    assert "not asked: a clip" in acting["messages"][-1]["content"]
-    assert "export_timeline" not in acting["messages"][-1]["content"]  # its quote is not words of the request: left off
-    # the rules, the hints in the schema, and Bolt's reasoning left off
-    assert "Do only what the filmmaker asked" in acting["messages"][0]["content"]
-    schema = next(f for f in acting["tools"] if f["function"]["name"] == "queue_still")["function"]["parameters"]
+    first = model.asked[0]
+    # the rules, the hints in the schema, greedy sampling, and Bolt's reasoning left off; no extra answer before acting
+    assert len(model.asked) == 3 and "response_format" not in first
+    assert "Do only what the filmmaker asked" in first["messages"][0]["content"] and "a long take or anything over 15 s queue_long" in first["messages"][0]["content"]
+    schema = next(f for f in first["tools"] if f["function"]["name"] == "queue_still")["function"]["parameters"]
     assert schema["properties"]["count"]["description"].startswith("how many pictures: exactly the number asked for")
     assert "unless the filmmaker names a model" in schema["properties"]["image_model"]["description"]
-    assert acting["chat_template_kwargs"] == {"enable_thinking": False} and acting["temperature"] == 0.3
-    # it stopped after one of the two: the check sent it back for the other, then it waited and finished
-    checked = next(b for b in model.asked if b["messages"][-1]["role"] == "user" and "Checked against" in b["messages"][-1]["content"])
-    assert "queue_still: 1 of the 2 call(s) on the checklist made" in checked["messages"][-1]["content"]
-    assert "jobs still queued" not in checked["messages"][-1]["content"]  # it had waited for the samurai
+    assert first["chat_template_kwargs"] == {"enable_thinking": False} and first["temperature"] == 0
     # tool answers are compact JSON
-    assert any(m["role"] == "tool" and m["content"].startswith('{"id":"j1","kind":"scout","status":"queued"') for m in checked["messages"])
-    # the answer ends with the records
+    assert any(m["role"] == "tool" and m["content"].startswith('{"id":"j1","kind":"scout","status":"queued"') for m in model.asked[1]["messages"])
+    # the answer ends with the records, as they are when it ends (j2 was not waited for: it is asked for)
     said = thread["turns"][-1]["text"]
     assert said.startswith("Made the samurai and the ninja") and "What the Studio's records say was made:" in said
     assert "- scout j1 (agent: still): done → scouts/j1/scout_s1.png" in said and "- scout j2 (agent: still): done → scouts/j2/scout_s1.png" in said
     task = record(answer["task"]["id"])
-    stream = [json.loads(line) for line in (agents.HOME / "agent" / task["id"] / "stream.jsonl").read_text().splitlines()]
-    assert [e["type"] for e in stream].count("verify") == 1 and stream[1]["type"] == "plan"
     saved = json.loads((agents.HOME / "agent" / task["id"] / "messages.json").read_text())
     assert saved["messages"][1]["content"] == "One picture of a samurai and one of a ninja" and saved["reply"] == said
+    assert saved["said"] == "Made the samurai and the ninja: scouts/j1/scout_s1.png and scouts/j2/scout_s1.png."
 
 
 def test_the_benchmark_can_turn_the_method_off_or_on_part_by_part(studio_tool, monkeypatch):
@@ -319,7 +302,7 @@ def test_the_benchmark_can_turn_the_method_off_or_on_part_by_part(studio_tool, m
     monkeypatch.setenv("STUDIO_LOCAL_AGENT", "rules,think,temp=0.6")
     assert agents.local_method() == {"parts": {"rules", "think"}, "temperature": 0.6}
     monkeypatch.delenv("STUDIO_LOCAL_AGENT")
-    assert agents.local_method()["parts"] == set(agents.LOCAL_METHOD)
+    assert agents.local_method() == {"parts": {"rules", "hints", "compact", "report"}, "temperature": 0}
     # studio_state, as the model reads it: the ids, and the fastest defaults
     state = json.loads(agents.compact_result("studio_state", json.dumps({"presets": {"small": {"label": "S", "size": [864, 480]}},
                                                                           "image_models": [{"id": "qwen", "label": "Qwen 2.1 Turbo"}, {"id": "flux3k-full", "label": "FLUX3-K Full"}],
