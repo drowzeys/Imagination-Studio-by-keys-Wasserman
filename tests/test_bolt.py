@@ -193,7 +193,8 @@ def test_no_idle_unload_while_a_turn_is_open_and_never_keeps_it(fake, monkeypatc
         assert fake.loaded()
     fake.last_used = time.time() - 60
     deadline = time.time() + 12
-    while fake.loaded() and time.time() < deadline:
+    # stop() shows "unloaded" before it has waited for the process and noted why: wait for the note
+    while (fake.loaded() or "why" not in fake.events[-1]) and time.time() < deadline:
         time.sleep(0.2)
     assert not fake.loaded() and fake.events[-1]["why"].startswith("idle for")
     assert bolt.idle_seconds("never") == 0 and bolt.idle_seconds("0") == 0 and bolt.idle_seconds("") == 600 and bolt.idle_seconds("120") == 120
