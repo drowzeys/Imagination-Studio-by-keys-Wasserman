@@ -14,6 +14,10 @@
 #   bash oneshot-setup.sh --music       # also MiniMax Music 3 for the Music tab (scripts/setup-music.sh: TensorFold's
 #                                       # music3-mlx in its own venv, 22 GB of weights, 64 GB of memory; MiniMax-Music3
 #                                       # Community License: commercial use allowed, a commercial UI shows "MiniMax-Music3")
+#   bash oneshot-setup.sh --bolt        # also NVIDIA Nemotron 3.5 Bolt as the Studio's brain engine (scripts/setup-bolt.sh:
+#                                       # NVIDIA's 24 GB checkpoint and LiLiCorr drafter, about 25 GB; OpenMDW 1.1, commercial
+#                                       # use allowed). Until TensorFold's Metal engine lands, BOLT_BACKEND=llamacpp runs it
+#                                       # through llama.cpp's server with NVIDIA's GGUF
 #   bash oneshot-setup.sh --sound       # also sound effects and foley (scripts/setup-sound.sh: Stable Audio Open 1.0,
 #                                       # Stability AI Community License, gated; MMAudio, weights CC-BY-NC 4.0; about 13 GB)
 #   bash oneshot-setup.sh --flux3       # also FLUX3-K (BFL's FLUX 3 Image Klein) as picture models beside Qwen-Image
@@ -48,7 +52,7 @@ if [ "$(uname -s)" = Linux ]; then
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
+      --image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
       --upscale|--remove) echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh)";;
       --fasth3) ;;
       --turbo|--app|--ref2va|--sound) echo "note: $arg is for the Mac build and does nothing on a DGX Spark";;
@@ -87,7 +91,7 @@ REF_ADAPTER_NAME="lightx2v_ref2v_4step_v0.1_ourlayout.safetensors"
 X2_REPO="speach1sdef178/MiniMax-H3-X2-Detail-VAE"
 X2_NAME="MiniMax-H3-X2-Detail-v1.safetensors"
 X2_SHA256="2296840f4acedcaa976688e7d7b97f7bf570b136e400385d3f46224011897aac"
-MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; COMFY_ARGS=()
+MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; BOLT=0; COMFY_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --image-only) VIDEO=0;;
@@ -98,6 +102,7 @@ for arg in "$@"; do
     --voice) VOICE=1;;
     --flux3) FLUX3=1;;
     --music) MUSIC=1;;
+    --bolt) BOLT=1;;
     --sound) SOUND=1;;
     --upscale|--remove|--moss) COMFY_ARGS+=("$arg");;
     --image-edit) IMAGE_EDIT=1;;
@@ -421,6 +426,10 @@ fi
 if [ "$MUSIC" = 1 ] || { [ "$MODE" = "--verify" ] && [ -x "$PREFIX/music3-venv/bin/python" ]; }; then  # MiniMax Music 3: its own venv and weights
   PREFIX="$PREFIX" bash "$HERE/scripts/setup-music.sh" $([ "$MODE" = "--verify" ] && echo --verify) \
     || [ "$MUSIC" = 1 ] || echo "  ! MiniMax Music 3 is not fully set up: bash scripts/setup-music.sh"
+fi
+if [ "$BOLT" = 1 ]; then  # NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine: its weights (scripts/setup-bolt.sh)
+  PREFIX="$PREFIX" bash "$HERE/scripts/setup-bolt.sh" $([ "$MODE" = "--verify" ] && echo --verify) \
+    || echo "  ! NVIDIA Nemotron 3.5 Bolt is not fully set up: bash scripts/setup-bolt.sh"
 fi
 if [ "$SOUND" = 1 ] || { [ "$MODE" = "--verify" ] && [ -x "$PREFIX/sound-venv/bin/python" ]; }; then  # sound effects and foley: their own venv and weights
   PREFIX="$PREFIX" bash "$HERE/scripts/setup-sound.sh" $([ "$MODE" = "--verify" ] && echo --verify) \

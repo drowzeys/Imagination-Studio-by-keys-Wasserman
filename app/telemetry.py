@@ -157,9 +157,11 @@ def disk_of(path: Path) -> dict:
             "used_pct": round(100 * used / (used + avail), 1) if used + avail else None}
 
 
-def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None, comfy_port: int | None = None) -> APIRouter:
+def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None, comfy_port: int | None = None,
+           engines=None) -> APIRouter:
     """``guard`` is spark/memory_guard.py (its floor and the ComfyUI server's pid); ``comfy_port`` the port of the
-    studio's ComfyUI (spark/comfy.sh, SPARK_COMFY_PORT, 8190)."""
+    studio's ComfyUI (spark/comfy.sh, SPARK_COMFY_PORT, 8190); ``engines`` what the Studio's resident engines hold
+    (NVIDIA Nemotron 3.5 Bolt: state, backend, memory), asked on every reading, so cheap."""
 
     router = APIRouter()
     port = int(comfy_port or os.environ.get("SPARK_COMFY_PORT", "8190"))
@@ -267,6 +269,12 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         return [{"id": job["id"], "status": job.get("status"), "title": job.get("title"), "kind": job.get("kind"),
                  "progress": job.get("progress"), "spark": job.get("spark")} for job in reversed(listed)]
 
+    def held_by_engines() -> dict | None:
+        try:
+            return engines() if engines else None
+        except Exception:  # noqa: BLE001 - a reading never fails over an engine's status
+            return None
+
     def snapshot() -> dict:
         # nvidia-smi is asked at most every GPU_FRESH s, and every GPU_BUSY s while something renders: one GPU query is
         # cheap, but on every node every two seconds it added up beside a render
@@ -298,7 +306,7 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         return {"time": time.time(), "host": socket.gethostname(), "platform": "spark" if SPARK else "mac" if sys.platform == "darwin" else sys.platform,
                 "gpu": card, "memory": mem, "cpu": {"load1": load, "cores": os.cpu_count()}, "disk": drive,
                 "gpu_lock": lock_held, "renderer": {"comfy": cached("comfy", comfy)}, "jobs": queue(), "governor": ruled,
-                "warnings": warnings}
+                "engines": held_by_engines(), "warnings": warnings}
 
     def sample() -> None:
         while True:

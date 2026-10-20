@@ -11,6 +11,9 @@ os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp(prefix="studio-te
 # nor walk the machine for models: the app starts that scan 20 s after it is imported (app/discover.py), and it would
 # hold the scan's lock while tests/test_discover.py runs its own scans
 os.environ.setdefault("STUDIO_DISCOVER_DELAY", "-1")
+# nor start a model server of this machine's: NVIDIA Nemotron 3.5 Bolt as the Studio's engine (app/bolt.py) is a stand-in
+# in tests/test_bolt.py, and everywhere else the brains' local server is the one a test names
+os.environ.setdefault("BOLT_BACKEND", "external")
 
 
 @pytest.fixture

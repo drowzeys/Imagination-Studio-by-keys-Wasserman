@@ -109,7 +109,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
     setRow("Renders go to", "The studio folder, set when the studio starts (STUDIO_HOME)", el("code", { class: "st-path" }, (S && S.home) || "the studio folder")))]; }
 
 /* ---------- 4. Connections ---------- */
-const LOCAL_PRESETS = [["Ollama", "http://127.0.0.1:11434/v1"], ["LM Studio", "http://127.0.0.1:1234/v1"], ["vLLM", "http://127.0.0.1:8000/v1"], ["llama.cpp", "http://127.0.0.1:8080/v1"], ["Hermes proxy", ""]];
+const LOCAL_PRESETS = [["Studio engine · Bolt", "studio:bolt"], ["Ollama", "http://127.0.0.1:11434/v1"], ["LM Studio", "http://127.0.0.1:1234/v1"], ["vLLM", "http://127.0.0.1:8000/v1"], ["llama.cpp", "http://127.0.0.1:8080/v1"], ["Hermes proxy", ""]];
 // the Local models card: on Settings → Connections and at the top of Machine → Brains & tools
 function localModelsCard() {
   const b = (typeof BR !== "undefined" && BR.data && BR.data.backends || []).find(x => x.id === "local"), set = typeof BR !== "undefined" && BR.data && BR.data.settings || {};
@@ -185,6 +185,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Built with Fish Audio: Fish Audio Drama 3",
       "Stability AI: Stable Audio Open · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio (sound effects and foley)",
       "Ash Hart: TensorFold",
+      "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine) · MiaAI-Lab: the Bolt TensorFold recipe for the DGX Spark",
       "antirez: h3.c · RobZombAI: H3MLX · mrbizarro: minimax-h3-mlx (Phosphene) · Filip Strand and the mflux contributors · felix-ab: flux3-mlx",
       "Comfy Org: ComfyUI and its MOSS-Image files · Apple: MLX · NVIDIA Research · FastVideo · LightX2V · Viggle · speach1sdef178 · rookiestar28 · ddalcu",
       "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, llama.cpp; Blender and blender-mcp",
@@ -194,6 +195,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
     el("ul", { class: "st-credits" }, ["Attribution required: per the NOTICE file (Apache 2.0 §4(d)), any use, fork or redistribution keeps the NOTICE and credits Keys (github.com/drowzeys) and Sam Wasserman / Wasserman Productions (wassermanproductions.com) in its documentation and about/credits surface",
       "Qwen-Image-2.1: Qwen Research License (non-commercial)", "MiniMax H3: MiniMax H3 Community License (territory limits)", "MiniMax-Music3: its licence asks for its name in a commercial UI",
       "FLUX3-K: FLUX Kommunity License", "MOSS-Image: Apache 2.0 (commercial use allowed)", "Fish Audio Drama 3: Fish Audio Community License v1.0; a hosted voice service needs Fish's own licence",
+      "NVIDIA Nemotron 3.5 Bolt: OpenMDW License 1.1 (commercial use allowed; a copy keeps the licence and NVIDIA's notices) · its DGX Spark engine: MiaAI-Lab's recipe, MIT, on TensorFold",
       "Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue)", "MMAudio's weights: CC-BY-NC 4.0, non-commercial",
       "Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT); the studio ships none of their code but the Slate workflow and the Motion Previs port, each with its NOTICE"].map(t => el("li", {}, t))))]; }
 

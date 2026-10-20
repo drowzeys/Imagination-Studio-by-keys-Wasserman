@@ -276,6 +276,21 @@ of this pack's scripts. No code is shared; theirs is the far more complete tool.
 **ddalcu**'s **mlx-serve** showed how to make 30 steps cost nine: a velocity cache and attention reuse with careful
 gates. The engine pinned here carries an adaptation of it; it is not yet enabled in this pack's scripts.
 
+## The brain the studio runs itself: NVIDIA (Nemotron 3.5 Bolt) and Mia (MiaAI-Lab)
+
+**NVIDIA** made **NVIDIA Nemotron 3.5 Bolt** (nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB, 74B parameters, 9B active)
+and its **LiLiCorr** drafter, the model the studio loads as its own brain (`app/bolt.py`): the official 24 GB
+checkpoint at a326822a and the drafter at 4c6a5613, downloaded by `--bolt`, under the **OpenMDW License Agreement 1.1**
+(use, modification and redistribution free, commercial use included; a copy passed on keeps the agreement and NVIDIA's
+notices). No weights are in this pack.
+
+**Mia (MiaAI-Lab)** made **Nemotron-3.5-Bolt-TensorFold-DGX-Spark** (MIT), the recipe that serves Bolt on one DGX Spark
+with TensorFold's native engine: the Bolt lane backend (`libbolt.so`, the packed-weight kernels, the LiLiCorr drafter
+run inside it) and the patches to TensorFold 46a08c18. The studio's CUDA engine is that build, copied out of Mia's
+image or the carrier by `spark/build-bolt.sh`; the trimmed settings it runs with (4 streams, 65,536 tokens, 2 GiB of
+prompt cache) are the studio's. TensorFold is Ash Hart's and the contributors'; **llama.cpp** (Georgi Gerganov and the
+ggml contributors) runs Bolt on a Mac until TensorFold's Metal port of the engine lands.
+
 ## The agents and brains you connect: their makers
 
 The studio drives the coding agents and model servers you already use, each with your own sign-in or on your own

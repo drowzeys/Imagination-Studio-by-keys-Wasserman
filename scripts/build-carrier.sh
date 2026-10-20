@@ -42,6 +42,16 @@ if [ -x "$SPARK_MUSIC3/bin/music3-generate" ]; then
   ( cd payload/spark-music3 && sha256sum music3-generate commit > SHA256SUMS )
   echo "spark-music3: music3-generate at $(cut -c1-8 payload/spark-music3/commit) ($(uname -m), sm_121)"
 else echo "NOTE: no engine at $SPARK_MUSIC3: this carrier will not hold the DGX Spark's music engine" >&2; fi
+# the DGX Spark's NVIDIA Nemotron 3.5 Bolt engine (tensorfold-native with Mia's libbolt), when spark/build-bolt.sh has
+# installed it: native/ and TensorFold's licence files, with the recipe stamp and checksums build-bolt.sh checks
+SPARK_BOLT="${PREFIX:-$HOME/.local/opt/tensorfold-studio}/bolt"
+if [ -x "$SPARK_BOLT/native/bin/tensorfold-native" ] && [ -f "$SPARK_BOLT/recipe" ]; then
+  mkdir -p payload/spark-bolt
+  cp -a "$SPARK_BOLT/native" "$SPARK_BOLT/recipe" "$SPARK_BOLT/SHA256SUMS" payload/spark-bolt/
+  [ ! -d "$SPARK_BOLT/share" ] || cp -a "$SPARK_BOLT/share" payload/spark-bolt/
+  ( cd payload/spark-bolt && sha256sum -c SHA256SUMS >/dev/null ) || { echo "spark-bolt: checksums do not match" >&2; exit 1; }
+  echo "spark-bolt: Bolt engine, recipe $(cut -c1-8 payload/spark-bolt/recipe) ($(uname -m), sm_121)"
+else echo "NOTE: no engine at $SPARK_BOLT: this carrier will not hold the DGX Spark's Bolt engine" >&2; fi
 cat payload/SHA256SUMS
 if [ "${PUSH:-0}" = 1 ]; then
   docker buildx build --platform linux/arm64,linux/amd64 -f Dockerfile.ghcr -t "$IMAGE:$TAG" -t "$IMAGE:latest" --push .
