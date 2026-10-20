@@ -160,7 +160,10 @@ if [ "$ENGINE" = fasth3 ]; then
   [ -n "$WHY" ] || sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -Eq 'Apple M([5-9]|[1-9][0-9])' || WHY="this chip has no tensor units"
   [ -n "$WHY" ] || [ -z "${AUDIO_SHIFT:-}${EXTRA:-}" ] || WHY="AUDIO_SHIFT and EXTRA are MLX options"
   [ -n "$WHY" ] || [ -z "$TEXT_ENCODER" ] || WHY="TEXT_ENCODER is an MLX option"
-  [ -n "$WHY" ] || [ -z "${LORA:-}" ] || WHY="a LoRA is merged by the MLX engine"
+  # a LoRA is merged into the native engine's weights (bf16 + update in float32, then its int8 rounding) when the
+  # engine can; an older engine, or an adapter that changes more than the block projections, renders on MLX
+  [ -n "$WHY" ] || [ -z "${LORA:-}" ] || grep -q -- '"--lora"' "$ZIG_ENGINE/h3_case.py" \
+    || WHY="a LoRA is merged by the MLX engine (this native engine is older)"
   [ -n "$WHY" ] || [ -z "${LAST_FRAME:-}" ] || WHY="a last frame is held by the MLX engine"
   case "${FASTH3_ENGINE:-auto}" in
     mlx) WHY="FASTH3_ENGINE=mlx";;
@@ -175,7 +178,13 @@ if [ "$ENGINE" = fasth3 ]; then
     [ -z "${CROP:-}" ] || ZARGS+=(--crop "$CROP")
     [ -z "${FIRST_FRAME:-}" ] || ZARGS+=(--first-frame "$FIRST_FRAME")
     if [ -n "${PROMPT_FILE:-}" ]; then ZARGS+=(--prompt-file "$PROMPT_FILE"); else ZARGS+=(--prompt "$PROMPT"); fi
-    exec "$PREFIX/venv/bin/python" "$PREFIX/zig_fasth3.py" "${ZARGS[@]}"
+    [ -n "${LORA:-}" ] || exec "$PREFIX/venv/bin/python" "$PREFIX/zig_fasth3.py" "${ZARGS[@]}"
+    while IFS= read -r ONE; do [ -z "$ONE" ] || ZARGS+=(--lora "$ONE"); done <<<"$LORA"
+    # status 3: the native engine cannot apply this adapter (it was refused before any pass); the MLX engine can
+    STATUS=0; "$PREFIX/venv/bin/python" "$PREFIX/zig_fasth3.py" "${ZARGS[@]}" || STATUS=$?
+    [ "$STATUS" = 3 ] || exit "$STATUS"
+    [ "${FASTH3_ENGINE:-auto}" != zig ] || { echo "FASTH3_ENGINE=zig, but the native engine cannot apply this LoRA" >&2; exit 2; }
+    WHY="the native engine cannot apply this LoRA"
   fi
   # On a chip without tensor units the MLX engine cannot use the int8 kernels and would hold the whole checkpoint
   # in bfloat16 (64 GiB). With the 8-bit weights written by fasth3_q8.py it holds half of that (FASTH3_Q8=0 or 1
