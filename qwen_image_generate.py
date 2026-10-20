@@ -14,9 +14,13 @@ from pathlib import Path
 
 
 def encode_prompt(model_dir: str, prompt: str):
-    """Prompt embeddings (1, tokens, 4096) from mflux's Qwen-Image-2.1 prompt encoder."""
+    """Prompt embeddings (1, tokens, 4096) from mflux's Qwen-Image-2.1 prompt encoder, taken before the language
+    model's final RMSNorm: the transformer is conditioned on the last decoder layer's output before that norm
+    (diffusers' QwenImage21Pipeline hooks the norm out, ComfyUI on the Sparks does the same). mflux's text-to-image
+    encoder applies it, which moves the picture and, with the Turbo nodes, puts a fine mesh over textured areas."""
 
     import mlx.core as mx
+    from mlx import nn
     from mflux.models.common.tokenizer import TokenizerLoader
     from mflux.models.qwen21.model.qwen21_text_encoder.qwen21_prompt_encoder import Qwen21PromptEncoder
     from mflux.models.qwen21.model.qwen21_text_encoder.qwen21_text_encoder import Qwen21TextEncoder
@@ -35,6 +39,7 @@ def encode_prompt(model_dir: str, prompt: str):
     holder.text_encoder = Qwen21TextEncoder()
     tokenizers = TokenizerLoader.load_all(definitions=Qwen21WeightDefinition.get_tokenizers(), model_path=model_dir)
     Qwen21Initializer.load_components(holder, Path(model_dir), TextOnly, None)
+    holder.text_encoder.norm = nn.Identity()  # after loading, so its weight still finds its place
     embeds, mask = Qwen21PromptEncoder.encode_prompt(prompt=prompt, prompt_cache={}, tokenizer=tokenizers["qwen21"],
                                                      text_encoder=holder.text_encoder)
     if int(mx.sum(mask).item()) != mask.shape[1]:
@@ -43,6 +48,31 @@ def encode_prompt(model_dir: str, prompt: str):
     del holder
     mx.clear_cache()
     return embeds
+
+
+def saved_denoise(dit, text, width: int, height: int, nodes, seed: int, on_step):
+    """Euler over a checkpoint's own saved noise levels (Qwen-Image-2.1-Turbo's sample_sigmas) as saved, then 0: no
+    resolution shift, as ComfyUI's ManualSigmas runs them on the Sparks. TensorFold's sampler shifts fixed nodes for
+    the image size (right for an adapter's training nodes): on the Turbo nodes that starts the last step from 0.56
+    instead of 0.41 at 1024x576 and leaves a fine regular mesh over grass, rock and water."""
+
+    import mlx.core as mx
+    import numpy as np
+    from tensorfold.families.qwen_image import sampler
+    from tensorfold.families.qwen_image.config import latent_grid
+
+    rows, columns = latent_grid(width, height)
+    levels = np.concatenate([np.asarray(nodes, dtype=np.float32), np.zeros(1, dtype=np.float32)])
+    if levels[0] > 1 or np.any(np.diff(levels) >= 0):
+        raise ValueError("nodes must fall from at most 1 towards 0")
+    prefix = dit.prefix(text, rows, columns)
+    x = sampler.start_noise(seed, width, height, dit.config.in_channels).astype(mx.float32)
+    for index in range(len(nodes)):
+        velocity = dit(x, float(levels[index]), prefix)
+        x = x + velocity.astype(mx.float32) * float(levels[index + 1] - levels[index])
+        mx.eval(x)
+        on_step(index, len(nodes))
+    return x.reshape(1, rows, columns, -1).transpose(0, 3, 1, 2)
 
 
 def guided_denoise(dit, text, negative, width: int, height: int, steps: int, seed: int, cfg: float, on_step):
@@ -82,7 +112,10 @@ def main() -> int:
     parser.add_argument("--steps", type=int, default=40)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--seeds", help="comma-separated seeds: one image each from one load, written as NAME_s<seed>.png")
-    parser.add_argument("--nodes", help="comma-separated raw noise levels for a distilled adapter")
+    parser.add_argument("--nodes", help="comma-separated noise levels: a distilled adapter's training nodes, shifted for "
+                        "the image size; with --raw-nodes a checkpoint's own saved schedule, run as given")
+    parser.add_argument("--raw-nodes", action="store_true",
+                        help="run --nodes as given, without the resolution shift (Qwen-Image-2.1-Turbo's sample_sigmas)")
     parser.add_argument("--lora", help="adapter safetensors to merge before quantizing")
     parser.add_argument("--no-int8", action="store_true", help="keep every projection in bfloat16")
     parser.add_argument("--vae-dtype", default="float32", choices=("float32", "bfloat16"))
@@ -127,6 +160,8 @@ def main() -> int:
         step = lambda i, n: print(f"[tensorfold] step {i + 1}/{n}", file=sys.stderr)  # noqa: E731
         if guided:
             latents = guided_denoise(dit, text, negative, args.width, args.height, args.steps, seed, args.cfg, step)
+        elif nodes and args.raw_nodes:
+            latents = saved_denoise(dit, text, args.width, args.height, nodes, seed, step)
         else:
             latents = sampler.denoise(dit, text, args.width, args.height, args.steps, seed, nodes, on_step=step)
         mx.eval(latents)

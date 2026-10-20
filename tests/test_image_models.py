@@ -205,6 +205,29 @@ def test_qwen_full_runs_the_base_model_with_guidance():
         assert done.stdout.startswith(str(base)) and "--steps 40 --cfg 4" in done.stdout, done.stdout
 
 
+def test_qwen_turbo_runs_its_saved_nodes_as_saved():
+    # shifted for the size, the Turbo nodes leave a fine mesh over grass, rock and water; the Sparks run them as saved
+    if sys.platform.startswith("linux"):
+        assert '"1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0.0"' in (ROOT / "spark/spark_generate.py").read_text()
+        return
+    with tempfile.TemporaryDirectory() as folder:
+        turbo = Path(folder) / "Qwen-Image-2.1-Turbo"
+        turbo.mkdir()
+        (turbo / "model_index.json").write_text('{"_class_name": "QwenImage21Pipeline", "sample_sigmas": [1.0, 0.5]}')
+        prefix = Path(folder) / "prefix"
+        (prefix / "venv/bin").mkdir(parents=True)
+        (prefix / "venv/bin/python").write_text("#!/bin/sh\nshift\necho \"$@\"\n")
+        (prefix / "venv/bin/python").chmod(0o755)
+        done = subprocess.run(["bash", str(ROOT / "scripts/image.sh"), "a lighthouse", str(Path(folder) / "out.png")],
+                              capture_output=True, text=True,
+                              env={"PATH": "/usr/bin:/bin", "HOME": folder, "IMAGE_MODEL": "qwen", "PREFIX": str(prefix),
+                                   "QWEN_MODEL_DIR": str(turbo)})
+        assert done.returncode == 0, done.stderr
+        assert "--raw-nodes --nodes 1.0,0.978453," in done.stdout, done.stdout
+    script = (ROOT / "qwen_image_generate.py").read_text()
+    assert "holder.text_encoder.norm = nn.Identity()" in script and "elif nodes and args.raw_nodes:" in script
+
+
 def test_a_spark_offers_moss_image_only_with_its_files_and_a_comfyui_that_knows_it():
     import server
 
