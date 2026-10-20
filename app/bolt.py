@@ -595,6 +595,12 @@ class Metal(Cuda):
     # not measured yet: the CUDA engine's figures until the Metal port has its own
     folder_name = "bolt-metal"
 
+    def __init__(self) -> None:
+        super().__init__()
+        # the Metal build (nemotron-bolt-metal b4edaea5) has no vision tower and its server refuses the --vision-* flags
+        # ("unrecognized arguments: --vision-max-videos": the fresh 3.1.0 install's first load); BOLT_VISION=1 asks anyway
+        self.vision = os.environ.get("BOLT_VISION") == "1"
+
     def present(self) -> str:
         if not MAC:
             return "The Metal backend runs on a Mac (Apple Silicon)."

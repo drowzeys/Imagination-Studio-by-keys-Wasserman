@@ -393,3 +393,14 @@ def test_the_pages_show_the_engine():
     source = (ROOT / "app" / "server.py").read_text()
     assert "bolt.admit(job" in source and "bolt.queue_empty()" in source and "bolt.room_mb()" in source
     assert json.loads(json.dumps(bolt.MAC_PEAK_GB))["video"] == 33.0
+
+
+def test_the_metal_engine_starts_without_the_vision_flags(monkeypatch):
+    """The Metal build has no vision tower: its server refused --vision-max-videos and the fresh 3.1.0 Mac install's
+    Bolt never loaded. The CUDA engine keeps them."""
+
+    monkeypatch.delenv("BOLT_VISION", raising=False)
+    assert not any(a.startswith("--vision") for a in bolt.Metal().argv(9999))
+    assert "--vision" in bolt.Cuda().argv(9999)
+    monkeypatch.setenv("BOLT_VISION", "1")
+    assert "--vision" in bolt.Metal().argv(9999)
