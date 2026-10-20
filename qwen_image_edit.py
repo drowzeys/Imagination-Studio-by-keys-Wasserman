@@ -49,8 +49,9 @@ def lora_specs(specs: list[str]) -> tuple[list[str], list[float]]:
 
 
 def own_schedule(nodes: tuple[float, ...]) -> None:
-    """Make mflux's default schedule the checkpoint's own raw noise levels: shifted for the size like any other,
-    without the terminal stretch (what scripts/image.sh does with the same levels on the TensorFold transformer)."""
+    """Make mflux's default schedule the checkpoint's own noise levels as saved, then 0: no size shift and no terminal
+    stretch, as ComfyUI's ManualSigmas runs them on the Sparks (and scripts/image.sh with --raw-nodes). Shifted for
+    the size, the last step starts higher and textured areas come out under a fine regular mesh."""
 
     import mlx.core as mx
     from mflux.models.common.config import config as mflux_config
@@ -60,7 +61,7 @@ def own_schedule(nodes: tuple[float, ...]) -> None:
         def _get_sigmas(self):
             if self.config.num_inference_steps != len(nodes):
                 raise ValueError(f"this checkpoint runs on its own {len(nodes)} steps")
-            return LinearScheduler.shift_sigmas(mx.array(list(nodes), dtype=mx.float32), self.config, use_terminal=False)
+            return mx.concatenate([mx.array(list(nodes), dtype=mx.float32), mx.zeros(1)])
 
     mflux_config.LinearScheduler = Nodes
 

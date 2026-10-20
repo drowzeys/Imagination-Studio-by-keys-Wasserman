@@ -41,11 +41,12 @@ case "${IMAGE_MODEL:-qwen}" in
   qwen-full) TURBO=0;;
   *) echo "IMAGE_MODEL is qwen, qwen-full, flux3k-fast, flux3k-full or moss-image, not ${IMAGE_MODEL}" >&2; exit 2;;
 esac
-# the Turbo checkpoint carries its schedule in model_index.json; the base model does not
+# the Turbo checkpoint carries its schedule in model_index.json (run as saved, no size shift, as on the Sparks);
+# the base model does not
 if grep -q sample_sigmas "$QWEN_MODEL_DIR/model_index.json" 2>/dev/null; then DISTILLED=1; else DISTILLED=0; fi
 SIZE=(-o "$OUT" --width "${WIDTH:-1344}" --height "${HEIGHT:-768}" --seed "${SEED:-0}")
 if [ "${TURBO:-1}" = 1 ] && [ "$DISTILLED" = 1 ]; then
-  ARGS=("$QWEN_MODEL_DIR" "${SIZE[@]}" --nodes 1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568)
+  ARGS=("$QWEN_MODEL_DIR" "${SIZE[@]}" --raw-nodes --nodes 1.0,0.978453,0.95418,0.926626,0.89508,0.845148,0.704534,0.414568)
 elif [ "${TURBO:-1}" = 1 ]; then
   ARGS=("$QWEN_MODEL_DIR" "${SIZE[@]}" --lora "$TURBO_ADAPTER" --nodes 1.0,0.9375,0.875,0.75,0.5,0.25)
 else
