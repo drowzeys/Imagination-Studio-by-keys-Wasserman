@@ -78,3 +78,9 @@ def test_films_timelines_references_and_pseudo_settings(tmp_path):
     assert bench.value_of(job(1, "scout", preset="small"), "size", FIXED) == "864x480"
     assert bench.value_of(job(1, "soundtrack", take="song1"), "song_title", FIXED) == "Neon Pulse"
     assert bench.check_value(0.92, {"max": 1.2}) and bench.check_value(5.125, {"approx": 5, "tol": 0.6}) and not bench.check_value(None, {"min": 1})
+
+
+def test_a_job_that_fits_two_matchers_goes_where_both_are_met(tmp_path):
+    want = {"jobs": [{"kind": "scout", "n": 1, "prompt_has": ["neon"]}, {"kind": "scout", "n": 1, "prompt_has": ["sandstorm"]}]}
+    made = [job(1, "scout", prompt="a chase in a neon canyon in a sandstorm"), job(2, "scout", prompt="a chase in a neon canyon")]
+    assert bench.score(want, made, [], [], FIXED, "j1 j2", tmp_path)["exact"]

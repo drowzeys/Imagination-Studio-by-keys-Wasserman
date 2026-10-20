@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import itertools
 import json
 import os
 import re
@@ -276,32 +277,42 @@ def score(spec: dict, jobs: list, films: list, projects: list, fixed: dict, repl
     live = [j for j in jobs if j.get("status") != "cancelled"]
     shots = {shot["id"]: shot.get("name") for film in films for scene in film.get("scenes") or [] for shot in scene.get("shots") or []}
     scout_outputs = {o for j in jobs if j.get("kind") == "scout" for o in j.get("outputs") or []}
-    used: set = set()
-    for matcher in spec.get("jobs") or []:
-        kinds = matcher["kind"] if isinstance(matcher["kind"], list) else [matcher["kind"]]
-        wanted_status = matcher.get("status")
-        pool = [j for j in (jobs if wanted_status else live) if j.get("kind") in kinds and j["id"] not in used
-                and (not wanted_status or j.get("status") == wanted_status)]
-        loose = [j for j in pool if all(w.lower() in text_of(j).lower() for w in matcher.get("prompt_has") or [])] or pool
+    def assign(matchers: list) -> tuple[set, list, list]:
+        """The jobs each matcher takes, in this order of the matchers: (jobs used, problems, missing)."""
 
-        def faults(job: dict) -> list[str]:
-            out = [f"{job['kind']}.{key}={value_of(job, key, fixed)!r} not {want!r}" for key, want in (matcher.get("params") or {}).items()
-                   if not check_value(value_of(job, key, fixed), want)]
-            out += [f"{job['kind']} prompt lacks {w!r}" for w in matcher.get("prompt_has") or [] if w.lower() not in text_of(job).lower()]
-            params = job.get("params") or {}
-            if matcher.get("image_from") and str(params.get("image") or "").lstrip("/") not in scout_outputs:
-                out.append(f"{job['kind']} does not open on the picture made for it (image={params.get('image')!r})")
-            if matcher.get("slate_shot"):
-                shot_id = (params.get("slate") or {}).get("shot")
-                if shot_id not in shots or (matcher["slate_shot"] != "*" and (shots[shot_id] or "").lower() != matcher["slate_shot"].lower()):
-                    out.append(f"{job['kind']} is not a take of Slate shot {matcher['slate_shot']}")
-            return out
-        ranked = sorted(loose, key=lambda j: len(faults(j)))[:matcher["n"]]
-        if len(ranked) < matcher["n"]:
-            missing.append(f"{matcher['n'] - len(ranked)} {'/'.join(kinds)} job(s)" + (f" with {matcher['prompt_has']}" if matcher.get("prompt_has") else ""))
-        for job in ranked:
-            used.add(job["id"])
-            problems += faults(job)
+        used_, problems_, missing_ = set(), [], []
+        for matcher in matchers:
+            kinds = matcher["kind"] if isinstance(matcher["kind"], list) else [matcher["kind"]]
+            wanted_status = matcher.get("status")
+            pool = [j for j in (jobs if wanted_status else live) if j.get("kind") in kinds and j["id"] not in used_
+                    and (not wanted_status or j.get("status") == wanted_status)]
+            loose = [j for j in pool if all(w.lower() in text_of(j).lower() for w in matcher.get("prompt_has") or [])] or pool
+
+            def faults(job: dict) -> list[str]:
+                out = [f"{job['kind']}.{key}={value_of(job, key, fixed)!r} not {want!r}" for key, want in (matcher.get("params") or {}).items()
+                       if not check_value(value_of(job, key, fixed), want)]
+                out += [f"{job['kind']} prompt lacks {w!r}" for w in matcher.get("prompt_has") or [] if w.lower() not in text_of(job).lower()]
+                params = job.get("params") or {}
+                if matcher.get("image_from") and str(params.get("image") or "").lstrip("/") not in scout_outputs:
+                    out.append(f"{job['kind']} does not open on the picture made for it (image={params.get('image')!r})")
+                if matcher.get("slate_shot"):
+                    shot_id = (params.get("slate") or {}).get("shot")
+                    if shot_id not in shots or (matcher["slate_shot"] != "*" and (shots[shot_id] or "").lower() != matcher["slate_shot"].lower()):
+                        out.append(f"{job['kind']} is not a take of Slate shot {matcher['slate_shot']}")
+                return out
+            ranked = sorted(loose, key=lambda j: len(faults(j)))[:matcher["n"]]
+            if len(ranked) < matcher["n"]:
+                missing_.append(f"{matcher['n'] - len(ranked)} {'/'.join(kinds)} job(s)" + (f" with {matcher['prompt_has']}" if matcher.get("prompt_has") else ""))
+            for job in ranked:
+                used_.add(job["id"])
+                problems_ += faults(job)
+        return used_, problems_, missing_
+
+    # the matchers in the order that fits the jobs best (a job may fit two of them: "neon" and "sandstorm")
+    matchers = spec.get("jobs") or []
+    orders = itertools.permutations(matchers) if len(matchers) <= 5 else [matchers]
+    used, problems, missing = min((assign(list(order)) for order in orders), key=lambda r: (len(r[2]), len(r[1])))
+    problems, missing = list(problems), list(missing)
     extra = [j for j in live if j["id"] not in used]
     problems += [f"extra {j['kind']} job: {j.get('title')}" for j in extra]
 
