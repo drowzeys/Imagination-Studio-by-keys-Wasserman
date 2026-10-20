@@ -652,15 +652,19 @@ class Cuda(Served):
                              lambda p: (p / "config.json").is_file() and (p / "model.safetensors.index.json").is_file())
         self.codec = located("drama3-codec", self.codec, Path.is_file)
         if not os.access(self.bin, os.X_OK):
-            return (f"No Drama 3 engine at {self.bin} (README, Voice: build TensorFold's drama3-cuda branch; DRAMA3_CUDA_BIN names another)."
+            return (f"No Drama 3 engine at {self.bin} (bash oneshot-setup-spark.sh --voice builds TensorFold's drama3-cuda engine "
+                    "and sets up the rest; DRAMA3_CUDA_BIN names another)."
                     + found_hint("drama3-binary"))
         if not self.lib.is_file():
-            return f"No libtensorfold_drama3.so at {self.lib} (the same build makes it; DRAMA3_CUDA_LIB names another)." + found_hint("drama3-lib")
+            return (f"No libtensorfold_drama3.so at {self.lib} (spark/build-drama3.sh makes it with the engine: bash "
+                    "oneshot-setup-spark.sh --voice; DRAMA3_CUDA_LIB names another)." + found_hint("drama3-lib"))
         if not (self.model / "config.json").is_file() or not (self.model / "model.safetensors.index.json").is_file():
-            return (f"No Drama 3 checkpoint at {self.model} (hf download fishaudio/drama-3; DRAMA3_CUDA_MODEL names another)."
+            return (f"No Drama 3 checkpoint at {self.model} (bash oneshot-setup-spark.sh --voice, or hf download fishaudio/drama-3; "
+                    "DRAMA3_CUDA_MODEL names another)."
                     + found_hint("drama3-checkpoint"))
         if not self.codec.is_file():
-            return (f"No converted codec at {self.codec} (once: codec_convert.py {self.model} {self.codec}; "
+            return (f"No converted codec at {self.codec} (converted once from the checkpoint's codec.pth: bash "
+                    f"oneshot-setup-spark.sh --voice, or spark/drama3_codec.py {self.model} {self.codec}; "
                     "DRAMA3_CUDA_CODEC names another)." + found_hint("drama3-codec"))
         free = mem_available_gb()
         if 0 <= free < self.NEED_GB and not comfy_up():

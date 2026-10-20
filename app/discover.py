@@ -346,7 +346,7 @@ def drama3_needs() -> list[dict]:
         binary = env_path("DRAMA3_CUDA_BIN", here / "bin" / "drama3-generate")
         model = env_path("DRAMA3_CUDA_MODEL", home() / "models" / "drama-3")
         codec = env_path("DRAMA3_CUDA_CODEC", here / "codec-v1.safetensors")
-        convert = ("python3 <TensorFold drama3-cuda checkout>/tools/drama3/codec_convert.py {found_dir} " + str(codec))
+        convert = (f"{prefix() / 'venv/bin/python'} -I {APP.parent / 'spark/drama3_codec.py'} {{found_dir}} {codec}")
         return [
             need("drama3-checkpoint", "Fish Audio Drama 3 checkpoint", "Voice (Drama 3)", model, "folder", env="DRAMA3_CUDA_MODEL",
                  members=("config.json", "model.safetensors.index.json"), anchor="model.safetensors.index.json",
@@ -355,12 +355,13 @@ def drama3_needs() -> list[dict]:
                  min_bytes=100 << 20, check=lambda p: "" if safetensors_header(p) else "not a safetensors file",
                  alt=[{"names": ("codec.pth",), "check": lambda p: fish_checkpoint(p.parent), "convert": convert,
                        "note": "the checkpoint's own codec.pth: the CUDA engine reads codec-v1.safetensors, converted from it once"}],
-                 download="converted once from the checkpoint's codec.pth (codec_convert.py)"),
+                 download="scripts/setup-voice.sh (converts the checkpoint's codec.pth once: spark/drama3_codec.py)"),
             need("drama3-binary", "drama3-generate (TensorFold CUDA engine)", "Voice (Drama 3)", binary, env="DRAMA3_CUDA_BIN",
-                 executable=True, check=lambda p: "" if is_binary(p) else "not a program", download="README, Voice: build TensorFold's drama3-cuda branch"),
+                 executable=True, check=lambda p: "" if is_binary(p) else "not a program",
+                 download="scripts/setup-voice.sh (TensorFold's drama3-cuda engine: spark/build-drama3.sh)"),
             need("drama3-lib", "libtensorfold_drama3.so", "Voice (Drama 3)",
                  env_path("DRAMA3_CUDA_LIB", binary.parent.parent / "lib" / "libtensorfold_drama3.so"), env="DRAMA3_CUDA_LIB",
-                 check=lambda p: "" if is_binary(p) else "not a library", download="the same build as drama3-generate"),
+                 check=lambda p: "" if is_binary(p) else "not a library", download="scripts/setup-voice.sh (built with drama3-generate)"),
         ]
     model = env_path("DRAMA3_MODEL", home() / "models/drama-3-mlx")
     return [need("drama3-mlx", "Fish Audio Drama 3 for MLX (converted)", "Voice (Drama 3)", model, "folder", env="DRAMA3_MODEL",
