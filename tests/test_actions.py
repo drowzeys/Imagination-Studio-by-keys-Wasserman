@@ -224,3 +224,26 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_an_action_starts_from_an_empty_server_after_another_kind_of_job(monkeypatch, tmp_path):
+    """ComfyUI kept FLUX3-K's weights beside a turnaround's Ref2VA transformer and text encoder, and the DGX Spark's
+    memory floor stopped it (2026-10-20): a Library action after a picture, a clip or a song restarts the server."""
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spark"))
+    import spark_workflows as W
+    stops = []
+    monkeypatch.setattr(W.sg, "STATE", tmp_path / "comfy.kind")
+    monkeypatch.setattr(W, "PATCHED", tmp_path / "comfy.patched")
+    monkeypatch.setattr(W.sg, "up", lambda: not stops)
+    monkeypatch.setattr(W.sg, "ensure_server", lambda kind: None)
+    monkeypatch.setattr(W.sg, "call", lambda path, *a: {n: {} for n in W.NODES["turnaround"]})
+    monkeypatch.setattr(W, "listed", lambda loader, field: [W.sg.REF2VA["bf16"]])
+    monkeypatch.setattr(W, "comfy_pid", lambda: "1")
+    monkeypatch.setattr(W.time, "sleep", lambda s: None)
+    monkeypatch.setattr(W.subprocess, "run", lambda cmd, **k: stops.append(cmd))
+    for last, restarted in (("flux3", True), ("image", True), ("video-int8", True), ("workflow-upscale", False), ("", False)):
+        stops.clear()
+        (tmp_path / "comfy.kind").write_text(last)
+        W.server("turnaround")
+        assert bool(stops) == restarted, last
