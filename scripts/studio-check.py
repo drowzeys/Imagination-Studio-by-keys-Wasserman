@@ -977,7 +977,12 @@ def c_song(r: Run):
     job = r.job({"caption": "A warm, cinematic song with a clear lead vocal.", "lyrics": "[Verse]\nThe light is turning on the hill\n"
                  "The city burns in neon light\n[Chorus]\nCarry me home, carry me home\nOver the water, I'm never alone",
                  "seconds": 30, "seed": 1, "live": False}, path="/api/music/takes")
-    return sound(r.output(job, r"\.wav$"), 30, 4.0) | {"_job": job}
+    out = r.output(job, r"\.wav$")
+    # "seconds" is the song's cap (music.py): the model may end a song sooner, at half the cap or more here
+    length = probe(out)["duration"]
+    if 15 <= length < 26:
+        return sound(out) | {"ended_early_s": round(length, 2), "_job": job}
+    return sound(out, 30, 4.0) | {"_job": job}
 
 
 @check("video-sharp-spec", "realistic")
