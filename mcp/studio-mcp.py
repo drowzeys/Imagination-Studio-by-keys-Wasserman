@@ -9,7 +9,9 @@ own HTTP API, so the Studio must be running; paths are relative to the Studio's 
 import json
 import mimetypes
 import os
+import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -70,8 +72,46 @@ TOOLS = [
                                           "description": "default 1920x1080"}})},
     {"name": "job_status", "description": "One job: status (queued, running, done, failed, cancelled), progress, outputs, error.",
      "inputSchema": text_schema({"id": {"type": "string"}}, ("id",))},
+    {"name": "wait_for_jobs", "description": "Wait until these jobs are done, failed or cancelled, for at most `seconds` (default 50, "
+                                             "up to 600). Returns each job as job_status does. Use it instead of asking job_status again and again.",
+     "inputSchema": text_schema({"ids": {"type": "array", "items": {"type": "string"}, "description": "job ids"},
+                                 "seconds": {"type": "number", "description": "the longest to wait (default 50, up to 600)"}}, ("ids",))},
     {"name": "list_jobs", "description": "The Studio's queue and finished jobs, newest first.",
      "inputSchema": text_schema({"limit": {"type": "integer", "description": "at most this many (default 20)"}})},
+    {"name": "slate_films", "description": "The films in Slate (the Production tab), newest first: id, name, scenes and shots.",
+     "inputSchema": text_schema({})},
+    {"name": "slate_film", "description": "One Slate film: its scenes and shots with their ids and prompts, and each shot's takes "
+                                          "(clips) with their Library paths and job ids.",
+     "inputSchema": text_schema({"film": {"type": "string", "description": "the film's id or name"}}, ("film",))},
+    {"name": "slate_new_film", "description": "Make a new Slate film. Returns its id.",
+     "inputSchema": text_schema({"name": {"type": "string"}, "logline": {"type": "string", "description": "the film in one sentence"}}, ("name",))},
+    {"name": "slate_add_scene", "description": "Add a scene to a Slate film. Returns the scene's id.",
+     "inputSchema": text_schema({"film": {"type": "string", "description": "the film's id or name"}, "name": {"type": "string"},
+                                 "synopsis": {"type": "string", "description": "what happens in the scene"}}, ("film", "name"))},
+    {"name": "slate_add_shot", "description": "Add a shot to a scene of a Slate film. The prompt describes what is seen: the subject and "
+                                             "its action, the composition, the lighting, the camera, the style and the mood (it may use "
+                                             "'# Subject', '# Composition', '# Lighting', '# Camera', '# Style', '# Mood' headings, each on a line "
+                                             "of its own). No "
+                                             "spoken words in the prompt. Returns the shot's id.",
+     "inputSchema": text_schema({"film": {"type": "string", "description": "the film's id or name"},
+                                 "scene": {"type": "string", "description": "the scene's id or name"},
+                                 "name": {"type": "string", "description": "the shot's name: the one the filmmaker gives, else e.g. Shot 01"},
+                                 "prompt": {"type": "string"},
+                                 "intent": {"type": "string", "description": "a note for the crew: what the shot is for (never rendered)"},
+                                 "seconds": {"type": "number", "description": "the clip's length, 1 to 15 (default the film's, 8)"},
+                                 "size": {"type": "string", "enum": ["EWS", "WS", "MWS", "MS", "MCU", "CU", "ECU", "Insert"]},
+                                 "angle": {"type": "string", "enum": ["eye level", "low", "high", "overhead", "dutch", "over-shoulder", "POV"]},
+                                 "movement": {"type": "string", "enum": ["locked", "handheld", "push-in", "pull-back", "orbit", "pan", "tilt",
+                                                                         "track", "crane", "drone", "steadicam"]},
+                                 "soundscape": {"type": "string", "description": "ambience and physical sound"}},
+                                ("film", "scene", "name", "prompt"))},
+    {"name": "slate_render_shot", "description": "Queue a clip of a Slate shot: the shot is compiled to the video model's prompt and "
+                                                "rendered at its own length; the take is logged in the shot. Give first_frame (a finished "
+                                                "Library picture, e.g. a still made for this shot) to open the clip on it. Follow it with "
+                                                "wait_for_jobs.",
+     "inputSchema": text_schema({"film": {"type": "string", "description": "the film's id or name"},
+                                 "shot": {"type": "string", "description": "the shot's id or name"},
+                                 "first_frame": {"type": "string", "description": "Library path of the opening picture"}}, ("film", "shot"))},
     {"name": "upload_file", "description": "Copy a file from this machine into the Studio's Library (png, jpg, webp, mp4, mov, wav, mp3...). "
                                            "Returns its Library path.",
      "inputSchema": text_schema({"path": {"type": "string", "description": "absolute path of the file on this machine"}}, ("path",))},
@@ -100,6 +140,76 @@ def call(method: str, path: str, body=None, raw: bytes | None = None, kind: str 
 
 def job_summary(job: dict) -> dict:
     return {k: job.get(k) for k in ("id", "kind", "status", "title", "progress", "outputs", "error", "elapsed", "estimate")}
+
+
+FINISHED = ("done", "failed", "cancelled")
+
+
+def wait_for(ids: list, seconds: float) -> list:
+    ends = time.time() + max(0.0, min(float(seconds), 600.0))
+    while True:
+        now = [job_summary(call("GET", "/api/jobs/" + urllib.request.quote(str(i), safe=""))) for i in ids]
+        if all(job.get("status") in FINISHED for job in now) or time.time() >= ends:
+            return now
+        time.sleep(min(3.0, max(0.1, ends - time.time())))
+
+
+def slate_id(prefix: str) -> str:
+    """An id in the shape the Slate page makes them (slId): prefix, the time in base 36, five random characters."""
+
+    stamp, digits, out = int(time.time() * 1000), "0123456789abcdefghijklmnopqrstuvwxyz", ""
+    while stamp:
+        stamp, rest = divmod(stamp, 36)
+        out = digits[rest] + out
+    return f"{prefix}-{out}-{uuid.uuid4().hex[:5]}"
+
+
+def slate_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+
+
+def named(items: list, ref, what: str) -> dict:
+    """The item whose id is ref, else the one whose name is ref (case aside); one only."""
+
+    ref = str(ref or "").strip()
+    hits = [i for i in items if i.get("id") == ref] or [i for i in items if (i.get("name") or "").strip().lower() == ref.lower()]
+    if len(hits) != 1:
+        raise StudioError(f"no {what} called {ref}" if not hits else f"{len(hits)} {what}s are called {ref}: give its id")
+    return hits[0]
+
+
+def film_of(ref) -> dict:
+    meta = named(call("GET", "/api/slate/projects"), ref, "film")
+    return call("GET", "/api/slate/projects/" + urllib.request.quote(meta["id"], safe=""))
+
+
+def save_film(film: dict) -> None:
+    call("PUT", "/api/slate/projects/" + urllib.request.quote(film["id"], safe=""), film)
+
+
+def shot_of(film: dict, ref) -> tuple:
+    pairs = [(scene, shot) for scene in film.get("scenes") or [] for shot in scene.get("shots") or []]
+    shot = named([shot for _, shot in pairs], ref, "shot")
+    return next(scene for scene, one in pairs if one is shot), shot
+
+
+HEADING = re.compile(r"^[ \t]*(#+)[ \t]*(subject|composition|lighting|camera|style|mood)[ \t]*:[ \t]*(\S.*)$", re.I | re.M)
+
+
+def sectioned(prompt: str) -> str:
+    """A shot's prompt with each section heading on a line of its own, as Slate reads them ("# Subject: a keeper" is
+    "# Subject" and "a keeper")."""
+
+    return HEADING.sub(lambda m: f"{m.group(1)} {m.group(2).capitalize()}\n{m.group(3)}", prompt.strip())
+
+
+def film_summary(film: dict) -> dict:
+    return {"id": film["id"], "name": film.get("name"), "logline": film.get("logline"), "scenes": [
+        {"id": scene.get("id"), "name": scene.get("name"), "synopsis": scene.get("synopsis"), "shots": [
+            {"id": shot.get("id"), "name": shot.get("name"), "seconds": (shot.get("spec") or {}).get("durationSec"),
+             "prompt": (shot.get("prompt") or "")[:300], "first_frame": (shot.get("tf") or {}).get("image"),
+             "takes": [{"path": take.get("mediaPath"), "job": take.get("jobId"), "rating": take.get("rating")} for take in shot.get("takes") or []]}
+            for shot in scene.get("shots") or []]} for scene in film.get("scenes") or []]}
 
 
 def project_of(given) -> dict:
@@ -162,6 +272,69 @@ def run(name: str, args: dict):
         return job_summary(call("POST", "/api/jobs", {"kind": "export", "title": "Export " + str(project.get("name") or project["id"]), "params": params}))
     if name == "job_status":
         return job_summary(call("GET", "/api/jobs/" + urllib.request.quote(str(args["id"]), safe="")))
+    if name == "wait_for_jobs":
+        ids = args["ids"] if isinstance(args["ids"], list) else [args["ids"]]
+        if not ids or len(ids) > 20:
+            raise StudioError("ids is a list of 1 to 20 job ids")
+        return wait_for(ids, args.get("seconds") if args.get("seconds") not in (None, "") else 50)
+    if name == "slate_films":
+        return call("GET", "/api/slate/projects")
+    if name == "slate_film":
+        return film_summary(film_of(args["film"]))
+    if name == "slate_new_film":
+        made = call("POST", "/api/slate/projects", {"name": str(args["name"])})
+        if args.get("logline"):
+            made["logline"] = str(args["logline"])
+            save_film(made)
+        return {"film": made["id"], "name": made.get("name")}
+    if name == "slate_add_scene":
+        film = film_of(args["film"])
+        scene = {"id": slate_id("scene"), "name": str(args["name"]).strip() or "Scene " + str(len(film["scenes"]) + 1),
+                 "synopsis": str(args.get("synopsis") or ""), "shots": []}
+        film.setdefault("scenes", []).append(scene)
+        save_film(film)
+        return {"film": film["id"], "scene": scene["id"], "name": scene["name"]}
+    if name == "slate_add_shot":
+        film = film_of(args["film"])
+        scene, defaults = named(film.get("scenes") or [], args["scene"], "scene"), film.get("defaults") or {}
+        seconds = float(args["seconds"]) if args.get("seconds") not in (None, "") else defaults.get("durationSec") or 8
+        if not 1 <= seconds <= 15:
+            raise StudioError("a shot is 1 to 15 seconds")
+        shot = {"id": slate_id("shot"), "name": str(args.get("name") or "").strip() or "Shot " + str(len(scene["shots"]) + 1).zfill(2),
+                "intent": str(args.get("intent") or ""),
+                "spec": {"durationSec": seconds, "fps": defaults.get("fps") or 24, "aspectRatio": defaults.get("aspectRatio") or "16:9",
+                         "lens": args.get("lens") or None, "movement": args.get("movement") or None, "size": args.get("size") or None,
+                         "angle": args.get("angle") or None},
+                "prompt": sectioned(str(args["prompt"])), "lockedLines": [], "mutedLines": [], "beatSheet": None, "targetModel": "minimax-h3",
+                "maxChars": None, "variants": [], "history": [], "takes": [], "createdAt": slate_now(), "updatedAt": slate_now(),
+                "tf": {"start": "text", "cast": [], "location": "", "lines": [], "soundscape": str(args.get("soundscape") or ""), "music": "N/A",
+                       "cue": "", "seed": 1, "image": None, "h3": "", "h3Auto": True}}
+        scene["shots"].append(shot)
+        save_film(film)
+        return {"film": film["id"], "scene": scene["id"], "shot": shot["id"], "name": shot["name"], "seconds": seconds,
+                "rendered": False, "note": "saved in Slate, not rendered: slate_render_shot queues its clip, when a clip is asked for"}
+    if name == "slate_render_shot":
+        film = film_of(args["film"])
+        scene, shot = shot_of(film, args["shot"])
+        tf = shot.setdefault("tf", {})
+        if args.get("first_frame"):
+            tf.update(start="image", image=str(args["first_frame"]))
+        save_film(film)  # the compile reads the shot from the film as it is now
+        compiled = call("POST", "/api/slate/compile", {"projectId": film["id"], "shotId": shot["id"]})
+        if args.get("first_frame") and compiled.get("mode") != "image":
+            raise StudioError(f"{args['first_frame']} is not a finished picture in the Library yet: wait for its job, then render the shot")
+        output = f"slate/{film['id']}/takes/{shot['id']}-{slate_id('t').split('-')[1]}.mp4"
+        prompt = (tf.get("h3") or "").strip() if tf.get("h3Auto") is False and (tf.get("h3") or "").strip() else compiled["prompt"]
+        job = call("POST", "/api/jobs", {"kind": "video", "title": f"{scene.get('name')} · {shot.get('name')}", "params": {
+            **compiled["plan"], "prompt": prompt, "output": output, "slate": {"project": film["id"], "scene": scene["id"], "shot": shot["id"]}}})
+        film = film_of(film["id"])  # logged into the film as it is after the job was queued
+        _, shot = shot_of(film, shot["id"])
+        shot.setdefault("takes", []).insert(0, {"id": slate_id("take"), "loggedAt": slate_now(), "model": "minimax-h3", "prompt": prompt,
+                                               "rating": "good", "notes": "queued by the agent", "mediaPath": output, "jobId": job.get("id"),
+                                               "seed": compiled["plan"].get("seed"), "settings": {k: (job.get("params") or compiled["plan"]).get(k)
+                                               for k in ("preset", "quality", "frames", "seconds", "width", "height") if (job.get("params") or compiled["plan"]).get(k) is not None}})
+        save_film(film)
+        return {**job_summary(job), "take": output, "warnings": compiled.get("warnings") or []}
     if name == "list_jobs":
         return [job_summary(job) for job in call("GET", "/api/jobs")[:int(args.get("limit") or 20)]]
     if name == "upload_file":

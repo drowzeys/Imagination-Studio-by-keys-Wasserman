@@ -13,7 +13,8 @@ The Agent room keeps conversations: a thread ($STUDIO_HOME/.studio-agents/thread
 {role: user|agent|tool, text, attachments, at}, and each user turn is one agent task run in the thread's own working
 folder, $STUDIO_HOME/agent/<thread id>. The next turn continues the harness's own session: Claude Code with
 `--session-id` then `--resume`, Codex with `codex exec resume <thread id>`, Hermes with `chat --continue <name>` then
-`--resume <session id>`. Gemini, Grok and a local model have no session the Studio can name: they get the thread's
+`--resume <session id>`. A local model whose server takes tool calls is run by the Studio's own loop with the same MCP
+tools (drive, below). Gemini, Grok and a local model have no session the Studio can name: they get the thread's
 recent turns ahead of the message. Only the session's id is kept, never a secret. An agent that ends its answer on a
 question (or the `[question]` marker its instructions ask for) is waiting on the user: the page shows a question card.
 
@@ -47,6 +48,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -91,6 +93,8 @@ CLIS = {
 }
 BACKENDS = (*CLIS, "local")
 HARNESSES = ("claude", "codex")  # run with the Studio's MCP tools; every other brain is a conversation in the Agent room
+# ... and "local", when its server takes OpenAI tool calls (local_tools): the Studio runs that loop itself (drive)
+AGENTS = (*HARNESSES, "local")  # what the Agent room's first choice may be
 SESSIONS = ("claude", "codex", "hermes")  # keep a session of their own from one turn to the next
 # local models the Studio calls by their own name, known from the model names the server lists: (pattern, name)
 LOCAL_NAMES = ((re.compile(r"nemotron[-_. ]*3[-_. ]*5[-_. ]*bolt", re.I), "NVIDIA Nemotron 3.5 Bolt"),)
@@ -115,16 +119,17 @@ SYSTEM = ("You are working for a filmmaker inside Imagination Studio. Save every
           "summary that lists the files you made.")
 
 # what the Agent room adds: a conversation that may need the user, and the Studio's own tools by name
-STUDIO_TOOLS = ("studio_state (call first), list_library, queue_still, queue_clip, queue_voice, queue_song, job_status, "
-                "list_jobs, list_projects, add_to_timeline, export_timeline and upload_file")
+STUDIO_TOOLS = ("studio_state (call first), list_library, queue_still, queue_clip, queue_voice, queue_song, job_status, wait_for_jobs, "
+                "list_jobs, list_projects, add_to_timeline, export_timeline, upload_file, and Slate's slate_films, slate_film, "
+                "slate_new_film, slate_add_scene, slate_add_shot and slate_render_shot")
 ROOM = (" This is a conversation with the filmmaker in the Studio's Agent room, and it continues over several turns."
         "{tools} When anything is unclear or a choice matters (length, look, voice, which take), ask the filmmaker one "
         "clear question and stop: write [question] on its own line, then the question, then up to four short choices "
         "as lines starting with '- ' where there are obvious ones. Otherwise do the work, and finish with a short plain "
         "summary that lists the files you made by their Library paths.")
 ROOM_TOOLS = (" The Studio's tools ({names}) make stills, clips with sound, voice lines and songs on this machine's GPU, "
-              "one job at a time: queue what is asked for, follow each job with job_status until it is done, and name its "
-              "outputs.")
+              "one job at a time: queue what is asked for, follow the jobs with wait_for_jobs (or job_status) until they are "
+              "done, and name their outputs.")
 CHAT = ("You are the filmmaker's assistant inside Imagination Studio, a local AI film studio (stills, clips with sound, "
         "voice lines, songs, a timeline). In this conversation you cannot run the Studio's tools: help plan (prompts, shot "
         "lists, lines, lyrics), and when the filmmaker wants something made, give the exact prompt to paste into the "
@@ -136,6 +141,23 @@ LOST_SESSION = re.compile(r"no conversation found|no session found|session[^\n]{
                           r"thread[^\n]{0,40}not found|no rollout found", re.I)
 THREAD_ID = re.compile(r"th-[0-9]{4}-[0-9]{6}-[0-9a-f]{6}")
 PROFILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+# the local harness (drive): the Studio runs the agent loop itself against the local OpenAI-compatible server, with the
+# same MCP servers Claude Code and Codex get, and nothing else: no shell, no file tools, paths held to the turn's folder
+LOCAL_DRIVE = (" You run the Studio's tools yourself, through function calls: call one or more, read what they return, and "
+               "carry on until everything the filmmaker asked for is made, or queued and finished. Never describe a call instead "
+               "of making it, and never stop at a plan. Use the ids the tools return (a film's, a scene's, a shot's, a job's), "
+               "never made-up ones, and the names the filmmaker gives. Do what was asked and nothing more: queue a still, a "
+               "clip, a voice line or a song only when the filmmaker asks for one. A still or a clip takes minutes: after "
+               "queueing, call wait_for_jobs with the job ids (again while they are still running), then name each output by "
+               "its Library path. A job that fails is reported with its reason, not queued again unchanged.")
+LOCAL_STEPS = 40  # the local model's answers in one turn (each may call several tools)
+LOCAL_ANSWER_TIMEOUT = 600  # one answer from the local server
+LOCAL_TOOL_TIMEOUT = 15 * 60  # one tool call (wait_for_jobs waits up to 10 minutes)
+LOCAL_RESULT_CHARS = 6000  # what the model reads of one tool's answer
+TOOLS_TTL = 10 * 60  # whether a local server takes tool calls, asked again after this
+# an answer that says it will act, in a turn that has not called a tool yet ("Let me know" is not one)
+PROMISE = re.compile(r"\b(?:I(?:'|’| wi)ll|let me(?! know)|I am going to|I'm going to|next,? I|now I)\b", re.I)
+PATHISH = re.compile(r"path|file|folder|dir|output|frame|image|picture", re.I)
 HISTORY_CHARS = 8000  # the recent turns a brain without a session of its own reads ahead of the message
 STEP_LIMIT = 200
 TEXT_LIMIT = 20000
@@ -143,6 +165,7 @@ TEXT_LIMIT = 20000
 lock = threading.RLock()
 probes: dict = {}  # (host or "", cli) -> (monotonic time, found)
 answering: dict = {}  # local server address -> (monotonic time, whether it answered), for the automatic default
+tool_checks: dict = {}  # (local server, model) -> (monotonic time, whether it takes tool calls)
 codex_checks: dict = {}  # codex path -> (monotonic time, its mtime, why it cannot start or None)
 versions: dict = {}  # CLI path -> (its mtime, its version as numbers)
 CODEX_BROKEN = re.compile(r"Error loading config|unknown variant|unknown field", re.I)
@@ -195,19 +218,23 @@ def chosen_default(saved: dict) -> str:
     return brain if brain in BACKENDS else ""
 
 
-def local_answers(endpoint: str) -> bool:
-    """Whether the local model server at this address answers, asked at most once a minute (2 s at most)."""
+def local_server(endpoint: str) -> tuple[str | None, list[str]]:
+    """slate.find_local (the server at this address, or "" for one found on this computer), asked at most once a minute."""
 
-    if not endpoint:
-        return False
     with lock:
         seen = answering.get(endpoint)
     if seen and time.monotonic() - seen[0] < PROBE_TTL:
-        return seen[1]
-    up = bool(slate.find_local(endpoint)[0])
+        return seen[2], seen[3]
+    base, models = slate.find_local(endpoint)
     with lock:
-        answering[endpoint] = (time.monotonic(), up)
-    return up
+        answering[endpoint] = (time.monotonic(), bool(base), base, models)
+    return base, models
+
+
+def local_answers(endpoint: str) -> bool:
+    """Whether the local model server at this address answers, asked at most once a minute (2 s at most)."""
+
+    return bool(endpoint) and bool(local_server(endpoint)[0])
 
 
 def automatic_default(endpoint: str) -> str:
@@ -218,20 +245,110 @@ def automatic_default(endpoint: str) -> str:
     return "local" if local_answers(endpoint) else "claude"
 
 
+def server_root(base: str) -> str:
+    return base[:-3] if base.endswith("/v1") else base
+
+
+def post_json(url: str, body: dict, timeout: float) -> dict:
+    request = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as answer:
+        return json.loads(answer.read())
+
+
+def props_tools(base: str) -> bool | None:
+    """What llama.cpp's /props says of its chat template (whether it takes tool calls), or None from another server."""
+
+    try:
+        with urllib.request.urlopen(server_root(base) + "/props", timeout=3) as answer:
+            caps = json.loads(answer.read()).get("chat_template_caps")
+        if isinstance(caps, dict) and "supports_tool_calls" in caps:
+            return bool(caps["supports_tool_calls"])
+    except Exception:  # not llama.cpp, or an older one
+        pass
+    return None
+
+
+def probe_tools(base: str, model: str) -> bool:
+    """Whether a server that has no /props takes tool calls: it is offered one tool in a small call and must call it."""
+
+    try:
+        answer = post_json(base + "/chat/completions", {"model": model, "temperature": 0, "max_tokens": 64, "messages": [
+            {"role": "user", "content": "Call the ready tool."}], "tools": [{"type": "function", "function": {
+                "name": "ready", "description": "Say that you are ready.", "parameters": {"type": "object", "properties": {}}}}]}, 45)
+        return bool(answer["choices"][0]["message"].get("tool_calls"))
+    except Exception:
+        return False
+
+
+def tools_of(base: str, model: str, wait: bool = True) -> bool:
+    """Whether the local server takes tool calls, kept for TOOLS_TTL; STUDIO_LOCAL_TOOLS=1 or 0 says it instead. A server
+    without /props is asked with a small call (probe_tools), which may take a while on a busy server: without ``wait``
+    (a page's look, the automatic agent) that runs aside and the answer is False until it is known."""
+
+    forced = os.environ.get("STUDIO_LOCAL_TOOLS", "").strip()
+    if forced in ("0", "1"):
+        return forced == "1"
+    key = (base, model)
+    with lock:
+        seen = tool_checks.get(key)
+    if seen and seen[1] is not None and time.monotonic() - seen[0] < TOOLS_TTL:
+        return seen[1]
+    said = props_tools(base)
+    if said is None and not wait:
+        with lock:
+            if key not in tool_checks or tool_checks[key][1] is not None:  # one look aside at a time
+                tool_checks[key] = (time.monotonic(), None)
+                threading.Thread(target=lambda: tools_of(base, model), daemon=True).start()
+        return False
+    ok = said if said is not None else probe_tools(base, model)
+    with lock:
+        tool_checks[key] = (time.monotonic(), ok)
+    return ok
+
+
+def local_tools(endpoint: str, model: str = "", wait: bool = True) -> bool:
+    """Whether the local model server (the one set, else one found on this computer) answers and takes tool calls: then
+    "local" is a harness, run by the Studio's own loop (drive) with the Studio's MCP tools."""
+
+    base, models = local_server(endpoint)
+    return bool(base) and tools_of(base, answering_model(models, model), wait)
+
+
+def is_harness(backend: str, config: dict | None = None) -> bool:
+    """Whether this brain runs with the Studio's MCP tools in the Agent room."""
+
+    if backend in HARNESSES:
+        return True
+    if backend != "local":
+        return False
+    config = config or saved_settings()
+    return local_tools(config["local_endpoint"], config["local_model"])
+
+
+def automatic_agent(default: str, endpoint: str, model: str) -> str:
+    """The Agent room's first choice when nobody chose one: the local model, when it is the brain (chosen, or the
+    automatic default because its server answers) and its server takes tool calls; else none (the page picks)."""
+
+    return "local" if default == "local" and local_tools(endpoint, model, wait=False) else ""
+
+
 def saved_settings() -> dict:
     """The saved settings; a setting never saved takes the environment's value (``environment_defaults``), and a
-    default nobody chose is the automatic one (``automatic_default``)."""
+    default nobody chose is the automatic one (``automatic_default``, ``automatic_agent``)."""
 
     saved = read_json(folder() / "settings.json" if folder() else None, {})
     remote = saved.get("remote") if isinstance(saved.get("remote"), dict) else {}
     env = environment_defaults()
     endpoint = str(saved.get("local_endpoint") or "") if "local_endpoint" in saved else env["local_endpoint"]
-    return {"default": chosen_default(saved) or automatic_default(endpoint),
+    model = str(saved.get("local_model") or "") if "local_model" in saved else env["local_model"]
+    default = chosen_default(saved) or automatic_default(endpoint)
+    return {"default": default,
             "remote": {"host": remote.get("host") or "", "backends": [b for b in remote.get("backends") or [] if b in CLIS],
                        "studio_host": remote.get("studio_host") or ""},
             "local_endpoint": endpoint,
-            "local_model": str(saved.get("local_model") or "") if "local_model" in saved else env["local_model"],
-            "agent": saved["agent"] if saved.get("agent") in HARNESSES else ""}  # the Agent room's first choice
+            "local_model": model,
+            # the Agent room's first choice
+            "agent": saved["agent"] if saved.get("agent") in AGENTS else automatic_agent(default, endpoint, model)}
 
 
 def default_brain() -> dict:
@@ -252,6 +369,7 @@ def save_settings(body: dict) -> dict:
     now = saved_settings()
     saved = read_json(folder() / "settings.json" if folder() else None, {})
     chosen = saved["default"] if saved.get("default") in BACKENDS else ""  # only a brain a person picked is kept
+    agent = saved["agent"] if saved.get("agent") in AGENTS else ""  # nor is an automatic agent written down
     if "default" in body:
         if body["default"] not in (*BACKENDS, ""):
             raise HTTPException(400, "default is one of " + ", ".join(BACKENDS))
@@ -267,9 +385,9 @@ def save_settings(body: dict) -> dict:
                          "backends": list(dict.fromkeys(backends)),
                          "studio_host": valid_host(remote.get("studio_host", now["remote"]["studio_host"]), "remote.studio_host")}
     if "agent" in body:
-        if body["agent"] not in (*HARNESSES, ""):
-            raise HTTPException(400, "agent is one of " + ", ".join(HARNESSES))
-        now["agent"] = body["agent"]
+        if body["agent"] not in (*AGENTS, ""):
+            raise HTTPException(400, "agent is one of " + ", ".join(AGENTS))
+        agent = body["agent"]
     if "local_endpoint" in body:
         value = str(body["local_endpoint"] or "").strip()
         if value and (len(value) > 300 or not re.fullmatch(r"(?:https?://)?[A-Za-z0-9.\-\[\]:]+(?:/[A-Za-z0-9._~/-]*)?", value)):
@@ -283,9 +401,12 @@ def save_settings(body: dict) -> dict:
     with lock:
         probes.clear()
         answering.clear()
+        tool_checks.clear()
     now["default"] = chosen_default({"default": chosen}) or automatic_default(now["local_endpoint"])
+    now["agent"] = agent or automatic_agent(now["default"], now["local_endpoint"], now["local_model"])
     if folder():  # a default nobody picked is not written down, so it stays automatic
-        write_json(folder() / "settings.json", {**now, "default": chosen} if chosen else {k: v for k, v in now.items() if k != "default"})
+        written = {**now, "agent": agent}
+        write_json(folder() / "settings.json", {**written, "default": chosen} if chosen else {k: v for k, v in written.items() if k != "default"})
     return now
 
 
@@ -513,7 +634,7 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
         for name in CLIS:
             if name not in remote and ("", name) not in cached:
                 jobs[("", name)] = pool.submit(look_here, name)
-        jobs[("local", "")] = pool.submit(slate.find_local, endpoint or config["local_endpoint"])
+        jobs[("local", "")] = pool.submit(look_local, endpoint or config["local_endpoint"], config["local_model"])
         done, _ = concurrent.futures.wait(jobs.values(), timeout=10)
         fresh = {key: job.result() for key, job in jobs.items() if job in done}
     finally:
@@ -523,7 +644,7 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
             if key[0] != "local":
                 probes[key] = (time.monotonic(), value)
             elif not endpoint and config["local_endpoint"]:  # what the set server said is news for the automatic default
-                answering[config["local_endpoint"]] = (time.monotonic(), bool(value[0]))
+                answering[config["local_endpoint"]] = (time.monotonic(), bool(value[0]), value[0], value[1])
     seen = {**cached, **fresh}
     out = []
     for name, (label, _, signin) in CLIS.items():
@@ -554,15 +675,24 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
         item.update(signin_flow=recipe_of(name, item["where"] != "here")["flow"], signin_command=terminal_line(name),
                     signin_note=SIGNIN_NOTES.get(name))
         out.append(item)
-    base, models = seen.get(("local", "")) or (None, [])
+    base, models, tools_ = seen.get(("local", "")) or (None, [], False)
     label = local_label(models, config["local_model"]) if base else "Local model server"
     running = answering_model(models, config["local_model"]) if base and models else ""
-    out.append({"id": "local", "label": label, "named": label != "Local model server", "kind": "http", "found": bool(base), "harness": False, "session": False,
+    # a harness when its server takes tool calls: the Studio runs its loop with the Studio's tools (drive)
+    out.append({"id": "local", "label": label, "named": label != "Local model server", "kind": "http", "found": bool(base),
+                "harness": bool(base and tools_), "session": False,
                 "endpoint": base or slate.endpoint_of(endpoint or config["local_endpoint"]) or None, "models": models or [],
                 # what it really runs, and the name set in Settings when the server no longer lists it
                 "model": running or None, "set_model": config["local_model"] or None,
                 "set_missing": bool(base and models and config["local_model"] and config["local_model"] not in models)})
     return out
+
+
+def look_local(endpoint: str, model: str) -> tuple[str | None, list[str], bool]:
+    """(the local server's address, the models it lists, whether it takes tool calls)."""
+
+    base, models = slate.find_local(endpoint)
+    return base, models, bool(base) and tools_of(base, answering_model(models, model), wait=False)
 
 
 def found(name: str) -> bool:
@@ -1243,9 +1373,11 @@ def submit(body: dict) -> dict:
                                      "start a new conversation for another agent")
         backend = thread["backend"]
     else:
-        backend = body.get("backend") or (saved_settings()["default"] if saved_settings()["default"] in HARNESSES else "claude")
+        config = saved_settings()
+        backend = body.get("backend") or config["agent"] or (config["default"] if config["default"] in HARNESSES else "claude")
     if backend not in BACKENDS:
         raise HTTPException(400, "an agent is one of " + ", ".join(BACKENDS))
+    harness = is_harness(backend)
     known = {t["id"]: t for t in tools()}
     if body.get("tools") is not None:
         chosen = body["tools"]
@@ -1255,9 +1387,9 @@ def submit(body: dict) -> dict:
         chosen = [t for t, v in known.items() if v["enabled"]]
     if not isinstance(chosen, list) or any(t not in known for t in chosen):
         raise HTTPException(400, "tools are ids from /api/agent/tools")
-    if backend in HARNESSES and any(not known[t]["enabled"] for t in chosen):
+    if harness and any(not known[t]["enabled"] for t in chosen):
         raise HTTPException(400, "a chosen tool is turned off")
-    chosen = list(dict.fromkeys(chosen)) if backend in HARNESSES else []  # a conversation has no tools to run
+    chosen = list(dict.fromkeys(chosen)) if harness else []  # a conversation has no tools to run
     attach_ = body.get("attach") or []
     if not isinstance(attach_, list) or len(attach_) > 20:
         raise HTTPException(400, "attach is a list of up to 20 Library paths")
@@ -1413,11 +1545,13 @@ def results_in(value) -> list:
     return found
 
 
-def note_results(task: dict, value) -> list[str]:
-    """Jobs the agent queued in the Studio, from its tools' answers, and a working line for each change of state."""
+def note_results(task: dict, value, lists: bool = False) -> list[str]:
+    """Jobs the agent queued in the Studio, from its tools' answers, and a working line for each change of state;
+    with ``lists``, the jobs of an answer that is a list of them too (wait_for_jobs)."""
 
     out = []
-    for result in results_in(value):
+    found_ = results_in(value)
+    for result in [one for item in found_ for one in (item if lists and isinstance(item, list) else [item])]:
         if not (isinstance(result, dict) and isinstance(result.get("id"), str) and result.get("kind") and result.get("status")):
             continue
         jobs_ = task.setdefault("jobs", [])
@@ -1631,7 +1765,7 @@ def perform(task: dict) -> None:
     work_.mkdir(parents=True, exist_ok=True)
     log = open(here / "log.txt", "a")
     try:
-        if task["backend"] not in SESSIONS:
+        if task["backend"] not in SESSIONS and not (task["backend"] == "local" and task["tools"]):
             return converse(task, thread, log)
         names = []
         for path in task["attach"]:  # the attachments, in a folder of their own beside what the agent makes
@@ -1644,6 +1778,8 @@ def perform(task: dict) -> None:
             names.append(name)
         task["inputs"] = names
         task["_before"] = snapshot(work_)
+        if task["backend"] == "local":
+            return drive(task, thread, log, config, work_, names)
         servers = mcp_servers(task, host, config) if task["backend"] in HARNESSES else {}
         if task["backend"] in HARNESSES:
             write_json(work_ / "mcp.json", {"mcpServers": servers})
@@ -1724,6 +1860,275 @@ def perform(task: dict) -> None:
         log.close()
         task.pop("_host", None)
         task.pop("_error", None)
+
+
+# ---------- the local harness: the Studio's own agent loop on a local OpenAI-compatible server ----------
+#
+# A local model whose server takes tool calls (llama.cpp with --jinja, vLLM, Ollama...) drives the Studio like Claude
+# Code and Codex do: the Studio starts the turn's MCP servers itself (the same commands, in the thread's work folder),
+# offers their tools as OpenAI functions, and runs the loop: the model answers, each tool call goes to its server, its
+# answer goes back, until the model answers without a call. LOCAL_STEPS answers and TASK_TIMEOUT at most (then one last
+# answer without tools, to say what is done); Stop ends it between calls. There is no shell and no file tool, and a
+# path a tool call names stays in the thread's folder or the studio folder (confine). What it says and calls goes to the
+# task's log, steps and stream.jsonl as the CLIs' do, so the Agent room shows it the same way.
+
+class Mcp:
+    """One stdio MCP server for one turn: newline-delimited JSON-RPC on its stdin and stdout."""
+
+    def __init__(self, tool: dict, argv: list[str], env: dict, cwd: str, errors: Path):
+        self.id, self.tools, self.number = tool["id"], [], 0
+        self.errors = open(errors, "ab")
+        try:
+            self.process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.errors, cwd=cwd,
+                                            env=child_env(env), start_new_session=True)
+        except OSError:
+            self.errors.close()
+            raise
+        self.lines: "queue.Queue[bytes | None]" = queue.Queue()
+        threading.Thread(target=self.read, daemon=True).start()
+
+    def read(self) -> None:
+        for line in self.process.stdout:
+            self.lines.put(line)
+        self.lines.put(None)
+
+    def request(self, method: str, params: dict, timeout: float, stopped=lambda: False) -> dict:
+        self.number += 1
+        wanted, ends = self.number, time.time() + timeout
+        rpc_send(self.process, {"jsonrpc": "2.0", "id": wanted, "method": method, "params": params})
+        while True:
+            if stopped():
+                raise InterruptedError
+            left = ends - time.time()
+            if left <= 0:
+                raise TimeoutError(f"{self.id} gave no answer to {method} in {int(timeout)} seconds")
+            try:
+                line = self.lines.get(timeout=min(0.25, left))
+            except queue.Empty:
+                continue
+            if line is None:
+                raise EOFError(f"{self.id} stopped")
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue  # a server's stray print
+            # an answer to this request (a request of the server's own has a method, and is not one)
+            if isinstance(message, dict) and message.get("id") == wanted and "method" not in message:
+                if message.get("error"):
+                    raise RuntimeError(str(message["error"].get("message") or method + " failed"))
+                return message.get("result") or {}
+
+    def start(self, stopped) -> list[dict]:
+        self.request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
+                                    "clientInfo": {"name": "slate-studio", "version": "1"}}, CHECK_TIMEOUT, stopped)
+        rpc_send(self.process, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        self.tools = [t for t in self.request("tools/list", {}, CHECK_TIMEOUT, stopped).get("tools") or [] if t.get("name")]
+        return self.tools
+
+    def close(self) -> None:
+        stop(self.process)
+        self.errors.close()
+
+
+def confine(args: dict, work_: Path) -> str | None:
+    """Why a tool call is refused, or None: an absolute path it names (a file to read or write) is inside the thread's
+    folder or the studio folder, never in a hidden folder of it, and a Library path never climbs out of it."""
+
+    roots = [work_.resolve(), HOME.resolve()]
+    def paths(value, key=""):
+        if isinstance(value, dict):
+            for k, v in value.items():
+                yield from paths(v, str(k))
+        elif isinstance(value, list):
+            for v in value:
+                yield from paths(v, key)
+        elif isinstance(value, str) and value.strip() and "prompt" not in key.lower() and (
+                PATHISH.search(key) or value.strip().startswith(("/", "~"))):  # any absolute path, whatever its key
+            yield key, value.strip()
+    for key, value in paths(args):
+        text = os.path.expanduser(value)
+        if os.path.isabs(text):
+            resolved = Path(text).resolve()
+            inside_ = next((root for root in roots if resolved == root or root in resolved.parents), None)
+            if inside_ is None or any(part.startswith(".") for part in resolved.relative_to(inside_).parts if part != ".inputs"):
+                return f"{key}: {value} is outside this conversation's folder ({work_}) and the Studio's Library"
+        elif ".." in Path(text).parts:
+            return f"{key}: {value} climbs out of the Studio's Library"
+    return None
+
+
+def function_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name)[:64]
+
+
+def answer_of(base: str, body: dict, stopped) -> dict | None:
+    """One answer from the local server, or None when the turn was stopped first (the call is left to end)."""
+
+    out: dict = {}
+    def run():
+        try:
+            out["answer"] = post_json(base + "/chat/completions", body, LOCAL_ANSWER_TIMEOUT)
+        except urllib.error.HTTPError as error:
+            out["error"] = f"the local model server said {error.code}: " + error.read().decode(errors="replace")[:400]
+        except Exception as error:  # the reason goes to the page as it is
+            out["error"] = f"the local model server did not answer: {error}"
+    caller = threading.Thread(target=run, daemon=True)
+    caller.start()
+    while caller.is_alive():
+        if stopped():
+            return None
+        caller.join(0.25)
+    if "error" in out:
+        raise RuntimeError(out["error"])
+    return out["answer"]
+
+
+def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names: list[str]) -> None:
+    """The local harness's turn (see above): the MCP servers of the task's tools, then the loop."""
+
+    started, here = time.time(), task_folder(task["id"])
+    stopped = lambda: task["status"] == "cancelled"
+    base, models = slate.find_local(config["local_endpoint"])
+    if not base:
+        raise RuntimeError("no local model server answers: start it, or set its address in Settings → Connections")
+    model = answering_model(models, config["local_model"])
+    raw = open(here / "stream.jsonl", "a")
+    clients: list[Mcp] = []
+    table: dict = {}  # function name -> (server, tool name, its required arguments)
+    calls = task["calls"] = {"answers": 0, "made": 0, "bad": 0, "failed": 0}
+
+    def say(text: str, step: str | None = None) -> None:
+        if text:
+            log.write(text.rstrip() + "\n")
+            log.flush()
+        if step:
+            task.setdefault("steps", []).append({"text": step[:300], "at": time.time()})
+            del task["steps"][:-STEP_LIMIT]
+
+    def record(event: dict) -> None:
+        raw.write(json.dumps({**event, "at": round(time.time(), 3)}) + "\n")
+        raw.flush()
+
+    try:
+        say(f"[local · {model} · {base}] {task['prompt'][:200]}")
+        ready, listed = [], []
+        for tool_id in task["tools"]:
+            tool = tool_of(tool_id)
+            try:
+                argv, env = launch_of(tool, config)
+                client = Mcp(tool, argv, env, str(work_), here / "stderr.txt")
+                clients.append(client)
+                listed.append((client, client.start(stopped)))
+                ready.append(tool_id)
+            except InterruptedError:
+                return
+            except (RuntimeError, OSError, TimeoutError, EOFError) as error:
+                ready.append(f"{tool_id} (failed)")
+                say(f"{tool_id} could not start: {error}")
+        say("tools: " + (", ".join(ready) or "none"), "tools: " + (", ".join(ready) or "none"))
+        counts: dict = {}
+        for _, items in listed:
+            for item in items:
+                counts[item["name"]] = counts.get(item["name"], 0) + 1
+        functions = []
+        for client, items in listed:  # a tool by its own name, or server__name where two servers have one of that name
+            for item in items:
+                name = function_name(item["name"] if counts[item["name"]] == 1 else f"{client.id}__{item['name']}")
+                schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {"type": "object", "properties": {}}
+                table[name] = (client, item["name"], [r for r in schema.get("required") or [] if isinstance(r, str)])
+                functions.append({"type": "function", "function": {"name": name, "description": str(item.get("description") or "")[:1000],
+                                                                    "parameters": schema}})
+        if not functions:
+            raise RuntimeError("none of this conversation's tools started: check them in Settings → Connections (Brains & tools)")
+        system = SYSTEM.format(folder=f" ({work_})", studio="")
+        if task.get("thread"):
+            system += ROOM.format(tools=ROOM_TOOLS.format(names=STUDIO_TOOLS) if "studio" in task["tools"] else "")
+        system += LOCAL_DRIVE
+        messages = [{"role": "system", "content": system},
+                    {"role": "user", "content": with_history(thread, task["prompt"]) + attached_note(task, names)}]
+        record({"type": "start", "model": model, "server": base, "tools": [f["function"]["name"] for f in functions]})
+        nudged = 0
+        for number in range(LOCAL_STEPS + 1):
+            last = number == LOCAL_STEPS or time.time() - started > TASK_TIMEOUT
+            if last:  # the limit: one more answer, without tools, that says what is done and what is not
+                task["limit"] = "steps" if number == LOCAL_STEPS else "time"
+                note = (f"stopped at the step limit ({LOCAL_STEPS} answers)" if task["limit"] == "steps"
+                        else f"stopped after {TASK_TIMEOUT // 3600} hours")
+                say(f"[{note}]", note)
+                messages.append({"role": "user", "content": f"The turn is {note}. Do not call any more tools: say what is done "
+                                                            "(with the Library paths of what was made) and what is not."})
+            body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 4096,
+                    **({} if last else {"tools": functions})}
+            answer = answer_of(base, body, stopped)
+            if answer is None:
+                return
+            calls["answers"] += 1
+            message = ((answer.get("choices") or [{}])[0].get("message")) or {}
+            said, wanted = (message.get("content") or "").strip(), [] if last else message.get("tool_calls") or []
+            record({"type": "answer", "number": number, "content": said, "tool_calls": wanted, "usage": answer.get("usage"),
+                    "finish": (answer.get("choices") or [{}])[0].get("finish_reason")})
+            say(said)
+            if not wanted:
+                garbled = "<tool_call>" in said or '"arguments"' in said
+                if not last and nudged < 2 and (garbled or (not calls["made"] and PROMISE.search(said) and not question_of(said)[0])):
+                    nudged += 1  # said it would act and stopped, or wrote a call as text: once or twice, it is told to call
+                    calls["bad"] += 1 if garbled else 0
+                    messages += [{"role": "assistant", "content": said},
+                                 {"role": "user", "content": "Make the calls now through the tools (function calls), not as text. "
+                                                             "If everything asked for is done, give your summary."}]
+                    say("", "nudged to call its tools")
+                    continue
+                task["reply"] = said
+                break
+            messages.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": wanted})
+            for one in wanted:
+                function = one.get("function") or {}
+                name, given = str(function.get("name") or ""), function.get("arguments")
+                calls["made"] += 1
+                hit = table.get(name) or table.get(name.removeprefix("mcp__").split("__")[-1])
+                text, failed = "", False
+                try:
+                    args = json.loads(given) if isinstance(given, str) and given.strip() else (given or {})
+                except ValueError:
+                    args = None
+                if not hit:
+                    text = f"There is no tool called {name}. The tools are: " + ", ".join(table)
+                elif not isinstance(args, dict):
+                    text = f"The arguments of {name} were not a JSON object: {str(given)[:300]}. Call it again with a JSON object."
+                elif [r for r in hit[2] if args.get(r) in (None, "")]:
+                    text = f"{name} needs {', '.join(r for r in hit[2] if args.get(r) in (None, ''))}: call it again with them."
+                elif confine(args, work_):
+                    text = "Refused: " + confine(args, work_)
+                if text:
+                    calls["bad"] += 1
+                    say(f"✗ {name}: {text}", f"✗ {name}: {text}")
+                else:
+                    client, tool, _ = hit
+                    say(f"→ {client.id}.{tool} " + json.dumps(args)[:300], f"→ {client.id} · {tool}")
+                    try:
+                        result = client.request("tools/call", {"name": tool, "arguments": args}, LOCAL_TOOL_TIMEOUT, stopped)
+                        text = "\n".join(str(c.get("text") or "") for c in result.get("content") or [] if isinstance(c, dict) and c.get("type") == "text") \
+                            or json.dumps(result.get("structuredContent") or result)
+                        failed = bool(result.get("isError"))
+                        for line in note_results(task, result, lists=tool != "list_jobs"):
+                            say(line, line)
+                    except InterruptedError:
+                        return
+                    except (TimeoutError, EOFError, RuntimeError, OSError) as error:
+                        text, failed = f"The tool failed: {error}", True
+                    if failed:
+                        calls["failed"] += 1
+                        say(f"  {tool} said: {text[:300]}")
+                    record({"type": "tool", "name": name, "arguments": args, "error": failed, "result": text[:LOG_LIMIT]})
+                messages.append({"role": "tool", "tool_call_id": str(one.get("id") or ""), "content": text[:LOCAL_RESULT_CHARS]})
+                if stopped():
+                    return
+        task["status"] = "done"
+    finally:
+        record({"type": "end", "status": task["status"], "calls": calls, "seconds": round(time.time() - started, 1)})
+        raw.close()
+        for client in clients:
+            client.close()
 
 
 # ---------- signing a brain in: the CLI's own login, in a pseudo-terminal ----------
@@ -2391,7 +2796,7 @@ def make_default(backend: str, body: dict) -> dict:
     if backend not in BACKENDS:
         raise HTTPException(404, "no such brain")
     patch = {"default": backend}
-    if backend in HARNESSES and body.get("agent", True):
+    if is_harness(backend) and body.get("agent", True):
         patch["agent"] = backend
     return {"settings": save_settings(patch)}
 
