@@ -5,7 +5,7 @@
 #   PROMPT_FILE=prompts/baker-image.txt bash scripts/image.sh "" out.png
 #   IMAGE_MODEL=flux3k-fast bash scripts/image.sh "a prompt" out.png   # FLUX3-K Fast (16 steps); flux3k-full: 50 steps
 #   IMAGE_MODEL=qwen-full bash scripts/image.sh "a prompt" out.png     # Qwen 2.1 Full: the base model, 40 steps at CFG 4
-#   IMAGE_MODEL=moss-image bash scripts/image.sh "a prompt" out.png    # MOSS-Image, 25 steps (DGX Spark only)
+#   IMAGE_MODEL=moss-image bash scripts/image.sh "a prompt" out.png    # MOSS-Image, 25 steps (oneshot-setup.sh --moss)
 # Environment: PREFIX, QWEN_MODEL_DIR (Qwen-Image-2.1-Turbo: 8 steps on the schedule saved with the checkpoint),
 # QWEN_BASE_DIR (Qwen-Image-2.1, for TURBO=0), TURBO, STEPS (base model only, default 40), WIDTH, HEIGHT (multiples
 # of 16), SEED, EXTRA (extra flags), QWEN_CFG (base model only, default 4; 1 runs it without guidance). An install from before 2.3 has the base model at QWEN_MODEL_DIR: it keeps
@@ -36,7 +36,17 @@ case "${IMAGE_MODEL:-qwen}" in
     if [ -n "${PROMPT_FILE:-}" ]; then ARGS+=(--prompt-file "$PROMPT_FILE"); else ARGS+=(--prompt "$PROMPT"); fi
     # shellcheck disable=SC2086
     exec "$PREFIX/flux3-venv/bin/python" "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/flux3_generate.py" "${ARGS[@]}" ${EXTRA:-};;
-  moss-image) echo "MOSS-Image runs on a DGX Spark (ComfyUI): there is no Mac build of it yet" >&2; exit 1;;
+  moss-image)
+    # MOSS-Image: the DGX Spark's ComfyUI graph (spark/spark_generate.py, ComfyUI's template: 25 steps of er_sde at CFG
+    # 2.5 against its negative prompt) on the Mac's own ComfyUI (mac/comfy.sh, oneshot-setup.sh --moss); NEGATIVE replaces
+    # the template's negative prompt. The server is stopped after the pictures so its memory is back for the next job.
+    [ -x "$PREFIX/comfy-venv/bin/python" ] || { echo "MOSS-Image is not installed here: bash oneshot-setup.sh --moss" >&2; exit 1; }
+    HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    ARGS=(image --model moss-image -o "$OUT" --width "${WIDTH:-1344}" --height "${HEIGHT:-768}" --seed "${SEED:-0}")
+    [ -z "${NEGATIVE:-}" ] || ARGS+=(--negative "$NEGATIVE")
+    if [ -n "${PROMPT_FILE:-}" ]; then ARGS+=(--prompt-file "$PROMPT_FILE"); else ARGS+=(--prompt "$PROMPT"); fi
+    # shellcheck disable=SC2086
+    PREFIX="$PREFIX" exec "$PREFIX/comfy-venv/bin/python" "$HERE/spark/spark_generate.py" "${ARGS[@]}" ${EXTRA:-};;
   qwen) ;;
   qwen-full) TURBO=0;;
   *) echo "IMAGE_MODEL is qwen, qwen-full, flux3k-fast, flux3k-full or moss-image, not ${IMAGE_MODEL}" >&2; exit 2;;

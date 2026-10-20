@@ -21,9 +21,16 @@ A worker that stops answering while it renders is marked down and its clip goes 
 machine; a worker is never waited on for more than LOST seconds. One job runs on a Spark at a time.
 
 Kept in the studio folder, under sparks/:
-  sparks.json    {"workers": [{"address", "name", "folder", "enabled"}], "sparks": the number new jobs start with}
+  sparks.json    {"workers": [{"address", "name", "folder", "enabled", "via"?}], "sparks": the number new jobs start with}
   takes.jsonl    one line per finished clip: its path, seed, settings and the Spark that rendered it
   tunnels.json   the tunnels this app has open (closed by the next start if this one was killed)
+
+This app may be on a DGX Spark or on a Mac. A Mac that cannot reach the workers' network goes through a machine that
+can (a worker's ``via``: the Spark that leads them): the Mac logs in there, and that machine logs in to the worker
+with its own key and forwards the worker's 127.0.0.1:7870 to a socket in a folder of its user's, which the Mac's
+tunnel ends on (Relay). No key is added anywhere for it. On a Mac at the head only what a Spark renders with its own
+settings is handed over: FastH3 clips at the sizes a Spark makes without the 2x decoder, never MiniMax H3 Turbo's
+qualities or a text encoder file of the Mac's (capable).
 """
 
 from __future__ import annotations
@@ -34,6 +41,8 @@ import json
 import math
 import os
 import re
+import select
+import shlex
 import shutil
 import signal
 import socket
@@ -62,6 +71,9 @@ THEIR_HOME = "$HOME/TensorFoldStudio"  # a worker's studio folder, and where its
 ADDRESS = re.compile(r"(?:[a-z_][a-z0-9_-]{0,31}@)?[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
 FOLDER = re.compile(r"[A-Za-z0-9_+][A-Za-z0-9_.+/-]{0,200}")
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"]
+RELAY = "$HOME/.cache/studio-sparks"  # on the machine a worker is reached through: the relays' sockets, the user's own
+BEAT = 10        # seconds between the heartbeats a relay is sent; one silent for three of them ends itself
+SOCKET = re.compile(r"/[A-Za-z0-9_.+/-]{1,80}")
 # the files that are the app: a worker whose copy of any of them differs from this Spark's is updated before it is used
 CODE = ("VERSION", "*.py", "app/*.py", "app/*.json", "app/static/*.js", "app/static/index.html", "spark/*.py", "spark/*.sh",
         "spark/tensorfold_h3/*.py", "spark/studio_mmaudio/*.py", "scripts/*.sh", "scripts/*.py")
@@ -74,7 +86,8 @@ MEASURED = {1: 1.0, 2: 2.03, 3: 2.70, 4: 3.81, 5: 4.05}
 STATES = {"new": "not checked yet", "unreachable": "does not answer over ssh", "bare": "no Studio installed there",
           "stopped": "its Studio app is not running", "update": "its Studio code differs from this Spark's",
           "ready": "idle", "busy": "rendering", "down": "stopped answering"}
-MAC = "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine."
+# presets that need the 2x decoder, which a DGX Spark does not have (spark/video.sh refuses them); said by name
+DOUBLED = {"draft": "Draft", "2k": "2K", "qhd": "2K 2560x1440", "p960": "960p"}
 ONE_CLIP = ("Splitting a single clip across Sparks is measured (1.40x on 2, 1.73x on 3, 1.77x on 4 for a 5 s 864x480 clip) "
             "and is not in the app yet.")
 
@@ -164,12 +177,20 @@ def folder_of(given: str) -> str:
     return text
 
 
-def shell(address: str, command: str, timeout: float = 30) -> tuple[int, str]:
+def hop(via: str, address: str, command: str) -> list[str]:
+    """``command`` run on ``address`` from ``via``: ssh to ``via``, and ssh from there with its own key. ``address``
+    is checked by address_of; the command is quoted once for the shell there."""
+
+    return [*SSH, via, " ".join([*SSH, address, shlex.quote(command)])]
+
+
+def shell(address: str, command: str, timeout: float = 30, via: str | None = None) -> tuple[int, str]:
     """A command on a worker over ssh, as the user who runs this app: (status, what it printed). 255 with the reason
-    when ssh itself cannot reach it or log in."""
+    when ssh itself cannot reach it or log in. With ``via`` it goes through that machine (hop)."""
 
     try:
-        done = subprocess.run([*SSH, address, command], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        done = subprocess.run(hop(via, address, command) if via else [*SSH, address, command], capture_output=True, text=True, timeout=timeout,
+                              stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return 255, f"no answer over ssh in {timeout:g} s"
     except OSError as error:
@@ -177,12 +198,14 @@ def shell(address: str, command: str, timeout: float = 30) -> tuple[int, str]:
     return done.returncode, (done.stdout + done.stderr).strip()
 
 
-def copy(pack: Path, address: str, folder: str, timeout: float = 900) -> tuple[int, str]:
+def copy(pack: Path, address: str, folder: str, timeout: float = 900, via: str | None = None) -> tuple[int, str]:
     """This Spark's Studio code sent to a worker with rsync over ssh. Models, the engine and the environment are not
-    part of it (they are the worker's own install); what the worker's folder holds besides is left alone."""
+    part of it (they are the worker's own install); what the worker's folder holds besides is left alone. With
+    ``via`` the copy goes through that machine; macOS's own rsync (openrsync) takes the same words."""
 
     command = ["rsync", "-a", "--exclude", ".git", "--exclude", "samples", "--exclude", "outputs", "--exclude", "payload",
-               "--exclude", "__pycache__", "--exclude", "*.pyc", "-e", " ".join(SSH), f"{pack}/", f"{address}:{folder}/"]
+               "--exclude", "__pycache__", "--exclude", "*.pyc", "--exclude", ".DS_Store",
+               "-e", " ".join([*SSH, via, *SSH] if via else SSH), f"{pack}/", f"{address}:{folder}/"]
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
@@ -197,14 +220,21 @@ class Tunnel:
     network; the tunnel is this process's child and is closed with it."""
 
     def __init__(self, address: str):
-        self.address, self.process, self.port = address, None, None
+        self.address, self.process, self.port, self.mark = address, None, None, None
 
-    def open(self, wait: float = 12) -> str:
+    def free(self) -> None:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             self.port = probe.getsockname()[1]
-        self.process = subprocess.Popen([*SSH, "-o", "ExitOnForwardFailure=yes", "-N", "-L", f"127.0.0.1:{self.port}:127.0.0.1:{PORT}", self.address],
+
+    def open(self, wait: float = 12) -> str:
+        self.free()
+        self.mark = f"127.0.0.1:{self.port}:127.0.0.1:{PORT}"
+        self.process = subprocess.Popen([*SSH, "-o", "ExitOnForwardFailure=yes", "-N", "-L", self.mark, self.address],
                                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        return self.reach(wait)
+
+    def reach(self, wait: float) -> str:
         until = time.time() + wait
         while time.time() < until:
             if self.process.poll() is not None:
@@ -230,14 +260,87 @@ class Tunnel:
         self.process = None
 
 
-def capable(kind: str, params: dict, info: dict | None) -> str:
-    """Why a worker cannot render this job ("" when it can), from what its app says it has (/api/spark/self)."""
+class Relay(Tunnel):
+    """127.0.0.1:<a free port here> to 127.0.0.1:PORT on a worker that this machine cannot reach, through ``via``,
+    which can: one ssh from here to ``via`` forwards the local port to a socket in a folder of the user's own there,
+    and on ``via`` a second ssh, logged in to the worker with ``via``'s own key, forwards that socket to the worker's
+    127.0.0.1:PORT. The second one lives only as long as the first: it is ended when the first's input closes (this
+    app closes it, or stops, or its ssh dies) or when the heartbeat this app sends every BEAT seconds stops for three
+    of them, and its socket is removed then. Nothing is opened to a network on either machine."""
+
+    def __init__(self, address: str, via: str):
+        super().__init__(address)
+        self.via, self.beating = via, None
+
+    def open(self, wait: float = 20) -> str:
+        code, said = shell(self.via, f'mkdir -p "{RELAY}" && chmod 700 "{RELAY}" && cd "{RELAY}" && pwd -P', 15)
+        folder = said.strip().splitlines()[-1] if code == 0 and said.strip() else ""
+        if code or not SOCKET.fullmatch(folder):
+            raise OSError(f"no relay through {self.via}: " + (said[-200:] or "ssh stopped"))
+        self.free()
+        place = f"{folder}/{uuid.uuid4().hex[:12]}.sock"
+        self.mark = f"127.0.0.1:{self.port}:{place}"
+        self.process = subprocess.Popen([*SSH, "-o", "ExitOnForwardFailure=yes", "-L", self.mark, self.via, "bash -c " + shlex.quote(self.script(place, wait))],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ready, until = False, time.time() + wait
+        while not ready and time.time() < until and self.process.poll() is None:
+            if select.select([self.process.stdout], [], [], max(0.0, until - time.time()))[0]:
+                line = self.process.stdout.readline()
+                if not line:
+                    break
+                ready = line.strip() == "ready"
+        if not ready:
+            said = (self.process.stderr.read() or "").strip()[-200:] if self.process.poll() is not None else f"it was not up in {wait:g} s"
+            self.close()
+            raise OSError(f"no relay to {self.address} through {self.via}: " + (said or "ssh stopped"))
+        self.beating = threading.Thread(target=self.beat, args=(self.process,), daemon=True)
+        self.beating.start()
+        return self.reach(5)
+
+    def script(self, place: str, wait: float = 20) -> str:
+        """What runs on ``via``: its own ssh to the worker, forwarding the socket ``place`` to the worker's
+        127.0.0.1:PORT; "ready" once the socket is there; then it lives while its input is open and beating."""
+
+        return (f'S={place}; rm -f "$S"; {" ".join(SSH)} -o ExitOnForwardFailure=yes -N -L "$S:127.0.0.1:{PORT}" {self.address} < /dev/null & p=$!; '
+                'i=0; while [ ! -S "$S" ]; do kill -0 $p 2>/dev/null || { wait $p; exit 1; }; i=$((i+1)); '
+                f'[ $i -lt {int(wait * 10)} ] || {{ kill $p; exit 1; }}; sleep 0.1; done; echo ready; '
+                f'while kill -0 $p 2>/dev/null && read -r -t {BEAT * 3:g} _; do :; done; kill $p 2>/dev/null; rm -f "$S"')
+
+    def beat(self, process) -> None:
+        while process.poll() is None:
+            try:
+                process.stdin.write("\n")
+                process.stdin.flush()
+            except (OSError, ValueError):
+                return
+            time.sleep(BEAT)
+
+    def close(self) -> None:
+        process = self.process
+        if process is not None and process.poll() is None:
+            try:
+                process.stdin.close()  # the relay there reads its end and stops its own ssh
+                process.wait(timeout=5)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
+        super().close()
+
+
+def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> str:
+    """Why a worker cannot render this job ("" when it can), from what its app says it has (/api/spark/self).
+    ``spark`` False: the job was queued on a Mac, whose own settings a Spark does not have."""
 
     info = info or {}
     if kind not in KINDS:
         return "only single clips are handed to another Spark"
     if not info.get("fasth3"):
         return "FastH3 is not installed there"
+    preset = params.get("preset") or ("small" if spark else "draft")  # what each machine renders when none is named
+    if info.get("presets") is not None and preset not in info["presets"]:
+        return (f"the {DOUBLED.get(preset, preset)} preset is made with the 2x decoder, which is not on that machine" if preset in DOUBLED
+                else f"the {preset} preset is not rendered there")
+    if not spark and params.get("text_encoder") not in (None, "", "regular"):
+        return "the text encoder file is one of this Mac's (an MLX file): a Spark reads only the files in its own ComfyUI folder"
     media = bool(params.get("reference_videos") or params.get("reference_audios"))
     if params.get("references") or media:
         if not info.get("ref2va"):
@@ -246,6 +349,9 @@ def capable(kind: str, params: dict, info: dict | None) -> str:
             return "the Ref2VA Turbo adapter is not installed there"
         if media and not info.get("ffmpeg"):
             return "reference videos and audio need ffmpeg, which is not installed there"
+    elif info.get("qualities") is not None and params.get("quality") and params["quality"] not in info["qualities"]:
+        return (f"the {params['quality']} quality is MiniMax H3 Turbo, which is not on that machine: a Spark renders FastH3 "
+                "(fh4, fh8, fh20)")
     missing = [str(one.get("id")) for one in params.get("loras") or [] if isinstance(one, dict) and one.get("id") not in (info.get("loras") or [])]
     if missing:
         return "the LoRA " + ", ".join(missing) + " is not installed there"
@@ -285,7 +391,10 @@ class Hub:
     ``timing(kind, params)`` is one clip's measured time on one Spark, or None."""
 
     def __init__(self, home: Path, pack: Path, spark: bool, jobs: dict, order: list, lock, wake, info, inside, work, timing=None):
+        # ``spark``: this app is on a DGX Spark; False on a Mac, which leads workers the same way (capable says what
+        # of a Mac's settings a Spark cannot render, and a worker it cannot reach is reached through its ``via``)
         self.home, self.pack, self.spark = home, pack, spark
+        self.word = "Spark" if spark else "Mac"
         self.jobs, self.order, self.lock, self.wake = jobs, order, lock, wake
         self.info, self.inside, self.work, self.timing = info, inside, work, timing or (lambda kind, params: None)
         self.folder = home / "sparks"
@@ -295,7 +404,7 @@ class Hub:
         self.mutex = threading.RLock()    # over self.live; taken after the queue's lock, never before it
         self.kick = threading.Event()
         self.mine: dict | None = None
-        self.shell, self.copy, self.dial = shell, copy, lambda address: Tunnel(address)  # stood in for by the tests
+        self.shell, self.copy, self.dial = shell, copy, lambda address: Relay(address, self.via(address)) if self.via(address) else Tunnel(address)  # stood in for by the tests
         # True while this Studio installs its own updates by itself (updates.Manager.automatic): a worker whose code
         # is behind is then brought level the same way, once per version of this Spark's code (catch_up)
         self.follow = lambda: False
@@ -320,7 +429,24 @@ class Hub:
         part.replace(self.book)
 
     def workers(self) -> list[dict]:
-        return self.config()["workers"] if self.spark else []
+        return self.config()["workers"]
+
+    def said(self, text: str) -> str:
+        """Words for the page: "this Spark" is "this Mac" on a Mac at the head."""
+
+        return text if self.spark or not text else text.replace("this Spark", "this Mac")
+
+    def via(self, address: str) -> str | None:
+        """The machine a worker is reached through, or None: it is reached directly."""
+
+        return next((worker.get("via") for worker in self.config()["workers"] if worker["address"] == address), None) or None
+
+    def on(self, worker: dict, command: str, timeout: float = 30) -> tuple[int, str]:
+        """A command on a worker, through its ``via`` when it has one."""
+
+        if worker.get("via"):
+            return self.shell(worker["address"], command, timeout, via=worker["via"])
+        return self.shell(worker["address"], command, timeout)
 
     def default_folder(self) -> str:
         """Where a worker's Studio is unless said otherwise: where this one is, under the home folder."""
@@ -357,26 +483,26 @@ class Hub:
         info, why = live["info"] or {}, self.usable(worker)
         memory = info.get("memory") or {}
         return {"address": worker["address"], "name": worker.get("name") or worker["address"], "folder": worker.get("folder"),
-                "enabled": worker.get("enabled", True), "state": live["state"], "says": STATES.get(live["state"], live["state"]),
-                "why": live["why"], "usable": not why, "unusable": why, "working": live["working"], "checked": live["checked"],
-                "job": live["job"], "version": info.get("version") or live.get("version"),
+                "enabled": worker.get("enabled", True), "state": live["state"], "says": self.said(STATES.get(live["state"], live["state"])),
+                "why": self.said(live["why"]), "usable": not why, "unusable": self.said(why), "working": live["working"], "checked": live["checked"],
+                "job": live["job"], "version": info.get("version") or live.get("version"), "via": worker.get("via"),
                 "memory_gb": round(memory["available_mb"] / 1000, 1) if memory.get("available_mb") is not None else live.get("memory_gb"),
                 "disk_gb": info.get("disk_gb"),
                 "guard": bool(info.get("guard")),
                 "can": {key: bool(info.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(info.get("loras") or [])} if info else None}
 
     def overview(self) -> dict:
-        if not self.spark:
-            return {"supported": False, "limit": LIMIT, "note": MAC, "available": 1, "listed": 1, "default": 1, "workers": [], "this": {"name": self.name}}
         found = self.config()
         rows = [self.shown(worker) for worker in found["workers"]]
         mine = self.info()
         with self.lock:
             local = next((job["id"] for job in self.jobs.values() if job["status"] == "running" and job.get("spark") == self.name), None)
+        memory = (mine.get("memory") or {}).get("available_mb")
         return {"supported": True, "limit": LIMIT, "note": "", "available": 1 + sum(1 for row in rows if row["usable"]), "listed": 1 + len(rows),
                 "default": max(1, min(int(found.get("sparks") or 1), LIMIT)), "workers": rows, "folder": self.default_folder(),
-                "this": {"name": self.name, "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
-                         "memory_gb": round((mine.get("memory") or {}).get("available_mb", 0) / 1000, 1), "disk_gb": mine.get("disk_gb"),
+                "head": "spark" if self.spark else "mac", "via": next((w.get("via") for w in reversed(found["workers"]) if w.get("via")), None),
+                "this": {"name": self.name, "kind": self.word, "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
+                         "guard": bool(mine.get("guard")), "memory_gb": round(memory / 1000, 1) if memory is not None else None, "disk_gb": mine.get("disk_gb"),
                          "can": {key: bool(mine.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(mine.get("loras") or [])}}}
 
     # ---- a worker: check, update and start, stop -----------------------------------------------------------------
@@ -416,7 +542,7 @@ class Hub:
         """The open tunnels' process ids, written down: a start after a kill closes what that run left behind."""
 
         with self.mutex:
-            pids = [live["tunnel"].process.pid for live in self.live.values()
+            pids = [[live["tunnel"].process.pid, getattr(live["tunnel"], "mark", None)] for live in self.live.values()
                     if live["tunnel"] is not None and getattr(live["tunnel"], "process", None) is not None and live["tunnel"].alive()]
         try:
             self.folder.mkdir(parents=True, exist_ok=True)
@@ -440,12 +566,13 @@ class Hub:
             pids = json.loads(note.read_text())
         except (OSError, ValueError):
             return
-        for pid in pids if isinstance(pids, list) else []:
+        for one in pids if isinstance(pids, list) else []:
+            pid, mark = (one[0], one[1]) if isinstance(one, list) and len(one) == 2 else (one, None)
             try:
-                words = Path(f"/proc/{int(pid)}/cmdline").read_bytes().split(b"\0")
-                if words[:1] == [b"ssh"] and b"-N" in words and any(word.endswith(f":127.0.0.1:{PORT}".encode()) for word in words):
+                words = command_of(int(pid))
+                if words[:1] == ["ssh"] and (mark in words if mark else "-N" in words and any(word.endswith(f":127.0.0.1:{PORT}") for word in words)):
                     os.kill(int(pid), signal.SIGTERM)
-            except (OSError, ValueError):
+            except (OSError, ValueError, TypeError):
                 pass
         note.unlink(missing_ok=True)
 
@@ -454,7 +581,7 @@ class Hub:
         whether an app answers on its 127.0.0.1:PORT (and whether a head started that app)."""
 
         where = f'"$HOME/{worker.get("folder") or self.default_folder()}"'
-        code, said = self.shell(worker["address"], (
+        code, said = self.on(worker, (
             f'F={where}; P="${{PREFIX:-{PREFIX}}}"; H="{THEIR_HOME}"; echo "host $(hostname)"; echo "version $(cat "$F/VERSION" 2>/dev/null)"; '
             '[ -f "$F/app/server.py" ] && echo "pack yes"; [ -x "$P/venv/bin/python" ] && echo "install yes"; '
             'grep -E "^(MemTotal|MemAvailable)" /proc/meminfo; '
@@ -477,7 +604,8 @@ class Hub:
         set_to = lambda state, why="", **more: live.update(state=state, why=why, checked=time.time(), fails=0, **more)
         if not found["reached"]:
             self.hang_up(address)
-            set_to("unreachable", "ssh as this user did not get in (a key login is needed): " + found["said"][-160:], info=None)
+            set_to("unreachable", (f"ssh through {worker['via']} did not get in (key logins are needed from here to {worker['via']} and from there to it): "
+                                   if worker.get("via") else "ssh as this user did not get in (a key login is needed): ") + found["said"][-160:], info=None)
             return live
         if found.get("host") and worker.get("name") in (None, "", address):
             self.rename(address, found["host"])
@@ -538,7 +666,7 @@ class Hub:
                     return live
             except (OSError, Refused):
                 pass
-        code, said = self.copy(self.pack, address, folder)
+        code, said = (self.copy(self.pack, address, folder, via=worker["via"]) if worker.get("via") else self.copy(self.pack, address, folder))
         if code:
             live.update(state="unreachable" if code == 255 else live["state"], why="The code could not be sent (rsync): " + said[-200:], checked=time.time())
             return live
@@ -547,7 +675,7 @@ class Hub:
             live.update(state="update", why="The code is there. An app that this Studio did not start is running on that Spark: stop it there, "
                         "then press “Update and start” again.", checked=time.time(), info=None)
             return live
-        code, said = self.shell(address, self.stop_command(folder, comfy=False) + "; " + self.start_command(folder), 40)
+        code, said = self.on(worker, self.stop_command(folder, comfy=False) + "; " + self.start_command(folder), 40)
         if code:
             live.update(state="stopped", why="Its app could not be started: " + said[-200:], checked=time.time(), info=None)
             return live
@@ -585,7 +713,7 @@ class Hub:
             live.update(why="The app on that Spark was not started by this Studio: it is left running.", checked=time.time())
             return live
         self.hang_up(address)
-        self.shell(address, self.stop_command(worker.get("folder") or self.default_folder()), 40)
+        self.on(worker, self.stop_command(worker.get("folder") or self.default_folder()), 40)
         return self.check(worker)
 
     def act(self, address: str, what: str) -> dict:
@@ -640,13 +768,13 @@ class Hub:
         """The workers a job may render on, in the list's order: the first N - 1 that are up and can render it."""
 
         sparks = job.get("sparks") or {}
-        if not self.spark or self.asked(job) < 2 or here_only(job["kind"], job["params"]) or sparks.get("moves", 0) >= MOVES:
+        if self.asked(job) < 2 or here_only(job["kind"], job["params"]) or sparks.get("moves", 0) >= MOVES:
             return []
         found = []
         for worker in self.workers():
             if worker["address"] in (sparks.get("not") or {}) or self.usable(worker):
                 continue
-            if capable(job["kind"], job["params"], self.state(worker["address"])["info"]):
+            if capable(job["kind"], job["params"], self.state(worker["address"])["info"], self.spark):
                 continue
             found.append(worker["address"])
         return found[:self.asked(job) - 1]
@@ -751,9 +879,9 @@ class Hub:
             self.wake.set()
 
     def start(self) -> None:
-        """At the app's start on a Spark: last run's tunnels closed, the loop started, the listed workers looked at."""
+        """At the app's start: last run's tunnels closed, the loop started, the listed workers looked at."""
 
-        if self.started or not self.spark:
+        if self.started:
             return
         self.started = True
         self.sweep()
@@ -806,7 +934,7 @@ class Hub:
         cancelled meanwhile; Moved when the worker refused the clip, failed it, or stopped answering."""
 
         address, name = worker["address"], worker.get("name") or worker["address"]
-        say = lambda text: job.update(log=(job["log"] + f"[sparks] {text}\n")[-20000:])
+        say = lambda text: job.update(log=(job["log"] + f"[sparks] {self.said(text)}\n")[-20000:])
         try:
             base = self.connect(address)
             # the worker's own memory guard, asked before anything is sent (its app asks it again when the job is queued)
@@ -872,7 +1000,7 @@ class Hub:
     def record(self, job: dict) -> None:
         """A finished clip written into the takes list: its path, seed, settings and the Spark that rendered it."""
 
-        if not self.spark or job["kind"] not in ("video", "studio", "long") or not job.get("outputs"):
+        if job["kind"] not in ("video", "studio", "long") or not job.get("outputs"):
             return
         params = job["params"]
         line = {"path": job["outputs"][0], "job": job["id"], "title": job.get("title"), "kind": job["kind"], "seed": params.get("seed"),
@@ -913,20 +1041,18 @@ class Hub:
         except (TypeError, ValueError):
             raise HTTPException(400, "sparks and clips are whole numbers")
         kind, params = str(body.get("kind") or "video"), body.get("params") if isinstance(body.get("params"), dict) else {}
-        if not self.spark:
-            return {"supported": False, "limit": LIMIT, "chosen": 1, "available": 1, "listed": 1, "used": 1, "mode": "one", "says": MAC, "without": [], "estimate": None}
         able, without = [], []
         for worker in self.workers():
-            why = self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"])
-            (without.append({"name": worker.get("name") or worker["address"], "why": why}) if why else able.append(worker["address"]))
+            why = self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"], self.spark)
+            (without.append({"name": worker.get("name") or worker["address"], "why": self.said(why)}) if why else able.append(worker["address"]))
         listed, available = 1 + len(able) + len(without), 1 + len(able)
         here = here_only(kind, params)
         used = 1 if here else min(chosen, available)
         count = f"{available} of {chosen} available" if chosen > available else f"{used} Spark{'s' if used != 1 else ''}"
         if here:
-            mode, says = "one", here
+            mode, says = "one", self.said(here)
         elif used < 2:
-            mode, says = "one", ("This Spark alone." if chosen < 2 else "No other Spark can take this job now, so it renders on this one.")
+            mode, says = "one", (f"This {self.word} alone." if chosen < 2 else "No other Spark can take this job now, so it renders on this one.")
         elif clips > 1:
             mode, says = "parallel", f"One clip per Spark, {min(used, clips)} at a time: {clips} clips on {min(used, clips)} Sparks."
         else:
@@ -938,8 +1064,10 @@ class Hub:
             seconds = 0
         if seconds > 0:
             faster, measured = speedup(used, clips) if mode == "parallel" else (1.0, True)
-            estimate = {"seconds": int(seconds * clips / faster), "one_spark": int(seconds * clips), "faster": round(faster, 2), "measured": measured,
-                        "note": "an estimate from one measured run of 8 clips" + ("" if measured else f"; {used} Sparks were not measured (five exist)")}
+            mac = mode == "parallel" and not self.spark  # the run was measured with a Spark at the head, every clip on a Spark
+            estimate = {"seconds": int(seconds * clips / faster), "one_spark": int(seconds * clips), "faster": round(faster, 2), "measured": measured and not mac,
+                        "note": "an estimate from one measured run of 8 clips" + ("" if measured else f"; {used} Sparks were not measured (five exist)")
+                        + ("; that run had a Spark at the head, not a Mac, and this time is the Mac's for one clip" if mac else "")}
         return {"supported": True, "limit": LIMIT, "chosen": chosen, "available": available, "listed": listed, "used": used, "mode": mode,
                 "count": count, "says": says, "without": without, "estimate": estimate}
 
@@ -972,11 +1100,10 @@ class Hub:
 
         @router.post("/api/sparks/workers")
         def add(body: dict) -> dict:
-            if not self.spark:
-                raise HTTPException(400, MAC)
             try:
                 address = address_of(str(body.get("address") or ""))
                 folder = folder_of(str(body["folder"])) if body.get("folder") else None
+                via = address_of(str(body["via"])) if body.get("via") else None
             except ValueError as error:
                 raise HTTPException(400, str(error))
             found = self.config()
@@ -984,7 +1111,8 @@ class Hub:
                 raise HTTPException(400, f"{address} is already in the list")
             if len(found["workers"]) >= LIMIT - 1:
                 raise HTTPException(400, f"at most {LIMIT} Sparks, this one included")
-            found["workers"].append({"address": address, "name": str(body.get("name") or "").strip()[:60] or address, "folder": folder, "enabled": True})
+            found["workers"].append({"address": address, "name": str(body.get("name") or "").strip()[:60] or address, "folder": folder, "enabled": True,
+                                     **({"via": via} if via else {})})
             self.keep(found)
             self.act(address, "check")
             return self.overview()
@@ -999,11 +1127,18 @@ class Hub:
                 worker["enabled"] = bool(body["enabled"])
             if body.get("name"):
                 worker["name"] = str(body["name"]).strip()[:60]
-            if "folder" in body:
+            if "folder" in body or "via" in body:
                 try:
-                    worker["folder"] = folder_of(str(body["folder"])) if body["folder"] else None
+                    if "folder" in body:
+                        worker["folder"] = folder_of(str(body["folder"])) if body["folder"] else None
+                    if "via" in body:
+                        via = address_of(str(body["via"])) if body["via"] else None
+                        worker.pop("via", None)
+                        worker.update({"via": via} if via else {})
                 except ValueError as error:
                     raise HTTPException(400, str(error))
+                if "via" in body:
+                    self.hang_up(address)  # the next look goes the new way
             self.keep(found)
             self.kick.set()
             return self.overview()
@@ -1014,7 +1149,7 @@ class Hub:
             if not any(one["address"] == address for one in found["workers"]):
                 raise HTTPException(404, "no such Spark in the list")
             if self.state(address)["job"]:
-                raise HTTPException(400, "that Spark is rendering one of this Spark's clips: cancel the job first")
+                raise HTTPException(400, self.said("that Spark is rendering one of this Spark's clips: cancel the job first"))
             found["workers"] = [one for one in found["workers"] if one["address"] != address]
             self.keep(found)
             self.hang_up(address)  # its app, if a head started it, keeps running there: "Stop" first to free its memory
@@ -1051,8 +1186,17 @@ class Hub:
         return router
 
 
-def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, models: Path) -> dict:
-    """What an app says of itself on /api/spark/self."""
+def command_of(pid: int) -> list[str]:
+    """A process's command line, as words: /proc on Linux, ps where there is no /proc (macOS)."""
+
+    if Path("/proc/self").exists():
+        return [word.decode("utf-8", "replace") for word in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0") if word]
+    done = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+    return done.stdout.split()
+
+
+def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, models: Path, renders: dict | None = None) -> dict:
+    """What an app says of itself on /api/spark/self. ``renders``: the presets and qualities it renders."""
 
     try:
         disk = round(shutil.disk_usage(home).free / 1e9, 1)
@@ -1063,4 +1207,4 @@ def about(home: Path, code: dict, state: dict, loras: list, active: int, memory:
             "fasth3": any((models / "FastH3-Comfy/diffusion_models").glob("*fasth3*")),
             "image": any((models / "Qwen-Image-2.1-Comfy/diffusion_models").glob("qwen_image_2.1*.safetensors")),
             "ref2va": state["ref2va"], "ref2va_turbo": state["ref2va_turbo"], "ffmpeg": state["ffmpeg"],
-            "loras": loras, "text_encoders": state["text_encoders"]}
+            "loras": loras, "text_encoders": state["text_encoders"], **(renders or {})}

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import atexit
 import concurrent.futures
+import difflib
 import json
 import os
 import queue
@@ -120,9 +121,10 @@ SYSTEM = ("You are working for a filmmaker inside Imagination Studio. Save every
           "summary that lists the files you made.")
 
 # what the Agent room adds: a conversation that may need the user, and the Studio's own tools by name
-STUDIO_TOOLS = ("studio_state (call first), list_library, queue_still, queue_clip, queue_voice, queue_song, job_status, wait_for_jobs, "
-                "list_jobs, list_projects, add_to_timeline, export_timeline, upload_file, and Slate's slate_films, slate_film, "
-                "slate_new_film, slate_add_scene, slate_add_shot and slate_render_shot")
+STUDIO_TOOLS = ("studio_state (call first), list_library, queue_still, queue_edit, queue_clip (references for Ref2VA), queue_long, "
+                "queue_voice, queue_song, queue_sound (sfx, foley), queue_soundtrack, check_clip (the QA gate), motion_previs, "
+                "job_status, wait_for_jobs, cancel_job, list_jobs, list_projects, add_to_timeline, export_timeline, upload_file, "
+                "and Slate's slate_films, slate_film, slate_new_film, slate_add_scene, slate_add_shot and slate_render_shot")
 ROOM = (" This is a conversation with the filmmaker in the Studio's Agent room, and it continues over several turns."
         "{tools} When anything is unclear or a choice matters (length, look, voice, which take), ask the filmmaker one "
         "clear question and stop: write [question] on its own line, then the question, then up to four short choices "
@@ -151,6 +153,9 @@ LOCAL_DRIVE = (" You run the Studio's tools yourself, through function calls: ca
                "clip, a voice line or a song only when the filmmaker asks for one. A still or a clip takes minutes: after "
                "queueing, call wait_for_jobs with the job ids (again while they are still running), then name each output by "
                "its Library path. A job that fails is reported with its reason, not queued again unchanged.")
+# the local harness's method (see "the local harness's method" below): the parts it runs, by name; STUDIO_LOCAL_AGENT
+# replaces the list (comma separated, "baseline" for none of them) so the agent benchmark can measure each one
+LOCAL_METHOD = ("rules", "hints", "compact", "report", "temp=0")
 LOCAL_STEPS = 40  # the local model's answers in one turn (each may call several tools)
 LOCAL_ANSWER_TIMEOUT = 600  # one answer from the local server
 LOCAL_TOOL_TIMEOUT = 15 * 60  # one tool call (wait_for_jobs waits up to 10 minutes)
@@ -2022,6 +2027,166 @@ def answer_once(base: str, body: dict, stopped) -> dict | None:
     return out["answer"]
 
 
+# ---------- the local harness's method ----------
+#
+# A small local model (NVIDIA Nemotron 3.5 Bolt) drives the Studio well when the loop around it keeps it to the brief.
+# Each part below was kept because it measurably helped on the agent benchmark (scripts/agent-bench, 38 briefs; on
+# Bolt it took exactness from 37-39% to 97%), against the same loop without it:
+#   rules    the system prompt's "do only what was asked" rules: one call per thing asked, the count asked, the names
+#            given, nothing rendered, checked or added unasked, the fast settings unless others are named, which tool
+#            makes what, and Library paths as the tools give them
+#   hints    the Studio tools' settings described for it: count is the number asked, no image_model / quality unless
+#            named (Qwen 2.1 Turbo and FastH3 4 passes, the fastest), 22 frames is 0.92 s
+#   compact  tool answers as compact JSON without empty fields, and studio_state cut to the ids (and labels) it needs
+#   report   the final answer ends with what the Studio's records say was made (each job's outputs, the Slate ids), so
+#            what it says about files can be checked against the records beside it; a path it names with a slip in it
+#            (Bolt doubles a pair of characters in a long id now and then) is put right from the records
+#   temp=0   greedy sampling (0.3 before; 0 was the more exact of the two)
+# A call that failed is never sent again unchanged (the model is told so instead): that stopped loops of the same error.
+# Measured and left out: a checklist the model writes first in a JSON schema with a check of the calls against it
+# before it may finish (it enforced the checklist's own mistakes: 87% against 95% without it), two worked examples in
+# the system prompt (no gain), and Bolt's reasoning, `think` (as exact, three times slower; kept as a part to turn on).
+
+MAKERS = ("queue_still", "queue_clip", "queue_voice", "queue_song", "queue_edit", "queue_long", "queue_sound", "queue_soundtrack",
+          "check_clip", "motion_previs", "slate_new_film", "slate_add_scene", "slate_add_shot", "slate_render_shot",
+          "add_to_timeline", "export_timeline", "upload_file")
+LOCAL_RULES = (" Do only what the filmmaker asked, exactly: one call for each thing asked for, the number of pictures, takes or "
+               "shots they asked for (one picture is count 1), the names and lengths they gave, word for word. Never add a picture, "
+               "clip, song, voice line, sound or render they did not ask for, never render a Slate shot unless asked, and when they "
+               "say not to make something, make nothing of it. Leave image_model and quality out (the fastest: Qwen 2.1 Turbo, "
+               "FastH3 4 passes) unless they name one. Each thing has its tool: a picture or still is queue_still, a change to a picture "
+               "queue_edit, a clip queue_clip (from a picture: its first_frame; from reference pictures: references), a long take or "
+               "anything over 15 s queue_long, a voice line queue_voice, a song or instrumental queue_song, a sound effect or foley "
+               "queue_sound, a song under a clip queue_soundtrack, Motion Previs motion_previs, a timeline add_to_timeline and "
+               "export_timeline; the QA gate (check_clip) only when they ask for a check; Slate films, scenes and shots only when they say Slate, film, scene or shot. The Studio's tools take Library paths as the filmmaker or the tools give them "
+               "(renders/a.mp4, scouts/<job>/scout_s1.png), never with a folder put in front. Name only files and ids the tools returned.")
+LOCAL_HINTS = {
+    "queue_still": {"count": "how many pictures: exactly the number asked for (1 for 'a picture', 'one picture', 'a still'); 4 only "
+                             "when they ask for options or candidates without a number",
+                    "image_model": "leave out (Qwen 2.1 Turbo, the fastest) unless the filmmaker names a model",
+                    "preset": "leave out unless a size is asked for; 'small' is 864x480"},
+    "queue_clip": {"quality": "leave out (FastH3 4 passes, the fastest) unless the filmmaker names a quality",
+                   "preset": "leave out unless a size is asked for; 'small' is 864x480",
+                   "seconds": "the length asked for; 22 frames is 0.92 s, the shortest"},
+    "queue_long": {"quality": "leave out (FastH3 4 passes, the fastest) unless the filmmaker names a quality"},
+    "queue_edit": {"image_model": "leave out (Qwen 2.1 Turbo) unless the filmmaker names a model"},
+}
+
+
+def local_method() -> dict:
+    """The parts of the method this Studio runs (LOCAL_METHOD, or STUDIO_LOCAL_AGENT), and the temperature."""
+
+    named = os.environ.get("STUDIO_LOCAL_AGENT")
+    parts = [p.strip() for p in (named.split(",") if named is not None else LOCAL_METHOD) if p.strip() and p.strip() != "baseline"]
+    temperature = next((float(p[5:]) for p in parts if p.startswith("temp=")), 0.3)
+    return {"parts": {p for p in parts if not p.startswith("temp=")}, "temperature": temperature}
+
+
+def hinted_schema(name: str, schema: dict) -> dict:
+    hints = LOCAL_HINTS.get(name)
+    if not hints or not isinstance(schema.get("properties"), dict):
+        return schema
+    properties = {k: dict(v) if isinstance(v, dict) else v for k, v in schema["properties"].items()}
+    for key, hint in hints.items():
+        if isinstance(properties.get(key), dict):
+            properties[key]["description"] = hint
+    return {**schema, "properties": properties}
+
+
+def pruned(value):
+    if isinstance(value, dict):
+        return {k: pruned(v) for k, v in value.items() if v not in (None, "", [], {})}
+    if isinstance(value, list):
+        return [pruned(v) for v in value]
+    return value
+
+
+def compact_result(tool: str, text: str) -> str:
+    """A tool's answer as the model reads it: compact JSON without empty fields; studio_state as the ids it needs."""
+
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return text
+    if tool == "studio_state" and isinstance(value, dict):
+        value = {"presets": {k: "x".join(str(n) for n in (v.get("size") or [])) for k, v in (value.get("presets") or {}).items()},
+                 "qualities": value.get("qualities") or {},
+                 "image_models": {m.get("id"): m.get("label") for m in value.get("image_models") or [] if isinstance(m, dict)},
+                 "defaults": {"image_model": "qwen (Qwen 2.1 Turbo, the fastest)", "quality": "fh4 (the fastest)"},
+                 "clip_seconds": "0.92 (22 frames) to 15", "platform": value.get("platform")}
+    if isinstance(value, dict) and isinstance(value.get("log"), str):
+        value.pop("log")
+    return json.dumps(pruned(value), separators=(",", ":"), ensure_ascii=False)
+
+
+LIBRARY_PATH = re.compile(r"(?<![\w./-])(?:scouts|renders|slate|exports|sound|voice|music|motion|uploads|projects|qa)/[\w./-]+\.[A-Za-z0-9]{2,4}\b")
+
+
+class Ledger:
+    """What the turn's tool calls made, from their answers: the jobs by id (as last seen) and the Slate and Editor ids."""
+
+    def __init__(self):
+        self.jobs: dict[str, dict] = {}
+        self.cancelled: set = set()
+        self.made: list[str] = []  # Slate films, scenes and shots, Editor timelines, by their ids
+
+    def note(self, tool: str, args: dict, text: str, failed: bool) -> None:
+        if failed:
+            return
+        values = results_in(text)
+        if tool == "cancel_job":
+            self.cancelled.add(str(args.get("id")))
+        for value in values:
+            for one in (value if isinstance(value, list) else [value]):
+                if not isinstance(one, dict):
+                    continue
+                if isinstance(one.get("id"), str) and one.get("status") and (one.get("kind") or one.get("stages") is not None):
+                    self.jobs[one["id"]] = {**self.jobs.get(one["id"], {}), **one}
+                if tool == "slate_new_film":
+                    self.made.append(f"Slate film {one.get('name')} ({one.get('film')})")
+                elif tool == "slate_add_scene":
+                    self.made.append(f"Slate scene {one.get('name')} ({one.get('scene')}) in film {one.get('film')}")
+                elif tool == "slate_add_shot":
+                    self.made.append(f"Slate shot {one.get('name')} ({one.get('shot')}), {one.get('seconds')} s, not rendered")
+                elif tool == "add_to_timeline":
+                    self.made.append(f"Editor timeline {one.get('name') or one.get('project')}: {one.get('clips')} clip(s)")
+
+    def paths(self) -> list[str]:
+        return [str(o) for job in self.jobs.values() for o in job.get("outputs") or []]
+
+    def mended(self, said: str) -> str:
+        """The answer with each Library path it names that the records do not have, but one of theirs differs from it by
+        a slip (a doubled or dropped character of an id: p-1a1a15... for p-1a15...), put right."""
+
+        known = self.paths()
+        def mend(match):
+            path = match.group(0)
+            if path in known or not known:
+                return path
+            near = difflib.get_close_matches(path, known, n=1, cutoff=0.9)
+            return near[0] if near and len(path) > 12 else path
+        return LIBRARY_PATH.sub(mend, said)
+
+    def running(self) -> list[str]:
+        return [i for i, job in self.jobs.items() if job.get("status") in ("queued", "running") and i not in self.cancelled]
+
+    def lines(self) -> list[str]:
+        out = []
+        for job_id, job in self.jobs.items():
+            outputs = job.get("outputs") or []
+            line = f"{job.get('kind') or 'motion'} {job_id} ({job.get('title') or ''}): {job.get('status')}"
+            if outputs:
+                line += " → " + ", ".join(str(o) for o in outputs[:6]) + (f" and {len(outputs) - 6} more" if len(outputs) > 6 else "")
+            if job.get("pack"):
+                line += f" → pack {job['pack']}"
+            if isinstance(job.get("qa"), dict) and job["qa"].get("passed") is not None:
+                line += " · QA gate: " + ("passed" if job["qa"]["passed"] else "failed")
+            if job.get("error"):
+                line += f" ({str(job['error'])[:200]})"
+            out.append(line)
+        return out + self.made
+
+
 def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names: list[str]) -> None:
     """The local harness's turn (see above): the MCP servers of the task's tools, then the loop."""
 
@@ -2035,6 +2200,8 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
     clients: list[Mcp] = []
     table: dict = {}  # function name -> (server, tool name, its required arguments)
     calls = task["calls"] = {"answers": 0, "made": 0, "bad": 0, "failed": 0}
+    method, ledger = local_method(), Ledger()
+    refused: dict = {}  # (function, its arguments) -> what the tool said when that call failed
 
     def say(text: str, step: str | None = None) -> None:
         if text:
@@ -2075,6 +2242,8 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                 name = function_name(item["name"] if counts[item["name"]] == 1 else f"{client.id}__{item['name']}")
                 schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {"type": "object", "properties": {}}
                 table[name] = (client, item["name"], [r for r in schema.get("required") or [] if isinstance(r, str)])
+                if "hints" in method["parts"] and client.id == "studio":
+                    schema = hinted_schema(item["name"], schema)
                 functions.append({"type": "function", "function": {"name": name, "description": str(item.get("description") or "")[:1000],
                                                                     "parameters": schema}})
         if not functions:
@@ -2082,10 +2251,14 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
         system = SYSTEM.format(folder=f" ({work_})", studio="")
         if task.get("thread"):
             system += ROOM.format(tools=ROOM_TOOLS.format(names=STUDIO_TOOLS) if "studio" in task["tools"] else "")
-        system += LOCAL_DRIVE
+        if not any(tool in MAKERS for _, tool, _ in table.values()):  # the method is for the Studio's tools: another server's run plain
+            method["parts"] -= {"rules", "report"}
+        system += LOCAL_DRIVE + (LOCAL_RULES if "rules" in method["parts"] else "")
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": with_history(thread, task["prompt"]) + attached_note(task, names)}]
-        record({"type": "start", "model": model, "server": base, "tools": [f["function"]["name"] for f in functions]})
+        record({"type": "start", "model": model, "server": base, "tools": [f["function"]["name"] for f in functions],
+                "method": sorted(method["parts"]), "temperature": method["temperature"]})
+        extra = {"chat_template_kwargs": {"enable_thinking": "think" in method["parts"]}}
         nudged = 0
         for number in range(LOCAL_STEPS + 1):
             last = number == LOCAL_STEPS or time.time() - started > TASK_TIMEOUT
@@ -2096,7 +2269,7 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                 say(f"[{note}]", note)
                 messages.append({"role": "user", "content": f"The turn is {note}. Do not call any more tools: say what is done "
                                                             "(with the Library paths of what was made) and what is not."})
-            body = {"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 4096,
+            body = {"model": model, "messages": messages, "temperature": method["temperature"], "max_tokens": 4096, **extra,
                     **({} if last else {"tools": functions})}
             answer = answer_of(base, body, stopped, lambda text: say(f"[{text}]", text))
             if answer is None:
@@ -2118,6 +2291,16 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                     say("", "nudged to call its tools")
                     continue
                 task["reply"] = said
+                studio_ = next((c for c in clients if c.id == "studio"), None)
+                for job_id in ledger.running() if "report" in method["parts"] and studio_ else []:  # as they are now
+                    try:
+                        now = studio_.request("tools/call", {"name": "job_status", "arguments": {"id": job_id}}, 30, stopped)
+                        ledger.note("job_status", {"id": job_id}, "\n".join(str(c.get("text") or "") for c in now.get("content") or []
+                                                                             if isinstance(c, dict)), bool(now.get("isError")))
+                    except (TimeoutError, EOFError, RuntimeError, OSError, InterruptedError):
+                        pass
+                if "report" in method["parts"] and ledger.lines():
+                    task["reply"] = ledger.mended(said).rstrip() + "\n\nWhat the Studio's records say was made:\n" + "\n".join("- " + l for l in ledger.lines())
                 break
             messages.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": wanted})
             for one in wanted:
@@ -2138,6 +2321,9 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                     text = f"{name} needs {', '.join(r for r in hit[2] if args.get(r) in (None, ''))}: call it again with them."
                 elif confine(args, work_):
                     text = "Refused: " + confine(args, work_)
+                elif (name, json.dumps(args, sort_keys=True)) in refused:  # the same call that failed, again: not sent
+                    text = (f"This exact {name} call failed already ({refused[(name, json.dumps(args, sort_keys=True))][:200]}). "
+                            "Do not repeat it: change what made it fail, or stop and say what could not be made.")
                 if text:
                     calls["bad"] += 1
                     say(f"✗ {name}: {text}", f"✗ {name}: {text}")
@@ -2157,14 +2343,25 @@ def drive(task: dict, thread: dict | None, log, config: dict, work_: Path, names
                         text, failed = f"The tool failed: {error}", True
                     if failed:
                         calls["failed"] += 1
+                        refused[(name, json.dumps(args, sort_keys=True))] = text
                         say(f"  {tool} said: {text[:300]}")
                     record({"type": "tool", "name": name, "arguments": args, "error": failed, "result": text[:LOG_LIMIT]})
+                    if client.id == "studio":
+                        ledger.note(tool, args, text, failed)
+                        if "compact" in method["parts"] and not failed:
+                            text = compact_result(tool, text)
                 messages.append({"role": "tool", "tool_call_id": str(one.get("id") or ""), "content": text[:LOCAL_RESULT_CHARS]})
                 if stopped():
                     return
         task["status"] = "done"
     finally:
         record({"type": "end", "status": task["status"], "calls": calls, "seconds": round(time.time() - started, 1)})
+        try:  # the whole conversation as the model saw it, for the agent benchmark and for training on good turns
+            write_json(here / "messages.json", {"model": model if "model" in locals() else None, "method": sorted(method["parts"]),
+                                                "tools": locals().get("functions") or [], "messages": locals().get("messages") or [],
+                                                "said": locals().get("said"), "reply": task.get("reply")})
+        except (OSError, TypeError, ValueError):
+            pass
         raw.close()
         for client in clients:
             client.close()

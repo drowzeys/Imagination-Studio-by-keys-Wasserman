@@ -292,3 +292,127 @@ def test_without_the_control_a_server_that_does_not_answer_still_fails_the_turn(
     thread = settled(answer["thread"]["id"])
     task = record(answer["task"]["id"])
     assert task["status"] in ("done", "failed")  # the first answer arrives; nothing waits for a server nobody stopped
+
+
+# a stand-in for the Studio's own MCP server: queue_still queues a job, wait_for_jobs and job_status find it done
+STUDIO_MCP = r'''
+import json, sys
+made = []
+for line in sys.stdin:
+    message = json.loads(line)
+    if "id" not in message:
+        continue
+    if message["method"] == "initialize":
+        result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "studio", "version": "1"}}
+    elif message["method"] == "tools/list":
+        result = {"tools": [{"name": "studio_state", "inputSchema": {"type": "object", "properties": {}}},
+                            {"name": "queue_still", "inputSchema": {"type": "object", "required": ["prompt"], "properties": {
+                                "prompt": {"type": "string"}, "count": {"type": "integer", "description": "1 to 12, default 4"},
+                                "image_model": {"type": "string"}}}},
+                            {"name": "wait_for_jobs", "inputSchema": {"type": "object", "required": ["ids"], "properties": {"ids": {"type": "array"}}}},
+                            {"name": "job_status", "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}}]}
+    else:
+        name, args = message["params"]["name"], message["params"]["arguments"]
+        if name == "studio_state":
+            out = {"presets": {"small": {"label": "Small", "size": [864, 480]}}, "qualities": {"fh4": "FastH3 4"}, "turbo": True,
+                   "image_models": [{"id": "qwen", "label": "Qwen", "note": "fast"}, {"id": "flux3k-full", "label": "F", "note": "slow"}],
+                   "platform": "mac", "version": "3"}
+        elif name == "queue_still" and args.get("prompt") == "too long":
+            out = None
+        elif name == "queue_still":
+            made.append(f"j{len(made) + 1}")
+            out = {"id": made[-1], "kind": "scout", "status": "queued", "title": "agent: still", "outputs": [], "error": None}
+        else:
+            ids = args.get("ids") or [args.get("id")]
+            out = [{"id": i, "kind": "scout", "status": "done", "outputs": [f"scouts/{i}/scout_s1.png"]} for i in ids]
+            out = out if name == "wait_for_jobs" else out[0]
+        result = {"content": [{"type": "text", "text": json.dumps(out, indent=1)}]} if out is not None else \
+            {"content": [{"type": "text", "text": "the Studio said: a prompt is at most 2000 characters (400)"}], "isError": True}
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+'''
+
+
+@pytest.fixture
+def studio_tool(fake, local):
+    path = fake["tmp"] / "studio-mcp.py"
+    path.write_text(STUDIO_MCP)
+    post("/api/agent/tools", {"id": "studio", "label": "Studio", "command": [PY, str(path)], "env": {}})
+    return local
+
+
+def test_the_method_keeps_the_model_to_the_brief_and_reports_the_records(studio_tool, monkeypatch):
+    monkeypatch.delenv("STUDIO_LOCAL_AGENT", raising=False)
+    def reply(body, n):
+        last = body["messages"][-1]
+        if last["role"] == "user":
+            return {"content": "", "tool_calls": [call("queue_still", {"prompt": "a samurai", "count": 1}, 1),
+                                                  call("queue_still", {"prompt": "a ninja", "count": 1}, 2)]}
+        if last["role"] == "tool" and '"status":"queued"' in last["content"]:
+            return {"content": "", "tool_calls": [call("wait_for_jobs", {"ids": ["j1"]}, 3)]}
+        return {"content": "Made the samurai and the ninja: scouts/j1/scout_s1.png and scouts/j2/scout_s1.png."}
+    model = studio_tool(reply)
+    answer = post("/api/agent/threads", {"text": "One picture of a samurai and one of a ninja", "backend": "local", "tools": ["studio"]}).json()
+    thread = settled(answer["thread"]["id"])
+    first = model.asked[0]
+    # the rules, the hints in the schema, greedy sampling, and Bolt's reasoning left off; no extra answer before acting
+    assert len(model.asked) == 3 and "response_format" not in first
+    assert "Do only what the filmmaker asked" in first["messages"][0]["content"] and "a long take or anything over 15 s queue_long" in first["messages"][0]["content"]
+    schema = next(f for f in first["tools"] if f["function"]["name"] == "queue_still")["function"]["parameters"]
+    assert schema["properties"]["count"]["description"].startswith("how many pictures: exactly the number asked for")
+    assert "unless the filmmaker names a model" in schema["properties"]["image_model"]["description"]
+    assert first["chat_template_kwargs"] == {"enable_thinking": False} and first["temperature"] == 0
+    # tool answers are compact JSON
+    assert any(m["role"] == "tool" and m["content"].startswith('{"id":"j1","kind":"scout","status":"queued"') for m in model.asked[1]["messages"])
+    # the answer ends with the records, as they are when it ends (j2 was not waited for: it is asked for)
+    said = thread["turns"][-1]["text"]
+    assert said.startswith("Made the samurai and the ninja") and "What the Studio's records say was made:" in said
+    assert "- scout j1 (agent: still): done → scouts/j1/scout_s1.png" in said and "- scout j2 (agent: still): done → scouts/j2/scout_s1.png" in said
+    task = record(answer["task"]["id"])
+    saved = json.loads((agents.HOME / "agent" / task["id"] / "messages.json").read_text())
+    assert saved["messages"][1]["content"] == "One picture of a samurai and one of a ninja" and saved["reply"] == said
+    assert saved["said"] == "Made the samurai and the ninja: scouts/j1/scout_s1.png and scouts/j2/scout_s1.png."
+
+
+def test_the_benchmark_can_turn_the_method_off_or_on_part_by_part(studio_tool, monkeypatch):
+    monkeypatch.setenv("STUDIO_LOCAL_AGENT", "baseline")
+    model = studio_tool(lambda body, n: {"content": "", "tool_calls": [call("studio_state", {})]} if n == 1 else {"content": "Nothing to make."})
+    answer = post("/api/agent/threads", {"text": "What can you make?", "backend": "local", "tools": ["studio"]}).json()
+    thread = settled(answer["thread"]["id"])
+    assert len(model.asked) == 2 and "response_format" not in model.asked[0] and thread["turns"][-1]["text"] == "Nothing to make."
+    assert "Do only what" not in model.asked[0]["messages"][0]["content"]
+    assert model.asked[1]["messages"][-1]["content"].startswith("{\n")  # the tool's own answer, as it gave it
+    assert agents.local_method() == {"parts": set(), "temperature": 0.3}
+    monkeypatch.setenv("STUDIO_LOCAL_AGENT", "rules,think,temp=0.6")
+    assert agents.local_method() == {"parts": {"rules", "think"}, "temperature": 0.6}
+    monkeypatch.delenv("STUDIO_LOCAL_AGENT")
+    assert agents.local_method() == {"parts": {"rules", "hints", "compact", "report"}, "temperature": 0}
+    # studio_state, as the model reads it: the ids, and the fastest defaults
+    state = json.loads(agents.compact_result("studio_state", json.dumps({"presets": {"small": {"label": "S", "size": [864, 480]}},
+                                                                          "image_models": [{"id": "qwen", "label": "Qwen 2.1 Turbo"}, {"id": "flux3k-full", "label": "FLUX3-K Full"}],
+                                                                          "qualities": {"fh4": "FastH3: 4 passes, fastest"}})))
+    assert state["presets"] == {"small": "864x480"} and state["image_models"] == {"qwen": "Qwen 2.1 Turbo", "flux3k-full": "FLUX3-K Full"} and "qwen" in state["defaults"]["image_model"]
+    assert state["qualities"] == {"fh4": "FastH3: 4 passes, fastest"}  # with their labels: which one is the fastest is in them
+
+
+
+def test_a_call_that_failed_is_not_sent_again_unchanged(studio_tool, monkeypatch):
+    monkeypatch.setenv("STUDIO_LOCAL_AGENT", "baseline")
+    model = studio_tool(lambda body, n: {"content": "", "tool_calls": [call("queue_still", {"prompt": "too long"}, n)]} if n <= 3
+                        else {"content": "It could not be queued."})
+    answer = post("/api/agent/threads", {"text": "Go", "backend": "local", "tools": ["studio"]}).json()
+    settled(answer["thread"]["id"])
+    task = record(answer["task"]["id"])
+    assert task["calls"] == {"answers": 4, "made": 3, "bad": 2, "failed": 1}  # sent once; the two repeats were answered here
+    said = [m["content"] for m in model.asked[-1]["messages"] if m["role"] == "tool"]
+    assert said[0] == "the Studio said: a prompt is at most 2000 characters (400)"
+    assert said[1].startswith("This exact queue_still call failed already (the Studio said: a prompt is at most") and said[2] == said[1]
+
+
+def test_a_slip_in_a_path_the_answer_names_is_put_right_from_the_records():
+    ledger = agents.Ledger()
+    ledger.note("slate_render_shot", {}, json.dumps({"id": "j1", "kind": "video", "status": "done",
+                                                    "outputs": ["slate/p-1a157b848c0-7743ef/takes/shot-mvg86evj-71f70-mvg86x3g.mp4"]}), False)
+    said = ("Rendered: slate/p-1a1a157b848c0-7743ef/takes/shot-mvg86evj-71f70-mvg86x3g.mp4, beside uploads/hero.png and "
+            "scouts/zzz/other.png.")
+    assert ledger.mended(said) == ("Rendered: slate/p-1a157b848c0-7743ef/takes/shot-mvg86evj-71f70-mvg86x3g.mp4, beside "
+                                   "uploads/hero.png and scouts/zzz/other.png.")  # a path not near one of the records stays as it is
