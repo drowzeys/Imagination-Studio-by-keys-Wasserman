@@ -44,9 +44,10 @@ LICENCES = {"sfx": "Stable Audio Open 1.0 · Stability AI Community License (fre
             "foley": "MMAudio · its weights are CC-BY-NC 4.0: non-commercial use only"}
 
 
-def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None):
+def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, seconds_of=None):
     """``room``: what this machine has for a render with none of the Studio's own engines counted (MB, or None),
-    the queue's memory_of as the server keeps it; a Spark's memory check reads it."""
+    the queue's memory_of as the server keeps it; a Spark's memory check reads it. ``seconds_of``: the server's
+    media_seconds (ffprobe with a time limit), so a clip foley cannot take is refused when it is queued."""
 
     router = APIRouter()
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
@@ -158,6 +159,10 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None):
         level = number(params, "foley_db", -6.0)
         if not -30 <= level <= 0:
             raise HTTPException(400, "foley_db is between -30 and 0")
+        length = seconds_of(str(clip))[0] if seconds_of else None  # None when it cannot be read: the runner measures again
+        if length is not None and length < FOLEY_SECONDS[0]:
+            # refused here, not by the runner after the job has unloaded Voice or Music and started the sound venv
+            raise HTTPException(400, f"the clip is {length:.2f} s and foley needs at least {FOLEY_SECONDS[0]:g} s of picture: pick a longer clip")
         fits(kind, FOLEY_SECONDS[1])  # the clip's length is read by the runner; the longest is asked for here
         sound, film = folder / f"{job_id}.wav", folder / f"{job_id}.mp4"
         command += ["--video", str(clip), "--steps", str(steps), "--cfg", f"{cfg:g}", "--max-seconds", f"{FOLEY_SECONDS[1]:g}",
