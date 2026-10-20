@@ -296,6 +296,9 @@ class Hub:
         self.kick = threading.Event()
         self.mine: dict | None = None
         self.shell, self.copy, self.dial = shell, copy, lambda address: Tunnel(address)  # stood in for by the tests
+        # True while this Studio installs its own updates by itself (updates.Manager.automatic): a worker whose code
+        # is behind is then brought level the same way, once per version of this Spark's code (catch_up)
+        self.follow = lambda: False
         self.started = False
 
     # ---- the list ---------------------------------------------------------------------------------------------
@@ -604,9 +607,25 @@ class Hub:
             finally:
                 live["working"] = ""
                 self.kick.set()
+            if what == "check":
+                self.catch_up(worker)
 
         threading.Thread(target=go, daemon=True).start()
         return self.shown(worker)
+
+    def catch_up(self, worker: dict) -> None:
+        """With automatic updates on, a worker that is behind only in its code gets this Spark's code (“Update and
+        start”, as a person would press it), once per version of that code: one that then fails is left for a person,
+        never tried in a loop. A worker that is down, unreachable or bare is never touched here."""
+
+        live = self.state(worker["address"])
+        if not self.follow() or not worker.get("enabled", True) or live["state"] != "update" or live["job"] or live["working"]:
+            return
+        version = hashlib.sha1(json.dumps(self.code(), sort_keys=True).encode()).hexdigest()
+        if live.get("caught") == version:
+            return
+        live["caught"] = version
+        self.act(worker["address"], "update")
 
     # ---- which Spark renders which clip -------------------------------------------------------------------------------
 
@@ -704,6 +723,8 @@ class Hub:
                             live["info"] = call(live["base"], "/api/spark/self", timeout=5)
                         except (OSError, Refused):
                             pass  # the thread that follows its job decides when it is lost
+                    if refresh and live["state"] == "update":
+                        self.catch_up(worker)
                     if live["job"] or live["working"] or not worker.get("enabled", True) or live["state"] not in ("ready", "busy"):
                         continue
                     if not (waiting or refresh) or not self.glance(worker) or not waiting:

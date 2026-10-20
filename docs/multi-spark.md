@@ -23,7 +23,9 @@ On a Mac the setting shows 1: multi-Spark rendering is for DGX Sparks.
    differs from this Spark's*, *no Studio installed there*, *does not answer over ssh*.
 4. Press **Update and start**. This sends this Spark's Studio code to the worker (rsync over ssh, as you: code only,
    never models), starts the worker's app on the worker's own `127.0.0.1:7870`, and checks it again. A worker renders
-   only when its code is this Spark's, which is also how it gets the memory guard.
+   only when its code is this Spark's, which is also how it gets the memory guard. With automatic updates on
+   (Settings → Updates), this Spark does that itself when a worker falls behind its code: once per version, for an idle
+   worker this Studio started; one that then fails waits for you.
 5. Each Spark's row then says: its Studio's version, memory available, disk free, and what it renders (FastH3 clips
    from text, a first frame or a last frame; Ref2VA; the image model; how many LoRAs; ffmpeg).
 
