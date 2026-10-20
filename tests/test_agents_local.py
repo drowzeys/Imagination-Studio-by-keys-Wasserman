@@ -323,3 +323,13 @@ def test_a_call_that_failed_is_not_sent_again_unchanged(studio_tool, monkeypatch
     said = [m["content"] for m in model.asked[-1]["messages"] if m["role"] == "tool"]
     assert said[0] == "the Studio said: a prompt is at most 2000 characters (400)"
     assert said[1].startswith("This exact queue_still call failed already (the Studio said: a prompt is at most") and said[2] == said[1]
+
+
+def test_a_slip_in_a_path_the_answer_names_is_put_right_from_the_records():
+    ledger = agents.Ledger()
+    ledger.note("slate_render_shot", {}, json.dumps({"id": "j1", "kind": "video", "status": "done",
+                                                    "outputs": ["slate/p-1a157b848c0-7743ef/takes/shot-mvg86evj-71f70-mvg86x3g.mp4"]}), False)
+    said = ("Rendered: slate/p-1a1a157b848c0-7743ef/takes/shot-mvg86evj-71f70-mvg86x3g.mp4, beside uploads/hero.png and "
+            "scouts/zzz/other.png.")
+    assert ledger.mended(said) == ("Rendered: slate/p-1a157b848c0-7743ef/takes/shot-mvg86evj-71f70-mvg86x3g.mp4, beside "
+                                   "uploads/hero.png and scouts/zzz/other.png.")  # a path not near one of the records stays as it is
