@@ -153,3 +153,19 @@ def test_a_signed_out_agent_is_never_called_not_on_this_machine():
         return  # no node on this machine: the page's code is not run here, as for the other page tests
     assert "Claude Code is not signed in." in out["said"] and "Claude Code is not on this machine" not in out["said"]
     assert "Gemini CLI is not on this machine." in out["said"] and "Grok CLI is not reached." in out["said"]
+
+
+def test_a_local_model_that_takes_tool_calls_uses_the_studio_and_is_the_rooms_first_choice():
+    out = run(BRAINS + """
+      BR.data.backends[5] = { id: "local", label: "NVIDIA Nemotron 3.5 Bolt (local)", named: true, kind: "http", found: true, harness: true, models: ["nvidia-nemotron-3.5-bolt"] };
+      BR.data.default = "local"; BR.data.automatic = true; BR.data.settings = { agent: "local" };
+      let page = viewAgent(); out.backend = AG.backend; out.card = text(card(page, "local")); out.under = text(cls(page, "agr-under"));
+      button(page, "A teaser").attrs.onclick(); page = viewAgent(); await button(page, "Send").attrs.onclick();
+      out.sent = calls.find(c => c[0] === "/api/agent/tasks" && c[1]);
+      // a local server without tool calls stays a conversation, and says why
+      BR.data.backends[5].harness = false; BR.data.settings = {}; AG.backend = "local"; page = viewAgent();
+      out.plain = [text(card(page, "local")), text(cls(page, "agr-under"))];""")
+    assert out["backend"] == "local" and "Uses the Studio" in out["card"] and "Nemotron 3.5 Bolt" in out["card"]
+    assert "It may use" in out["under"] and "This Studio" in out["under"]
+    assert out["sent"][1]["backend"] == "local" and "studio" in out["sent"][1]["tools"]
+    assert "Conversation" in out["plain"][0] and "does not take tool calls" in out["plain"][1]
