@@ -150,6 +150,8 @@ def test_the_runner_names_its_licences_and_lays_foley_under_the_speech():
     assert "StableAudioPipeline" in text and "large_44k_v2" in text and "CC-BY-NC 4.0" in text
     assert "gaussian_noise_on_metal" in text  # Stable Audio Open on Metal: the Brownian tree never ends there (measured)
     assert "amix=inputs=2" in text and "limit=0.84" in text  # under the clip's own sound, peaks under -1 dBFS
+    # on Metal: Stable Audio Open's transformer in float16, MMAudio built without random initial values (measured)
+    assert "half_on_metal(pipe.transformer)" in text and "without_initial_values()" in text and "SOUND_PRECISION" in text
     setup = (ROOT / "scripts/setup-sound.sh").read_text()
     assert "MMAUDIO_COMMIT=\"974010a026c731054592d8f777218bd9d85a6c24\"" in setup and "sudo" not in setup
 
