@@ -108,7 +108,7 @@ function moSource() {
   // play only the chosen range, the way the pack will be cut
   video.addEventListener("timeupdate", () => { if (!video.paused && video.currentTime > Number(MO.end)) video.currentTime = Number(MO.start); });
   put(box, video, el("div", { class: "row" }, field("Start (s)", el("div", { class: "row", style: "flex-wrap:nowrap;gap:6px" }, a, mark("start", a))), field("End (s)", el("div", { class: "row", style: "flex-wrap:nowrap;gap:6px" }, b, mark("end", b))),
-    el("button", { class: "fit", onclick: () => { video.currentTime = Number(MO.start); video.play(); } }, "▶ Play the range")),
+    el("button", { class: "fit", onclick: () => { video.currentTime = Number(MO.start); video.play().catch(() => {}); } }, "▶ Play the range")),
     el("div", { class: "summary" }, el("span", { class: "chip k" }, MO.source.split("/").pop()), MO.meta ? el("span", { class: "chip" }, MO.meta.width + " × " + MO.meta.height + " · " + MO.meta.duration.toFixed(2) + " s") : null, say,
       el("span", { class: "eta" }, "a shot is 2 to 15 s")));
   paint(); return box;
@@ -142,7 +142,7 @@ function moReview(pack) {
   put(box, el("div", { class: "summary", style: "margin-top:4px" }, el("span", { class: "chip k" }, pack.source || pack.id), pack.range ? el("span", { class: "chip" }, pack.range.duration.toFixed(2) + " s") : null,
     el("span", { class: "chip" }, (MO.state.modes[pack.mode] || [pack.mode])[0]), pack.size && pack.size.width ? el("span", { class: "chip" }, pack.size.width + " × " + pack.size.height) : null,
     pack.quality ? el("span", { class: "chip" }, "quality " + pack.quality.score + "/100 · " + pack.quality.readiness) : null, pack.imported ? el("span", { class: "chip" }, "uploaded pack") : null,
-    el("span", { style: "flex:1" }), el("button", { class: "small", onclick: () => { players.forEach(v => { v.currentTime = 0; v.play(); }); } }, "▶ Play all together"),
+    el("span", { style: "flex:1" }), el("button", { class: "small", onclick: () => { players.forEach(v => { v.currentTime = 0; v.play().catch(() => {}); }); } }, "▶ Play all together"),
     pack.zip ? el("a", { href: file(pack.zip), download: pack.id + ".zip" }, "Download the pack (ZIP)") : null));
   put(box, moCamera(pack));
   put(box, el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px" }, views.map(([label, path]) => { const v = path ? el("video", { src: file(path), controls: true, muted: true, loop: true, preload: "metadata", playsinline: true }) : null; if (v) players.push(v);

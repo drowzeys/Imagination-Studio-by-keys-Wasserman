@@ -16,6 +16,7 @@ os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp()) / "Imagination
 sys.path.insert(0, str(ROOT / "app"))
 import server  # noqa: E402
 import sound  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 client = TestClient(server.app)
@@ -113,6 +114,20 @@ def test_each_setting_is_checked_before_the_job_is_queued(ready):
         answer = client.post("/api/jobs", json={"kind": kind, "params": params})
         assert answer.status_code in (400, 403), (kind, params, answer.text)
         assert words in answer.json()["error"], (kind, params, answer.json())
+
+
+def test_a_clip_too_short_for_foley_is_refused_when_it_is_queued(ready):
+    """A 22-frame clip (0.92 s) was queued, unloaded Music 3 and failed 14 s later in the runner on a Mac."""
+    clip = server.HOME / "renders" / "short.mp4"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    clip.write_bytes(b"not really a clip")
+    lengths = {"short": (0.92, True), "unread": (None, None)}
+    build = sound.attach(server.HOME, ROOT, False, server.inside, server.relative, None, lambda path: lengths[Path(path).stem])[1]
+    with pytest.raises(HTTPException) as refused:
+        build("foley", {"video": "renders/short.mp4"}, "j1")
+    assert refused.value.status_code == 400 and "0.92 s" in refused.value.detail and "at least 1 s" in refused.value.detail
+    (server.HOME / "renders" / "unread.mp4").write_bytes(b"x")
+    assert "--video" in build("foley", {"video": "renders/unread.mp4"}, "j2")[0]  # not measured here: the runner decides
 
 
 def test_what_is_missing_is_said(ready, monkeypatch, tmp_path):
