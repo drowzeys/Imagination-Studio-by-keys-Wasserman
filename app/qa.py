@@ -203,6 +203,21 @@ def local_vision(picture: Path, endpoint: str, model: str) -> str:
         return json.loads(answer.read())["choices"][0]["message"]["content"]
 
 
+def bolt_engine(endpoint: str | None):
+    """bolt.py when the brains' address means the Studio's own Bolt engine, else None."""
+
+    try:
+        import bolt
+    except ImportError:
+        return None
+    return bolt if bolt.serves(endpoint or "") else None
+
+
+def engine_model() -> str:
+    import bolt
+    return bolt.SERVED
+
+
 def default_brain() -> dict:
     """The brain saved in Brains & tools (agents.py), which the studio's environment fills only when nothing is saved
     (``STUDIO_DEFAULT_BRAIN``, ``STUDIO_LOCAL_ENDPOINT``, ``STUDIO_LOCAL_MODEL``)."""
@@ -225,6 +240,10 @@ def look(picture: Path, brain: dict) -> tuple[str, str]:
         try:
             if backend == "local":
                 endpoint, model = brain.get("endpoint"), brain.get("model")
+                engine = bolt_engine(endpoint)
+                if engine is not None:  # the Studio's Bolt engine: refused at once while a job holds its memory
+                    with engine.request(wait=False) as live:
+                        return local_vision(picture, live, model or engine_model()), "local model"
                 if not endpoint:
                     continue
                 return local_vision(picture, endpoint, model or ""), "local model"
