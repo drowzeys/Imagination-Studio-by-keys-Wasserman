@@ -9,6 +9,7 @@
     python3 scripts/studio-check.py --keep             # leave the renders, jobs and test films; --clean <report.json> later
     python3 scripts/studio-check.py --base http://mac:7870 --base http://spark:7870   # both at once, one table
     python3 scripts/studio-check.py --merge mac/report.json spark/report.json --out both # side by side from two runs
+    python3 scripts/studio-check.py --sparks 5         # a head Spark: clips may render on its worker Sparks, as in use
 
 Run it on the machine of the app: the brains, agents and storage routes answer only from 127.0.0.1, and from another
 machine they are n/a ("answers only on its own machine"). A request without an Origin passes the app's same-origin
@@ -48,6 +49,7 @@ from pathlib import Path
 
 os.environ["PATH"] = os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin"
 JOB_TIMEOUT = 2400  # a job that takes longer than 40 minutes is a failure here
+SPARKS = 1  # --sparks: how many Sparks a job may use; 1 renders every job on the app's own machine
 # reference timings of the same work on a DGX Spark (2026-10-19), for the report's last column: seconds
 SPARK_REFERENCE = {"video-realistic": 81, "music-realistic": 78}
 
@@ -257,7 +259,7 @@ class Run:
 
     # a queue job from start to end; returns (job, seconds it ran)
     def job(self, body: dict, timeout: float = JOB_TIMEOUT, path: str = "/api/jobs") -> dict:
-        body = {"sparks": 1, **body} if path == "/api/jobs" else body
+        body = {"sparks": SPARKS, **body} if path == "/api/jobs" else body
         job = self.api.post(path, body)
         if not isinstance(job, dict) or "id" not in job:
             raise Fail(f"{path} answered without a job: {str(job)[:300]}")
@@ -710,7 +712,7 @@ def c_sparks(r: Run):
         raise NotHere("this app has no Sparks setting (on a Mac, a Studio from before a Mac could lead Sparks)")
     me = r.api.get("/api/spark/self")
     hub = r.api.get("/api/sparks")
-    plan = r.api.post("/api/sparks/plan", {"sparks": 1, "kind": "video", "params": {**SMALL, "prompt": "x"}})
+    plan = r.api.post("/api/sparks/plan", {"sparks": SPARKS, "kind": "video", "params": {**SMALL, "prompt": "x"}})
     return {"self": str(me)[:120], "workers": len((hub or {}).get("workers") or []), "plan": str(plan)[:160]}
 
 
@@ -1058,7 +1060,7 @@ def several(bases: list[str], args) -> int:
 
     out = Path(args.out or f"/tmp/studio-check-{time.strftime('%m%d-%H%M%S')}")
     passed = ["--tier", args.tier] + (["--only", args.only] if args.only else []) + (["--skip", args.skip] if args.skip else []) + (
-        ["--keep"] if args.keep else [])
+        ["--keep"] if args.keep else []) + ["--sparks", str(args.sparks)]
     procs, files = [], []
     for base in bases:
         folder = out / re.sub(r"[^\w.-]+", "_", urllib.parse.urlsplit(base).netloc or base)
@@ -1086,9 +1088,12 @@ def main() -> int:
     parser.add_argument("--skip", default="", help="comma-separated name prefixes")
     parser.add_argument("--out", default="")
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--sparks", type=int, default=1, help="Sparks a job may use (a head whose clips render on its worker Sparks: 5)")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--clean", metavar="REPORT", help="clean up what an earlier --keep run made (its report.json), then stop")
     args = parser.parse_args()
+    global SPARKS
+    SPARKS = args.sparks
     bases = args.base or [os.environ.get("STUDIO_URL", "http://127.0.0.1:7870")]
     if args.merge:
         return merge([Path(p) for p in args.merge], Path(args.out or "."))
