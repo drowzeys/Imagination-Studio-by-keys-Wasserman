@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 import signal
 import subprocess
 import threading
@@ -28,6 +29,10 @@ TIMEOUT = 8 * 60 * 60  # a 70 GB model on a slow line
 SCRIPTS = {"--music": "scripts/setup-music.sh", "--voice": "scripts/setup-voice.sh", "--flux3": "scripts/setup-flux3.sh",
            "--motion": "scripts/setup-motion.sh", "--sound": "scripts/setup-sound.sh"}
 ONESHOT_FLAGS = ("--image-edit", "--ref2va", "--turbo", "--image-only")
+# a DGX Spark installs every option through oneshot-setup-spark.sh (the Mac's scripts/setup-*.sh are not its own)
+SPARK = sys.platform.startswith("linux")
+SPARK_FLAGS = ("--ref2va", "--h3-base", "--image-edit", "--flux3", "--moss", "--music", "--bolt", "--sound", "--motion", "--voice",
+               "--image-only")
 GATED = re.compile(r"GatedRepoError|is gated|gated repo|Access to model .* is restricted|accept (?:its|the) licen[cs]e|401 Client Error|403 Client Error", re.I)
 REPO = re.compile(r"huggingface\.co/(?!api/|settings/|datasets/|spaces/)([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)")
 lock = threading.Lock()
@@ -53,12 +58,16 @@ def plan_of(item: dict) -> dict:
         target = str(item["expected"] if item["kind"] == "folder" else Path(item["expected"]).parent)
         return {**out, "how": "hf", "repo": hf.group(1), "command": ["hf", "download", hf.group(1), "--local-dir", target],
                 "shown": f"hf download {hf.group(1)} --local-dir {target}"}
-    script = re.match(r"(?:bash )?(scripts/[a-z0-9-]+\.sh)\b(.*)$", words)
+    script = re.match(r"(?:bash )?((?:scripts|spark)/[a-z0-9-]+\.sh)\b(.*)$", words)
     if script and (PACK / script.group(1)).is_file():
         args = script.group(2).split()
         args = [a for a in args if a.startswith("--")]
         return {**out, "how": "script", "command": ["bash", str(PACK / script.group(1)), *args], "shown": " ".join(["bash", script.group(1), *args])}
-    oneshot = re.match(r"(?:bash )?oneshot-setup\.sh((?:\s+--[a-z0-9-]+)*)", words)
+    oneshot = re.match(r"(?:bash )?oneshot-setup(?:-spark)?\.sh((?:\s+--[a-z0-9-]+)*)", words)
+    if oneshot and SPARK:
+        flags = [f for f in oneshot.group(1).split() if f in SPARK_FLAGS]
+        return {**out, "how": "oneshot", "command": ["bash", str(PACK / "oneshot-setup-spark.sh"), "--no-render", *flags],
+                "shown": " ".join(["bash oneshot-setup-spark.sh --no-render", *flags])}
     if oneshot:
         flags = oneshot.group(1).split()
         own = next((SCRIPTS[f] for f in flags if f in SCRIPTS), None)
