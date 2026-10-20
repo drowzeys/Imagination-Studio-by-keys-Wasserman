@@ -89,6 +89,13 @@ MAC_PEAK_UNKNOWN_GB = 103.0
 LOG_BYTES = 50 * 1024 ** 2  # $STUDIO_HOME/bolt/engine.log starts again past this (the one before kept as engine.log.1)
 
 
+def own_environment() -> dict:
+    """The app's environment for the engine, without the Studio's own address: a server (or its start script) that reads
+    PORT or HOST would take the Studio's (Sam Wasserman found Mia's start.sh trying to start Bolt on the Studio's port)."""
+
+    return {k: v for k, v in os.environ.items() if k not in ("PORT", "HOST")}
+
+
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
@@ -154,7 +161,7 @@ class Engine:
         raise NotImplementedError
 
     def environment(self) -> dict:
-        return dict(os.environ)
+        return own_environment()
 
     def present(self) -> str:
         """What is missing for this backend ("" when its files are all here): files only, no process."""
@@ -559,7 +566,7 @@ class Cuda(Engine):
         return "bash oneshot-setup-spark.sh --bolt"
 
     def environment(self) -> dict:
-        env = dict(os.environ)
+        env = own_environment()
         env["LD_LIBRARY_PATH"] = str(self.lib) + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
         self.cache.mkdir(parents=True, exist_ok=True)
         env.update(HF_HUB_OFFLINE="1", TENSORFOLD_NO_UPDATE_CHECK="1", BOLT_KV=os.environ.get("BOLT_KV", "bf16"),

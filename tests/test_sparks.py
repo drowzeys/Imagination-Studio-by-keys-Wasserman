@@ -670,3 +670,25 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_two_saves_of_the_list_at_once_do_not_move_each_others_file():
+    """Sam Wasserman's fix (#74): every save writes through a file of its own, so saves from two threads at once all
+    land and the list is whole JSON after them."""
+
+    errors = []
+
+    def save(n):
+        try:
+            for _ in range(30):
+                hub.keep({"workers": [], "sparks": n})
+        except OSError as error:
+            errors.append(error)
+    threads = [threading.Thread(target=save, args=(n,)) for n in (1, 2, 3, 4)]
+    for one in threads:
+        one.start()
+    for one in threads:
+        one.join()
+    assert not errors and json.loads(hub.book.read_text())["sparks"] in (1, 2, 3, 4)
+    assert not list(hub.book.parent.glob("*.part"))
+    hub.keep({"workers": [], "sparks": 1})
