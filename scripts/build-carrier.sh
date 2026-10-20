@@ -2,7 +2,8 @@
 # Build and push the GHCR carrier image, one for both builds: for a Mac the TensorFold wheel at the pinned commit, the
 # dependency lock, the render scripts and the native Metal engine; for a DGX Spark the prebuilt CUDA engines
 # (payload/spark-engine, copied from $PREFIX/tf-h3 on a Spark where spark/build-engine.sh has run, and
-# payload/spark-music3, MiniMax Music 3's, from $PREFIX/music3 where spark/build-music3.sh has run).
+# payload/spark-music3, MiniMax Music 3's, from $PREFIX/music3 where spark/build-music3.sh has run, and
+# payload/spark-drama3, Fish Audio Drama 3's, from $PREFIX/drama3 where spark/build-drama3.sh has run: no weights).
 # Build it on a worker DGX Spark (arm64 + CUDA) with both engines built; payload/zig-engine comes from a Mac, or from
 # the previous carrier when its commit is unchanged (docker run --rm -v "$PWD/payload":/out IMAGE:OLD cp -a /payload/zig-engine /out/).
 #   bash scripts/build-carrier.sh           # build only
@@ -42,6 +43,15 @@ if [ -x "$SPARK_MUSIC3/bin/music3-generate" ]; then
   ( cd payload/spark-music3 && sha256sum music3-generate commit > SHA256SUMS )
   echo "spark-music3: music3-generate at $(cut -c1-8 payload/spark-music3/commit) ($(uname -m), sm_121)"
 else echo "NOTE: no engine at $SPARK_MUSIC3: this carrier will not hold the DGX Spark's music engine" >&2; fi
+# the DGX Spark's Fish Audio Drama 3 engine (drama3-generate and libtensorfold_drama3.so, branch drama3-cuda), when
+# spark/build-drama3.sh has built it: the engine only, never the converted codec or any of Fish's weights
+SPARK_DRAMA3="${PREFIX:-$HOME/.local/opt/tensorfold-studio}/drama3"
+if [ -x "$SPARK_DRAMA3/bin/drama3-generate" ] && [ -s "$SPARK_DRAMA3/lib/libtensorfold_drama3.so" ] && [ -s "$SPARK_DRAMA3/commit" ]; then
+  rm -rf payload/spark-drama3 && mkdir -p payload/spark-drama3
+  cp "$SPARK_DRAMA3/bin/drama3-generate" "$SPARK_DRAMA3/lib/libtensorfold_drama3.so" "$SPARK_DRAMA3/commit" payload/spark-drama3/
+  ( cd payload/spark-drama3 && sha256sum drama3-generate libtensorfold_drama3.so commit > SHA256SUMS )
+  echo "spark-drama3: drama3-generate + libtensorfold_drama3.so at $(cut -c1-8 payload/spark-drama3/commit) ($(uname -m), sm_121)"
+else echo "NOTE: no engine at $SPARK_DRAMA3 (or no commit file): this carrier will not hold the DGX Spark's voice engine" >&2; fi
 # the DGX Spark's NVIDIA Nemotron 3.5 Bolt engine (tensorfold-native with Mia's libbolt), when spark/build-bolt.sh has
 # installed it: native/ and TensorFold's licence files, with the recipe stamp and checksums build-bolt.sh checks
 SPARK_BOLT="${PREFIX:-$HOME/.local/opt/tensorfold-studio}/bolt"
