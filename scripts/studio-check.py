@@ -649,7 +649,7 @@ def c_edit(r: Run):
 def c_angles(r: Run):
     state = r.ctx.get("edit_state") or {}
     lora = state.get("angle_lora") or "qwen-multiple-angles"
-    if (r.ctx.get("loras", {}).get(lora) or {}).get("status") != "ready":
+    if not (r.ctx.get("loras", {}).get(lora) or {}).get("installed"):
         raise Skip(f"the angle LoRA {lora} is not installed")
     job = r.job({"kind": "edit", "title": "studio-check angles", "params": {"image": picture_in(r), "seed": 0, "size": "model", "resolution": 512,
                                                                         "image_model": "qwen", "base": False, "loras": [{"id": lora}],
@@ -767,11 +767,20 @@ def c_video_last(r: Run):
 
 @check("video-lora", "short")
 def c_video_lora(r: Run):
-    if (r.ctx.get("loras", {}).get("wasserman-80s-horror") or {}).get("status") != "ready":
-        raise Skip("the 80s Horror LoRA is not installed")
+    # "status" is whether this platform supports the recipe, "installed" whether its file is here: the 80s Horror LoRA
+    # with its VHS style where it is installed, else any installed clip LoRA
+    loras = r.ctx.get("loras", {})
+    if (loras.get("wasserman-80s-horror") or {}).get("installed"):
+        picked = {"id": "wasserman-80s-horror", "style": "VHS"}
+    else:
+        usable = [l["id"] for l in loras.values() if l.get("installed") and l.get("usable") and l.get("target", "video") == "video"
+                  and l.get("status") == "ready"]
+        if not usable:
+            raise Skip("no clip LoRA is installed")
+        picked = {"id": usable[0]}
     job = r.job({"kind": "video", "title": "studio-check LoRA", "params": {"prompt": "A neon diner at night, a figure in the doorway, rain on the glass.",
-                                                                       "image": None, **SMALL, "loras": [{"id": "wasserman-80s-horror", "style": "VHS"}]}})
-    return clip(r.output(job, r"\.mp4$"), 22 / 24, SMALL_SIZE) | {"engine": job.get("engine"), "_job": job}
+                                                                       "image": None, **SMALL, "loras": [picked]}})
+    return clip(r.output(job, r"\.mp4$"), 22 / 24, SMALL_SIZE) | {"lora": picked["id"], "engine": job.get("engine"), "_job": job}
 
 
 @check("video-slate-shot", "short")
