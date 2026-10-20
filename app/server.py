@@ -1333,7 +1333,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     if kind == "edit":  # a picture re-drawn by the image model (picture_edit.py)
         return edit_build(params, job_id)
     preset = params.get("preset", "small" if SPARK else "draft")
-    quality = params.get("quality", "standard")
+    quality = params.get("quality", "fh8" if SPARK else "standard")  # a Spark has no "standard": an API call or an agent may leave it out
     chosen, _ = custom(params)
     if (preset not in PRESETS and preset != "custom") or quality not in QUALITIES:
         raise HTTPException(400, "unknown preset or quality")
@@ -1911,7 +1911,7 @@ def clip_estimate(kind: str, params: dict, referenced: bool = False, ref_media: 
 
     if kind not in ("video", "studio", "long") or params.get("preset") == "custom" or params.get("steps") not in (None, "") or params.get("loras"):
         return None
-    return estimate(params.get("preset", ""), params.get("quality", "standard"), clip_seconds(params),
+    return estimate(params.get("preset", ""), params.get("quality", "fh8" if SPARK else "standard"), clip_seconds(params),
                     kind == "video" and not params.get("image") and not params.get("first_frame_from"), referenced,
                     bool(params.get("ref_turbo")), ref_media)
 
@@ -1984,7 +1984,7 @@ def queue_job(body: dict) -> dict:
     referenced, ref_media = bool(found), bool(found and (found["videos"] or found["audios"]))
     if kind in ("video", "studio", "long") and not referenced and not params.get("quality"):
         params["quality"] = API_QUALITY  # a job that names no quality gets the page's own default, as Home sends it
-    if kind in ("video", "studio", "long") and not referenced and not str(params.get("quality", "standard")).startswith("fh") and not turbo_ready():
+    if kind in ("video", "studio", "long") and not referenced and not str(params.get("quality", "fh8" if SPARK else "standard")).startswith("fh") and not turbo_ready():
         raise HTTPException(400, "MiniMax H3 Turbo is not installed here (oneshot-setup.sh --turbo adds it): use FastH3, quality fh4, fh8 or fh20")
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     if kind not in ("export", "long"):
