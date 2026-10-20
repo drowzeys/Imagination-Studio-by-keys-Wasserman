@@ -336,9 +336,11 @@ def music_check(seconds: float, available_mb: int | None = None, total_mb: int |
 # kind -> (MB with the models loaded and nothing made, MB per second of sound asked for). Each is measured the way a
 # song was, from a stopped server on a worker Spark under a second watchdog, smallest first; a kind with no line here
 # has not been measured on a DGX Spark, and is refused there.
-SOUND_ESTIMATE: dict = {}
+# Measured 2026-10-20 on worker .5 (6.4 to 7.2 GB in use before each, ComfyUI stopped before each run): Stable Audio
+# Open's 100 steps hardly grow with the length; MMAudio's foley grows with the clip's frames it reads.
+SOUND_ESTIMATE: dict = {"sfx": (7_000, 40), "foley": (13_000, 300)}
 # kind -> ((seconds asked, MB), ...): the measured runs; tests/test_sound.py holds each line to them
-SOUND_MEASURED: dict = {}
+SOUND_MEASURED: dict = {"sfx": ((5, 6_211), (20, 4_665), (47, 8_679)), "foley": ((5, 13_744), (10, 15_426), (15, 16_617))}
 SOUND_LONGEST = {"sfx": 47.0, "foley": 15.0}  # the app's longest of each (app/sound.py)
 SOUND_NAMES = {"sfx": "a sound effect (Stable Audio Open 1.0)", "foley": "foley (MMAudio)"}
 
