@@ -35,10 +35,19 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import memory_guard  # noqa: E402  (what a clip needs and whether this machine has it, beside this file)
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
-URL = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190"))  # the port spark/comfy.sh starts it on
+# On a Mac the same graphs run on a ComfyUI of their own (mac/comfy.sh, scripts/setup-comfy.sh): the Library actions
+# and MOSS-Image, on PyTorch's Metal device. Its port, its model folder and the names of the H3 files differ (MAC_FILES).
+MAC = sys.platform == "darwin"
+ENGINE = "mps" if MAC else "cuda"
+COMFY_SH = HERE.parent / "mac" / "comfy.sh" if MAC else HERE / "comfy.sh"
+if MAC:
+    URL = os.environ.get("MAC_COMFY_URL", "http://127.0.0.1:" + os.environ.get("MAC_COMFY_PORT", "8191"))
+    MODELS = Path(os.environ.get("MAC_COMFY_MODELS") or PREFIX / "comfy-models").expanduser()
+else:
+    URL = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190"))  # the port spark/comfy.sh starts it on
+    MODELS = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
 STATE = PREFIX / "comfy.kind"
 ENGINE_LIB = PREFIX / "tf-h3" / "libtf_h3.so"
-MODELS = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
 
 FASTH3 = {"bf16": "fastvideo_fasth3_8step_v2_pruned_bf16.safetensors",
           "int8": "fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors"}
@@ -57,6 +66,14 @@ TEXT_TAG = ""
 # 864x480), the same picture to 42 to 44 dB. SPARK_VAE=minimax_h3_video_vae_fp16.safetensors selects the other.
 H3_VAE = os.environ.get("SPARK_VAE", "minimax_h3_video_vae_int8_convrot.safetensors")
 H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
+# On a Mac MiniMax H3 is read from MiniMax's own files (mac/studio_files): the Ref2VA transformer with its full adaLN
+# weights, the text encoder in bfloat16 and the video decoder in fp32, where a Spark has Comfy-Org's pruned, 8-bit copies.
+MAC_FILES = {"ref2va": "minimax_h3_ref2va_bf16.studio.sft", "text": "qwen3vl_32b_minimax_h3_bf16.studio.sft",
+             "vae": "minimax_h3_video_vae_fp32.studio.sft"}
+if MAC:
+    REF2VA = {"bf16": MAC_FILES["ref2va"]}
+    H3_TEXT = MAC_FILES["text"]
+    H3_VAE = MAC_FILES["vae"]
 QWEN = "qwen_image_2.1_turbo_bf16.safetensors"   # Qwen-Image-2.1-Turbo, the 8-step checkpoint
 QWEN_BASE = "qwen_image_2.1_bf16.safetensors"    # the 40-step base model, only when it has been downloaded
 QWEN_TEXT = "qwen3vl_8b_int8_convrot.safetensors"
@@ -110,7 +127,7 @@ def ensure_server(kind: str) -> None:
 
     if not up():
         print("[tensorfold] starting ComfyUI (first render after a start loads the models)", flush=True)
-        subprocess.run(["bash", str(HERE / "comfy.sh"), "start"], check=True)
+        subprocess.run(["bash", str(COMFY_SH), "start"], check=True)
         for _ in range(180):
             if up():
                 break
@@ -129,7 +146,7 @@ def fresh_server(why: str) -> None:
     """Stop the ComfyUI server and wait until its memory is back: the next render starts with nothing loaded."""
 
     print(f"[tensorfold] restarting ComfyUI: {why}", flush=True)
-    subprocess.run(["bash", str(HERE / "comfy.sh"), "stop"], check=False)
+    subprocess.run(["bash", str(COMFY_SH), "stop"], check=False)
     for _ in range(60):
         if not up():
             break
@@ -1159,7 +1176,7 @@ def image(args) -> None:
             item, seconds = render(moss_workflow(args, text, seed), "12")
             out = target.with_name(f"{target.stem}_s{seed}{target.suffix}") if args.seeds else target
             fetch(item, out)
-            print("[tensorfold] " + json.dumps({"output": str(out), "engine": "cuda", "model": args.model,
+            print("[tensorfold] " + json.dumps({"output": str(out), "engine": ENGINE, "model": args.model,
                                                 "width": args.width, "height": args.height, "seed": seed,
                                                 "steps": args.steps or MOSS[args.model][1], "total_s": round(seconds, 1)}), flush=True)
         return
@@ -1308,6 +1325,19 @@ def main() -> None:
         if not isinstance(error, (OSError, ConnectionError)) and type(error).__module__.split(".")[0] != "aiohttp":
             raise
         sys.exit(stopped() or f"ComfyUI stopped answering during the render: {error} (log: {PREFIX}/comfy.log)")
+    finally:
+        mac_release()
+
+
+def mac_release() -> None:
+    """On a Mac, after the job: the ComfyUI server stopped (its models hold the memory the MLX jobs of the queue need;
+    MAC_COMFY_KEEP=1 leaves it running) and H3 Relay's cache of prepared clips emptied (it keeps every clip it was
+    given, unbounded). Nothing on a Spark."""
+
+    if not MAC or os.environ.get("MAC_COMFY_KEEP") == "1":
+        return
+    subprocess.run(["bash", str(COMFY_SH), "stop"], capture_output=True)
+    shutil.rmtree(PREFIX / "ComfyUI" / "output" / "__h3_removal_cache", ignore_errors=True)
 
 
 def stopped() -> str:
@@ -1319,7 +1349,7 @@ def stopped() -> str:
     except OSError:
         return ""
     for line in reversed(tail):
-        if "stopping ComfyUI" in line and ("memory floor:" in line or "free memory is" in line):
+        if "stopping ComfyUI" in line and ("memory floor:" in line or "free memory is" in line or "memory guard:" in line):
             return ("the render was stopped to protect the machine: " + line.split("] ", 1)[-1].replace("memory floor: ", "").strip()
                     + ". Use a shorter clip, a shorter or fewer reference videos, or a smaller size; a LoRA clip needs more memory than one without.")
         if "stopping the managed server:" in line:

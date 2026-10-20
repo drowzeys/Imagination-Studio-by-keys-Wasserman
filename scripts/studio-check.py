@@ -677,7 +677,7 @@ def c_turn(r: Run):
 
 @check("actions-refused", "api")
 def c_actions_refused(r: Run):
-    """An action this machine does not offer (upscale, mask and remove are DGX Spark only) is refused when queued."""
+    """An action this machine does not offer (upscale, mask and remove where ComfyUI and their models are not installed) is refused when queued."""
     out = {}
     for kind in ("upscale", "mask", "remove"):
         if (r.ctx.get("actions") or {}).get(kind, {}).get("ready"):
