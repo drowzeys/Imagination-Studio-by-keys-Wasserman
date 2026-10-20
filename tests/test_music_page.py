@@ -1,10 +1,11 @@
 """The Music tab's page code (app/static/music.js), run in node with the page's helpers stood in for:
 python3 tests/test_music_page.py. Skipped where node is not installed; no browser, no GPU, no network."""
 import json
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+from test_shell_page import need_node
 
 ROOT = Path(__file__).resolve().parent.parent
 HARNESS = r"""
@@ -32,8 +33,7 @@ vm.runInThisContext(`(async () => { const out = {}; ${fs.readFileSync(process.ar
 
 
 def run(code: str) -> dict:
-    if not shutil.which("node"):
-        return None
+    need_node()
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "harness.js").write_text(HARNESS)
         (Path(scratch) / "test.js").write_text(code)

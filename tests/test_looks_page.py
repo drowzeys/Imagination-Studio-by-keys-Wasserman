@@ -1,10 +1,11 @@
 """Studio Vault → Looks (app/static/looks.js), run in node with the page's helpers stood in for:
 python3 tests/test_looks_page.py. Skipped where node is not installed."""
 import json
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+from test_shell_page import need_node
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ["shell.js", "engines.js", "home.js", "looks.js"]
@@ -49,8 +50,7 @@ HUB.groups = [{ id: "wasserman", name: "Wasserman" }, { id: "camera", name: "Cam
 
 
 def run(code: str) -> dict:
-    if not shutil.which("node"):
-        return None
+    need_node()
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "harness.js").write_text(HARNESS)
         (Path(scratch) / "test.js").write_text(SETUP + code)
@@ -67,8 +67,6 @@ def test_the_page_lists_every_look_and_the_horror_card_has_its_banner():
       out.segs = text(find(page, n => n.attrs && n.attrs.class === "seg-ctl"));
       out.image = !!button(card(page, "qwen-multiple-angles"), "Use in Image"); out.install = !!button(card(page, "camera-motion"), "Install");
       out.deadAct = !!find(card(page, "far-away"), n => n.tag === "button");""")
-    if out is None:
-        return
     for words in ("Looks", "Wasserman 80s Horror", "Camera Motion", "Multiple Angles", "Far Away", "by A. Author", "Installed", "Needs another base.", "2 of 4 looks are usable", "own licence"):
         assert words in out["page"], words
     assert out["horror"] and out["slot"] and out["image"] and out["install"] and not out["deadAct"]
@@ -78,8 +76,6 @@ def test_the_page_lists_every_look_and_the_horror_card_has_its_banner():
 def test_install_asks_with_the_licence_then_installs():
     out = run("""const page = viewLooks(); await button(card(page, "camera-motion"), "Install").attrs.onclick();
       out.confirm = confirms[0]; out.calls = calls.map(c => c[0]); out.watched = watched;""")
-    if out is None:
-        return
     assert "Its own licence text." in out["confirm"] and "Camera Motion" in out["confirm"] and "300 MB" in out["confirm"]
     assert "/api/loras/camera-motion/install" in out["calls"] and out["watched"] >= 1
 
@@ -90,8 +86,6 @@ def test_use_in_video_puts_the_look_on_the_clip_and_opens_create():
       page = viewLooks(); button(card(page, "wasserman-80s-horror"), "On in Video").attrs.onclick(); out.count = C.loras.length;
       button(card(page, "qwen-multiple-angles"), "Use in Image").attrs.onclick(); out.ed = edUsed;
       await button(card(page, "wasserman-80s-horror"), "Remove").attrs.onclick(); out.removed = calls.find(c => c[2] === "DELETE"); out.after = C.loras.length;""")
-    if out is None:
-        return
     assert out["loras"] == [{"id": "wasserman-80s-horror", "strength": 1, "style": "VHS"}]
     assert out["goes"] == "video" and out["start"] == "own" and out["tab"] == "Create" and out["toast"] == "Look on: Wasserman 80s Horror"
     assert out["count"] == 1 and out["ed"] == ["qwen-multiple-angles"]
@@ -105,8 +99,6 @@ def test_filters_and_the_add_form():
       let page = viewLooks(); button(page, "+ Add your own").attrs.onclick(); page = viewLooks(); out.form = text(page);
       LK.form.name = "Mine"; LK.form.styles = "A = one.; B = two."; await button(page, "Add to Looks").attrs.onclick();
       const post = calls.find(c => c[0] === "/api/loras" && c[1]); out.post = post[1]; out.inst = calls.some(c => c[0] === "/api/loras/mine-1/install"); out.open = LK.open;""")
-    if out is None:
-        return
     assert "Camera Motion" in out["camera"] and "Wasserman 80s Horror" not in out["camera"]
     assert "Wasserman 80s Horror" in out["q"] and "Camera Motion" not in out["q"]
     assert "Camera Motion" not in out["mine"] and "Multiple Angles" in out["mine"]

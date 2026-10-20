@@ -38,8 +38,6 @@ def test_the_chooser_shows_found_remote_and_missing_agents():
       out.hermesOn = card(page, "hermes").attrs["aria-checked"];
       if (typeof viewSettings !== "function") globalThis.viewSettings = () => el("div"); TABS.push("Settings"); page = viewAgent();
       const link = find(page, n => n.tag === "a" && n.attrs.class === "ag-setup"); out.settings = text(link); link.attrs.onclick({}); out.tab = tab;""")
-    if out is None:
-        return
     assert out["backend"] == "claude"
     states = dict(zip(["claude", "codex", "hermes", "gemini", "grok", "local"], out["states"]))
     assert "Ready · 2.1.4" in states["claude"][0] and "Uses the Studio" in states["claude"][0] and not states["claude"][1]
@@ -68,8 +66,6 @@ def test_a_new_conversation_starts_and_opens_its_thread():
       out.nextOn = !button(page, "Send").attrs.disabled;  // a message written while it works waits its turn (agents.submit)
       await button(cls(page, "agr-livebox"), "Stop").attrs.onclick(); out.stop = calls.some(c => c[0] === "/api/agent/threads/th-1018-100000-bbbbbb/cancel");
       clearInterval(AG.timer); AG.timer = null;""")
-    if out is None:
-        return
     assert "Describe the shot" in out["start"] and "Choose your agent" in out["start"]
     body = out["sent"][1]
     assert body["backend"] == "claude" and "studio" in body["tools"] and body["prompt"].startswith("Make a 10-second teaser")
@@ -93,8 +89,6 @@ def test_a_question_card_takes_the_answer_and_the_thread_shows_what_it_made():
       AG.reply = "Make it 8 s instead"; page = viewAgent(); await button(cls(page, "agr-q"), "Send answer").attrs.onclick();
       out.answer = calls.filter(c => c[0] === "/api/agent/threads/" + thread.id + "/messages").map(c => c[1].text);
       clearInterval(AG.timer); AG.timer = null;""")
-    if out is None:
-        return
     assert "A diner teaser" in out["list"] and "Needs you" in out["list"] and "Older" in out["list"]
     assert "Claude Code asks" in out["q"] and "How long should the clip be?" in out["q"] and "5 s" in out["q"]
     assert out["nested"] == 0
@@ -110,8 +104,6 @@ def test_an_agents_words_are_never_html():
     out = run(BRAINS + """const nodes = agText("**Done.** Saved `a.png`\\n\\n- one\\n- two\\n\\n<img src=x onerror=alert(1)>");
       out.tags = JSON.stringify(nodes).match(/"tag":"[a-z]+"/g); out.text = text(nodes);
       out.html = JSON.stringify(nodes).includes('"html"'); out.nested = nested(nodes);""")
-    if out is None:
-        return
     assert '"tag":"b"' in out["tags"] and '"tag":"code"' in out["tags"] and '"tag":"li"' in out["tags"] and '"tag":"img"' not in out["tags"]
     assert "<img src=x onerror=alert(1)>" in out["text"] and not out["html"] and out["nested"] == 0
 
@@ -127,8 +119,6 @@ def test_a_remote_not_reached_or_a_cli_not_signed_in_is_not_ready():
       out.backend = AG.backend; out.hint = text(cls(page, "ag-hint"));
       BR.status.claude = { state: "signed_in", detail: "Claude subscription" }; page = viewAgent();
       out.after = [text(card(page, "claude")), card(page, "claude").attrs["aria-disabled"] === "true"];""")
-    if out is None:
-        return
     assert "Not signed in" in out["claude"][0] and out["claude"][1]
     assert "Not reached" in out["codex"][0] and out["codex"][1] and "ssh user@workstation true" in out["codex"][0]  # its title says what to do
     assert out["backend"] not in ("claude", "codex") and "Claude Code" in out["hint"] and "Codex" in out["hint"]
@@ -150,8 +140,6 @@ def test_a_reply_goes_to_the_threads_own_agent():
       thread.live = { task: "t2", status: "running", backend: "hermes", steps: [], outputs: [], jobs: [] }; thread.queued = [{ task: "t3", text: "And a title card", attachments: [] }];
       page = viewAgent(); out.queued = text(cls(page, "agr-queued"));
       clearInterval(AG.timer); AG.timer = null;""")
-    if out is None:
-        return
     assert "Hermes" in out["bar"] and "Claude" not in out["bar"]
     assert out["sent"] == [{"text": "Shorter, please", "backend": "hermes", "attach": []}]  # no tools: the thread keeps its own
     assert "Queued" in out["queued"] and "And a title card" in out["queued"]

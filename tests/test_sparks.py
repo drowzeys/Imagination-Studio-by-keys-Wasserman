@@ -4,7 +4,6 @@ that answers the calls this app makes to one (its page's own API), and ssh, rsyn
 import ast
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +11,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+import pytest
+
+from test_shell_page import need_node
 
 ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp()) / "TensorFoldStudio"))
@@ -23,7 +26,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 client = TestClient(server.app)
 hub = server.hub
-hub.spark = True  # the scheduler is the same on any machine once ssh and the renders are stood in for
 PRESET = "small" if "small" in server.PRESETS else next(iter(server.PRESETS))
 QUALITY = "fh8"
 TAKES = 0.35  # how long a stand-in render takes, here and on a worker
@@ -158,11 +160,32 @@ def local_render(job, command, env, label=""):
 
 
 local_render.now = local_render.most = 0
-server.run = local_render
-server.memory_of = lambda *args, **kwargs: {"fits": True, "reason": ""}  # this machine's guard has its own tests
-hub.shell, hub.copy = stand_in_shell, lambda pack, address, folder, timeout=900: (SENT.append((address, folder)), (0, ""))[1]
-hub.dial = lambda address: Line(WORKERS[address])
-threading.Thread(target=hub.loop, daemon=True).start()
+
+
+def stand_in() -> dict:
+    """Puts the stand-ins in place and returns what they replaced. Only while this file's tests run: pytest imports
+    every test file before it runs any, and a stand-in left behind (memory_of above all) would answer other files' tests."""
+
+    had = {"run": server.run, "memory_of": server.memory_of, "shell": hub.shell, "copy": hub.copy, "dial": hub.dial, "poll": sparks.POLL, "spark": hub.spark}
+    hub.spark = True  # the scheduler is the same on any machine once ssh and the renders are stood in for
+    sparks.POLL = float(os.environ["STUDIO_SPARK_POLL"])  # read when sparks.py is imported, maybe by another test file first
+    server.run = local_render
+    server.memory_of = lambda *args, **kwargs: {"fits": True, "reason": ""}  # this machine's guard has its own tests
+    hub.shell, hub.copy = stand_in_shell, lambda pack, address, folder, timeout=900: (SENT.append((address, folder)), (0, ""))[1]
+    hub.dial = lambda address: Line(WORKERS[address])
+    if not getattr(stand_in, "looping", False):
+        stand_in.looping = True
+        threading.Thread(target=hub.loop, daemon=True).start()
+    return had
+
+
+@pytest.fixture(autouse=True, scope="module")
+def stand_ins():
+    had = stand_in()
+    yield
+    server.run, server.memory_of = had["run"], had["memory_of"]
+    hub.shell, hub.copy, hub.dial, sparks.POLL = had["shell"], had["copy"], had["dial"], had["poll"]
+    hub.spark = had["spark"]
 
 
 def fresh(*workers: Worker) -> None:
@@ -300,7 +323,7 @@ def test_queued_clips_render_one_per_spark_and_come_back_here():
     assert all(job["status"] == "done" for job in done), [(job["status"], job["error"]) for job in done]
     assert {job["spark"] for job in done} == {hub.name, "spark-a", "spark-b"}
     assert one.most == 1 and two.most == 1 and local_render.most == 1  # one job on a Spark at a time
-    assert wall < 6 * TAKES * 0.75, wall  # three machines, not one after another
+    assert wall < 6 * TAKES * 0.75, (wall, [(job["spark"], round(job["started"] - started, 2), round(job["finished"] - started, 2)) for job in done])  # three machines, not one after another
     made = hub.takes()
     for job in done:
         clip = server.HOME / job["outputs"][0]
@@ -558,8 +581,7 @@ vm.runInThisContext(`(async () => { const out = {};
 
 
 def test_the_page_draws_the_chooser_and_the_list():
-    if not shutil.which("node"):
-        return
+    need_node()
     with tempfile.TemporaryDirectory() as scratch:
         (Path(scratch) / "harness.js").write_text(PAGE)
         done = subprocess.run(["node", str(Path(scratch) / "harness.js"), str(ROOT / "app/static/sparks.js")], capture_output=True, text=True, timeout=60)
@@ -578,6 +600,7 @@ def test_the_page_draws_the_chooser_and_the_list():
 
 
 if __name__ == "__main__":
+    stand_in()
     for name, test in list(globals().items()):
         if name.startswith("test_"):
             test()

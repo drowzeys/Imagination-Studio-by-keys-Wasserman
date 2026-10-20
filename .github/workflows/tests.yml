@@ -1,0 +1,35 @@
+# The test suite, without a GPU, weights or engines: the app's code against stand-ins, and the page tests
+# (app/static JavaScript) in node, which must be there here (STUDIO_TESTS_NEED_NODE=1 fails instead of skipping).
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: ffmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+      - name: Test dependencies
+        # The light part of requirements.lock that the tests import (av for app/shot.py); no MLX, torch or weights.
+        run: python -m pip install fastapi==0.142.2 starlette==1.7.0 httpx==0.28.1 uvicorn==0.54.0 python-multipart==0.0.32 numpy==2.4.6 pillow==12.3.0 av pytest
+      - name: Tests
+        env:
+          STUDIO_TESTS_NEED_NODE: "1"
+        run: |
+          export STUDIO_HOME="$RUNNER_TEMP/ImaginationStudio"
+          python -m pytest -q tests
