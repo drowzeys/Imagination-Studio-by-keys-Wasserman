@@ -782,7 +782,9 @@ def hermes_streams(tool: str, host: str) -> bool:
     if key not in HERMES_STREAMS:
         try:
             said = run_cli([tool, *profile_args(), "chat", "--help"], "", host, 30)
-            HERMES_STREAMS[key] = "--format" in (said.stdout + said.stderr)
+            text = said.stdout + said.stderr
+            # only a help that lists chat's options without --format says no: anything else keeps the documented way
+            HERMES_STREAMS[key] = "--format" in text or not re.search(r"usage:\s*hermes chat", text)
         except (OSError, subprocess.TimeoutExpired):
             HERMES_STREAMS[key] = True  # unknown: the documented way, whose error says why if it is refused
     return HERMES_STREAMS[key]
