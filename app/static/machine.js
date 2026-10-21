@@ -465,6 +465,7 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
       el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
     el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
+      order.length > 1 ? el("span", { class: "cn-or" }, "or") : null,
       order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small", onclick: () => connectGo(b) }, b.label)))); }
 // NVIDIA Nemotron 3.5 Bolt run by the Studio itself (app/bolt.py): its state and backend, what it holds, Load and Unload
 const BOLT_WORD = { loaded: "Loaded", unloaded: "Unloaded", loading: "Loading…", held: "Unloaded for a render", external: "Not managed here" };
