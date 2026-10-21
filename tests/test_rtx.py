@@ -91,10 +91,10 @@ def test_the_largest_measured_clip_fits_a_96_gb_card(monkeypatch):
 def test_voice_and_bolt_see_the_cards_free_memory(monkeypatch):
     """Drama 3 and Bolt decide whether to stop ComfyUI from mem_available_gb: on a card, its free memory."""
 
-    monkeypatch.setattr(voice, "gpu_free_gb", lambda: 20.0)
-    assert voice.mem_available_gb() == 20.0  # the machine's RAM is far more; the card is the limit
+    monkeypatch.setattr(voice, "gpu_free_gb", lambda: 0.25)
+    assert voice.mem_available_gb() == 0.25  # the machine's RAM is more; the card is the limit
     monkeypatch.setattr(voice, "gpu_free_gb", lambda: None)
-    assert voice.mem_available_gb() > 20.0 or sys.platform != "linux"
+    assert voice.mem_available_gb() > 0.25 or sys.platform != "linux"  # a Spark: the machine's own
 
 
 def test_an_x86_64_workstation_is_pointed_at_llama_cpp(monkeypatch):
