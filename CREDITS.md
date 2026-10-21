@@ -310,6 +310,13 @@ machine; none of their code ships in this pack.
   **Blender**.
 - The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
 
+## The RTX Pro 6000 build, run on the card: August Sturm
+
+**August Sturm (@auguststurm)** ran the Studio's core install on an RTX Pro 6000 Blackwell, the first run on the card
+itself, and made the CUDA install pick the card by its `nvidia-smi` index (`STUDIO_GPU`): one install shared by the
+DGX Spark and RTX Pro 6000 entries (`oneshot-setup-cuda.sh`), a compute card used beside a display card, and a second
+studio on a second card.
+
 ## Platform and tools
 
 - **Apple / ml-explore** — **MLX**, and the Metal 4 tensor operations on M5.
