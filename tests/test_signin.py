@@ -3,6 +3,7 @@ No real sign-in ever runs: claude, codex and grok are small stand-ins on PATH th
 (an address, a prompt for a code, a device code) and read their terminal."""
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -89,6 +90,15 @@ if args == ["--version"]:
     print("Hermes Agent v9"); sys.exit(0)
 if args == ["auth", "list"]:
     print("copilot (0 credentials):\n\nopenai-codex (2 credentials):\n  #1  device_code oauth id=bbb3bb priority=0 ←"); sys.exit(0)
+import json, os
+config = os.path.join(os.environ.get("FAKE_HERMES_DIR", "/tmp"), "hermes-config.json")
+saved = json.load(open(config)) if os.path.exists(config) else {}
+if args[:3] == ["auth", "add", "openai-codex"]:
+    print("Signed in to openai-codex."); sys.exit(0)
+if args[:2] == ["config", "get"]:
+    print(saved.get(args[2], "")); sys.exit(0)
+if args[:2] == ["config", "set"]:
+    saved[args[2]] = args[3]; json.dump(saved, open(config, "w")); sys.exit(0)
 sys.exit(3)
 '''
 
@@ -330,3 +340,37 @@ def test_only_this_computer_and_the_studio_page_may_sign_in(fake):
     assert away.post("/api/brains/claude/signin", json={}).status_code == 403
     assert away.get("/api/brains/claude/signin").status_code == 403
     assert agents.signin.get("process") is None  # nothing was started by any of them
+
+
+def test_a_hermes_sign_in_also_points_hermes_at_that_provider_and_a_model_it_lists(fake, monkeypatch):
+    """`hermes auth add` only stores a credential: with no model in its config Hermes sends an empty one. After the
+    sign-in the Studio sets the provider and the first model Hermes' own catalog lists for it."""
+
+    monkeypatch.setenv("FAKE_HERMES_DIR", str(fake["tmp"]))
+    asked = []
+    monkeypatch.setattr(agents, "hermes_model_for", lambda provider, host: asked.append(provider) or "gpt-test-1")
+    assert post("/api/brains/hermes/signin", {"provider": "openai-codex"}).status_code == 200
+    assert until("hermes", ("done", "failed"))["state"] == "done"
+    saved = json.loads((fake["tmp"] / "hermes-config.json").read_text())
+    assert saved == {"model.provider": "openai-codex", "model.default": "gpt-test-1"} and asked == ["openai-codex"]
+    # a model already chosen for that provider is kept
+    monkeypatch.setattr(agents, "hermes_model_for", lambda provider, host: "gpt-other")
+    assert agents.hermes_use("openai-codex", "") == "" and json.loads((fake["tmp"] / "hermes-config.json").read_text())["model.default"] == "gpt-test-1"
+
+
+def test_a_hermes_sign_in_says_so_when_hermes_lists_no_model(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_HERMES_DIR", str(fake["tmp"]))
+    monkeypatch.setattr(agents, "hermes_model_for", lambda provider, host: "")
+    post("/api/brains/hermes/signin", {"provider": "openai-codex"})
+    said = until("hermes", ("done", "failed"))
+    assert said["state"] == "failed" and "hermes model" in said["reason"]
+
+
+def test_an_error_hermes_prints_as_its_answer_is_an_error(fake, monkeypatch):
+    for printed in ("Codex Responses request 'model' must be a non-empty string.",
+                    'HTTP 400: {"detail":"The \'gpt-5.5\' model is not supported when using Codex with a ChatGPT account."}'):
+        monkeypatch.setattr(agents, "run_cli", lambda *a, **k: subprocess.CompletedProcess(a, 0, printed + "\n", ""))
+        with pytest.raises(RuntimeError):
+            agents.ask("hermes", "", "Reply with the single word: ready")
+    monkeypatch.setattr(agents, "run_cli", lambda *a, **k: subprocess.CompletedProcess(a, 0, "ready\n", ""))
+    assert agents.ask("hermes", "", "Reply with the single word: ready") == "ready"

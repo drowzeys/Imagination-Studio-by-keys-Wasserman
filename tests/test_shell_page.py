@@ -540,6 +540,33 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
 
 
+def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account():
+    """Your own local model (Nemotron 3.5 Bolt here) is one of the card's choices and is made the default in one
+    click; Hermes signs in only to the account the person picks, never to ChatGPT by itself."""
+    out = run(CONNECT + """
+      const store = {}; globalThis.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+      globalThis.ART = { ready: new Set() }; globalThis.artSlot = () => null; globalThis.palOpen = () => {}; globalThis.platName = () => "DGX Spark"; globalThis.SHELL = { tel: null, samples: [] };
+      const hermes = { id: "hermes", label: "Hermes", kind: "cli", found: true, where: "here", signin_flow: "pty" };
+      BR.data = { default: "claude", settings: { remote: { host: "", backends: [] } }, backends: [hermes,
+        { id: "local", label: "NVIDIA Nemotron 3.5 Bolt (Studio engine)", kind: "http", found: true, harness: true, engine: { state: "unloaded", available: true } }] }; BR.tools = { tools: [] };
+      BR.status = { hermes: { state: "signed_out" } };
+      tab = "Home"; const card = n => find(n, x => x.attrs && x.attrs["data-card"] === "connect");
+      let home = viewHome(); out.home = text(card(home));
+      answers["/api/brains/local/default"] = { settings: { default: "local", agent: "local", remote: { host: "", backends: [] } } };
+      await button(card(home), "Nemotron 3.5 Bolt (local)").attrs.onclick(); out.defaulted = [calls.some(c => c[0] === "/api/brains/local/default"), BR.data.default];
+      out.inUse = text(card(viewHome())).includes("(local) · in use");
+      answers["/api/brains/hermes/connect"] = base("hermes", { signin: { state: "signed_out" } });
+      await connectStart(hermes); await settle();
+      out.started = calls.filter(c => c[0] === "/api/brains/hermes/signin").length; out.tabsBefore = tabs.length;
+      const p = panel("hermes"); out.panel = text(p);
+      answers["/api/brains/hermes/signin"] = { backend: "hermes", state: "device_code", url: "https://claude.ai/oauth", code: "AB-12", lines: [] };
+      await button(p, "Claude").attrs.onclick(); out.sent = calls.filter(c => c[0] === "/api/brains/hermes/signin").slice(-1)[0][1]; out.tabsAfter = tabs.length;""")
+    assert "Nemotron 3.5 Bolt (local)" in out["home"] and out["defaulted"] == [True, "local"] and out["inUse"]
+    assert out["started"] == 0 and out["tabsBefore"] == 0  # no ChatGPT sign-in on its own, no blank tab
+    assert "Which account should Hermes use?" in out["panel"] and "ChatGPT (Codex)" in out["panel"] and "Nous Portal" in out["panel"]
+    assert out["sent"] == {"provider": "anthropic"} and out["tabsAfter"] == 1
+
+
 def test_the_qr_code_has_its_finders_and_size_for_the_address():
     out = run("""const m = qrMatrix("https://auth.openai.com/codex/device"), big = qrMatrix("https://claude.com/" + "a".repeat(420));
       const finder = (m, x, y) => [0, 1, 2, 3, 4, 5, 6].every(i => m[y][x + i] && m[y + 6][x + i] && m[y + i][x] && m[y + i][x + 6]) && m[y + 3][x + 3] && !m[y + 1][x + 1];
