@@ -16,7 +16,8 @@ video with sound and Fish Audio Drama 3 voices, on TensorFold: Apple-silicon Mac
 
 ## Minimum hardware requirements (read this first)
 
-One machine is a complete Studio: a DGX Spark **or** a Mac. You do not need both, and neither needs the other.
+One machine is a complete Studio: a DGX Spark, an RTX Pro 6000 workstation **or** a Mac. You do not need more than
+one, and none needs another.
 The installers check memory and disk before they download anything and stop with the reason when the machine is
 too small.
 
@@ -27,10 +28,18 @@ too small.
 | Core: pictures and FastH3 video with sound | 125 GB | `bash oneshot-setup.sh` |
 | **Everything** | **about 400 GB** | `bash oneshot-setup.sh --all` |
 
-**NVIDIA RTX Pro 6000 Blackwell (96 GB), on an x86_64 Linux workstation: may use the same one-shot recipe, pending
-validation** on the card. `bash oneshot-setup.sh --all` builds the engines for it (sm_120), and the Studio reads the
-card's own memory. It was simulated on a DGX Spark, not yet run on an RTX Pro 6000; the Bolt brain runs through
-llama.cpp there. Recipe, requirements and what is still untested: [docs/rtx-pro-6000.md](docs/rtx-pro-6000.md).
+**NVIDIA RTX Pro 6000 Blackwell** (96 GB card, x86_64 Linux workstation: Ubuntu 22.04 or 24.04, NVIDIA driver 580 or
+newer, the CUDA 13 toolkit, 64 GB of RAM or more, 128 GB recommended): every feature, with the same one-shot recipe,
+**pending validation on the card**. The installer builds the engines for it (sm_120) and the Studio reads the card's
+own memory; the Bolt brain runs through llama.cpp there. It was simulated as a 96 GB card on a DGX Spark (the whole
+checklist and the heaviest jobs back to back passed, the card never over 72 GB), not yet run on one:
+[docs/rtx-pro-6000.md](docs/rtx-pro-6000.md).
+
+| Install | Disk free | Command |
+|---|---|---|
+| Core: pictures and FastH3 video with sound | 125 GB | `bash oneshot-setup.sh` |
+| **Everything** | **about 400 GB** | `bash oneshot-setup.sh --all` |
+
 Other NVIDIA GPUs are untested: the CUDA engines are built and measured for the GB10.
 
 **Apple-silicon Mac** (macOS 26 or later, for Metal 4). What runs depends on the memory. Every figure was measured on
@@ -60,14 +69,50 @@ Full recipes, every option and the measured memory of each job: [Install, and th
 design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
-**3.0.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB) and the NVIDIA DGX Spark ·
+**3.1.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
+6000 (96 GB; pending validation) ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MOSS-Image** (text to image, DGX Spark) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
-## New on main: Upscale, Find and Remove a person on a Mac
+## New since 3.1.0 (on main; every install follows it by itself)
+
+- **Your phone and other devices, with an access key.** On the computer running the studio nothing is asked. A phone,
+  a tablet or another computer signs in once: **Settings → Access key** shows a QR code that signs a phone in with one
+  scan, the key itself to copy, and *Make a new key* for a lost phone. Step by step: TUTORIAL.md section 15, and
+  **Learn → Your phone and other devices** in the app. Details: [The access key](#using-it-on-your-phone).
+- **Automatic updates are on by default**, so an install stays on the latest version: checked every six hours,
+  installed when the queue is idle (Settings → Updates turns it off). Worker Sparks follow their head.
+- **NVIDIA RTX Pro 6000 Blackwell (96 GB)** may use the same one-shot recipe, pending validation on the card: engines
+  built for sm_120, the card's own memory read for every job, Bolt through llama.cpp ([docs/rtx-pro-6000.md](docs/rtx-pro-6000.md)).
+- **Every credit, in the app and in the repo.** Settings → About → *Every credit* shows CREDITS.md and the third-party
+  notices; about 25 more libraries, conversions and tools are credited, and a test keeps the two in step.
+- **No personal information in the repo**, enforced by a test and by CI; contact goes through GitHub only (Issues,
+  Discussions, private vulnerability reporting: [SECURITY.md](SECURITY.md)).
+- **The repository is now `drowzeys/Imagination-Studio-by-keys-Wasserman`**, matching the name. The old address
+  redirects, so installs that follow it keep updating.
+
+## New in 3.1.0 (2026-10-20)
+
+- **One-shot installs with everything, on both machines.** `bash oneshot-setup.sh --all` installs every feature the
+  machine runs, from prebuilt engines: the GHCR carrier `keys-tensorfold-studio:3.1.0` (the DGX Spark's H3, Music 3,
+  Drama 3 and Bolt engines) and the v3.1.0 release (the Mac's native engine and Bolt on Metal), each checksummed. The
+  minimum hardware now opens this README. Proven on a fresh DGX Spark and a fresh Mac.
+- **NVIDIA Nemotron 3.5 Bolt is the studio's own brain**, loaded and unloaded by the Studio around renders (TensorFold's
+  CUDA engine on a DGX Spark, Metal on a Mac), for the First AD, the agents and the local harness.
+- **A Mac can lead worker DGX Sparks**, and a DGX Spark head leaves clips to its idle workers.
+- **Voice on a DGX Spark in one shot** (Drama 3's CUDA engine from the carrier), and sound effects and foley measured
+  and guarded there.
+- **A LoRA on the Mac's native FastH3 engine**, merged into the int8 weights at load; sound effects on Metal twice as
+  fast.
+- **The Mac's memory read correctly** (free, file-backed and purgeable pages), so a large job no longer pushes the Mac
+  into a memory panic, and every ComfyUI job's peak is checked first.
+- Upscale, Find and Remove a person and MOSS-Image on a Mac (below), updates that refresh the renderers' copies, and
+  Sam Wasserman's CI, host-independent tests and fixes.
+
+### Upscale, Find and Remove a person on a Mac
 
 - **Upscale, Find a person and Remove a person now run on a Mac** (Mac Studio M5 Ultra), with the DGX Spark's own graphs
   and the authors' node packs at the Spark's pins, on a ComfyUI of the Mac's own on PyTorch's Metal device
