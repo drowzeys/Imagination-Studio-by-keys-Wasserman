@@ -1,6 +1,7 @@
 #!/bin/bash
-# The studio's access key (app/access.py), and the addresses that open the page with it: on this computer, and on its
-# Tailscale name for a phone (after `tailscale serve --bg 7870`). A browser opened once at one of them keeps the key.
+# The studio's access key (app/access.py), for another device: a browser on this computer needs none. Prints the key
+# and the address that signs a phone in (its Tailscale name, after `tailscale serve --bg 7870`); Settings → Access
+# key shows the same with a QR code.
 #   bash scripts/studio-key.sh          # the key and the addresses
 #   bash scripts/studio-key.sh --key    # the key alone, for a script
 #   bash scripts/studio-key.sh --new    # a new key: every browser and phone signed in so far asks again
@@ -22,7 +23,6 @@ KEY="$(tr -d '[:space:]' < "$FILE")"
 if [ "${1:-}" = --key ]; then echo "$KEY"; exit 0; fi
 echo "Access key: $KEY"
 echo
-echo "On this computer:  http://127.0.0.1:$PORT/?key=$KEY"
 TS="$(command -v tailscale || { [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ] && echo /Applications/Tailscale.app/Contents/MacOS/Tailscale; })"
 if [ -n "$TS" ]; then
   NAME="$("$TS" status --json --peers=false 2>/dev/null | python3 -c 'import sys,json; print((json.load(sys.stdin).get("Self") or {}).get("DNSName","").rstrip("."))' 2>/dev/null)"

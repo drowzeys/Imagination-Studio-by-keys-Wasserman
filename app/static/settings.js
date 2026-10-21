@@ -9,7 +9,7 @@ const SET_DEFAULTS = {
   hermes_profile: "", hermes_command: "" };
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false }, about: null };
 const SET_SECTIONS = [["appearance", "Appearance", "type, glow, poster, accent"], ["layout", "Studio layout", "what the sidebar shows"],
-  ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"],
+  ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"], ["access", "Access key", "sign in your phone, a new key"],
   ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to five DGX Sparks for a job"],
   ["brains", "Brains & tools", "your agents, another computer, MCP tools"], ["updates", "Updates", "the version and the branch it follows"], ["about", "About", "version, credits, licences"]];
 // Machine's own pages, opened here too: each is the same view, and its data is drawn again when it arrives
@@ -166,6 +166,33 @@ function setConnections() {
           el("div", { class: "m-acts" }, el("button", { type: "button", class: "small", onclick: async () => { try { const a = await api("/api/suite"); toast((Array.isArray(a) ? a.length : 0) + " suite apps and editors are known here"); } catch (e) { toast(e.message); } } }, "Test"),
             el("button", { type: "button", class: "small", onclick: () => go("Import") }, "Open"))))) ]; }
 
+/* ---------- the access key (app/access.py): sign another device in, show the key, make a new one ---------- */
+const keyCopy = async (text, what) => { try { await navigator.clipboard.writeText(text); toast(what + " copied"); } catch { toast("Copy it by hand: " + text); } };
+function setAccess() {
+  if (!SET.key) { SET.key = { loading: true }; api("/api/key/share").then(d => { SET.key = d; if (tab === "Settings") render(); }, e => { SET.key = { error: e.message }; if (tab === "Settings") render(); }); }
+  const k = SET.key, phone = (k.links || []).find(l => /Tailscale/.test(l.label));
+  if (k.loading) return [setPanel("Access key", "Loading…")];
+  if (k.error) return [setPanel("Access key", k.error)];
+  const qr = phone && typeof qrSvg === "function" ? qrSvg(phone.url, 200) : null;
+  return [setPanel("Access key", "The key is for reaching the studio from another device: a phone over Tailscale, another computer. Each signs in once and stays signed in.",
+      el("div", { class: "key-steps" },
+        el("div", { class: "key-step" }, el("b", {}, "Sign in your phone or another computer"),
+          phone ? [el("p", { class: "note m-flat" }, "Scan this with the phone's camera. It opens the studio and signs the phone in; then add it to the home screen."),
+                   qr ? el("div", { class: "key-qr" }, qr) : null,
+                   el("div", { class: "m-acts" }, el("button", { type: "button", class: "small", onclick: () => keyCopy(phone.url, "The link") }, "Copy the link"))]
+                : el("p", { class: "note m-flat" }, "A phone reaches the studio through Tailscale: install it on both and run ", el("code", {}, "tailscale serve --bg " + (location.port || "7870")),
+                     " on this computer (Settings → Connections has the steps). This panel then shows a QR code for the phone.")),
+        el("div", { class: "key-step" }, el("b", {}, "On this computer"),
+          el("p", { class: "note m-flat" }, "Nothing to do: a browser on the computer running the studio (localhost) never needs the key, and neither do updates there.")),
+        el("div", { class: "key-step" }, el("b", {}, "The key itself"),
+          el("p", { class: "note m-flat" }, "For a tool, or to type on a device: kept in ", el("code", {}, k.file || "access-key"), " (only you can read it)."),
+          el("div", { class: "m-acts" }, el("code", { class: "key-shown" }, SET.keyShown ? k.key : "•".repeat(12)),
+            el("button", { type: "button", class: "small", onclick: () => { SET.keyShown = !SET.keyShown; render(); } }, SET.keyShown ? "Hide" : "Show"),
+            el("button", { type: "button", class: "small", onclick: () => keyCopy(k.key, "The key") }, "Copy"))))),
+    setPanel("Make a new key", "If the key got out, or a device you signed in is gone: every other browser and phone is signed out and asks again. This browser stays signed in.",
+      el("div", {}, el("button", { type: "button", onclick: async () => { if (!confirm("Make a new key? Every other device is signed out.")) return;
+        try { await api("/api/key/new", {}); SET.key = null; SET.keyShown = false; toast("New key made: sign your other devices in again"); render(); } catch (e) { toast(e.message); } } }, "Make a new key")))]; }
+
 /* ---------- 5. About ---------- */
 // Keys and Wasserman Productions: their sites and code
 const ABOUT_LINKS = [["Keys", [["X @u1tra_instinct", "https://x.com/u1tra_instinct"], ["GitHub", "https://github.com/drowzeys"]]],
@@ -235,7 +262,7 @@ function setEmbedded(section) { const [name, data] = SET_VIEWS[section], view = 
   if (SET.embedTimer && SET.embedTimer.unref) SET.embedTimer.unref();
   return [el("div", { class: "st-embed", "data-embed": section }, view())]; }
 function viewSettings() {
-  const draw = { appearance: setAppearance, layout: setLayout, presets: setPresets, connections: setConnections, about: setAbout,
+  const draw = { appearance: setAppearance, layout: setLayout, presets: setPresets, connections: setConnections, access: setAccess, about: setAbout,
     models: () => setEmbedded("models"), sparks: () => setEmbedded("sparks"), brains: () => setEmbedded("brains"), updates: () => setEmbedded("updates") }[SET.section] || setAppearance;
   return el("div", { class: "settings" },
     typeof pageHead === "function" ? pageHead("Studio Vault", "Settings", "How the studio looks, what it shows, and what it connects to.") : el("h1", { class: "display" }, "Settings"),

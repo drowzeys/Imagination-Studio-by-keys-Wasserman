@@ -268,8 +268,12 @@ class Manager:
         self.started = False
 
     def automatic(self) -> bool:
+        """On unless turned off: an install nobody set follows its branch by itself (when idle, between jobs). Turned
+        off by the person in Settings → Updates, or by the launcher after an update that would not start."""
         try:
-            return json.loads(self.settings_path.read_text()).get("automatic") is True
+            return json.loads(self.settings_path.read_text()).get("automatic") is not False
+        except FileNotFoundError:
+            return True
         except (OSError, ValueError):
             return False
 

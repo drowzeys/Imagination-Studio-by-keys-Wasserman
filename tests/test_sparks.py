@@ -545,13 +545,18 @@ def test_automatic_updates_bring_a_worker_level_once():
         assert client.get("/api/sparks").json()["workers"][0]["state"] == "update" and SENT == []
     finally:
         hub.follow, hub.copy = had, copy
-    # automatic updates off (the default): a worker behind is left for a person's “Update and start”
-    two = Worker("spark-b")
-    two.code = {**hub.code(), "app/server.py": "an older one"}
-    SENT.clear()
-    fresh(two)
-    assert client.get("/api/sparks").json()["workers"][0]["state"] == "update" and SENT == []
-    client.delete(f"/api/sparks/workers/{two.address}")
+    # automatic updates turned off (they are on by default): a worker behind is left for a person's “Update and start”
+    had = hub.follow
+    hub.follow = lambda: False
+    try:
+        two = Worker("spark-b")
+        two.code = {**hub.code(), "app/server.py": "an older one"}
+        SENT.clear()
+        fresh(two)
+        assert client.get("/api/sparks").json()["workers"][0]["state"] == "update" and SENT == []
+        client.delete(f"/api/sparks/workers/{two.address}")
+    finally:
+        hub.follow = had
 
 
 def test_the_tunnel_ends_on_the_workers_own_loopback_and_is_closed():
