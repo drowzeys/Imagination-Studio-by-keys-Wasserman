@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3  
 **Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, and MiniMax Music 3's `music3-generate`)  
-**Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2068c03`, own venv, int8 tensor-unit kernels
+**Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2b592fe`, own venv, int8 tensor-unit kernels
 
 ```bash
 git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git
@@ -299,6 +299,17 @@ Rules:
   the job is queued and in `spark_generate.py` before anything loads); `SOUND_ESTIMATE` and `SOUND_MEASURED` are
   measurements, added only from runs on a worker Spark under the DGX Spark memory rules above.
 - mflux, minimax-h3-mlx, flux3-mlx, TensorFold's music3-mlx, MMAudio and ComfyUI-MMAudio are pinned by commit and used at run time. Do not unpin.
+
+**No personal information, ever:** no real email, phone number, home or postal address, account name, private IP,
+host name, tailnet name, key or token goes into this repo: not in a file, not in a commit's author, committer or
+trailer. Commit with a GitHub noreply address; in examples use stand-ins (`example.invalid`, `/Users/you`,
+`192.168.1.10`, `tail1234.ts.net`). `tests/test_no_personal_info.py` and the workflow's commit check enforce it. People
+reach the project through GitHub only: Issues, Discussions, and private vulnerability reporting (`SECURITY.md`).
+
+**Credits, in the repo and on the page:** anything the repo or the studio uses (a model, LoRA, node pack, engine,
+library, conversion, idea, prompt or someone's code) is credited in CREDITS.md in the same change that brings it in,
+and the maker is named in the page's Credits list (`app/static/settings.js`); the page's *Every credit* panel shows
+CREDITS.md and THIRD_PARTY_NOTICES.md themselves (`/api/credits`). `tests/test_credits.py` checks both.
 
 **Credits:** keep CREDITS.md in sync. Qwen team (Qwen-Image-2.1), Black Forest Labs (FLUX 3 Image Klein), OpenMOSS (MOSS-Image), Stability AI (Stable Audio Open), Ho Kei Cheng et al. (MMAudio), kijai (ComfyUI-MMAudio), felix-ab (flux3-mlx), MiniMax (H3, MiniMax-Music3), NVIDIA (Nemotron 3.5 Bolt), MiaAI-Lab (the Bolt TensorFold recipe), Ash Hart (TensorFold), antirez (h3.c),
 RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx / Phosphene), Filip Strand and mflux contributors, Viggle, speach1sdef178, LightX2V,

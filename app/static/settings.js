@@ -170,6 +170,27 @@ function setConnections() {
 // Keys and Wasserman Productions: their sites and code
 const ABOUT_LINKS = [["Keys", [["X @u1tra_instinct", "https://x.com/u1tra_instinct"], ["GitHub", "https://github.com/drowzeys"]]],
   ["Sam Wasserman / Wasserman Productions", [["wassermanproductions.com", "https://wassermanproductions.com"], ["X @SamJWasserman", "https://x.com/SamJWasserman"], ["GitHub", "https://github.com/wassermanproductions"]]]];
+// CREDITS.md and THIRD_PARTY_NOTICES.md as the repo has them (/api/credits), drawn with el() only: headings, bullets,
+// paragraphs, **bold** and `code`; nothing of the file becomes markup
+function mdInline(text) { return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/).filter(Boolean).map(p =>
+  p.startsWith("**") ? el("b", {}, p.slice(2, -2)) : p.startsWith("`") ? el("code", {}, p.slice(1, -1)) : p); }
+function mdBlocks(text) { const out = []; let list = null, para = null;
+  const end = () => { if (para) out.push(el("p", { class: "note m-flat" }, mdInline(para))); para = null; };
+  for (const raw of (text || "").split("\n")) { const line = raw.trimEnd();
+    if (!line.trim()) { end(); list = null; continue; }
+    const head = /^(#{1,3}) (.*)$/.exec(line), item = /^\s*- (.*)$/.exec(line);
+    if (head) { end(); list = null; out.push(el(head[1].length === 1 ? "h3" : "h4", { class: "st-md-head" }, mdInline(head[2]))); }
+    else if (item) { end(); if (!list) out.push(list = el("ul", { class: "st-credits" })); list.appendChild(el("li", {}, mdInline(item[1]))); }
+    else if (list && /^\s/.test(raw) && list.lastChild) list.lastChild.append(" ", ...mdInline(line.trim()));
+    else { list = null; para = para ? para + " " + line.trim() : line.trim(); } }
+  end(); return out; }
+function setFullCredits() {
+  if (!SET.credits) { SET.credits = { loading: true }; api("/api/credits").then(d => { SET.credits = d; if (tab === "Settings") render(); }, () => { SET.credits = { error: true }; }); }
+  const c = SET.credits;
+  return setPanel("Every credit", "Everyone whose work made the studio possible, as CREDITS.md and THIRD_PARTY_NOTICES.md in the repo say it.",
+    c.loading ? el("p", { class: "note m-flat" }, "Loading…") : c.error ? el("p", { class: "note m-flat" }, "CREDITS.md could not be read here: it is in the repo, github.com/drowzeys.") :
+    [el("details", { class: "st-md", open: true }, el("summary", {}, "CREDITS.md"), mdBlocks(c.credits)),
+     el("details", { class: "st-md" }, el("summary", {}, "THIRD_PARTY_NOTICES.md"), mdBlocks(c.notices))]); }
 function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.about = { loading: true }; updRequest().then(d => { SET.about = d; if (tab === "Settings") render(); }, () => { SET.about = { error: true }; }); }
   const u = SET.about || {}, row = (k, v) => el("div", { class: "kv st-kv" }, el("span", {}, k), el("b", {}, v));
   return [setPanel("About", null,
@@ -187,10 +208,16 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "Ash Hart: TensorFold",
       "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine) · MiaAI-Lab: the Bolt TensorFold recipe for the DGX Spark",
       "antirez: h3.c · RobZombAI: H3MLX · mrbizarro: minimax-h3-mlx (Phosphene) · Filip Strand and the mflux contributors · felix-ab: flux3-mlx",
-      "Comfy Org: ComfyUI and its MOSS-Image files · Apple: MLX · NVIDIA Research · FastVideo · LightX2V · Viggle · speach1sdef178 · rookiestar28 · ddalcu",
-      "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, llama.cpp; Blender and blender-mcp",
-      "OpenAI Whisper and faster-whisper, yt-dlp, FFmpeg, PyTorch, Hugging Face diffusers and transformers, FastAPI, Geist and Instrument Serif",
-      "The community LoRA authors, by name in Looks and in CREDITS.md"].map(t => el("li", {}, t)))),
+      "comfyanonymous, Comfy Org and the ComfyUI contributors: ComfyUI, and Comfy Org's MOSS-Image and MiniMax-Music-3 files · Apple: MLX · mlx-vlm · Qwen team: Qwen3-VL · VisualInference",
+      "NVIDIA Research: Sol · FastVideo (Hao AI Lab): FastH3 · LightX2V (ModelTC) · larryvrh · TaoLiveAIGC · Viggle · speach1sdef178 · rookiestar28 · ddalcu · Kijai · DeepBeepMeep",
+      "The Library's actions: MATLOWAI (H3 Contact Sheet) · dntpi / Sandpies (H3 Video Upsampler) · LBH-123-AI · bbaudio-2025 · Alissonerdx · Akatz Labs (H3 Relay, Person Remover) · Meta: SAM 3.1",
+      "Motion Previs: Sam Wasserman's Motion Previs Studio · Google: MediaPipe · Lihe Yang et al.: Depth Anything (Xenova's ONNX conversion) · OpenCV · Microsoft: ONNX Runtime",
+      "MMAudio's models: Apple DFN5B CLIP · Synchformer (Iashin et al.) · NVIDIA BigVGAN v2 · Google: T5 · the SGLang-Omni team and Descript: Fish's codec on a Spark",
+      "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, llama.cpp (Georgi Gerganov and the ggml contributors); Blender (Blender Foundation) and blender-mcp (Siddharth Ahuja)",
+      "OpenAI Whisper, faster-whisper (SYSTRAN, Mobius Labs), yt-dlp, FFmpeg, PyTorch, Hugging Face diffusers, transformers and huggingface_hub, torchsde, FastAPI, Starlette and Uvicorn (Encode), xgrammar (MLC-AI), Zig, BusyBox, uv, NumPy, Pillow, PyAV",
+      "Geist and Instrument Serif · LobeHub and Simple Icons: the agents' marks · @itxabdullaa: the Black Mirror test prompt",
+      "The community LoRA authors, by name on each card in Looks and in CREDITS.md · every one of them, with what was used and its licence, under Every credit below"].map(t => el("li", {}, t)))),
+  setFullCredits(),
   setPanel("Licences", "The studio's code is Apache-2.0. The models keep their own terms: do not redistribute their weights.",
     el("ul", { class: "st-credits" }, ["Attribution required: per the NOTICE file (Apache 2.0 §4(d)), any use, fork or redistribution keeps the NOTICE and credits Keys (github.com/drowzeys) and Sam Wasserman / Wasserman Productions (wassermanproductions.com) in its documentation and about/credits surface",
       "Qwen-Image-2.1: Qwen Research License (non-commercial)", "MiniMax H3: MiniMax H3 Community License (territory limits)", "MiniMax-Music3: its licence asks for its name in a commercial UI",

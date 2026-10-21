@@ -184,7 +184,17 @@ On the phone:
 | :---: | :---: | :---: |
 | **Home** | **More** | **An engine: Video** |
 
+## Contact
+
+Through GitHub only; the project publishes no email address. Bugs and install trouble: **Issues**. Questions, ideas
+and what you made: **Discussions**. A security problem: the **Security** tab's *Report a vulnerability*, which only
+the maintainers see ([SECURITY.md](SECURITY.md)). Never paste a token, key or your own address into any of them.
+
 ## License & credits
+
+Everyone whose work the studio uses is named in [CREDITS.md](CREDITS.md) (with
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)), and the app shows the same files under Settings → About → Every
+credit.
 
 **Apache License 2.0** — see [LICENSE](LICENSE). Free to use, modify, fork and build on, commercially or otherwise;
 the models it downloads keep their own licences (below).
@@ -3007,7 +3017,7 @@ bash oneshot-setup.sh --image-only  # or just Qwen-Image-2.1: 33 GB
 
 `oneshot-setup.sh` does the following:
 
-1. Gets TensorFold 0.6.5 with the H3 and Qwen-Image families (`drowzeys/TensorFold` at `a2068c03`), from the **GHCR
+1. Gets TensorFold 0.6.5 with the H3 and Qwen-Image families (`drowzeys/TensorFold` at `a2b592fe`), from the **GHCR
    prebuilt carrier** when Docker is available (checksums verified), otherwise from git at the same commit.
    The native FastH3 engine (`tf-h3-dit`) comes from the same carrier, or without Docker as a checksummed download
    from the [v2.0 release](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/tag/v2.0); no Zig toolchain is needed.
