@@ -482,6 +482,10 @@ def search_path() -> str:
 def child_env(extra: dict | None = None) -> dict:
     env = {**os.environ, "PATH": search_path(), **(extra or {})}
     env.pop("CLAUDECODE", None)  # a Studio started from inside a Claude Code session must not look like a nested one
+    # PREFIX is the Studio's runtime folder, and npm reads PREFIX as its global prefix: an Install from Connect went into
+    # $PREFIX/bin, where no one looks. The CLIs and their installers get npm's own prefix (or ~/.npm-global) instead.
+    if "PREFIX" not in (extra or {}):
+        env.pop("PREFIX", None)
     return env
 
 
