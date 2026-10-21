@@ -466,20 +466,20 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
   if (clis.some(b => b.found && (!BR.status[b.id] || BR.status[b.id].state === "asking"))) return null;  // not yet known: nothing flashes up
   if (clis.some(b => BR.status[b.id] && BR.status[b.id].state === "signed_in")) return null;
   const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found) || order[0];
-  const localB = (BR.data.backends || []).find(b => b.id === "local" && b.found && !b.error);
+  const locals = (BR.data.backends || []).filter(b => (b.id === "local" || b.local_agent) && b.found && !b.error);  // the local brain and each local agent added
   if (!pick) return null;
   return el("section", { class: "panel cn-nudge", "data-card": "connect", "data-where": where },
     el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, "One click"), el("h2", {}, "Connect your agent"),
       el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
     el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
-      order.length > 1 || localB ? el("span", { class: "cn-or" }, "or") : null,
+      order.length > 1 || locals.length ? el("span", { class: "cn-or" }, "or") : null,
       order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small cn-alt", onclick: () => connectGo(b) }, brainMarkOf(b.id, b) ? mark(brainMarkOf(b.id, b), "") : null, b.label)),
-      localB ? el("button", { type: "button", class: "small cn-alt" + (BR.data.default === "local" ? " on" : ""), "aria-pressed": BR.data.default === "local" ? "true" : "false", onclick: () => cnUseLocal(localB) },
-        brainMarkOf("local", localB) ? mark(brainMarkOf("local", localB), "") : null, localName(localB) + (BR.data.default === "local" ? " · in use" : "")) : null)); }
+      locals.map(b => el("button", { type: "button", class: "small cn-alt" + (BR.data.default === b.id ? " on" : ""), "aria-pressed": BR.data.default === b.id ? "true" : "false", onclick: () => cnUseLocal(b) },
+        brainMarkOf(b.id, b) ? mark(brainMarkOf(b.id, b), "") : null, localName(b) + (BR.data.default === b.id ? " · in use" : ""))))); }
 // the local brain needs no sign-in: choosing it makes it the default brain (and the Agent room's, when it drives the Studio)
 const localName = b => (b.label || "Local model").replace(/ \(Studio engine\)$/, "") + " (local)";
-async function cnUseLocal(b) { try { const r = await api("/api/brains/local/default", {});
+async function cnUseLocal(b) { try { const r = await api("/api/brains/" + encodeURIComponent(b.id) + "/default", {});
     if (BR.data) { BR.data.default = r.settings.default; BR.data.settings = r.settings; }
     toast(localName(b) + " is your default brain" + (b.harness ? ", and the Agent room's" : ""));
   } catch (e) { toast(e.message); } cnRedraw(); }
@@ -508,11 +508,11 @@ function viewBrains() {
   const d = BR.data, set = d.settings || {}, remote = set.remote || {};
   const host = el("input", { value: remote.host || "", placeholder: "you@your-mac" }), studioHost = el("input", { value: remote.studio_host || "", placeholder: "you@this-machine (optional)" });
   const save = async patch => { try { await api("/api/brains/settings", { ...set, ...patch }); toast("Saved"); BR.data = null; brainsLoad(); } catch (e) { toast(e.message); } };
-  put(wrap, head(), typeof localModelsCard === "function" ? localModelsCard() : null,
+  put(wrap, head(), typeof localModelsCard === "function" ? localModelsCard() : null, typeof localAgentsCard === "function" ? localAgentsCard() : null,
     el("p", { class: "note m-flat m-setlink" }, "Sign-in help, the Hermes profile and every connection in one place: ", el("a", { href: "#Settings", onclick: e => { e.preventDefault(); typeof goSettings === "function" ? goSettings("connections") : go("Settings"); } }, "Settings → Connections"), "."),
     el("details", { class: "fold m-fold" }, el("summary", {}, "What is kept, and who pays"),
     el("div", { class: "note m-flat" }, "Studio uses the AI subscriptions you already pay for. Nothing is stored but which one you prefer: each answer is billed to your own sign-in, and a local model never leaves your network.")));
-  const clis = (d.backends || []).filter(b => b.kind !== "http" && b.id !== "local").map(b => ({ kind: "cli", ...b })), localB = (d.backends || []).find(b => b.kind === "http" || b.id === "local");
+  const clis = (d.backends || []).filter(b => b.kind !== "http" && b.id !== "local").map(b => ({ kind: "cli", ...b })), localB = (d.backends || []).find(b => b.id === "local");
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Your agents"), el("span", { class: "note" }, "Connect one: the studio installs it, signs you in and checks it.")),
     el("div", { class: "tri" }, clis.map(b => connectCard(b)),
       localB ? el("div", { class: "brain" + (d.default === "local" ? " on" : ""), "data-brain": "local" }, el("div", { class: "head" }, brainLogo("local", localB), el("div", { class: "m-min" }, el("b", {}, localB.label),

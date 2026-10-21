@@ -52,7 +52,7 @@ function useOutput(path, how) {
 // a brain's mark beside its name, where it has one (shell.js MARKS); a letter where it has none
 const agMark = id => { const k = typeof brainMarkOf === "function" ? brainMarkOf(id) || id : id;
   return typeof mark === "function" && typeof MARKS !== "undefined" && MARKS[k] ? mark(k, "") : null; };
-const agBadge = id => agMark(id) || el("span", { class: "agr-mono", "aria-hidden": "true" }, id === "local" ? "◎" : (id || "?").slice(0, 1).toUpperCase());
+const agBadge = id => agMark(id) || el("span", { class: "agr-mono", "aria-hidden": "true" }, id === "local" || String(id).startsWith("local:") ? "◎" : (id || "?").slice(0, 1).toUpperCase());
 // a brain a task can go to: found on this machine, or run over SSH on the computer named in Brains & tools, that machine
 // reached, and not known to be signed out (the CLI's own word, as Settings → Connections shows it: BR.status, machine.js)
 const AG_NOT_SIGNED = { signed_out: "Not signed in", broken: "Cannot start", missing: "Not found" };
@@ -69,6 +69,8 @@ const agSetup = () => { const want = ((BR.data && BR.data.backends) || []).find(
     el("a", { href: agSettings() ? "#Settings" : "#Brains", class: "ag-setup", onclick: e => { if (e && e.preventDefault) e.preventDefault(); if (agSettings() && typeof SET !== "undefined") SET.section = "connections"; go(agSettings() ? "Settings" : "Brains"); } },
       agSettings() ? "Set up in Settings → Connections" : "Set up on Machine → Brains & tools")); };
 const agName = id => { const b = ((BR.data && BR.data.backends) || []).find(x => x.id === id); return (b && b.label) || (AG_AGENTS.find(a => a[0] === id) || [id, id])[1]; };
+// the fixed agents, then each local agent added in Settings → Connections ("local:<id>", its own server and model)
+const agAgents = found => [...AG_AGENTS, ...found.filter(b => b.local_agent).map(b => [b.id, b.label])];
 const agAgo = s => { if (!s) return ""; const d = Date.now() / 1000 - s; return d < 60 ? "just now" : d < 3600 ? Math.round(d / 60) + " min ago" : d < 86400 ? Math.round(d / 3600) + " h ago" : new Date(s * 1000).toLocaleDateString(); };
 const agPic = p => /\.(png|jpe?g|webp|mp4|mov)$/i.test(p), agSound = p => /\.(wav|mp3|m4a|aac|flac|ogg)$/i.test(p);
 
@@ -277,12 +279,12 @@ function agQuestion(thread, t) {
 
 // ---------- the room ----------
 function agChooser(found) {
-  return el("div", { class: "agr-cards", role: "radiogroup", "aria-label": "Choose your agent" }, AG_AGENTS.map(([id, name]) => {
+  return el("div", { class: "agr-cards", role: "radiogroup", "aria-label": "Choose your agent" }, agAgents(found).map(([id, name]) => {
     const b = found.find(x => x.id === id), ready = agReady(b), on = ready && AG.backend === id, remote = b && /^ssh:./.test(b.where || ""), st = agSignState(b);
     const state = !b ? "Not found" : b.error ? "Not reached" : st ? AG_NOT_SIGNED[st.state] : remote ? "On " + b.where.slice(4).replace(/^[^@]*@/, "") : b.found ? "Ready" + (b.version ? " · " + String(b.version).replace(/^[^0-9]*/, "").split(/[\s(]/)[0] : "") : "Not found";
     const can = agIsHarness(id) ? "Uses the Studio" : "Conversation";
     // an agent that is not ready is one click from ready: its card opens the Connect checklist over the room
-    const fix = id !== "local" && typeof connectOpen === "function";
+    const fix = id !== "local" && !id.startsWith("local:") && typeof connectOpen === "function";
     return el("button", { class: "agr-card" + (on ? " on" : "") + (ready ? "" : " off"), role: "radio", "aria-checked": on ? "true" : "false", disabled: !ready && !fix, "aria-disabled": ready ? false : "true",
       title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : ((b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it")) +
         (fix ? " · Click to connect it: the studio installs it if needed, signs you in and checks it answers." : ""),
@@ -353,7 +355,7 @@ function viewAgent() {
     const def = BR.data && (found.find(b => b.id === chosen0 && agReady(b)) || found.find(b => b.id === BR.data.default && agReady(b)));
     // nobody chose a brain or an agent, and the set local server answers: it is the room's first choice
     const auto = BR.data && BR.data.automatic && !chosen0 && BR.data.default === "local" ? found.find(b => b.id === "local" && agReady(b)) : null;
-    AG.backend = (auto || ((def && (agIsHarness(def.id) || !harnesses.some(agReady))) ? def : null) || harnesses.find(agReady) || found.find(b => agReady(b) && AG_AGENTS.some(a => a[0] === b.id)) || { id: AG.backend || "claude" }).id;
+    AG.backend = (auto || ((def && (agIsHarness(def.id) || !harnesses.some(agReady))) ? def : null) || harnesses.find(agReady) || found.find(b => agReady(b) && agAgents(found).some(a => a[0] === b.id)) || { id: AG.backend || "claude" }).id;
   }
   const missing = harnesses.filter(b => !agReady(b));
   const toolList = BR.tools ? (BR.tools.tools || BR.tools) : [{ id: "blender", label: "Blender" }, { id: "blockout", label: "Blockout" }, { id: "studio", label: "Studio" }];
@@ -385,7 +387,7 @@ function viewAgent() {
         far && Object.keys(unreach).length ? el("span", { class: "note m-flat ag-back" }, "Some tools need " + chosen.where.slice(4) + " to reach this computer: ",
           el("a", { href: "#Settings", onclick: e => { if (e && e.preventDefault) e.preventDefault(); if (typeof SET !== "undefined") SET.section = "connections"; if (typeof CN !== "undefined") CN.linkOpen = true; go("Settings"); } }, "let it reach this studio"), ".") : null]
         : el("span", {}, AG.backend === "hermes" ? "Hermes is a conversation here: it reads its MCP servers from its own config, not from the Studio, so it plans and answers but does not drive the Studio's tools. Pick Claude Code or Codex for that."
-          : (chosen ? chosen.label : agName(AG.backend)) + (AG.backend === "local" ? " is a conversation here: its server does not take tool calls (llama.cpp needs --jinja), so it plans, writes prompts and answers; Claude Code or Codex make things with the Studio's tools." : " is a conversation here: it plans, writes prompts and answers; Claude Code or Codex make things with the Studio's tools.")),
+          : (chosen ? chosen.label : agName(AG.backend)) + (AG.backend === "local" || AG.backend.startsWith("local:") ? " is a conversation here: its server does not take tool calls (llama.cpp needs --jinja), so it plans, writes prompts and answers; Claude Code or Codex make things with the Studio's tools." : " is a conversation here: it plans, writes prompts and answers; Claude Code or Codex make things with the Studio's tools.")),
       chosen && chosen.where && /^ssh:/.test(chosen.where) ? el("span", { class: "note m-flat" }, "Runs on " + chosen.where.slice(4) + " over SSH") : null),
     el("div", { class: "agr-room" }, agList(), thread ? agConversation(thread) : agStart(missing)),
     earlier.length ? el("div", { class: "sectionhead" }, el("h2", {}, "Earlier one-shot tasks"), el("button", { class: "small", onclick: () => { AG.earlier = !AG.earlier; render(); } }, AG.earlier ? "Hide" : "Show " + earlier.length)) : null,

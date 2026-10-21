@@ -7,7 +7,8 @@ const SET_DEFAULTS = {
   layout: { hidden: [], order: [] },
   presets: { recipe: "quick", image_model: "qwen", seconds: 5, qa_gate: true, audio_rate: "keep", seed: "fixed", mode: "clip" },
   hermes_profile: "", hermes_command: "" };
-const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false }, about: null };
+const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false },
+  agents: { name: "", endpoint: "", model: "", nearby: null, finding: false, adding: false, said: {}, testing: {} }, about: null };
 const SET_SECTIONS = [["appearance", "Appearance", "type, glow, poster, accent"], ["layout", "Studio layout", "what the sidebar shows"],
   ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"], ["access", "Access key", "sign in your phone, a new key"],
   ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to five DGX Sparks for a job"],
@@ -139,6 +140,40 @@ function localModelsCard() {
     b && b.set_missing && b.endpoint === (found && found.endpoint) ? el("div", { class: "note m-flat" }, "Set to " + b.set_model + ", which this server no longer runs: the studio uses " + b.model + ". ",
       el("button", { type: "button", class: "small", onclick: () => save1({ local_model: "" }) }, "Follow what the server runs")) : null,
     L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null); }
+// More local agents: every other model server (a GLM, a DeepSeek, an Ollama) as a brain of its own, beside Bolt
+function localAgentsCard() {
+  const d = typeof BR !== "undefined" && BR.data || {}, A = SET.agents, mine = (d.backends || []).filter(b => b.local_agent);
+  const reload = () => { if (typeof BR !== "undefined") { BR.data = null; brainsLoad().then(() => render()); } else render(); };
+  const name = el("input", { value: A.name, placeholder: "Name, like GLM or DeepSeek", "aria-label": "Local agent name", oninput: e => { A.name = e.target.value; } });
+  const addr = el("input", { value: A.endpoint, placeholder: "http://127.0.0.1:8000/v1", "aria-label": "Local agent address", oninput: e => { A.endpoint = e.target.value; } });
+  const model = el("input", { value: A.model, placeholder: "model (optional: the server's first)", "aria-label": "Local agent model", oninput: e => { A.model = e.target.value; } });
+  const add = async () => { A.adding = true; render();
+    try { await api("/api/brains/local-agents", { name: A.name.trim(), endpoint: A.endpoint.trim(), model: A.model.trim() }); toast("Added " + A.name.trim()); Object.assign(A, { name: "", endpoint: "", model: "", nearby: null }); reload(); }
+    catch (e) { toast(e.message); } A.adding = false; render(); };
+  const look = async () => { A.finding = true; render(); try { A.nearby = (await api("/api/brains/local-agents/nearby")).nearby || []; } catch (e) { A.nearby = []; toast(e.message); } A.finding = false; render(); };
+  const test = async id => { A.testing[id] = true; render(); try { A.said[id] = await api("/api/brains/test", { backend: id }); } catch (e) { A.said[id] = { ok: false, error: e.message }; } A.testing[id] = false; render(); };
+  const row = b => { const said = A.said[b.id], on = d.default === b.id;
+    return el("div", { class: "brain" + (on ? " on" : ""), "data-brain": b.id }, el("div", { class: "head" }, typeof brainLogo === "function" ? brainLogo(b.id, b) : null, el("div", { class: "m-min" }, el("b", {}, b.label),
+        el("span", { class: "cn-word " + (b.found ? "ok" : "bad") }, b.found ? "Ready" : "Not answering", b.found && (b.model || b.set_model) ? " · " + (b.model || b.set_model) : ""),
+        el("span", { class: "note m-flat" }, b.endpoint))),
+      said ? el("div", { class: "note m-flat " + (said.ok ? "vt-ok" : "vt-bad") }, said.ok ? "Answered “" + String(said.text || "").slice(0, 40) + "”" : said.error) : null,
+      el("div", { class: "m-acts" },
+        el("button", { type: "button", class: "small", disabled: A.testing[b.id] || !b.found, onclick: () => test(b.id) }, A.testing[b.id] ? "Asking…" : "Test"),
+        on ? el("span", { class: "tag2 t" }, "default") : el("button", { type: "button", class: "small", disabled: !b.found, onclick: async () => { try { await api("/api/brains/settings", { default: b.id }); toast(b.label + " is the default"); reload(); } catch (e) { toast(e.message); } } }, "Make default"),
+        el("button", { type: "button", class: "small", onclick: async () => { if (!confirm("Remove " + b.label + "? The server itself is left as it is.")) return;
+          try { await api("/api/brains/local-agents/" + encodeURIComponent(b.id), {}, "DELETE"); reload(); } catch (e) { toast(e.message); } } }, "Remove"))); };
+  return el("section", { class: "panel st-local", "data-card": "local-agents" },
+    el("div", { class: "st-lh" }, el("span", { class: "logo" }, icon("machine")), el("div", { class: "m-min" }, el("h2", {}, "More local agents"),
+      el("p", { class: "st-line" }, "Each model server you run is an agent of its own, beside Bolt and your subscriptions.")),
+      el("span", { class: "tag2" + (mine.some(b => b.found) ? " ok" : "") }, mine.length ? mine.length + " added" : "none yet")),
+    mine.length ? el("div", { class: "tri" }, mine.map(row)) : null,
+    el("div", { class: "st-lrow" }, name, addr, model, el("button", { type: "button", class: "primary small", disabled: A.adding || !A.name.trim() || !A.endpoint.trim(), onclick: add }, A.adding ? "Adding…" : "Add")),
+    el("div", { class: "st-lrow" }, el("button", { type: "button", class: "small", disabled: A.finding, onclick: look }, A.finding ? "Looking…" : "Find servers on this computer"),
+      A.nearby && !A.nearby.length ? el("span", { class: "note m-flat" }, "Nothing new answered on 11434, 1234, 8000, 8080, 8001, 8888, 5000 or 30000. A server on another computer: type its address.") : null,
+      (A.nearby || []).map(n => el("button", { type: "button", class: "toggle", title: (n.models || []).join(", "),
+        onclick: () => { A.endpoint = n.endpoint; A.model = (n.models || [])[0] || ""; if (!A.name) A.name = String((n.models || [])[0] || "Local").split("/").pop().slice(0, 40); render(); } },
+        n.endpoint.replace(/^https?:\/\//, "").replace(/\/v1$/, "") + ((n.models || [])[0] ? " · " + n.models[0].split("/").pop() : "")))),
+    el("div", { class: "note m-flat" }, "Any OpenAI-compatible server works: vLLM, SGLang, Ollama, LM Studio, llama.cpp. Each can be the default brain, run in the Agent room and answer Slate.")); }
 const setWhere = b => b.found ? (b.where && b.where !== "here" ? "on " + b.where.replace(/^ssh:/, "") : "found here") + (b.version ? " · " + b.version : "") : b.error || (b.where && b.where !== "here" ? "not found on " + b.where.replace(/^ssh:/, "") : "not found");
 function setBrainCard(b) { return typeof connectCard === "function" ? connectCard(b, b.id === "hermes" ? [setHermes()] : []) : el("div", { class: "brain", "data-brain": b.id }, b.label); }
 function setHermes() { const p = prefs();
@@ -150,7 +185,7 @@ function setConnections() {
   if (BR.data.error) return [localModelsCard(), setPanel("Your subscriptions", "Brains are not offered here: " + BR.data.error)];
   const clis = (BR.data.backends || []).filter(b => b.kind === "cli"), remote = (BR.data.settings || {}).remote || {};
   const tools = BR.tools ? (BR.tools.tools || BR.tools) : [];
-  return [localModelsCard(),
+  return [localModelsCard(), localAgentsCard(),
     setPanel("Your agents", "Press Connect: the studio finds the agent (or installs it), runs its own sign-in, checks it answers and makes it your default. It keeps nothing of the sign-in; each answer is billed to your own subscription.",
       el("div", { class: "tri" }, clis.map(setBrainCard)),
       el("div", { class: "note m-flat" }, remote.host ? "On another computer: " + remote.host + " runs " + ((remote.backends || []).join(", ") || "nothing yet") + " over SSH." : "A DGX Spark can use the agents signed in on your Mac: link it below.")),

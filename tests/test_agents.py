@@ -267,7 +267,7 @@ def test_settings_are_saved_privately_and_checked(fake):
                                                                         "studio_host": "user@studio-box"},
                                          "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b"}).json()["settings"]
     assert good == {"default": "gemini", "remote": {"host": "user@workstation.local:2222", "backends": ["claude"], "studio_host": "user@studio-box"},
-                    "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b", "agent": ""}
+                    "local_endpoint": "http://127.0.0.1:11434", "local_model": "qwen3:8b", "agent": "", "local_agents": []}
     file = agents.HOME / ".studio-agents/settings.json"
     assert json.loads(file.read_text()) == good and (file.stat().st_mode & 0o777) == 0o600
     assert post("/api/brains/settings", {"default": "gpt"}).status_code == 400

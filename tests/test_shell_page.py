@@ -567,6 +567,24 @@ def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account()
     assert out["sent"] == {"provider": "anthropic"} and out["tabsAfter"] == 1
 
 
+def test_each_local_agent_added_is_a_choice_of_its_own():
+    """A GLM or DeepSeek server added in Settings → Connections is a pill on the Connect card beside the local brain."""
+    out = run(CONNECT + """
+      const store = {}; globalThis.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = v; } };
+      globalThis.ART = { ready: new Set() }; globalThis.artSlot = () => null; globalThis.palOpen = () => {}; globalThis.platName = () => "DGX Spark"; globalThis.SHELL = { tel: null, samples: [] };
+      BR.data = { default: "claude", settings: { remote: { host: "", backends: [] } }, backends: [{ id: "codex", label: "Codex", kind: "cli", found: true, where: "here" },
+        { id: "local", label: "NVIDIA Nemotron 3.5 Bolt (Studio engine)", kind: "http", found: true, harness: true, engine: { state: "unloaded", available: true } },
+        { id: "local:glm", label: "GLM", kind: "http", local_agent: true, named: true, found: true, harness: false },
+        { id: "local:off", label: "Off", kind: "http", local_agent: true, named: true, found: false, harness: false }] }; BR.tools = { tools: [] };
+      BR.status = { codex: { state: "signed_out" } };
+      tab = "Home"; const card = n => find(n, x => x.attrs && x.attrs["data-card"] === "connect");
+      const home = viewHome(); out.home = text(card(home));
+      answers["/api/brains/local%3Aglm/default"] = { settings: { default: "local:glm", agent: "", remote: { host: "", backends: [] } } };
+      await button(card(home), "GLM (local)").attrs.onclick(); out.defaulted = [calls.some(c => c[0] === "/api/brains/local%3Aglm/default"), BR.data.default];""")
+    assert "GLM (local)" in out["home"] and "Nemotron 3.5 Bolt (local)" in out["home"] and "Off (local)" not in out["home"]
+    assert out["defaulted"] == [True, "local:glm"]
+
+
 def test_the_qr_code_has_its_finders_and_size_for_the_address():
     out = run("""const m = qrMatrix("https://auth.openai.com/codex/device"), big = qrMatrix("https://claude.com/" + "a".repeat(420));
       const finder = (m, x, y) => [0, 1, 2, 3, 4, 5, 6].every(i => m[y][x + i] && m[y + 6][x + i] && m[y + i][x] && m[y + i][x + 6]) && m[y + 3][x + 3] && !m[y + 1][x + 1];

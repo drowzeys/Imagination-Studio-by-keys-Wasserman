@@ -318,7 +318,7 @@ def resolve_brain(backend: str, endpoint: str = "", model: str = "") -> tuple[st
     Studio's default brain with that brain's server and model."""
     import agents  # the brains (agents.py): Claude Code, Codex, Gemini CLI, Grok CLI here or over ssh, or a local server
 
-    if backend in agents.BACKENDS:
+    if agents.is_backend(backend):  # a local agent ("local:<id>") brings its own server and model (agents.as_local)
         return backend, endpoint, model
     now = agents.default_brain()
     return now["backend"], now["endpoint"] or "", now["model"] or ""
@@ -372,7 +372,8 @@ def brain_status(endpoint: str = "") -> dict:
     local = found["local"]
     return {**{name: found[name]["found"] for name in agents.CLIS}, "local": local["found"], "localLabel": local["label"],
             "endpoint": local["endpoint"] if local["found"] else None, "models": local["models"],
-            "default": agents.default_brain()["backend"]}  # what a film on AUTO asks
+            "localAgents": [{"id": b["id"], "label": b["label"], "found": b["found"]} for b in found.values() if b.get("local_agent")],
+            "default": agents.default_brain().get("agent") or agents.default_brain()["backend"]}  # what a film on AUTO asks
 
 
 @router.post("/api/slate/brain")

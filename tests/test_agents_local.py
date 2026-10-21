@@ -333,3 +333,49 @@ def test_a_slip_in_a_path_the_answer_names_is_put_right_from_the_records():
             "scouts/zzz/other.png.")
     assert ledger.mended(said) == ("Rendered: slate/p-1a157b848c0-7743ef/takes/shot-mvg86evj-71f70-mvg86x3g.mp4, beside "
                                    "uploads/hero.png and scouts/zzz/other.png.")  # a path not near one of the records stays as it is
+
+
+def test_more_local_agents_each_answer_from_their_own_server(local):
+    bolt = local(lambda body, n: {"content": "bolt here"}, tools=False)
+    glm = Model(lambda body, n: {"content": "glm here"}, tools=False)
+    deep = Model(lambda body, n: {"content": "deep here"}, tools=None)
+    try:
+        assert post("/api/brains/local-agents", {"name": "GLM", "endpoint": glm.url + "/v1"}).json()["added"] == "local:glm"
+        assert post("/api/brains/local-agents", {"name": "DeepSeek", "endpoint": deep.url, "model": "nvidia-nemotron-3.5-bolt"}).json()["added"] == "local:deepseek"
+        assert post("/api/brains/local-agents", {"name": "GLM again", "endpoint": glm.url + "/v1"}).status_code == 409
+        assert post("/api/brains/local-agents", {"name": "", "endpoint": glm.url}).status_code == 400
+        assert post("/api/brains/local-agents", {"name": "Evil", "endpoint": "http://x/ y"}).status_code == 400
+        found = {b["id"]: b for b in client.get("/api/brains").json()["backends"]}
+        assert found["local:glm"]["found"] and found["local:glm"]["label"] == "GLM" and found["local:glm"]["local_agent"]
+        assert found["local:deepseek"]["found"] and found["local:deepseek"]["set_model"] == "nvidia-nemotron-3.5-bolt"
+        # each is asked at its own address; the one local brain keeps its own
+        assert post("/api/brains/test", {"backend": "local:glm"}).json()["text"] == "glm here"
+        assert post("/api/brains/test", {"backend": "local:deepseek"}).json()["text"] == "deep here"
+        assert post("/api/brains/test", {"backend": "local"}).json()["text"] == "bolt here"
+        assert deep.asked[-1]["model"] == "nvidia-nemotron-3.5-bolt" and len(bolt.asked) == 1
+        # one is the default brain, and Slate on AUTO asks it
+        assert post("/api/brains/local:glm/default").json()["settings"]["default"] == "local:glm"
+        brain = client.get("/api/slate/brain").json()
+        assert brain["default"] == "local:glm" and {a["id"] for a in brain["localAgents"]} == {"local:glm", "local:deepseek"}
+        assert post("/api/slate/brain", {"backend": "local:deepseek", "prompt": "hi"}).json()["text"] == "deep here"
+        # the Agent room runs a conversation with it
+        answer = post("/api/agent/threads", {"text": "A still", "backend": "local:deepseek", "tools": []}).json()
+        assert settled(answer["thread"]["id"])["turns"][-1]["text"] == "deep here"
+        # removing the default one puts the automatic default back; the list keeps the other
+        gone = client.request("DELETE", "/api/brains/local-agents/local:glm", json={})
+        assert gone.status_code == 200, gone.text
+        left = gone.json()["local_agents"]
+        assert [a["id"] for a in left] == ["local:deepseek"]
+        assert client.get("/api/brains").json()["default"] != "local:glm"
+        assert client.request("DELETE", "/api/brains/local-agents/local:glm", json={}).status_code == 404
+    finally:
+        glm.close()
+        deep.close()
+
+
+def test_a_local_agent_that_does_not_answer_is_kept_but_not_ready(local):
+    local(lambda body, n: {"content": "ok"}, tools=False)
+    assert post("/api/brains/local-agents", {"name": "Off for now", "endpoint": "http://127.0.0.1:9/v1"}).status_code == 200
+    one = next(b for b in client.get("/api/brains").json()["backends"] if b["id"] == "local:off-for-now")
+    assert one["found"] is False and one["harness"] is False
+    assert post("/api/brains/local:off-for-now/default").status_code in (200, 400)

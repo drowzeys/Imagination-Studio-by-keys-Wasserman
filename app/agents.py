@@ -218,10 +218,59 @@ def environment_defaults() -> dict:
 def chosen_default(saved: dict) -> str:
     """The brain a person chose: the one saved in Brains & tools, else ``STUDIO_DEFAULT_BRAIN``; "" when nobody chose."""
 
-    if saved.get("default") in BACKENDS:
+    if saved.get("default") in BACKENDS or saved.get("default") in local_agent_ids(saved):
         return saved["default"]
     brain = os.environ.get("STUDIO_DEFAULT_BRAIN", "").strip()
     return brain if brain in BACKENDS else ""
+
+
+# ---------- more local agents: named OpenAI-compatible servers beside the one local brain ----------
+# "local" is the one local brain (the Studio's Nemotron 3.5 Bolt, or the server set in Settings). Each server added in
+# Settings → Connections is a brain of its own, "local:<id>", with its address and model: it is asked, checked and run
+# in the Agent room exactly as "local" is, with that address and model in place of the set ones (as_local).
+LOCAL_AGENT = re.compile(r"local:[a-z0-9][a-z0-9-]{0,30}")
+LOCAL_ADDRESS = re.compile(r"(?:https?://)?[A-Za-z0-9.\-\[\]:]+(?:/[A-Za-z0-9._~/-]*)?")
+LOCAL_AGENTS_MAX = 12
+NEARBY_PORTS = (11434, 1234, 8000, 8080, 8001, 8888, 5000, 30000)  # Ollama, LM Studio, vLLM, llama.cpp, SGLang and friends
+
+
+def clean_local_agents(value) -> list[dict]:
+    out, seen = [], set()
+    for one in value if isinstance(value, list) else []:
+        if not isinstance(one, dict) or not LOCAL_AGENT.fullmatch(str(one.get("id") or "")) or one["id"] in seen:
+            continue
+        endpoint, name = str(one.get("endpoint") or "").strip(), str(one.get("name") or "").strip()[:40]
+        if not endpoint or len(endpoint) > 300 or not LOCAL_ADDRESS.fullmatch(endpoint) or not name:
+            continue
+        model = str(one.get("model") or "").strip()[:200]
+        seen.add(one["id"])
+        out.append({"id": one["id"], "name": name, "endpoint": endpoint, "model": "" if any(c in model for c in "\n\r\0") else model})
+    return out[:LOCAL_AGENTS_MAX]
+
+
+def local_agent_ids(saved: dict) -> list[str]:
+    return [one["id"] for one in clean_local_agents(saved.get("local_agents"))]
+
+
+def local_agent(backend: str, config: dict | None = None) -> dict | None:
+    if not isinstance(backend, str) or not backend.startswith("local:"):
+        return None
+    return next((one for one in (config or saved_settings())["local_agents"] if one["id"] == backend), None)
+
+
+def is_local(backend: str) -> bool:
+    return backend == "local" or (isinstance(backend, str) and backend.startswith("local:"))
+
+
+def is_backend(backend: str, config: dict | None = None) -> bool:
+    return backend in BACKENDS or local_agent(backend, config) is not None
+
+
+def as_local(backend: str, config: dict) -> dict:
+    """The settings a local agent runs with: its own address and model in the place of the one local brain's."""
+
+    one = local_agent(backend, config)
+    return {**config, "local_endpoint": one["endpoint"], "local_model": one["model"]} if one else config
 
 
 def local_server(endpoint: str) -> tuple[str | None, list[str]]:
@@ -329,9 +378,9 @@ def is_harness(backend: str, config: dict | None = None) -> bool:
 
     if backend in HARNESSES:
         return True
-    if backend != "local":
+    if not is_local(backend):
         return False
-    config = config or saved_settings()
+    config = as_local(backend, config or saved_settings())
     return local_tools(config["local_endpoint"], config["local_model"])
 
 
@@ -357,14 +406,19 @@ def saved_settings() -> dict:
                        "studio_host": remote.get("studio_host") or ""},
             "local_endpoint": endpoint,
             "local_model": model,
+            "local_agents": clean_local_agents(saved.get("local_agents")),
             # the Agent room's first choice
-            "agent": saved["agent"] if saved.get("agent") in AGENTS else automatic_agent(default, endpoint, model)}
+            "agent": saved["agent"] if saved.get("agent") in AGENTS or saved.get("agent") in local_agent_ids(saved)
+            else automatic_agent(default, endpoint, model)}
 
 
 def default_brain() -> dict:
     """The brain a new film and a QA look start from: {backend, endpoint, model}."""
 
     now = saved_settings()
+    if local_agent(now["default"], now):
+        one = local_agent(now["default"], now)
+        return {"backend": "local", "endpoint": one["endpoint"], "model": one["model"], "agent": now["default"]}
     return {"backend": now["default"], "endpoint": now["local_endpoint"], "model": now["local_model"]}
 
 
@@ -378,11 +432,12 @@ def valid_host(value, what: str = "host") -> str:
 def save_settings(body: dict) -> dict:
     now = saved_settings()
     saved = read_json(folder() / "settings.json" if folder() else None, {})
-    chosen = saved["default"] if saved.get("default") in BACKENDS else ""  # only a brain a person picked is kept
-    agent = saved["agent"] if saved.get("agent") in AGENTS else ""  # nor is an automatic agent written down
+    mine = local_agent_ids(saved)
+    chosen = saved["default"] if saved.get("default") in BACKENDS or saved.get("default") in mine else ""  # only a brain a person picked is kept
+    agent = saved["agent"] if saved.get("agent") in AGENTS or saved.get("agent") in mine else ""  # nor is an automatic agent written down
     if "default" in body:
-        if body["default"] not in (*BACKENDS, ""):
-            raise HTTPException(400, "default is one of " + ", ".join(BACKENDS))
+        if body["default"] not in (*BACKENDS, *mine, ""):
+            raise HTTPException(400, "default is one of " + ", ".join([*BACKENDS, *mine]))
         chosen = body["default"]  # "" goes back to the automatic default
     if "remote" in body:
         remote = body["remote"] or {}
@@ -395,8 +450,8 @@ def save_settings(body: dict) -> dict:
                          "backends": list(dict.fromkeys(backends)),
                          "studio_host": valid_host(remote.get("studio_host", now["remote"]["studio_host"]), "remote.studio_host")}
     if "agent" in body:
-        if body["agent"] not in (*AGENTS, ""):
-            raise HTTPException(400, "agent is one of " + ", ".join(AGENTS))
+        if body["agent"] not in (*AGENTS, *mine, ""):
+            raise HTTPException(400, "agent is one of " + ", ".join([*AGENTS, *mine]))
         agent = body["agent"]
     if "local_endpoint" in body:
         value = str(body["local_endpoint"] or "").strip()
@@ -412,7 +467,7 @@ def save_settings(body: dict) -> dict:
         probes.clear()
         answering.clear()
         tool_checks.clear()
-    now["default"] = chosen_default({"default": chosen}) or automatic_default(now["local_endpoint"])
+    now["default"] = chosen_default({"default": chosen, "local_agents": now["local_agents"]}) or automatic_default(now["local_endpoint"])
     now["agent"] = agent or automatic_agent(now["default"], now["local_endpoint"], now["local_model"])
     if folder():  # a default nobody picked is not written down, so it stays automatic
         written = {**now, "agent": agent}
@@ -649,15 +704,17 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
             if name not in remote and ("", name) not in cached:
                 jobs[("", name)] = pool.submit(look_here, name)
         jobs[("local", "")] = pool.submit(look_local, endpoint or config["local_endpoint"], config["local_model"])
+        for one in config["local_agents"]:
+            jobs[(one["id"], "")] = pool.submit(look_local, one["endpoint"], one["model"])
         done, _ = concurrent.futures.wait(jobs.values(), timeout=10)
         fresh = {key: job.result() for key, job in jobs.items() if job in done}
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     with lock:
         for key, value in fresh.items():
-            if key[0] != "local":
+            if not is_local(key[0]):
                 probes[key] = (time.monotonic(), value)
-            elif not endpoint and config["local_endpoint"]:  # what the set server said is news for the automatic default
+            elif key[0] == "local" and not endpoint and config["local_endpoint"]:  # what the set server said is news for the automatic default
                 answering[config["local_endpoint"]] = (time.monotonic(), bool(value[0]), value[0], value[1])
     seen = {**cached, **fresh}
     out = []
@@ -702,6 +759,13 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
                 "set_missing": bool(base and models and config["local_model"] and config["local_model"] not in models),
                 # NVIDIA Nemotron 3.5 Bolt as the Studio's engine (bolt.py): its state, backend and memory, Load / Unload
                 "engine": bolt.state() if engine else None})
+    for one in config["local_agents"]:  # the other local agents, each its own brain
+        base, models, tools_ = seen.get((one["id"], "")) or (None, [], False)
+        running = answering_model(models, one["model"]) if base and models else ""
+        out.append({"id": one["id"], "label": one["name"], "named": True, "kind": "http", "local_agent": True, "found": bool(base),
+                    "harness": bool(base and tools_), "session": False, "endpoint": base or slate.endpoint_of(one["endpoint"]) or one["endpoint"],
+                    "models": models or [], "model": running or None, "set_model": one["model"] or None,
+                    "set_missing": bool(base and models and one["model"] and one["model"] not in models), "engine": None})
     return out
 
 
@@ -833,6 +897,8 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
     """One answer from a brain: a CLI here or over ssh, or a local OpenAI-compatible server."""
 
     config, timeout = settings or saved_settings(), timeout or slate.TIMEOUT
+    if local_agent(backend, config):  # another local agent: its own address and model
+        config, endpoint, model, backend = as_local(backend, config), "", "", "local"
     if backend == "local":
         base, models = slate.find_local(endpoint or config["local_endpoint"])
         if not base:
@@ -1430,8 +1496,8 @@ def submit(body: dict) -> dict:
     else:
         config = saved_settings()
         backend = body.get("backend") or config["agent"] or (config["default"] if config["default"] in HARNESSES else "claude")
-    if backend not in BACKENDS:
-        raise HTTPException(400, "an agent is one of " + ", ".join(BACKENDS))
+    if not is_backend(backend):
+        raise HTTPException(400, "an agent is one of " + ", ".join(BACKENDS) + ", or a local agent from Settings → Connections")
     harness = is_harness(backend)
     known = {t["id"]: t for t in tools()}
     if body.get("tools") is not None:
@@ -1829,7 +1895,9 @@ def perform(task: dict) -> None:
     work_.mkdir(parents=True, exist_ok=True)
     log = open(here / "log.txt", "a")
     try:
-        if task["backend"] not in SESSIONS and not (task["backend"] == "local" and task["tools"]):
+        if is_local(task["backend"]):  # a local agent runs as the local brain does, at its own address and model
+            config = as_local(task["backend"], config)
+        if task["backend"] not in SESSIONS and not (is_local(task["backend"]) and task["tools"]):
             return converse(task, thread, log)
         names = []
         for path in task["attach"]:  # the attachments, in a folder of their own beside what the agent makes
@@ -1842,7 +1910,7 @@ def perform(task: dict) -> None:
             names.append(name)
         task["inputs"] = names
         task["_before"] = snapshot(work_)
-        if task["backend"] == "local":
+        if is_local(task["backend"]):
             return drive(task, thread, log, config, work_, names)
         servers = mcp_servers(task, host, config) if task["backend"] in HARNESSES else {}
         if task["backend"] in HARNESSES:
@@ -3100,7 +3168,7 @@ def fix_of(backend: str, error: str, host: str) -> dict:
 def verify(backend: str) -> dict:
     """One short real answer from the brain, VERIFY_TIMEOUT at most; kept for the Connect checklist."""
 
-    if backend not in BACKENDS:
+    if not is_backend(backend):
         raise HTTPException(404, "no such brain")
     host = where_of(backend) if backend in CLIS else ""
     started = time.time()
@@ -3120,12 +3188,75 @@ def verify(backend: str) -> dict:
 
 
 def make_default(backend: str, body: dict) -> dict:
-    if backend not in BACKENDS:
+    if not is_backend(backend):
         raise HTTPException(404, "no such brain")
     patch = {"default": backend}
     if is_harness(backend) and body.get("agent", True):
         patch["agent"] = backend
     return {"settings": save_settings(patch)}
+
+
+def add_local_agent(body: dict) -> dict:
+    """A local model server as a brain of its own: {name, endpoint, model?}. Kept in the brain settings; it answers or
+    not, the list keeps it either way (a server may be off for now)."""
+
+    name, endpoint = str(body.get("name") or "").strip(), str(body.get("endpoint") or "").strip()
+    model = str(body.get("model") or "").strip()
+    if not name or len(name) > 40 or any(c in name for c in "\n\r\0<>"):
+        raise HTTPException(400, "name it in a few words (40 characters at most)")
+    if not endpoint or len(endpoint) > 300 or not LOCAL_ADDRESS.fullmatch(endpoint):
+        raise HTTPException(400, "the address is like http://127.0.0.1:11434 or 192.168.1.20:8000/v1")
+    if len(model) > 200 or any(c in model for c in "\n\r\0"):
+        raise HTTPException(400, "the model is a model name")
+    saved = read_json(folder() / "settings.json" if folder() else None, {})
+    agents_ = clean_local_agents(saved.get("local_agents"))
+    if len(agents_) >= LOCAL_AGENTS_MAX:
+        raise HTTPException(400, f"at most {LOCAL_AGENTS_MAX} local agents")
+    if any(slate.endpoint_of(one["endpoint"]) == slate.endpoint_of(endpoint) and one["model"] == model for one in agents_):
+        raise HTTPException(409, "that server and model are already a local agent")
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:24] or "agent"
+    ident, n = "local:" + slug, 2
+    while any(one["id"] == ident for one in agents_):
+        ident, n = f"local:{slug}-{n}", n + 1
+    agents_.append({"id": ident, "name": name, "endpoint": endpoint, "model": model})
+    write_local_agents(saved, agents_)
+    return {"added": ident, "local_agents": agents_}
+
+
+def remove_local_agent(ident: str) -> dict:
+    saved = read_json(folder() / "settings.json" if folder() else None, {})
+    agents_ = clean_local_agents(saved.get("local_agents"))
+    if not any(one["id"] == ident for one in agents_):
+        raise HTTPException(404, "no such local agent")
+    agents_ = [one for one in agents_ if one["id"] != ident]
+    for key in ("default", "agent"):  # a choice of the agent removed goes back to the automatic one
+        if saved.get(key) == ident:
+            saved.pop(key, None)
+    write_local_agents(saved, agents_)
+    return {"removed": ident, "local_agents": agents_}
+
+
+def write_local_agents(saved: dict, agents_: list[dict]) -> None:
+    if not folder():
+        raise HTTPException(500, "no studio folder to keep settings in")
+    write_json(folder() / "settings.json", {**saved, "local_agents": agents_})
+    with lock:
+        probes.clear()
+        answering.clear()
+
+
+def nearby_local() -> list[dict]:
+    """Model servers answering on this computer's usual ports that are not a brain yet: {endpoint, models}."""
+
+    config = saved_settings()
+    have = {slate.endpoint_of(one["endpoint"]) for one in config["local_agents"]} | {slate.endpoint_of(config["local_endpoint"])}
+    out = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        for port, models in zip(NEARBY_PORTS, pool.map(lambda port: slate.local_models(f"http://127.0.0.1:{port}/v1"), NEARBY_PORTS)):
+            endpoint = f"http://127.0.0.1:{port}/v1"
+            if models is not None and endpoint not in have:
+                out.append({"endpoint": endpoint, "models": models[:20]})
+    return out
 
 
 def connect_of(backend: str) -> dict:
@@ -3503,8 +3634,8 @@ def attach(home: Path) -> APIRouter:
         local(request, True)
         started = time.time()
         backend = body.get("backend") or saved_settings()["default"]
-        if backend not in BACKENDS:
-            raise HTTPException(400, "backend is one of " + ", ".join(BACKENDS))
+        if not is_backend(backend):
+            raise HTTPException(400, "backend is one of " + ", ".join(BACKENDS) + ", or a local agent")
         try:
             text = ask(backend, "", "Reply with the single word: ready", "fast" if backend == "claude" else "top", timeout=TEST_TIMEOUT)
             out = {"ok": bool(text.strip()), "text": text, "error": None}
@@ -3515,6 +3646,21 @@ def attach(home: Path) -> APIRouter:
         return {**out, "backend": backend, "elapsedMs": int(1000 * (time.time() - started))}
 
     # signing a brain in with the CLI's own login (start, follow, a pasted code, cancel), its status and signing out
+    @router.get("/api/brains/local-agents/nearby")
+    def local_agents_nearby(request: Request):
+        local(request)
+        return {"nearby": nearby_local()}
+
+    @router.post("/api/brains/local-agents")
+    def local_agents_add(body: dict, request: Request):
+        local(request, True)
+        return add_local_agent(body)
+
+    @router.delete("/api/brains/local-agents/{ident}")
+    def local_agents_remove(ident: str, request: Request):
+        local(request, True)
+        return remove_local_agent(ident)
+
     @router.get("/api/brains/{backend}/status")
     def brain_status(backend: str, request: Request):
         local(request)
