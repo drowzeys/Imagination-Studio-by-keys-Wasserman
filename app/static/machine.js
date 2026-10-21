@@ -248,6 +248,7 @@ function brainWord(b) { if (!b || b.kind !== "cli") return [b && b.found ? "Read
   return ["Not signed in", "connect", "Connect"]; }
 // the Connect button's click: a tab is opened now (a click may open one, a timer may not) and pointed at the sign-in page later
 function cnPrepareTab(b) { const st = BR.status[b.id];
+  if (b.id === "hermes" && !CN.hermesProvider) return;  // the tab opens on the provider's click, not on Connect's
   if (b.found && b.signin_flow === "pty" && !(st && st.state === "signed_in") && typeof window !== "undefined" && typeof window.open === "function") {
     try { const w = window.open("", "_blank"); if (w) { CN.win = w; try { w.document.title = "Signing in…"; w.document.body.innerHTML = "<p style='font:16px system-ui;padding:24px'>Opening the sign-in page…</p>"; } catch {} } } catch {} } }
 function cnCloseTab() { if (CN.win) { try { CN.win.close(); } catch {} CN.win = null; } }
@@ -275,7 +276,8 @@ function cnAdvance(id) { const d = CN.data[id], b = cnBrain(id), tried = CN.trie
   if (!d.find.found) { cnCloseTab(); return cnWatch(); }
   if (st.state !== "signed_in") {
     if (sign && SIGN_RUNNING.includes(sign.state)) return cnWatch();
-    if (b && b.signin_flow === "pty" && !["broken", "missing"].includes(st.state) && !tried.signin) { tried.signin = true; cnSignin(id); }
+    // Hermes signs in to a provider the person picks (cnSteps shows the choice): it is never started without one
+    if (b && b.signin_flow === "pty" && id !== "hermes" && !["broken", "missing"].includes(st.state) && !tried.signin) { tried.signin = true; cnSignin(id); }
     return cnWatch(); }
   cnCloseTab();
   if (!d.verify && !tried.verify) { tried.verify = true; cnVerify(id); return; }
@@ -364,12 +366,14 @@ function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : 
   else if (st.state === "broken") steps.push(["signin", "Sign in", "failed", st.detail, st.hint ? el("div", { class: "note m-flat" }, st.hint) : null, el("button", { type: "button", class: "small", onclick: () => cnInstall(b.id) }, "Update " + b.label)]);
   else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait", b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
     el("div", { class: "signin-cmd" }, el("code", {}, b.signin_command || ""), el("button", { type: "button", class: "small", onclick: () => copyText(b.signin_command || "", "Command") }, "Copy"))]);
+  else if (b.id === "hermes") steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Which account should Hermes use? It signs in there, then picks a model that account has.",
+    el("div", { class: "chips" }, HERMES_PROVIDERS.map(([provider, label]) => el("button", { type: "button", class: "small", onclick: () => { CN.hermesProvider = provider; cnPrepareTab(b); cnSignin(b.id, { provider }); } }, label)))]);
   else steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Not signed in yet.", el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Sign in"))]);
   // c. one real answer
   const v = d.verify, signed = st.state === "signed_in";
   if (CN.verifying[b.id]) steps.push(["verify", "Check it answers", "running", "Asking " + b.label + " to say ok (one short answer, a minute at most)…"]);
   else if (v && v.ok) steps.push(["verify", "Check it answers", "done", "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s"]);
-  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" }, act = { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action];
+  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" }, act = { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action];
     steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, fix.label)) : el("div", { class: "note m-flat" }, fix.label)]); }
   else steps.push(["verify", "Check it answers", signed ? "wait" : "todo", signed ? "" : "After it is signed in.", signed ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
   // d. the default
@@ -462,14 +466,23 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
   if (clis.some(b => b.found && (!BR.status[b.id] || BR.status[b.id].state === "asking"))) return null;  // not yet known: nothing flashes up
   if (clis.some(b => BR.status[b.id] && BR.status[b.id].state === "signed_in")) return null;
   const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found) || order[0];
+  const localB = (BR.data.backends || []).find(b => b.id === "local" && b.found && !b.error);
   if (!pick) return null;
   return el("section", { class: "panel cn-nudge", "data-card": "connect", "data-where": where },
     el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, "One click"), el("h2", {}, "Connect your agent"),
       el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
     el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
-      order.length > 1 ? el("span", { class: "cn-or" }, "or") : null,
-      order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small cn-alt", onclick: () => connectGo(b) }, brainMarkOf(b.id, b) ? mark(brainMarkOf(b.id, b), "") : null, b.label)))); }
+      order.length > 1 || localB ? el("span", { class: "cn-or" }, "or") : null,
+      order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small cn-alt", onclick: () => connectGo(b) }, brainMarkOf(b.id, b) ? mark(brainMarkOf(b.id, b), "") : null, b.label)),
+      localB ? el("button", { type: "button", class: "small cn-alt" + (BR.data.default === "local" ? " on" : ""), "aria-pressed": BR.data.default === "local" ? "true" : "false", onclick: () => cnUseLocal(localB) },
+        brainMarkOf("local", localB) ? mark(brainMarkOf("local", localB), "") : null, localName(localB) + (BR.data.default === "local" ? " · in use" : "")) : null)); }
+// the local brain needs no sign-in: choosing it makes it the default brain (and the Agent room's, when it drives the Studio)
+const localName = b => (b.label || "Local model").replace(/ \(Studio engine\)$/, "") + " (local)";
+async function cnUseLocal(b) { try { const r = await api("/api/brains/local/default", {});
+    if (BR.data) { BR.data.default = r.settings.default; BR.data.settings = r.settings; }
+    toast(localName(b) + " is your default brain" + (b.harness ? ", and the Agent room's" : ""));
+  } catch (e) { toast(e.message); } cnRedraw(); }
 // NVIDIA Nemotron 3.5 Bolt run by the Studio itself (app/bolt.py): its state and backend, what it holds, Load and Unload
 const BOLT_WORD = { loaded: "Loaded", unloaded: "Unloaded", loading: "Loading…", held: "Unloaded for a render", external: "Not managed here" };
 const gbOf = x => x == null ? "" : (Math.round(x * 10) / 10) + " GB";

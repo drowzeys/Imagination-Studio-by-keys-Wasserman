@@ -846,9 +846,9 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
             done = run_cli([tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json", "--toolsets", HERMES_ASK_TOOLSETS,
                             "--max-turns", str(HERMES_TURNS)], joined, host, timeout)
             reply = hermes_events(done.stdout)[1].strip()
-        if reply and not done.returncode:
+        if reply and not done.returncode and not HERMES_FAILED.search(reply):
             return reply
-        raise RuntimeError(hinted("hermes", done.stderr or done.stdout or f"Hermes stopped with code {done.returncode}", host))
+        raise RuntimeError(hinted("hermes", (reply if HERMES_FAILED.search(reply or "") else "") or done.stderr or done.stdout or f"Hermes stopped with code {done.returncode}", host))
     if backend == "grok":
         done = run_cli([tool, "--prompt-file", "/dev/stdin", "--output-format", "plain"], joined, host, timeout)
         if re.search(r"unexpected argument|unknown (?:option|flag|argument)|unrecognized", done.stderr, re.I):
@@ -1502,6 +1502,8 @@ def toml_value(value) -> str:
 
 
 HERMES_TOOLSETS, HERMES_TURNS = "clarify,todo", 25  # its question card and its plan; a turn's tool calls at most
+# what Hermes prints in place of an answer when its provider refuses (it exits 0): an HTTP error, a missing model
+HERMES_FAILED = re.compile(r"^\s*(?:HTTP [45]\d\d\b|Codex Responses request '?model'? must|Error:|API error)", re.I)
 HERMES_ASK_TOOLSETS = "todo"  # a brain's one answer (the Slate's First AD, a prompt's rewrite): no tool it could act with
 CLAUDE_FILES = json.dumps({"permissions": {"blockReadsOutsideWorkingDirectories": True}})
 
@@ -2418,6 +2420,47 @@ def terminal_line(backend: str) -> str:
             "hermes": " ".join(["hermes", *profile_args(), "setup"])}.get(backend, "")
 
 
+# A provider signed in to Hermes (`hermes auth add`) is only a credential: Hermes answers with the provider and model
+# its config names, and with none it sends an empty model ("Codex Responses request 'model' must be a non-empty
+# string"). After a sign-in the config is pointed at that provider and, when it named another provider or no model,
+# at the first model Hermes' own catalog lists for this account (hermes_cli.models.curated_models_for_provider: the
+# provider's live list, its static one when unreachable), read with the Python Hermes runs on.
+HERMES_PICK = (
+    'h=$(command -v "$1"); t=$(sed -n "s/^exec \\([^ ]*\\).*/\\1/p" "$h" 2>/dev/null | head -1); [ -n "$t" ] || t="$h"; '
+    '"$(dirname "$t")/python" -c "import json,sys; from hermes_cli.models import curated_models_for_provider as c, '
+    'get_default_model_for_provider as d; p=sys.argv[1]; ids=[m[0] for m in (c(p) or [])] or [d(p)]; '
+    'print(json.dumps([i for i in ids if i][:1]))" "$2"')
+
+
+def hermes_model_for(provider: str, host: str) -> str:
+    tool = cli("hermes") if not host else CLIS["hermes"][1]
+    done = run_cli(["bash", "-c", HERMES_PICK, "_", tool or "hermes", provider], "", host, 60)
+    try:
+        return (json.loads(done.stdout.strip().splitlines()[-1]) or [""])[0]
+    except (ValueError, IndexError, TypeError):
+        return ""
+
+
+def hermes_use(provider: str, host: str) -> str:
+    """Point Hermes' config at ``provider`` after its sign-in; "" when done, else why not (the page shows it)."""
+
+    tool = cli("hermes") if not host else CLIS["hermes"][1]
+    get = lambda key: run_cli([tool, *profile_args(), "config", "get", key], "", host, 30).stdout.strip()
+    try:
+        if get("model.provider") == provider and get("model.default"):
+            return ""
+        model = hermes_model_for(provider, host)
+        if not model:
+            return f"Signed in, but Hermes lists no model for {provider}: run `hermes model` in a terminal to pick one."
+        for key, value in (("model.provider", provider), ("model.default", model)):
+            done = run_cli([tool, *profile_args(), "config", "set", key, value], "", host, 30)
+            if done.returncode:
+                return f"Signed in, but Hermes did not take {key} {value}: {(done.stderr or done.stdout).strip()[-200:]}"
+    except subprocess.TimeoutExpired:
+        return "Signed in, but Hermes took too long to set its model: run `hermes model` in a terminal."
+    return ""
+
+
 def recipe_of(backend: str, remote: bool, body: dict | None = None) -> dict:
     body = body or {}
     if backend == "claude":
@@ -2553,6 +2596,9 @@ def pump(state: dict, fd: int, process) -> None:
                 catch_token(state, ended=True)
             if code == 0 and state.get("token_host") and not state.get("token_saved"):
                 finish(state, "failed", state.get("token_error") or "Claude Code did not print a sign-in token: try again.")
+            elif code == 0 and state.get("backend") == "hermes" and state.get("provider"):
+                said = hermes_use(state["provider"], state["where"][4:] if state.get("where", "here") != "here" else "")
+                finish(state, "done" if not said else "failed", said or None)
             elif code == 0:
                 finish(state, "done", None)
             else:
@@ -2599,7 +2645,8 @@ def start_signin(backend: str, body: dict) -> dict:
         raise
     state = {"backend": backend, "where": f"ssh:{host}" if host else "here", "process": process, "fd": master, "raw": "",
              "started": time.time(), "deadline": time.monotonic() + SIGNIN_TIMEOUT, "command": " ".join([CLIS[backend][1], *recipe["args"]]),
-             "token_host": host if recipe.get("token") else ""}
+             "token_host": host if recipe.get("token") else "",
+             "provider": (body.get("provider") or HERMES_PROVIDERS[0]) if backend == "hermes" else ""}
     with lock:
         cancelled = signin.get("cancelled")
         signin.clear()
