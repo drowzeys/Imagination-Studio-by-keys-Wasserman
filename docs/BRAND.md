@@ -150,5 +150,5 @@ which reads as a slate or a lens.
 
 - `docs/screenshots/imagination-studio.webp`: the GitHub banner since 3.0 (the poster); `samples/banner.jpg` was the one before, made in the Studio.
 - `docs/brand/brand-sheet.jpg`: this page's sheet.
-- `samples/demo_mac_280.jpg` and the [60 s demo](https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v2.8.0/wasserman-studio-mac-demo.mp4).
+- `samples/demo_mac_280.jpg` and the [60 s demo](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/v2.8.0/wasserman-studio-mac-demo.mp4).
 - `samples/ui_*.png`: app screenshots.

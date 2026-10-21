@@ -79,7 +79,7 @@ REF_COMMIT="79190205258454b43e6c9e50e577de234222419c"
 # the native engine for FastH3: TensorFold 1.0.4's Zig + Metal runtime with the H3 family, from the same fork
 # (its pin is scripts/build-zig-engine.sh's, which the updater also reads, so the two never differ)
 ZIG_COMMIT="$(sed -n 's/^ZIG_COMMIT="\${ZIG_COMMIT:-\([0-9a-f]\{40\}\)}"$/\1/p' "$HERE/scripts/build-zig-engine.sh")"
-ZIG_ENGINE_URL="https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v3.1.0/zig-engine-${ZIG_COMMIT:0:8}-macos-arm64.tar.gz"
+ZIG_ENGINE_URL="https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/v3.1.0/zig-engine-${ZIG_COMMIT:0:8}-macos-arm64.tar.gz"
 ZIG_ENGINE_SHA256="775e9163d77a9d4e7ff8d608e3a59f146fb1c97754b4234b7e5fb6bd685387ab"
 MFLUX_REPO="https://github.com/mflux-community/mflux.git"
 MFLUX_COMMIT="add5164e62c07cbcc9aec7a95c2e19c75605880c"

@@ -1,12 +1,12 @@
 # Agent one-shot — Wasserman Slate AI Studio, powered by TensorFold: Qwen-Image-2.1 + MiniMax H3 (MLX, Apple Silicon)
 
-**Repo:** https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3  
+**Repo:** https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman  
 **Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:2.9.1` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, and MiniMax Music 3's `music3-generate`)  
 **Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2b592fe`, own venv, int8 tensor-unit kernels
 
 ```bash
-git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git
-cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3
+git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+cd Imagination-Studio-by-keys-Wasserman
 brew install python@3.11 uv ffmpeg
 bash oneshot-setup.sh               # image model, FastH3 and its text encoder and decoders (175 GB) and a test clip; --image-only for 33 GB; --turbo adds MiniMax H3 Turbo (64 GB more, 128 GB of memory); --ref2va adds reference pictures to video (64 GB more, 128 GB)
 bash scripts/studio.sh "the picture" "what happens in the clip" out.mp4   # text -> image -> video with sound

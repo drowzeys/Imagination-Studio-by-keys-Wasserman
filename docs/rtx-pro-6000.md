@@ -1,6 +1,6 @@
 # Imagination Studio on an NVIDIA RTX Pro 6000 Blackwell (96 GB)
 
-**Status: simulated, not yet run on an RTX Pro 6000.** Everything below was measured on a DGX Spark made to behave like
+**Status: RTX Pro 6000 (96 GB) users may use the one-shot recipe below, pending validation.** It is simulated, not yet run on an RTX Pro 6000. Everything below was measured on a DGX Spark made to behave like
 a 96 GB card (the simulation section). The parts that only a real card can show are listed as untested. If you run it
 on one, open an Issue with what `bash scripts/studio-key.sh` and the checklist below print. That is how this page
 becomes measured.
@@ -24,8 +24,8 @@ sudo apt install -y git ffmpeg curl cuda-toolkit-13-0
 export PATH=/usr/local/cuda/bin:$PATH && nvcc --version     # 12.9 or newer
 
 # 2. the Studio: Linux hands over to the CUDA installer, which builds the engines for your card
-git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git
-cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3
+git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+cd Imagination-Studio-by-keys-Wasserman
 bash oneshot-setup.sh --all
 
 # 3. start it, then open the address the key script prints
