@@ -142,3 +142,37 @@ def test_the_settings_panel_shares_the_key_and_makes_a_new_one(keyed, monkeypatc
     assert made.headers["set-cookie"].startswith(f"studio_key_{server.APP_PORT}={server.ACCESS_KEY};")
     fresh = TestClient(server.app, client=("192.168.1.51", 50000))  # without the new cookie this client just got
     assert fresh.get("/api/state", headers={"X-Studio-Key": KEY}).status_code == 401  # the old key is signed out
+
+
+def test_a_studio_open_to_the_network_offers_a_sign_in_link_for_it(keyed, monkeypatch, tmp_path):
+    """HOST=0.0.0.0: Settings → Access key links (and QR-codes) this computer's network address for another computer;
+    on loopback only, no network link."""
+
+    monkeypatch.setattr(server, "HOME", tmp_path)
+    monkeypatch.setattr(server, "network_addresses", lambda: ["192.168.1.10", "10.0.10.4"])
+    here = TestClient(server.app, client=("127.0.0.1", 50000))
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    said = here.get("/api/key/share", headers={"host": "localhost:7870"}).json()
+    network = [link for link in said["links"] if link.get("kind") == "network"]
+    assert said["on_network"] and [link["url"] for link in network] == [
+        f"http://192.168.1.10:{server.APP_PORT}/?key={KEY}", f"http://10.0.10.4:{server.APP_PORT}/?key={KEY}"]
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    said = here.get("/api/key/share", headers={"host": "localhost:7870"}).json()
+    assert not said["on_network"] and not [link for link in said["links"] if link.get("kind") == "network"]
+
+
+def test_network_addresses_skip_containers_tunnels_and_tailscale(monkeypatch):
+    shown = "\n".join(["1: lo    inet 127.0.0.1/8 scope host lo",
+                       "2: enP7s7    inet 10.0.10.4/24 brd 10.0.10.255 scope global enP7s7",
+                       "3: eth0    inet 192.168.1.10/22 brd 192.168.3.255 scope global eth0",
+                       "4: tailscale0    inet 100.86.1.2/32 scope global tailscale0",
+                       "5: docker0    inet 172.17.0.1/16 scope global docker0",
+                       "6: br-27dc306d4947    inet 172.18.0.1/16 scope global br-27dc306d4947",
+                       "7: wlan0    inet 8.8.4.4/24 scope global wlan0"])
+
+    class Done:
+        stdout = shown
+    monkeypatch.setattr(server.sys, "platform", "linux")
+    monkeypatch.setattr(server.subprocess, "run", lambda *a, **k: Done())
+    monkeypatch.setattr(server, "_NETWORK", {"at": 0.0, "value": []})
+    assert server.network_addresses() == ["192.168.1.10", "10.0.10.4"]

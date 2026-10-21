@@ -422,19 +422,69 @@ def key_state(request: Request):
     return {"needed": access.enabled() and not here, "signed_in": here or access.allowed(headers, APP_PORT, ACCESS_KEY), "local": here}
 
 
+# interfaces that are not a network another computer reaches this one on: containers, VMs, VPN tunnels (Tailscale's
+# own link is offered by its name), Apple's peer-to-peer links
+VIRTUAL_IFACE = ("lo", "docker", "br-", "veth", "virbr", "vmnet", "vmenet", "bridge", "utun", "tailscale", "awdl", "llw",
+                 "anpi", "ap", "gif", "stf", "cni", "flannel", "podman")
+_NETWORK: dict = {"at": 0.0, "value": []}
+
+
+def network_addresses() -> list[str]:
+    """This computer's private IPv4 addresses on real network interfaces, the home network (192.168.x) first: where
+    another computer on the network opens the studio (when it listens beyond loopback, HOST=0.0.0.0). Kept a minute."""
+
+    if time.monotonic() - _NETWORK["at"] < 60:
+        return _NETWORK["value"]
+    found: list[tuple[str, str]] = []
+    try:
+        if sys.platform == "darwin":
+            iface = ""
+            for line in subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=3).stdout.splitlines():
+                if line and not line[0].isspace():
+                    iface = line.split(":", 1)[0]
+                elif line.strip().startswith("inet "):
+                    found.append((iface, line.split()[1]))
+        else:
+            for line in subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=3).stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 4:
+                    found.append((parts[1], parts[3].split("/")[0]))
+    except (OSError, subprocess.SubprocessError):
+        found = []
+    out = []
+    for iface, address in found:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if iface.startswith(VIRTUAL_IFACE) or not ip.is_private or ip.is_loopback or ip.is_link_local or ip in ipaddress.ip_network("100.64.0.0/10"):
+            continue
+        out.append(address)
+    out.sort(key=lambda a: (not a.startswith("192.168."), not a.startswith("10."), a))
+    _NETWORK.update(at=time.monotonic(), value=list(dict.fromkeys(out)))
+    return _NETWORK["value"]
+
+
+def on_network() -> bool:
+    return os.environ.get("HOST", "127.0.0.1") in ("0.0.0.0", "::", "")
+
+
 @app.get("/api/key/share")
 def key_share(request: Request):
     """For a signed-in browser (the key guards this route): the key and the addresses that sign another device in,
     this computer's and its Tailscale name's (a phone, after `tailscale serve --bg PORT`)."""
 
     links = [{"label": "This computer", "url": f"http://127.0.0.1:{APP_PORT}/?key={ACCESS_KEY}"}]
+    if on_network():  # opened to the network: another computer there signs in at this one's address
+        links = [{"label": f"Your network ({address})", "kind": "network", "url": f"http://{address}:{APP_PORT}/?key={ACCESS_KEY}"}
+                 for address in network_addresses()] + links
     labels, tailnet = OWN.get("labels") or set(), OWN.get("tailnet")
     if tailnet:
         for label in sorted(labels):
             if "." not in label and label.replace("-", "").isalnum():
-                links.insert(0, {"label": "Your phone (Tailscale)", "url": f"https://{label}.{tailnet}/?key={ACCESS_KEY}"})
+                links.insert(0, {"label": "Your phone (Tailscale)", "kind": "tailscale", "url": f"https://{label}.{tailnet}/?key={ACCESS_KEY}"})
                 break
-    return {"key": ACCESS_KEY, "links": links, "file": str(access.path(HOME))}
+    return {"key": ACCESS_KEY, "links": links, "file": str(access.path(HOME)), "on_network": on_network(), "port": APP_PORT}
 
 
 @app.post("/api/key/new")

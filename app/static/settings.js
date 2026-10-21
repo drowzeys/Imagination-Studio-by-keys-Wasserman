@@ -170,18 +170,25 @@ function setConnections() {
 const keyCopy = async (text, what) => { try { await navigator.clipboard.writeText(text); toast(what + " copied"); } catch { toast("Copy it by hand: " + text); } };
 function setAccess() {
   if (!SET.key) { SET.key = { loading: true }; api("/api/key/share").then(d => { SET.key = d; if (tab === "Settings") render(); }, e => { SET.key = { error: e.message }; if (tab === "Settings") render(); }); }
-  const k = SET.key, phone = (k.links || []).find(l => /Tailscale/.test(l.label));
+  const k = SET.key, phone = (k.links || []).find(l => l.kind === "tailscale"), nets = (k.links || []).filter(l => l.kind === "network");
   if (k.loading) return [setPanel("Access key", "Loading…")];
   if (k.error) return [setPanel("Access key", k.error)];
-  const qr = phone && typeof qrSvg === "function" ? qrSvg(phone.url, 200) : null;
+  const qr = phone && typeof qrSvg === "function" ? qrSvg(phone.url, 200) : null, netQr = nets[0] && typeof qrSvg === "function" ? qrSvg(nets[0].url, 200) : null;
   return [setPanel("Access key", "The key is for reaching the studio from another device: a phone over Tailscale, another computer. Each signs in once and stays signed in.",
       el("div", { class: "key-steps" },
-        el("div", { class: "key-step" }, el("b", {}, "Sign in your phone or another computer"),
+        el("div", { class: "key-step" }, el("b", {}, "Sign in your phone (Tailscale)"),
           phone ? [el("p", { class: "note m-flat" }, "Scan this with the phone's camera. It opens the studio and signs the phone in; then add it to the home screen."),
                    qr ? el("div", { class: "key-qr" }, qr) : null,
                    el("div", { class: "m-acts" }, el("button", { type: "button", class: "small", onclick: () => keyCopy(phone.url, "The link") }, "Copy the link"))]
                 : el("p", { class: "note m-flat" }, "A phone reaches the studio through Tailscale: install it on both and run ", el("code", {}, "tailscale serve --bg " + (location.port || "7870")),
                      " on this computer (Settings → Connections has the steps). This panel then shows a QR code for the phone.")),
+        el("div", { class: "key-step" }, el("b", {}, "Sign in another computer on your network"),
+          nets.length ? [el("p", { class: "note m-flat" }, "Open this link on the other computer (or scan the code with a phone on the same Wi-Fi): it opens this studio there, signed in. Only devices on your own network can reach it."),
+                         netQr ? el("div", { class: "key-qr" }, netQr) : null,
+                         nets.map(n => el("div", { class: "m-acts" }, el("code", { class: "key-shown" }, n.label.replace(/^Your network \((.*)\)$/, "http://$1:" + (k.port || "7870"))),
+                           el("button", { type: "button", class: "small", onclick: () => keyCopy(n.url, "The sign-in link") }, "Copy the sign-in link")))]
+                       : el("p", { class: "note m-flat" }, "This studio listens on this computer only. To open it to your home network, start it with ", el("code", {}, "HOST=0.0.0.0 bash scripts/app.sh"),
+                            " (on a Mac, build the app with HOST=0.0.0.0 bash scripts/make-app.sh); this step then shows a link and a QR code for the other computer. Keep that to a network you trust.")),
         el("div", { class: "key-step" }, el("b", {}, "On this computer"),
           el("p", { class: "note m-flat" }, "Nothing to do: a browser on the computer running the studio (localhost) never needs the key, and neither do updates there.")),
         el("div", { class: "key-step" }, el("b", {}, "The key itself"),

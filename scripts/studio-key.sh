@@ -23,10 +23,20 @@ KEY="$(tr -d '[:space:]' < "$FILE")"
 if [ "${1:-}" = --key ]; then echo "$KEY"; exit 0; fi
 echo "Access key: $KEY"
 echo
-TS="$(command -v tailscale || { [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ] && echo /Applications/Tailscale.app/Contents/MacOS/Tailscale; })"
-if [ -n "$TS" ]; then
-  NAME="$("$TS" status --json --peers=false 2>/dev/null | python3 -c 'import sys,json; print((json.load(sys.stdin).get("Self") or {}).get("DNSName","").rstrip("."))' 2>/dev/null)"
-  [ -n "$NAME" ] && echo "On your phone:      https://$NAME/?key=$KEY   (after: tailscale serve --bg $PORT)"
-fi
+# the sign-in links the running studio offers (Settings → Access key shows them with QR codes): its network addresses
+# when it is opened to the network (HOST=0.0.0.0), and its Tailscale name for a phone
+LINKS="$(curl -s -m 5 "http://127.0.0.1:$PORT/api/key/share" 2>/dev/null | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    sys.exit()
+for link in d.get("links", []):
+    if link.get("kind"):
+        print(f"{link[\"label\"] + \":\":34} {link[\"url\"]}")
+if not d.get("on_network"):
+    print("(This studio listens on this computer only: start it with HOST=0.0.0.0 to sign in another computer on your network.)")
+' 2>/dev/null)"
+if [ -n "$LINKS" ]; then echo "$LINKS"; else echo "(Start the studio to see its sign-in links.)"; fi
 echo
-echo "Open one once: the browser keeps the key. Or open the studio and type the key when it asks."
+echo "Open a link once on the other device: it stays signed in. Or type the key when the studio asks."
