@@ -16,8 +16,13 @@ if [ -x "$OUT/bin/music3-generate" ] && [ "$(cat "$OUT/commit" 2>/dev/null)" = "
   echo "[tensorfold] music3 engine already built at ${MUSIC3_COMMIT:0:8}"; exit 0
 fi
 GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
+# the GPU's compute capability as nvcc names it: 121 on a GB10 (DGX Spark), 120 on an RTX Pro 6000 Blackwell (a
+# cubin for one does not run on the other); TF_SM overrides, a comma list builds both
+SM="${TF_SM:-$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' .')}"
+case "$SM" in ''|*[!0-9,]*) SM=121;; esac  # a driver without the field answers with words
 case "$GPU" in *GB10*) ;; *)
-  [ "${MUSIC3_ANY_GPU:-0}" = 1 ] || { echo "the music3 engine is measured on a GB10 (DGX Spark) only; this GPU is '${GPU:-none}'. MUSIC3_ANY_GPU=1 builds it anyway" >&2; exit 1; };;
+  if [ "$SM" = 120 ]; then echo "! the music3 engine is measured on a GB10 (DGX Spark); building it for this sm_120 card ('$GPU'), untested there (docs/rtx-pro-6000.md)" >&2
+  else [ "${MUSIC3_ANY_GPU:-0}" = 1 ] || { echo "the music3 engine is measured on a GB10 (DGX Spark) only; this GPU is '${GPU:-none}'. MUSIC3_ANY_GPU=1 builds it anyway" >&2; exit 1; }; fi;;
 esac
 # the prebuilt engine from the carrier image (one already here, else pulled), when Docker is here and the image holds
 # this commit's build: its commit file and checksums decide
@@ -63,7 +68,7 @@ if [ -z "${MUSIC3_SOURCE:-}" ]; then
 fi
 echo "[tensorfold] building the music3 engine with $NVCC"
 # two compile jobs: the kernel image's compiler takes a few GB
-(cd "$SRC" && nice -n 19 "$ZIG" build music3-generate -j2 -Doptimize=ReleaseFast -Dnvcc="$NVCC")
+(cd "$SRC" && nice -n 19 "$ZIG" build music3-generate -j2 -Doptimize=ReleaseFast -Dnvcc="$NVCC" -Dsm="$SM")
 mkdir -p "$OUT/bin"
 cp "$SRC/zig-out/bin/music3-generate" "$OUT/bin/music3-generate"
 if [ -n "${MUSIC3_SOURCE:-}" ] && git -C "$SRC" rev-parse HEAD >/dev/null 2>&1; then git -C "$SRC" rev-parse HEAD > "$OUT/commit"

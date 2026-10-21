@@ -75,6 +75,7 @@ import argparse
 import ctypes
 import os
 import signal
+import subprocess
 import sys
 import time
 
@@ -164,24 +165,101 @@ def server_pid() -> int | None:
     return None
 
 
+# ---------- a discrete GPU: an NVIDIA card with memory of its own (an RTX Pro 6000 Blackwell, 96 GB) ----------
+# A DGX Spark's GB10 has one memory for the CPU and the GPU (nvidia-smi says [N/A] for the GPU's), and everything above
+# reads it as /proc/meminfo. A card with its own memory is full long before the machine's RAM is: there a job's room is
+# the smaller of the two. The estimates stay the Spark's, measured as the fall of the whole machine's memory: a card
+# holds a part of that (the rest is the processes' own RAM), so they are an upper bound there.
+# STUDIO_VRAM_GB pretends to be such a card on a Spark (the RTX Pro 6000 simulation, docs/rtx-pro-6000.md): its total
+# is that, its used memory what the CUDA processes hold (nvidia-smi's compute apps).
+VRAM_MARGIN_MB = 2048  # kept free on the card: CUDA's own context and fragmentation
+_DEVICE: dict = {"at": 0.0, "value": None}
+
+
+def smi(*query: str) -> list[list[str]]:
+    try:
+        said = subprocess.run(["nvidia-smi", *query, "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [[part.strip() for part in line.split(",")] for line in said.stdout.splitlines() if line.strip()] if said.returncode == 0 else []
+
+
+def processes_mb() -> dict[int, int]:
+    """Each CUDA process's device memory (MB), as nvidia-smi reports it."""
+
+    out = {}
+    for row in smi("--query-compute-apps=pid,used_memory"):
+        if len(row) == 2 and row[0].isdigit() and row[1].isdigit():
+            out[int(row[0])] = out.get(int(row[0]), 0) + int(row[1])
+    return out
+
+
+def device(fresh: bool = False) -> dict | None:
+    """The card's own memory, {"total_mb", "used_mb", "free_mb", "simulated"}, or None where the GPU has none of its
+    own (a DGX Spark) or there is no nvidia-smi. Asked again at most every 2 s."""
+
+    if not fresh and time.monotonic() - _DEVICE["at"] < 2:
+        return _DEVICE["value"]
+    value = None
+    pretend = os.environ.get("STUDIO_VRAM_GB", "").strip()
+    if pretend:
+        try:
+            total = int(float(pretend) * 1024)
+            used = sum(processes_mb().values())
+            value = {"total_mb": total, "used_mb": used, "free_mb": max(0, total - used), "simulated": True}
+        except ValueError:
+            value = None
+    else:
+        rows_ = smi("--query-gpu=memory.total,memory.used,memory.free")
+        if rows_ and all(part.isdigit() for part in rows_[0][:3]):
+            total, used, free = (int(part) for part in rows_[0][:3])
+            value = {"total_mb": total, "used_mb": used, "free_mb": free, "simulated": False}
+    _DEVICE.update(at=time.monotonic(), value=value)
+    return value
+
+
+def discrete() -> bool:
+    return device() is not None
+
+
+def device_room_mb() -> int | None:
+    """What the card has for a render with none of the Studio's ComfyUI models counted against it (its server's
+    memory counts as the job's, as room_mb counts it on a Spark); None on a Spark."""
+
+    card = device()
+    if card is None:
+        return None
+    pid = server_pid()
+    held = processes_mb().get(pid, 0) if pid else 0
+    return max(0, card["free_mb"] + held - VRAM_MARGIN_MB)
+
+
 def room_mb() -> int | None:
     """What this machine has for a render, with none of the Studio's own models counted against it: what is
     available now, or, while the ComfyUI server runs, what was available when it started (the guard beside it
     wrote that down). A server from before the guard has no such note: the machine is then taken as otherwise
-    idle. None where there is no /proc/meminfo."""
+    idle. None where there is no /proc/meminfo.
+
+    On a discrete card the smaller of that and the card's room. The checks keep ``floor_mb`` of the machine's RAM
+    free; on the card only VRAM_MARGIN_MB, so the card's room is given here with the floor added back."""
 
     info = meminfo()
     now = info.get("MemAvailable")
     if now is None:
         return None
+    ram = now
     try:
         with open(state_file()) as handle:
             before, pid = handle.read().split()[:2]
         if alive(int(pid)):
-            return max(now, int(before))
+            ram = max(now, int(before))
+        elif server_pid():
+            ram = max(now, info["MemTotal"] - IDLE_MB)
     except (OSError, ValueError):
-        pass
-    return max(now, info["MemTotal"] - IDLE_MB) if server_pid() else now
+        if server_pid():
+            ram = max(now, info["MemTotal"] - IDLE_MB)
+    card = device_room_mb()
+    return ram if card is None else min(ram, card + floor_mb(info.get("MemTotal")))
 
 
 # ---------- layer 1: the estimate ----------
@@ -509,6 +587,9 @@ def watch(pid: int, floor: int, say=print) -> int:
         f"and the model files' page cache is given back when under {keep} MB is free", flush=True)
 
     def release() -> None:
+        card = device()
+        if card and not card["simulated"]:  # the page cache is the GB10's trouble (one memory for both); a card has its
+            return                         # own. A Spark pretending to be a card (STUDIO_VRAM_GB) is still a GB10.
         before = meter.read()["free"]
         count = release_cache(model_files(pid))
         released[1] += 1

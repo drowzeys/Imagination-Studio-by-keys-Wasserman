@@ -163,6 +163,8 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   const gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1);
   const say = [(S && S.platform_label) || platName(), busy ? "rolling" : "ready", "GPU " + (gpu == null ? "n/a" : gpu + "%" + (t.gpu && t.gpu.temp_c != null ? " at " + t.gpu.temp_c + "°C" : "")),
     t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : "",
+    // a card with memory of its own (an RTX Pro 6000): its memory, beside the machine's
+    t.memory && t.memory.card ? "card " + gb(t.memory.card.used_mb) + " of " + gb(t.memory.card.total_mb) + " GB" : "",
     // the Studio's Bolt brain (app/bolt.py) while it holds memory
     t.engines && t.engines.bolt && t.engines.bolt.state === "loaded" ? "Bolt brain " + (t.engines.bolt.memory_gb != null ? t.engines.bolt.memory_gb + " GB" : "loaded") : "",
     t.disk ? Math.round(t.disk.free_gb) + " GB disk free" : "",

@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import platform
 import signal
 import socket
 import subprocess
@@ -634,7 +635,10 @@ class Llamacpp(Engine):
     ~/bolt/llama.cpp/build/bin/llama-server and the GGUF in ~/bolt/models (the copy whose NVFP4 Mamba tensors were
     rewritten as Q8_0 first: Metal has no NVFP4 matmul)."""
 
-    name, label = "llamacpp", "llama.cpp · Metal (until TensorFold's Metal engine)"
+    name = "llamacpp"
+    # Metal on a Mac; on a Linux workstation (an RTX Pro 6000: no TensorFold Bolt engine for x86_64) a CUDA build of
+    # llama-server with the same flags
+    label = "llama.cpp · Metal (until TensorFold's Metal engine)" if sys.platform == "darwin" else "llama.cpp · CUDA"
     load_s = 25.0
     NEED_GB = 40.0  # the 24 GB file, a 65,536-token window and the guard's 8 GB beside it
     RESIDENT_GB = 27.0
@@ -654,6 +658,9 @@ class Llamacpp(Engine):
 
     def present(self) -> str:
         if not os.access(self.bin, os.X_OK):
+            if sys.platform != "darwin":
+                return (f"No llama-server at {self.bin} (llama.cpp built with CUDA, -DGGML_CUDA=ON; BOLT_LLAMACPP_BIN names "
+                        "another; docs/rtx-pro-6000.md).")
             return (f"No llama-server at {self.bin} (llama.cpp built with Metal; BOLT_LLAMACPP_BIN names another). "
                     "TensorFold's Metal engine replaces it when it lands (BOLT_BACKEND=metal).")
         if not self.gguf.is_file():
@@ -711,6 +718,8 @@ def choose() -> tuple[type, str]:
         return BACKENDS[told], ""
     if SPARK:
         why = Cuda().present()
+        if why and platform.machine() not in ("aarch64", "arm64"):  # TensorFold's Bolt engine is built for a DGX Spark only
+            why += " On an x86_64 CUDA workstation BOLT_BACKEND=llamacpp runs it through a CUDA build of llama.cpp (docs/rtx-pro-6000.md)."
         return (External, why) if why else (Cuda, "")
     if MAC:
         why = Metal().present()

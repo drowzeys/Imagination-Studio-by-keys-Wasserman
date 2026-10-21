@@ -91,14 +91,32 @@ def mem_available_gb() -> float:
             return 0.0 if telemetry.mac_pressure_critical() else mb / 1024
         except (OSError, ValueError, subprocess.TimeoutExpired):
             return -1.0
+    ram = -1.0
     try:
         with open("/proc/meminfo") as handle:
             for line in handle:
                 if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) / 1024 ** 2
+                    ram = int(line.split()[1]) / 1024 ** 2
+                    break
     except (OSError, ValueError, IndexError):
         pass
-    return -1.0
+    card = gpu_free_gb()
+    return ram if card is None or ram < 0 else min(ram, card)
+
+
+def gpu_free_gb() -> float | None:
+    """A discrete card's free memory in GB (spark/memory_guard.py's ``device``: an RTX Pro 6000, or the simulation of
+    one on a Spark); None on a DGX Spark, whose GPU memory is the machine's."""
+
+    try:
+        spark = str(Path(__file__).resolve().parent.parent / "spark")
+        if spark not in sys.path:
+            sys.path.insert(0, spark)
+        import memory_guard
+        card = memory_guard.device(fresh=True)
+    except Exception:  # noqa: BLE001  (a reading, never a reason to fail)
+        return None
+    return None if card is None else card["free_mb"] / 1024
 
 
 def comfy_up(port: int | None = None) -> bool:

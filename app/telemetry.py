@@ -220,7 +220,11 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
                 pass
         floor = guard.floor_mb(total) if guard and SPARK and total else None  # the guard covers a DGX Spark only
         used = round(100 * (1 - available / total), 1) if total and available is not None else None
-        return {"total_mb": total, "available_mb": available, "floor_mb": floor, "used_pct": used}
+        out = {"total_mb": total, "available_mb": available, "floor_mb": floor, "used_pct": used}
+        card = guard.device() if guard and SPARK else None  # a card with its own memory (an RTX Pro 6000): shown beside the RAM
+        if card:
+            out["card"] = {key: card[key] for key in ("total_mb", "used_mb", "free_mb", "simulated")}
+        return out
 
     def gpu_lock() -> dict:
         folder = Path(os.environ.get("STUDIO_GPU_LOCK", Path.home() / "studio-gpu.lock.d"))
