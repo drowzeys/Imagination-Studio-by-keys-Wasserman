@@ -13,6 +13,8 @@
 | openai.svg | OpenAI | https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/openai.svg | LobeHub icons, MIT, unofficial; fill set to #e7e9ef | Identification only. Not an official asset. |
 | codex.svg | OpenAI | https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/codex.svg | LobeHub icons, MIT, unofficial; fill set to #e7e9ef | Identification only. Not an official asset. |
 | grok.svg | xAI | https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/grok.svg | LobeHub icons, MIT, unofficial; fill set to #e7e9ef | Identification only. Not an official asset. |
+| hermes-agent.png | Nous Research (Hermes Agent) | https://raw.githubusercontent.com/NousResearch/hermes-agent/HEAD/apps/bootstrap-installer/src-tauri/icons/128x128.png | Hermes Agent repository, MIT; the app's own icon | Resized to 64x64. Identification only. |
+| nvidia.svg | NVIDIA | https://cdn.jsdelivr.net/npm/simple-icons@13.21.0/icons/nvidia.svg (Simple Icons) | CC0-1.0 drawing (Simple Icons); fill set to NVIDIA green #76B900 | Identification of NVIDIA Nemotron 3.5 Bolt only, at icon size. No implied partnership or endorsement. Trademark belongs to NVIDIA. |
 | tensorfold-symbol.webp, tensorfold-wordmark.webp | TensorFold project | Sam Wasserman's Imagination Studio Brand Kit, 03-Shared/partners (transparent reproductions prepared from the TensorFold reference) | Brand kit | Trimmed and resized from the kit's alpha PNGs; beside POWERED BY in the sidebar footer only. Not official masters. |
 
 These marks identify the models and tools the Studio runs. They are trademarks of their owners and are used for identification only.

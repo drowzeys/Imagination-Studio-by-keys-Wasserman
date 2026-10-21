@@ -60,7 +60,8 @@ const icon = (name, cls) => { const n = el("span", { class: cls || "ico" }); n.i
 // the marks of the models and tools the Studio runs (app/static/brand, THIRD-PARTY-MARKS.md): identification only
 const MARKS = { qwen: ["brand/qwen.svg", "Qwen"], flux: ["brand/bfl-white.svg", "FLUX3-K"], minimax: ["brand/minimax.svg", "MiniMax H3"], music3: ["brand/minimax.svg", "MiniMax-Music3"],
   fish: ["brand/fish-audio.svg", "Fish Audio Drama 3"], comfy: ["brand/comfyui.svg", "ComfyUI"], tensorfold: ["brand/tensorfold.webp", "TensorFold"],
-  claude: ["brand/claude.svg", "Claude"], openai: ["brand/openai.svg", "ChatGPT"], codex: ["brand/codex.svg", "Codex"], gemini: ["brand/gemini.svg", "Gemini"], grok: ["brand/grok.svg", "Grok"] };
+  claude: ["brand/claude.svg", "Claude"], openai: ["brand/openai.svg", "ChatGPT"], codex: ["brand/codex.svg", "Codex"], gemini: ["brand/gemini.svg", "Gemini"], grok: ["brand/grok.svg", "Grok"],
+  hermes: ["brand/hermes-agent.png", "Hermes Agent"], nvidia: ["brand/nvidia.svg", "NVIDIA"] };
 const mark = (id, label, big) => { const m = MARKS[id]; if (!m) return label || null; return el("span", { class: "mk" + (big ? " big" : "") }, el("img", { src: m[0], alt: "", width: big ? 40 : 18, height: big ? 40 : 18 }), label === "" ? null : label || m[1]); };
 // every change of page goes on the app's own stack (Back) and the browser's (its Back and Forward); a page reached
 // by the browser's Back (hashchange, opts.fromHash) is taken off the stack, not pushed again
