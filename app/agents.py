@@ -897,10 +897,13 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
     """One answer from a brain: a CLI here or over ssh, or a local OpenAI-compatible server."""
 
     config, timeout = settings or saved_settings(), timeout or slate.TIMEOUT
-    if local_agent(backend, config):  # another local agent: its own address and model
+    one = local_agent(backend, config)
+    if one:  # another local agent: its own address and model
         config, endpoint, model, backend = as_local(backend, config), "", "", "local"
     if backend == "local":
         base, models = slate.find_local(endpoint or config["local_endpoint"])
+        if not base and one:
+            raise RuntimeError(f"{one['name']} does not answer at {one['endpoint']}: start its server, or change its address in Settings → Connections")
         if not base:
             raise RuntimeError("no local model server answers: start Ollama, LM Studio, vLLM or llama.cpp, or set its address in Settings → Connections")
         body = json.dumps({"model": answering_model(models, model or config["local_model"]), "temperature": 0.7,

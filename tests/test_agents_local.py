@@ -378,4 +378,6 @@ def test_a_local_agent_that_does_not_answer_is_kept_but_not_ready(local):
     assert post("/api/brains/local-agents", {"name": "Off for now", "endpoint": "http://127.0.0.1:9/v1"}).status_code == 200
     one = next(b for b in client.get("/api/brains").json()["backends"] if b["id"] == "local:off-for-now")
     assert one["found"] is False and one["harness"] is False
+    said = post("/api/brains/test", {"backend": "local:off-for-now"}).json()
+    assert said["ok"] is False and said["error"].startswith("Off for now does not answer at http://127.0.0.1:9/v1")
     assert post("/api/brains/local:off-for-now/default").status_code in (200, 400)
