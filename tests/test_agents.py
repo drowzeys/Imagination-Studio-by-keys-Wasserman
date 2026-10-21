@@ -632,3 +632,11 @@ def test_a_hermes_without_stream_json_answers_through_its_quiet_mode(monkeypatch
     assert shown == ["", "Hi! What can I help with?\n"] and task["reply"] == "Hi! What can I help with?"
     assert agents.hermes_quiet_session("Session x found but has no messages. Starting fresh.\n\nsession_id: 20261021_083328_c11ece\n") == "20261021_083328_c11ece"
     assert agents.hermes_quiet_reply("  ⚠ tirith security scanner enabled\r\nready\n") == "ready"
+
+
+def test_the_studios_prefix_never_reaches_npm_or_the_clis(monkeypatch):
+    """PREFIX names the Studio's runtime folder, and npm reads PREFIX as its global prefix: with it, Connect's Install
+    put Claude Code and Codex into $PREFIX/bin, where nothing looks for them."""
+
+    monkeypatch.setenv("PREFIX", "/opt/studio-runtime")
+    assert "PREFIX" not in agents.child_env() and agents.child_env({"PREFIX": "/x"})["PREFIX"] == "/x"
