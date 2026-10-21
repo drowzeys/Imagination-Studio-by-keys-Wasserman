@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -612,3 +613,22 @@ def test_only_this_computer_may_use_them(fake):
 def test_the_update_check_does_not_wait_on_agents(fake, monkeypatch):
     monkeypatch.setenv("STUDIO_GPU_LOCK", str(fake["tmp"] / "no-lock"))
     assert server.update_busy() is False
+
+
+def test_a_hermes_without_stream_json_answers_through_its_quiet_mode(monkeypatch):
+    """Hermes v0.21 has no `chat --format stream-json` (it stops with "unrecognized arguments"): the Studio asks its
+    --help once and runs `chat -Q` instead, the answer on standard output, the session named on standard error."""
+
+    helps = {"new": "usage: hermes chat [--format {text,stream-json}]", "old": "usage: hermes chat [-q QUERY] [-Q]"}
+    for kind, text in helps.items():
+        agents.HERMES_STREAMS.clear()
+        monkeypatch.setattr(agents, "run_cli", lambda *a, **k: subprocess.CompletedProcess(a, 0, text, ""))
+        task = {"id": "t", "backend": "hermes", "_host": "", "thread": "th1", "steps": []}
+        args = agents.harness_args(task, "hermes", "", {}, "system")
+        assert ("--format" in args) == (kind == "new") and ("-Q" in args) == (kind == "old") and task["_quiet"] == (kind == "old")
+    task = {"id": "t", "backend": "hermes", "_host": "", "_quiet": True, "steps": []}
+    shown = [agents.render("hermes", line, task) for line in
+             ("  ⚠ tirith security scanner enabled but not available — command scanning will use pattern matching only\r\n", "Hi! What can I help with?\n")]
+    assert shown == ["", "Hi! What can I help with?\n"] and task["reply"] == "Hi! What can I help with?"
+    assert agents.hermes_quiet_session("Session x found but has no messages. Starting fresh.\n\nsession_id: 20261021_083328_c11ece\n") == "20261021_083328_c11ece"
+    assert agents.hermes_quiet_reply("  ⚠ tirith security scanner enabled\r\nready\n") == "ready"
