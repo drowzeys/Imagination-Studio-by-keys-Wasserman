@@ -36,8 +36,9 @@ Do these in order on the person's Mac, and report each result plainly.
    rendering `outputs/test.mp4`; confirm that file exists and plays.
 5. `bash scripts/make-app.sh` builds `~/Applications/Wasserman Slate AI Studio.app`. If the models are not in the default
    folders, export `QWEN_MODEL_DIR`, `H3_MODEL_DIR`, `FASTH3_DIR` first: the app records them. Do not set
-   `HOST=0.0.0.0` unless the person asks to reach it from other machines; there is no login.
-6. `open "$HOME/Applications/Wasserman Slate AI Studio.app"`, then check `curl -s http://127.0.0.1:7870/api/state` answers.
+   `HOST=0.0.0.0` unless the person asks to reach it from other machines; every request carries the studio's access key
+   (`app/access.py`; `bash scripts/studio-key.sh` prints it and the address that opens the page with it).
+6. `open "$HOME/Applications/Wasserman Slate AI Studio.app"`, then check `curl -s -H "X-Studio-Key: $(bash scripts/studio-key.sh --key)" http://127.0.0.1:7870/api/state` answers (every request to the app carries its access key, `app/access.py`).
 7. Tell the person: double-click Wasserman Slate AI Studio in Applications; renders land in `~/ImaginationStudio`; the log is
    `~/Library/Logs/TensorFoldStudio.log`; to stop it run the app's executable with `stop`.
 
@@ -63,10 +64,17 @@ FastH3 and long videos: `scripts/fast.sh` (STEPS=4|8|20, RES=480p|720p, UPSCALE=
 clips made by the web app's `long` job (each opens on the last frame of the one before); only an 18 s chain has been
 rendered, so do not promise the look of a 30 minute one.
 
-Web app: `bash scripts/app.sh` (http://127.0.0.1:7870; `HOST=0.0.0.0` to open it to the LAN, no login). It runs the
+Web app: `bash scripts/app.sh` (http://127.0.0.1:7870; `HOST=0.0.0.0` to open it to the LAN; every request carries the access key of `app/access.py`). It runs the
 same scripts through a one-at-a-time queue and stores everything under `~/ImaginationStudio`.
 
 Rules:
+
+- The access key (`app/access.py`, README *The access key*): every request to `/api/` and `/files/` carries it, from
+  any client, this computer's included; only `access.OPEN` is answered without it (the page's prompt, and the update
+  health check an older launcher asks). Do not add a route there, and do not exempt loopback: Sam Wasserman's point
+  was that a local process or a `tailscale serve` user can load the page too. The key lives only in
+  `<studio folder>/access-key` (0600): never put it in a job's params, a log, a saved URL, a report or the repo. A tool
+  that calls the app sends `X-Studio-Key`, read from that file (or `STUDIO_KEY` for another machine's app).
 
 - This is not a server. `tensorfold serve` routes neither model; render with the scripts.
 - Qwen-Image-2.1-Turbo is non-commercial (Qwen Research License). MiniMax H3 has territory limits.

@@ -165,10 +165,20 @@ write a prompt, roll a clip, watch the queue, play takes from the Library, plan 
 
    Tailscale prints the address, `https://<computer>.<your-tailnet>.ts.net`. Only devices on your own tailnet can
    open it, over HTTPS, and the studio accepts its Tailscale name by itself. (On a trusted home network,
-   `HOST=0.0.0.0 bash scripts/app.sh` and `http://<computer's address>:7870` work too; there is no login, so never on
-   a shared or public network.)
-3. **Open that address on the phone** in Safari or Chrome, then *Share → Add to Home Screen* (iPhone) or *⋮ → Add to
-   Home screen* (Android). The studio then opens full screen from its own icon.
+   `HOST=0.0.0.0 bash scripts/app.sh` and `http://<computer's address>:7870` work too; the access key below still
+   guards it, but keep that to a network you trust.)
+3. **Open that address on the phone** in Safari or Chrome. The studio asks for its **access key** once: on the
+   computer, `bash scripts/studio-key.sh` prints it, and an address for the phone that carries it (open that one and
+   nothing is typed). The phone keeps it. Then *Share → Add to Home Screen* (iPhone) or *⋮ → Add to Home screen*
+   (Android): the studio opens full screen from its own icon.
+
+**The access key.** Every request for the studio's work (renders, the Library, the queue, agents, settings) carries
+the studio's access key, from any device, this computer's own browser included, the way Jupyter's token works: being
+able to reach the address is not enough. The key is made once, kept in `access-key` in the studio folder (readable by
+you only) and survives restarts and updates. The Mac app opens the page with it, so on the computer itself nothing is
+typed; the studio's own tools (the agents' MCP tools, `scripts/studio-check.py`, a Mac or Spark leading worker Sparks)
+read it from that file. `bash scripts/studio-key.sh --new` and a restart make a new one and sign every browser and
+phone out. A clip read from another machine's app (Slate's *Import a take*) needs that app's key beside its address.
 
 On the phone:
 

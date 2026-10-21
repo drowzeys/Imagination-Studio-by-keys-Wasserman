@@ -199,6 +199,7 @@ def import_take(body: dict) -> dict:
     try:
         if body.get("from"):
             base = remote.address(str(body["from"]))
+            remote.remember(base, body.get("key"))
             source = {"from": base}
             if body.get("job"):
                 theirs = remote.job(base, str(body["job"]))

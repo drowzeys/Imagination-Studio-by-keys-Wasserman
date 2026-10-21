@@ -60,9 +60,22 @@ NEON_RAIN = {"name": "Neon Rain", "logline": "A courier with a stolen katana run
 
 def http(base: str, method: str, path: str, body=None, timeout: float = 60):
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(base + path, data=data, method=method, headers={"Content-Type": "application/json"} if data else {})
+    head = {"Content-Type": "application/json"} if data else {}
+    key = os.environ.get("STUDIO_KEY") or studio_key()
+    if key:
+        head["X-Studio-Key"] = key  # the app's access key (app/access.py)
+    request = urllib.request.Request(base + path, data=data, method=method, headers=head)
     with urllib.request.urlopen(request, timeout=timeout) as answer:
         return json.loads(answer.read() or b"null")
+
+
+def studio_key() -> str:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
+    try:
+        from studio_home import studio_home
+        return (studio_home() / "access-key").read_text().strip()
+    except (ImportError, OSError):
+        return ""
 
 
 class Studio:

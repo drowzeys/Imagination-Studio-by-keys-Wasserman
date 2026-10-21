@@ -104,12 +104,21 @@ class Moved(Exception):
     """The clip was taken back from its worker and is in the queue again."""
 
 
+# each worker app's access key (app/access.py), by the local address its tunnel gives it: read over ssh from the
+# worker's own studio folder when the tunnel opens (Hub.connect), kept in memory only, never in sparks.json
+KEYS: dict[str, str] = {}
+
+
+def keyed(base: str, headers: dict) -> dict:
+    return {**headers, "X-Studio-Key": KEYS[base]} if KEYS.get(base) else headers
+
+
 def call(base: str, path: str, body=None, method: str | None = None, timeout: float = CALL):
     """One JSON request to an app. Refused when it answers with an error, OSError when it does not answer."""
 
     data = None if body is None else json.dumps(body).encode()
     request = urllib.request.Request(base + path, data, method=method or ("POST" if data is not None else "GET"),
-                                     headers={"Content-Type": "application/json"} if data is not None else {})
+                                     headers=keyed(base, {"Content-Type": "application/json"} if data is not None else {}))
     try:
         with urllib.request.urlopen(request, timeout=timeout) as answer:
             return json.loads(answer.read() or b"null")
@@ -131,7 +140,7 @@ def send(base: str, path: Path, timeout: float = 300) -> str:
     head = (f'--{mark}\r\nContent-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
             "Content-Type: application/octet-stream\r\n\r\n").encode()
     request = urllib.request.Request(base + "/api/upload", head + path.read_bytes() + f"\r\n--{mark}--\r\n".encode(),
-                                     headers={"Content-Type": f"multipart/form-data; boundary={mark}"})
+                                     headers=keyed(base, {"Content-Type": f"multipart/form-data; boundary={mark}"}))
     try:
         with urllib.request.urlopen(request, timeout=timeout) as answer:
             return json.loads(answer.read())["path"]
@@ -529,15 +538,28 @@ class Hub:
             live["tunnel"], live["base"] = None, None
         tunnel = self.dial(address)
         base = tunnel.open()
+        KEYS[base] = self.their_key(address)
         with self.mutex:
             live["tunnel"], live["base"] = tunnel, base
         self.note_tunnels()
         return base
 
+    def their_key(self, address: str) -> str:
+        """The worker app's access key, read over ssh from its studio folder ("" when it has none: an app from before
+        the key, or one not started yet, which then answers 401 and the worker is checked again)."""
+
+        worker = next((one for one in self.config()["workers"] if one["address"] == address), {"address": address})
+        folder = worker.get("folder") or self.default_folder()
+        code, said = self.on(worker, (f'H="$(cd "$HOME/{folder}" 2>/dev/null && python3 app/studio_home.py 2>/dev/null)"; '
+                                      f'cat "${{H:-$HOME/ImaginationStudio}}/access-key" 2>/dev/null || cat "{THEIR_HOME}/access-key" 2>/dev/null; true'), 20)
+        lines = said.strip().splitlines() if code == 0 else []
+        return lines[-1].strip() if lines and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", lines[-1].strip()) else ""
+
     def hang_up(self, address: str) -> None:
         live = self.state(address)
         with self.mutex:
-            tunnel, live["tunnel"], live["base"] = live["tunnel"], None, None
+            tunnel, base, live["tunnel"], live["base"] = live["tunnel"], live["base"], None, None
+        KEYS.pop(base, None)
         if tunnel is not None:
             tunnel.close()
         self.note_tunnels()
@@ -627,7 +649,12 @@ class Hub:
             return live
         try:
             info = call(self.connect(address), "/api/spark/self", timeout=CALL)
-        except Refused:
+        except Refused as error:
+            if error.status == 401:
+                self.hang_up(address)  # the next check reads the key again
+                set_to("down", "Its app asks for its access key, which could not be read over ssh from its studio folder "
+                       "(the file access-key there): check that file, then Check again.", info=None)
+                return live
             set_to("update", f"Its app is Studio {found.get('version') or '?'}, from before the Sparks setting and the memory guard: “Update and start” "
                    "brings it to this Spark's code.", info=None)
             return live
@@ -993,7 +1020,7 @@ class Hub:
         try:
             if not theirs.get("outputs"):
                 raise LookupError("its job finished without a clip")
-            remote.fetch(base, theirs["outputs"][0], target, timeout=300)
+            remote.fetch(base, theirs["outputs"][0], target, timeout=300, key=KEYS.get(base))
         except (OSError, LookupError, ValueError) as error:
             self.move(job, worker, f"its clip could not be fetched ({str(error)[-160:]})", down=isinstance(error, OSError))
             return False

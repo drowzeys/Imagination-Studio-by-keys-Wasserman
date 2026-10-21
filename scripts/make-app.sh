@@ -51,7 +51,9 @@ if ! up; then
   for _ in $(seq 60); do up && break; sleep 0.5; done
   up || { say "Wasserman Slate AI Studio did not start. See $LOG"; exit 1; }
 fi
-open "$URL"
+# the page opened with the studio's access key (app/access.py): the browser keeps it, and the address bar drops it
+KEY="$(cat "$(python3 "$PACK/app/studio_home.py" 2>/dev/null || echo "${STUDIO_HOME:-$HOME/ImaginationStudio}")/access-key" 2>/dev/null)"
+open "$URL/${KEY:+?key=$KEY}"
 LAUNCH
 } > "$APP/Contents/MacOS/TensorFoldStudio"
 chmod +x "$APP/Contents/MacOS/TensorFoldStudio"

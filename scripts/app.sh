@@ -1,7 +1,7 @@
 #!/bin/bash
 # The TensorFold Studio web app: create wizard, production board, clip editor.
 #   bash scripts/app.sh                 # http://127.0.0.1:7870
-#   HOST=0.0.0.0 bash scripts/app.sh    # also reachable from other machines on your network (no login: trusted LANs only)
+#   HOST=0.0.0.0 bash scripts/app.sh    # also reachable from other machines on your network (behind the access key, app/access.py: trusted LANs only)
 # Environment: PREFIX, QWEN_MODEL_DIR, H3_MODEL_DIR (as for the other scripts), HOST, PORT, STUDIO_HOME (default
 # ~/ImaginationStudio, where projects, uploads and renders are kept).
 set -euo pipefail

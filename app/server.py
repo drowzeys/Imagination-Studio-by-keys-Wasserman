@@ -2,7 +2,7 @@
 """TensorFold Studio web app: a create wizard, a production board and a clip editor over the pack's scripts.
 
     bash scripts/app.sh            # http://127.0.0.1:7870
-    HOST=0.0.0.0 bash scripts/app.sh   # reachable from other machines on the network (no login: trusted LANs only)
+    HOST=0.0.0.0 bash scripts/app.sh   # reachable from other machines on the network (behind the access key, app/access.py: trusted LANs only)
 
 One job runs at a time, in the order queued; every job is one of this pack's scripts with environment variables.
 Projects, uploads and renders live under $STUDIO_HOME (default ~/ImaginationStudio; app/studio_home.py).
@@ -10,6 +10,7 @@ Projects, uploads and renders live under $STUDIO_HOME (default ~/ImaginationStud
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import math
@@ -26,11 +27,11 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 HERE = Path(__file__).resolve().parent
@@ -40,6 +41,9 @@ HOME = studio_home(move=__name__ == "__main__")  # moved only when the studio st
 os.environ["STUDIO_HOME"] = str(HOME)  # the scripts and engines it starts keep everything in the same folder
 for name in ("projects", "uploads", "renders", "scouts", "exports"):
     (HOME / name).mkdir(parents=True, exist_ok=True)
+import access  # noqa: E402  (the studio's access key, beside this file)
+ACCESS_KEY = access.ensure(HOME)  # <studio folder>/access-key, 0600, made once and kept
+APP_PORT = os.environ.get("PORT", "7870")
 
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
@@ -328,6 +332,15 @@ class WriteGuard:
                 return await send({"type": "websocket.close", "code": 1008})
             return await JSONResponse({"error": "Open the Studio by this computer's name, its address or its Tailscale name (STUDIO_ALLOWED_HOSTS adds another)."},
                                       status_code=403)(scope, receive, send)
+        if access.enabled():
+            if access.needs_key(scope["path"]) and not access.allowed(headers, APP_PORT, ACCESS_KEY):
+                if scope["type"] == "websocket":
+                    return await send({"type": "websocket.close", "code": 4401})
+                return await JSONResponse({"error": "This studio asks for its access key: open the address scripts/studio-key.sh "
+                                                    "prints, or type the key on the page.", "access": "key"},
+                                          status_code=401)(scope, receive, send)
+            if scope["type"] == "http" and scope["method"] == "GET" and b"key=" in scope.get("query_string", b""):
+                return await self.take_key(scope, receive, send, headers)
         if scope["type"] != "http" or scope["method"] not in WRITES or not scope["path"].startswith("/api/"):
             return await self.app(scope, receive, send)
         why = refused(headers)
@@ -367,7 +380,44 @@ class WriteGuard:
             await too_large(scope, receive, send)
 
 
+    async def take_key(self, scope, receive, send, headers):
+        """``/?key=<key>`` (the launcher's first page): the key kept as this app's cookie and the page opened again
+        without it in the address bar. A wrong key is ignored: the page opens and asks for it."""
+
+        query = [(name, value) for name, value in parse_qsl(scope["query_string"].decode("latin-1"), keep_blank_values=True)]
+        offered = next((value for name, value in query if name == "key"), "")
+        if not access.matches(offered, ACCESS_KEY):
+            return await self.app(scope, receive, send)
+        rest = urlencode([(name, value) for name, value in query if name != "key"])
+        answer = Response(status_code=303, headers={"Location": scope["path"] + ("?" + rest if rest else ""), "Cache-Control": "no-store"})
+        answer.headers.append("Set-Cookie", access.cookie(APP_PORT, ACCESS_KEY, secure_request(scope, headers)))
+        return await answer(scope, receive, send)
+
+
+def secure_request(scope, headers) -> bool:
+    """Whether the page was opened over HTTPS (directly, or through `tailscale serve`): its cookie is then Secure."""
+
+    return scope.get("scheme") == "https" or headers.get("x-forwarded-proto", "").lower() == "https"
+
+
 app.add_middleware(WriteGuard)
+
+
+@app.post("/api/key")
+async def take_typed_key(request: Request):
+    """The key typed on the page's prompt (a phone, a browser the launcher did not open): kept as this app's cookie.
+    A wrong key waits a second before it is refused."""
+
+    try:
+        offered = str((await request.json()).get("key") or "").strip()
+    except (ValueError, AttributeError):
+        offered = ""
+    if not access.matches(offered, ACCESS_KEY):
+        await asyncio.sleep(1)
+        return JSONResponse({"error": "That is not this studio's access key.", "access": "key"}, status_code=401)
+    answer = JSONResponse({"ok": True})
+    answer.headers.append("Set-Cookie", access.cookie(APP_PORT, ACCESS_KEY, secure_request(request.scope, {k.lower(): v for k, v in request.headers.items()})))
+    return answer
 
 
 class SecurityHeaders:
@@ -2354,7 +2404,7 @@ def qa_gate(body: dict) -> dict:
         raise HTTPException(400, "give the clip: a path, or another app's address (from) with a path or a job id")
     try:
         if body.get("from"):
-            remote.address(str(body["from"]))
+            remote.remember(remote.address(str(body["from"])), body.get("key"))  # its access key: in memory, never in the job
     except ValueError as error:
         raise HTTPException(400, str(error))
     can = qa.ready()

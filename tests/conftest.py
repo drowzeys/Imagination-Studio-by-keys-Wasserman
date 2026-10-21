@@ -14,6 +14,8 @@ os.environ.setdefault("STUDIO_DISCOVER_DELAY", "-1")
 # nor start a model server of this machine's: NVIDIA Nemotron 3.5 Bolt as the Studio's engine (app/bolt.py) is a stand-in
 # in tests/test_bolt.py, and everywhere else the brains' local server is the one a test names
 os.environ.setdefault("BOLT_BACKEND", "external")
+# nor ask for the studio's access key (app/access.py): tests/test_access.py turns it on for its own requests
+os.environ.setdefault("STUDIO_ACCESS_KEY", "off")
 
 
 @pytest.fixture

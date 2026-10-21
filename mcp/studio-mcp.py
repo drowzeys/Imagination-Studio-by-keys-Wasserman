@@ -18,6 +18,20 @@ import uuid
 from pathlib import Path
 
 URL = os.environ.get("STUDIO_URL", "http://127.0.0.1:7870").rstrip("/")
+
+
+def studio_key() -> str:
+    """The app's access key (app/access.py): STUDIO_KEY, else the studio folder's access-key file, read at each call
+    (the app may have made it after this server started)."""
+
+    if os.environ.get("STUDIO_KEY"):
+        return os.environ["STUDIO_KEY"].strip()
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+    try:
+        from studio_home import studio_home
+        return (studio_home() / "access-key").read_text().strip()
+    except (ImportError, OSError):
+        return ""
 VERSION = "2024-11-05"
 TIMEOUT = 60
 
@@ -176,7 +190,10 @@ class StudioError(Exception):
 
 def call(method: str, path: str, body=None, raw: bytes | None = None, kind: str = "application/json"):
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
-    request = urllib.request.Request(URL + path, data=data, method=method, headers={"Content-Type": kind} if data is not None else {})
+    head = {"Content-Type": kind} if data is not None else {}
+    if key := studio_key():
+        head["X-Studio-Key"] = key
+    request = urllib.request.Request(URL + path, data=data, method=method, headers=head)
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
             return json.loads(answer.read() or b"null")

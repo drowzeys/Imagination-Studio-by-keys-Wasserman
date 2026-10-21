@@ -79,8 +79,9 @@ any time to come back. Drag it to the Dock to keep it there.
 - It is a small launcher around the folder you cloned. If you move that folder, run `make-app.sh` again.
 - Stop it: `"$HOME/Applications/Wasserman Slate AI Studio.app/Contents/MacOS/TensorFoldStudio" stop`
 - Log: `~/Library/Logs/TensorFoldStudio.log`. Everything you make: `~/ImaginationStudio`.
-- It listens on this Mac only, and has no login. `HOST=0.0.0.0 bash scripts/make-app.sh` opens it to your network;
-  do that only on a network you trust.
+- It listens on this Mac only, behind its access key (the app opens the page with it; `bash scripts/studio-key.sh`
+  prints it for a phone or another browser). `HOST=0.0.0.0 bash scripts/make-app.sh` opens it to your network; do
+  that only on a network you trust.
 
 ## 4. Make a video from text
 
