@@ -7,7 +7,7 @@
 # With Docker it first tries the prebuilt engine in the carrier image (GB10, aarch64; ENGINE_FROM_SOURCE=1 skips that).
 # A build needs the CUDA toolkit's nvcc (12.9 or newer; a Spark has 13 at /usr/local/cuda) and fetches Zig 0.17.0 and the
 # engine's source (drowzeys/TensorFold at DRAMA3_COMMIT, branch drama3-cuda) under $PREFIX. Its zig build compiles the
-# kernel fatbins of TensorFold's whole CUDA engine with nvcc (the runtime embeds them all), for sm_121: about two minutes
+# kernel fatbins of TensorFold's whole CUDA engine with nvcc (the runtime embeds them all), for the GPU's own target (sm_121 on a GB10, sm_120 on an RTX Pro 6000): about two minutes
 # on a GB10 (1 min 43 s measured, 43 fatbins).
 # Measured on a GB10 only: on another GPU it refuses unless DRAMA3_ANY_GPU=1.
 # It installs no weights and no codec: Fish's checkpoint and the converted codec are scripts/setup-voice.sh's.
@@ -29,8 +29,13 @@ if installed && [ -z "${DRAMA3_SOURCE:-}" ]; then
   echo "[tensorfold] drama3 engine already built at ${DRAMA3_COMMIT:0:8}"; exit 0
 fi
 GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
+# the GPU's compute capability as nvcc names it: 121 on a GB10 (DGX Spark), 120 on an RTX Pro 6000 Blackwell (a
+# cubin for one does not run on the other); TF_SM overrides, a comma list builds both
+SM="${TF_SM:-$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' .')}"
+case "$SM" in ''|*[!0-9,]*) SM=121;; esac  # a driver without the field answers with words
 case "$GPU" in *GB10*) ;; *)
-  [ "${DRAMA3_ANY_GPU:-0}" = 1 ] || { echo "the drama3 engine is measured on a GB10 (DGX Spark) only; this GPU is '${GPU:-none}'. DRAMA3_ANY_GPU=1 builds it anyway" >&2; exit 1; };;
+  if [ "$SM" = 120 ]; then echo "! the drama3 engine is measured on a GB10 (DGX Spark); building it for this sm_120 card ('$GPU'), untested there (docs/rtx-pro-6000.md)" >&2
+  else [ "${DRAMA3_ANY_GPU:-0}" = 1 ] || { echo "the drama3 engine is measured on a GB10 (DGX Spark) only; this GPU is '${GPU:-none}'. DRAMA3_ANY_GPU=1 builds it anyway" >&2; exit 1; }; fi;;
 esac
 
 # put FROM's drama3-generate and libtensorfold_drama3.so in place, with the commit and a BUILD line saying where from
@@ -91,7 +96,7 @@ fi
 echo "[tensorfold] building the drama3 engine with $NVCC (every CUDA kernel fatbin for sm_121, then the engine)"
 # stripped: no build machine paths in the binaries (they may go into the carrier image)
 (cd "$SRC" && nice -n 19 "$ZIG" build drama3-generate drama3-lib -j"${DRAMA3_BUILD_JOBS:-4}" -Doptimize=ReleaseFast \
-  -Dnvcc="$NVCC" -Dsm=121 -Dstrip=true --prefix "$SRC/zig-out")
+  -Dnvcc="$NVCC" -Dsm="$SM" -Dstrip=true --prefix "$SRC/zig-out")
 STAGE="$SRC/zig-out/stage"
 rm -rf "$STAGE" && mkdir -p "$STAGE"
 cp "$SRC/zig-out/bin/drama3-generate" "$SRC/zig-out/lib/libtensorfold_drama3.so" "$STAGE/"

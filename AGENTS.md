@@ -306,6 +306,10 @@ Rules:
   kind renders on a Spark only when `memory_guard.SOUND_ESTIMATE` has its measured line (`sound_check`, asked when
   the job is queued and in `spark_generate.py` before anything loads); `SOUND_ESTIMATE` and `SOUND_MEASURED` are
   measurements, added only from runs on a worker Spark under the DGX Spark memory rules above.
+- A card with memory of its own (an RTX Pro 6000 Blackwell, docs/rtx-pro-6000.md): every room check is the smaller of the
+  machine's RAM and the card's free memory (`memory_guard.device`, `voice.mem_available_gb`); keep it that way, a
+  check on RAM alone lets Drama 3 load beside a 62 GB ComfyUI on a 96 GB card. `STUDIO_VRAM_GB` pretends to be such a
+  card on a Spark (it keeps the GB10's page-cache release). The engines build for the card's own sm (`TF_SM`).
 - mflux, minimax-h3-mlx, flux3-mlx, TensorFold's music3-mlx, MMAudio and ComfyUI-MMAudio are pinned by commit and used at run time. Do not unpin.
 
 **No personal information, ever:** no real email, phone number, home or postal address, account name, private IP,

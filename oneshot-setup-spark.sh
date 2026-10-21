@@ -99,8 +99,18 @@ else ok "version $(cat "$HERE/VERSION")$([ ! -f "$PREFIX/VERSION" ] || echo " (i
 GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
 MEM_GB=$(awk '/MemTotal/{print int($2/1048576)}' /proc/meminfo)
 ok "$GPU, $(uname -m), ${MEM_GB} GB"
-case "$GPU" in *GB10*) ;; *) echo "  ! measured only on a DGX Spark (GB10, 128 GB unified memory); other GPUs are untested";; esac
-[ "$MEM_GB" -ge 100 ] || [ "$IMAGE_ONLY" = 1 ] || die "video needs about 90 GB of memory at 1344x768 (128 GB machine); this one has ${MEM_GB} GB. --image-only fits."
+# a card with memory of its own (an RTX Pro 6000 Blackwell, 96 GB): the video models live in its memory, and the
+# machine's RAM holds the rest (docs/rtx-pro-6000.md); on a DGX Spark both are one 128 GB pool
+VRAM_GB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+case "$VRAM_GB" in ''|*[!0-9]*) VRAM_GB="";; *) VRAM_GB=$((VRAM_GB / 1024));; esac
+case "$GPU" in *GB10*) ;; *) if [ -n "$VRAM_GB" ]; then echo "  ! a ${VRAM_GB} GB card: measured on a DGX Spark and simulated as a 96 GB RTX Pro 6000, not run on one (docs/rtx-pro-6000.md)"
+  else echo "  ! measured only on a DGX Spark (GB10, 128 GB unified memory); other GPUs are untested"; fi;; esac
+if [ -n "$VRAM_GB" ]; then
+  [ "$VRAM_GB" -ge 90 ] || [ "$IMAGE_ONLY" = 1 ] || die "video needs a card of about 96 GB (an RTX Pro 6000 Blackwell); this one has ${VRAM_GB} GB. --image-only fits on 48 GB."
+  [ "$MEM_GB" -ge 64 ] || die "the machine needs 64 GB of RAM or more beside the card (the models are read through it); this one has ${MEM_GB} GB"
+else
+  [ "$MEM_GB" -ge 100 ] || [ "$IMAGE_ONLY" = 1 ] || die "video needs about 90 GB of memory at 1344x768 (128 GB machine); this one has ${MEM_GB} GB. --image-only fits."
+fi
 for tool in git ffmpeg ffprobe; do command -v "$tool" >/dev/null || die "install $tool first (sudo apt install $([ "$tool" = ffprobe ] && echo ffmpeg || echo "$tool"))"; done
 if ! command -v uv >/dev/null; then
   [ "$VERIFY" = 0 ] || die "no uv"
@@ -307,7 +317,8 @@ fi
 
 if [ "$BOLT" = 1 ]; then  # NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine: weights and engine (scripts/setup-bolt.sh)
   if [ "$UPGRADE" = 1 ]; then PREFIX="$PREFIX" SPARK_MODELS="$MODELS" bash "$HERE/spark/build-bolt.sh" || echo "  ! the Bolt engine was not updated: bash spark/build-bolt.sh"
-  else PREFIX="$PREFIX" SPARK_MODELS="$MODELS" bash "$HERE/scripts/setup-bolt.sh" $([ "$VERIFY" = 1 ] && echo --verify); fi
+  else PREFIX="$PREFIX" SPARK_MODELS="$MODELS" bash "$HERE/scripts/setup-bolt.sh" $([ "$VERIFY" = 1 ] && echo --verify) \
+         || echo "  ! the Bolt engine was not installed (on x86_64 there is no TensorFold Bolt engine: BOLT_BACKEND=llamacpp, docs/rtx-pro-6000.md); the rest goes on"; fi
 fi
 
 if [ "$SOUND" = 1 ]; then

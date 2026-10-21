@@ -38,6 +38,10 @@ version="$("$NVCC" --version | sed -n 's/.*release \([0-9]*\)\.\([0-9]*\).*/\1 \
 read -r major minor <<<"$version"
 [ "$major" -gt 12 ] || { [ "$major" = 12 ] && [ "$minor" -ge 9 ]; } || { echo "$NVCC is CUDA $major.$minor; the GB10 needs 12.9 or newer" >&2; exit 1; }
 case "$(uname -m)" in aarch64) arch=aarch64;; x86_64) arch=x86_64;; *) echo "no Zig build for $(uname -m)" >&2; exit 1;; esac
+# the GPU's compute capability as nvcc names it: 121 on a GB10 (DGX Spark), 120 on an RTX Pro 6000 Blackwell (a
+# cubin for one does not run on the other); TF_SM overrides, a comma list builds both
+SM="${TF_SM:-$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' .')}"
+case "$SM" in ''|*[!0-9,]*) SM=121;; esac  # a driver without the field answers with words
 ZIG="$PREFIX/zig-$ZIG_VERSION/zig"
 if [ ! -x "$ZIG" ]; then
   echo "[tensorfold] fetching Zig $ZIG_VERSION"
@@ -52,7 +56,7 @@ if [ -z "${TF_SOURCE:-}" ]; then
 fi
 echo "[tensorfold] building the engine with $NVCC"
 # two compile jobs: the kernel image's compiler takes a few GB
-(cd "$SRC" && nice -n 19 "$ZIG" build tf-h3 -j2 -Doptimize=ReleaseFast -Dnvcc="$NVCC")
+(cd "$SRC" && nice -n 19 "$ZIG" build tf-h3 -j2 -Doptimize=ReleaseFast -Dnvcc="$NVCC" -Dsm="$SM")
 mkdir -p "$OUT"
 cp "$SRC/zig-out/lib/libtf_h3.so" "$OUT/libtf_h3.so"
 [ -n "${TF_SOURCE:-}" ] && git -C "$SRC" rev-parse HEAD > "$OUT/commit" || echo "$TF_COMMIT" > "$OUT/commit"

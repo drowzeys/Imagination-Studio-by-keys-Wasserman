@@ -27,7 +27,9 @@ too small.
 | Core: pictures and FastH3 video with sound | 125 GB | `bash oneshot-setup.sh` |
 | **Everything** | **about 400 GB** | `bash oneshot-setup.sh --all` |
 
-Other NVIDIA GPUs are untested: the CUDA engines are built and measured for the GB10.
+**NVIDIA RTX Pro 6000 Blackwell (96 GB) on an x86_64 Linux workstation:** a recipe simulated on a DGX Spark, not yet run on
+the card ([docs/rtx-pro-6000.md](docs/rtx-pro-6000.md)). The same `bash oneshot-setup.sh --all` builds the engines for sm_120;
+the Bolt brain runs through llama.cpp there. Other NVIDIA GPUs are untested: the CUDA engines are built and measured for the GB10.
 
 **Apple-silicon Mac** (macOS 26 or later, for Metal 4). What runs depends on the memory. Every figure was measured on
 a Mac Studio M5 Ultra with 256 GB; smaller Macs and M1 to M4 follow from those measurements and are untested.

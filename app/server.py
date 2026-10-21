@@ -178,7 +178,9 @@ def machine() -> tuple[str, str]:
                                                text=True, timeout=5).stdout.strip().splitlines()[0])
             except (OSError, IndexError, subprocess.TimeoutExpired):
                 return "spark", "DGX SPARK · CUDA · H3-CUDA"  # not kept: asked again on a later call
-        return "spark", f"DGX SPARK · {GPU_NAME[0].upper()} · H3-CUDA"
+        # the same build on a CUDA workstation (an RTX Pro 6000): named by its card, not as a DGX Spark
+        return "spark", (f"DGX SPARK · {GPU_NAME[0].upper()} · H3-CUDA" if "GB10" in GPU_NAME[0].upper()
+                         else f"CUDA · {GPU_NAME[0].upper()} · H3-CUDA")
     # no chip name: the same recipe runs from an M1 with 64 GB up
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
@@ -1238,6 +1240,8 @@ def bolt_room_mb(resident_gb: float) -> int | None:
     one = bolt.engine()
     if not one.loaded():
         return int(room - resident_gb * 1024)
+    if memory_guard.discrete():  # the card's room already counts what Bolt holds on it
+        return int(room)
     now = memory_guard.meminfo().get("MemAvailable") or room
     try:
         noted = Path(memory_guard.state_file()).stat().st_mtime

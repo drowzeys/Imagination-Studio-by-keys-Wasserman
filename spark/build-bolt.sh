@@ -34,7 +34,7 @@ GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 |
 case "$GPU" in *GB10*) ;; *)
   [ "${BOLT_ANY_GPU:-0}" = 1 ] || { echo "Mia's Bolt engine is measured on a GB10 (DGX Spark) only; this GPU is '${GPU:-none}'. BOLT_ANY_GPU=1 installs it anyway" >&2; exit 1; };;
 esac
-[ "$(uname -m)" = aarch64 ] || { echo "the prebuilt Bolt engine is for aarch64 (DGX Spark); this machine is $(uname -m)" >&2; exit 1; }
+[ "$(uname -m)" = aarch64 ] || { echo "the prebuilt Bolt engine is for aarch64 (DGX Spark); this machine is $(uname -m): run Bolt through a CUDA build of llama.cpp instead (BOLT_BACKEND=llamacpp, docs/rtx-pro-6000.md)" >&2; exit 1; }
 TMP="$PREFIX/bolt.fetch"
 rm -rf "$TMP" 2>/dev/null || true
 mkdir -p "$TMP"

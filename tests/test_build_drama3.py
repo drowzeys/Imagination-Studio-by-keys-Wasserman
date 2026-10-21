@@ -32,7 +32,7 @@ def box(tmp_path):
     bin_dir, payload, prefix = tmp_path / "bin", tmp_path / "payload", tmp_path / "prefix"
     bin_dir.mkdir()
     payload.mkdir()
-    stub(bin_dir, "nvidia-smi", 'echo "${FAKE_GPU:-NVIDIA GB10}"\n')
+    stub(bin_dir, "nvidia-smi", 'case "$*" in *compute_cap*) echo "${FAKE_CC:-12.1}";; *) echo "${FAKE_GPU:-NVIDIA GB10}";; esac\n')
     stub(bin_dir, "uname", '[ "$1" = -m ] && { echo aarch64; exit 0; }; exec /usr/bin/uname "$@"\n')
     # docker run --rm -v DIR:/out IMAGE sh -c '...': the image's /payload/spark-drama3 copied into DIR
     stub(bin_dir, "docker", f'''echo "$*" >> "{tmp_path}/docker.log"
@@ -73,6 +73,28 @@ def test_it_refuses_another_gpu(box):
     done = run(box, FAKE_GPU="NVIDIA H100 80GB HBM3")
     assert done.returncode == 1 and "measured on a GB10" in done.stderr and "DRAMA3_ANY_GPU=1" in done.stderr
     assert not (box["prefix"] / "drama3").exists()
+
+
+def test_an_sm_120_card_builds_for_its_own_target_with_a_warning(box):
+    """An RTX Pro 6000 Blackwell (compute capability 12.0) is not refused: it goes on to a source build for sm_120,
+    said to be untested (here it stops at the missing nvcc)."""
+
+    done = run(box, FAKE_GPU="NVIDIA RTX PRO 6000 Blackwell Workstation Edition", FAKE_CC="12.0")
+    assert "untested there" in done.stderr and "DRAMA3_ANY_GPU=1" not in done.stderr and "no nvcc" in done.stderr
+
+
+def test_the_build_target_follows_the_gpu(box):
+    """sm_121 on a GB10, sm_120 on an RTX Pro 6000, TF_SM over both, and 121 when the driver answers with words."""
+
+    script = SCRIPT.read_text()
+    line = next(one for one in script.splitlines() if one.startswith('SM="${TF_SM:-'))
+    guard = next(one for one in script.splitlines() if one.startswith('case "$SM" in'))
+    probe = box["tmp"] / "sm.sh"
+    probe.write_text(line + "\n" + guard + '\necho "$SM"\n')
+    said = lambda **extra: subprocess.run(["bash", str(probe)], env={**box["env"], **extra}, capture_output=True, text=True).stdout.strip()
+    assert said() == "121" and said(FAKE_CC="12.0") == "120" and said(TF_SM="120,121") == "120,121"
+    assert said(FAKE_CC='Field "compute_cap" is not a valid field to query.') == "121"
+    assert '-Dsm="$SM"' in script and "-Dsm=121" not in script
 
 
 def test_the_carrier_engine_is_taken_when_its_commit_and_checksums_match(box):
