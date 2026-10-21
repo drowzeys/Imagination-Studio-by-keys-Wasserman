@@ -124,6 +124,11 @@ def test_when_the_floor_stops_the_server():
     assert G.verdict([(0.0, 81000), (0.25, 73600)], floor) == ""
     assert "waiting on memory" in G.verdict([(0.0, 50000), (0.25, 50000)], floor, stalled=0.7)
     assert G.verdict([(0.0, 50000), (0.25, 50000)], floor, stalled=0.2) == ""
+    # just after the guard gave the model files' cache back, the server reading them again is not a machine running out
+    assert G.verdict([(0.0, 62000), (0.25, 62000)], floor, stalled=0.52, settling=True) == ""
+    assert "waiting on memory" in G.verdict([(0.0, 62000), (0.25, 62000)], floor, stalled=0.52)
+    assert "waiting on memory" in G.verdict([(0.0, 2 * floor - 1), (0.25, 2 * floor - 1)], floor, stalled=0.7, settling=True)
+    assert "under the floor" in G.verdict([(0.0, 13000), (0.05, floor - 1)], floor, stalled=0.7, settling=True)
 
 
 def test_the_watch_stops_a_process_under_the_floor_and_leaves_one_above_it():

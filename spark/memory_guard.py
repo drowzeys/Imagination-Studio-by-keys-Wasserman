@@ -455,9 +455,12 @@ def sound_check(kind: str, seconds: float, available_mb: int | None = None, tota
 
 # ---------- layer 2: the floor under a running server ----------
 
-def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0) -> str:
+def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0, settling: bool = False) -> str:
     """Why the server must stop now ("" while it may run). ``samples`` are (time, MB available), newest last;
-    ``stalled`` is the share of the last STALL_WINDOW_S in which every task waited on memory."""
+    ``stalled`` is the share of the last STALL_WINDOW_S in which every task waited on memory. ``settling``: the
+    model files' page cache was given back within that window. The server then reads those files again, which the
+    kernel counts as waiting on memory; with at least twice the floor available that wait is the guard's own doing
+    (a cold start of a long clip was stopped with 62 GB available), not a machine running out."""
 
     now, free = samples[-1]
     if free < floor:
@@ -468,7 +471,7 @@ def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0) 
         if fall > 0 and free - fall < floor / 3:
             return (f"{free} MB available and falling by {fall:.0f} MB a second, which is under {floor // 3} MB within a second "
                     f"(the floor is {floor} MB)")
-    if STALL_SHARE and stalled >= STALL_SHARE:
+    if STALL_SHARE and stalled >= STALL_SHARE and not (settling and free >= 2 * floor):
         return f"the machine spent {100 * stalled:.0f} % of the last {STALL_WINDOW_S:g} s waiting on memory, with {free} MB available"
     return ""
 
@@ -609,7 +612,7 @@ def watch(pid: int, floor: int, say=print) -> int:
                 stalls.pop(0)
             if now - stalls[0][0] >= STALL_WINDOW_S * 0.9:
                 stalled = (stall - stalls[0][1]) / 1e6 / (now - stalls[0][0])
-        why = verdict(samples, floor, stalled)
+        why = verdict(samples, floor, stalled, settling=released[1] > 0 and now - released[0] <= STALL_WINDOW_S + 1.0)
         if why:
             try:
                 os.kill(pid, signal.SIGKILL)
