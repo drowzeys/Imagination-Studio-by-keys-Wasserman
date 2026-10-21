@@ -69,13 +69,12 @@ same scripts through a one-at-a-time queue and stores everything under `~/Imagin
 
 Rules:
 
-- The access key (`app/access.py`, README *The access key*): every request to `/api/` and `/files/` carries it, from
-  any client, this computer's included; only `access.OPEN` is answered without it (the page's prompt, and the update
-  health check an older launcher asks). Do not add a route there, and do not exempt loopback: Sam Wasserman's point
-  was that a local process or a `tailscale serve` user can load the page too. The key lives only in
-  `<studio folder>/access-key` (0600): never put it in a job's params, a log, a saved URL, a report or the repo. A tool
-  that calls the app sends `X-Studio-Key`, read from that file (or `STUDIO_KEY` for another machine's app).
-
+- The access key (`app/access.py`, README *The access key*) guards remote access: a request to `/api/` or `/files/`
+  from another device carries it; a request from this computer itself (a loopback client naming a loopback Host,
+  `access.local`) needs none, by the owner's decision. `tailscale serve` arrives from a loopback address under a
+  `.ts.net` name and is asked: keep both conditions. Only `access.OPEN` is answered without it from elsewhere. The key
+  lives only in `<studio folder>/access-key` (0600): never put it in a job's params, a log, a saved URL, a report or
+  the repo. Settings → Access key shows it, a QR code for a phone, and makes a new one.
 - This is not a server. `tensorfold serve` routes neither model; render with the scripts.
 - Qwen-Image-2.1-Turbo is non-commercial (Qwen Research License). MiniMax H3 has territory limits.
   Do not redistribute weights, and say so when asked to use the outputs commercially.

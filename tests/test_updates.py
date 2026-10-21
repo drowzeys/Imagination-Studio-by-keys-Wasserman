@@ -345,16 +345,16 @@ def test_recovery_never_discards_changes_made_during_restart(history):
     assert (clone / "code.py").read_text() == "a person's new change"
 
 
-def test_preferences_are_per_checkout_persistent_and_default_off(history, tmp_path, monkeypatch):
+def test_preferences_are_per_checkout_persistent_and_default_on(history, tmp_path, monkeypatch):
     _, clone = history
     monkeypatch.setenv("STUDIO_UPDATE_SESSION", "test-session")
     manager = updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False)
-    assert not manager.automatic()
-    manager.set_automatic(True)
-    assert updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False).automatic()
-    assert not updates.Manager(tmp_path / "another-clone", tmp_path / "home", threading.Lock(), lambda: False).automatic()
+    assert manager.automatic()  # nobody set it: on
     manager.set_automatic(False)
-    assert not manager.automatic()
+    assert not updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False).automatic()
+    assert updates.Manager(tmp_path / "another-clone", tmp_path / "home", threading.Lock(), lambda: False).automatic()
+    manager.set_automatic(True)
+    assert manager.automatic()
 
 
 def test_busy_jobs_do_not_restart_and_new_work_is_gated_atomically(history, tmp_path, monkeypatch):

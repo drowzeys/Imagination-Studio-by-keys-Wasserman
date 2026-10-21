@@ -113,3 +113,32 @@ def test_the_studios_own_clients_send_it(monkeypatch):
     assert seen[-1].get_header("X-studio-key") == "their-key"
     remote.job("http://spark-6:7870", "1013-131100-5eb633")
     assert seen[-1].get_header("X-studio-key") is None
+
+
+def test_this_computer_itself_needs_no_key_but_tailscale_and_the_network_do(keyed, monkeypatch):
+    """The key is for remote access: a loopback client naming localhost passes; `tailscale serve` (a loopback client
+    under a .ts.net name) and a LAN address are asked."""
+
+    here = TestClient(server.app, client=("127.0.0.1", 50000), follow_redirects=False)
+    assert here.get("/api/state", headers={"host": "localhost:7870"}).status_code == 200
+    assert here.get("/api/state", headers={"host": "127.0.0.1:7870"}).status_code == 200
+    assert here.get("/api/key", headers={"host": "localhost:7870"}).json() == {"needed": False, "signed_in": True, "local": True}
+    served = here.get("/api/state", headers={"host": "studio-mac.tail1234.ts.net"})
+    assert served.status_code == 401 and served.json()["access"] == "key"
+    lan = TestClient(server.app, client=("192.168.1.50", 50000))
+    assert lan.get("/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 401
+    assert lan.get("/api/key", headers={"host": "192.168.1.10:7870"}).json()["needed"] is True
+    assert access.local("127.0.0.1", "[::1]:7870") and not access.local("192.168.1.50", "localhost:7870")
+
+
+def test_the_settings_panel_shares_the_key_and_makes_a_new_one(keyed, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "HOME", tmp_path)
+    away = TestClient(server.app, client=("192.168.1.50", 50000))
+    assert away.get("/api/key/share").status_code == 401  # the key guards the key
+    shared = away.get("/api/key/share", headers={"X-Studio-Key": KEY}).json()
+    assert shared["key"] == KEY and any(link["url"].endswith("/?key=" + KEY) for link in shared["links"])
+    made = away.post("/api/key/new", json={}, headers={"X-Studio-Key": KEY})
+    assert made.status_code == 200 and server.ACCESS_KEY != KEY and access.read(tmp_path) == server.ACCESS_KEY
+    assert made.headers["set-cookie"].startswith(f"studio_key_{server.APP_PORT}={server.ACCESS_KEY};")
+    fresh = TestClient(server.app, client=("192.168.1.51", 50000))  # without the new cookie this client just got
+    assert fresh.get("/api/state", headers={"X-Studio-Key": KEY}).status_code == 401  # the old key is signed out

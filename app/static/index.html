@@ -84,16 +84,17 @@ let KEY_ASKED = false;
 window.fetch = async (...args) => { const r = await plainFetch(...args);
   if (r.status === 401 && !KEY_ASKED) r.clone().json().then(d => { if (d && d.access === "key") askKey(); }).catch(() => {});
   return r; };
+// The studio's access key (app/access.py) guards remote access: on the computer itself nothing is asked. A phone or
+// another computer is asked once; the key typed here (or opened from Settings → Access key's QR code) is kept as a cookie
 function askKey() { if (KEY_ASKED) return; KEY_ASKED = true;
   const box = el("input", { type: "password", autocomplete: "current-password", "aria-label": "Access key", placeholder: "Access key" }),
     said = el("p", { class: "note m-flat", role: "status" }), go = async () => {
       const r = await plainFetch("/api/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: box.value.trim() }) });
       if (r.ok) return location.reload(); said.textContent = ((await r.json().catch(() => ({}))).error) || "That key was not taken."; box.select(); };
-  box.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
   document.body.append(el("div", { class: "key-ask", role: "dialog", "aria-modal": "true", "aria-label": "Access key" }, el("form", { class: "key-card", onsubmit: e => { e.preventDefault(); go(); } },
-    el("h2", {}, "This studio asks for its access key"),
-    el("p", { class: "note m-flat" }, "On the computer running the studio, run ", el("code", {}, "bash scripts/studio-key.sh"), " in its folder: it prints the key, and an address that opens this page with it. The key is also the file ", el("code", {}, "access-key"), " in the studio folder. This browser keeps it, so it asks once."),
-    box, el("button", { type: "submit" }, "Open the studio"), said)));
+    el("h2", {}, "Sign this device in"),
+    el("p", { class: "note m-flat" }, "Reaching the studio from another device takes its access key, once. The easiest way: on the computer running the studio, open Settings → Access key and scan the QR code with this device. Or type the key here."),
+    box, el("button", { type: "submit", class: "primary" }, "Sign in"), said)));
   box.focus(); }
 const api = async (path, body, method) => {
   // every job queued from this page carries the number of Sparks chosen in the queue (sparks.js); the app ignores it where it does not apply

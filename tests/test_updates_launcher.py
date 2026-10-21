@@ -114,7 +114,7 @@ def test_real_install_restarts_and_keeps_projects_and_settings(tmp_path):
     runtime = prefix_copies(tmp_path, clone)
     installed = (runtime / "zig_fasth3.py").read_bytes()
     with running(tmp_path, clone, home) as (url, process, _env):
-        assert not api(url)["automatic"]
+        assert api(url)["automatic"]  # on by default
         api(url, "/api/updates/settings", {"automatic": True})
         project = home / "projects/keep-this.json"
         project.write_text('{"a creative project": true}')

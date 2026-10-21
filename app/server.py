@@ -335,11 +335,13 @@ class WriteGuard:
             return await JSONResponse({"error": "Open the Studio by this computer's name, its address or its Tailscale name (STUDIO_ALLOWED_HOSTS adds another)."},
                                       status_code=403)(scope, receive, send)
         if access.enabled():
-            if access.needs_key(scope["path"]) and not access.allowed(headers, APP_PORT, ACCESS_KEY):
+            client = (scope.get("client") or (None,))[0]
+            if (access.needs_key(scope["path"]) and not access.local(client, headers.get("host", ""))
+                    and not access.allowed(headers, APP_PORT, ACCESS_KEY)):
                 if scope["type"] == "websocket":
                     return await send({"type": "websocket.close", "code": 4401})
-                return await JSONResponse({"error": "This studio asks for its access key: open the address scripts/studio-key.sh "
-                                                    "prints, or type the key on the page.", "access": "key"},
+                return await JSONResponse({"error": "This device needs the studio's access key once: on the computer running the "
+                                                    "studio, Settings → Access key has a QR code for it.", "access": "key"},
                                           status_code=401)(scope, receive, send)
             if scope["type"] == "http" and scope["method"] == "GET" and b"key=" in scope.get("query_string", b""):
                 return await self.take_key(scope, receive, send, headers)
@@ -403,6 +405,45 @@ def secure_request(scope, headers) -> bool:
 
 
 app.add_middleware(WriteGuard)
+
+
+def keyed_answer(body: dict, request: Request, key: str) -> JSONResponse:
+    answer = JSONResponse(body)
+    answer.headers.append("Set-Cookie", access.cookie(APP_PORT, key, secure_request(request.scope, {k.lower(): v for k, v in request.headers.items()})))
+    return answer
+
+
+@app.get("/api/key")
+def key_state(request: Request):
+    """Whether this browser needs the key (not on the computer itself) and whether it has it."""
+
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    here = access.local(request.client.host if request.client else None, headers.get("host", ""))
+    return {"needed": access.enabled() and not here, "signed_in": here or access.allowed(headers, APP_PORT, ACCESS_KEY), "local": here}
+
+
+@app.get("/api/key/share")
+def key_share(request: Request):
+    """For a signed-in browser (the key guards this route): the key and the addresses that sign another device in,
+    this computer's and its Tailscale name's (a phone, after `tailscale serve --bg PORT`)."""
+
+    links = [{"label": "This computer", "url": f"http://127.0.0.1:{APP_PORT}/?key={ACCESS_KEY}"}]
+    labels, tailnet = OWN.get("labels") or set(), OWN.get("tailnet")
+    if tailnet:
+        for label in sorted(labels):
+            if "." not in label and label.replace("-", "").isalnum():
+                links.insert(0, {"label": "Your phone (Tailscale)", "url": f"https://{label}.{tailnet}/?key={ACCESS_KEY}"})
+                break
+    return {"key": ACCESS_KEY, "links": links, "file": str(access.path(HOME))}
+
+
+@app.post("/api/key/new")
+def key_new(request: Request):
+    """A new key: every other browser and phone is signed out; this browser keeps working with the new one."""
+
+    global ACCESS_KEY
+    ACCESS_KEY = access.rotate(HOME)
+    return keyed_answer({"ok": True}, request, ACCESS_KEY)
 
 
 @app.post("/api/key")
