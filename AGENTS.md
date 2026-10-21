@@ -70,8 +70,9 @@ same scripts through a one-at-a-time queue and stores everything under `~/Imagin
 Rules:
 
 - The access key (`app/access.py`, README *The access key*) guards remote access: a request to `/api/` or `/files/`
-  from another device carries it; a request from this computer itself (a loopback client naming a loopback Host,
-  `access.local`) needs none, by the owner's decision. `tailscale serve` arrives from a loopback address under a
+  from another device carries it; a request from this computer itself (a loopback client naming a loopback Host, or,
+  opened to the network, a client on one of its own addresses naming its own address or name: `access.local`,
+  `server.this_computer`) needs none, by the owner's decision. `tailscale serve` arrives from a loopback address under a
   `.ts.net` name and is asked: keep both conditions. Only `access.OPEN` is answered without it from elsewhere. The key
   lives only in `<studio folder>/access-key` (0600): never put it in a job's params, a log, a saved URL, a report or
   the repo. Settings → Access key shows it, a QR code for a phone, and makes a new one.

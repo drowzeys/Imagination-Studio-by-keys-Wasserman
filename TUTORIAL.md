@@ -440,8 +440,8 @@ FIRST_FRAME=photo.jpg bash scripts/video.sh "what happens" out.mp4
 
 ## 15. Your phone and other devices: the access key
 
-On the computer running the studio there is nothing to do: a browser there (opened as `localhost`) never asks for a
-key, and updates work as always. The access key is for reaching the studio from anywhere else: a phone, a tablet,
+On the computer running the studio there is nothing to do: a browser there (opened as `localhost`, or by the
+computer's own network address or `.local` name) never asks for a key, and updates work as always. The access key is for reaching the studio from anywhere else: a phone, a tablet,
 another computer. Each device signs in once and stays signed in.
 
 **Sign in your phone, step by step**

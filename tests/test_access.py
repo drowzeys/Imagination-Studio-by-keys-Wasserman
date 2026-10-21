@@ -131,6 +131,25 @@ def test_this_computer_itself_needs_no_key_but_tailscale_and_the_network_do(keye
     assert access.local("127.0.0.1", "[::1]:7870") and not access.local("192.168.1.50", "localhost:7870")
 
 
+def test_this_computer_by_its_network_address_or_name_needs_no_key(keyed, monkeypatch):
+    """HOST=0.0.0.0: a browser on this computer opening http://<its address>:7870 or http://<name>.local:7870 comes
+    from the computer's own address and passes; another computer, or a proxy here naming a .ts.net Host, is asked."""
+
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    monkeypatch.setattr(server, "network_addresses", lambda: ["192.168.1.10", "10.0.10.4"])
+    monkeypatch.setitem(server.OWN, "labels", {"studio-mac"})
+    itself = TestClient(server.app, client=("192.168.1.10", 50000))
+    for host in ("192.168.1.10:7870", "10.0.10.4:7870", "studio-mac.local:7870", "Studio-Mac:7870"):
+        assert itself.get("/api/state", headers={"host": host}).status_code == 200, host
+    assert itself.get("/api/key", headers={"host": "studio-mac.local:7870"}).json()["local"] is True
+    assert itself.get("/api/state", headers={"host": "studio-mac.tail1234.ts.net"}).status_code == 401
+    assert TestClient(server.app, client=("192.168.1.50", 50000)).get(
+        "/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 401
+    monkeypatch.setenv("HOST", "127.0.0.1")  # listening on loopback only: nothing but loopback is this computer
+    assert itself.get("/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 401
+    assert not access.local("192.168.1.10", "evil.example:7870", ["192.168.1.10"], ["studio-mac"])
+
+
 def test_the_settings_panel_shares_the_key_and_makes_a_new_one(keyed, monkeypatch, tmp_path):
     monkeypatch.setattr(server, "HOME", tmp_path)
     away = TestClient(server.app, client=("192.168.1.50", 50000))

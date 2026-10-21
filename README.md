@@ -220,8 +220,8 @@ write a prompt, roll a clip, watch the queue, play takes from the Library, plan 
    camera. It opens the studio on the phone, signed in. The phone keeps it. Then *Share → Add to Home Screen* (iPhone) or *⋮ → Add to Home screen*
    (Android): the studio opens full screen from its own icon.
 
-**The access key.** On the computer running the studio nothing is asked: open `http://localhost:7870` and use it,
-updates included. Reaching it from another device (a phone over Tailscale, another computer on the network) takes the
+**The access key.** On the computer running the studio nothing is asked: open `http://localhost:7870` (or the
+computer's own network address or `.local` name, when it is opened to the network) and use it, updates included. Reaching it from another device (a phone over Tailscale, another computer on the network) takes the
 studio's access key, once per device: on the computer, **Settings → Access key** shows a QR code that signs a phone in
 with one scan, and the key itself to copy. The key is made once, kept in `access-key` in the studio folder (readable
 by you only) and survives restarts and updates; *Make a new key* there signs every other device out.
