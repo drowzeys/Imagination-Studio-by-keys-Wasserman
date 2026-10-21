@@ -340,8 +340,8 @@ class WriteGuard:
                     and not access.allowed(headers, APP_PORT, ACCESS_KEY)):
                 if scope["type"] == "websocket":
                     return await send({"type": "websocket.close", "code": 4401})
-                return await JSONResponse({"error": "This studio asks for its access key: open the address scripts/studio-key.sh "
-                                                    "prints, or type the key on the page.", "access": "key"},
+                return await JSONResponse({"error": "This device needs the studio's access key once: on the computer running the "
+                                                    "studio, Settings → Access key has a QR code for it.", "access": "key"},
                                           status_code=401)(scope, receive, send)
             if scope["type"] == "http" and scope["method"] == "GET" and b"key=" in scope.get("query_string", b""):
                 return await self.take_key(scope, receive, send, headers)
