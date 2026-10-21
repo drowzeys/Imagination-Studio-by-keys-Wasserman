@@ -7,7 +7,7 @@
 #
 #   docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:3.1.0 cp -a /payload/. /out/
 FROM busybox:1.37
-LABEL org.opencontainers.image.source="https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3"
+LABEL org.opencontainers.image.source="https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman"
 LABEL org.opencontainers.image.description="Carrier (not a runtime): Wasserman Slate AI Studio, powered by TensorFold (Mac + DGX Spark) 3.1.0, both builds: the DGX Spark's prebuilt CUDA engines (H3 with LoRA support, MiniMax Music 3, NVIDIA Nemotron 3.5 Bolt, Fish Audio Drama 3); for Macs the TensorFold wheel with the MiniMax H3 and Qwen-Image-2.1 families, the prebuilt native Zig + Metal FastH3 engine, dependency lock and render scripts for Apple Silicon"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 COPY payload/ /payload/

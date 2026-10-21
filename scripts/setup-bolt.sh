@@ -25,7 +25,7 @@ DRAFT_REPO=nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr; DRAFT_REVISION
 if [ "$(uname -s)" = Linux ]; then MODELS="${BOLT_MODELS:-${SPARK_MODELS:-$HOME/spark-studio-models}}"; else MODELS="${BOLT_MODELS:-$HOME/bolt-models}"; fi
 # Mac: TensorFold's Metal Bolt engine (tensorfold-native with libbolt for Apple GPUs), prebuilt as a release asset
 METAL_COMMIT="b4edaea53e3c0624e9fce06f0c9f33150e58cde3"
-METAL_URL="https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3/releases/download/v3.1.0/bolt-metal-b4edaea5-macos-arm64.tar.gz"
+METAL_URL="https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/v3.1.0/bolt-metal-b4edaea5-macos-arm64.tar.gz"
 METAL_SHA256="58203b65ec8d7dce6c87b06c7889967583d6148ecb13fcada2da754c384e8a49"
 CKPT="$MODELS/Nemotron-3.5-Bolt-24GB"; DRAFT="$MODELS/Nemotron-3.5-Bolt-24GB-LiLiCorr"
 VERIFY=0

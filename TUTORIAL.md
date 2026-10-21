@@ -25,8 +25,8 @@ Everything here was measured on one machine: a Mac Studio M5 Ultra with 256 GB.
 
 ```bash
 brew install python@3.11 uv ffmpeg
-git clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3.git
-cd keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3
+git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+cd Imagination-Studio-by-keys-Wasserman
 bash oneshot-setup.sh --app
 ```
 
@@ -61,7 +61,7 @@ say otherwise.
 
 **Prefer to let an agent do it?** Give Claude Code (or another coding agent) this:
 
-> Clone https://github.com/drowzeys/keys-Wasserman-Slate-AI-Studio-powered-by-TensorFold-built-with-integrated-Fish-Audio-Drama3 and follow its AGENTS.md section "Install for a
+> Clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman and follow its AGENTS.md section "Install for a
 > person and build the one-click app". Tell me before any large download starts and when the app is ready.
 
 ## 3. The clickable app
@@ -437,6 +437,35 @@ bash scripts/image.sh "a prompt" out.png                         # image only
 bash scripts/studio.sh "the picture" "what happens" out.mp4      # Qwen image, then video (ENGINE=fasth3 for FastH3)
 FIRST_FRAME=photo.jpg bash scripts/video.sh "what happens" out.mp4
 ```
+
+## 15. Your phone and other devices: the access key
+
+On the computer running the studio there is nothing to do: a browser there (opened as `localhost`) never asks for a
+key, and updates work as always. The access key is for reaching the studio from anywhere else: a phone, a tablet,
+another computer. Each device signs in once and stays signed in.
+
+**Sign in your phone, step by step**
+
+1. Install [Tailscale](https://tailscale.com) on the computer and on the phone, signed in to the same account (free for
+   personal use).
+2. On the computer, once, in a terminal: `tailscale serve --bg 7870`. Only your own devices can open that address,
+   over HTTPS.
+3. On the computer, open **Settings → Access key**. It shows a QR code.
+4. Point the phone's camera at the QR code and open the link. The studio opens on the phone, already signed in.
+5. *Share → Add to Home Screen* (iPhone) or *⋮ → Add to Home screen* (Android). The studio then opens full screen from
+   its own icon, still signed in.
+
+**Without a camera.** In **Settings → Access key** press **Show** or **Copy**, and type the key on the device when the
+studio asks ("Sign this device in"). In a terminal on the computer, `bash scripts/studio-key.sh` prints it too. The key
+is a password to your studio: send it only to your own devices.
+
+**A lost phone, or a key that got out.** **Settings → Access key → Make a new key.** Every other device is signed out at
+once; the browser you pressed it in stays signed in. Sign your devices in again with the new QR code.
+
+**Another machine's studio.** Slate's *Import a take rendered on another machine* asks for that studio's key beside its
+address: copy it from that machine's Settings → Access key.
+
+The same steps are in the app: **Learn → Your phone and other devices**.
 
 ## If something goes wrong
 
