@@ -899,6 +899,9 @@ nav#rooms .lbl.long { white-space:normal; line-height:1.12; font-size:14.5px; }
 .cn-nudge .primary .logo, .cn-nudge .primary .logo .ico, .cn-nudge .primary .logo .mk { width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; flex:none; }
 .cn-nudge .primary .logo svg, .cn-nudge .primary .logo img { width:18px; height:18px; display:block; }
 .cn-nudge .cn-or { color:var(--dim); font-size:13px; margin:0 2px; }
+.cn-nudge .cn-alt { display:inline-flex; align-items:center; gap:7px; }
+.cn-nudge .cn-alt .mk, .cn-nudge .cn-alt .mk img { width:16px; height:16px; display:block; flex:none; }
+.mk img[src$="hermes-agent.png"] { border-radius:4px; }
 .st-embed .pagehead { margin-top:0; }
 @media (max-width: 640px) { .cn-qr { width:132px; height:132px; } .cn-code span { font-size:24px; } .connect { padding:10px; } .cn-step { grid-template-columns:22px minmax(0,1fr); gap:8px; } .cn-tick { width:22px; height:22px; } }
 

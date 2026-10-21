@@ -91,8 +91,11 @@ function viewMachine() {
 /* ---------- Brains & tools: the user's own subscriptions and the MCP tools an agent may use ---------- */
 const BR = { data: null, tools: null, testing: {}, said: {}, checking: {}, checked: {}, status: {}, sign: {}, signOpen: null, signTimer: null, signSig: "", codeDraft: {} };
 // each brain shows its own mark (brand/, THIRD-PARTY-MARKS.md); a local model server and the tools show a plain sign
-const BRAIN_MARK = { claude: "claude", codex: "codex", gemini: "gemini", grok: "grok", openai: "openai", chatgpt: "openai" };
-const brainLogo = id => el("span", { class: "logo" }, BRAIN_MARK[id] ? mark(BRAIN_MARK[id], "") : icon("machine"));
+const BRAIN_MARK = { claude: "claude", codex: "codex", gemini: "gemini", grok: "grok", hermes: "hermes", openai: "openai", chatgpt: "openai" };
+// the local brain wears NVIDIA's mark when it is the Studio's own Nemotron 3.5 Bolt engine
+const isBolt = b => !!b && (!!b.engine || /nemotron|bolt/i.test(b.label || ""));
+const brainMarkOf = (id, b) => id === "local" ? (isBolt(b || ((BR.data && BR.data.backends) || []).find(x => x.id === "local")) ? "nvidia" : null) : BRAIN_MARK[id] || null;
+const brainLogo = (id, b) => el("span", { class: "logo" }, brainMarkOf(id, b) ? mark(brainMarkOf(id, b), "") : icon("machine"));
 const toolLogo = id => el("span", { class: "logo" }, id === "studio" ? el("img", { src: "brand/aperture-mark-color.svg", alt: "Imagination Studio", width: 20, height: 20 }) : icon(id === "blockout" ? "library" : id === "blender" ? "previs" : "suite"));
 async function brainsLoad() { try { BR.data = await api("/api/brains"); } catch (e) { BR.data = { error: e.message }; } try { BR.tools = await api("/api/agent/tools"); } catch { BR.tools = null; } if (tab === "Brains") render(); }
 /* ---------- signing a brain in: the CLI's own login run by the studio (app/agents.py, the signin section) ----------
@@ -466,7 +469,7 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
     el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
       order.length > 1 ? el("span", { class: "cn-or" }, "or") : null,
-      order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small", onclick: () => connectGo(b) }, b.label)))); }
+      order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small cn-alt", onclick: () => connectGo(b) }, brainMarkOf(b.id, b) ? mark(brainMarkOf(b.id, b), "") : null, b.label)))); }
 // NVIDIA Nemotron 3.5 Bolt run by the Studio itself (app/bolt.py): its state and backend, what it holds, Load and Unload
 const BOLT_WORD = { loaded: "Loaded", unloaded: "Unloaded", loading: "Loading…", held: "Unloaded for a render", external: "Not managed here" };
 const gbOf = x => x == null ? "" : (Math.round(x * 10) / 10) + " GB";
@@ -499,7 +502,7 @@ function viewBrains() {
   const clis = (d.backends || []).filter(b => b.kind !== "http" && b.id !== "local").map(b => ({ kind: "cli", ...b })), localB = (d.backends || []).find(b => b.kind === "http" || b.id === "local");
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Your agents"), el("span", { class: "note" }, "Connect one: the studio installs it, signs you in and checks it.")),
     el("div", { class: "tri" }, clis.map(b => connectCard(b)),
-      localB ? el("div", { class: "brain" + (d.default === "local" ? " on" : ""), "data-brain": "local" }, el("div", { class: "head" }, brainLogo("local"), el("div", { class: "m-min" }, el("b", {}, localB.label),
+      localB ? el("div", { class: "brain" + (d.default === "local" ? " on" : ""), "data-brain": "local" }, el("div", { class: "head" }, brainLogo("local", localB), el("div", { class: "m-min" }, el("b", {}, localB.label),
           el("span", { class: "cn-word " + (localB.found ? "ok" : "bad") }, localB.found ? "Ready" : "Not answering", localB.found && localB.model ? " · running " + localB.model : localB.models && localB.models.length ? " · " + localB.models.length + " models" : ""))),
         localB.engine ? boltPanel(localB.engine) : null,
         el("div", { class: "m-acts" }, d.default === "local" ? el("span", { class: "tag2 t", title: d.automatic ? "Nobody chose a default brain, and this local server answers: it leads until you make another brain the default" : "" }, d.automatic ? "default · automatic" : "default") : el("button", { class: "small", disabled: !localB.found, onclick: () => save({ default: "local" }) }, "Make default"))) : null));

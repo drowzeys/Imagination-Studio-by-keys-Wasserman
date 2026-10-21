@@ -14,7 +14,8 @@ Only the files the app uses are copied here. The SVGs are outlined vectors (no e
 - Use dark-ink versions on light surfaces. Avoid ivory on white and blue microtype on a dark background.
 - The title-only logo goes in the application header; the creator credit on welcome, About and marketing surfaces.
 - NVIDIA and Apple belong in the hardware line, as text. The kit's NVIDIA and Apple pictures are reproductions, not
-  official masters, so they are not used. TensorFold sits beside POWERED BY.
+  official masters, so they are not used. NVIDIA's eye mark (brand/nvidia.svg, from Simple Icons) appears only at icon size beside
+  NVIDIA Nemotron 3.5 Bolt's name, to identify the model. TensorFold sits beside POWERED BY.
 
 ## Colours (studio.css `:root`)
 

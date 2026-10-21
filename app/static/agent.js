@@ -50,7 +50,8 @@ function useOutput(path, how) {
   else if (how === "ref") { Object.assign(C, { goes: "video", start: "refs", step: 1, prompt: "" }); if (/\.(mp4|mov)$/i.test(path)) { if (!C.refVideos.includes(path)) { C.refVideos.push(path); C.video_subjects.push(""); } } else if (!C.refs.includes(path)) { C.refs.push(path); C.subjects.push(""); } }
   sync(); go("Create"); toast(how === "ref" ? "Added as a reference" : how === "first" ? "Set as the first frame" : "Set as the last frame"); }
 // a brain's mark beside its name, where it has one (shell.js MARKS); a letter where it has none
-const agMark = id => typeof mark === "function" && typeof MARKS !== "undefined" && MARKS[id] ? mark(id, "") : null;
+const agMark = id => { const k = typeof brainMarkOf === "function" ? brainMarkOf(id) || id : id;
+  return typeof mark === "function" && typeof MARKS !== "undefined" && MARKS[k] ? mark(k, "") : null; };
 const agBadge = id => agMark(id) || el("span", { class: "agr-mono", "aria-hidden": "true" }, id === "local" ? "◎" : (id || "?").slice(0, 1).toUpperCase());
 // a brain a task can go to: found on this machine, or run over SSH on the computer named in Brains & tools, that machine
 // reached, and not known to be signed out (the CLI's own word, as Settings → Connections shows it: BR.status, machine.js)
