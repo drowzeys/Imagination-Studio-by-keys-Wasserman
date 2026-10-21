@@ -12,7 +12,8 @@ file is the three layers that now stand in the way, and everything that starts a
 2. `watch` (run by spark/comfy.sh beside the ComfyUI server, whatever started it): reads the machine's available
    memory twenty times a second and stops the server, long before the machine is in danger, when it is under the
    floor, when the fall of the last quarter second would take it under a third of the floor within a second, or
-   when the kernel reports that work is stalled on memory. The render then fails with that reason.
+   when the kernel reports that work is stalled on memory with under twice the floor available (a cold start's
+   model load stalls on the page cache with half the machine free). The render then fails with that reason.
 3. The server is marked as the first process the kernel ends if memory runs out all the same (oom_score_adj).
 
     python3 spark/memory_guard.py check --width 1376 --height 768 --frames 124 --lora
@@ -455,12 +456,13 @@ def sound_check(kind: str, seconds: float, available_mb: int | None = None, tota
 
 # ---------- layer 2: the floor under a running server ----------
 
-def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0, settling: bool = False) -> str:
+def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0) -> str:
     """Why the server must stop now ("" while it may run). ``samples`` are (time, MB available), newest last;
-    ``stalled`` is the share of the last STALL_WINDOW_S in which every task waited on memory. ``settling``: the
-    model files' page cache was given back within that window. The server then reads those files again, which the
-    kernel counts as waiting on memory; with at least twice the floor available that wait is the guard's own doing
-    (a cold start of a long clip was stopped with 62 GB available), not a machine running out."""
+    ``stalled`` is the share of the last STALL_WINDOW_S in which every task waited on memory. A stall stops the
+    server only under twice the floor available: loading the models from a cold start (the text encoder, then
+    42 GB of H3 staged from the page cache) has the kernel reclaim cache for seconds, which it counts as waiting
+    on memory, with half the machine still available (a 2-minute clip was stopped so with 62 GB available, and
+    ran to the end without the stop). Running out is caught by the floor and the rate of the fall."""
 
     now, free = samples[-1]
     if free < floor:
@@ -471,7 +473,7 @@ def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0, 
         if fall > 0 and free - fall < floor / 3:
             return (f"{free} MB available and falling by {fall:.0f} MB a second, which is under {floor // 3} MB within a second "
                     f"(the floor is {floor} MB)")
-    if STALL_SHARE and stalled >= STALL_SHARE and not (settling and free >= 2 * floor):
+    if STALL_SHARE and stalled >= STALL_SHARE and free < 2 * floor:
         return f"the machine spent {100 * stalled:.0f} % of the last {STALL_WINDOW_S:g} s waiting on memory, with {free} MB available"
     return ""
 
@@ -612,7 +614,7 @@ def watch(pid: int, floor: int, say=print) -> int:
                 stalls.pop(0)
             if now - stalls[0][0] >= STALL_WINDOW_S * 0.9:
                 stalled = (stall - stalls[0][1]) / 1e6 / (now - stalls[0][0])
-        why = verdict(samples, floor, stalled, settling=released[1] > 0 and now - released[0] <= STALL_WINDOW_S + 1.0)
+        why = verdict(samples, floor, stalled)
         if why:
             try:
                 os.kill(pid, signal.SIGKILL)
