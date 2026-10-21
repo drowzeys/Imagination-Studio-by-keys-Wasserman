@@ -72,12 +72,28 @@ LOCAL_ONLY = re.compile(r"on this computer|Tailscale address", re.I)
 
 # ---------- HTTP ----------
 
+def studio_key() -> str:
+    """The app's access key (app/access.py): STUDIO_KEY (another machine's), else this computer's studio folder's file."""
+
+    if os.environ.get("STUDIO_KEY"):
+        return os.environ["STUDIO_KEY"].strip()
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+    try:
+        from studio_home import studio_home
+        return (studio_home() / "access-key").read_text().strip()
+    except (ImportError, OSError):
+        return ""
+
+
 class Api:
     def __init__(self, base: str):
         self.base = base.rstrip("/")
+        self.key = studio_key()
 
     def call(self, method: str, path: str, body=None, timeout: float = 120, raw: bool = False, headers=None):
         data, head = None, dict(headers or {})
+        if self.key:
+            head["X-Studio-Key"] = self.key
         if body is not None:
             data, head["Content-Type"] = json.dumps(body).encode(), "application/json"
         request = urllib.request.Request(self.base + path, data=data, method=method, headers=head)
@@ -120,7 +136,8 @@ class Api:
                      f"Content-Type: {kind}\r\n\r\n".encode() + file.read_bytes() + b"\r\n")
         parts.append(f"--{boundary}--\r\n".encode())
         request = urllib.request.Request(self.base + path, data=b"".join(parts), method="POST",
-                                         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+                                         headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                                                  **({"X-Studio-Key": self.key} if self.key else {})})
         try:
             with urllib.request.urlopen(request, timeout=300) as answer:
                 return json.loads(answer.read())
@@ -1125,8 +1142,11 @@ def main() -> int:
     parser.add_argument("--keep", action="store_true")
     parser.add_argument("--sparks", type=int, default=1, help="Sparks a job may use (a head whose clips render on its worker Sparks: 5)")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument("--key", default="", help="the app's access key, for an app on another machine (default: STUDIO_KEY, else this computer's)")
     parser.add_argument("--clean", metavar="REPORT", help="clean up what an earlier --keep run made (its report.json), then stop")
     args = parser.parse_args()
+    if args.key:
+        os.environ["STUDIO_KEY"] = args.key  # read by Api, here and in a run per --base
     global SPARKS
     SPARKS = args.sparks
     bases = args.base or [os.environ.get("STUDIO_URL", "http://127.0.0.1:7870")]

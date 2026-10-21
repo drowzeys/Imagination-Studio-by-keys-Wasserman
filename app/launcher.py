@@ -14,11 +14,20 @@ import uuid
 from pathlib import Path
 from urllib.request import ProxyHandler, build_opener
 
+import access
 from studio_home import studio_home
 from updates import Manager, UpdateError, apply_stopped, engine_stale, prefix_of, rollback, sync_prefix, write_json, git
 
 
+def keyed(opener, home: Path | None = None):
+    """The opener with the app's access key (app/access.py), read now: a server started a moment ago makes it."""
+
+    opener.addheaders = [(name, value) for name, value in access.headers_for(home or studio_home()).items()]
+    return opener
+
+
 def idle(opener, port: str) -> bool:
+    keyed(opener)
     try:
         with opener.open(f"http://127.0.0.1:{port}/api/jobs", timeout=5) as response:
             listing = json.load(response)
@@ -87,7 +96,7 @@ def main() -> int:
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline and not stopping and child.poll() is None:
             try:
-                with opener.open(url, timeout=2) as response:
+                with keyed(opener, home).open(url, timeout=2) as response:
                     if json.load(response).get("session") == session:
                         return True
             except (OSError, ValueError):

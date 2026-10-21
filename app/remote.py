@@ -3,7 +3,8 @@
 A film is often rendered on several machines, each with its own app (workers of a DGX Spark fabric, a Mac beside
 them), while the Slate project and the tools a check needs (ffmpeg, a speech-to-text model) are on one. What this
 reads is what that app's page reads: `/api/jobs/<id>` and `/files/<path>`. Nothing is sent but the request.
-The apps have no login, so this is for the same trusted network the apps themselves are opened to.
+Each app asks for its own access key (app/access.py): a key given for an address is kept in memory (``remember``,
+never in a job's saved settings) and sent with every request to it.
 """
 
 from __future__ import annotations
@@ -32,13 +33,36 @@ def address(given: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def job(base: str, job_id: str, timeout: float = 20) -> dict:
+KEYS: dict[str, str] = {}  # access keys by address, from the person (remember) or a Sparks tunnel
+
+
+def remember(base: str, key: str | None) -> None:
+    """The access key of the app at ``base``, given by the person with its address."""
+
+    key = (key or "").strip()
+    if key:
+        KEYS[address(base)] = key
+
+
+def opened(url: str, base: str, key: str | None, timeout: float):
+    key = key or KEYS.get(address(base), "")
+    request = urllib.request.Request(url, headers={"X-Studio-Key": key} if key else {})
+    try:
+        return urllib.request.urlopen(request, timeout=timeout)
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            raise OSError(f"{address(base)} asks for its access key: give it with the address (on that computer, "
+                          "bash scripts/studio-key.sh prints it)") from None
+        raise
+
+
+def job(base: str, job_id: str, timeout: float = 20, key: str | None = None) -> dict:
     """A job as that app reports it; LookupError when it has none, OSError when the app does not answer."""
 
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", job_id or ""):
         raise ValueError("a job id is letters, digits and dashes")
     try:
-        with urllib.request.urlopen(f"{address(base)}/api/jobs/{job_id}", timeout=timeout) as reply:
+        with opened(f"{address(base)}/api/jobs/{job_id}", base, key, timeout) as reply:
             return json.loads(reply.read())
     except urllib.error.HTTPError as error:
         if error.code == 404:
@@ -46,7 +70,7 @@ def job(base: str, job_id: str, timeout: float = 20) -> dict:
         raise OSError(f"{address(base)} answered {error.code}") from None
 
 
-def fetch(base: str, path: str, target: Path, timeout: float = 60, limit: int = LIMIT) -> Path:
+def fetch(base: str, path: str, target: Path, timeout: float = 60, limit: int = LIMIT, key: str | None = None) -> Path:
     """The file `path` of that app's studio folder, written to ``target`` (through a .part file). ValueError for a
     path that is not a clip or a picture, LookupError when that app has no such file."""
 
@@ -57,7 +81,7 @@ def fetch(base: str, path: str, target: Path, timeout: float = 60, limit: int = 
     target.parent.mkdir(parents=True, exist_ok=True)
     part = target.with_name(target.name + ".part")
     try:
-        with urllib.request.urlopen(f"{address(base)}/files/{urllib.parse.quote(path)}", timeout=timeout) as reply, open(part, "wb") as out:
+        with opened(f"{address(base)}/files/{urllib.parse.quote(path)}", base, key, timeout) as reply, open(part, "wb") as out:
             done = 0
             while chunk := reply.read(1 << 20):
                 done += len(chunk)

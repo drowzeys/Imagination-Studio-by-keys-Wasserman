@@ -53,9 +53,10 @@ available are shown dimmed.
 Through the API the number is `sparks` beside `kind` and `params`:
 
 ```bash
-curl -s -X POST http://127.0.0.1:7870/api/jobs -H 'Content-Type: application/json' \
+K="X-Studio-Key: $(bash scripts/studio-key.sh --key)"   # the app's access key (app/access.py)
+curl -s -X POST http://127.0.0.1:7870/api/jobs -H "$K" -H 'Content-Type: application/json' \
   -d '{"kind": "video", "sparks": 5, "params": {"prompt": "…", "preset": "small", "quality": "fh8", "frames": 56}}'
-curl -s -X POST http://127.0.0.1:7870/api/sparks/plan -H 'Content-Type: application/json' \
+curl -s -X POST http://127.0.0.1:7870/api/sparks/plan -H "$K" -H 'Content-Type: application/json' \
   -d '{"sparks": 5, "kind": "video", "clips": 8, "params": {"preset": "small", "quality": "fh8", "frames": 56}}'
 ```
 

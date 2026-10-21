@@ -15,6 +15,10 @@
 const fs = require("fs"), path = require("path");
 const base = (process.argv[2] || "http://127.0.0.1:7870").replace(/\/$/, "");
 const out = process.argv[3] || "studio-check-ui";
+// the app's access key (app/access.py): STUDIO_KEY for another machine's app, else this computer's studio folder's
+const KEY = process.env.STUDIO_KEY || (() => { try { const home = require("child_process").execFileSync("python3", [path.join(__dirname, "../app/studio_home.py")]).toString().trim();
+  return fs.readFileSync(path.join(home, "access-key"), "utf8").trim(); } catch (e) { return ""; } })();
+const KEYED = KEY ? { extraHTTPHeaders: { "X-Studio-Key": KEY } } : {};
 const pw = (() => { for (const p of [process.env.PLAYWRIGHT, "playwright-core", "playwright"].filter(Boolean)) {
   try { return require(p); } catch (e) { /* next */ } } throw new Error("playwright-core not found: set PLAYWRIGHT"); })();
 const chrome = process.env.CHROME || (() => { const d = path.join(process.env.HOME || "", ".cache/ms-playwright");
@@ -31,7 +35,7 @@ const BAD_TEXT = /\b(undefined|NaN|\[object Object\]|Traceback|Internal Server E
 (async () => {
   fs.mkdirSync(out, { recursive: true });
   const browser = await pw.chromium.launch({ executablePath: chrome });
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...KEYED });
   const page = await ctx.newPage();
   let now = { tab: "(load)", click: null }, events = [];
   const note = (type, text) => events.push({ tab: now.tab, click: now.click, type, text: String(text).slice(0, 400) });
@@ -110,7 +114,7 @@ const BAD_TEXT = /\b(undefined|NaN|\[object Object\]|Traceback|Internal Server E
     console.log(`${tab.padEnd(14)} ${r.pageerrors.length ? "FAIL" : "ok  "} ${String(r.ms).padStart(6)} ms  clicked ${String(r.clicked).padStart(3)}  pageerr ${r.pageerrors.length}  console ${r.console.length}  http ${r.http.length}  bad ${r.bad.length}${r.unavailable.length ? "  unavailable: " + r.unavailable[0].slice(0, 70) : ""}`);
   }
   // the phone layout of Home
-  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true });
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, ...KEYED });
   await phone.goto(base + "/", { waitUntil: "load" }); await phone.waitForTimeout(2000);
   report.phone_overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   await phone.screenshot({ path: path.join(out, "99-phone.png") });
