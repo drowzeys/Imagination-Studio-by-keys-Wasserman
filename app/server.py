@@ -400,12 +400,14 @@ class WriteGuard:
 
 def this_computer(client: str | None, host: str) -> bool:
     """access.local with this computer's own network addresses and names: its own browser opening the studio by the
-    machine's network address or .local name (HOST=0.0.0.0) needs no key either."""
+    machine's network address (HOST=0.0.0.0) or its .local name needs no key either."""
 
     if client and client.startswith("::ffff:") and "." in client:
         client = client[7:]
-    if client in access.LOOPBACK_CLIENTS or not on_network():
-        return access.local(client, host)
+    if access.local(client, host):
+        return True
+    if client not in access.LOOPBACK_CLIENTS and not on_network():
+        return False
     return access.local(client, host, network_addresses(), OWN["labels"] or ())
 
 

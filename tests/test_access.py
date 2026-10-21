@@ -150,6 +150,20 @@ def test_this_computer_by_its_network_address_or_name_needs_no_key(keyed, monkey
     assert not access.local("192.168.1.10", "evil.example:7870", ["192.168.1.10"], ["studio-mac"])
 
 
+def test_this_computer_by_its_local_name_through_loopback_needs_no_key(keyed, monkeypatch):
+    """On a Mac http://<name>.local:7870 resolves to 127.0.0.1 on the machine itself: that passes. A loopback client
+    under a one-word tailnet name or a .ts.net name (a `tailscale serve` proxy) is still asked."""
+
+    monkeypatch.setattr(server, "network_addresses", lambda: ["192.168.1.10"])
+    monkeypatch.setitem(server.OWN, "labels", {"studio-mac"})
+    here = TestClient(server.app, client=("127.0.0.1", 50000))
+    for host in ("studio-mac.local:7870", "192.168.1.10:7870"):
+        assert here.get("/api/state", headers={"host": host}).status_code == 200, host
+    for host in ("studio-mac:7870", "studio-mac.tail1234.ts.net"):
+        assert here.get("/api/state", headers={"host": host}).status_code == 401, host
+    assert here.get("/api/state", headers={"host": "other-mac.local:7870"}).status_code == 403  # not this computer's name
+
+
 def test_the_settings_panel_shares_the_key_and_makes_a_new_one(keyed, monkeypatch, tmp_path):
     monkeypatch.setattr(server, "HOME", tmp_path)
     away = TestClient(server.app, client=("192.168.1.50", 50000))

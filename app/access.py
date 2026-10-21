@@ -87,22 +87,24 @@ LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
 def local(client_host: str | None, host_header: str, own_addresses=(), own_names=()) -> bool:
-    """Whether a request is this computer's own browser or tool: a loopback client and a loopback Host, or a client
-    on one of this computer's own network addresses (only this computer can complete a connection from one) naming
-    this computer by one of those addresses or its own name (one word, or .local). A proxy here, such as `tailscale
-    serve`, names a .ts.net Host and is asked for the key either way."""
+    """Whether a request is this computer's own browser or tool. A loopback client passes naming localhost, one of
+    this computer's own network addresses or its own `.local` name (which resolves to loopback on the machine
+    itself); a client on one of the computer's own network addresses (only this computer can complete a connection
+    from one) passes naming one of those addresses or its own name (one word, or .local). A proxy here, such as
+    `tailscale serve`, names a .ts.net Host or a tailnet short name and is asked for the key."""
 
     name = host_header.strip().lower()
     name = name[1:].split("]", 1)[0] if name.startswith("[") else name.rsplit(":", 1)[0] if name.count(":") == 1 else name
     name = name.rstrip(".")
-    if client_host in LOOPBACK_CLIENTS:
-        return name in LOOPBACK_HOSTS
-    if not client_host or client_host not in own_addresses:
+    loopback = client_host in LOOPBACK_CLIENTS
+    if loopback and name in LOOPBACK_HOSTS:
+        return True
+    if not loopback and (not client_host or client_host not in own_addresses):
         return False
     if name in own_addresses:
         return True
     label, _, rest = name.partition(".")
-    return rest in ("", "local") and label in {one.lower() for one in own_names if one}
+    return (rest == "local" or (rest == "" and not loopback)) and label in {one.lower() for one in own_names if one}
 
 
 def matches(given: str | None, key: str) -> bool:
