@@ -637,6 +637,12 @@ Tested on one DGX Spark on 2026-10-19 (bf16, one seed per prompt, judged by eye)
 
 ## Speed: the first version on each machine, and 2.3
 
+![Benchmark: TensorFold against ComfyUI, h3.c, H3MLX, Phosphene and the Turbo LoRA, on a DGX Spark and a Mac Studio M5 Ultra](docs/benchmark/imagination-studio-benchmark.webp)
+
+*Every figure on the poster is a measurement from this README and the H3 shootout of
+[keys-Mac-TensorFold-MiniMax-H3-MLX](https://github.com/drowzeys/keys-Mac-TensorFold-MiniMax-H3-MLX). Most are one run
+each; the times include loading the model and decoding unless a row says per pass.*
+
 One run each unless a range is given; 5 second clips are 124 frames. Mac: Mac Studio M5 Ultra, 256 GB. Spark: one
 NVIDIA DGX Spark (GB10), models already loaded.
 
