@@ -770,6 +770,36 @@ def codex_events(stdout: str) -> tuple[list[dict], str, str]:
     return events, reply, error
 
 
+HERMES_STREAMS: dict = {}  # (command, host) -> whether `hermes chat` takes --format stream-json
+HERMES_NOISE = re.compile(r"^\s*(?:\u26a0|warning:)|security scanner", re.I)  # what -Q prints that is not the answer
+
+
+def hermes_streams(tool: str, host: str) -> bool:
+    """Whether this Hermes streams JSON events (`chat --format stream-json`). Hermes v0.21 and others before it do not:
+    the Studio then runs `chat -Q`, whose standard output is the answer and whose standard error names the session."""
+
+    key = (tool, host)
+    if key not in HERMES_STREAMS:
+        try:
+            said = run_cli([tool, *profile_args(), "chat", "--help"], "", host, 30)
+            HERMES_STREAMS[key] = "--format" in (said.stdout + said.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            HERMES_STREAMS[key] = True  # unknown: the documented way, whose error says why if it is refused
+    return HERMES_STREAMS[key]
+
+
+def hermes_quiet_reply(stdout: str) -> str:
+    """The answer in what `hermes chat -Q` printed: its notices (a missing security scanner) left out."""
+
+    return "\n".join(line.rstrip("\r") for line in stdout.replace("\r\n", "\n").split("\n")
+                     if line.strip() and not HERMES_NOISE.search(line)).strip()
+
+
+def hermes_quiet_session(stderr: str) -> str:
+    found = re.findall(r"^session_id:\s*(\S+)", stderr, re.M)
+    return found[-1] if found else ""
+
+
 def hermes_events(stdout: str) -> tuple[list[dict], str, str, str]:
     """(events, final text, session id, error) from `hermes chat --format stream-json`; its warnings are plain lines."""
 
@@ -843,9 +873,10 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
             done = run_cli([tool, *profile_args(), "-z", joined, "-t", HERMES_ASK_TOOLSETS], "", host, timeout)
             reply = done.stdout.strip()
         else:
-            done = run_cli([tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json", "--toolsets", HERMES_ASK_TOOLSETS,
-                            "--max-turns", str(HERMES_TURNS)], joined, host, timeout)
-            reply = hermes_events(done.stdout)[1].strip()
+            streams = hermes_streams(tool, host)
+            done = run_cli([tool, *profile_args(), "chat", "--query-file", "-", *(["--format", "stream-json"] if streams else ["-Q"]),
+                            "--toolsets", HERMES_ASK_TOOLSETS, "--max-turns", str(HERMES_TURNS)], joined, host, timeout)
+            reply = (hermes_events(done.stdout)[1] if streams else hermes_quiet_reply(done.stdout)).strip()
         if reply and not done.returncode and not HERMES_FAILED.search(reply):
             return reply
         raise RuntimeError(hinted("hermes", (reply if HERMES_FAILED.search(reply or "") else "") or done.stderr or done.stdout or f"Hermes stopped with code {done.returncode}", host))
@@ -1525,7 +1556,8 @@ def harness_args(task: dict, tool: str, config_path: str, servers: dict, system:
     if task["backend"] == "hermes":
         # in the room Hermes converses and plans (it drives no Studio tool): its toolsets are held to HERMES_TOOLSETS, so
         # its terminal, browser, code execution, computer use and cron are off here whatever its own config enables
-        args = [tool, *profile_args(), "chat", "--query-file", "-", "--format", "stream-json",
+        task["_quiet"] = not hermes_streams(tool, task.get("_host") or "")
+        args = [tool, *profile_args(), "chat", "--query-file", "-", *(["-Q"] if task["_quiet"] else ["--format", "stream-json"]),
                 "--toolsets", HERMES_TOOLSETS, "--max-turns", str(HERMES_TURNS)]
         return args + (["--resume", session] if session else ["--continue", "imagination-" + task["thread"], "--create-if-missing"])
     # `codex exec resume` takes no --sandbox: the same sandbox goes as its config value
@@ -1588,6 +1620,12 @@ def note_results(task: dict, value, lists: bool = False) -> list[str]:
 def render(backend: str, line: str, task: dict) -> str:
     """One line of the harness's stream as a person reads it; working lines also go to the task's steps."""
 
+    if backend == "hermes" and task.get("_quiet"):  # `chat -Q`: plain lines, the answer itself
+        text = line.rstrip("\n").rstrip("\r")
+        if not text.strip() or HERMES_NOISE.search(text):
+            return ""
+        task["reply"] = (task.get("reply") + "\n" if task.get("reply") else "") + text
+        return text + "\n"
     try:
         event = json.loads(line)
     except ValueError:
@@ -1868,6 +1906,12 @@ def perform(task: dict) -> None:
                 log.write(f"could not copy the outputs back from {host}: {back.stderr.strip()[-300:]}\n")
         if task["status"] == "cancelled" or code is None:
             return
+        if task.get("_quiet"):  # `chat -Q` names its session on standard error, and prints a refusal as its answer
+            said = (here / "stderr.txt").read_text(errors="replace")
+            if hermes_quiet_session(said) and task.get("_session") is not None:
+                task["_session"]["id"] = hermes_quiet_session(said)
+            if HERMES_FAILED.search(task.get("reply") or ""):
+                task["_error"] = hinted("hermes", task["reply"], host)
         error = task.pop("_error", None)
         if code or error:
             said = (here / "stderr.txt").read_text(errors="replace").strip()
@@ -1880,6 +1924,7 @@ def perform(task: dict) -> None:
         log.close()
         task.pop("_host", None)
         task.pop("_error", None)
+        task.pop("_quiet", None)
 
 
 # ---------- the local harness: the Studio's own agent loop on a local OpenAI-compatible server ----------
