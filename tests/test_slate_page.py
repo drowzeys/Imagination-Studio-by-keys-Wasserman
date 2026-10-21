@@ -101,17 +101,17 @@ def test_an_imported_take_joins_the_shots_takes():
       SL.p = film(); slApply([{ type: "create_scene", name: "Scene 1" }, { type: "create_shot", scene: "Scene 1", name: "1.4" }]);
       const shot = SL.p.scenes[0].shots[0];
       answers = { "/api/slate/takes": { take: { id: "take-1", loggedAt: "2026-10-13T17:00:00.000Z", mediaPath: "slate/p-test/takes/x.mp4", seed: 43, rating: "good", notes: "", imported: true,
-                    settings: { preset: "sharp", frames: 124, quality: "fh8", loras: [{ id: "camera-motion" }] }, source: { from: "http://10.100.10.5:7870", job: "w2" } } } };
-      const take = await slImportTake(shot, { from: "http://10.100.10.5:7870", job: "w2", seed: "", notes: "" });
+                    settings: { preset: "sharp", frames: 124, quality: "fh8", loras: [{ id: "camera-motion" }] }, source: { from: "http://10.0.10.5:7870", job: "w2" } } } };
+      const take = await slImportTake(shot, { from: "http://10.0.10.5:7870", job: "w2", seed: "", notes: "" });
       out.calls = calls.map(c => c[0]); out.sent = calls[1][1]; out.takes = shot.takes.map(t => t.id); out.have = SL.have[take.mediaPath];
       out.line = slTakeLine(take); out.best = slBest(shot);
     """)
     if got is None:
         return
     assert got["calls"] == ["/api/slate/projects/p-test", "/api/slate/takes"]  # the film is saved first: the server reads the shot from the file
-    assert got["sent"] == {"projectId": "p-test", "shot": got["sent"]["shot"], "from": "http://10.100.10.5:7870", "job": "w2"}  # empty fields are not sent
+    assert got["sent"] == {"projectId": "p-test", "shot": got["sent"]["shot"], "from": "http://10.0.10.5:7870", "job": "w2"}  # empty fields are not sent
     assert got["takes"] == ["take-1"] and got["have"] is True and got["best"] == "slate/p-test/takes/x.mp4"
-    assert got["line"] == "seed 43 · sharp · 124 frames · fh8 · LoRA camera-motion · imported from 10.100.10.5:7870 · 2026-10-13 17:00"
+    assert got["line"] == "seed 43 · sharp · 124 frames · fh8 · LoRA camera-motion · imported from 10.0.10.5:7870 · 2026-10-13 17:00"
 
 
 def test_the_first_ad_sets_the_song_a_shots_bars_and_its_lora():
@@ -153,7 +153,7 @@ def test_the_views_draw_with_a_song_a_shot_lora_and_an_imported_take():
       slApply([{ type: "update_project", song: { name: "Hesitation", bpm: 117.45, firstBeat: 0.07 } }, { type: "create_scene", name: "Scene 1" },
                { type: "create_shot", scene: "Scene 1", name: "1.1", prompt: "# Subject\\nLeo walks.", bars: 2, lora: { name: "Camera Motion", style: "Orbit" } }]);
       const scene = SL.p.scenes[0], shot = scene.shots[0];
-      shot.takes.push({ id: "take-1", loggedAt: "2026-10-13T17:00:00.000Z", mediaPath: "slate/p/takes/x.mp4", seed: 43, rating: "good", notes: "", imported: true, settings: { preset: "sharp", frames: 107 }, source: { from: "http://10.100.10.5:7870" } });
+      shot.takes.push({ id: "take-1", loggedAt: "2026-10-13T17:00:00.000Z", mediaPath: "slate/p/takes/x.mp4", seed: 43, rating: "good", notes: "", imported: true, settings: { preset: "sharp", frames: 107 }, source: { from: "http://10.0.10.5:7870" } });
       SL.have["slate/p/takes/x.mp4"] = true;
       SL.plan[shot.id] = { prompt: "p", mode: "text", chars: 1, warnings: ["This shot will be refused when queued: a clip with a LoRA ..."], plan: { seconds: 4.458, frames: 107, quality: "fh8", preset: "small", loras: [{ id: "camera-motion" }], slot: { bars: 2, seconds: 4.087, frames: 98, start: 0.07, bar: 1, spare: 9 } } };
       SL.open.import = true;
@@ -167,7 +167,7 @@ def test_the_views_draw_with_a_song_a_shot_lora_and_an_imported_take():
     assert "Slot: 2 bars = 4.09 s (98 frames), from bar 1 at 0:00.1 of the song. The clip is 107 frames (4.46 s): 9 to trim." in got["shots"]
     assert "This shot will be refused when queued" in got["shots"] and "2 bars · 107 frames" in got["shots"] and "LoRA · camera-motion" in got["shots"]
     assert "Import a take rendered on another machine" in got["shots"] and "The other app's address" in got["shots"]
-    assert "seed 43 · sharp · 107 frames · imported from 10.100.10.5:7870" in got["shots"]
+    assert "seed 43 · sharp · 107 frames · imported from 10.0.10.5:7870" in got["shots"]
     assert "a note for people, kept out of the prompt" in got["shots"]
     assert "1 of 1 shots have a finished take" in got["deliver"] and "2 bars" in got["deliver"]
     assert "The tempo is yours to give" in got["no_song"] and "Slot, in bars" not in got["shots_no_song"]

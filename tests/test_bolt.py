@@ -120,7 +120,7 @@ def test_the_brains_address_follows_the_engine_and_the_first_question_loads_it(f
 
 
 def test_an_address_typed_in_settings_stays_an_external_server(fake):
-    assert not bolt.serves("http://192.168.4.194:8091")
+    assert not bolt.serves("http://192.168.1.30:8091")
     assert agents.local_server("http://127.0.0.1:9")[0] is None  # asked as before: nothing answers there
     assert not fake.loaded()
 

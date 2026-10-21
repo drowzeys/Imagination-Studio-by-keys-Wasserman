@@ -11,13 +11,13 @@ The app on a Mac leads worker Sparks too: see *A Mac at the head* below.
 - The Studio installed on this Spark as usual, and on each other Spark once (`bash oneshot-setup-spark.sh`, or a copy
   of the install and of the FastH3 models). A worker needs the FastH3 models to take clips; the image model, Ref2VA,
   LoRAs and ffmpeg are optional there, and the app sends a worker only what it can render.
-- A key login from this Spark to each other Spark as the user who runs the app (`ssh 10.100.10.5` must get in
+- A key login from this Spark to each other Spark as the user who runs the app (`ssh 10.0.10.5` must get in
   without a password). Nothing is installed as root, no system file is edited and no folder is shared.
 
 ## Set it up: the Sparks tab
 
 1. Open **Sparks** (the tab beside Library).
-2. Under *Add a Spark*, type the other machine's address as you would after `ssh` (`10.100.10.5`, or
+2. Under *Add a Spark*, type the other machine's address as you would after `ssh` (`10.0.10.5`, or
    `user@spark-5`) and press **Add**. If its Studio is not in the same folder as on this Spark, give the folder.
 3. The app looks at it and shows one of: *idle*, *rendering*, *its Studio app is not running*, *its Studio code
    differs from this Spark's*, *no Studio installed there*, *does not answer over ssh*.
@@ -46,7 +46,7 @@ The chooser, **Sparks 1 2 3 4 5**, is in four places and is one setting:
 - in a **Slate** shot, under *Render this shot*.
 
 Under it the app says what will happen, for example *3 of 5 available. One clip per Spark, 3 at a time: 8 clips on
-3 Sparks.* with a time estimate, and which Sparks are left out and why (*spark-0060 (the LoRA camera-motion is not
+3 Sparks.* with a time estimate, and which Sparks are left out and why (*spark-node3 (the LoRA camera-motion is not
 installed there)*). Choosing more than there are is allowed: the app uses what is there. Numbers above the ones
 available are shown dimmed.
 
@@ -74,7 +74,7 @@ A job queued without `sparks` takes the number set on the Sparks tab. `GET /api/
 
 A clip rendered on a worker comes back into this Spark's studio folder at the path it would have had here (the
 Library, a project's segment, a Slate take), and the QA gate, the shot check and the silenced sound track run here,
-on the fetched clip, where their tools are. The job's card says *Rendered on gx10-5482*, the Library shows the
+on the fetched clip, where their tools are. The job's card says *Rendered on spark-node5*, the Library shows the
 Spark's name and the seed under the clip, and `sparks/takes.jsonl` in the studio folder keeps one line per clip:
 path, seed, settings, the Spark, and the time it took.
 
@@ -138,8 +138,8 @@ page says why beside each Spark:
 The same seed does not give the same frames on a Mac and on a Spark: they run different engines.
 
 **Reaching the Sparks.** When the Mac reaches each Spark with ssh itself, add a Spark as on a Spark head. When it
-reaches only the Spark that leads them (here the Mac reaches `192.168.4.174` but not the `10.100.10.x` fabric), give
-that Spark under **Through** (`keyspark@192.168.4.174`). The Mac then logs in there with its own key, and that Spark
+reaches only the Spark that leads them (here the Mac reaches `192.168.1.10` but not the `10.0.10.x` fabric), give
+that Spark under **Through** (`spark@192.168.1.10`). The Mac then logs in there with its own key, and that Spark
 logs in to the worker with its own key: no key is added to any worker. The tunnel is one ssh from the Mac to that
 Spark, forwarding a local port to a socket in `~/.cache/studio-sparks` there (a folder only its user can open); on that
 Spark a second ssh forwards the socket to the worker's own `127.0.0.1:7870`. Nothing listens on a network on any of the
@@ -151,7 +151,7 @@ the same commit have the same `CODE` files, so a worker that is level with one i
 
 **Once, by hand, on the Mac:**
 
-1. A key login from the Mac to the Spark it goes through: `ssh keyspark@192.168.4.174 true` must answer without a
+1. A key login from the Mac to the Spark it goes through: `ssh spark@192.168.1.10 true` must answer without a
    password. Add the Mac's public key (`~/.ssh/id_ed25519.pub`) to that Spark's `~/.ssh/authorized_keys` if it is not
    there.
 2. That Spark's host key in the Mac's `~/.ssh/known_hosts`: the app uses ssh with `BatchMode`, which never asks. Run the
@@ -160,18 +160,18 @@ the same commit have the same `CODE` files, so a worker that is level with one i
 3. Nothing for the workers: the Spark that leads them already has a key login to each (it is how it leads them).
 
 Instead of **Through**, a person who prefers the Mac to log in to every worker itself can authorise the Mac's key on
-each worker (`ssh-copy-id -o ProxyJump=keyspark@192.168.4.174 keyspark@10.100.10.5`, after step 2) and put
-`ProxyJump keyspark@192.168.4.174` for `10.100.10.*` in `~/.ssh/config`: then add the workers with no Through, as if
+each worker (`ssh-copy-id -o ProxyJump=spark@192.168.1.10 spark@10.0.10.5`, after step 2) and put
+`ProxyJump spark@192.168.1.10` for `10.0.10.*` in `~/.ssh/config`: then add the workers with no Through, as if
 the Mac reached them.
 
 **Measured.** On 2026-10-19, a test app of this branch on a Mac Studio M5 Ultra (port 7871, its own folder), worker
-gx10-5482 (`10.100.10.5`) through the Spark at `192.168.4.174`, one run:
+spark-node5 (`10.0.10.5`) through the Spark at `192.168.1.10`, one run:
 
 | Step | Time |
 |---|---|
 | Add, then *Check* (ssh through the Spark, the relay, `/api/spark/self`): "differs in 5 files" | under 15 s |
 | *Update and start* (openrsync through the Spark, its app restarted, checked again): *idle* | 7 s |
-| A 5 s 864x480 FastH3 clip (8 passes, seed 7), `sparks` 2, the Mac's own queue busy: handed to gx10-5482 | 1.0 s after it was queued |
+| A 5 s 864x480 FastH3 clip (8 passes, seed 7), `sparks` 2, the Mac's own queue busy: handed to spark-node5 | 1.0 s after it was queued |
 | Rendered there (its memory guard: about 58 GB needed, 118 GB there) | 71 s |
 | Back in the Mac's folder and shot-checked on the Mac | 73.7 s after it was queued |
 

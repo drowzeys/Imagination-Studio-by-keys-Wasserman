@@ -164,7 +164,7 @@ def address_of(given: str) -> str:
 
     text = (given or "").strip()
     if not ADDRESS.fullmatch(text):
-        raise ValueError("a Spark's address is its host name or IP address, as you would type it after ssh (10.100.10.5 or user@spark-5)")
+        raise ValueError("a Spark's address is its host name or IP address, as you would type it after ssh (10.0.10.5 or user@spark-5)")
     return text
 
 

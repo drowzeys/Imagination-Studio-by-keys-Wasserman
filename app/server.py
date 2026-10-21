@@ -2458,6 +2458,18 @@ def wait(ms: int = 1000):
 AGENT_RECORDS = ("stderr.txt", "stream.jsonl", "log.txt", "mcp.json")
 
 
+@app.get("/api/credits")
+def credits():
+    """CREDITS.md and THIRD_PARTY_NOTICES.md as they are in this checkout: the page's Credits shows the repo's own
+    files, so the app and the repo credit the same people (tests/test_credits.py)."""
+    def read(name):
+        try:
+            return (PACK / name).read_text(encoding="utf-8")
+        except OSError:
+            return ""
+    return {"credits": read("CREDITS.md"), "notices": read("THIRD_PARTY_NOTICES.md")}
+
+
 @app.get("/files/{path:path}")
 def files(path: str, request: Request):
     if "\0" in path or hidden(path):

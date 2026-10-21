@@ -7,7 +7,7 @@
 | bfl-white.svg | Black Forest Labs | https://bfl.ai/brand/symbol-white.svg | BFL press kit, no recolouring | White symbol, unmodified. Clear space equals the stroke thickness. Symbol alone only at small size. No shadow, glow or distortion. |
 | fish-audio.svg | Hanabi AI Inc. (Fish Audio) | https://docs.fish.audio/brand (via Simple Icons fishaudio) | CC0-1.0 (Simple Icons); fill set to #e7e9ef for dark backgrounds | Identification only. No implied partnership or endorsement, never more prominent than our own brand. Link: https://fish.audio |
 | comfyui.svg | Comfy Org | https://raw.githubusercontent.com/Comfy-Org/ComfyUI_frontend/HEAD/apps/website/src/assets/brand/logomark.svg | ComfyUI_frontend repo GPL-3.0; no separate brand licence found | Identification only. |
-| tensorfold.webp | TensorFold project | https://raw.githubusercontent.com/drowzeys/TensorFold/HEAD/assets/tensorfold-logo.png | MIT repository, no separate brand terms | Resized to 160x160. Identification only. |
+| tensorfold.webp | TensorFold project | https://raw.githubusercontent.com/drowzeys/TensorFold/HEAD/assets/tensorfold-logo.png | Apache-2.0 repository (MIT before 0.6.0), no separate brand terms | Resized to 160x160. Identification only. |
 | claude.svg | Anthropic | https://cdn.simpleicons.org/claude (Simple Icons) | CC0-1.0 (Simple Icons) | Identification only. |
 | gemini.svg | Google | https://cdn.simpleicons.org/googlegemini (Simple Icons) | CC0-1.0 (Simple Icons) | Identification only. |
 | openai.svg | OpenAI | https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.95.1/icons/openai.svg | LobeHub icons, MIT, unofficial; fill set to #e7e9ef | Identification only. Not an official asset. |

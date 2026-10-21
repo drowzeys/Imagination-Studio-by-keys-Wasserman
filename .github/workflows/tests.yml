@@ -16,6 +16,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Commits carry GitHub noreply addresses only
+        # No one's real email in the history (AGENTS.md): every new commit's author and committer is a noreply address.
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then range="$BASE..$HEAD"; else range="-1 $HEAD"; fi
+          bad=$(git log --format='%h %an <%ae> | %cn <%ce>' $range | grep -vE '<[^>]*noreply[^>]*> \| [^<]*<[^>]*noreply[^>]*>$' || true)
+          if [ -n "$bad" ]; then echo "Commits with a real email (use your GitHub noreply address):"; echo "$bad"; exit 1; fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

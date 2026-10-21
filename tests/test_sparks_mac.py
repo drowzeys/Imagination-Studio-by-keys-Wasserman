@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "app"))
 import sparks  # noqa: E402
 
-HEAD = "keyspark@192.168.4.174"
-WORKER = "10.100.10.5"
+HEAD = "spark@192.168.1.10"
+WORKER = "10.0.10.5"
 # what a DGX Spark's app says it renders (server.about_this_spark): no 2x decoder presets, FastH3 qualities only
 SPARK_RENDERS = {"presets": ["small", "native", "p720", "sharp", "custom"], "qualities": ["fh8", "fh4", "fh20"]}
 SPARK_INFO = {"fasth3": True, "guard": True, "loras": ["camera-motion"], "ffmpeg": True, "text_encoders": ["other_minimax_h3.safetensors"],
@@ -30,7 +30,7 @@ def mac_hub(home: Path, spark: bool = False, timing=None) -> sparks.Hub:
 
     hub = sparks.Hub(home, ROOT, spark, {}, [], threading.Lock(), threading.Event(), lambda: {"version": "3.0.1", "disk_gb": 900},
                      lambda path: home / path, lambda job, worker: None, timing)
-    hub.keep({"workers": [{"address": WORKER, "name": "gx10-5482", "folder": "keys-Mac-TensorFold-Studio", "enabled": True, "via": HEAD}], "sparks": 2})
+    hub.keep({"workers": [{"address": WORKER, "name": "spark-node5", "folder": "keys-Mac-TensorFold-Studio", "enabled": True, "via": HEAD}], "sparks": 2})
     hub.state(WORKER).update(state="ready", info=dict(SPARK_INFO))
     return hub
 
@@ -50,8 +50,8 @@ def test_a_mac_leads_the_sparks():
         assert "This Mac alone." == hub.plan({"sparks": 1, "kind": "video", "params": job["params"]})["says"]
         assert "this Mac" in hub.plan({"sparks": 2, "kind": "long", "params": {}})["says"]
         # a finished clip is written down on a Mac too
-        hub.record({"id": "j1", "kind": "video", "outputs": ["renders/j1.mp4"], "params": job["params"], "spark": "gx10-5482", "remote": WORKER, "sparks": {"chosen": 2}})
-        assert hub.takes()["renders/j1.mp4"]["spark"] == "gx10-5482"
+        hub.record({"id": "j1", "kind": "video", "outputs": ["renders/j1.mp4"], "params": job["params"], "spark": "spark-node5", "remote": WORKER, "sparks": {"chosen": 2}})
+        assert hub.takes()["renders/j1.mp4"]["spark"] == "spark-node5"
         # what the page says of a worker speaks of this Mac, not of a Spark at the head
         hub.state(WORKER).update(state="update", why="Its Studio code differs from this Spark's in 2 files")
         row = hub.overview()["workers"][0]
@@ -240,7 +240,7 @@ def test_the_relay_is_one_ssh_from_here_and_closes_with_this_app():
     had = sparks.subprocess.Popen, sparks.socket.create_connection, sparks.shell
     sparks.subprocess.Popen = Process
     sparks.socket.create_connection = lambda *args, **kwargs: type("S", (), {"close": lambda self: None})()
-    sparks.shell = lambda address, command, timeout=30, via=None: (seen.setdefault("asked", []).append((address, command)), (0, "/home/keyspark/.cache/studio-sparks\n"))[1]
+    sparks.shell = lambda address, command, timeout=30, via=None: (seen.setdefault("asked", []).append((address, command)), (0, "/home/spark/.cache/studio-sparks\n"))[1]
     try:
         relay = sparks.Relay(WORKER, HEAD)
         base = relay.open()
@@ -248,7 +248,7 @@ def test_the_relay_is_one_ssh_from_here_and_closes_with_this_app():
         assert seen["asked"][0][0] == HEAD and "chmod 700" in seen["asked"][0][1]  # a folder of the user's own there
         assert command[:len(sparks.SSH)] == sparks.SSH and command[-2] == HEAD and "-N" not in command
         forward = command[command.index("-L") + 1]
-        assert forward.startswith(f"127.0.0.1:{relay.port}:/home/keyspark/.cache/studio-sparks/") and forward.endswith(".sock")
+        assert forward.startswith(f"127.0.0.1:{relay.port}:/home/spark/.cache/studio-sparks/") and forward.endswith(".sock")
         assert base == f"http://127.0.0.1:{relay.port}" and relay.mark == forward
         there = shlex.split(command[-1])
         assert there[:2] == ["bash", "-c"] and f'-L "$S:127.0.0.1:7870" {WORKER}' in there[2] and "0.0.0.0" not in there[2]
@@ -265,13 +265,13 @@ def test_the_relay_is_one_ssh_from_here_and_closes_with_this_app():
     with tempfile.TemporaryDirectory() as scratch:
         hub = mac_hub(Path(scratch))
         assert isinstance(hub.dial(WORKER), sparks.Relay) and hub.dial(WORKER).via == HEAD
-        assert type(hub.dial("10.100.10.1")) is sparks.Tunnel
+        assert type(hub.dial("10.0.10.1")) is sparks.Tunnel
 
 
 def test_a_tunnel_left_by_a_killed_run_is_closed_on_a_mac_too():
     """A run that was killed left its ssh: the next start ends it, read with ps where there is no /proc (macOS)."""
 
-    mark = "127.0.0.1:59999:/home/keyspark/.cache/studio-sparks/x.sock"
+    mark = "127.0.0.1:59999:/home/spark/.cache/studio-sparks/x.sock"
     # a process whose command is ssh with that forward (sh as ssh, waiting)
     ours = subprocess.Popen(["ssh", "-c", "sleep 30; :", "-L", mark, HEAD], executable="/bin/sh")
     other = subprocess.Popen(["ssh", "-c", "sleep 30; :", "-L", "127.0.0.1:1:/elsewhere.sock", HEAD], executable="/bin/sh")

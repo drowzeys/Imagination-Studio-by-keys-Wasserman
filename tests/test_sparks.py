@@ -239,7 +239,7 @@ def finished(ids, limit: float = 30) -> list[dict]:
 
 
 def test_an_address_is_a_host_and_nothing_ssh_reads_as_an_option():
-    assert sparks.address_of(" 10.100.10.5 ") == "10.100.10.5" and sparks.address_of("keys@spark-5") == "keys@spark-5"
+    assert sparks.address_of(" 10.0.10.5 ") == "10.0.10.5" and sparks.address_of("keys@spark-5") == "keys@spark-5"
     for bad in ("", "-oProxyCommand=x", "a b", "host;rm", "user@", "http://10.0.0.5:7870", "a/b"):
         try:
             sparks.address_of(bad)
@@ -578,10 +578,10 @@ def test_the_tunnel_ends_on_the_workers_own_loopback_and_is_closed():
     sparks.subprocess.Popen = Process
     sparks.socket.create_connection = lambda *args, **kwargs: type("S", (), {"close": lambda self: None})()
     try:
-        tunnel = sparks.Tunnel("10.100.10.5")
+        tunnel = sparks.Tunnel("10.0.10.5")
         base = tunnel.open()
         command = seen["command"]
-        assert command[0] == "ssh" and "BatchMode=yes" in command and "-N" in command and command[-1] == "10.100.10.5"
+        assert command[0] == "ssh" and "BatchMode=yes" in command and "-N" in command and command[-1] == "10.0.10.5"
         forward = command[command.index("-L") + 1]
         assert forward == f"127.0.0.1:{tunnel.port}:127.0.0.1:7870" and base == f"http://127.0.0.1:{tunnel.port}"
         assert tunnel.alive()
@@ -620,10 +620,10 @@ globalThis.all = (node, tag, out = []) => { if (node && typeof node === "object"
 vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"));
 vm.runInThisContext(`(async () => { const out = {};
   const five = { supported: true, limit: 5, available: 3, listed: 3, default: 1, this: { name: "head", state: "ready", version: "2.6.6", memory_gb: 110, disk_gb: 70, can: { fasth3: true, image: true, ref2va: true, ref2va_turbo: true, ffmpeg: true, loras: 22 } },
-    workers: [{ address: "10.100.10.5", name: "gx10-5482", state: "ready", says: "idle", enabled: true, usable: true, guard: true, version: "2.6.6", memory_gb: 116.1, disk_gb: 40, can: { fasth3: true, loras: 0 }, why: "", working: "" },
-              { address: "10.100.10.3", name: "spark-0060", state: "down", says: "stopped answering", enabled: true, usable: false, unusable: "it stopped answering", why: "It stopped answering for 60 s while rendering", working: "", version: "2.6.6" }] };
+    workers: [{ address: "10.0.10.5", name: "spark-node5", state: "ready", says: "idle", enabled: true, usable: true, guard: true, version: "2.6.6", memory_gb: 116.1, disk_gb: 40, can: { fasth3: true, loras: 0 }, why: "", working: "" },
+              { address: "10.0.10.3", name: "spark-node3", state: "down", says: "stopped answering", enabled: true, usable: false, unusable: "it stopped answering", why: "It stopped answering for 60 s while rendering", working: "", version: "2.6.6" }] };
   out.counts = [spkCount(five, 1), spkCount(five, 3), spkCount(five, 5), spkCount({ supported: false }, 1)];
-  answers["/api/sparks"] = five; answers["/api/sparks/plan"] = { supported: true, count: "3 of 5 available", says: "One clip per Spark, 3 at a time: 8 clips on 3 Sparks.", mode: "parallel", without: [{ name: "spark-0060", why: "it stopped answering" }], estimate: { seconds: 80, one_spark: 320, faster: 4, note: "an estimate" } };
+  answers["/api/sparks"] = five; answers["/api/sparks/plan"] = { supported: true, count: "3 of 5 available", says: "One clip per Spark, 3 at a time: 8 clips on 3 Sparks.", mode: "parallel", without: [{ name: "spark-node3", why: "it stopped answering" }], estimate: { seconds: 80, one_spark: 320, faster: 4, note: "an estimate" } };
   await spkLoad(); spkSet(8);  /* above the limit: held to 5 */
   const pick = sparksPick({ kind: "video", clips: 8 }); await new Promise(r => setTimeout(r, 20));
   const buttons = all(pick, "button").filter(b => /^[1-9]$/.test(text(b)));
@@ -631,8 +631,8 @@ vm.runInThisContext(`(async () => { const out = {};
   out.says = text(pick); out.sent = calls.filter(c => c[0] === "/api/sparks/plan").map(c => c[1])[0]; out.kept = calls.some(c => c[0] === "/api/sparks" && c[1] && c[1].sparks === 5);
   tab = "Sparks"; out.page = text(viewSparks());
   /* a Mac at the head: the same list, "this Mac", and where a Spark it cannot reach is reached through */
-  const macHead = { ...five, listed: 2, available: 2, head: "mac", via: "keyspark@192.168.4.174", this: { ...five.this, name: "Mac-Studio", kind: "Mac", guard: false, memory_gb: null },
-    workers: [{ ...five.workers[0], via: "keyspark@192.168.4.174" }] };
+  const macHead = { ...five, listed: 2, available: 2, head: "mac", via: "spark@192.168.1.10", this: { ...five.this, name: "Mac-Studio", kind: "Mac", guard: false, memory_gb: null },
+    workers: [{ ...five.workers[0], via: "spark@192.168.1.10" }] };
   SPK.data = macHead; out.macCount = spkCount(macHead, 1); out.macPage = text(viewSparks()); out.macFields = all(viewSparks(), "input").length;
   /* an older app on a Mac: one machine */
   SPK.data = { supported: false, limit: 5, available: 1, note: "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine.", workers: [], this: {} }; spkSet(5);
@@ -650,14 +650,14 @@ def test_the_page_draws_the_chooser_and_the_list():
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["counts"] == ["this Spark alone", "3 of 3 available Sparks", "3 of 5 available", "this machine"]
     assert out["buttons"] == list("12345") and out["on"] == ["5"] and out["far"] == ["4", "5"]
-    assert "3 of 5 available" in out["says"] and "One clip per Spark" in out["says"] and "spark-0060 (it stopped answering)" in out["says"] and "Estimate" in out["says"]
+    assert "3 of 5 available" in out["says"] and "One clip per Spark" in out["says"] and "spark-node3 (it stopped answering)" in out["says"] and "Estimate" in out["says"]
     assert out["sent"] == {"sparks": 5, "kind": "video", "params": {}, "clips": 8, "seconds": 0} and out["kept"]
-    for words in ("gx10-5482", "10.100.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "3 available"):
+    for words in ("spark-node5", "10.0.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "3 available"):
         assert words in out["page"], words
     assert out["mac"][0] == 1 and out["mac"][1] == ["1"] and "DGX Sparks" in out["mac"][2]
     # a Mac at the head: its own name, no memory guard of its own claimed, and the Through field
     assert out["macCount"] == "this Mac alone" and "This Mac and 1 other" in out["macPage"] and "this Mac" in out["macPage"]
-    assert "10.100.10.5 through keyspark@192.168.4.174" in out["macPage"] and "Through" in out["macPage"] and "memory guard ·" not in out["macPage"].split("gx10-5482")[0]
+    assert "10.0.10.5 through spark@192.168.1.10" in out["macPage"] and "Through" in out["macPage"] and "memory guard ·" not in out["macPage"].split("spark-node5")[0]
     assert out["macFields"] == 3 + 1  # address, folder, through, and each worker's "use" box
     # every job the page queues carries the number
     page = (ROOT / "app/static/index.html").read_text()
