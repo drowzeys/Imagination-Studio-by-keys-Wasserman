@@ -16,7 +16,13 @@
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 PORT="${SPARK_COMFY_PORT:-8190}"
+# The default port keeps the old names. Another port is a second studio on this install.
+if [ "$PORT" = 8190 ]; then COMFY_LOG="$PREFIX/comfy.log"; COMFY_KIND="$PREFIX/comfy.kind"
+else COMFY_LOG="$PREFIX/comfy-$PORT.log"; COMFY_KIND="$PREFIX/comfy-$PORT.kind"; fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$HERE/gpu.sh"
+studio_pin_gpu
 MATCH="[m]ain.py --listen 127.0.0.1 --port $PORT"
 case "${1:-start}" in
   stop)
@@ -27,22 +33,22 @@ case "${1:-start}" in
       for _ in $(seq 1 25); do pgrep -f "$MATCH" >/dev/null || break; sleep 1; done
       MATCH="^[^ ]+ main\.py --listen 127\.0\.0\.1 --port $PORT( |\$)"
     fi
-    pkill -f "$MATCH" 2>/dev/null && echo "stopped" || echo "not running"; rm -f "$PREFIX/comfy.kind";;
+    pkill -f "$MATCH" 2>/dev/null && echo "stopped" || echo "not running"; rm -f "$COMFY_KIND";;
   status) pgrep -f "$MATCH" >/dev/null && echo "running on 127.0.0.1:$PORT" || echo "not running";;
   run)
     export PATH="/usr/local/cuda/bin:$PATH" CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}" MAX_JOBS="${MAX_JOBS:-2}"
     # TensorFold's H3 engine as a ComfyUI node, when it has been built (spark/build-engine.sh)
     NODE="$PREFIX/ComfyUI/custom_nodes/tensorfold_h3"
-    rm -rf "$NODE"
     if [ -s "$PREFIX/tf-h3/libtf_h3.so" ]; then
-      mkdir -p "$NODE" && cp "$HERE/tensorfold_h3/__init__.py" "$NODE/"
+      mkdir -p "$NODE"
+      cp "$HERE/tensorfold_h3/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
       export TF_H3_LIB="$PREFIX/tf-h3/libtf_h3.so"
     fi
     # the Studio's MMAudio sampler (foley), beside kijai's ComfyUI-MMAudio when oneshot-setup-spark.sh --sound put it there
     NODE="$PREFIX/ComfyUI/custom_nodes/studio_mmaudio"
-    rm -rf "$NODE"
     if [ -f "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio/nodes.py" ] && [ -f "$HERE/studio_mmaudio/__init__.py" ]; then
-      mkdir -p "$NODE" && cp "$HERE/studio_mmaudio/__init__.py" "$NODE/"
+      mkdir -p "$NODE"
+      cp "$HERE/studio_mmaudio/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
     fi
     cd "$PREFIX/ComfyUI"
     # --use-ck-attention: ComfyUI's own flash-attention kernel, 12% faster a pass than PyTorch's on a GB10
@@ -74,8 +80,8 @@ case "${1:-start}" in
   start)
     pgrep -f "$MATCH" >/dev/null && { echo "already running"; exit 0; }
     [ -x "$PREFIX/venv/bin/python" ] && [ -f "$PREFIX/ComfyUI/main.py" ] || { echo "run oneshot-setup-spark.sh first: nothing at $PREFIX" >&2; exit 1; }
-    rm -f "$PREFIX/comfy.kind"
-    nohup setsid bash "$0" run > "$PREFIX/comfy.log" 2>&1 < /dev/null &
-    echo "ComfyUI starting on 127.0.0.1:$PORT (log: $PREFIX/comfy.log)";;
+    rm -f "$COMFY_KIND"
+    nohup setsid bash "$0" run > "$COMFY_LOG" 2>&1 < /dev/null &
+    echo "ComfyUI starting on 127.0.0.1:$PORT (log: $COMFY_LOG)";;
   *) echo "usage: comfy.sh start|stop|status" >&2; exit 2;;
 esac

@@ -49,7 +49,14 @@ def test_the_snapshot_answers_fast_with_every_field():
     assert time.time() - started < 0.15
     for key in ("time", "host", "platform", "gpu", "memory", "cpu", "disk", "gpu_lock", "renderer", "jobs", "governor", "warnings"):
         assert key in now, key
-    assert set(now["memory"]) == {"total_mb", "available_mb", "floor_mb", "used_pct"}
+    memory_keys = {"total_mb", "available_mb", "floor_mb", "used_pct"}
+    card = server.memory_guard.device(fresh=True) if server.SPARK else None
+    if card:
+        memory_keys.add("card")
+    assert set(now["memory"]) == memory_keys
+    if card:
+        assert set(now["memory"]["card"]) == {"total_mb", "used_mb", "free_mb", "simulated"}
+        assert now["memory"]["card"]["total_mb"] == card["total_mb"]
     assert now["disk"]["path"] == str(server.HOME) and now["disk"]["total_gb"] > 0
     assert now["renderer"]["comfy"]["port"] and now["jobs"]["current"] is None or isinstance(now["jobs"]["current"], dict)
 

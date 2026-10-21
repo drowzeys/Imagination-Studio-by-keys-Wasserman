@@ -11,6 +11,9 @@
 # UPSAMPLE=0 (FLUX3-K: the prompt as written instead of BFL's upsampler's caption).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$HERE/gpu.sh"
+studio_pin_gpu
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 [ -x "$PREFIX/venv/bin/python" ] || { echo "run oneshot-setup-spark.sh first: no environment at $PREFIX" >&2; exit 1; }
 IMAGE="${1:-}"; PROMPT="${2:-}"; OUT="${3:-}"

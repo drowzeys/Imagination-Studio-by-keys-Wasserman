@@ -141,9 +141,21 @@ def keep_free_mb(floor: int) -> int:
     return int(asked) if asked.isdigit() else floor * 2 // 3
 
 
-def state_file() -> str:
+def comfy_file(ext: str) -> str:
+    """A ComfyUI side file under PREFIX.
+
+    The default port keeps ``comfy.log``, ``comfy.kind`` and ``comfy.mem``. Another ``SPARK_COMFY_PORT`` gets
+    ``comfy-<port>.<ext>``, so two studios that share this install do not share a log or a loaded-model mark.
+    """
+
     prefix = os.environ.get("PREFIX") or os.path.expanduser("~/.local/opt/tensorfold-studio")
-    return os.path.join(prefix, "comfy.mem")
+    port = os.environ.get("SPARK_COMFY_PORT", "8190").strip() or "8190"
+    stem = "comfy" if port == "8190" else f"comfy-{port}"
+    return os.path.join(prefix, f"{stem}.{ext}")
+
+
+def state_file() -> str:
+    return comfy_file("mem")
 
 
 def server_pid() -> int | None:
@@ -176,9 +188,19 @@ VRAM_MARGIN_MB = 2048  # kept free on the card: CUDA's own context and fragmenta
 _DEVICE: dict = {"at": 0.0, "value": None}
 
 
+def nvidia_argv() -> list[str]:
+    """`nvidia-smi` for the studio's card. `STUDIO_GPU` is an nvidia-smi index (`spark/gpu.sh`).
+
+    Unset, the first GPU, which is the only GPU on a DGX Spark. nvidia-smi ignores `CUDA_VISIBLE_DEVICES`, so the
+    index is passed with `-i`."""
+
+    raw = os.environ.get("STUDIO_GPU", "").strip()
+    return ["nvidia-smi", "-i", raw] if raw.isdigit() else ["nvidia-smi"]
+
+
 def smi(*query: str) -> list[list[str]]:
     try:
-        said = subprocess.run(["nvidia-smi", *query, "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
+        said = subprocess.run([*nvidia_argv(), *query, "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return []
     return [[part.strip() for part in line.split(",")] for line in said.stdout.splitlines() if line.strip()] if said.returncode == 0 else []

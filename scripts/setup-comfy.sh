@@ -8,7 +8,7 @@
 #   bash scripts/setup-comfy.sh --verify      # check what is installed, download nothing
 # oneshot-setup.sh --upscale / --remove / --moss run this. Under $PREFIX (default ~/.local/opt/tensorfold-studio):
 #   comfy-venv/    PyTorch (Metal) and ComfyUI's requirements (about 1.6 GB)
-#   ComfyUI/       ComfyUI at the Spark's commit (COMFY_COMMIT in oneshot-setup-spark.sh), the node packs at the Spark's
+#   ComfyUI/       ComfyUI at the CUDA install's commit (COMFY_COMMIT in oneshot-setup-cuda.sh), the node packs at the Spark's
 #                  pins (spark/setup-workflows.sh)
 #   comfy-models/  (MAC_COMFY_MODELS) the files above and MiniMax H3's audio decoder (0.6 GB). MiniMax H3 itself is not
 #                  downloaded again: mac/studio_files reads the Mac's own Ref2VA transformer, text encoder and video
@@ -21,8 +21,8 @@ PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 MODELS="${MAC_COMFY_MODELS:-$PREFIX/comfy-models}"
 H3_MODEL_DIR="${H3_MODEL_DIR:-$HOME/h3-models/MiniMax-H3}"
 VENV="$PREFIX/comfy-venv"; COMFY="$PREFIX/ComfyUI"
-# the Spark's pins, read from its own scripts so the two never drift apart
-COMFY_COMMIT="$(sed -n 's/^COMFY_COMMIT=\([0-9a-f]*\).*/\1/p' "$HERE/oneshot-setup-spark.sh")"
+# the CUDA install's pin, read from that script so the Mac and the CUDA build do not drift apart
+COMFY_COMMIT="$(sed -n 's/^COMFY_COMMIT=\([0-9a-f]*\).*/\1/p' "$HERE/oneshot-setup-cuda.sh")"
 pin() { awk -v n="$1" '$1 == "node" && $2 == n {print $4}' "$HERE/spark/setup-workflows.sh"; }
 TORCH="torch==2.14.1 torchvision==0.29.1"
 UPSCALE=0; REMOVE=0; MOSS=0; VERIFY=0
@@ -47,7 +47,7 @@ if [ "$VERIFY" = 1 ]; then  # what is there decides what is checked
   [ -s "$MODELS/diffusion_models/moss_image_sft_bf16.safetensors" ] && MOSS=1
   [ -d "$COMFY" ] || { note "no ComfyUI at $COMFY: bash scripts/setup-comfy.sh --upscale|--remove|--moss"; exit 1; }
 fi
-[ -n "$COMFY_COMMIT" ] || { echo "no COMFY_COMMIT in oneshot-setup-spark.sh" >&2; exit 1; }
+[ -n "$COMFY_COMMIT" ] || { echo "no COMFY_COMMIT in oneshot-setup-cuda.sh" >&2; exit 1; }
 command -v uv >/dev/null || { echo "  uv is needed: brew install uv" >&2; exit 1; }
 
 # the environment and ComfyUI itself

@@ -21,29 +21,67 @@ one, and none needs another.
 The installers check memory and disk before they download anything and stop with the reason when the machine is
 too small.
 
-**NVIDIA DGX Spark** (GB10, 128 GB unified memory, DGX OS with CUDA 13 and Docker): every feature runs.
+### NVIDIA DGX Spark
+
+GB10, 128 GB unified memory, DGX OS with CUDA 13 and Docker. Every feature runs.
 
 | Install | Disk free | Command |
 |---|---|---|
 | Core: pictures and FastH3 video with sound | 125 GB | `bash oneshot-setup.sh` |
 | **Everything** | **about 400 GB** | `bash oneshot-setup.sh --all` |
 
-**NVIDIA RTX Pro 6000 Blackwell** (96 GB card, x86_64 Linux workstation: Ubuntu 22.04 or 24.04, NVIDIA driver 580 or
-newer, the CUDA 13 toolkit, 64 GB of RAM or more, 128 GB recommended): every feature, with the same one-shot recipe,
-**pending validation on the card**. The installer builds the engines for it (sm_120) and the Studio reads the card's
-own memory; the Bolt brain runs through llama.cpp there. It was simulated as a 96 GB card on a DGX Spark (the whole
-checklist and the heaviest jobs back to back passed, the card never over 72 GB), not yet run on one:
+### NVIDIA RTX Pro 6000 Blackwell
+
+96 GB card, x86_64 Linux workstation (Ubuntu 22.04 or 24.04, NVIDIA driver 580 or newer, the CUDA 13 toolkit, 64 GB
+of RAM or more, 128 GB recommended). The core install runs on the card: pictures and FastH3 video with sound.
+`oneshot-setup-rtx-6000.sh` names the card and runs `oneshot-setup-cuda.sh`, the same install
+`oneshot-setup-spark.sh` runs. That install builds the engines for the card (sm_120) and the Studio reads the card's
+own memory; the Bolt brain runs through llama.cpp there.
 [docs/rtx-pro-6000.md](docs/rtx-pro-6000.md).
 
-| Install | Disk free | Command |
+`oneshot-setup.sh` on Linux reads the first GPU. Use the command below. Set the four variables for the disk and
+the card. `/data/studio` is an example path. No flag is the core (125 GB). Flags are listed under
+[Install flags](#install-flags).
+
+| Variable | Default | Purpose |
 |---|---|---|
-| Core: pictures and FastH3 video with sound | 125 GB | `bash oneshot-setup.sh` |
-| **Everything** | **about 400 GB** | `bash oneshot-setup.sh --all` |
+| `PREFIX` | `~/.local/opt/tensorfold-studio` | Environment, ComfyUI, and the engines |
+| `SPARK_MODELS` | `~/spark-studio-models` | Weights. This is the part that fills a disk |
+| `STUDIO_HOME` | `~/ImaginationStudio` | Projects, renders, uploads, and settings |
+| `STUDIO_GPU` | unset | nvidia-smi index of the card. Required when more than one GPU is not driving a display. Indexes differ by machine |
 
-Other NVIDIA GPUs are untested: the CUDA engines are built and measured for the GB10.
+```bash
+PREFIX=/data/studio SPARK_MODELS=/data/studio/models \
+STUDIO_HOME=/data/studio/ImaginationStudio STUDIO_GPU=1 \
+bash oneshot-setup-rtx-6000.sh
+```
 
-**Apple-silicon Mac** (macOS 26 or later, for Metal 4). What runs depends on the memory. Every figure was measured on
-a Mac Studio M5 Ultra with 256 GB; smaller Macs and M1 to M4 follow from those measurements and are untested.
+The install's `DONE` line prints `STUDIO_GPU` and `scripts/app.sh` only. Pass the same four values again or the app
+looks under `$HOME` and does not find this install. It serves http://127.0.0.1:7870.
+
+```bash
+PREFIX=/data/studio SPARK_MODELS=/data/studio/models \
+STUDIO_HOME=/data/studio/ImaginationStudio STUDIO_GPU=1 \
+bash scripts/app.sh
+```
+
+Ctrl-C in that terminal stops the web app. ComfyUI stays up in its own session, with the models loaded, and keeps
+the card. Stop it from any terminal with the same `PREFIX` and `STUDIO_GPU`. `PREFIX` is this install. `STUDIO_GPU`
+is required when more than one GPU is not driving a display: the stop checks the card first and exits before
+ComfyUI is touched when that variable is missing.
+
+```bash
+PREFIX=/data/studio STUDIO_GPU=1 bash spark/comfy.sh stop
+```
+
+### Other NVIDIA GPUs
+
+Untested. The CUDA engines are built and measured for the GB10.
+
+### Apple silicon
+
+macOS 26 or later, for Metal 4. What runs depends on the memory. Every figure was measured on a Mac Studio M5 Ultra
+with 256 GB; smaller Macs and M1 to M4 follow from those measurements and are untested.
 
 | Memory | M5 family | M1 to M4 | Disk free for `--all` |
 |---|---|---|---|
@@ -55,8 +93,35 @@ a Mac Studio M5 Ultra with 256 GB; smaller Macs and M1 to M4 follow from those m
 `bash oneshot-setup.sh --all --app` installs everything your Mac's memory runs and the double-clickable app. It says
 which features it left out and why. Before that, `brew install python@3.11 uv ffmpeg`.
 
-**Accounts:** FLUX3-K and Stable Audio Open (sound effects) are gated on Hugging Face. Accept their licences with your
-account and run `hf auth login` before installing them; the installer says so when access is missing.
+### Install flags
+
+For `oneshot-setup-rtx-6000.sh` and `oneshot-setup-spark.sh`. A DGX Spark does not set `STUDIO_GPU`. No flag is the
+core: pictures and FastH3 video with sound (125 GB).
+
+| Flag | What it installs |
+|---|---|
+| `--all` | Every feature below, about 400 GB |
+| `--image-only` | Qwen-Image-2.1 only (26 GB) |
+| `--ref2va` | Reference pictures to video (39 GB more) |
+| `--h3-base` | MiniMax H3's own transformer, for keyframe LoRAs and the Library actions (40 GB more) |
+| `--image-edit` | Qwen-Image-2.1's 40-step model (14 GB more) |
+| `--flux3` | FLUX3-K pictures (41 GB more, gated) |
+| `--moss` | MOSS-Image (30 GB more) |
+| `--music` | MiniMax Music 3 (22 GB more) |
+| `--bolt` | Nemotron 3.5 Bolt, the studio's brain (about 25 GB more) |
+| `--sound` | Sound effects and foley (11 GB more, gated) |
+| `--motion` | Motion Previs analysis (0.5 GB) |
+| `--voice` | Fish Audio Drama 3 (about 41 GB more) |
+| `--no-render` | Skip the test clip |
+| `--no-loras` | Skip the essential LoRA bundle (about 4 GB) |
+| `--no-workflows` | Skip the Library action packs |
+| `--verify` | Check an existing install and download nothing |
+| `--upgrade` | Move an existing install to this version and fetch no weights |
+
+### Accounts
+
+FLUX3-K and Stable Audio Open (sound effects) are gated on Hugging Face. Accept their licences with your account and
+run `hf auth login` before installing them; the installer says so when access is missing.
 
 Full recipes, every option and the measured memory of each job: [Install, and the one-click app](#install-and-the-one-click-app)
 (Mac), [DGX Spark (CUDA) build](#dgx-spark-cuda-build).
@@ -70,7 +135,7 @@ design and build the studio in collaboration with Keys, made Wasserman's Filmmak
 [Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
 **3.1.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
-6000 (96 GB; pending validation) ·
+6000 (96 GB) ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MOSS-Image** (text to image, DGX Spark) · **MiniMax H3**
@@ -85,8 +150,8 @@ cores · a 2x video decoder for 2K finals on the Mac
   **Learn → Your phone and other devices** in the app. Details: [The access key](#using-it-on-your-phone).
 - **Automatic updates are on by default**, so an install stays on the latest version: checked every six hours,
   installed when the queue is idle (Settings → Updates turns it off). Worker Sparks follow their head.
-- **NVIDIA RTX Pro 6000 Blackwell (96 GB)** may use the same one-shot recipe, pending validation on the card: engines
-  built for sm_120, the card's own memory read for every job, Bolt through llama.cpp ([docs/rtx-pro-6000.md](docs/rtx-pro-6000.md)).
+- **NVIDIA RTX Pro 6000 Blackwell (96 GB)** uses the same one-shot recipe: engines built for sm_120, the card's own
+  memory read for every job, Bolt through llama.cpp ([docs/rtx-pro-6000.md](docs/rtx-pro-6000.md)).
 - **Every credit, in the app and in the repo.** Settings → About → *Every credit* shows CREDITS.md and the third-party
   notices; about 25 more libraries, conversions and tools are credited, and a test keeps the two in step.
 - **No personal information in the repo**, enforced by a test and by CI; contact goes through GitHub only (Issues,
@@ -3575,6 +3640,8 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
   its new Zig engine drives Metal without MLX. This code lives in the `drowzeys/TensorFold` fork, on 0.6.5.
 - **Tests.** `python -m pytest -q tests`, no GPU or weights; the page tests run the app's JavaScript and need Node 20 or
   newer (skipped without it). GitHub Actions runs the suite on every pull request (`.github/workflows/tests.yml`).
+  A DGX Spark is unchanged. Where a display GPU sits in front of a compute GPU, the suite reads the first compute
+  GPU. Set `STUDIO_GPU` before pytest to pick another.
 
 ## Credits
 

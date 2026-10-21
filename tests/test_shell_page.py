@@ -65,6 +65,16 @@ def run(code: str) -> dict:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
+def test_the_chip_names_the_card_and_a_spark_stays_a_spark():
+    out = run("""out.spark = platName();
+      S.platform_label = "CUDA · NVIDIA RTX PRO 6000 BLACKWELL MAX-Q WORKSTATION EDITION · H3-CUDA"; S.gpu_index = "1";
+      out.rtx = platName(); delete S.gpu_index; out.rtxBare = platName();
+      S.platform = "mac"; S.platform_label = "MAC · APPLE SILICON MX · H3-METAL"; out.mac = platName();""")
+    assert out["spark"] == "DGX Spark"
+    assert out["rtx"] == "RTX PRO 6000 · 1" and out["rtxBare"] == "RTX PRO 6000"
+    assert out["mac"] == "Mac"
+
+
 def test_every_tab_has_one_room_and_old_links_still_work():
     out = run("""out.rooms = ROOMS.map(r => r.name); out.groups = GROUPS.map(g => g.name + ":" + ROOMS.filter(r => r.group === g.id).map(r => r.name).join(","));
       out.homeless = TABS.filter(t => ROOMS.filter(r => r.tabs.includes(t)).length !== 1);

@@ -63,6 +63,16 @@ PACK = Path(__file__).resolve().parent.parent
 SPARK = sys.platform.startswith("linux")
 MAC = sys.platform == "darwin"
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
+
+
+def comfy_kind_path() -> Path:
+    """The loaded-model mark for this process's ComfyUI. Port 8190 keeps PREFIX/comfy.kind."""
+
+    spark = str(Path(__file__).resolve().parent.parent / "spark")
+    if spark not in sys.path:
+        sys.path.insert(0, spark)
+    import memory_guard
+    return Path(memory_guard.comfy_file("kind"))
 SECONDS = (10, 300)  # the longest a song may be, as the app offers it (the model takes up to 360 s)
 CAPTION_LIMIT, LYRICS_LIMIT = 2000, 6000  # characters (the model reads 5000 tokens of caption and lyrics in all)
 SAMPLING = {"steps": (30, 8, 60), "dit_cfg": (1.7, 1.0, 5.0), "ar_cfg": (1.5, 1.0, 5.0), "top_k": (50, 1, 500)}
@@ -351,7 +361,7 @@ class Comfy:
 
     def kind(self) -> str:
         try:
-            return (PREFIX / "comfy.kind").read_text().strip()
+            return comfy_kind_path().read_text().strip()
         except OSError:
             return ""
 
@@ -455,7 +465,7 @@ class Comfy:
         except OSError:
             return False
         try:
-            (PREFIX / "comfy.kind").unlink()
+            comfy_kind_path().unlink()
         except OSError:
             pass
         voice.settle()
@@ -588,7 +598,7 @@ class Cuda(voice.Served):
         """What the studio's ComfyUI server has loaded (spark_generate.py writes it), "" for nothing."""
 
         try:
-            return (PREFIX / "comfy.kind").read_text().strip()
+            return comfy_kind_path().read_text().strip()
         except OSError:
             return ""
 

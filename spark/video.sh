@@ -28,6 +28,9 @@
 # Not on the Spark: MiniMax H3 Turbo (ENGINE=h3, QUALITY) and the 2x decoder (X2, TWOK, QHD).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$HERE/gpu.sh"
+studio_pin_gpu
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 [ "${ENGINE:-fasth3}" = fasth3 ] || { echo "the Spark build renders with FastH3 only (ENGINE=fasth3)" >&2; exit 2; }
 [ "${X2:-0}" != 1 ] || { echo "the 2x decoder is not part of the Spark build: use WIDTH and HEIGHT up to 1344x768" >&2; exit 2; }

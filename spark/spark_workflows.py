@@ -77,7 +77,7 @@ def comfy_pid() -> str:
 def server(action: str) -> None:
     """ComfyUI up with nothing of another kind loaded, and the action's nodes and files present."""
 
-    last = sg.STATE.read_text().strip() if sg.STATE.exists() else ""
+    last = sg.side("kind").read_text().strip() if sg.side("kind").exists() else ""
     other = PATCHED.read_text().split() if PATCHED.exists() else []
     clash = action in PACK and len(other) == 2 and other[0] != PACK[action] and other[1] == comfy_pid()
     # a server another kind of job used (a clip, a picture model, a song) starts again empty: ComfyUI kept FLUX3-K's
@@ -193,7 +193,7 @@ def execute(workflow: dict, sampler: str, parts: int = 1) -> tuple[dict, float]:
     if record["status"].get("status_str") != "success":
         errors = [m[1] for m in record["status"].get("messages", []) if m[0] == "execution_error"]
         detail = errors[0].get("exception_message", "").strip() if errors else json.dumps(record["status"])[:600]
-        sys.exit(f"ComfyUI failed: {detail} (log: {sg.PREFIX}/comfy.log)")
+        sys.exit(f"ComfyUI failed: {detail} (log: {sg.side('log')})")
     saved = {}
     for node, output in record["outputs"].items():
         saved[node] = [item for items in output.values() for item in (items if isinstance(items, list) else [])

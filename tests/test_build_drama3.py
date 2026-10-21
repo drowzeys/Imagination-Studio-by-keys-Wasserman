@@ -75,12 +75,12 @@ def test_it_refuses_another_gpu(box):
     assert not (box["prefix"] / "drama3").exists()
 
 
-def test_an_sm_120_card_builds_for_its_own_target_with_a_warning(box):
-    """An RTX Pro 6000 Blackwell (compute capability 12.0) is not refused: it goes on to a source build for sm_120,
-    said to be untested (here it stops at the missing nvcc)."""
+def test_an_sm_120_card_builds_for_its_own_target(box):
+    """An RTX Pro 6000 Blackwell (compute capability 12.0) is not refused: it goes on to a source build for sm_120
+    (here it stops at the missing nvcc)."""
 
     done = run(box, FAKE_GPU="NVIDIA RTX PRO 6000 Blackwell Workstation Edition", FAKE_CC="12.0")
-    assert "untested there" in done.stderr and "DRAMA3_ANY_GPU=1" not in done.stderr and "no nvcc" in done.stderr
+    assert "untested there" not in done.stderr and "DRAMA3_ANY_GPU=1" not in done.stderr and "no nvcc" in done.stderr
 
 
 def test_the_build_target_follows_the_gpu(box):

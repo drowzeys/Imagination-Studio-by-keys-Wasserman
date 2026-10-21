@@ -233,7 +233,8 @@ def test_an_action_starts_from_an_empty_server_after_another_kind_of_job(monkeyp
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spark"))
     import spark_workflows as W
     stops = []
-    monkeypatch.setattr(W.sg, "STATE", tmp_path / "comfy.kind")
+    kind = tmp_path / "comfy.kind"
+    monkeypatch.setattr(W.sg, "side", lambda ext: kind if ext == "kind" else tmp_path / f"comfy.{ext}")
     monkeypatch.setattr(W, "PATCHED", tmp_path / "comfy.patched")
     monkeypatch.setattr(W.sg, "up", lambda: not stops)
     monkeypatch.setattr(W.sg, "ensure_server", lambda kind: None)

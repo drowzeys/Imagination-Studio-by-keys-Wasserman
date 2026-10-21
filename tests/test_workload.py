@@ -292,7 +292,9 @@ def test_a_stop_by_the_limits_is_said_plainly():
     had = SG.PREFIX
     SG.PREFIX = home
     try:
-        (home / "comfy.log").write_text("loading\n[studio] stopping the managed server: cool start: memory pressure is high\n")
+        log = SG.side("log")
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("loading\n[studio] stopping the managed server: cool start: memory pressure is high\n")
         said = SG.stopped()
     finally:
         SG.PREFIX = had

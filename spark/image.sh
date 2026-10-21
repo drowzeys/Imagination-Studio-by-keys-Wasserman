@@ -13,6 +13,9 @@
 # written; NEGATIVE replaces its template's negative prompt.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$HERE/gpu.sh"
+studio_pin_gpu
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 [ -x "$PREFIX/venv/bin/python" ] || { echo "run oneshot-setup-spark.sh first: no environment at $PREFIX" >&2; exit 1; }
 PROMPT="${1:-}"; OUT="${2:-outputs/image.png}"

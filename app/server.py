@@ -174,8 +174,8 @@ def machine() -> tuple[str, str]:
     if SPARK:
         if not GPU_NAME:
             try:
-                GPU_NAME.append(subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True,
-                                               text=True, timeout=5).stdout.strip().splitlines()[0])
+                GPU_NAME.append(subprocess.run([*memory_guard.nvidia_argv(), "--query-gpu=name", "--format=csv,noheader"],
+                                               capture_output=True, text=True, timeout=5).stdout.strip().splitlines()[0])
             except (OSError, IndexError, subprocess.TimeoutExpired):
                 return "spark", "DGX SPARK · CUDA · H3-CUDA"  # not kept: asked again on a later call
         # the same build on a CUDA workstation (an RTX Pro 6000): named by its card, not as a DGX Spark
@@ -2014,7 +2014,9 @@ def state() -> dict:
             "text_encoders": sorted(text_encoders()),
             # the picture models installed here, in the order the page offers them (IMAGE_MODELS)
             "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
-            "platform": machine()[0], "platform_label": machine()[1], "last_frame": True,
+            "platform": machine()[0], "platform_label": machine()[1],
+            "gpu_index": os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None,
+            "last_frame": True,
             # every clip length the model takes (lengths.py), and the longest this machine renders at each size
             "lengths": {"fps": FPS, "step": lengths.STEP, "shortest": lengths.SHORTEST, "longest": lengths.LONGEST,
                         "presets": {k: longest_frames(v[2]) for k, v in PRESETS.items()}, "custom": longest_frames({"WIDTH": 1344, "HEIGHT": 768})},

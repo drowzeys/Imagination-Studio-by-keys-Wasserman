@@ -199,7 +199,8 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         if not shutil.which("nvidia-smi"):
             return None
         try:
-            done = subprocess.run(["nvidia-smi", f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader,nounits"],
+            argv = guard.nvidia_argv() if guard is not None and hasattr(guard, "nvidia_argv") else ["nvidia-smi"]
+            done = subprocess.run([*argv, f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader,nounits"],
                                   capture_output=True, text=True, timeout=2)
             lines = done.stdout.strip().splitlines()
             return parse_gpu(lines[0]) if done.returncode == 0 and lines else None

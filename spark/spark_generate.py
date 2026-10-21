@@ -46,7 +46,17 @@ if MAC:
 else:
     URL = os.environ.get("SPARK_COMFY_URL", "http://127.0.0.1:" + os.environ.get("SPARK_COMFY_PORT", "8190"))  # the port spark/comfy.sh starts it on
     MODELS = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
-STATE = PREFIX / "comfy.kind"
+
+
+def side(ext: str) -> Path:
+    """This process's ComfyUI log or loaded-model mark. Port 8190 keeps comfy.log and comfy.kind.
+    Read when used: a test can point PREFIX at another folder after this module is imported."""
+
+    port = os.environ.get("SPARK_COMFY_PORT", "8190").strip() or "8190"
+    name = f"comfy.{ext}" if port == "8190" else f"comfy-{port}.{ext}"
+    return PREFIX / name
+
+
 ENGINE_LIB = PREFIX / "tf-h3" / "libtf_h3.so"
 
 FASTH3 = {"bf16": "fastvideo_fasth3_8step_v2_pruned_bf16.safetensors",
@@ -133,13 +143,13 @@ def ensure_server(kind: str) -> None:
                 break
             time.sleep(2)
         else:
-            sys.exit(f"ComfyUI did not answer at {URL}: see {PREFIX}/comfy.log")
+            sys.exit(f"ComfyUI did not answer at {URL}: see {side('log')}")
     kind += TEXT_TAG
-    last = STATE.read_text().strip() if STATE.exists() else ""
+    last = side("kind").read_text().strip() if side("kind").exists() else ""
     if last and last != kind:
         # the picture and video models together would not leave room for the render itself in 128 GB
         call("/free", {"unload_models": True, "free_memory": True})
-    STATE.write_text(kind)
+    side("kind").write_text(kind)
 
 
 def fresh_server(why: str) -> None:
@@ -266,7 +276,7 @@ def render(workflow: dict, sampler: str, named: dict | None = None, stages: list
     if record["status"].get("status_str") != "success":
         errors = [m[1] for m in record["status"].get("messages", []) if m[0] == "execution_error"]
         detail = errors[0].get("exception_message", "").strip() if errors else json.dumps(record["status"])[:600]
-        sys.exit(f"ComfyUI failed: {detail} (log: {PREFIX}/comfy.log)")
+        sys.exit(f"ComfyUI failed: {detail} (log: {side('log')})")
     # the files the save nodes wrote: a loader of a reference video or sound lists its input file among the outputs too
     found = [item for output in record["outputs"].values() for items in output.values()
              for item in (items if isinstance(items, list) else []) if isinstance(item, dict) and item.get("filename")
@@ -580,7 +590,7 @@ def reference(args) -> None:
     check_clip_lengths("audio clip", [(path, probe["audio_seconds"]) for path, probe in sounds])
     sizes = [reference_video_size(*probe["video"], args.width, args.height, args.ref_video_size) for _, probe in probes]
     loras = hub_loras(args.lora)
-    last = STATE.read_text().strip() if STATE.exists() else ""
+    last = side("kind").read_text().strip() if side("kind").exists() else ""
     if up() and (last.startswith("video") or loras or "lora" in last):
         # A LoRA render, and the render after one, start from a server with nothing loaded, as for FastH3: the bf16
         # transformer (40 GB) with a LoRA merged in and the one ComfyUI still holds do not fit side by side.
@@ -737,7 +747,7 @@ def video(args) -> None:
         sparsity = 0.8 if args.width * args.height >= 700_000 else 0.0
     if args.engine == "tensorfold" and not ENGINE_LIB.exists():
         sys.exit(f"no TensorFold engine at {ENGINE_LIB}: run spark/build-engine.sh, or use --engine comfy")
-    last = STATE.read_text().strip() if STATE.exists() else ""
+    last = side("kind").read_text().strip() if side("kind").exists() else ""
     on_comfy = bool(loras) and args.engine != "tensorfold"
     if up() and (on_comfy or base or "lora" in last or "h3base" in last):
         # On a Spark the GPU and the system share one pool. With the bf16 weights (42 GB) a text encoder (26 GB) that
@@ -976,7 +986,7 @@ def music(args) -> None:
               f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
         if not found["fits"]:
             sys.exit("refused before anything was loaded: " + found["reason"])
-    last = STATE.read_text().strip() if STATE.exists() else ""
+    last = side("kind").read_text().strip() if side("kind").exists() else ""
     if up() and last != "music":
         # the song loads into a server with nothing else in it: what ComfyUI's own unloading leaves behind (TensorFold's
         # H3 engine keeps its int8 weights) and the 22 GB of MiniMax Music 3 are not measured side by side
@@ -1120,7 +1130,7 @@ def sound(args) -> None:
                   f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
         if not found["fits"]:
             sys.exit("refused before anything was loaded: " + found["reason"])
-    last = STATE.read_text().strip() if STATE.exists() else ""
+    last = side("kind").read_text().strip() if side("kind").exists() else ""
     if up() and last != args.kind:
         fresh_server(("Stable Audio Open" if args.kind == "sfx" else "MMAudio") + " starts from a server with nothing else loaded")
     ensure_server(args.kind)
@@ -1324,7 +1334,7 @@ def main() -> None:
     except Exception as error:  # noqa: BLE001 - the server went away under the render: say why, not a traceback
         if not isinstance(error, (OSError, ConnectionError)) and type(error).__module__.split(".")[0] != "aiohttp":
             raise
-        sys.exit(stopped() or f"ComfyUI stopped answering during the render: {error} (log: {PREFIX}/comfy.log)")
+        sys.exit(stopped() or f"ComfyUI stopped answering during the render: {error} (log: {side('log')})")
     finally:
         mac_release()
 
@@ -1345,7 +1355,7 @@ def stopped() -> str:
     stops it when the machine runs low."""
 
     try:
-        tail = (PREFIX / "comfy.log").read_text(errors="replace")[-4000:].splitlines()
+        tail = side("log").read_text(errors="replace")[-4000:].splitlines()
     except OSError:
         return ""
     for line in reversed(tail):

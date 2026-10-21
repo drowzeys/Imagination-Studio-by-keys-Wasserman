@@ -176,11 +176,11 @@ def shell_vars(file: Path) -> dict:
 
 
 def spark_fetches() -> list[tuple[str, str, str]]:
-    """(repository, folder under SPARK_MODELS, file) of every ``fetch`` in oneshot-setup-spark.sh."""
+    """(repository, folder under SPARK_MODELS, file) of every ``fetch`` in oneshot-setup-cuda.sh."""
 
     out = []
     flux3 = literals(PACK / "spark" / "spark_generate.py").get("FLUX3")
-    for line in shell_lines(PACK / "oneshot-setup-spark.sh"):
+    for line in shell_lines(PACK / "oneshot-setup-cuda.sh"):
         words = line.split()
         if len(words) >= 4 and words[0] == "fetch" and not words[1].startswith("("):
             for f in words[3:]:

@@ -24,6 +24,7 @@ GB = 1024
 def fresh(monkeypatch):
     monkeypatch.setattr(memory_guard, "_DEVICE", {"at": 0.0, "value": None})
     monkeypatch.delenv("STUDIO_VRAM_GB", raising=False)
+    monkeypatch.delenv("STUDIO_GPU", raising=False)
 
 
 def answers(monkeypatch, gpu=None, apps=None):
@@ -40,6 +41,21 @@ def test_a_card_is_read_from_nvidia_smi(monkeypatch):
     answers(monkeypatch, gpu=["97887", "30000", "67887"])
     assert memory_guard.device() == {"total_mb": 97887, "used_mb": 30000, "free_mb": 67887, "simulated": False}
     assert memory_guard.discrete()
+
+
+def test_studio_gpu_is_the_card_nvidia_smi_is_asked_for(monkeypatch):
+    """The display card can be nvidia-smi's first row. STUDIO_GPU is the index the guard reads."""
+
+    monkeypatch.setenv("STUDIO_GPU", "1")
+    seen = []
+
+    def run(command, *args, **kwargs):
+        seen.append(command)
+        return type("Done", (), {"returncode": 0, "stdout": "97887, 1000, 96887\n"})()
+
+    monkeypatch.setattr(memory_guard.subprocess, "run", run)
+    assert memory_guard.device()["total_mb"] == 97887
+    assert seen[0][:3] == ["nvidia-smi", "-i", "1"]
 
 
 def test_a_dgx_spark_has_no_card_memory_of_its_own(monkeypatch):

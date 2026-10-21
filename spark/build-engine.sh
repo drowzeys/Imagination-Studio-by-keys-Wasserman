@@ -40,7 +40,12 @@ read -r major minor <<<"$version"
 case "$(uname -m)" in aarch64) arch=aarch64;; x86_64) arch=x86_64;; *) echo "no Zig build for $(uname -m)" >&2; exit 1;; esac
 # the GPU's compute capability as nvcc names it: 121 on a GB10 (DGX Spark), 120 on an RTX Pro 6000 Blackwell (a
 # cubin for one does not run on the other); TF_SM overrides, a comma list builds both
-SM="${TF_SM:-$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' .')}"
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gpu.sh"
+studio_pin_gpu
+smi_i=()
+[ -z "${STUDIO_GPU:-}" ] || smi_i=(-i "$STUDIO_GPU")
+SM="${TF_SM:-$(nvidia-smi "${smi_i[@]}" --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' .')}"
 case "$SM" in ''|*[!0-9,]*) SM=121;; esac  # a driver without the field answers with words
 ZIG="$PREFIX/zig-$ZIG_VERSION/zig"
 if [ ! -x "$ZIG" ]; then

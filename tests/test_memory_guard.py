@@ -19,6 +19,19 @@ SPARK_MB, IDLE = 124546, 118700  # the machine the estimates were measured on: a
 LINUX = bool(G.meminfo())
 
 
+def assert_room_matches(alive_server: bool) -> None:
+    """room_mb() against this machine. A Spark's room is its RAM. A discrete card's is the smaller of that and the card."""
+
+    info = G.meminfo()
+    room = G.room_mb()
+    card = G.device_room_mb()
+    ram = info["MemAvailable"]
+    if alive_server:
+        ram = max(ram, info["MemTotal"] - G.IDLE_MB)
+    expect = ram if card is None else min(ram, card + G.floor_mb(info.get("MemTotal")))
+    assert abs(room - expect) < 2000
+
+
 def test_rows_are_the_models_own():
     # TensorFold's node logs 39546 rows for 1376x768, 124 frames (the video's 39216 and the text and sound rows)
     assert G.rows(1376, 768, 124) == 39216
@@ -154,13 +167,13 @@ def test_the_watch_stops_a_process_under_the_floor_and_leaves_one_above_it():
     # the guard wrote down what the machine had when the server started
     before, pid = Path(G.state_file()).read_text().split()
     assert int(before) > 0 and int(pid) == short.pid
-    assert abs(G.room_mb() - G.meminfo()["MemAvailable"]) < 2000  # that server is gone: what is available now
+    assert_room_matches(alive_server=False)  # that server is gone: what is available now
     # a server from before the guard left no note: the machine is taken as otherwise idle, not as full
     had_pid = G.server_pid
     G.server_pid = lambda: 1
     try:
         os.remove(G.state_file())
-        assert G.room_mb() >= G.meminfo()["MemTotal"] - G.IDLE_MB
+        assert_room_matches(alive_server=True)
     finally:
         G.server_pid = had_pid
 
@@ -178,7 +191,7 @@ def test_page_cache_of_a_file_is_given_back():
 def test_what_a_stopped_render_says():
     import spark_generate as sg
 
-    log = sg.PREFIX / "comfy.log"
+    log = sg.side("log")
     log.write_text("[INFO] got prompt\n[tensorfold] memory floor: 11800 MB available, under the floor of 12454 MB: stopping ComfyUI\n"
                    "[tensorfold] memory floor: the server is gone after 0.4 s, 96000 MB available\n")
     said = sg.stopped()

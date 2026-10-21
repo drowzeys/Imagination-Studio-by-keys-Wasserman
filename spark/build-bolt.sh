@@ -30,7 +30,10 @@ say() { echo "[tensorfold] $*"; }
 if [ -x "$OUT/native/bin/tensorfold-native" ] && [ -f "$OUT/native/lib/libbolt.so" ] && [ "$(cat "$OUT/recipe" 2>/dev/null)" = "$STAMP" ]; then
   say "Bolt engine already installed (recipe ${BOLT_RECIPE_COMMIT:0:8}, patches $BOLT_PATCHES)"; exit 0
 fi
-GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gpu.sh"
+studio_pin_gpu
+GPU="$(studio_smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
 case "$GPU" in *GB10*) ;; *)
   [ "${BOLT_ANY_GPU:-0}" = 1 ] || { echo "Mia's Bolt engine is measured on a GB10 (DGX Spark) only; this GPU is '${GPU:-none}'. BOLT_ANY_GPU=1 installs it anyway" >&2; exit 1; };;
 esac

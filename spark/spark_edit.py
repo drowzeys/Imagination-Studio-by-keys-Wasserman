@@ -214,7 +214,7 @@ def main() -> None:
         sys.exit("give --prompt and -o, or --set with a prompt and an output for each edit")
     # After a Library action (Ref2VA in bfloat16, SAM, the latent upscaler) ComfyUI's own unloading leaves too little
     # for Qwen-Image beside it (measured: 12.7 GB free during an edit): that edit starts from a server with nothing loaded.
-    last = sg.STATE.read_text().strip() if sg.STATE.exists() else ""
+    last = sg.side("kind").read_text().strip() if sg.side("kind").exists() else ""
     if sg.up() and last.startswith("workflow"):
         print("[tensorfold] restarting ComfyUI: a picture edit after a Library action starts from a server with nothing loaded", flush=True)
         subprocess.run(["bash", str(sg.HERE / "comfy.sh"), "stop"], check=False)

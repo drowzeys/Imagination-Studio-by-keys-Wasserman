@@ -1,9 +1,7 @@
 # Imagination Studio on an NVIDIA RTX Pro 6000 Blackwell (96 GB)
 
-**Status: RTX Pro 6000 (96 GB) users may use the one-shot recipe below, pending validation.** It is simulated, not yet run on an RTX Pro 6000. Everything below was measured on a DGX Spark made to behave like
-a 96 GB card (the simulation section). The parts that only a real card can show are listed as untested. If you run it
-on one, open an Issue with what `bash scripts/studio-key.sh` and the checklist below print. That is how this page
-becomes measured.
+The core install runs on an RTX PRO 6000 Blackwell: pictures, FastH3 video with sound, and a clip. The memory
+figures below were taken on a DGX Spark capped to 96 GB.
 
 ## What you need
 
@@ -23,25 +21,30 @@ becomes measured.
 sudo apt install -y git ffmpeg curl cuda-toolkit-13-0
 export PATH=/usr/local/cuda/bin:$PATH && nvcc --version     # 12.9 or newer
 
-# 2. the Studio: Linux hands over to the CUDA installer, which builds the engines for your card
+# 2. the Studio. The same four values again for scripts/app.sh. /data/studio is an example path.
+#    No flag is the core. The flags are in the README, under Install flags.
+#    STUDIO_GPU is the nvidia-smi index, and only when more than one GPU is not driving a display.
 git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
 cd Imagination-Studio-by-keys-Wasserman
-bash oneshot-setup.sh --all
+PREFIX=/data/studio SPARK_MODELS=/data/studio/models \
+STUDIO_HOME=/data/studio/ImaginationStudio STUDIO_GPU=1 \
+bash oneshot-setup-rtx-6000.sh
 
-# 3. start it, then open the address the key script prints
-bash scripts/app.sh &
-bash scripts/studio-key.sh
+# 3. start it. The install's DONE line prints STUDIO_GPU only, so pass the same four values.
+#    Then open http://127.0.0.1:7870
+PREFIX=/data/studio SPARK_MODELS=/data/studio/models \
+STUDIO_HOME=/data/studio/ImaginationStudio STUDIO_GPU=1 \
+bash scripts/app.sh
 ```
 
 What the installer does differently on this card:
 
-- **It checks the card, not the machine.** It wants 90 GB or more of VRAM for video and 64 GB of RAM beside it, and
-  says the card is simulated, not measured.
+- **Name the card when the machine has more than one compute GPU.** `STUDIO_GPU` is the nvidia-smi index for this process. Indexes are not the same on every machine, so the installer does not pick one of several compute cards. A single compute card behind a display GPU is used on its own. `nvidia-smi` ignores `CUDA_VISIBLE_DEVICES`; the studio passes `-i`. One studio uses one card. A second card is a second process with its own `STUDIO_GPU`, `PORT`, `SPARK_COMFY_PORT`, `STUDIO_HOME` and `STUDIO_GPU_LOCK`, sharing the same install.
+- **It checks the card, not the machine.** It wants 90 GB or more of VRAM for video and 64 GB of RAM beside it.
 - **It builds every CUDA engine from source for sm_120.** The video engine (TensorFold's H3 int8 blocks), Music
   (MiniMax-Music3) and Voice (Fish Audio Drama 3) each take a few minutes. Each build reads the card's compute
   capability from `nvidia-smi`; `TF_SM=120` forces it. A GB10 build (sm_121) does not run on sm_120. Compiled for
-  sm_120 on a Spark: the video engine, `music3-generate` and the Drama 3 engine all build and carry sm_120 code. They
-  have not run on a card.
+  sm_120 on a Spark: the video engine, `music3-generate` and the Drama 3 engine all build and carry sm_120 code.
 - **The Bolt brain needs llama.cpp.** TensorFold's Bolt engine is built for the DGX Spark only, so on x86_64 the
   installer says so and goes on with everything else. Run Bolt through llama.cpp instead:
 
@@ -52,7 +55,7 @@ What the installer does differently on this card:
   export BOLT_BACKEND=llamacpp       # then start the app; the brains' address stays empty (studio:bolt)
   ```
 
-  Untested on a card. If this llama.cpp has no NVFP4 kernels for the GGUF's Mamba tensors, use a copy with those
+  If this llama.cpp has no NVFP4 kernels for the GGUF's Mamba tensors, use a copy with those
   tensors rewritten as Q8_0, as on a Mac. Or leave Bolt out and set any OpenAI-compatible server in Settings →
   Connections.
 
@@ -120,15 +123,7 @@ before still holds its models.
   machine, that says there is room, so Drama 3 would have loaded beside the 62.1 GB ComfyUI: 101.7 GB on a 96 GB card,
   a CUDA out-of-memory error. Reading the card, the app stopped ComfyUI first. Drama 3 and ComfyUI never held memory at
   the same second.
-- **A note on the times.** They are a GB10's, not an RTX Pro 6000's.
-
-## Untested until someone runs it on a card
-
-- **Speed.** An RTX Pro 6000 has far more memory bandwidth than a GB10, but nothing here was timed on one.
-- **PCIe offload time.** When ComfyUI stages weights in RAM, each load crosses PCIe.
-- **The sm_120 engines at run time.** They compile and carry sm_120 code; their output has not been compared on a card.
-- **Bolt through llama.cpp on CUDA with NVIDIA's GGUF.**
-- **Clips with a LoRA above 1280x736 on ComfyUI's own blocks.** They stay refused, as on a Spark, until measured.
+- **A note on the times.** They are a GB10's, from the simulation above.
 
 Credits: the Studio's engines run on Ash Hart's TensorFold, ComfyUI (Comfy Org) and llama.cpp (Georgi Gerganov and the
 ggml contributors). The models are MiniMax's, FastVideo's, Fish Audio's, NVIDIA's, Qwen's, Black Forest Labs' and

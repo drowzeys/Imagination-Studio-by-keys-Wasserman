@@ -1,0 +1,23 @@
+#!/bin/bash
+# Answer nvidia-smi for the card named by STUDIO_GPU.
+# oneshot-setup-rtx-6000.sh puts this directory first on PATH. The CUDA installer
+# (oneshot-setup-cuda.sh) reads the first row and does not take a GPU index. nvidia-smi ignores
+# CUDA_VISIBLE_DEVICES, so a query that names no device gets -i "$STUDIO_GPU".
+# A query that already names a device, and any call that is not a query, goes through unchanged.
+real="${NVIDIA_SMI_BIN:-/usr/bin/nvidia-smi}"
+if [ -n "${STUDIO_GPU:-}" ]; then
+  named=0
+  for arg in "$@"; do
+    case "$arg" in
+      -i|--id|-i*) named=1;;
+    esac
+  done
+  if [ "$named" = 0 ]; then
+    for arg in "$@"; do
+      case "$arg" in
+        --query-gpu=*|--query-compute-apps=*) exec "$real" -i "$STUDIO_GPU" "$@";;
+      esac
+    done
+  fi
+fi
+exec "$real" "$@"

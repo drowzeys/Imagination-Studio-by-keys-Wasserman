@@ -288,7 +288,7 @@ def test_the_studio_sampler_takes_frames_at_mmaudios_times():
 
 
 def test_the_spark_install_pins_the_nodes_and_starts_the_sampler_beside_them():
-    setup = (ROOT / "oneshot-setup-spark.sh").read_text()
+    setup = (ROOT / "oneshot-setup-cuda.sh").read_text()
     assert "--sound) SOUND=1" in setup and "MMA_COMMIT=8eaeb72edc3aaf2059b57f2d96a1f6f689f19ae2" in setup
     assert "Sound-Comfy/mmaudio" in setup and "Sound-Comfy/checkpoints" in setup and "Sound-Comfy/text_encoders" in setup
     assert "hf_gate" in setup and "CC-BY-NC 4.0" in setup and "Stability AI Community License" in setup
