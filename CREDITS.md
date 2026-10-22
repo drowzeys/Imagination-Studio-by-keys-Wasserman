@@ -324,6 +324,13 @@ DGX Spark and RTX Pro 6000 entries (`oneshot-setup-cuda.sh`), a compute card use
 studio on a second card. He also made **quitting the app stop that install's ComfyUI** (#119), so Ctrl-C frees the
 card on a DGX Spark and an RTX Pro 6000 alike, and the quit no longer ends in a traceback.
 
+## Bug reports from a film made in Slate: BTankut
+
+**BTankut (@BTankut)** made a 2-minute, continuity-first film entirely in Slate and reported what got in the way, each
+report with its cause and a fix (#51 to #60). Four are fixed from those reports (#121): the export keeps a clip's In
+point when Out is 0, the export size survives a redraw, the shot check's "+ timeline, trimmed to it" button shows, and
+Regenerate no longer sends the app's own "Regenerated at seed N" label to the brain as feedback.
+
 ## Platform and tools
 
 - **Apple / ml-explore** — **MLX**, and the Metal 4 tensor operations on M5.

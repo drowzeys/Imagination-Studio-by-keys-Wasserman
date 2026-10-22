@@ -273,6 +273,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
     el("ul", { class: "st-credits" }, ["Keys (drowzeys): the studio itself, its TensorFold families and int8 kernels, and its Mac and DGX Spark engines",
       "Sam Wasserman and Wasserman Productions: helped design and build the studio in collaboration with Keys; Wasserman's Filmmaker Suite (ScriptBreak, Cork Board, Master Canvas, Storyboard Reference Studio, Blockout, Motion Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the studio's art; More local agents and the memory guard's cold-load fix",
       "August Sturm: the RTX Pro 6000 build, run on the card; quitting the app stops its ComfyUI",
+      "BTankut: bug reports from a film made in Slate, with causes and fixes (export trims and size, the shot check button, Regenerate)",
       "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Built with Fish Audio: Fish Audio Drama 3",
       "Stability AI: Stable Audio Open · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio (sound effects and foley)",
       "Ash Hart: TensorFold",
