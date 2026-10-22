@@ -458,7 +458,8 @@ def cast_voices(lines: list[dict], sheets: list[dict | None], warnings: list[str
             continue
         audios.append(path)
         total += seconds
-        notes.append(f"the voice timbre reference for <Subject {int(line.get('subject') or 1)}>'s voice, containing {line['voice']}")
+        whose = f"the off-screen voice of {line.get('speaker') or 'the speaker'}" if line.get("offscreen") else f"<Subject {int(line.get('subject') or 1)}>'s voice"
+        notes.append(f"the voice timbre reference for {whose}, containing {line['voice']}")
     return audios, notes
 
 
@@ -566,16 +567,17 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
         ratio = "16:9"
     size = SIZES[tier][ratio]
 
-    references, subjects = [], []
+    references, subjects, pictured = [], [], []  # pictured: the cast ids of the references, <Subject 1> first
     if start == "cast":
         for sheet in cast:
             stills = [p for p in sheet.get("images") or [] if (HOME / p).is_file()]
             if stills and len(references) < LIMIT:
                 references.append(stills[0])
                 subjects.append(f"{sheet.get('name', 'the person')}, {person(sheet)}".rstrip(", "))
+                pictured.append(sheet.get("id"))
         if not parts.get("ref2va"):
             warnings.append("Reference pictures need the Ref2VA model (oneshot-setup.sh --ref2va); rendering from text.")
-            references, subjects = [], []
+            references, subjects, pictured = [], [], []
         elif not references:
             warnings.append("No one cast in this shot has a still pinned in Casting; rendering from text.")
         if [s for s in cast if not [p for p in s.get("images") or [] if (HOME / p).is_file()]] and references:
@@ -611,15 +613,20 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     # beats, and a production run's timecodes and "the audience sees the collision coming" went to the model.
     action = " ".join(f"{lead[min(i, 3)] if i < len(beats) - 1 or i == 0 else lead[4]} {sentence(b['text'][0].lower() + b['text'][1:])}"
                       for i, b in enumerate(beats))
-    voices, order, lines, sheets = by_id("voices"), [sheet.get("id") for sheet in cast], [], []
+    voices, lines, sheets = by_id("voices"), [], []
     for line in extra.get("lines") or []:
         if not (line.get("text") or "").strip():
             continue
         who = by_id("characters").get(line.get("characterId"))
         sheet = voices.get(line.get("voiceId")) or next((v for v in voices.values() if who and v.get("characterId") == who.get("id")), None)
+        # a speaker who is not one of the reference pictures is heard off screen: given to <Subject 1>, the line was
+        # spoken by whoever is pictured first (issue #56). A line with no speaker named stays with <Subject 1>.
+        away = bool(references and who and who.get("id") not in pictured)
+        if away:
+            warnings.append(f"{who.get('name') or 'A speaker'} speaks but is not pictured in this shot: the line is written as an off-screen voice.")
         lines.append({"voice": voice_of(sheet, line.get("voice") or ""), "text": line["text"].strip(), "language": line.get("language") or "English",
-                      "sung": bool(line.get("sung")), "speaker": who.get("name") if who else "",
-                      "subject": order.index(who["id"]) + 1 if who and references and who.get("id") in order[:len(references)] else 1})
+                      "sung": bool(line.get("sung")), "speaker": who.get("name") if who else "", **({"offscreen": True} if away else {}),
+                      "subject": 0 if away else pictured.index(who["id"]) + 1 if who and who.get("id") in pictured else 1})
         sheets.append(sheet)
     audios, notes = cast_voices(lines, sheets, warnings) if references else ([], [])
     words = sum(len(line["text"].split()) for line in lines)

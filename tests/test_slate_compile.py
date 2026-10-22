@@ -154,6 +154,36 @@ def test_a_shots_own_lora_goes_into_its_plan_and_through_the_memory_guard():
             memory_guard.room_mb = was
 
 
+def test_a_speaker_not_pictured_is_an_offscreen_voice():
+    """A shot on cast stills with a line by someone not pictured (issue #56): the line is an off-screen voice, never
+    given to <Subject 1>, and the preflight says so. Lines go to the subject whose still is in the shot, also when a
+    cast member before them has no still."""
+
+    stills = Path(slate.HOME) / "casting"
+    stills.mkdir(parents=True, exist_ok=True)
+    (stills / "mia.png").write_bytes(b"png")
+    made = film()
+    made["characters"].append({"id": "char-hale", "name": "Hale", "age": "50", "gender": "male"})
+    made["characters"][1]["images"] = ["casting/mia.png"]  # Mia has a still, Leo (cast first) has none
+    tf = made["scenes"][0]["shots"][0]["tf"]
+    tf.update(start="cast", lines=[{"characterId": "char-hale", "text": "Varga, do you copy?"}])
+    had = slate.ready
+    slate.ready = lambda: {"ref2va": True}
+    try:
+        told = slate.compile_shot(made, "shot-1")
+        assert told["mode"] == "references" and told["plan"]["references"] == ["casting/mia.png"]
+        assert "An off-screen voice, Hale, (S1)" in told["prompt"] and "<Subject 1> (S1)" not in told["prompt"]
+        assert "listen with their mouths closed" in told["prompt"]
+        assert any(w.startswith("Hale speaks but is not pictured") for w in told["warnings"])
+        # Mia's own line goes to her picture, <Subject 1>, though Leo comes first in the cast
+        tf["lines"].append({"characterId": "char-mia", "text": "Copy that."})
+        both = slate.compile_shot(made, "shot-1")
+        assert "<Subject 1> (S2)" in both["prompt"] and "During the off-screen lines the mouths in the frame stay closed." in both["prompt"]
+        assert not N.find(N.picture_part(both["prompt"]))
+    finally:
+        slate.ready = had
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):

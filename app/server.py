@@ -884,7 +884,7 @@ def compose_references(fields: dict, count: int) -> str:
         voices.append(f"<Audio {sounds}>")
     scene = (fields.get("scene") or "").strip()
     shot = joined(scene, fields.get("camera", ""), fields.get("action", ""), *follow)
-    spoken = []
+    spoken, away = [], 0
     for index, line in enumerate(fields.get("dialogue") or [], start=1):
         text = (line.get("text") or "").strip()
         if not text:
@@ -892,13 +892,24 @@ def compose_references(fields: dict, count: int) -> str:
         voice = (line.get("voice") or "a natural voice").strip()
         verb = "sings" if line.get("sung") else "speaks"
         language = (line.get("language") or "English").strip()
-        spoken.append(f"<Subject {int(line.get('subject') or 1)}> (S{index}), in {voice}, {verb}: <d>[{language}] {text}</d>")
+        if line.get("offscreen"):  # a speaker who is not pictured (slate.py): a voice from outside the frame
+            away += 1
+            who = (line.get("speaker") or "").strip()
+            spoken.append(f"An off-screen voice{', ' + who + ',' if who else ''} (S{index}), heard from outside the frame in {voice}, {verb}: <d>[{language}] {text}</d>")
+        else:
+            spoken.append(f"<Subject {int(line.get('subject') or 1)}> (S{index}), in {voice}, {verb}: <d>[{language}] {text}</d>")
     if spoken:
         if voices:
             shot += " The speaker's voice timbre references the delivery from " + " and ".join(voices) + "."
-        # a clip longer than its lines: without this the model may keep the mouth moving and invent words
-        shot += (" " + " ".join(spoken) + " Mouth movements follow the words. After the last word the speaker stops"
-                 " talking, closes the mouth and stays silent until the end of the clip.")
+        shot += " " + " ".join(spoken)
+        if away == len(spoken):  # only voices from outside the frame: the people pictured listen
+            shot += " The people in the frame listen with their mouths closed while the off-screen voice speaks."
+        else:
+            # a clip longer than its lines: without this the model may keep the mouth moving and invent words
+            shot += (" Mouth movements follow the words. After the last word the speaker stops"
+                     " talking, closes the mouth and stays silent until the end of the clip.")
+            if away:
+                shot += " During the off-screen lines the mouths in the frame stay closed."
     elif tracks:  # a video's own sound is a reference: it may hold speech, so nothing here says that nobody speaks
         shot += " The sound of " + " and ".join(tracks) + " plays through the clip."
     else:

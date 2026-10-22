@@ -827,7 +827,7 @@ function viewEditor() {
     const player = el("video", { class: "main", controls: true }); const info = el("div", { class: "note" });
     const span = c => [Number(c.in) || 0, Number(c.out) > Number(c.in) ? Number(c.out) : c.duration];
     const load = (i, play) => { at = i; if (!tl[i]) return; const [a] = span(tl[i]); player.src = file(tl[i].path) + "#t=" + a; player.currentTime = a; if (play) player.play().catch(() => {}); mark(); };
-    const strip = el("div", { class: "tl" }); const mark = () => [...strip.children].forEach((n, i) => n.classList.toggle("on", i === at));
+    const strip = el("div", { class: "tl", "data-keep-scroll": "timeline" }); const mark = () => [...strip.children].forEach((n, i) => n.classList.toggle("on", i === at));
     player.addEventListener("timeupdate", () => { const c = tl[at]; if (!c) return; const [, b] = span(c); if (player.currentTime >= b - 0.04 && !player.paused) { if (at + 1 < tl.length) load(at + 1, true); else player.pause(); } });
     player.addEventListener("ended", () => { if (at + 1 < tl.length) load(at + 1, true); });
     const total = () => tl.reduce((s, c) => { const [a, b] = span(c); return s + Math.max(b - a, 0); }, 0);
@@ -1186,20 +1186,42 @@ function jobTools() { const done = jobs.filter(j => ["done", "cancelled"].includ
     el("button", { class: "small", disabled: !failed, title: "Take every failed job out of this list", onclick: () => clearOut({ failed: true }, "Clear the " + count(failed, "failed job") + " from the queue list?") }, "Clear failed (" + failed + ")"),
     el("button", { class: "small", disabled: !done, title: "Every finished or cancelled job leaves this list and its clips, stills and check sheets go to the trash folder. A clip that is in a film (a project's timeline, a Slate take) stays.", onclick: () => clearOut({ finished: true }, "Delete all " + count(done, "finished job") + " and the files they made?\nA clip that is in a film (a project's timeline or a Slate take) stays where it is.") }, "Delete all finished (" + done + ")")] : [])); }
 let lastSig = "";
+// A pointer held down (a click or a tap under way): the page is not rebuilt under it, or the click is lost (#54)
+let HELD = false;
+for (const [on, held] of [["pointerdown", true], ["pointerup", false], ["pointercancel", false]]) document.addEventListener(on, () => { HELD = held; }, true);
+const busyHere = () => HELD || document.activeElement.matches("input,textarea,select");
+// The queue keeps each job's card while the job is unchanged, so a tick, an open log or a click on it survives the poll;
+// a running job's card is redrawn every poll for its clock
+const CARDS = new Map();
+function queueDraw(box) { const shown = jobs.slice(0, 30), was = CARDS.size ? [...box.children] : [];
+  if (!shown.length) { CARDS.clear(); return box.replaceChildren(el("div", { class: "note" }, "Nothing queued yet.")); }
+  const next = new Map(shown.map(job => { const sig = JSON.stringify(job) + (job.status === "running" ? Date.now() : ""), had = CARDS.get(job.id);
+    if (had && had[0] === sig) return [job.id, had];
+    const card = jobCard(job), log = had && had[1].querySelector(":scope > pre"); if (log && !log.classList.contains("hide")) card.querySelector(":scope > pre").classList.remove("hide");
+    return [job.id, [sig, card]]; }));
+  const cards = [...next.values()].map(([, card]) => card);
+  if (was.length === cards.length && shown.every((job, i) => CARDS.has(job.id) && CARDS.get(job.id)[1] === was[i])) cards.forEach((card, i) => { if (was[i] !== card) was[i].replaceWith(card); });
+  else box.replaceChildren(...cards);
+  CARDS.clear(); for (const [id, one] of next) CARDS.set(id, one); }
 async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
-  jobTools(); const box = $("#jobs"); box.replaceChildren(...(jobs.length ? jobs.slice(0, 30).map(jobCard) : [el("div", { class: "note" }, "Nothing queued yet.")])); bayUpdate();
+  if (HELD) return;  // the next poll draws it, once the pointer is up
+  jobTools(); queueDraw($("#jobs")); bayUpdate();
   // a timeline changed from another window or device shows here without a reload
-  if (project && tab === "Editor" && !document.activeElement.matches("input,textarea,select")) { try { const fresh = await api("/api/projects/" + project.id);
+  if (project && tab === "Editor" && !busyHere()) { try { const fresh = await api("/api/projects/" + project.id);
     if (JSON.stringify(fresh.timeline) !== JSON.stringify(project.timeline)) { project = fresh; render(); } } catch {} }
-  const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig) { const had = lastSig; lastSig = sig; if (had && !document.activeElement.matches("input,textarea,select")) render(); } }
+  const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig && !busyHere()) { const had = lastSig; lastSig = sig; if (had) render(); } }
 
-function render() { renderShell(); releaseMedia($("#view"));
+// A redraw keeps where the page and its scrolling strips were (the Editor timeline, #54): marked with data-keep-scroll
+function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [...document.querySelectorAll("[data-keep-scroll]")].map(n => [n.dataset.keepScroll, n.scrollLeft, n.scrollTop]);
+  return () => { for (const [key, left, top] of strips) { const n = document.querySelector(`[data-keep-scroll="${key}"]`); if (n) { n.scrollLeft = left; n.scrollTop = top; } } window.scrollTo(...at); }; }
+function render() { const back = keepScroll(); renderShell(); releaseMedia($("#view"));
   $("#view").replaceChildren({ Home: viewHome, Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Library: viewLibrary,
     Machine: viewMachine, Models: () => typeof viewDiscover === "function" ? viewDiscover() : el("div", { class: "note" }, "Models & weights is not in this build."), Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial, Settings: viewSettings,
     // Nodes is its own module (nodes.js): a page without it says so quietly
     Nodes: typeof viewNodes === "function" ? viewNodes : () => el("div", { class: "panel" }, el("h2", {}, "Nodes"), el("div", { class: "note m-flat" }, "The node canvas is not part of this install yet.")) }[tab]()); coach(); bayUpdate();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
-  if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true); }
+  if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true);
+  back(); }
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
   // links can preset the Create form: ?goes=image, ?engine=h3&res=720p&up=1&step=4 ...
   for (const [k, v] of new URLSearchParams(location.search)) if (k in C && k !== "mode") C[k] = k === "up" ? v === "1" : (k === "step" || k === "count" ? Number(v) : v);

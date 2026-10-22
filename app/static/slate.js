@@ -146,15 +146,15 @@ INTENT: a shot's "intent" is a one-line note for the crew (what the shot is for,
 SPEECH AND SOUND: never write spoken words inside a "prompt". Every spoken line goes in the shot's "lines" with its speaker, about three words per second of the shot at most; a shot with no "lines" is rendered with nobody speaking. Describe ambience and physical sound in "soundscape".
 CAST AND PLACE: add characters and locations BEFORE the shots that use them, then name them in each shot's "cast" and "location" so their sheets are repeated in the compiled prompt.
 MUSIC VIDEOS: when the project has a SONG (or the director gives a tempo: set it with update_project "song"), give every shot "bars": its slot on the bar grid (2 bars at 120 BPM is 4 s). The clip is rendered a little longer than the slot and cut on the bar line; shots follow each other in order from bar 1, so the bars of all shots add up to the song. "lora" puts one installed LoRA on a single shot (a camera move, a look): name one from INSTALLED LORAS only, and null takes it off.
-"opensOn": "previous" makes a shot start on the last frame of the shot before it (one continuous move, no cut); "text" is a fresh frame, a cut.
+"opensOn": "previous" makes a shot start on the last frame of the shot before it (one continuous move, no cut); "text" is a fresh frame, a cut. "cast" opens on the pinned stills of the shot's cast as reference pictures, so the faces stay the same from shot to shot: use it for a shot whose cast are in CAST WITH STILLS when their faces must match other shots (it needs the reference model, renders slower, and leaves the shot's own LoRA out; cast without a still are described in words). "image" opens on a picture as the first frame: give "image" as a path from the Library, or leave it out to open on the first still of the shot's location (LOCATIONS WITH STILLS).
 
 ACTIONS — when (and only when) the director's intent is clear enough to act, include actions. Available actions:
 
 - {"type":"update_project","logline"?,"world"?,"defaults"?:{"aspectRatio"?,"durationSec"?},"song"?:{"name"?,"bpm"?:number,"beatsPerBar"?:number,"firstBeat"?:number}}
 - {"type":"create_scene","name","synopsis"?}
 - {"type":"update_scene","scene":"<name or id>","name"?,"synopsis"?}
-- {"type":"create_shot","scene":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?:{"durationSec"?,"aspectRatio"?,"size"?,"angle"?,"lens"?,"movement"?},"beatSheet"?:[{"from","to","text"}],"lines"?:[{"speaker":"<character name>","text":"<the exact words>"}],"soundscape"?,"cast"?:["<character names>"],"location"?:"<location name>","opensOn"?:("text"|"previous"),"bars"?:number,"lora"?:{"name":"<an installed LoRA>","strength"?:number,"style"?:"<one of its looks>"}|null}
-- {"type":"update_shot","shot":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?,"beatSheet"?,"lines"?,"soundscape"?,"cast"?,"location"?,"opensOn"?,"bars"?,"lora"?}
+- {"type":"create_shot","scene":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?:{"durationSec"?,"aspectRatio"?,"size"?,"angle"?,"lens"?,"movement"?},"beatSheet"?:[{"from","to","text"}],"lines"?:[{"speaker":"<character name>","text":"<the exact words>"}],"soundscape"?,"cast"?:["<character names>"],"location"?:"<location name>","opensOn"?:("text"|"previous"|"cast"|"image"),"image"?:"<a Library path, for opensOn image>","bars"?:number,"lora"?:{"name":"<an installed LoRA>","strength"?:number,"style"?:"<one of its looks>"}|null}
+- {"type":"update_shot","shot":"<name or id>","name"?,"intent"?,"prompt"?,"spec"?,"beatSheet"?,"lines"?,"soundscape"?,"cast"?,"location"?,"opensOn"?,"image"?,"bars"?,"lora"?}
 - {"type":"add_character","name","age"?,"gender"?,"ethnicity"?,"faceFeatures"?,"hair"?,"clothing"?,"expression"?,"eyeDirection"?,"mood"?,"environment"?,"keyLightSide"?,"lightingMood"?}
 - {"type":"add_location","name","interiorExterior"?("interior"|"exterior"|"both"),"description"?,"timeOfDay"?,"weather"?,"architecture"?,"textures"?,"practicalLights"?}
 - {"type":"add_art","kind"("prop"|"wardrobe"|"vehicle"),"name","description"?,"materials"?,"condition"?,"era"?,"distinctive"?}
@@ -182,6 +182,13 @@ const SL_BIBLE = {
   add_voice: { key: "voices", ref: "voice", id: "voice", noun: "voice", added: "Cast voice", unnamed: "Unnamed voice", blank: () => ({ characterId: null, notes: "" }),
     read: (a, str, p) => { const out = slSheetRead(["ageGender", "accent", "timbre", "pitch", "pacing", "energy", "texture", "emotionalRange", "sampleLine"])(a, str, p);
       if (a.characterName !== undefined) { const who = p.characters.find(c => c.name.toLowerCase() === str(a.characterName).toLowerCase()); out.all.characterId = out.sent.characterId = who ? who.id : null; } return out; } } };
+// The First AD's "opensOn": text and previous as they are; cast opens on the cast's pinned stills; image on a Library
+// path it names, else the first still of the shot's location sheet (without either the opening is left as it was)
+function slOpensOn(shot, tf, a, receipts) { const p = SL.p, path = typeof a.image === "string" ? a.image.trim() : "";
+  if (["text", "previous", "cast"].includes(a.opensOn)) tf.start = a.opensOn;
+  else if (a.opensOn === "image") { const place = p.locations.find(l => l.id === tf.location), still = path || ((place && place.images) || [])[0];
+    if (still) { tf.start = "image"; tf.image = still; } else receipts.push(`⚠ ${shot.name}: "image" needs a Library path or a location with a still; its opening is unchanged`); }
+  if (a.opensOn === "cast" && !S.ref2va) receipts.push(`⚠ ${shot.name} opens on cast stills, which need the Ref2VA model: until it is installed it renders from text`); }
 const SL_BIBLE_CHANGE = { update_character: "add_character", update_location: "add_location", update_art: "add_art", update_music_cue: "add_music_cue", update_voice: "add_voice" };
 function slApply(actions) { const p = SL.p, receipts = [], str = v => typeof v === "string" ? v : "";
   const scene = ref => p.scenes.find(s => s.id === ref) || p.scenes.find(s => s.name.toLowerCase() === String(ref || "").trim().toLowerCase());
@@ -189,7 +196,7 @@ function slApply(actions) { const p = SL.p, receipts = [], str = v => typeof v =
   const named = (list, name) => list.find(x => (x.name || "").toLowerCase() === String(name || "").trim().toLowerCase());
   const gear = (shot, a) => { const tf = slTf(shot); if (Array.isArray(a.cast)) tf.cast = a.cast.map(n => named(p.characters, n)).filter(Boolean).map(c => c.id); if (a.location !== undefined) tf.location = (named(p.locations, a.location) || {}).id || "";
     if (Array.isArray(a.lines)) tf.lines = a.lines.filter(l => l && str(l.text).trim()).map(l => ({ characterId: (named(p.characters, l.speaker) || {}).id || null, voiceId: null, text: str(l.text).trim(), language: str(l.language) || "English", sung: !!l.sung }));
-    if (a.soundscape !== undefined) tf.soundscape = str(a.soundscape); if (["text", "previous"].includes(a.opensOn)) tf.start = a.opensOn; tf.h3Auto = true;
+    if (a.soundscape !== undefined) tf.soundscape = str(a.soundscape); slOpensOn(shot, tf, a, receipts); tf.h3Auto = true;
     if (a.bars !== undefined) { const n = Number(a.bars); if (n > 0 && n <= 64) tf.bars = n; else delete tf.bars; }
     if (a.lora !== undefined) { const ask = a.lora && String(a.lora.name || a.lora.id || "").trim().toLowerCase(), hit = ask && slShotLoras().find(r => r.id === ask || (r.name || "").toLowerCase() === ask);
       if (!a.lora) tf.loras = []; else if (hit) tf.loras = [{ id: hit.id, strength: Number(a.lora.strength) || hit.strength || 1, style: str(a.lora.style) && (hit.styles || {})[a.lora.style] !== undefined ? a.lora.style : "" }];
@@ -224,9 +231,12 @@ async function slAD(message) { const p = SL.p, log = p.copilot || (p.copilot = [
   const inv = ["CURRENT SCENE/SHOT INVENTORY (ids in brackets):", ...(p.scenes.length ? [] : ["- (no scenes yet)"]), ...p.scenes.flatMap(sc => [`- Scene "${sc.name}" [${sc.id}]${sc.synopsis ? " — " + sc.synopsis : ""}`,
     ...sc.shots.map(sh => `    · Shot "${sh.name}" [${sh.id}] ${[sh.spec.durationSec && sh.spec.durationSec + "s", sh.spec.size, sh.spec.movement].filter(Boolean).join(", ")} — ${sh.intent || sh.prompt.slice(0, 80).replace(/\n/g, " ") || "empty"}`)])].join("\n");
   const loras = slShotLoras(); const invLoras = "\n\nINSTALLED LORAS (for a shot's \"lora\"): " + (loras.length ? loras.map(r => r.name + (Object.keys(r.styles || {}).length ? " [" + Object.keys(r.styles).join(", ") + "]" : "")).join("; ") : "(none)");
+  const stills = list => list.filter(x => (x.images || []).length).map(x => x.name).join("; ") || "(none)";
+  const invStills = "\n\nCAST WITH STILLS (for opensOn \"cast\"" + (S.ref2va ? "" : "; the reference model is not installed, so these shots render from text") + "): " + stills(p.characters)
+    + "\nLOCATIONS WITH STILLS (for opensOn \"image\"): " + stills(p.locations);
   const convo = log.slice(-14).map(m => `${m.role === "user" ? "DIRECTOR" : "FIRST AD"}: ${m.text}`).join("\n\n");
   log.push({ role: "user", text: message }); slSave();
-  const r = await slBrain("First AD", `${slContext()}\n\n${inv}${invLoras}\n\n${convo ? "CONVERSATION SO FAR:\n" + convo + "\n\n" : ""}DIRECTOR: ${message}`, { json: true, system: SL_AD });
+  const r = await slBrain("First AD", `${slContext()}\n\n${inv}${invLoras}${invStills}\n\n${convo ? "CONVERSATION SO FAR:\n" + convo + "\n\n" : ""}DIRECTOR: ${message}`, { json: true, system: SL_AD });
   if (!r) { log.pop(); return slDraw(); } const receipts = slApply(r.json.actions); log.push({ role: "assistant", text: String(r.json.reply || ""), receipts }); p.copilot = log.slice(-60); slDraw(); }
 
 /* ---------- from a shot to the queue ---------- */
