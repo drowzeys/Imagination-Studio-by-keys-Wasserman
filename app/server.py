@@ -1662,9 +1662,10 @@ def export(job: dict) -> None:
         start = max(0.0, float(clip.get("in", 0.0)))
         end = float(clip.get("out", 0.0))
         inputs += ["-i", str(source)]
-        span = f"trim=start={start}:end={end},setpts=PTS-STARTPTS," if end > start else ""
-        aspan = f"atrim=start={start}:end={end},asetpts=PTS-STARTPTS," if end > start else ""
-        length = (end - start) if end > start else float(clip.get("duration", 5.0))
+        cut = f"start={start}" + (f":end={end}" if end > start else "")  # Out 0 (or before In) plays to the clip's end
+        span = f"trim={cut},setpts=PTS-STARTPTS," if start > 0 or end > start else ""
+        aspan = f"atrim={cut},asetpts=PTS-STARTPTS," if start > 0 or end > start else ""
+        length = (end - start) if end > start else max(float(clip.get("duration", 5.0)) - start, 0.1)
         fade = min(0.08, length / 4)
         filters.append(f"[{index}:v]{span}scale={width}:{height}:force_original_aspect_ratio=decrease,"
                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={FPS}[v{index}]")

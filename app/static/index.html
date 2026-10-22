@@ -76,7 +76,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
     else if (k === "html") n.innerHTML = v; else if (v !== false && v != null) n.setAttribute(k, v === true ? "" : v); }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid.nodeType ? kid : document.createTextNode(kid)); return n; };
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) n.append(kid.nodeType ? kid : document.createTextNode(kid)); return n; };
 // The studio's access key (app/access.py): an answer of 401 that asks for it opens one prompt; the key typed there is
 // kept by the browser as this app's cookie (POST /api/key), so a phone asks once
 const plainFetch = window.fetch.bind(window);
@@ -840,7 +840,8 @@ function viewEditor() {
         el("button", { class: "small", onclick: () => { tl.splice(i, 1); saveProject(); render(); } }, "✕")))));
     if (!tl.length) strip.append(el("div", { class: "note", style: "padding:14px" }, "The timeline is empty. Add clips from the media bin below, or send rendered segments from Production."));
     info.textContent = "Timeline " + total().toFixed(1) + " s · " + tl.length + " clips · project " + project.name + ". Out = 0 plays a clip to its end.";
-    const size = el("select", {}, [["1920x1080", "1920×1080"], ["2560x1440", "2560×1440"], ["2048x1152", "2048×1152"], ["1344x768", "1344×768"]].map(([v, t]) => el("option", { value: v }, t)));
+    const size = el("select", { onchange: () => { project.exportSize = size.value; saveProject(); } }, [["1920x1080", "1920×1080"], ["2560x1440", "2560×1440"], ["2048x1152", "2048×1152"], ["1344x768", "1344×768"]].map(([v, t]) => el("option", { value: v }, t)));
+    if (project.exportSize) size.value = project.exportSize;  // kept on the project: the select is rebuilt on every redraw
     const exp = project.exportJob && jobs.find(j => j.id === project.exportJob);
     put(box, el("h3", {}, "Preview"), player, el("div", { class: "row", style: "margin:8px 0" }, el("button", { class: "fit", disabled: !tl.length, onclick: () => load(0, true) }, "▶ Play the sequence"),
         el("div", { class: "fit", style: "width:150px" }, size), el("button", { class: "primary fit", disabled: !tl.length, onclick: async () => { try { const [w, h] = size.value.split("x").map(Number);
