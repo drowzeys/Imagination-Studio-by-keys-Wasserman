@@ -39,6 +39,12 @@ Wasserman's own art covers the engines, the start, action and vault cards and th
 action's card was rendered with the studio's own FLUX3-K and Qwen 2.1 models, and the home key art was generated with the
 image tool of Sam Wasserman's ChatGPT desktop app (OpenAI). Every picture's source is in `app/static/art/ART-SOURCES.md`.
 
+He also wrote **More local agents** (#114): every OpenAI-compatible model server you run, on this computer, the LAN
+or the tailnet, is an agent of its own beside Bolt and the subscriptions, with Find servers on this computer, a card
+in the Agent room and a place in Slate's brain picker. And the **memory guard's cold-load fix** (#117): a cold start's
+model load, which stalls on the page cache with half the machine free, is no longer stopped (a 2-minute clip was
+stopped so with 62 GB available).
+
 ## The film workflow in Production: Sam Wasserman's Slate
 
 **Sam Wasserman (wassermanproductions.com)** created **Slate**, the prompt studio for AI filmmaking: projects, scenes
@@ -304,8 +310,8 @@ machine; none of their code ships in this pack.
 - **Google** — **Gemini CLI**.
 - **xAI** — **Grok CLI**.
 - **Nous Research** — **Hermes Agent**.
-- **Ollama**, **LM Studio**, **vLLM** and **llama.cpp** (Georgi Gerganov and the ggml contributors) — the local model
-  servers a brain may be.
+- **Ollama**, **LM Studio**, **vLLM**, **SGLang** (the SGLang team and LMSYS) and **llama.cpp** (Georgi Gerganov and
+  the ggml contributors) — the local model servers a brain or a local agent may be.
 - **Siddharth Ahuja** — **blender-mcp**, the Blender bridge an agent works through; the **Blender Foundation** —
   **Blender**.
 - The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
@@ -315,7 +321,8 @@ machine; none of their code ships in this pack.
 **August Sturm (@auguststurm)** ran the Studio's core install on an RTX Pro 6000 Blackwell, the first run on the card
 itself, and made the CUDA install pick the card by its `nvidia-smi` index (`STUDIO_GPU`): one install shared by the
 DGX Spark and RTX Pro 6000 entries (`oneshot-setup-cuda.sh`), a compute card used beside a display card, and a second
-studio on a second card.
+studio on a second card. He also made **quitting the app stop that install's ComfyUI** (#119), so Ctrl-C frees the
+card on a DGX Spark and an RTX Pro 6000 alike, and the quit no longer ends in a traceback.
 
 ## Platform and tools
 
