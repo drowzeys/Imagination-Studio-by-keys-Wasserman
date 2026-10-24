@@ -72,7 +72,7 @@ function lookUseVideo(r) { if (!C.loras) C.loras = [];
 // how many of the hub's LoRAs can be used on this machine now, and why the others cannot (as loraHub's hubTally)
 function lookTally() { const sets = LORAS.filter(r => r.builtin), ok = sets.filter(r => r.usable), not = sets.filter(r => !r.usable);
   const why = r => r.status === "unsupported" ? (r.platforms && !r.platforms.includes("mac") && S.platform !== "spark" ? "DGX Spark only" : "not on this machine") : r.status === "gated" ? "waits on its author's approval of your download" : "not installed";
-  const head = ok.length + " of " + sets.length + " looks are usable on this " + (S.platform === "spark" ? "DGX Spark" : "Mac");
+  const head = ok.length + " of " + sets.length + " looks are usable on this " + (typeof cardFace === "function" && cardFace() ? "GPU" : S.platform === "spark" ? "DGX Spark" : "Mac");
   return not.length ? el("details", { class: "fold" }, el("summary", {}, head), el("div", { class: "note", style: "margin:0" }, "Not usable yet: " + not.map(r => r.name + " (" + why(r) + ")").join(", ") + ".")) : head + "."; }
 
 function lookCard(r) { const st = r.installing, busy = lookBusy(r), dead = r.status === "unsupported", gated = r.status === "gated";

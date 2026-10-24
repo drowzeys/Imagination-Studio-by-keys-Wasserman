@@ -22,17 +22,19 @@ function sparkline(id, tone) { return el("div", { class: "stack m-sparkbox" }, s
 function sparkSet(id, values, max) { const s = document.querySelector('[data-spark="' + id + '"]'); if (!s) return; const [line, area] = sparkPath(values, 600, 64, max); const p = s.querySelectorAll("path"); p[0].setAttribute("d", area); p[1].setAttribute("d", line); }
 const M = { storage: null, loading: false, history: null };
 function machineLive(t) {
-  if (!t) return; const g = t.gpu || {}, mem = t.memory || {}, used = mem.total_mb ? 1 - mem.available_mb / mem.total_mb : 0;
+  if (!t) return; const g = t.gpu || {}, mem = t.memory || {}, card = typeof cardMem === "function" ? cardMem(t) : null;
+  const used = card ? card.used_mb / card.total_mb : (mem.total_mb ? 1 - mem.available_mb / mem.total_mb : 0);
   ringSet("gpu", (g.util_pct || 0) / 100, g.util_pct == null ? "–" : g.util_pct + "%", g.util_pct > 60 ? "var(--amber)" : "var(--green)");
   ringSet("mem", used, Math.round(used * 100) + "%", used > .85 ? "var(--red)" : used > .65 ? "var(--amber)" : "var(--blue)");
   ringSet("temp", (g.temp_c || 0) / 100, g.temp_c == null ? "–" : g.temp_c + "°", g.temp_c > 85 ? "var(--red)" : g.temp_c > 70 ? "var(--amber)" : "var(--green)");
   ringSet("power", (g.power_w || 0) / 240, g.power_w == null ? "–" : Math.round(g.power_w) + "W", "var(--blue)");
   const foot = (k, s) => { const n = document.querySelector('[data-foot="' + k + '"]'); if (n) n.textContent = s; };
   foot("gpu", (g.name || "GPU") + (g.clock_mhz ? " · " + g.clock_mhz + " MHz" : ""));
-  foot("mem", mem.total_mb ? Math.round((mem.total_mb - mem.available_mb) / 1024) + " of " + Math.round(mem.total_mb / 1024) + " GB" + (mem.floor_mb ? " · guard floor " + Math.round(mem.floor_mb / 1024) + " GB" : "") : "–");
+  foot("mem", card ? Math.round(card.used_mb / 1024) + " of " + Math.round(card.total_mb / 1024) + " GB" : (mem.total_mb ? Math.round((mem.total_mb - mem.available_mb) / 1024) + " of " + Math.round(mem.total_mb / 1024) + " GB" + (mem.floor_mb ? " · guard floor " + Math.round(mem.floor_mb / 1024) + " GB" : "") : "–"));
   const noGpu = !t.gpu; if (noGpu) foot("gpu", "no GPU readings on this machine");
   foot("temp", noGpu ? "reported on a DGX Spark" : g.temp_c > 85 ? "hot: renders may slow" : "GPU temperature"); foot("power", noGpu ? "reported on a DGX Spark" : "power draw");
-  const hist = [...(M.history || []), ...SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem }))].slice(-300);
+  // Server history is the RAM percent. On a card the chart is the card, from the live samples only, so the two are not mixed.
+  const hist = (card ? SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem })) : [...(M.history || []), ...SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem }))]).slice(-300);
   sparkSet("gpu", hist.map(s => s.gpu), 100); sparkSet("mem", hist.map(s => s.mem), 100);
   const st = document.querySelector("#machstatus"); if (st) st.replaceChildren(...statusRows(t));
   const w = document.querySelector("#machwarn"); if (w) w.replaceChildren(...(t.warnings || []).map(x => el("div", { class: "warnline" }, el("span", { class: "dotl r m-dot" }), el("div", {}, x))));
@@ -67,7 +69,7 @@ async function loadStorage(draw) { M.loading = true; try { M.storage = await api
   if (M.storage && M.storage.computing) setTimeout(() => { if (document.querySelector("#storage")) loadStorage(draw); }, 2500); }
 function viewMachine() {
   const wrap = el("div");
-  const where = S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : "This machine";
+  const where = typeof cardFace === "function" && cardFace() ? "GPU" : S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : "This machine";
   put(wrap, pageHead("Studio Vault", "Machine", where + ": live readings. Read only, nothing here changes the machine."),
     S.platform_label ? el("div", { class: "m-plat" }, S.platform_label) : null,
     el("div", { id: "machwarn", class: "stack m-warns" }),
@@ -79,10 +81,10 @@ function viewMachine() {
     el("div", { class: "split m-gap" },
       el("div", { class: "stack" },
         el("div", { class: "panel stack" }, el("div", { class: "kv" }, el("h2", { class: "m-flat" }, "GPU load"), el("span", {}, "last 10 minutes")), sparkline("gpu", "green"),
-          el("div", { class: "kv" }, el("h2", { class: "m-flat" }, "Unified memory"), el("span", {}, "% used")), sparkline("mem", "blue")),
+          el("div", { class: "kv" }, el("h2", { class: "m-flat" }, where === "GPU" ? "GPU memory" : "Unified memory"), el("span", {}, "% used")), sparkline("mem", "blue")),
         storagePanel()),
       el("div", { class: "panel" }, el("h2", {}, "Right now"), el("div", { id: "machstatus" }, el("div", { class: "note" }, "Waiting for the first reading…")),
-        el("details", { class: "fold" }, el("summary", {}, "The memory guard"), el("div", { class: "note m-flat" }, "The memory guard checks every clip before it is queued and again before a model loads, and stops the renderer if memory falls under its floor. These readouts show what it sees; they do not change it.")))));
+        el("details", { class: "fold" }, el("summary", {}, "The memory guard"), el("div", { class: "note m-flat" }, where === "GPU" ? "The memory guard checks every clip before it is queued and again before a model loads, and refuses a clip that would leave the GPU under its floor. These readouts show what it sees; they do not change it." : "The memory guard checks every clip before it is queued and again before a model loads, and stops the renderer if memory falls under its floor. These readouts show what it sees; they do not change it.")))));
   api("/api/telemetry/history").then(h => { M.history = (h.samples || []).map(s => ({ gpu: s.gpu, mem: s.mem })); if (SHELL.tel) machineLive(SHELL.tel); }).catch(() => {});
   setTimeout(() => { if (SHELL.tel) machineLive(SHELL.tel); }, 0);
   return wrap;
@@ -495,7 +497,7 @@ function boltPanel(e) {
   if (e.state === "loading" && !BR.boltTimer) BR.boltTimer = setTimeout(() => { BR.boltTimer = null; if (tab === "Brains") { BR.data = null; brainsLoad(); } }, 3000);
   return el("div", { class: "stack m-bolt", "data-bolt": e.state },
     el("div", { class: "kv m-row" }, el("span", {}, "Studio engine"), el("b", { class: e.state === "loaded" ? "vt-ok" : e.error ? "warn" : "" }, boltLine(e))),
-    el("div", { class: "kv m-row" }, el("span", {}, "Backend"), el("b", {}, e.backend_label || e.backend)),
+    el("div", { class: "kv m-row" }, el("span", {}, "Backend"), el("b", {}, typeof measuredLabel === "function" ? measuredLabel(e.backend_label || e.backend) : (e.backend_label || e.backend))),
     el("div", { class: "note m-flat" }, e.available === false && e.why ? e.why : "Loaded on the first question (about " + Math.round(e.load_s || 40) + " s), unloaded " + (e.idle_unload_s ? "after " + Math.round(e.idle_unload_s / 60) + " idle minutes" : "only by hand") + " and before a render that needs its memory, never while it answers. Needs about " + Math.round(e.need_gb || 40) + " GB free to load; holds about " + Math.round(e.resident_gb || 28) + " GB."),
     e.error && e.state !== "loaded" ? el("div", { class: "note m-flat vt-bad" }, e.error) : null,
     el("div", { class: "m-acts" },

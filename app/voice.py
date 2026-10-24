@@ -76,10 +76,26 @@ def tool(name: str) -> str | None:
 
 # ---------- backends ----------
 
+def _linux_ram_gb() -> float:
+    """MemAvailable in GB, or -1 when /proc/meminfo cannot be read."""
+
+    try:
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024 ** 2
+    except (OSError, ValueError, IndexError):
+        pass
+    return -1.0
+
+
 def mem_available_gb() -> float:
     """MemAvailable of this machine in GB (a DGX Spark's GPU and system share one pool); on a Mac what the kernel gets
     back without compressing (telemetry.parse_vm_stat: free, file-backed and purgeable pages), 0 while macOS says its
-    memory pressure is critical; -1 when unknown."""
+    memory pressure is critical; -1 when unknown.
+
+    On a discrete card the number is that card's free memory alone (``gpu_free_gb``), including when system RAM is
+    the smaller one. System RAM is used only when the GPU has no memory of its own."""
 
     if sys.platform == "darwin":
         import telemetry
@@ -91,17 +107,10 @@ def mem_available_gb() -> float:
             return 0.0 if telemetry.mac_pressure_critical() else mb / 1024
         except (OSError, ValueError, subprocess.TimeoutExpired):
             return -1.0
-    ram = -1.0
-    try:
-        with open("/proc/meminfo") as handle:
-            for line in handle:
-                if line.startswith("MemAvailable:"):
-                    ram = int(line.split()[1]) / 1024 ** 2
-                    break
-    except (OSError, ValueError, IndexError):
-        pass
     card = gpu_free_gb()
-    return ram if card is None or ram < 0 else min(ram, card)
+    if card is not None:
+        return card
+    return _linux_ram_gb()
 
 
 def gpu_free_gb() -> float | None:
@@ -117,6 +126,26 @@ def gpu_free_gb() -> float | None:
     except Exception:  # noqa: BLE001  (a reading, never a reason to fail)
         return None
     return None if card is None else card["free_mb"] / 1024
+
+
+def has_card_memory() -> bool:
+    """True when ``gpu_free_gb`` is a number: this GPU has memory of its own.
+
+    A Mac is never that, and this does not ask nvidia-smi there. On Linux a reading ``mem_available_gb`` just took
+    is reused, so a kill loop does not ask twice. A stale reading is taken again."""
+
+    if sys.platform == "darwin":
+        return False
+    try:
+        spark = str(Path(__file__).resolve().parent.parent / "spark")
+        if spark not in sys.path:
+            sys.path.insert(0, spark)
+        import memory_guard
+        if time.monotonic() - memory_guard._DEVICE["at"] >= 2:
+            return gpu_free_gb() is not None
+        return memory_guard._DEVICE["value"] is not None
+    except Exception:  # noqa: BLE001  (a reading, never a reason to fail)
+        return False
 
 
 def comfy_up(port: int | None = None) -> bool:
@@ -249,12 +278,18 @@ class Served:
         self.answers.put({"ok": False, "error": "the engine stopped", "gone": True})
 
     def guard(self, process: subprocess.Popen) -> None:
-        """MemAvailable four times a second; the engine is killed by its PID under the floor."""
+        """Available memory four times a second; the engine is killed by its PID under the floor.
+
+        A DGX Spark and a Mac keep the MemAvailable line. A discrete card names GPU memory, and the number is that
+        card's free memory."""
 
         while process.poll() is None:
             free = mem_available_gb()
             if 0 <= free < self.guard_gb:
-                self.killed = f"MemAvailable {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed {self.title} (pid {process.pid})"
+                if has_card_memory():
+                    self.killed = f"GPU memory {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed {self.title} (pid {process.pid})"
+                else:
+                    self.killed = f"MemAvailable {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed {self.title} (pid {process.pid})"
                 try:
                     os.kill(process.pid, 9)
                 except OSError:
@@ -307,7 +342,8 @@ class Served:
             settle()
             free = mem_available_gb()
         if 0 <= free < self.NEED_GB:
-            raise RuntimeError(f"{self.title} needs about {self.NEED_GB:.0f} GB of free memory to load and this machine has "
+            who = "GPU" if has_card_memory() else "machine"
+            raise RuntimeError(f"{self.title} needs about {self.NEED_GB:.0f} GB of free memory to load and this {who} has "
                                f"{free:.0f} GB available")
 
     def start(self, job: dict) -> bool:
@@ -693,7 +729,8 @@ class Cuda(Served):
                     "DRAMA3_CUDA_CODEC names another)." + found_hint("drama3-codec"))
         free = mem_available_gb()
         if 0 <= free < self.NEED_GB and not comfy_up():
-            return (f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory and this Spark has {free:.0f} GB available now "
+            who = "GPU" if has_card_memory() else "Spark"
+            return (f"Drama 3 needs about {self.NEED_GB:.0f} GB of free memory and this {who} has {free:.0f} GB available now "
                     "(something outside the studio holds the rest).")
         return ""
 

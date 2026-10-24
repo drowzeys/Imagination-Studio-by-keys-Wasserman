@@ -7,8 +7,9 @@ const SUITE_APPS = [
   ["Storyboard Reference", "reframed stills with a prompt each"], ["Master Canvas", "boards, references and shot order"], ["Slate", "the desktop film planner"],
   ["Circle Take", "dailies and a QC gate"], ["Stem Studio", "dialogue, music and effects stems"],
 ];
-function timeOfDay() { const h = new Date().getHours(); return h < 5 ? ["Night shoot", "Still rolling at this hour."] : h < 12 ? ["Morning call", "Fresh light. Good time to scout."]
-  : h < 17 ? ["Afternoon shoot", "Plenty of day left for coverage."] : h < 21 ? ["Golden hour", "Make something that glows."] : ["Tonight's slate", "Queue it up and let the Sparks work."]; }
+function timeOfDay() { const h = new Date().getHours(); const night = typeof cardFace === "function" && cardFace() ? "Queue it up and let the GPU work." : "Queue it up and let the Sparks work.";
+  return h < 5 ? ["Night shoot", "Still rolling at this hour."] : h < 12 ? ["Morning call", "Fresh light. Good time to scout."]
+  : h < 17 ? ["Afternoon shoot", "Plenty of day left for coverage."] : h < 21 ? ["Golden hour", "Make something that glows."] : ["Tonight's slate", night]; }
 function timecode(d = new Date()) { const p = n => String(n).padStart(2, "0"); return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + ":" + p(Math.floor(d.getMilliseconds() / 41.67)); }
 // where Keys and Wasserman Productions publish (Home under the credit; Settings → About lists them with the rest)
 const HOME_LINKS = [["Keys on GitHub", "https://github.com/drowzeys"], ["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"]];
@@ -17,14 +18,15 @@ const startCreate = (set, step = 0) => { Object.assign(C, set); C.step = step; C
 // the machine, in one line: LED, name, GPU, memory against the guard's floor, disk
 function machineStrip() {
   const t = SHELL.tel, gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1), running = jobs.find(j => j.status === "running");
-  const memUsed = t && t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : null;
+  const card = t && typeof cardMem === "function" ? cardMem(t) : null;
+  const memUsed = card ? pct(card.used_mb, card.total_mb) : (t && t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : null);
   const m = (label, v, value, c, floor, cls) => el("div", { class: "m" + (cls ? " " + cls : "") }, el("div", { class: "kv" }, el("span", {}, label), el("b", { "data-k": label }, value)),
     el("div", { class: "gaugebar" }, el("i", { "data-b": label, style: "width:" + Math.max(1, Math.min(100, v || 0)) + "%;--c:" + c }), floor != null ? el("span", { class: "floor", style: "left:" + floor + "%" }) : null));
   return el("div", { class: "mstrip", id: "homemachine" },
     el("div", { class: "who" }, el("span", { class: "dotl" + (running ? " r" : t && (t.warnings || []).length ? " t" : "") }),
       el("div", { style: "min-width:0" }, el("b", {}, platName() || "This machine"), el("span", {}, running ? "Rolling: " + running.title : t && (t.warnings || []).length ? t.warnings[0] : "Ready for the next take"))),
     t && t.gpu ? m("GPU", t.gpu.util_pct, (t.gpu.util_pct ?? "–") + "%" + (t.gpu.temp_c != null ? " · " + t.gpu.temp_c + "°C" : ""), t.gpu.util_pct > 60 ? "var(--red)" : "var(--green)") : el("div", { class: "m" }, el("span", { class: "note", style: "margin:0" }, t ? "" : "Readouts appear once the machine reports them.")),
-    t && t.memory ? m("Memory", memUsed, gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB", memUsed > 85 ? "var(--red)" : "var(--amber)", t.memory.floor_mb ? 100 - pct(t.memory.floor_mb, t.memory.total_mb) : null) : el("div", { class: "m" }),
+    t && t.memory ? m("Memory", memUsed, (card ? gb(card.used_mb) + " of " + gb(card.total_mb) : gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb)) + " GB", memUsed > 85 ? "var(--red)" : "var(--amber)", card ? null : (t.memory.floor_mb ? 100 - pct(t.memory.floor_mb, t.memory.total_mb) : null)) : el("div", { class: "m" }),
     t && t.disk ? m("Disk", t.disk.used_pct, Math.round(t.disk.free_gb) + " GB free", t.disk.used_pct > 90 ? "var(--red)" : "var(--blue)", null, "disk") : el("div", { class: "m disk" }),
     el("button", { class: "small", onclick: () => go("Machine") }, "Telemetry"));
 }
@@ -77,7 +79,9 @@ function hcLength() { const now = hcSeconds(), shorts = Object.keys((S && S.dura
 // the expected time of this length with this recipe (server.estimate: a long take adds up its clips), asked once a choice
 function hcEstimate() { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" }, seconds = hcSeconds(), key = [r.preset, r.quality, seconds].join("|");
   if (!(key in HC.est)) { HC.est[key] = undefined;
-    api("/api/estimate", { preset: r.preset, quality: r.quality, seconds, text_only: true }).then(d => { HC.est[key] = d && d.seconds != null ? d.seconds : null; render(); }, () => { HC.est[key] = null; }); }
+    api("/api/estimate", { preset: r.preset, quality: r.quality, seconds, text_only: true }).then(d => {
+      const card = typeof cardFace === "function" && cardFace();
+      HC.est[key] = d && d.seconds != null && (!card || d.where === "card") ? d.seconds : null; render(); }, () => { HC.est[key] = null; }); }
   return HC.est[key]; }
 // what Generate sends for each kind of take: the same endpoints and bodies the tabs use
 async function hcRequest(mode, text, seed, retake) {

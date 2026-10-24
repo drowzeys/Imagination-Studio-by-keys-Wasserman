@@ -159,6 +159,11 @@ SPARK_FASTH3_5S = {"fh4": {"small": 45, "p720": 111, "native": 113},
 SPARK_COMFY_5S = {"fh4": {"small": 76, "p720": 155, "native": 172},
                   "fh8": {"small": 118, "p720": 260, "native": 289},
                   "fh20": {"small": 244, "p720": 575, "native": 642}}
+# A discrete card's own warm samples, written beside the GB10 tables. Not a copy of those tables.
+# One entry is one canvas: (quality, preset, seconds, text_only) -> wall seconds, models already loaded.
+# A cold load is not an entry. Nothing else is priced from it: not another canvas, pass count, or length,
+# and not a clip that opens on a picture. Empty until this GPU has a sample. The line may then say "on this card."
+CARD_WARM: dict[tuple, int] = {}
 
 
 GPU_NAME: list[str] = []  # asked of the driver once: see machine()
@@ -184,6 +189,14 @@ def machine() -> tuple[str, str]:
                          else f"CUDA · {GPU_NAME[0].upper()} · H3-CUDA")
     # no chip name: the same recipe runs from an M1 with 64 GB up
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
+
+
+def card_face() -> bool:
+    """The discrete-card face of the CUDA build. The banner ``machine()`` writes starts with ``CUDA · ``.
+
+    A GB10, and a failed nvidia-smi, start with ``DGX SPARK``. The pages' ``cardFace()`` reads that same banner."""
+
+    return bool(SPARK and machine()[1].startswith("CUDA · "))
 
 
 app = FastAPI(title="Imagination Studio by keys+Wasserman, powered by TensorFold, built with Fish Audio Drama 3")
@@ -1254,6 +1267,15 @@ def references(params: dict) -> dict:
 
 def estimate(preset: str, quality: str, seconds: float, text_only: bool = False, referenced: bool = False,
              ref_turbo: bool = False, ref_media: bool = False) -> int | None:
+    if card_face():
+        # this GPU's own sample of this canvas, or no number. Not the GB10 table, and not a power of it.
+        if referenced or ref_media or seconds > LONGEST:
+            return None
+        seconds_key = float(seconds)
+        if seconds_key.is_integer():
+            seconds_key = int(seconds_key)
+        hit = CARD_WARM.get((quality, preset, seconds_key, bool(text_only)))
+        return None if hit is None else int(hit)
     if referenced and ref_media:
         return None  # a reference video or audio clip adds its own rows to every pass: the time depends on its length
     if referenced:
@@ -1390,7 +1412,10 @@ def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
     room = bolt_room_mb(resident_gb)
     if room is None:
         return None
-    floor = memory_guard.floor_mb()
+    # On a card the floor is the 2 GB margin, once. bolt_room_mb is that room after the margin, so the voice
+    # branch adds the margin back and compares it once. A Spark keeps a tenth of its RAM.
+    on_card = memory_guard.discrete()
+    floor = memory_guard.VRAM_MARGIN_MB if on_card else memory_guard.floor_mb()
     try:
         if kind in ("video", "studio", "long"):
             chosen, _ = custom(params) if params.get("preset") == "custom" else ({}, False)
@@ -1401,15 +1426,19 @@ def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
             said = memory_of(params, sized, frames, bool(params.get("loras")), found, available_mb=room)
         elif kind == "music":
             said = memory_guard.music_check(float(params.get("seconds") or 60), available_mb=room,
-                                            route=getattr(music.engine(), "guard_route", "music"))
+                                            route=getattr(music.engine(), "guard_route", "music"), card=on_card)
         elif kind in sound.KINDS:
-            said = memory_guard.sound_check(kind, float(params.get("seconds") or 10), available_mb=room)
+            said = memory_guard.sound_check(kind, float(params.get("seconds") or 10), available_mb=room, card=on_card)
             if said.get("need_mb") is None:
                 return None
         elif kind == "voice":
             one = voice.backend()
             need = 0 if one.loaded() else int(float(getattr(one, "NEED_GB", 50)) * 1024)
-            said = {"fits": room - need >= floor, "need_mb": need, "available_mb": room}
+            if on_card:
+                have = room + memory_guard.VRAM_MARGIN_MB
+                said = {"fits": have - need >= memory_guard.VRAM_MARGIN_MB, "need_mb": need, "available_mb": have}
+            else:
+                said = {"fits": room - need >= floor, "need_mb": need, "available_mb": room}
         else:
             return None
     except (HTTPException, ValueError, KeyError, TypeError):
@@ -1438,9 +1467,19 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
     engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
     # a Drama 3 server kept loaded after a voice take is unloaded before this job starts (voice.release): its memory
     # counts as this job's, like the ComfyUI server's own; so does MiniMax Music 3's CUDA engine (music.release), and
-    # NVIDIA Nemotron 3.5 Bolt's (bolt.admit unloads it when the job does not fit beside it)
-    room = held_room() if available_mb is None else available_mb
-    return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room,
+    # NVIDIA Nemotron 3.5 Bolt's (bolt.admit unloads it when the job does not fit beside it).
+    # On a card that memory is the card's raw free before the engine loaded. held_room() mixes it with the
+    # after-margin card room, so it is not passed in. A caller that already adjusted the card's room (Bolt beside
+    # the job) passes it through and the margin is applied once.
+    on_card = memory_guard.device_room_mb() is not None
+    if on_card and available_mb is None:
+        room = memory_guard.card_room_for_job([voice.room_mb(), music.room_mb(), bolt.room_mb()])
+        card = True
+    elif on_card:
+        room, card = available_mb, True
+    else:
+        room, card = (held_room() if available_mb is None else available_mb), False
+    return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room, card=card,
                               base=env.get("SPARK_BASE") == "h3", engine=engine,
                               pictures=len(found.get("pictures") or []),
                               reference_frames=sum(min(frames, int(round((media_seconds(path)[0] or frames / FPS) * FPS))) for path in videos))
@@ -2146,11 +2185,13 @@ def estimate_time(body: dict) -> dict:
             room = None  # the settings are refused for another reason when the job is queued
     if body.get("preset") == "custom" or body.get("steps") not in (None, "") or body.get("loras"):
         return {"seconds": None, "memory": room}  # a LoRA changes which engine renders the clip: no time is measured for it
-    return {"seconds": estimate(body.get("preset", "draft"), body.get("quality", "standard"),
-                                clip_seconds({"frames": body.get("frames"), "seconds": body.get("seconds", 5)})
-                                if float(body.get("seconds") or 5) <= LONGEST + 1 or body.get("frames") else int(body["seconds"]),
-                                bool(body.get("text_only")), bool(body.get("referenced")),
-                                bool(body.get("ref_turbo")), bool(body.get("ref_media"))), "memory": room}
+    seconds = estimate(body.get("preset", "draft"), body.get("quality", "standard"),
+                       clip_seconds({"frames": body.get("frames"), "seconds": body.get("seconds", 5)})
+                       if float(body.get("seconds") or 5) <= LONGEST + 1 or body.get("frames") else int(body["seconds"]),
+                       bool(body.get("text_only")), bool(body.get("referenced")),
+                       bool(body.get("ref_turbo")), bool(body.get("ref_media")))
+    # "card" marks a warm sample of this canvas. A GB10 number is never sent under that mark.
+    return {"seconds": seconds, "memory": room, **({"where": "card"} if seconds is not None and card_face() else {})}
 
 
 def clip_estimate(kind: str, params: dict, referenced: bool = False, ref_media: bool = False) -> int | None:
@@ -2856,8 +2897,16 @@ def about_this_spark() -> dict:
 
     listing = next(route.endpoint for route in lora_router.routes if route.path == "/api/loras" and "GET" in route.methods)
     info = memory_guard.meminfo()
-    memory = {"available_mb": info.get("MemAvailable"), "total_mb": info.get("MemTotal"), "room_mb": max(memory_guard.room_mb() or 0, voice.room_mb() or 0) or None,
-              "floor_mb": memory_guard.floor_mb(info.get("MemTotal"))} if SPARK and info else {}
+    card = memory_guard.device() if SPARK else None
+    if card is not None:
+        # This machine's own line. A worker still reports whatever its own /api/spark/self says.
+        memory = {"available_mb": card["free_mb"], "total_mb": card["total_mb"],
+                  "room_mb": memory_guard.device_room_mb(), "floor_mb": memory_guard.VRAM_MARGIN_MB}
+    elif SPARK and info:
+        memory = {"available_mb": info.get("MemAvailable"), "total_mb": info.get("MemTotal"), "room_mb": max(memory_guard.room_mb() or 0, voice.room_mb() or 0) or None,
+                  "floor_mb": memory_guard.floor_mb(info.get("MemTotal"))}
+    else:
+        memory = {}
     with lock:
         active = sum(1 for job in jobs.values() if job["status"] in ("queued", "running"))
     # what it renders with its own settings: a head on a Mac hands a Spark only these (sparks.capable)

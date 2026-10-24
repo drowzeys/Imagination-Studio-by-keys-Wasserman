@@ -20,7 +20,7 @@ LINUX = bool(G.meminfo())
 
 
 def assert_room_matches(alive_server: bool) -> None:
-    """room_mb() against this machine. A Spark's room is its RAM. A discrete card's is the smaller of that and the card."""
+    """room_mb() against this machine. A Spark's room is its RAM. A discrete card's is the card's room."""
 
     info = G.meminfo()
     room = G.room_mb()
@@ -28,7 +28,7 @@ def assert_room_matches(alive_server: bool) -> None:
     ram = info["MemAvailable"]
     if alive_server:
         ram = max(ram, info["MemTotal"] - G.IDLE_MB)
-    expect = ram if card is None else min(ram, card + G.floor_mb(info.get("MemTotal")))
+    expect = card if card is not None else ram
     assert abs(room - expect) < 2000
 
 
@@ -111,7 +111,7 @@ def test_the_estimate_follows_the_measured_points():
 
 def test_another_programs_memory_counts_against_the_clip():
     found = G.check(1376, 768, 243, available_mb=IDLE - 30000, total_mb=SPARK_MB)  # a model server holding 30 GB
-    assert found["fits"] is False and "needs about" in found["reason"]
+    assert found["fits"] is False and "needs about" in found["reason"] and "this machine has" in found["reason"]
     near = found["nearest"]
     assert near["frames"] or near["size"]
     if near["size"]:
@@ -226,8 +226,10 @@ def test_the_app_refuses_before_the_job_is_queued():
     if not server.SPARK:
         return
     client = TestClient(server.app)
-    had = G.room_mb
+    had, had_device, had_held = G.room_mb, G.device_room_mb, server.held_room
     G.room_mb = lambda: IDLE  # an idle Spark, whatever this machine is doing now
+    G.device_room_mb = lambda: None  # a card reads its own room and would ignore the stand-in above
+    server.held_room = lambda: None
     try:
         told = client.post("/api/estimate", json={"preset": "sharp", "quality": "fh8", "seconds": 5, "with_lora": True}).json()
         assert told["memory"]["fits"] is False and "What fits" in told["memory"]["reason"]
@@ -246,7 +248,7 @@ def test_the_app_refuses_before_the_job_is_queued():
         finally:
             server.lora_resolve = was
     finally:
-        G.room_mb = had
+        G.room_mb, G.device_room_mb, server.held_room = had, had_device, had_held
 
 
 

@@ -575,7 +575,8 @@ class Cuda(voice.Served):
             return why
         free = voice.mem_available_gb()
         if 0 <= free < self.NEED_GB and not voice.comfy_up():
-            return (f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this Spark has {free:.0f} GB available "
+            who = "GPU" if voice.has_card_memory() else "Spark"
+            return (f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this {who} has {free:.0f} GB available "
                     "now (something outside the studio holds the rest).")
         return ""
 
@@ -835,10 +836,16 @@ def checked(body: dict) -> dict:
     if SPARK:
         import memory_guard
 
-        # a loaded Drama 3 or MiniMax Music 3 server gives its memory back before the song loads (or is the song's)
-        held = [one for one in (voice.room_mb(), room_mb()) if one]
-        room = max([memory_guard.room_mb() or 0] + held) if held else None
-        found = memory_guard.music_check(seconds, available_mb=room, route=getattr(engine(), "guard_route", "music"))
+        # a loaded Drama 3 or MiniMax Music 3 server gives its memory back before the song loads (or is the song's).
+        # On a card that is the card's raw free before the engine loaded. The margin is applied once. Bolt is not
+        # in this set. A RAM room is not mixed in.
+        if memory_guard.device_room_mb() is not None:
+            have = memory_guard.card_room_for_job([voice.room_mb(), room_mb()])
+            found = memory_guard.music_check(seconds, available_mb=have, route=getattr(engine(), "guard_route", "music"), card=True)
+        else:
+            held = [one for one in (voice.room_mb(), room_mb()) if one]
+            room = max([memory_guard.room_mb() or 0] + held) if held else None
+            found = memory_guard.music_check(seconds, available_mb=room, route=getattr(engine(), "guard_route", "music"))
         if not found["fits"]:
             raise HTTPException(400, found["reason"])
     params["asr"] = body.get("asr", True) is not False

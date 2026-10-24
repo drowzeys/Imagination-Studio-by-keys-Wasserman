@@ -229,7 +229,7 @@ def server_pid() -> int | None:
 # ---------- a discrete GPU: an NVIDIA card with memory of its own (an RTX Pro 6000 Blackwell, 96 GB) ----------
 # A DGX Spark's GB10 has one memory for the CPU and the GPU (nvidia-smi says [N/A] for the GPU's), and everything above
 # reads it as /proc/meminfo. A card with its own memory is full long before the machine's RAM is: there a job's room is
-# the smaller of the two. The estimates stay the Spark's, measured as the fall of the whole machine's memory: a card
+# the card's own (device_room_mb, the 2 GB margin already taken out). The estimates stay the Spark's, measured as the fall of the whole machine's memory: a card
 # holds a part of that (the rest is the processes' own RAM), so they are an upper bound there.
 # STUDIO_VRAM_GB pretends to be such a card on a Spark (the RTX Pro 6000 simulation, docs/rtx-pro-6000.md): its total
 # is that, its used memory what the CUDA processes hold (nvidia-smi's compute apps).
@@ -305,14 +305,32 @@ def device_room_mb() -> int | None:
     return max(0, card["free_mb"] + held - VRAM_MARGIN_MB)
 
 
+def card_room_for_job(raw_befores: list | None = None) -> int | None:
+    """The card's room for a job that unloads Drama 3, Music, or Bolt first (MB, the 2 GB margin already out).
+
+    ``device_room_mb`` adds back only the ComfyUI server. Each engine's ``room_mb`` is the card's raw free memory
+    just before that engine loaded, which the job gets back. The room is the larger of those, and the margin is
+    taken out once. None on a Spark (``device_room_mb`` is None). System RAM is not mixed in. A caller that already
+    holds an after-margin room (Bolt beside the job) does not use this."""
+
+    base = device_room_mb()
+    if base is None:
+        return None
+    raw = base + VRAM_MARGIN_MB
+    for one in raw_befores or ():
+        if one:
+            raw = max(raw, int(one))
+    return max(0, raw - VRAM_MARGIN_MB)
+
+
 def room_mb() -> int | None:
     """What this machine has for a render, with none of the Studio's own models counted against it: what is
     available now, or, while the ComfyUI server runs, what was available when it started (the guard beside it
     wrote that down). A server from before the guard has no such note: the machine is then taken as otherwise
     idle. None where there is no /proc/meminfo.
 
-    On a discrete card the smaller of that and the card's room. The checks keep ``floor_mb`` of the machine's RAM
-    free; on the card only VRAM_MARGIN_MB, so the card's room is given here with the floor added back."""
+    On a discrete card, that card's room only (``device_room_mb``, the 2 GB margin already taken out). System RAM
+    is not a second pool. The Spark branch, ``device_room_mb`` None, returns the RAM figure above and is not mixed."""
 
     info = meminfo()
     now = info.get("MemAvailable")
@@ -330,7 +348,7 @@ def room_mb() -> int | None:
         if server_pid():
             ram = max(now, info["MemTotal"] - IDLE_MB)
     card = device_room_mb()
-    return ram if card is None else min(ram, card + floor_mb(info.get("MemTotal")))
+    return ram if card is None else card
 
 
 # ---------- layer 1: the estimate ----------
@@ -378,9 +396,31 @@ def says(frames: int) -> str:
     return f"{frames} frames ({frames / FPS:.1f} s)"
 
 
+def _pool(available_mb: int | None, total_mb: int, card: bool = False) -> tuple[int, int, bool]:
+    """(available MB, floor MB, whether the sentence names the GPU).
+
+    A caller that omits ``available_mb`` on a discrete card gets the card's free memory, with what the studio's
+    ComfyUI server holds counted back, and the 2 GB margin as the floor. ``room_mb`` on a card is that room after
+    the margin, so the margin is added back here and compared once.
+
+    ``card`` is for a caller that already passed that after-margin room (a job beside Bolt). A passed
+    ``available_mb`` without it keeps the Spark arithmetic, so a test that names a Spark's pool stays on it even
+    when this machine has a card.
+    """
+
+    live = device_room_mb()
+    if live is not None and available_mb is None:
+        return live + VRAM_MARGIN_MB, VRAM_MARGIN_MB, True
+    if card and available_mb is not None:
+        return available_mb + VRAM_MARGIN_MB, VRAM_MARGIN_MB, True
+    if available_mb is None:
+        available_mb = room_mb() or total_mb - IDLE_MB
+    return available_mb, floor_mb(total_mb), False
+
+
 def check(width: int, height: int, frames: int, lora: bool = False, references: bool = False, base: bool = False,
           engine: bool = True, pictures: int = 0, reference_frames: int = 0, available_mb: int | None = None,
-          total_mb: int | None = None) -> dict:
+          total_mb: int | None = None, card: bool = False) -> dict:
     """Whether this clip fits this machine. ``available_mb`` is what the machine has with none of the Studio's own
     models loaded (default: all of it less what an idle Spark keeps). Returns {"fits", "reason", "need_mb",
     "error_mb", "left_mb", "floor_mb", "available_mb", "route", "rows", "nearest"}; on a machine without
@@ -390,10 +430,8 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
         total_mb = meminfo().get("MemTotal", 0)
     if not total_mb:
         return {"fits": True, "reason": "", "route": None}
-    measured_here = available_mb is None
-    if available_mb is None:
-        available_mb = room_mb() or total_mb - IDLE_MB
-    floor = floor_mb(total_mb)
+    measured_here = available_mb is None and not card
+    available_mb, floor, on_card = _pool(available_mb, total_mb, card)
     route = route_of(lora, references, base, engine)
     patched = lora and route in MEASURED_PIXELS  # a LoRA or the Turbo adapter merged into the weights as they load
 
@@ -426,14 +464,15 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
                 "is not known, and a clip with a LoRA on the bfloat16 weights (1376x768, 124 frames) took a Spark down, "
                 "so it is refused")
     else:
+        who = "GPU" if on_card else "machine"
         said = (f"{what} renders on {how} and needs about {need / 1000:.0f} GB at its peak (give or take {ERROR_MB / 1000:g}); this "
-                f"machine has {available_mb / 1000:.0f} GB for it and keeps {floor / 1000:.0f} GB free as its floor, so it is refused")
+                f"{who} has {available_mb / 1000:.0f} GB for it and keeps {floor / 1000:.0f} GB free as its floor, so it is refused")
     fit = [f"{says(shorter)} at this size" if shorter else "", f"{smaller[0]}x{smaller[1]} at this length" if smaller else ""]
     fit = " or ".join(bit for bit in fit if bit)
     out["reason"] = said + (f". What fits: {fit}." if fit else ". No smaller size or shorter length of this kind fits either.")
     if lora and why == "memory" and route == "bf16":
         out["reason"] += " Without the LoRA the clip runs on the int8 engine, which needs less."
-    if why == "memory" and measured_here:
+    if why == "memory" and measured_here and not on_card:
         out["reason"] += held_note()
     return out
 
@@ -459,7 +498,8 @@ MUSIC_CUDA_MEASURED = {"music-cuda-int8": ((30, 30.0, 16_632), (60, 60.0, 17_928
                        "music-cuda-bf16": ((30, 30.0, 24_012), (60, 60.0, 25_485), (120, 61.3, 25_683), (120, 120.0, 26_647))}
 
 
-def music_check(seconds: float, available_mb: int | None = None, total_mb: int | None = None, route: str = "music") -> dict:
+def music_check(seconds: float, available_mb: int | None = None, total_mb: int | None = None, route: str = "music",
+                card: bool = False) -> dict:
     """Whether a MiniMax Music 3 song of up to ``seconds`` fits this machine, as ``check`` answers for a clip:
     ``route`` "music" (ComfyUI's nodes) or "music-cuda-int8" / "music-cuda-bf16" (TensorFold's CUDA engine);
     everything fits where there is no /proc/meminfo."""
@@ -468,10 +508,8 @@ def music_check(seconds: float, available_mb: int | None = None, total_mb: int |
         total_mb = meminfo().get("MemTotal", 0)
     if not total_mb:
         return {"fits": True, "reason": "", "route": None}
-    measured_here = available_mb is None
-    if available_mb is None:
-        available_mb = room_mb() or total_mb - IDLE_MB
-    floor = floor_mb(total_mb)
+    measured_here = available_mb is None and not card
+    available_mb, floor, on_card = _pool(available_mb, total_mb, card)
     fixed, per_second = MUSIC_CUDA_ESTIMATE.get(route) or MUSIC_ESTIMATE
     route = route if route in MUSIC_CUDA_ESTIMATE else "music"
     need = int(fixed + per_second * float(seconds))
@@ -479,10 +517,11 @@ def music_check(seconds: float, available_mb: int | None = None, total_mb: int |
     out = {"fits": left >= floor, "reason": "", "need_mb": need, "error_mb": ERROR_MB, "left_mb": left, "floor_mb": floor,
            "available_mb": available_mb, "route": route, "rows": None, "nearest": None}
     if not out["fits"]:
+        who = "GPU" if on_card else "machine"
         out["reason"] = (f"a song of up to {seconds:g} s needs about {need / 1000:.0f} GB at its peak (give or take "
-                         f"{ERROR_MB / 1000:g}); this machine has {available_mb / 1000:.0f} GB for it and keeps "
+                         f"{ERROR_MB / 1000:g}); this {who} has {available_mb / 1000:.0f} GB for it and keeps "
                          f"{floor / 1000:.0f} GB free as its floor, so it is refused. Something outside the studio holds the rest")
-        note = held_note() if measured_here else ""
+        note = held_note() if measured_here and not on_card else ""
         out["reason"] += "." + note if note else ""
     return out
 
@@ -500,7 +539,8 @@ SOUND_LONGEST = {"sfx": 47.0, "foley": 15.0}  # the app's longest of each (app/s
 SOUND_NAMES = {"sfx": "a sound effect (Stable Audio Open 1.0)", "foley": "foley (MMAudio)"}
 
 
-def sound_check(kind: str, seconds: float, available_mb: int | None = None, total_mb: int | None = None) -> dict:
+def sound_check(kind: str, seconds: float, available_mb: int | None = None, total_mb: int | None = None,
+                card: bool = False) -> dict:
     """Whether a sound effect or a clip's foley of ``seconds`` fits this machine, as ``music_check`` answers for a song;
     a kind not measured here is refused with that reason. Everything fits where there is no /proc/meminfo."""
 
@@ -508,15 +548,17 @@ def sound_check(kind: str, seconds: float, available_mb: int | None = None, tota
         total_mb = meminfo().get("MemTotal", 0)
     if not total_mb:
         return {"fits": True, "reason": "", "route": None}
-    measured_here = available_mb is None
-    if available_mb is None:
-        available_mb = room_mb() or total_mb - IDLE_MB
-    floor = floor_mb(total_mb)
+    measured_here = available_mb is None and not card
+    available_mb, floor, on_card = _pool(available_mb, total_mb, card)
     out = {"fits": False, "reason": "", "need_mb": None, "error_mb": ERROR_MB, "left_mb": None, "floor_mb": floor,
            "available_mb": available_mb, "route": f"sound-{kind}", "rows": None, "nearest": None}
     if kind not in SOUND_ESTIMATE:
-        out["reason"] = (f"{SOUND_NAMES.get(kind, kind)} has not been measured on a DGX Spark yet, and nothing renders on a "
-                         "Spark without a measured memory estimate (spark/memory_guard.py), so it is refused here")
+        if on_card:
+            out["reason"] = (f"{SOUND_NAMES.get(kind, kind)} has not been measured on this GPU yet, and nothing renders "
+                             "here without a measured memory estimate")
+        else:
+            out["reason"] = (f"{SOUND_NAMES.get(kind, kind)} has not been measured on a DGX Spark yet, and nothing renders on a "
+                             "Spark without a measured memory estimate (spark/memory_guard.py), so it is refused here")
         return out
     if seconds > SOUND_LONGEST.get(kind, 0):
         out["reason"] = f"{SOUND_NAMES[kind]} is at most {SOUND_LONGEST[kind]:g} s here, the longest measured"
@@ -526,10 +568,11 @@ def sound_check(kind: str, seconds: float, available_mb: int | None = None, tota
     left = available_mb - need - ERROR_MB
     out.update(fits=left >= floor, need_mb=need, left_mb=left)
     if not out["fits"]:
+        who = "GPU" if on_card else "machine"
         out["reason"] = (f"{SOUND_NAMES[kind]} of {seconds:g} s needs about {need / 1000:.0f} GB at its peak (give or take "
-                         f"{ERROR_MB / 1000:g}); this machine has {available_mb / 1000:.0f} GB for it and keeps "
+                         f"{ERROR_MB / 1000:g}); this {who} has {available_mb / 1000:.0f} GB for it and keeps "
                          f"{floor / 1000:.0f} GB free as its floor, so it is refused. Something outside the studio holds the rest")
-        note = held_note() if measured_here else ""
+        note = held_note() if measured_here and not on_card else ""
         out["reason"] += "." + note if note else ""
     return out
 

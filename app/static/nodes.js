@@ -146,7 +146,7 @@ async function ndStart() {
   if (!said.ok) { ndPaint(); return toast(said.problems[0].message + (said.problems.length > 1 ? " (and " + (said.problems.length - 1) + " more)" : "")); }
   const clips = ND.graph.nodes.filter(n => n.type === "clip"); await Promise.all(clips.map(ndEstimate));
   const full = clips.find(n => ND.est[n.id] && ND.est[n.id].memory && ND.est[n.id].memory.fits === false);
-  if (full) { ND.sel = { node: full.id }; ndPaint(); return toast(ndTitle(full) + ": " + (ND.est[full.id].memory.reason || "it does not fit this machine's memory")); }
+  if (full) { ND.sel = { node: full.id }; ndPaint(); return toast(ndTitle(full) + ": " + (ND.est[full.id].memory.reason || "it does not fit " + (typeof cardFace === "function" && cardFace() ? "this GPU's memory" : "this machine's memory"))); }
   try { ND.run = await api("/api/nodes/run", { graph: ndSerialize(), ...(ND.graph.id && !ND.dirty ? { id: ND.graph.id } : {}) }); } catch (e) { return toast(e.message); }
   toast("Running " + ND.graph.name + ": its jobs are in the queue"); ndPaintStatus(); ndWatch(); }
 async function ndCancel() {
@@ -231,8 +231,8 @@ function ndFields(node) {
 function ndOut(node) {
   const st = ND.run && ND.run.nodes && ND.run.nodes[node.id], out = [];
   const est = ND.est[node.id];
-  if (est && est.memory && est.memory.fits === false) out.push(el("div", { class: "nd-err" }, "Does not fit: " + (est.memory.reason || "this machine's memory")));
-  else if (est && est.seconds && !st) out.push(el("div", { class: "nd-meta" }, "About " + mmss(est.seconds)));
+  if (est && est.memory && est.memory.fits === false) out.push(el("div", { class: "nd-err" }, "Does not fit: " + (est.memory.reason || (typeof cardFace === "function" && cardFace() ? "this GPU's memory" : "this machine's memory"))));
+  else if (est && est.seconds && !st && (typeof cardFace !== "function" || !cardFace() || est.where === "card")) out.push(el("div", { class: "nd-meta" }, "About " + mmss(est.seconds)));
   if (ND.problems[node.id]) out.push(el("div", { class: "nd-err" }, ND.problems[node.id]));
   if (!st) return out;
   if (st.status === "running") { const pr = st.progress;

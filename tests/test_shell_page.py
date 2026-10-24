@@ -66,14 +66,79 @@ def run(code: str) -> dict:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
+def test_the_memory_guard_fold_refuses_on_a_card_and_still_stops_a_spark():
+    out = run("""document.createElementNS = () => ({ setAttribute() {}, append() {}, style: {} });
+      answers["/api/storage"] = { buckets: [], free_gb: 10, total_gb: 20, used_pct: 50, computing: false };
+      answers["/api/telemetry/history"] = { samples: [] };
+      S.platform = "spark"; S.platform_label = "CUDA · NVIDIA RTX PRO 6000 BLACKWELL MAX-Q · H3-CUDA";
+      out.card = text(viewMachine());
+      S.platform_label = "DGX SPARK · NVIDIA GB10 · H3-CUDA"; out.spark = text(viewMachine());
+      S.platform = "mac"; S.platform_label = "MAC · APPLE SILICON MX · H3-METAL"; out.mac = text(viewMachine());""")
+    assert "refuses a clip that would leave the GPU under its floor" in out["card"]
+    assert "stops the renderer" not in out["card"]
+    for face in ("spark", "mac"):
+        assert "stops the renderer if memory falls under its floor" in out[face]
+        assert "leave the GPU" not in out[face]
+
+
 def test_the_chip_names_the_card_and_a_spark_stays_a_spark():
-    out = run("""out.spark = platName();
+    out = run("""out.spark = platName(); out.sparkCard = cardFace();
+      S.platform_label = "DGX SPARK · CUDA · H3-CUDA";
+      out.failed = platName(); out.failedCard = cardFace();
       S.platform_label = "CUDA · NVIDIA RTX PRO 6000 BLACKWELL MAX-Q WORKSTATION EDITION · H3-CUDA"; S.gpu_index = "1";
-      out.rtx = platName(); delete S.gpu_index; out.rtxBare = platName();
-      S.platform = "mac"; S.platform_label = "MAC · APPLE SILICON MX · H3-METAL"; out.mac = platName();""")
-    assert out["spark"] == "DGX Spark"
-    assert out["rtx"] == "RTX PRO 6000 · 1" and out["rtxBare"] == "RTX PRO 6000"
-    assert out["mac"] == "Mac"
+      out.rtx = platName(); out.rtxCard = cardFace(); delete S.gpu_index; out.rtxBare = platName(); out.rtxBareCard = cardFace();
+      S.platform = "mac"; S.platform_label = "MAC · APPLE SILICON MX · H3-METAL"; out.mac = platName(); out.macCard = cardFace();""")
+    assert out["spark"] == "DGX Spark" and out["sparkCard"] is False
+    assert out["failed"] == "DGX Spark" and out["failedCard"] is False
+    assert out["rtx"] == "RTX PRO 6000 · 1" and out["rtxCard"] is True
+    assert out["rtxBare"] == "RTX PRO 6000" and out["rtxBareCard"] is True
+    assert out["mac"] == "Mac" and out["macCard"] is False
+
+
+def test_a_card_shows_no_video_number_until_that_canvas_is_sampled():
+    """A GB10 label keeps the Spark suffix. A card shows a number only when the answer is that canvas's own sample."""
+
+    out = run("""out.sparkLine = estimateWhere({ seconds: 73 });
+      out.sparkVoice = measuredLabel("TensorFold CUDA · DGX Spark");
+      out.sparkMusic = measuredLabel("ComfyUI · DGX Spark (CUDA)");
+      S.platform_label = "DGX SPARK · CUDA · H3-CUDA";
+      out.failedLine = estimateWhere({ seconds: 73 });
+      S.platform_label = "CUDA · NVIDIA RTX PRO 6000 BLACKWELL MAX-Q WORKSTATION EDITION · H3-CUDA";
+      out.cardBlank = estimateWhere({ seconds: 420 });
+      out.cardSample = estimateWhere({ seconds: 40, where: "card" });
+      out.cardNone = estimateWhere({ seconds: null });
+      out.cardVoice = measuredLabel("TensorFold CUDA · DGX Spark");
+      out.cardMusic = measuredLabel("ComfyUI · DGX Spark (CUDA)");
+      out.cardBolt = measuredLabel("TensorFold CUDA · DGX Spark (Mia's Bolt recipe)");
+      S.platform = "mac"; S.platform_label = "MAC · APPLE SILICON MX · H3-METAL";
+      out.macLine = estimateWhere({ seconds: 64 });
+      out.macVoice = measuredLabel("Metal · Apple Silicon");
+      S.platform = "spark"; S.platform_label = "CUDA · NVIDIA RTX PRO 6000 · H3-CUDA";
+      answers["/api/estimate"] = { seconds: 420 };
+      HC.recipe = "quick"; HC.seconds = 5; HC.est = {};
+      hcEstimate(); await new Promise(r => setTimeout(r, 20));
+      out.homeHidden = HC.est["small|fh4|5"];
+      answers["/api/estimate"] = { seconds: 40, where: "card" };
+      delete HC.est["small|fh4|5"];
+      hcEstimate(); await new Promise(r => setTimeout(r, 20));
+      out.homeSample = HC.est["small|fh4|5"];
+      S.platform_label = "DGX SPARK · NVIDIA GB10 · H3-CUDA";
+      answers["/api/estimate"] = { seconds: 73 };
+      delete HC.est["small|fh4|5"];
+      hcEstimate(); await new Promise(r => setTimeout(r, 20));
+      out.homeSpark = HC.est["small|fh4|5"];""")
+    assert out["sparkLine"] == "≈ 73 s on a DGX Spark, models loaded"
+    assert out["failedLine"] == "≈ 73 s on a DGX Spark, models loaded"
+    assert out["cardBlank"] == "" and out["cardNone"] == ""
+    assert out["cardSample"] == "≈ 40 s on this card"
+    assert out["macLine"] == "≈ 64 s on an M5 Ultra"
+    assert out["sparkVoice"] == "TensorFold CUDA · DGX Spark"
+    assert out["sparkMusic"] == "ComfyUI · DGX Spark (CUDA)"
+    assert out["cardVoice"] == "TensorFold CUDA · measured on a DGX Spark"
+    assert out["cardMusic"] == "ComfyUI · measured on a DGX Spark (CUDA)"
+    assert out["cardBolt"] == "TensorFold CUDA · measured on a DGX Spark (Mia's Bolt recipe)"
+    assert out["macVoice"] == "Metal · Apple Silicon"
+    assert out["homeHidden"] is None and out["homeSample"] == 40 and out["homeSpark"] == 73
 
 
 def test_every_tab_has_one_room_and_old_links_still_work():

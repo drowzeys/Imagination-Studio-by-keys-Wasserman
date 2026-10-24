@@ -393,6 +393,23 @@ def speedup(used: int, clips: int) -> tuple[float, bool]:
     return max(1.0, clips / math.ceil(clips / used) * kept), measured
 
 
+def machine_word(spark: bool) -> str:
+    """What this machine is called. A Mac is a Mac. A GB10 is a Spark. A discrete card is a GPU.
+
+    ``device()`` is None where nvidia-smi has no memory of its own (a GB10's ``[N/A]``) and where nvidia-smi
+    fails. The word then stays Spark, which is the same banner the page treats as unified."""
+
+    if not spark:
+        return "Mac"
+    try:
+        import memory_guard
+        if memory_guard.device() is not None:
+            return "GPU"
+    except Exception:  # noqa: BLE001 - a reading, never a reason to fail the queue
+        return "Spark"
+    return "Spark"
+
+
 class Hub:
     """The workers of one studio and the clips on them. ``jobs``, ``order``, ``lock`` and ``wake`` are the server's
     queue; ``info`` is what this app says of itself to another (its /api/spark/self); ``inside`` resolves a path of
@@ -403,7 +420,7 @@ class Hub:
         # ``spark``: this app is on a DGX Spark; False on a Mac, which leads workers the same way (capable says what
         # of a Mac's settings a Spark cannot render, and a worker it cannot reach is reached through its ``via``)
         self.home, self.pack, self.spark = home, pack, spark
-        self.word = "Spark" if spark else "Mac"
+        self.word = machine_word(spark)
         self.jobs, self.order, self.lock, self.wake = jobs, order, lock, wake
         self.info, self.inside, self.work, self.timing = info, inside, work, timing or (lambda kind, params: None)
         self.folder = home / "sparks"
@@ -445,9 +462,12 @@ class Hub:
         return self.config()["workers"]
 
     def said(self, text: str) -> str:
-        """Words for the page: "this Spark" is "this Mac" on a Mac at the head."""
+        """Words for the page. "this Spark" is this machine: left as written on a GB10, "this Mac" on a Mac, "this GPU" on a card.
+        A worker is still called a Spark. Those sentences do not say "this Spark"."""
 
-        return text if self.spark or not text else text.replace("this Spark", "this Mac")
+        if not text or self.word == "Spark":
+            return text
+        return text.replace("this Spark", "this " + self.word)
 
     def via(self, address: str) -> str | None:
         """The machine a worker is reached through, or None: it is reached directly."""
@@ -1082,7 +1102,14 @@ class Hub:
         listed, available = 1 + len(able) + len(without), 1 + len(able)
         here = here_only(kind, params)
         used = 1 if here else min(chosen, available)
-        count = f"{available} of {chosen} available" if chosen > available else f"{used} Spark{'s' if used != 1 else ''}"
+        if self.word == "GPU":
+            # A count that includes this machine does not call it a Spark. Chosen above what is free stays the old shape.
+            others = used - 1
+            count = (f"{available} of {chosen} available" if chosen > available else
+                     f"This {self.word} alone." if used < 2 else
+                     f"this {self.word} and {others} Spark" + ("" if others == 1 else "s"))
+        else:
+            count = f"{available} of {chosen} available" if chosen > available else f"{used} Spark{'s' if used != 1 else ''}"
         if here:
             mode, says = "one", self.said(here)
         elif used < 2:
@@ -1144,6 +1171,16 @@ class Hub:
             if any(worker["address"] == address for worker in found["workers"]):
                 raise HTTPException(400, f"{address} is already in the list")
             if len(found["workers"]) >= LIMIT - 1:
+                # said() rewrites "this Spark" only. This sentence does not say that, so the card branch is its own.
+                # A GB10 and a Mac keep the Spark sentence. A card does not call this machine a Spark.
+                on_card = False
+                try:
+                    import server
+                    on_card = bool(server.card_face())
+                except Exception:
+                    on_card = False
+                if on_card:
+                    raise HTTPException(400, f"at most {LIMIT} machines, this GPU included")
                 raise HTTPException(400, f"at most {LIMIT} Sparks, this one included")
             found["workers"].append({"address": address, "name": str(body.get("name") or "").strip()[:60] or address, "folder": folder, "enabled": True,
                                      **({"via": via} if via else {})})

@@ -145,8 +145,18 @@ def adaln_basis(folder: Path):
         return None, None  # no pruned Ref2VA here: a checkpoint with the full time embedder takes the pair as it is
     local = Path(os.environ.get("H3_MODEL_DIR", str(Path.home() / "h3-models/MiniMax-H3"))) / "Ref2VA/transformer/model-00001-of-00013.safetensors"
     if not local.is_file() and os.environ.get("LORA_OFFLINE") == "1":
-        raise RuntimeError("this LoRA adapts the model's time layers, and moving it onto the DGX Spark's checkpoint takes 64 MB of "
-                           "MiniMax H3 from MiniMax's page once (or ref2va-adaln-basis.npy in the LoRA bundle); LORA_OFFLINE=1 keeps this off the network")
+        # The GB10 sentence stays. A card does not call this machine a DGX Spark. The banner is server.card_face().
+        spark_line = ("this LoRA adapts the model's time layers, and moving it onto the DGX Spark's checkpoint takes 64 MB of "
+                      "MiniMax H3 from MiniMax's page once (or ref2va-adaln-basis.npy in the LoRA bundle); LORA_OFFLINE=1 keeps this off the network")
+        card_line = ("this LoRA adapts the model's time layers, and moving it onto this GPU's checkpoint takes 64 MB of "
+                     "MiniMax H3 from MiniMax's page once (or ref2va-adaln-basis.npy in the LoRA bundle); LORA_OFFLINE=1 keeps this off the network")
+        on_card = False
+        try:
+            import server
+            on_card = bool(server.card_face())
+        except Exception:
+            on_card = False
+        raise RuntimeError(card_line if on_card else spark_line)
     basis, offset, error = lora_layout.curve_basis(table, lora_layout.embedder(local if local.is_file() else None))
     if error > 1e-3:
         raise RuntimeError(f"the checkpoint's time table does not follow MiniMax H3's time embedder (fit error {error:.1e}): the LoRA is not moved onto it")

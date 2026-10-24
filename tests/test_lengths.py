@@ -103,8 +103,47 @@ if __name__ == "__main__":
 
 
 def test_a_long_take_on_a_spark_is_estimated_as_keys_measured_it(monkeypatch):
+    import subprocess
+
     import server
     monkeypatch.setattr(server, "SPARK", True)
     monkeypatch.setattr(server, "SPARK_ENGINE_LIB", Path(__file__))  # TensorFold's engine is there
+    monkeypatch.setattr(server, "GPU_NAME", ["NVIDIA GB10"])  # a fake GB10 name still takes the Spark branch
     assert abs(server.estimate("small", "fh4", 30) - 333) < 0.1 * 333  # two 15 s parts, measured 333 s
     assert 5.0 < server.estimate("small", "fh4", 1800) / 3600 < 6.0  # 30 minutes, measured about 5.5 h
+    monkeypatch.setattr(server, "memory_of", lambda *_a, **_k: {"fits": True, "need_mb": 1000, "reason": "", "error_mb": 0, "left_mb": 0, "floor_mb": 0, "available_mb": 0, "nearest": None})
+    spark = server.estimate_time({"preset": "small", "quality": "fh4", "seconds": 5, "text_only": True})
+    assert spark["seconds"] == 45 and "where" not in spark and spark["memory"]["fits"] is True
+    # a failed nvidia-smi is the unified banner, so the Spark table stays
+    monkeypatch.setattr(server, "GPU_NAME", [])
+
+    def boom(command, *_args, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 5)
+
+    monkeypatch.setattr(server.subprocess, "run", boom)
+    assert server.machine()[1] == "DGX SPARK · CUDA · H3-CUDA"
+    assert server.estimate("small", "fh4", 5, text_only=True) == 45
+    # a discrete card: no number until a warm sample of that canvas, and one sample prices only that canvas.
+    # GPU_NAME is set, so machine() does not ask the driver (the stand-in above is still in place).
+    monkeypatch.setattr(server, "GPU_NAME", ["NVIDIA RTX PRO 6000"])
+    assert server.card_face() is True
+    assert server.estimate("small", "fh4", 5, text_only=True) is None
+    assert server.estimate("small", "fh4", 10, text_only=True) is None
+    assert server.estimate("small", "fh4", 30) is None  # a longer take is not a sum of another length
+    assert server.estimate("p720", "fh4", 5, text_only=True) is None
+    assert server.estimate("small", "fh8", 5, text_only=True) is None
+    assert server.estimate("small", "fh4", 5, text_only=False) is None  # a picture is not the text sample
+    assert server.estimate("small", "fh4", 5, referenced=True) is None
+    blank = server.estimate_time({"preset": "small", "quality": "fh4", "seconds": 5, "text_only": True})
+    assert blank["seconds"] is None and "where" not in blank
+    monkeypatch.setattr(server, "CARD_WARM", {("fh4", "small", 5, True): 40})
+    assert server.estimate("small", "fh4", 5, text_only=True) == 40
+    assert server.estimate("small", "fh4", 5.0, text_only=True) == 40
+    assert server.estimate("small", "fh4", 10, text_only=True) is None
+    assert server.estimate("small", "fh4", 5, text_only=False) is None
+    assert server.estimate("small", "fh8", 5, text_only=True) is None
+    assert server.estimate("p720", "fh4", 5, text_only=True) is None
+    sampled = server.estimate_time({"preset": "small", "quality": "fh4", "seconds": 5, "text_only": True})
+    assert sampled["seconds"] == 40 and sampled["where"] == "card"
+    other = server.estimate_time({"preset": "small", "quality": "fh4", "seconds": 10, "text_only": True})
+    assert other["seconds"] is None and "where" not in other

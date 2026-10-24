@@ -1,5 +1,5 @@
 """A card with memory of its own (an RTX Pro 6000 Blackwell, 96 GB; docs/rtx-pro-6000.md): the Studio's room for a
-job is the smaller of the machine's RAM and the card's memory, the card is read from nvidia-smi (or pretended with
+job is that card's memory, the card is read from nvidia-smi (or pretended with
 STUDIO_VRAM_GB on a Spark), a DGX Spark reads as it always did, and Bolt points an x86_64 machine at llama.cpp.
 Run: STUDIO_HOME=$(mktemp -d) python3 -m pytest tests/test_rtx.py"""
 import os
@@ -79,14 +79,15 @@ def test_the_comfyui_servers_own_memory_counts_as_the_jobs(monkeypatch):
     assert memory_guard.device_room_mb() == 86 * GB - memory_guard.VRAM_MARGIN_MB
 
 
-def test_room_is_the_smaller_of_ram_and_the_card(monkeypatch):
+def test_room_is_the_cards_on_a_card_and_the_rams_on_a_spark(monkeypatch):
+    """A card's room is device_room_mb alone. A smaller RAM is not the limit. A Spark (no card) stays on its RAM."""
+
     monkeypatch.setattr(memory_guard, "meminfo", lambda: {"MemAvailable": 200 * GB, "MemTotal": 256 * GB})
     monkeypatch.setattr(memory_guard, "server_pid", lambda: None)
     monkeypatch.setattr(memory_guard, "device_room_mb", lambda: 60 * GB)
-    floor = memory_guard.floor_mb(256 * GB)
-    assert memory_guard.room_mb() == 60 * GB + floor  # the floor is the RAM's: the card keeps VRAM_MARGIN_MB instead
+    assert memory_guard.room_mb() == 60 * GB
     monkeypatch.setattr(memory_guard, "meminfo", lambda: {"MemAvailable": 50 * GB, "MemTotal": 64 * GB})
-    assert memory_guard.room_mb() == 50 * GB  # a small RAM is the limit
+    assert memory_guard.room_mb() == 60 * GB  # a smaller RAM is not the limit
     monkeypatch.setattr(memory_guard, "device_room_mb", lambda: None)  # a Spark: as before
     assert memory_guard.room_mb() == 50 * GB
 
@@ -101,16 +102,22 @@ def test_the_largest_measured_clip_fits_a_96_gb_card(monkeypatch):
     assert memory_guard.check(1376, 768, 243)["fits"]
     monkeypatch.setattr(memory_guard, "device_room_mb", lambda: 48 * GB)
     said = memory_guard.check(1376, 768, 243)
-    assert not said["fits"] and said["reason"]
+    assert not said["fits"] and "this GPU" in said["reason"]
+    assert said["floor_mb"] == memory_guard.VRAM_MARGIN_MB and "this machine has" not in said["reason"]
 
 
 def test_voice_and_bolt_see_the_cards_free_memory(monkeypatch):
-    """Drama 3 and Bolt decide whether to stop ComfyUI from mem_available_gb: on a card, its free memory."""
+    """Drama 3 and Bolt decide whether to stop ComfyUI from mem_available_gb: on a card, its free memory alone,
+    not the smaller of that and system RAM."""
 
     monkeypatch.setattr(voice, "gpu_free_gb", lambda: 0.25)
-    assert voice.mem_available_gb() == 0.25  # the machine's RAM is more; the card is the limit
+    assert voice.mem_available_gb() == 0.25
+    monkeypatch.setattr(voice, "gpu_free_gb", lambda: 500.0)
+    assert voice.mem_available_gb() == 500.0  # a smaller RAM is not the limit
     monkeypatch.setattr(voice, "gpu_free_gb", lambda: None)
-    assert voice.mem_available_gb() > 0.25 or sys.platform != "linux"  # a Spark: the machine's own
+    monkeypatch.setattr(voice, "_linux_ram_gb", lambda: 80.0)
+    if sys.platform.startswith("linux"):
+        assert voice.mem_available_gb() == 80.0  # no card reading: the machine's RAM, not the 500 GB just above
 
 
 def test_an_x86_64_workstation_is_pointed_at_llama_cpp(monkeypatch):
@@ -123,6 +130,80 @@ def test_an_x86_64_workstation_is_pointed_at_llama_cpp(monkeypatch):
     monkeypatch.setattr(bolt.platform, "machine", lambda: "aarch64")
     assert "llamacpp" not in bolt.choose()[1]
     assert "CUDA" in bolt.Llamacpp.label or sys.platform == "darwin"
+
+
+def test_a_loaded_engine_counts_once_on_a_card(monkeypatch):
+    """Queue time is before the unload. The room is the larger of the live card and each engine's raw free, and the
+    2 GB margin is taken once. A raw before under the live free does not shrink the room. A passed room is kept.
+    A song counts Drama 3 and Music, not Bolt."""
+
+    margin = memory_guard.VRAM_MARGIN_MB
+    monkeypatch.setattr(memory_guard, "meminfo", lambda: {"MemTotal": 256 * GB, "MemAvailable": 200 * GB})
+    monkeypatch.setattr(memory_guard, "device_room_mb", lambda: None)
+    assert memory_guard.card_room_for_job([90 * GB]) is None
+    monkeypatch.setattr(memory_guard, "device_room_mb", lambda: 8 * GB)
+    # 8 GB + 100 MB is above the after-margin room and below the live raw free. Dropping the margin before the
+    # max would subtract it from this before and shrink the room.
+    assert memory_guard.card_room_for_job([8 * GB + 100]) == 8 * GB
+    assert memory_guard.card_room_for_job([None, 0]) == 8 * GB
+    assert memory_guard.card_room_for_job([50 * GB, 90 * GB, 70 * GB]) == 90 * GB - margin
+    wide = memory_guard.check(1376, 768, 243, available_mb=90 * GB - margin, total_mb=256 * GB, card=True)
+    assert wide["fits"] and wide["available_mb"] == 90 * GB and wide["floor_mb"] == margin
+    spark = memory_guard.check(1376, 768, 243, available_mb=40 * GB, total_mb=128 * GB)
+    assert not spark["fits"] and "this machine has" in spark["reason"] and "this GPU" not in spark["reason"]
+
+    import server
+    import music
+    assert server.SPARK and music.SPARK
+    monkeypatch.setattr(voice, "room_mb", lambda: 50 * GB)
+    monkeypatch.setattr(music, "room_mb", lambda: 70 * GB)
+    monkeypatch.setattr(server.bolt, "room_mb", lambda: 90 * GB)
+    found = server.memory_of({}, {"WIDTH": 864, "HEIGHT": 480}, 22, False)
+    assert found["available_mb"] == 90 * GB  # Bolt is the largest. The 200 GB of RAM is not the pool.
+    beside = server.memory_of({}, {"WIDTH": 864, "HEIGHT": 480}, 22, False, available_mb=20 * GB)
+    assert beside["available_mb"] == 20 * GB + margin
+    monkeypatch.setattr(voice, "room_mb", lambda: None)
+    monkeypatch.setattr(music, "room_mb", lambda: None)
+    monkeypatch.setattr(server.bolt, "room_mb", lambda: None)
+    idle = server.memory_of({}, {"WIDTH": 864, "HEIGHT": 480}, 22, False)
+    assert idle["available_mb"] == 8 * GB + margin
+
+    class Quiet:
+        def check(self):
+            return ""
+        guard_route = "music-cuda-int8"
+
+    monkeypatch.setattr(music, "_engine", Quiet())
+    asked = {}
+
+    def grab(seconds, available_mb=None, total_mb=None, route="music", card=False):
+        asked.update(available_mb=available_mb, card=card, route=route)
+        return {"fits": True}
+
+    monkeypatch.setattr(memory_guard, "music_check", grab)
+    monkeypatch.setattr(voice, "room_mb", lambda: 40 * GB)
+    monkeypatch.setattr(music, "room_mb", lambda: 80 * GB)
+    monkeypatch.setattr(server.bolt, "room_mb", lambda: 95 * GB)
+    music.checked({"caption": "pop", "seconds": 30, "seed": 1})
+    assert asked == {"available_mb": 80 * GB - margin, "card": True, "route": "music-cuda-int8"}
+    monkeypatch.setattr(voice, "room_mb", lambda: 85 * GB)
+    monkeypatch.setattr(music, "room_mb", lambda: 30 * GB)
+    music.checked({"caption": "pop", "seconds": 30, "seed": 1})
+    assert asked["available_mb"] == 85 * GB - margin and asked["card"] is True
+
+
+def test_drama_3_names_the_gpu_when_the_card_is_short(monkeypatch):
+    monkeypatch.setattr(voice, "has_card_memory", lambda: True)
+    monkeypatch.setattr(voice, "mem_available_gb", lambda: 10.0)
+    monkeypatch.setattr(voice, "comfy_up", lambda port=None: False)
+    monkeypatch.setattr(voice, "settle", lambda: None)
+    one = voice.Served.__new__(voice.Served)
+    one.NEED_GB, one.title = 50.0, "Drama 3"
+    with pytest.raises(RuntimeError, match="this GPU has 10 GB"):
+        one.make_room({})
+    monkeypatch.setattr(voice, "has_card_memory", lambda: False)
+    with pytest.raises(RuntimeError, match="this machine has 10 GB"):
+        one.make_room({})
 
 
 def test_the_page_cache_is_left_alone_on_a_card():

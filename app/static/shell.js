@@ -180,10 +180,39 @@ const platName = () => {
   if (!card) return "DGX Spark";
   return S.gpu_index ? card + " · " + S.gpu_index : card;
 };
+// Unified vs card, from the banner machine() already wrote. Unified starts with "DGX SPARK"
+// (a GB10, and the nvidia-smi failure banner). A card is the CUDA build and starts with "CUDA · ".
+function cardFace() {
+  return !!(S && S.platform === "spark" && (S.platform_label || "").startsWith("CUDA · "));
+}
+// A video time on a card is a warm sample of that canvas (where === "card"). Anything else is no number and no suffix.
+// A GB10 keeps "on a DGX Spark, models loaded". A Mac keeps "on an M5 Ultra".
+function estimateWhere(r) {
+  const seconds = r && r.seconds;
+  if (!seconds) return "";
+  if (cardFace()) return r.where === "card" ? "≈ " + mmss(seconds) + " on this card" : "";
+  if (S && S.platform === "spark") return "≈ " + mmss(seconds) + " on a DGX Spark, models loaded";
+  return "≈ " + mmss(seconds) + " on an M5 Ultra";
+}
+// Voice, Music, and Bolt keep the GB10 identity in the data. On a card the label says where that was measured.
+function measuredLabel(label) {
+  if (!cardFace()) return label || "";
+  if (label === "TensorFold CUDA · DGX Spark") return "TensorFold CUDA · measured on a DGX Spark";
+  if (label === "ComfyUI · DGX Spark (CUDA)") return "ComfyUI · measured on a DGX Spark (CUDA)";
+  if (label === "TensorFold CUDA · DGX Spark (Mia's Bolt recipe)") return "TensorFold CUDA · measured on a DGX Spark (Mia's Bolt recipe)";
+  return label || "";
+}
+// The pool a card's meters lead with. A GB10 has no memory.card, so the RAM reading stays.
+function cardMem(t) {
+  const c = t && t.memory && t.memory.card;
+  return cardFace() && c && c.total_mb ? c : null;
+}
 function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
-  SHELL.samples.push({ t: Date.now(), gpu: t.gpu ? t.gpu.util_pct : null, mem: t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : null, temp: t.gpu ? t.gpu.temp_c : null, power: t.gpu ? t.gpu.power_w : null });
+  const card = cardMem(t);
+  const memPct = card ? pct(card.used_mb, card.total_mb) : (t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : null);
+  SHELL.samples.push({ t: Date.now(), gpu: t.gpu ? t.gpu.util_pct : null, mem: memPct, temp: t.gpu ? t.gpu.temp_c : null, power: t.gpu ? t.gpu.power_w : null });
   if (SHELL.samples.length > 300) SHELL.samples.shift();
-  const used = t.memory ? 100 - pct(t.memory.available_mb, t.memory.total_mb) : 0, gpu = t.gpu && t.gpu.util_pct != null ? t.gpu.util_pct : null;
+  const used = memPct == null ? 0 : memPct, gpu = t.gpu && t.gpu.util_pct != null ? t.gpu.util_pct : null;
   const busy = t.jobs && t.jobs.running, warn = (t.warnings || []).length;
   // the chip is green when the machine is ready and red while it rolls; a warning (a full disk) is a small amber mark
   // beside it and in the title, never the chip's own colour
@@ -191,9 +220,9 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   $("#mtxt").textContent = gpu != null ? gpu + "% GPU" : t.memory ? Math.round(t.memory.available_mb / 1024) + " GB free" : "";
   const gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1);
   const say = [(S && S.platform_label) || platName(), busy ? "rolling" : "ready", "GPU " + (gpu == null ? "n/a" : gpu + "%" + (t.gpu && t.gpu.temp_c != null ? " at " + t.gpu.temp_c + "°C" : "")),
-    t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : "",
-    // a card with memory of its own (an RTX Pro 6000): its memory, beside the machine's
-    t.memory && t.memory.card ? "card " + gb(t.memory.card.used_mb) + " of " + gb(t.memory.card.total_mb) + " GB" : "",
+    card ? "memory " + gb(card.used_mb) + " of " + gb(card.total_mb) + " GB (" + used + "%)" : (t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : ""),
+    // a card's memory is the memory clause above; this second clause is only where the page still leads with RAM
+    !card && t.memory && t.memory.card ? "card " + gb(t.memory.card.used_mb) + " of " + gb(t.memory.card.total_mb) + " GB" : "",
     // the Studio's Bolt brain (app/bolt.py) while it holds memory
     t.engines && t.engines.bolt && t.engines.bolt.state === "loaded" ? "Bolt brain " + (t.engines.bolt.memory_gb != null ? t.engines.bolt.memory_gb + " GB" : "loaded") : "",
     t.disk ? Math.round(t.disk.free_gb) + " GB disk free" : "",

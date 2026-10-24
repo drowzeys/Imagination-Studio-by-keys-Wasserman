@@ -90,6 +90,18 @@ def test_a_running_job_is_the_current_one():
             server.order.remove(job["id"])
 
 
+def test_a_card_under_its_floor_does_not_say_the_render_would_be_stopped():
+    """GPU free under 2 GB is the card's own warning. The guard beside ComfyUI still stops on system RAM,
+    so this line must not say the render would be stopped, and a tight card must not fall through to that RAM line."""
+
+    tight = telemetry.low_memory_warning({"card": {"free_mb": 500}, "available_mb": 1000, "floor_mb": 8000}, 2048)
+    assert tight == "GPU memory (0.5 GB) is below the memory guard's floor (2.0 GB)."
+    assert "stopped" not in tight
+    assert telemetry.low_memory_warning({"card": {"free_mb": 40000}, "available_mb": 1000, "floor_mb": 8000}, 2048) is None
+    spark = telemetry.low_memory_warning({"available_mb": 1000, "floor_mb": 8000}, 2048)
+    assert spark == "Available memory (1.0 GB) is below the memory guard's floor (8.0 GB): a render now would be stopped."
+
+
 def test_warnings_in_plain_words(monkeypatch):
     hot = {"name": "NVIDIA GB10", "util_pct": 99.0, "temp_c": 91.0, "power_w": 80.0, "clock_mhz": 2400}
     monkeypatch.setattr(telemetry.shutil, "which", lambda name, *a, **k: "/usr/bin/nvidia-smi" if name == "nvidia-smi" else None)

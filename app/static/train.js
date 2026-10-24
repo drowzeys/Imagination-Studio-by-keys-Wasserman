@@ -56,12 +56,13 @@ function trainPanel() { const info = TR.info, f = TR.form;
   if (!TR.asked) { TR.asked = true; trainLoad(); }
   // a run that has just finished: its LoRA is in the hub now
   for (const j of trainJobs()) if (j.status === "done" && !TR.done.has(j.id)) { TR.done.add(j.id); if (typeof loadLoras === "function") loadLoras().then(() => render()); trainLoad(); }
-  const head = el("div", { class: "kv" }, el("b", {}, "Train a LoRA"), info && info.ready ? el("span", { class: "tag2 ok" }, "Ready on this Spark") : null);
-  const line = el("p", { class: "note" }, "Your own clips or stills become a look or a character the video model can use: at least " + trainLeast() + ", each clip 5 seconds or longer. It trains on this DGX Spark and lands here in Looks.");
+  const card = typeof cardFace === "function" && cardFace();
+  const head = el("div", { class: "kv" }, el("b", {}, "Train a LoRA"), info && info.ready ? el("span", { class: "tag2 ok" }, card ? "Ready on this GPU." : "Ready on this Spark") : null);
+  const line = el("p", { class: "note" }, "Your own clips or stills become a look or a character the video model can use: at least " + trainLeast() + ", each clip 5 seconds or longer. It trains on this " + (card ? "GPU" : "DGX Spark") + " and lands here in Looks.");
   if (!info) return el("div", { class: "panel train" }, head, line, el("div", { class: "note" }, "Loading…"));
   if (!info.spark) return el("div", { class: "panel train" }, head, line, el("div", { class: "note" }, "Training a LoRA runs on a DGX Spark. On the Spark: " + (info.setup || TRAIN_SETUP)));
   if (!info.ready) return el("div", { class: "panel train" }, head, line,
-    el("div", { class: "note" }, "Training is not set up on this Spark yet. Run once: ", el("code", {}, info.setup || TRAIN_SETUP)),
+    el("div", { class: "note" }, card ? "Training is not set up on this GPU yet. Run once: " : "Training is not set up on this Spark yet. Run once: ", el("code", {}, info.setup || TRAIN_SETUP)),
     (info.missing || []).length ? el("details", { class: "fold" }, el("summary", {}, "What is missing (" + info.missing.length + ")"), el("div", { class: "note", style: "margin:0" }, info.missing.join("; "))) : null);
   const running = trainActive();
   const steps = el("input", { type: "range", min: 300, max: 3000, step: 100, value: f.steps, "aria-label": "Training steps, 300 to 3000",
@@ -76,7 +77,7 @@ function trainPanel() { const info = TR.info, f = TR.form;
     field("What it learns", choice(f, "kind", { look: ["A look", "a style: colour, grain, light, lenses"], character: ["A character", "one person or creature, the same in every shot"] }, render, true)),
     field("Captions", choice(f, "captions", { auto: ["Automatic", "each clip's prompt, else the Library's caption, else the trigger"], prompts: ["Prompts only", "each clip's prompt, else the trigger"], none: ["Trigger only", "every caption is the trigger word"] }, render, true)),
     field("Size", choice(f, "size", sizes, render, true)),
-    el("div", {}, el("label", {}, "Length"), steps, el("div", { class: "note" }, said, " · the Spark is busy for that long: ComfyUI is stopped and nothing else renders until it ends. A checkpoint every 100 steps: a run you cancel resumes from it.")),
+    el("div", {}, el("label", {}, "Length"), steps, el("div", { class: "note" }, said, " · " + (card ? "the GPU is busy" : "the Spark is busy") + " for that long: ComfyUI is stopped and nothing else renders until it ends. A checkpoint every 100 steps: a run you cancel resumes from it.")),
     el("div", { class: "chips" }, el("button", { type: "button", class: "small" + (TR.picking ? " on" : ""), onclick: () => { TR.picking = !TR.picking; render(); } }, TR.pick.size ? TR.pick.size + " picked: change" : "Pick from the Library"),
       el("span", { class: "note m-flat" }, TR.pick.size < trainLeast() ? "at least " + trainLeast() + " needed" : "ready to train")),
     TR.picking ? trainPicker() : null,

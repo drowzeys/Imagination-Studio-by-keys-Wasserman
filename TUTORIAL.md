@@ -124,7 +124,9 @@ A LoRA is a small file that teaches the video model one thing: a camera move, a 
    **Needs:** with a button that takes you to the step, and step 5 will not queue the clip until it is there.
 4. Write the prompt the way the card's note says, then render as usual. A clip with a LoRA takes a slower path and
    shows no time estimate. On a Mac, FastH3 then runs on the MLX engine, not the native one. On a DGX Spark the
-   LoRA is merged into TensorFold's int8 engine (since 2.7.1), at the same memory as a clip without one.
+   LoRA is merged into TensorFold's int8 engine (since 2.7.1), at the same memory as a clip without one. On a GPU
+   the LoRA is merged into TensorFold's int8 engine, at the same memory as a clip without one. An engine there that
+   predates 2.7.1 uses ComfyUI's own blocks instead.
 
 A slider LoRA such as *Anime Slider* has a track centred on 0: drag right for flat 2D anime (3 is plenty on a clip
 from text), left for a photographic look, or press *Off (0)*. On a Mac, a slider on a clip *from references* pulls
@@ -154,7 +156,8 @@ drawn as anime on the same outlines and timing.
 ## 8.6 Library actions: turn a picture round, make a clip larger, take a person out
 
 Three LoRAs of the hub have a job of their own, and the Library has a button for each. On a DGX Spark they come with
-`oneshot-setup-spark.sh --ref2va` (three node packs, SAM 3.1 and the H3 latent upscaler, 2.5 GB). They are queued like any
+`oneshot-setup-spark.sh --ref2va` (three node packs, SAM 3.1 and the H3 latent upscaler, 2.5 GB). On a GPU they come
+with the same CUDA install: `oneshot-setup-rtx-6000.sh --ref2va` runs it. They are queued like any
 render; the result lands in the Library.
 
 **Turnaround** (under a picture; Mac and DGX Spark). Five views of the picture's subject, turning from where it
@@ -169,14 +172,14 @@ faces now, made together so the character is the same in all five.
 If a view comes out tilted or seen from above, change the seed. The instruction box takes your own wording; it
 names the picture as `<Picture 1>`.
 
-**Upscale** (under a clip; DGX Spark). A finished clip made larger and sharper, with its motion, mouths and sound
+**Upscale** (under a clip; DGX Spark or a GPU). A finished clip made larger and sharper, with its motion, mouths and sound
 left as they were.
 
 1. Press **Upscale** under a clip and choose the size: *2 megapixels* is about 1920 x 1080.
 2. Leave the re-draw on **Light**. *None* only enlarges; *Stronger* adds more detail of its own.
 3. Press **Upscale this clip**. A 5 second 864x480 clip took about five minutes at 2 megapixels.
 
-**Remove a person** (under a clip; DGX Spark). One person taken out, the background drawn again.
+**Remove a person** (under a clip; DGX Spark or a GPU). One person taken out, the background drawn again.
 
 1. Press **Remove a person** under a clip and say who, in a few words: *man in a blue shirt*, *woman in a red coat*.
 2. Press **1. Find the person**. In under a minute the clip comes back with the person painted green. Look at the
@@ -332,7 +335,8 @@ valid for a clip where the check picked a different fighter than in the source.
 ## 10. Voice: speech with Fish Audio Drama 3
 
 The **Voice** tab turns text into speech with Fish Audio Drama 3, on this machine, through TensorFold's port: MLX on a
-Mac (`bash oneshot-setup.sh --voice`), native CUDA on a DGX Spark (`bash oneshot-setup-spark.sh --voice`). Nothing
+Mac (`bash oneshot-setup.sh --voice`), native CUDA on a DGX Spark (`bash oneshot-setup-spark.sh --voice`). On a GPU
+it is the same native CUDA port (`bash oneshot-setup-rtx-6000.sh --voice`). Nothing
 is sent to Fish Audio. **Built with Fish Audio.**
 
 1. **What is said.** Type the words. Speaker tags switch voices, `<|speaker:0|>` to `<|speaker:15|>`, one turn on each
@@ -372,6 +376,7 @@ Which engine runs depends on the machine; the tab says which:
 | Mac with an M5 or later | TensorFold's native Metal engine (Zig and Metal, since 2.9.2) | no, not yet: the song plays when it is done | 59.5 to 63.0 s on an M5 Ultra on TensorFold's command line, 17.8 GB at the peak; through the app a 33.4 s song took 35.2 s |
 | Mac with an M1 to M4, or `MUSIC3_BACKEND=mlx` | TensorFold's MLX port, int8 | yes: it starts once enough is made that it never stops, about 13 s into a 60 s song | about 63 s on an M5 Ultra, through the app |
 | DGX Spark | TensorFold's CUDA engine, int8 (ComfyUI's nodes where it is not built) | no | about 149 s on one GB10, through the app |
+| GPU | TensorFold's CUDA engine, int8 (ComfyUI's nodes where it is not built) | no | the 149 s above was measured on one GB10 |
 
 1. **Lyrics.** Section tags on lines of their own, above the lines they hold; the buttons under the box add
    `[Intro]`, `[Verse]`, `[Pre-Chorus]`, `[Chorus]`, `[Bridge]`, `[Instrumental]` and `[Outro]`. Lines in
@@ -413,6 +418,8 @@ Measured through the app, eight 56-frame 864x480 FastH3 clips: 263 s on one Spar
 on four, 65 s on five. Six to eight Sparks are not measured, and one clip split across several Sparks is not in the
 app. On a Mac the tab says there is one machine.
 
+On a GPU this machine renders the job. A job may also use DGX Sparks you add, up to five, this GPU counted. Several clips render one per machine. One clip renders on one machine. A long video, pictures, edits, Library actions, voice takes and songs stay on this GPU. The row of 1 to 8 above, and the times, are a DGX Spark's.
+
 ## 13. Memory on a DGX Spark
 
 On a Spark the GPU and the system share one pool of memory, and a memory guard stands beside every render.
@@ -430,6 +437,8 @@ On a Spark the GPU and the system share one pool of memory, and a memory guard s
 A LoRA on FastH3 is merged into TensorFold's int8 engine and takes what a clip without one takes, measured up to
 1376x768 at 10 seconds. A Spark whose engine predates 2.7.1 renders LoRA clips on ComfyUI's own blocks, and refuses
 them above 1280x736 at 124 frames.
+
+On a GPU the clip is loaded onto the GPU, and that is the memory that moves. System RAM stays put and is not the pool. Before you queue a clip, the estimate in step 1 and step 5 adds *about N GB of this GPU's memory*, from measured peaks. A clip that would leave the GPU under its floor (2 GB kept free) shows **This clip will be refused: memory**, with the reason and the nearest size and length that fit. The one-pool lesson above is a DGX Spark's.
 
 ## 14. Without the app
 
@@ -479,7 +488,7 @@ The same steps are in the app: **Learn → Your phone and other devices**.
 | A job fails | open its **Log** in the queue; the last lines say why |
 | Very slow renders | check the chip is M5-family and nothing else is using the GPU |
 | The job says "MLX engine" for FastH3 | the native engine is not installed or the chip is older than M5, or the clip has a LoRA: run `bash oneshot-setup.sh --verify` and look for the `tf-h3-dit` line |
-| "This clip will be refused: memory" (DGX Spark) | choose the size or length the message names (section 13) |
-| A song does not play while it is made | on an M5 Mac the Metal engine does not stream yet, and a DGX Spark never does; `MUSIC3_BACKEND=mlx` runs the MLX engine on a Mac, which does |
+| "This clip will be refused: memory" (DGX Spark or a GPU) | choose the size or length the message names (section 13) |
+| A song does not play while it is made | on an M5 Mac the Metal engine does not stream yet, and a DGX Spark never does; a GPU does not stream either. `MUSIC3_BACKEND=mlx` runs the MLX engine on a Mac, which does |
 | The Voice or Music tab says "Not available here" | install it: `bash oneshot-setup.sh --voice` or `--music`; the tab says what is missing |
 | The Render the take button stays off with a clip to clone | tick the consent box |

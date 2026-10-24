@@ -39,6 +39,25 @@ FRESH = 1.0                     # a tool's answer is kept this long
 GPU_FRESH, GPU_BUSY = 5.0, 30.0  # nvidia-smi's answer is kept this long; while a job or the render engine runs, longer
 STORAGE_FRESH = 600             # the folder sizes are worked out again after ten minutes
 DISK_FULL, GPU_HOT = 90, 85     # warnings: a disk this full (%), a GPU this hot (°C, the governor's alert line)
+
+
+def low_memory_warning(mem: dict, margin_mb: int) -> str | None:
+    """The line when free memory is under the floor. A card names GPU memory and does not say the
+    render would be stopped: the guard beside ComfyUI still watches system RAM."""
+
+    card_mem = mem.get("card") if isinstance(mem, dict) else None
+    if card_mem is not None:
+        free = card_mem.get("free_mb")
+        if free is not None and free < margin_mb:
+            return (f"GPU memory ({free / 1000:.1f} GB) is below the memory guard's floor "
+                    f"({margin_mb / 1000:.1f} GB).")
+        return None
+    floor = mem.get("floor_mb") if isinstance(mem, dict) else None
+    available = mem.get("available_mb") if isinstance(mem, dict) else None
+    if floor and available is not None and available < floor:
+        return (f"Available memory ({available / 1000:.1f} GB) is below the memory guard's floor "
+                f"({floor / 1000:.1f} GB): a render now would be stopped.")
+    return None
 GPU_FIELDS = "utilization.gpu,temperature.gpu,power.draw,clocks.sm,name"
 # the machine's workload governor (spark/workload.py), read only where SPARK_GOVERNOR (or SPARK_GOVERNOR_DIR) names its folder
 GOVERNOR = Path(os.environ.get("SPARK_GOVERNOR_DIR") or os.environ.get("SPARK_GOVERNOR") or "/nonexistent-governor")
@@ -316,9 +335,9 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         warnings = []
         if drive["used_pct"] is not None and drive["used_pct"] > DISK_FULL:
             warnings.append(f"The disk holding the studio folder is {drive['used_pct']:.0f}% full ({drive['free_gb']:g} GB free).")
-        if mem["floor_mb"] and mem["available_mb"] is not None and mem["available_mb"] < mem["floor_mb"]:
-            warnings.append(f"Available memory ({mem['available_mb'] / 1000:.1f} GB) is below the memory guard's floor "
-                            f"({mem['floor_mb'] / 1000:.1f} GB): a render now would be stopped.")
+        low = low_memory_warning(mem, guard.VRAM_MARGIN_MB if guard else 0)
+        if low:
+            warnings.append(low)
         if card and card["temp_c"] is not None and card["temp_c"] > GPU_HOT:
             warnings.append(f"The GPU is at {card['temp_c']:.0f} °C, over {GPU_HOT} °C.")
         if ruled and ruled["status"] not in (None, "ok"):

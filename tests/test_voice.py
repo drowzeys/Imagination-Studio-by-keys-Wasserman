@@ -144,14 +144,16 @@ def test_the_cuda_backend_says_what_is_missing():
     assert one.argv() == [str(one.bin), "--model", str(one.model), "--codec", str(one.codec), "--serve", "1"]
     (folder / "codec-v1.safetensors").unlink()
     one.known = None
-    assert "drama3_codec.py" in one.check() and "oneshot-setup-spark.sh --voice" in one.check() and "DRAMA3_CUDA_CODEC" in one.check()
-    one.known, one.model = None, folder / "nowhere"
-    assert "No Drama 3 checkpoint" in one.check()
-    one.known, one.bin = None, folder / "nothing"
-    why = one.check()
-    assert "drama3-cuda" in why and "DRAMA3_CUDA_BIN" in why
+    had_located = voice.located
+    voice.located = lambda need, path, there: path  # this desk's linked weights are not the missing install
     had = voice._backend
     try:
+        assert "drama3_codec.py" in one.check() and "oneshot-setup-spark.sh --voice" in one.check() and "DRAMA3_CUDA_CODEC" in one.check()
+        one.known, one.model = None, folder / "nowhere"
+        assert "No Drama 3 checkpoint" in one.check()
+        one.known, one.bin = None, folder / "nothing"
+        why = one.check()
+        assert "drama3-cuda" in why and "DRAMA3_CUDA_BIN" in why
         voice._backend = one
         state = client.get("/api/state").json()["voice"]
         assert state["available"] is False and state["backend"] == "cuda" and state["credit"] == "Built with Fish Audio"
@@ -159,6 +161,7 @@ def test_the_cuda_backend_says_what_is_missing():
         answer = client.post("/api/voice/takes", json={"text": "Hello."})
         assert answer.status_code == 400 and "DRAMA3_CUDA_BIN" in answer.json()["error"]
     finally:
+        voice.located = had_located
         voice._backend = had
 
 
@@ -277,12 +280,14 @@ def test_an_h3_job_unloads_drama3_before_it_runs():
         # while it is loaded a clip is measured against the memory the machine had before it loaded
         assert voice.room_mb() == int(one.before_gb * 1024)
         if server.SPARK:
-            had_room = server.memory_guard.room_mb
+            had_room, had_device = server.memory_guard.room_mb, server.memory_guard.device_room_mb
             try:
                 server.memory_guard.room_mb = lambda: 1000
+                server.memory_guard.device_room_mb = lambda: None  # a card reads its own room and would ignore the stand-in
                 assert server.memory_of({}, {"WIDTH": 864, "HEIGHT": 480}, 121, False)["available_mb"] == voice.room_mb()
             finally:
                 server.memory_guard.room_mb = had_room
+                server.memory_guard.device_room_mb = had_device
         server.build = build
         job = {"id": "test-h3-yield", "kind": "image", "status": "running", "title": "t", "params": {}, "log": "", "outputs": [],
                "started": time.time(), "finished": None, "remote": None}

@@ -66,17 +66,34 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The options both know pass through to oneshot-setup-spark.sh (it adds --h3-base, which is the Spark's own); --upscale and
 # --remove come with the Spark's --ref2va; the Mac-only ones (--turbo, --app) are dropped with a note.
 if [ "$(uname -s)" = Linux ]; then
+  # A GB10, and a failed nvidia-smi, keep the Spark lines. A discrete card is told this is a GPU. The hand-off below does not change.
+  GPU_NAME=""
+  if [ -n "${STUDIO_GPU:-}" ]; then
+    GPU_NAME="$(nvidia-smi -i "$STUDIO_GPU" --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
+  else
+    GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
+  fi
+  case "$GPU_NAME" in
+    *GB10*|"") ON_CARD=0;;
+    *) ON_CARD=1;;
+  esac
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
       --all|--yes|-y|--image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--sound|--graphics|--no-graphics|--finish|--no-finish|--train|--ref2va|--image-edit|--h3-base|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
-      --upscale|--remove) echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"; SPARK_ARGS+=("--ref2va");;
+      --upscale|--remove)
+        if [ "$ON_CARD" = 1 ]; then echo "note: on this GPU $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"
+        else echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"; fi
+        SPARK_ARGS+=("--ref2va");;
       --fasth3) ;;
-      --turbo|--app) echo "note: $arg is for the Mac build and does nothing on a DGX Spark";;
+      --turbo|--app)
+        if [ "$ON_CARD" = 1 ]; then echo "note: $arg is for the Mac build and does nothing on this GPU"
+        else echo "note: $arg is for the Mac build and does nothing on a DGX Spark"; fi;;
       *) echo "unknown option $arg" >&2; exit 2;;
     esac
   done
-  echo "Linux detected: installing the DGX Spark (CUDA) build"
+  if [ "$ON_CARD" = 1 ]; then echo "Linux detected: installing the CUDA build"
+  else echo "Linux detected: installing the DGX Spark (CUDA) build"; fi
   exec bash "$HERE/oneshot-setup-spark.sh" ${SPARK_ARGS[@]+"${SPARK_ARGS[@]}"}
 fi
 # In a terminal with no feature flag: the checklist of parts (scripts/install-checklist.sh), every part this Mac's memory

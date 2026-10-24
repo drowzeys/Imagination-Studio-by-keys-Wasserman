@@ -64,14 +64,16 @@ What the installer does differently on this card:
 A DGX Spark has one 128 GB memory for the CPU and the GPU. A card has its own 96 GB, and the machine's RAM is separate.
 The Studio reads the card's own memory (`nvidia-smi`) wherever it decides whether something fits:
 
-- **Before a clip is queued and before anything loads**, the room is the smaller of the machine's RAM and the card's
-  free memory. The card keeps 2 GB free (`VRAM_MARGIN_MB`); the RAM keeps the usual tenth.
+- **Before a clip is queued**, the room is the card's free memory, including what a loaded Drama 3, Music, or Bolt
+  will give back (each is unloaded before the job). **Before anything loads**, those engines are already gone, so the
+  room is the card's free memory then. The card keeps 2 GB free (`VRAM_MARGIN_MB`), already taken out of that room.
+  System RAM is not mixed in.
 - **Voice (Drama 3, about 42 GB)** stops the studio's ComfyUI first when the card's free memory is under what Drama 3
   needs. So Voice never loads beside the video models it would not fit with.
 - **Bolt** is held beside a job only when the card has room for both. Otherwise it is unloaded first, as on a Spark.
 - **ComfyUI offloads by itself.** When a model does not fit the card's free memory, it stages the weights in RAM and
   streams them to the card. That is slower; the first load after a LoRA job took minutes in the simulation.
-- **The status bar** shows the card's memory beside the machine's ("card 52 of 96 GB").
+- **The status bar** leads with the card's memory. It does not also quote system RAM as a second memory.
 
 ## The simulation
 

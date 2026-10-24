@@ -61,6 +61,14 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
 
     def guard(kind: str, seconds: float) -> dict:
         import memory_guard  # spark/, on the server's path
+        if memory_guard.device_room_mb() is not None:
+            # Drama 3, Music, and Bolt are unloaded before this job (server.perform). Their room_mb is the card's
+            # raw free before they loaded. The callback is held_room, which mixes that with the after-margin room.
+            import voice
+            import music
+            import bolt
+            have = memory_guard.card_room_for_job([voice.room_mb(), music.room_mb(), bolt.room_mb()])
+            return memory_guard.sound_check(kind, seconds, available_mb=have, card=True)
         return memory_guard.sound_check(kind, seconds, available_mb=room() if room else None)
 
     def spark_missing(kind: str) -> str:

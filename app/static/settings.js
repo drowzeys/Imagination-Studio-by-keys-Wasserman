@@ -106,7 +106,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
     setRow("Home starts on", "The composer's first chip", setSeg(p.mode, { clip: "Clip", picture: "Picture", voice: "Voice", song: "Song" }, v => put1({ mode: v }), "Home starts on")),
     setRow("QA gate on each clip", "The transcript and contact-sheet check after a Sharp Spec clip", setSwitch(p.qa_gate, v => put1({ qa_gate: v }), "QA gate")),
     setRow("Describe new clips automatically", "When nothing is rendering, the local model looks at new clips and pictures so the Library can search by what is in them", setSwitch(p.captions_auto !== false, v => put1({ captions_auto: v }), "Describe new clips automatically")),
-    setRow("Delivery sound", "On a DGX Spark a clip's sound is 32 kHz; 48 kHz stereo re-encodes only the sound", setSeg(p.audio_rate, { keep: "Keep 32 kHz", "48000": "48 kHz stereo" }, v => put1({ audio_rate: v }), "Delivery sound")),
+    setRow("Delivery sound", (typeof cardFace === "function" && cardFace() ? "On this GPU" : "On a DGX Spark") + " a clip's sound is 32 kHz; 48 kHz stereo re-encodes only the sound", setSeg(p.audio_rate, { keep: "Keep 32 kHz", "48000": "48 kHz stereo" }, v => put1({ audio_rate: v }), "Delivery sound")),
     setRow("Seed", "Fixed repeats a take; random gives each a new one", setSeg(p.seed, { fixed: "Fixed", random: "Random" }, v => put1({ seed: v }), "Seed")),
     setRow("Renders go to", "The studio folder, set when the studio starts (STUDIO_HOME)", el("code", { class: "st-path" }, (S && S.home) || "the studio folder")))]; }
 
@@ -189,7 +189,7 @@ function setConnections() {
   return [localModelsCard(), localAgentsCard(),
     setPanel("Your agents", "Press Connect: the studio finds the agent (or installs it), runs its own sign-in, checks it answers and makes it your default. It keeps nothing of the sign-in; each answer is billed to your own subscription.",
       el("div", { class: "tri" }, clis.map(setBrainCard)),
-      el("div", { class: "note m-flat" }, remote.host ? "On another computer: " + remote.host + " runs " + ((remote.backends || []).join(", ") || "nothing yet") + " over SSH." : "A DGX Spark can use the agents signed in on your Mac: link it below.")),
+      el("div", { class: "note m-flat" }, remote.host ? "On another computer: " + remote.host + " runs " + ((remote.backends || []).join(", ") || "nothing yet") + " over SSH." : ((typeof cardFace === "function" && cardFace() ? "This GPU" : "A DGX Spark") + " can use the agents signed in on your Mac: link it below."))),
     typeof linkPanel === "function" ? linkPanel() : null,
     setPanel("Tools and the suite", "What an agent may drive, and how the filmmaker suite and Resolve connect (by files, nothing to sign in to).",
       el("div", { class: "tri" }, tools.map(t => { const said = BR.checked[t.id];
@@ -315,8 +315,9 @@ function viewSettings() {
   return el("div", { class: "settings" },
     typeof pageHead === "function" ? pageHead("Studio Vault", "Settings", "How the studio looks, what it shows, and what it connects to.") : el("h1", { class: "display" }, "Settings"),
     el("div", { class: "st-wrap" },
-      el("nav", { class: "st-rail", "aria-label": "Settings sections" }, SET_SECTIONS.map(([id, name, one]) => el("button", { type: "button", class: SET.section === id ? "on" : "", "aria-current": SET.section === id ? "page" : false, "data-section": id,
-        onclick: () => { SET.section = id; render(); } }, el("b", {}, name), el("span", {}, one)))),
+      el("nav", { class: "st-rail", "aria-label": "Settings sections" }, SET_SECTIONS.map(([id, name, one]) => { const blurb = id === "sparks" && typeof cardFace === "function" && cardFace() ? "this GPU, plus up to five DGX Sparks" : one;
+        return el("button", { type: "button", class: SET.section === id ? "on" : "", "aria-current": SET.section === id ? "page" : false, "data-section": id,
+        onclick: () => { SET.section = id; render(); } }, el("b", {}, name), el("span", {}, blurb)); })),
       el("div", { class: "st-body" }, draw()))); }
 // open Settings at one section (⌘K, the Agent room's and Brains' links)
 function goSettings(section) { if (section) SET.section = section; go("Settings"); }

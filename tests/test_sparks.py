@@ -299,7 +299,9 @@ def test_the_number_is_held_to_the_sparks_there_are():
     said = client.post("/api/sparks/plan", json={"sparks": 5, "kind": "video", "clips": 8, "seconds": 40}).json()
     assert said["chosen"] == 5 and said["available"] == 3 and said["used"] == 3 and said["count"] == "3 of 5 available" and said["mode"] == "parallel"
     assert "3 at a time" in said["says"] and said["estimate"]["one_spark"] == 320
-    assert client.post("/api/sparks/plan", json={"sparks": 2, "clips": 8}).json()["count"] == "2 Sparks"
+    # a count that includes this machine: "2 Sparks" on a GB10, "this GPU and 1 Spark" on a card
+    expect = "this GPU and 1 Spark" if hub.word == "GPU" else "2 Sparks"
+    assert client.post("/api/sparks/plan", json={"sparks": 2, "clips": 8}).json()["count"] == expect
     # one clip: one Spark, and it says that a clip is not split
     alone = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 1}).json()
     assert alone["mode"] == "one" and "one Spark" in alone["says"] and "not in the app" in alone["says"]
@@ -396,7 +398,7 @@ def test_a_worker_that_stops_answering_is_marked_down_and_its_clip_rendered_else
     client.post(f"/api/sparks/workers/{one.address}/check", json={})
     settle()
     row = client.get("/api/sparks").json()["workers"][0]
-    assert row["state"] == "busy" and not row["usable"] and "not this Spark's" in row["why"]
+    assert row["state"] == "busy" and not row["usable"] and f"not this {hub.word}'s" in row["why"]
     for job in one.jobs.values():
         job["status"] = "cancelled"
     client.post(f"/api/sparks/workers/{one.address}/check", json={})
@@ -642,6 +644,25 @@ vm.runInThisContext(`(async () => { const out = {};
   /* an older app on a Mac: one machine */
   SPK.data = { supported: false, limit: 5, available: 1, note: "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine.", workers: [], this: {} }; spkSet(5);
   const mac = sparksPick(); out.mac = [SPK.n, all(mac, "button").map(b => text(b)), text(mac)];
+  /* a DGX Spark with no worker still shows the number row and "Add a Spark" */
+  globalThis.S = { platform: "spark", platform_label: "DGX SPARK · NVIDIA GB10 · H3-CUDA" };
+  out.gb10Count = spkCount(five, 3);
+  SPK.n = 4; SPK.data = { supported: true, limit: 5, available: 1, listed: 1, default: 1, folder: "~/studio", head: "spark", workers: [], this: five.this };
+  const gb10Bay = { style: {}, kids: ["stale"], replaceChildren(...k) { this.kids = k; } };
+  globalThis.document.querySelector = sel => sel === "#sparks" ? gb10Bay : null;
+  spkQueue();
+  out.gb10Pick = text(sparksPick({ kind: "video", clips: 8 }));
+  out.gb10N = SPK.n; out.gb10Bay = gb10Bay.style.display || ""; out.gb10Page = text(viewSparks());
+  /* a discrete card with no other machine: the number row stays off; the tab is the add form */
+  globalThis.S = { platform: "spark", platform_label: "CUDA · NVIDIA RTX PRO 6000 BLACKWELL MAX-Q · H3-CUDA" };
+  out.cardWith = spkCount({ supported: true, available: 3, this: { kind: "GPU" } }, 3);
+  out.cardOver = spkCount({ supported: true, available: 3, this: { kind: "GPU" } }, 5);
+  SPK.n = 4; SPK.data = { supported: true, limit: 5, available: 1, listed: 1, default: 1, folder: "~/studio", head: "spark", workers: [], this: five.this };
+  const bay = { style: {}, kids: ["stale"], replaceChildren(...k) { this.kids = k; this.style.display = this.style.display; } };
+  globalThis.document.querySelector = sel => sel === "#sparks" ? bay : null;
+  spkQueue();
+  out.alonePick = sparksPick({ kind: "video", clips: 8 });
+  out.aloneN = SPK.n; out.aloneBay = bay.style.display; out.alonePage = text(viewSparks());
   console.log(JSON.stringify(out)); })().catch(e => { console.error(e); process.exit(1); });`);
 """
 
@@ -664,6 +685,13 @@ def test_the_page_draws_the_chooser_and_the_list():
     assert out["macCount"] == "this Mac alone" and "This Mac and 1 other" in out["macPage"] and "this Mac" in out["macPage"]
     assert "10.0.10.5 through spark@192.168.1.10" in out["macPage"] and "Through" in out["macPage"] and "memory guard ·" not in out["macPage"].split("spark-node5")[0]
     assert out["macFields"] == 3 + 1  # address, folder, through, and each worker's "use" box
+    assert "Sparks for new jobs" in out["gb10Page"] and "Add a Spark" in out["gb10Page"] and "Add a DGX Spark" not in out["gb10Page"]
+    assert out["gb10Count"] == "3 of 3 available Sparks"
+    assert out["gb10Pick"] and out["gb10N"] == 4 and out["gb10Bay"] == ""
+    assert out["alonePick"] is None and out["aloneN"] == 1 and out["aloneBay"] == "none"
+    assert out["cardWith"] == "this GPU and 2 Sparks" and out["cardOver"] == "3 of 5 available"
+    assert "Add a DGX Spark" in out["alonePage"] and "This GPU renders every clip" in out["alonePage"]
+    assert "Sparks for new jobs" not in out["alonePage"] and "1" not in out["alonePage"].split("Add a DGX Spark")[0]
     # every job the page queues carries the number
     page = (ROOT / "app/static/index.html").read_text()
     assert 'body = { sparks: SPK.n, ...body }' in page and '"Sparks"' in page and "Sparks: viewSparks" in page
@@ -675,6 +703,68 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_a_quiet_card_lesson_points_at_the_page_that_is_there():
+    """With no worker, Show me on a card must hit the Sparks tab that is actually drawn. A GB10, a Mac, and a
+    card that already has a worker keep the number row and “Add a Spark”."""
+
+    need_node()
+    html = (ROOT / "app/static/index.html").read_text()
+    start = html.index("function lessons()")
+    depth, end = 0, None
+    for i in range(html.index("{", start), len(html)):
+        depth += 1 if html[i] == "{" else -1 if html[i] == "}" else 0
+        if depth == 0:
+            end = i + 1
+            break
+    assert end, "lessons() did not close"
+    baker = html[html.index("const BAKER = "):start]
+    script = r"""
+const vm = require("vm"), fs = require("fs");
+globalThis.location = { port: "7870" };
+globalThis.S = { platform: "spark", platform_label: "", turbo: false, x2: false, sharp: null,
+  custom: { sides: [256, 1344], steps: [1, 40] }, home: "/studio", ref2va: false, voice: {} };
+let fleet = false;
+globalThis.cardFace = () => S.platform === "spark" && (S.platform_label || "").startsWith("CUDA · ");
+globalThis.spkQuiet = () => cardFace() && !fleet;
+vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"));
+const step = (title) => lessons().find(l => l.id === "sparks").steps.find(s => s.t === title);
+const face = (platform, label, workers) => { S.platform = platform; S.platform_label = label; fleet = workers;
+  const choose = step("Choose the number"), add = lessons().find(l => l.id === "sparks").steps.find(s => s.t.startsWith("Add a")),
+    check = step("Check, update, start, stop"), open = lessons().find(l => l.id === "sparks").steps[0];
+  return { open: open.d.join(" "), choose: choose.d.join(" "), chooseGo: choose.go, add: add.t, addBody: add.d.join(" "), addGo: add.go, check: check.d.join(" "), checkGo: check.go }; };
+console.log(JSON.stringify({
+  quiet: face("spark", "CUDA · NVIDIA RTX PRO 6000 · H3-CUDA", false),
+  withWorker: face("spark", "CUDA · NVIDIA RTX PRO 6000 · H3-CUDA", true),
+  gb10: face("spark", "DGX SPARK · NVIDIA GB10 · H3-CUDA", false),
+  mac: face("mac", "MAC · APPLE SILICON MX · H3-METAL", false) }));
+"""
+    with tempfile.TemporaryDirectory() as scratch:
+        (Path(scratch) / "lessons.js").write_text(baker + html[start:end])
+        (Path(scratch) / "harness.js").write_text(script)
+        done = subprocess.run(["node", str(Path(scratch) / "harness.js"), str(Path(scratch) / "lessons.js")],
+                              capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr[-2000:]
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    quiet = out["quiet"]
+    assert quiet["open"].startswith("This GPU renders the job")
+    assert "stays off until a DGX Spark is on the list" in quiet["choose"] and "The same row of numbers is at the top" not in quiet["choose"]
+    assert quiet["chooseGo"] == {"tab": "Sparks", "spot": "Sparks"}
+    assert quiet["add"] == "Add a DGX Spark" and "under “Add a DGX Spark”" in quiet["addBody"]
+    assert quiet["addGo"] == {"tab": "Sparks", "spot": "Add a DGX Spark"}
+    assert "Once a DGX Spark is on the list" in quiet["check"] and "this GPU's Studio code" in quiet["check"]
+    assert quiet["checkGo"] == {"tab": "Sparks", "spot": "Add a DGX Spark"}
+    shared = "The same row of numbers is at the top of the render bay"
+    for name in ("withWorker", "gb10", "mac"):
+        one = out[name]
+        assert one["choose"].startswith(shared) and one["chooseGo"] == {"tab": "Create", "step": 4, "spot": "Sparks", "set": {"goes": "video"}}
+        assert one["add"] == "Add a Spark" and "under “Add a Spark”" in one["addBody"] and "Add a DGX Spark" not in one["addBody"]
+        assert one["addGo"] == {"tab": "Sparks", "spot": "Add a Spark"}
+        assert one["check"].startswith("Each row shows") and "this Spark's Studio code" in one["check"]
+        assert one["checkGo"] == {"tab": "Sparks", "spot": "This Spark and"}
+    assert out["gb10"]["open"].startswith("On a DGX Spark") and out["mac"]["open"].startswith("On a DGX Spark")
+    assert "On a Mac the Mac leads them" in out["mac"]["open"] and "On a Mac the Mac leads them" not in out["gb10"]["open"]
 
 
 def test_two_saves_of_the_list_at_once_do_not_move_each_others_file():

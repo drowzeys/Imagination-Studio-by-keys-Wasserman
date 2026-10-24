@@ -176,6 +176,7 @@ def spark(tmp_path, monkeypatch):
     monkeypatch.setenv("SPARK_MODELS", str(models))
     monkeypatch.delenv("SOUND_PYTHON", raising=False)
     monkeypatch.setattr(memory_guard, "meminfo", lambda text=None: {"MemTotal": 124_500, "MemAvailable": 118_000, "MemFree": 100_000})
+    monkeypatch.setattr(memory_guard, "device_room_mb", lambda: None)  # this desk has a card; these tests are the Spark path
     monkeypatch.setattr(memory_guard, "SOUND_ESTIMATE", {"sfx": (8_000, 10), "foley": (9_000, 50)})
     clip = server.HOME / "renders" / "walk.mp4"
     clip.parent.mkdir(parents=True, exist_ok=True)
@@ -222,11 +223,31 @@ def test_a_spark_refuses_a_kind_the_guard_has_not_measured_or_that_does_not_fit(
     with pytest.raises(Exception) as error:
         build("sfx", {"prompt": "rain", "seconds": 40}, "x")
     assert "refused" in error.value.detail and "floor" in error.value.detail
-    # what the Studio's own engines hold counts as room (server.held_room)
+    # The room callback is the Spark path's pool. 20_000 MB available would refuse this estimate.
     _, build, _, _ = sound.attach(server.HOME, ROOT, True, server.inside, server.relative, lambda: 124_000)
     monkeypatch.setattr(spark["guard"], "meminfo", lambda text=None: {"MemTotal": 124_500, "MemAvailable": 20_000})
     monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (8_000, 10), "foley": (9_000, 50)})
     assert build("sfx", {"prompt": "rain"}, "x")[0][2] == "sfx"
+
+
+def test_a_card_counts_a_loaded_engine_and_ignores_the_ram_room(spark, monkeypatch):
+    """The queue asks before the unload. Bolt's raw free is why a short effect fits. Voice alone, and the live card,
+    are short of it. A RAM callback large enough to fit on the Spark path is still refused."""
+
+    monkeypatch.setattr(spark["guard"], "device_room_mb", lambda: 4_000)
+    monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (8_000, 10), "foley": (9_000, 50)})
+    monkeypatch.setattr(server.voice, "room_mb", lambda: 5_000)
+    monkeypatch.setattr(server.music, "room_mb", lambda: None)
+    monkeypatch.setattr(server.bolt, "room_mb", lambda: 80_000)
+    held = {"mb": 1_000}
+    _, build, _, _ = sound.attach(server.HOME, ROOT, True, server.inside, server.relative, lambda: held["mb"])
+    assert build("sfx", {"prompt": "rain", "seconds": 6}, "x")[0][2] == "sfx"
+    held["mb"] = 124_000
+    monkeypatch.setattr(server.voice, "room_mb", lambda: None)
+    monkeypatch.setattr(server.bolt, "room_mb", lambda: None)
+    with pytest.raises(HTTPException) as error:
+        build("sfx", {"prompt": "rain", "seconds": 40}, "y")
+    assert "this GPU" in error.value.detail and "this machine" not in error.value.detail
 
 
 def test_a_spark_says_what_is_not_installed(spark):

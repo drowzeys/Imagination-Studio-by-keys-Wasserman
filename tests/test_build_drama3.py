@@ -95,6 +95,8 @@ def test_the_build_target_follows_the_gpu(box):
     assert said() == "121" and said(FAKE_CC="12.0") == "120" and said(TF_SM="120,121") == "120,121"
     assert said(FAKE_CC='Field "compute_cap" is not a valid field to query.') == "121"
     assert '-Dsm="$SM"' in script and "-Dsm=121" not in script
+    echo = next(one for one in script.splitlines() if "building the drama3 engine" in one)
+    assert "sm_${SM//,/, sm_}" in echo and "sm_121" not in echo
 
 
 def test_the_carrier_engine_is_taken_when_its_commit_and_checksums_match(box):

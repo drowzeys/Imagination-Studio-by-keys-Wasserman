@@ -35,8 +35,9 @@ Lifecycle (``Engine``), mirroring voice.Served:
 - **idle unload** after ``BOLT_IDLE_S`` (600) seconds without a request; ``never`` (or 0) keeps it, for a head that
   never renders;
 - **memory**: before it loads, ``NEED_GB`` must be free; while it is loaded, its memory counts as a job's
-  (``room_mb``, server.held_room), since the job unloads it; a kill-guard reads the available memory (MemAvailable on
-  Linux, vm_stat on a Mac) and kills the engine's process group under ``BOLT_GUARD_GB`` (8 GB);
+  (``room_mb``, server.held_room), since the job unloads it; a kill-guard reads the available memory (that card's
+  free memory on a discrete GPU, MemAvailable on a DGX Spark, vm_stat on a Mac) and kills the engine's process group
+  under ``BOLT_GUARD_GB`` (8 GB);
 - it dies with the app: it runs under a leash (bolt_leash.py) that ends it when the app's pipe closes.
 
 It never takes the studio's GPU lock: a brain is not a render, it is held to the machine's memory by measurement, and a
@@ -179,7 +180,8 @@ class Engine:
         if not why:
             free = voice.mem_available_gb()
             if 0 <= free < self.NEED_GB and not self.holds_room():
-                why = (f"{NAME} needs about {self.NEED_GB:.0f} GB of free memory to load and this machine has {free:.0f} GB "
+                who = "GPU" if voice.has_card_memory() else "machine"
+                why = (f"{NAME} needs about {self.NEED_GB:.0f} GB of free memory to load and this {who} has {free:.0f} GB "
                        "available now (a render or a model outside the Studio holds the rest).")
         self.known = (time.time(), why)
         return why
@@ -251,7 +253,10 @@ class Engine:
         while process.poll() is None:
             free = voice.mem_available_gb()
             if 0 <= free < self.guard_gb:
-                self.killed = f"available memory {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed {NAME} (pid {process.pid})"
+                if voice.has_card_memory():
+                    self.killed = f"GPU memory {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed {NAME} (pid {process.pid})"
+                else:
+                    self.killed = f"available memory {free:.1f} GB < {self.guard_gb:g} GB: the memory guard killed {NAME} (pid {process.pid})"
                 kill_group(process)
                 return
             time.sleep(0.25 if SPARK else 1.0)
@@ -354,7 +359,8 @@ class Engine:
             free = voice.mem_available_gb()
             self.note("stopped ComfyUI before loading", available_gb=round(free, 1))
         if 0 <= free < self.NEED_GB:
-            raise RuntimeError(f"{NAME} needs about {self.NEED_GB:.0f} GB of free memory to load and this machine has "
+            who = "GPU" if voice.has_card_memory() else "machine"
+            raise RuntimeError(f"{NAME} needs about {self.NEED_GB:.0f} GB of free memory to load and this {who} has "
                                f"{free:.0f} GB available")
 
     def stop(self, why: str) -> None:

@@ -136,7 +136,7 @@ FastH3 video with sound (125 GB), motion graphics, Finish and phone notification
 | `--sound` | Sound effects and foley (11 GB more, gated) |
 | `--motion` | Motion Previs analysis (0.5 GB) |
 | `--voice` | Fish Audio Drama 3 (about 41 GB more) |
-| `--train` | Train your own LoRA: musubi-tuner, MiniMax H3's video encoder and a training adapter (an 8 GB environment, its two files, about 6 GB, and, when `--h3-base` has not installed it, that 40 GB transformer; DGX Spark only, not on a Mac) |
+| `--train` | Train your own LoRA: musubi-tuner, MiniMax H3's video encoder and a training adapter (an 8 GB environment, its two files, about 6 GB, and, when `--h3-base` has not installed it, that 40 GB transformer; the CUDA build, a DGX Spark or a GPU, not on a Mac) |
 | `--graphics` | Motion graphics: HyperFrames, GSAP, Node 22 when the machine's is older, and a browser (about 400 MB). In the default install; `--no-graphics` leaves it out |
 | `--finish` | Finish: Tesseract 0.4.0 and Tesseract Converter 0.3.0, two fonts (about 150 MB; the fonts only on Linux ARM such as a DGX Spark). In the default install; `--no-finish` leaves it out. Tesseract is free under Mirage's own terms, not open source; the converter is MIT |
 | `--no-render` | Skip the test clip |
@@ -208,7 +208,7 @@ Making the film, in the order you would use it:
   [Finish](#finish-the-final-cut-and-mix-to-resolve-premiere-or-after-effects).
 - **Work on a clip you already have.** *Restyle*, *Extend* and *Fix*, under every clip in the Library.
   [Restyle, Extend, Fix](#work-on-a-clip-you-already-have-restyle-extend-fix).
-- **Train your own LoRA.** A look or a character from your own clips, on a DGX Spark.
+- **Train your own LoRA.** A look or a character from your own clips, on the CUDA build (a DGX Spark or a GPU).
   [Train your own LoRA](#train-your-own-lora).
 - **Captions and search in the Library.** The studio describes every clip and picture, so you can search by what is in
   them. [Search your library](#search-your-library-by-what-is-in-it).
@@ -302,10 +302,10 @@ It runs on this computer and needs no account.
 
 ## New in 3.0.1
 
-- **MOSS-Image**, a fifth picture model, on a DGX Spark: OpenMOSS's 5B model (Apache 2.0, commercial use allowed),
+- **MOSS-Image**, a fifth picture model, on a DGX Spark or a GPU: OpenMOSS's 5B model (Apache 2.0, commercial use allowed),
   through ComfyUI's own support. It is the best of the picture models at lettering: posters, title cards, signs and
   menus came out exactly as written, in English and Japanese. About 45 s for 1344x768. Install it with
-  `oneshot-setup-spark.sh --moss` (30 GB); see [MOSS-Image on a DGX Spark](#moss-image-on-a-dgx-spark).
+  `oneshot-setup-spark.sh --moss` on a DGX Spark, or `oneshot-setup-rtx-6000.sh --moss` on a GPU (30 GB; `--moss` is in the CUDA setup both doors run); see [MOSS-Image on a DGX Spark](#moss-image-on-a-dgx-spark).
 - **ComfyUI moves to v0.42.0** (`b9b290e4`) on a DGX Spark, for MOSS-Image: `oneshot-setup-spark.sh --upgrade` moves
   an existing install. FLUX3-K, Qwen and FastH3 clips render as before on it.
 - **Credits:** OpenMOSS in the README, CREDITS.md, NOTICE and the app's About.
@@ -331,7 +331,7 @@ It runs on this computer and needs no account.
   timeline), Blender and Blockout.
 - **One-click Connect** for every agent, from any page that needs one: finds it or installs it, runs its own
   sign-in (the page opens by itself, with the code, a QR code and Copy link), checks it answers, makes it the default.
-- **Link another computer**: a DGX Spark uses the agents signed in on your Mac over SSH, and the studio sets up both
+- **Link another computer**: a DGX Spark, or a GPU, uses the agents signed in on your Mac over SSH, and the studio sets up both
   directions itself. Claude Code's Mac Keychain over SSH is solved with **Allow over SSH** (`BRAINS.md`).
 - The ChatGPT app's own Codex is used when the one on PATH is older, here or over SSH.
 
@@ -896,7 +896,7 @@ memory, CUDA 13). FastH3's transformer runs there on **TensorFold's H3 family fo
 (int8 projections, tile-routed int8 attention with FastH3's own sparse selection) on the GB10's tensor cores, written
 in Zig over the CUDA driver. **ComfyUI**, pinned, hosts the rest: the text encoder, the sampler, the decoders and
 Qwen-Image-2.1. The header of the web app says which build you are in: a green `DGX SPARK · NVIDIA GB10 · H3-CUDA`
-badge, or a purple `MAC · APPLE SILICON MX · H3-METAL`.
+badge, or a purple `MAC · APPLE SILICON MX · H3-METAL`. On a GPU that header is `CUDA · <card> · H3-CUDA`.
 
 **Thank you** to Ash Hart for TensorFold, FastVideo (Hao AI Lab) for FastH3 and its ComfyUI release, MiniMax for H3,
 the Qwen team for Qwen-Image-2.1-Turbo, and the ComfyUI team for the runtime this build stands on.

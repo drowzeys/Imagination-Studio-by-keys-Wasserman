@@ -8,8 +8,20 @@ const spkHere = d => "this " + ((d && d.this && d.this.kind) || "Spark");
 // which Spark rendered a clip (sparks/takes.jsonl in the studio folder), for a take's line
 const spkTake = path => { const t = SPK.takes[path]; return t && t.spark ? "on " + t.spark : null; };
 const spkLimit = () => (SPK.data && SPK.data.limit) || 5;
-// "5 of 8 available" when more are asked for than there are; else how many will be used
-const spkCount = (d, n) => !d || !d.supported ? "this machine" : n > d.available ? d.available + " of " + n + " available" : n === 1 ? spkHere(d) + " alone" : n + " of " + d.available + " available Sparks";
+// A discrete card's banner starts with "CUDA ·". A GB10 starts with "DGX SPARK". Anything else keeps the original page.
+const spkFleet = () => !!(SPK.data && SPK.data.supported && (SPK.data.workers || []).length);
+// shell.js cardFace() is the one helper. This file is also loaded alone by its page test.
+const onCard = () => typeof cardFace === "function" ? cardFace() : (typeof S !== "undefined" && !!S && S.platform === "spark" && (S.platform_label || "").startsWith("CUDA · "));
+const spkQuiet = () => onCard() && !spkFleet();
+// "5 of 8 available" when more are asked for than there are; else how many will be used.
+// A count that includes a card does not call this machine a Spark.
+const spkCount = (d, n) => {
+  if (!d || !d.supported) return "this machine";
+  if (n > d.available) return d.available + " of " + n + " available";
+  if (n === 1) return spkHere(d) + " alone";
+  if (onCard()) { const others = n - 1; return spkHere(d) + " and " + others + " Spark" + (others === 1 ? "" : "s"); }
+  return n + " of " + d.available + " available Sparks";
+};
 const spkSig = d => !d ? "" : JSON.stringify([d.available, d.default, d.workers.map(w => [w.address, w.name, w.state, w.working, w.enabled, w.why, w.job, w.memory_gb, w.usable]), d.this && d.this.job]);
 async function spkLoad(draw) { const was = spkSig(SPK.data); try { const first = !SPK.data; SPK.data = await api("/api/sparks");
     if (first) { let kept = null; try { kept = Number(localStorage.getItem("sparks")); } catch {} SPK.n = SPK.data.supported ? Math.max(1, Math.min(kept || SPK.data.default || 1, SPK.data.limit)) : 1; }
@@ -32,25 +44,41 @@ function spkSays(r) { if (!r.supported) return [r.says];
 function sparksPick(what = {}, label = "Sparks") { const d = SPK.data, says = el("div", { class: "note", style: "margin-top:4px" });
   if (!d) return null;
   if (!d.supported) return el("div", { class: "sparks" }, el("label", {}, label), el("div", { class: "row", style: "gap:5px;align-items:center" }, el("button", { class: "small on fit", disabled: true }, "1"), el("span", { class: "note" }, d.note)));
+  if (spkQuiet()) return null;
   spkPlan(says, what);
-  return el("div", { class: "sparks", "data-keep": "" }, el("label", { title: "How many DGX Sparks this job may use, this one counted. More than there are is allowed: what is there is used." }, label),
+  return el("div", { class: "sparks", "data-keep": "" }, el("label", { title: onCard() ? "How many machines this job may use, this GPU counted. More than there are is allowed: what is there is used." : "How many DGX Sparks this job may use, this one counted. More than there are is allowed: what is there is used." }, label),
     el("div", { class: "row", style: "gap:5px;align-items:center;flex-wrap:wrap" },
       Array.from({ length: d.limit }, (_, i) => el("button", { type: "button", class: "small fit" + (SPK.n === i + 1 ? " on" : "") + (i + 1 > d.available ? " far" : ""), "aria-pressed": String(SPK.n === i + 1),
-        title: i + 1 > d.available ? "Only " + d.available + " available now: " + d.available + " will be used" : (i + 1) + (i ? " Sparks" : " Spark"), onclick: () => spkSet(i + 1) }, String(i + 1))),
+        title: i + 1 > d.available ? "Only " + d.available + " available now: " + d.available + " will be used" : (onCard() ? (i ? "this GPU and " + i + " Spark" + (i === 1 ? "" : "s") : "this GPU") : (i + 1) + (i ? " Sparks" : " Spark")), onclick: () => spkSet(i + 1) }, String(i + 1))),
       el("button", { type: "button", class: "small fit", title: "The list of Sparks: add one, check them, update and start them", onclick: () => { tab = "Sparks"; history.replaceState(null, "", "#Sparks"); render(); } }, "Sparks…")), says); }
 // The queue's own line, on every tab
 function spkQueue() { const box = document.querySelector("#sparks"); if (!box || !SPK.data) return; const d = SPK.data;
+  if (spkQuiet()) { if (SPK.n !== 1) SPK.n = 1; box.style.display = "none"; box.replaceChildren(); return; }
+  if (onCard()) box.style.display = "";
   if (!d.supported) { box.replaceChildren(el("div", { class: "note" }, "Sparks: 1. " + d.note)); return; }
-  box.replaceChildren(el("div", { class: "sparks" }, el("div", { class: "row", style: "gap:4px;align-items:center;flex-wrap:wrap" }, el("span", { class: "note fit", title: "How many DGX Sparks a job queued now may use, this one counted" }, "Sparks"),
+  box.replaceChildren(el("div", { class: "sparks" }, el("div", { class: "row", style: "gap:4px;align-items:center;flex-wrap:wrap" }, el("span", { class: "note fit", title: onCard() ? "How many machines a job queued now may use, this GPU counted" : "How many DGX Sparks a job queued now may use, this one counted" }, "Sparks"),
     Array.from({ length: d.limit }, (_, i) => el("button", { type: "button", class: "small fit" + (SPK.n === i + 1 ? " on" : "") + (i + 1 > d.available ? " far" : ""), onclick: () => spkSet(i + 1) }, String(i + 1)))),
     el("div", { class: "note" }, spkCount(d, SPK.n) + (SPK.n > 1 ? ": queued clips render one per Spark." : ".")))); }
 const spkDo = async (path, body, method) => { try { SPK.data = await api(path, body, method); SPK.plans = {}; } catch (e) { toast(e.message, 6000); } spkQueue(); render(); };
 const spkHas = can => !can ? "" : [can.fasth3 ? "FastH3 clips (text, first and last frame)" : "no FastH3", can.ref2va ? "Ref2VA" + (can.ref2va_turbo ? " with Turbo" : "") : "no Ref2VA", can.image ? "image model" : "no image model",
   can.loras ? can.loras + " LoRA" + (can.loras === 1 ? "" : "s") : "no LoRAs", can.ffmpeg ? "ffmpeg" : "no ffmpeg"].join(" · ");
 const spkDot = state => el("span", { style: "display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:" + ({ ready: "var(--ok)", busy: "var(--warn)", update: "var(--warn)", stopped: "var(--dim)", new: "var(--faint)" }[state] || "var(--bad)") });
+function spkAdd(d, title = "Add a Spark") {
+  const f = SPK.form, mac = d.head === "mac", here = spkHere(d);
+  if (mac && f.via === null) f.via = d.via || "";
+  return el("div", {}, el("h3", {}, title),
+    el("div", { class: "note" }, "Its address as you would type it after ssh. It needs the Studio installed once (oneshot-setup-spark.sh, with the FastH3 models); “Update and start” then sends " + here + "'s Studio code and starts its app. No password is asked and nothing is installed as root: if ssh asks for a password, set up a key login first."
+      + (mac ? " Through: a Spark this Mac reaches by ssh and that reaches the other Spark by its own key login (the Spark that leads them, e.g. user@spark-head); leave it empty when this Mac reaches the Spark itself." : "")),
+    el("div", { class: "row" }, field("Address", bind(f, "address", el("input", { placeholder: "10.0.10.5  or  user@spark-5" }))), field("Studio folder there, under the home folder", bind(f, "folder", el("input", { placeholder: d.folder }))),
+      mac ? field("Through", bind(f, "via", el("input", { placeholder: "user@the-spark-that-leads" }))) : null,
+      el("button", { class: "primary fit", onclick: async () => { if (!f.address.trim()) return toast("Give the Spark's address"); await spkDo("/api/sparks/workers", { address: f.address.trim(), folder: f.folder.trim() || null, ...(mac && (f.via || "").trim() ? { via: f.via.trim() } : {}) }); f.address = ""; } }, "Add")));
+}
 function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}, "Sparks")), d = SPK.data;
   if (!d) { spkLoad(true).then(() => { if (SPK.data && tab === "Sparks") render(); }); return put(box, el("div", { class: "note" }, "Loading…")), box; }
   if (!d.supported) return put(box, el("div", { class: "note" }, d.note), sparksPick()), box;
+  if (spkQuiet()) return put(box,
+    el("p", { class: "note m-flat" }, "This GPU renders every clip. Add a DGX Spark when you have another one. Clips that do not have to wait on each other then run one per machine, and the number shows up on the queue."),
+    spkAdd(d, "Add a DGX Spark")), box;
   const f = SPK.form, a = encodeURIComponent, mac = d.head === "mac", here = spkHere(d);
   if (mac && f.via === null) f.via = d.via || "";
   const row = w => el("div", { class: "seg" }, el("div", { class: "seghead" }, spkDot(w.working ? "busy" : w.state), el("b", {}, w.name), el("span", { class: "note" }, w.address + (w.via ? " through " + w.via : "")),
@@ -64,7 +92,7 @@ function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}
       w.disk_gb != null ? w.disk_gb + " GB of disk free" : null, w.job ? "rendering job " + w.job : null].filter(Boolean).join(" · ")),
     w.can ? el("div", { class: "note" }, "Renders: " + spkHas(w.can)) : null,
     w.why || (w.unusable && w.state === "ready") ? el("div", { class: "note", style: "color:var(--warn)" }, w.why || w.unusable) : null);
-  put(box, el("div", { class: "note" }, "A job may use more than one DGX Spark. Choose how many here, in the queue, or where you queue a job: " + here + " counts as one. Several clips render one per Spark, side by side; one clip renders on one Spark. Each other Spark runs its own copy of this Studio, closed to the network: this app reaches it through an ssh tunnel it opens itself, so you need a key login to it as the user who runs this app."
+  put(box, el("div", { class: "note" }, (onCard() ? "A job may use this GPU and the DGX Sparks you add. Choose how many here, in the queue, or where you queue a job: " + here + " counts as one. Several clips render one per machine, side by side; one clip renders on one machine. " : "A job may use more than one DGX Spark. Choose how many here, in the queue, or where you queue a job: " + here + " counts as one. Several clips render one per Spark, side by side; one clip renders on one Spark. ") + "Each other Spark runs its own copy of this Studio, closed to the network: this app reaches it through an ssh tunnel it opens itself, so you need a key login to it as the user who runs this app."
       + (mac ? " From a Mac only single FastH3 clips a Spark makes with its own settings go to a Spark (no MiniMax H3 Turbo quality, no 2x decoder preset, no text encoder file of this Mac's); the rest renders on this Mac, and the page says why. A Spark this Mac cannot reach goes through one that can (“Through”): that Spark logs in to it with its own key." : "")),
     sparksPick({ clips: 8 }, "Sparks for new jobs"),
     el("h3", {}, here[0].toUpperCase() + here.slice(1) + " and " + (d.listed - 1) + " other" + (d.listed === 2 ? "" : "s") + " · " + d.available + " available"),

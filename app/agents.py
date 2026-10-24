@@ -129,6 +129,24 @@ STUDIO_TOOLS = ("studio_state (call first), list_library, search_library, queue_
                 "make_graphics (titles, lower thirds, captions, slideshows, music videos), "
                 "train_lora and training_status (a LoRA trained on a DGX Spark from Library clips, for hours), night_shift (a batch of Slate shots rendered overnight), "
                 "and Slate's slate_films, slate_film, slate_new_film, slate_add_scene, slate_add_shot, slate_render_shot, suite_imports and suite_attach (what the filmmaker suite brought in, sent into a film), and the Director's direct_film and director_status")
+
+
+def studio_tools() -> str:
+    """The tool list the agent is given. ``STUDIO_TOOLS`` stays the GB10 sentence.
+
+    Training runs on any CUDA Linux machine (``train.ready``). On a card the agent is told this GPU.
+    A failed import keeps the Spark sentence, which is what a GB10 and a Mac already say."""
+
+    try:
+        import server
+        if server.card_face():
+            return STUDIO_TOOLS.replace("a LoRA trained on a DGX Spark from Library clips, for hours",
+                                         "a LoRA trained on this GPU from Library clips, for hours")
+    except Exception:
+        pass
+    return STUDIO_TOOLS
+
+
 ROOM = (" This is a conversation with the filmmaker in the Studio's Agent room, and it continues over several turns."
         "{tools} When anything is unclear or a choice matters (length, look, voice, which take), ask the filmmaker one "
         "clear question and stop: write [question] on its own line, then the question, then up to four short choices "
@@ -2009,7 +2027,7 @@ def perform(task: dict) -> None:
             studio, folder_, config_path, where = "", f" ({work_})", str(work_ / "mcp.json"), None
         system = SYSTEM.format(folder=folder_, studio=studio)
         if task.get("thread"):
-            system += ROOM.format(tools=ROOM_TOOLS.format(names=STUDIO_TOOLS) if "studio" in task["tools"] else "") \
+            system += ROOM.format(tools=ROOM_TOOLS.format(names=studio_tools()) if "studio" in task["tools"] else "") \
                 if task["backend"] in HARNESSES else NO_STUDIO + ROOM.format(tools="")
         log.write(f"[{task['backend']} {'on ' + host if host else 'here'}{' · continues its session' if continuing else ''}] {task['prompt'][:200]}\n")
         log.flush()
@@ -2422,7 +2440,7 @@ def drive_on(task: dict, thread: dict | None, log, config: dict, work_: Path, na
             raise RuntimeError("none of this conversation's tools started: check them in Settings → Connections (Brains & tools)")
         system = SYSTEM.format(folder=f" ({work_})", studio="")
         if task.get("thread"):
-            system += ROOM.format(tools=ROOM_TOOLS.format(names=STUDIO_TOOLS) if "studio" in task["tools"] else "")
+            system += ROOM.format(tools=ROOM_TOOLS.format(names=studio_tools()) if "studio" in task["tools"] else "")
         if not any(tool in MAKERS for _, tool, _ in table.values()):  # the method is for the Studio's tools: another server's run plain
             method["parts"] -= {"rules", "report"}
         system += LOCAL_DRIVE + (LOCAL_RULES if "rules" in method["parts"] else "")

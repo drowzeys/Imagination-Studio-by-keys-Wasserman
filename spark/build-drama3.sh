@@ -99,7 +99,7 @@ if [ -z "${DRAMA3_SOURCE:-}" ]; then
     git -C "$SRC" checkout -q FETCH_HEAD
   fi
 fi
-echo "[tensorfold] building the drama3 engine with $NVCC (every CUDA kernel fatbin for sm_121, then the engine)"
+echo "[tensorfold] building the drama3 engine with $NVCC (every CUDA kernel fatbin for sm_${SM//,/, sm_}, then the engine)"
 # stripped: no build machine paths in the binaries (they may go into the carrier image)
 (cd "$SRC" && nice -n 19 "$ZIG" build drama3-generate drama3-lib -j"${DRAMA3_BUILD_JOBS:-4}" -Doptimize=ReleaseFast \
   -Dnvcc="$NVCC" -Dsm="$SM" -Dstrip=true --prefix "$SRC/zig-out")
