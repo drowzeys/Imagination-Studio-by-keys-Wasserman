@@ -272,6 +272,42 @@ def test_a_refusal_names_memory_the_driver_holds():
         G.smi, G.processes_mb = had
 
 
+def test_studio_room_mb_stands_in_for_the_cards_room_and_never_beyond_the_ram():
+    """A card smaller than the video models: STUDIO_ROOM_MB is the budget, capped by the machine's RAM room."""
+
+    had = G.meminfo, G.server_pid, G.device_room_mb, os.environ.get("STUDIO_ROOM_MB")
+    G.meminfo = lambda text=None: {"MemAvailable": 80_000, "MemTotal": 91_000}
+    G.server_pid = lambda: None
+    try:
+        G.device_room_mb = lambda: 25_000  # a 32 GB card
+        os.environ.pop("STUDIO_ROOM_MB", None)
+        unset = G.room_mb()
+        assert unset == 25_000 + G.floor_mb(91_000)  # as before
+        os.environ["STUDIO_ROOM_MB"] = "70000"
+        assert G.room_mb() == 70_000  # used instead of the card's room
+        os.environ["STUDIO_ROOM_MB"] = "200000"
+        assert G.room_mb() == 80_000  # never more than the RAM has
+        for bad in ("", "  ", "abc", "0", "-5", "7.5"):
+            os.environ["STUDIO_ROOM_MB"] = bad
+            assert G.room_mb() == unset, bad  # ignored
+        G.device_room_mb = lambda: None  # a Spark has no card to stand in for
+        os.environ["STUDIO_ROOM_MB"] = "70000"
+        assert G.room_mb() == 80_000
+    finally:
+        G.meminfo, G.server_pid, G.device_room_mb = had[:3]
+        if had[3] is None:
+            os.environ.pop("STUDIO_ROOM_MB", None)
+        else:
+            os.environ["STUDIO_ROOM_MB"] = had[3]
+
+
+def test_the_installer_has_an_escape_for_a_card_under_90_gb():
+    setup = (ROOT / "oneshot-setup-cuda.sh").read_text()
+    line = next(l for l in setup.splitlines() if 'die "video needs a card of about 96 GB' in l)
+    assert 'STUDIO_ALLOW_SMALL_VRAM:-0}" = 1' in line and "docs/rtx-5090.md" in line
+    assert '[ "$VRAM_GB" -ge 90 ]' in line  # the default is still the 90 GB floor
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):

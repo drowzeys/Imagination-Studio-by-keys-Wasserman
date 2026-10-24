@@ -312,7 +312,12 @@ def room_mb() -> int | None:
     idle. None where there is no /proc/meminfo.
 
     On a discrete card the smaller of that and the card's room. The checks keep ``floor_mb`` of the machine's RAM
-    free; on the card only VRAM_MARGIN_MB, so the card's room is given here with the floor added back."""
+    free; on the card only VRAM_MARGIN_MB, so the card's room is given here with the floor added back.
+
+    STUDIO_ROOM_MB (MB) stands in for the card's room on a discrete card, for a card smaller than the video models
+    when ComfyUI offloads them to RAM and streams blocks to the card (docs/rtx-5090.md). It is a budget of the
+    machine's RAM, so it never gives more than the RAM room above; unset, empty or not a number, it is ignored.
+    A Spark has no card to stand in for."""
 
     info = meminfo()
     now = info.get("MemAvailable")
@@ -330,7 +335,12 @@ def room_mb() -> int | None:
         if server_pid():
             ram = max(now, info["MemTotal"] - IDLE_MB)
     card = device_room_mb()
-    return ram if card is None else min(ram, card + floor_mb(info.get("MemTotal")))
+    if card is None:
+        return ram
+    asked = os.environ.get("STUDIO_ROOM_MB", "").strip()
+    if asked.isdigit() and int(asked) > 0:
+        return min(ram, int(asked))
+    return min(ram, card + floor_mb(info.get("MemTotal")))
 
 
 # ---------- layer 1: the estimate ----------

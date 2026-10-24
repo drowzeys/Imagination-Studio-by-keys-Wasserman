@@ -159,7 +159,7 @@ VRAM_GB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/d
 case "$VRAM_GB" in ''|*[!0-9]*) VRAM_GB="";; *) VRAM_GB=$((VRAM_GB / 1024));; esac
 case "$GPU" in *GB10*) ;; *) if [ -z "$VRAM_GB" ]; then echo "  ! measured only on a DGX Spark (GB10, 128 GB unified memory) and an RTX Pro 6000; other GPUs are untested"; fi;; esac
 if [ -n "$VRAM_GB" ]; then
-  [ "$VRAM_GB" -ge 90 ] || [ "$IMAGE_ONLY" = 1 ] || die "video needs a card of about 96 GB (an RTX Pro 6000 Blackwell); this one has ${VRAM_GB} GB. --image-only fits on 48 GB."
+  [ "$VRAM_GB" -ge 90 ] || [ "$IMAGE_ONLY" = 1 ] || [ "${STUDIO_ALLOW_SMALL_VRAM:-0}" = 1 ] || die "video needs a card of about 96 GB (an RTX Pro 6000 Blackwell); this one has ${VRAM_GB} GB. --image-only fits on 48 GB. STUDIO_ALLOW_SMALL_VRAM=1 installs video anyway: ComfyUI then holds the weights in RAM and streams blocks to the card (docs/rtx-5090.md)."
   [ "$MEM_GB" -ge 64 ] || die "the machine needs 64 GB of RAM or more beside the card (the models are read through it); this one has ${MEM_GB} GB"
 else
   [ "$MEM_GB" -ge 100 ] || [ "$IMAGE_ONLY" = 1 ] || die "video needs about 90 GB of memory at 1344x768 (128 GB machine); this one has ${MEM_GB} GB. --image-only fits."

@@ -37,7 +37,8 @@ of RAM or more, 128 GB recommended). The core install runs on the card: pictures
 `oneshot-setup-rtx-6000.sh` names the card and runs `oneshot-setup-cuda.sh`, the same install
 `oneshot-setup-spark.sh` runs. That install builds the engines for the card (sm_120) and the Studio reads the card's
 own memory; the Bolt brain runs through llama.cpp there.
-[docs/rtx-pro-6000.md](docs/rtx-pro-6000.md).
+[docs/rtx-pro-6000.md](docs/rtx-pro-6000.md). A 32 GB RTX 5090 can run video too, as an opt-in that keeps the weights in
+RAM: [docs/rtx-5090.md](docs/rtx-5090.md).
 
 `oneshot-setup.sh` on Linux reads the first GPU. Use the command below. Set the four variables for the disk and
 the card. `/data/studio` is an example path. No flag is the core (125 GB). Flags are listed under
