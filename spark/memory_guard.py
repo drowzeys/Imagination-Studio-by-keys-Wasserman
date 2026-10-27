@@ -480,7 +480,7 @@ def _pool(available_mb: int | None, total_mb: int, card: bool = False) -> tuple[
 
 def check(width: int, height: int, frames: int, lora: bool = False, references: bool = False, base: bool = False,
           engine: bool = True, pictures: int = 0, reference_frames: int = 0, available_mb: int | None = None,
-          total_mb: int | None = None, card: bool = False) -> dict:
+          total_mb: int | None = None, card: bool = False, adapter: bool = False) -> dict:
     """Whether this clip fits this machine. ``available_mb`` is what the machine has with none of the Studio's own
     models loaded (default: all of it less what an idle Spark keeps). Returns {"fits", "reason", "need_mb",
     "error_mb", "left_mb", "floor_mb", "available_mb", "route", "rows", "nearest"}; on a machine without
@@ -513,7 +513,9 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
     smaller = next(((w, h) for w, h in reversed(SIZES) if w * h < width * height and one(w, h, frames)[0]), None)
     out["nearest"] = {"frames": shorter, "seconds": round(shorter / FPS, 3) if shorter else None,
                       "size": list(smaller) if smaller else None}
-    what = ("a clip with a LoRA" if lora else "a clip from references" if references else "this clip")
+    # `adapter`: the reference clip's own Turbo 4-pass speed-up, which the guard counts as a LoRA but the person never picked
+    what = ("a clip from references with the Turbo 4-pass speed-up" if adapter and references else
+            "a clip with a LoRA" if lora else "a clip from references" if references else "this clip")
     how = {"bf16": "ComfyUI's own blocks with the full-precision (bfloat16) weights", "int8": "TensorFold's int8 engine",
            "int8-lora": "TensorFold's int8 engine with the LoRA merged into it"}[route]
     if why == "unmeasured":
@@ -532,6 +534,8 @@ def check(width: int, height: int, frames: int, lora: bool = False, references: 
     out["reason"] = said + (f". What fits: {fit}." if fit else ". No smaller size or shorter length of this kind fits either.")
     if lora and why == "memory" and route == "bf16":
         out["reason"] += " Without the LoRA the clip runs on the int8 engine, which needs less."
+    if adapter and references and why == "unmeasured":
+        out["reason"] += " To keep this size, choose 20 passes (the model as released) instead of Turbo: that setting is not held to this limit."
     if why == "memory" and measured_here and not on_card:
         out["reason"] += held_note()
     return out

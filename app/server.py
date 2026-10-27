@@ -1484,7 +1484,7 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
         room, card = (held_room() if available_mb is None else available_mb), False
     return memory_guard.check(width, height, frames, lora=lora, references=bool(found), available_mb=room, card=card,
                               base=env.get("SPARK_BASE") == "h3", engine=engine,
-                              pictures=len(found.get("pictures") or []),
+                              pictures=len(found.get("pictures") or []), adapter=bool(found and params.get("ref_turbo")),
                               reference_frames=sum(min(frames, int(round((media_seconds(path)[0] or frames / FPS) * FPS))) for path in videos))
 
 
@@ -1587,6 +1587,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
         return graphics_build(params, job_id)
     seed = str(int(params.get("seed", 0)))
     if kind == "scout":
+        if params.get("loras"):  # text to picture has no LoRA path: an identity LoRA works only in an edit of a picture
+            raise HTTPException(400, "a picture made from words alone cannot take LoRAs (they would be ignored): use Edit a picture with a source picture for an Emily or Dave LoRA")
         folder = HOME / "scouts" / job_id
         prompt = params["prompt"]
         count = max(1, min(int(params.get("count", 4)), 12))

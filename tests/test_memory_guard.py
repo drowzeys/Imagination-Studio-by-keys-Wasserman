@@ -317,3 +317,13 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_turbo_with_references_is_named_in_plain_words():
+    """The 4-pass Turbo speed-up counts as a LoRA to the guard but the person never picked one: a refusal of a reference
+    clip with it says "Turbo 4-pass speed-up", not "a clip with a LoRA"."""
+
+    told = G.check(1280, 736, 124, lora=True, references=True, adapter=True, engine=True, available_mb=20000)
+    assert not told["fits"] and "Turbo 4-pass speed-up" in told["reason"] and "with a LoRA" not in told["reason"]
+    plain = G.check(1280, 736, 124, lora=True, references=True, engine=True, available_mb=20000)
+    assert "a clip with a LoRA" in plain["reason"]
