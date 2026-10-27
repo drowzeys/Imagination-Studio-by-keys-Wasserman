@@ -79,6 +79,27 @@ on the fetched clip, where their tools are. The job's card says *Rendered on spa
 Spark's name and the seed under the clip, and `sparks/takes.jsonl` in the studio folder keeps one line per clip:
 path, seed, settings, the Spark, and the time it took.
 
+## Names and each machine's own status
+
+The Sparks tab and the Machine tab show a card for every machine, this one and each worker: what it is doing, its GPU
+use, temperature, memory used and free (unified memory on a Spark or a Mac, a card's own memory beside it where there
+is one), disk free, load, and how many LoRAs and which models it can render with. The figures are the ones each Studio
+app reports about itself on `/api/spark/self` (`status`, from `telemetry.compact`); the head already looks at every
+connected worker about every 20 seconds, so the panel only reads what `/api/sparks` holds and asks no worker anything
+more. A worker on code from before this field shows what the older answer carried (memory and disk) and says it needs
+“Update and start” for the rest.
+
+Machines are called by their host names. To call them something else, write `sparks/labels.json` in the studio folder:
+
+```json
+{"head": "fa5a (head)", "spark-d197": "d197", "user@100.98.90.106": "Mac Studio"}
+```
+
+A key is `head` (or this machine's host name) for this Spark, and a worker's address or its listed name for a worker. The
+file is only read, by people and scripts, so a save of the list or an update of the Studio never changes it. A label is
+display only: jobs, takes and the log keep each machine's own name, and the page maps them
+(`names` on `/api/sparks`).
+
 ## What keeps it safe
 
 - **One job on a Spark at a time.** A worker that is rendering anything, for this Spark or for someone else, is

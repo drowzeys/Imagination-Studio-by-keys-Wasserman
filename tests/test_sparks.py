@@ -663,6 +663,13 @@ vm.runInThisContext(`(async () => { const out = {};
   spkQueue();
   out.alonePick = sparksPick({ kind: "video", clips: 8 });
   out.aloneN = SPK.n; out.aloneBay = bay.style.display; out.alonePage = text(viewSparks());
+  /* each machine: the names from labels.json and its own readings */
+  const status = { at: Date.now() / 1000, gpu: { name: "GB10", util_pct: 41, temp_c: 58, power_w: 52 }, memory: { total_mb: 124000, free_mb: 60000, used_mb: 64000, used_pct: 51.6, unified: true },
+    disk: { total_gb: 4000, free_gb: 900, used_pct: 77 }, cpu: { load1: 1.5, cores: 20 }, job: { id: "j1", title: "NOV FF_S3f5.png", progress: { stage: "picture", at: 3, of: 8 } }, warnings: [] };
+  SPK.data = { ...five, names: { head: "fa5a (head)", "spark-node5": "d197" }, this: { ...five.this, label: "fa5a (head)", status },
+    workers: [{ ...five.workers[0], label: "d197", status: { ...status, job: null, gpu: null } }, { ...five.workers[1], can: { fasth3: true, loras: 1 } }] };
+  out.labelled = [spkLabel("head"), spkLabel("spark-node5"), spkLabel("unknown")];
+  out.panel = text(spkMachinesPanel()); out.sparksPage = text(viewSparks());
   console.log(JSON.stringify(out)); })().catch(e => { console.error(e); process.exit(1); });`);
 """
 
@@ -692,9 +699,54 @@ def test_the_page_draws_the_chooser_and_the_list():
     assert out["cardWith"] == "this GPU and 2 Sparks" and out["cardOver"] == "3 of 5 available"
     assert "Add a DGX Spark" in out["alonePage"] and "This GPU renders every clip" in out["alonePage"]
     assert "Sparks for new jobs" not in out["alonePage"] and "1" not in out["alonePage"].split("Add a DGX Spark")[0]
+    # each machine's own panel: the label, then GPU, temperature, memory used and free, disk, the job it rolls, the LoRA count
+    assert out["labelled"] == ["fa5a (head)", "d197", "unknown"]
+    for words in ("fa5a (head)", "d197", "head", "NOV FF_S3f5.png · picture 3/8", "41% · 52 W", "58 °C", "64 GB used · 60 GB free of 124 GB", "900 GB free of 4000 GB", "load 1.5 on 20 cores",
+                  "22 LoRAs", "1 LoRA", "no GPU reading on this machine", "Update and start", "Memory (the GPU shares it)"):
+        assert words in out["panel"], words
+    assert "d197" in out["sparksPage"] and "Each machine" in out["sparksPage"]
     # every job the page queues carries the number
     page = (ROOT / "app/static/index.html").read_text()
     assert 'body = { sparks: SPK.n, ...body }' in page and '"Sparks"' in page and "Sparks: viewSparks" in page
+
+
+def test_a_machine_is_called_by_the_labels_file_and_the_app_never_writes_it():
+    """sparks/labels.json names the machines for the page (display only: a job and a take keep the machine's own name),
+    and each machine's own readings ride on what it says of itself."""
+
+    status = {"at": time.time(), "host": "spark-one", "platform": "spark", "gpu": {"name": "NVIDIA GB10", "util_pct": 41, "temp_c": 58, "power_w": 52},
+              "memory": {"total_mb": 124000, "free_mb": 60000, "used_mb": 64000, "used_pct": 51.6, "floor_mb": 12000, "unified": True}, "card": None,
+              "disk": {"total_gb": 4000, "free_gb": 900, "used_pct": 77}, "cpu": {"load1": 1.5, "cores": 20}, "gpu_lock": False, "job": None, "queued": 0, "warnings": []}
+    one = Worker("spark-one", status=status)
+    fresh(one)
+    path = hub.folder / "labels.json"
+    try:
+        before = client.get("/api/sparks").json()
+        assert before["workers"][0]["label"] == "spark-one" and before["this"]["label"] == hub.name  # no file: the machine's own names
+        assert before["names"][hub.name] == hub.name
+        path.write_text(json.dumps({"head": "fa5a (head)", one.address: "d197", "ignored": 7}))
+        after = client.get("/api/sparks").json()
+        assert after["this"]["label"] == "fa5a (head)" and after["this"]["name"] == hub.name
+        assert after["workers"][0]["label"] == "d197" and after["workers"][0]["name"] == "spark-one"
+        assert after["names"][hub.name] == "fa5a (head)" and after["names"]["spark-one"] == "d197" and after["names"][one.address] == "d197"
+        # a worker's own readings are what it reported on its last look; this Spark's are read in-process
+        assert after["workers"][0]["status"]["gpu"]["temp_c"] == 58 and after["workers"][0]["status"]["memory"]["free_mb"] == 60000
+        mine = after["this"]["status"]
+        assert mine and {"gpu", "memory", "disk", "cpu", "job", "queued"} <= set(mine) and mine["disk"]["free_gb"] is not None
+        # a save of the list (what the page does on every change) leaves the labels file as it was
+        text = path.read_text()
+        assert client.post(f"/api/sparks/workers/{one.address}", json={"enabled": True}).status_code == 200
+        assert path.read_text() == text
+        # a worker with a name of its own listed under another label: the address wins, then the listed name
+        path.write_text(json.dumps({"spark-one": "by name"}))
+        assert client.get("/api/sparks").json()["workers"][0]["label"] == "by name"
+        # a file that is not a list of names is no names at all
+        path.write_text("[1, 2]")
+        assert client.get("/api/sparks").json()["workers"][0]["label"] == "spark-one"
+        path.write_text("not json")
+        assert client.get("/api/sparks").json()["this"]["label"] == hub.name
+    finally:
+        path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

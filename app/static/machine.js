@@ -48,7 +48,7 @@ function statusRows(t) { const row = (k, v, cls) => el("div", { class: "kv m-row
     t.engines && t.engines.bolt && t.engines.bolt.managed ? row("Bolt brain", boltLine(t.engines.bolt) + " · " + (t.engines.bolt.backend || "")) : null,
     row("Workload governor", t.governor ? (t.governor.status || "answering") + (Array.isArray(t.governor.reservations) ? " · " + count(t.governor.reservations.length, "reservation") : "") + (t.governor.alert_temperature_c ? " · alert at " + t.governor.alert_temperature_c + "°C" : "") : "not on this machine", t.governor && t.governor.status && t.governor.status !== "ok" ? "warn" : ""),
     row("Processor", t.cpu ? "load " + (t.cpu.load1 ?? "–") + " on " + (t.cpu.cores || "?") + " cores" : "–"),
-    row("Host", t.host || "–")].filter(Boolean); }
+    row("Host", t.host ? (typeof spkLabel === "function" && spkLabel(t.host) !== t.host ? spkLabel(t.host) + " (" + t.host + ")" : t.host) : "–")].filter(Boolean); }
 // eight muted colours (--c1 to --c8 in studio.css), one a folder, in order of size
 const bucketTone = i => "c" + (i % 8 + 1);
 function storagePanel() {
@@ -78,6 +78,7 @@ function viewMachine() {
       el("div", { class: "gauge" }, ring("mem", "Memory", "var(--blue)"), el("div", { class: "foot", "data-foot": "mem" }, "–")),
       el("div", { class: "gauge" }, ring("temp", "Temp", "var(--green)"), el("div", { class: "foot", "data-foot": "temp" }, "–")),
       el("div", { class: "gauge" }, ring("power", "Power", "var(--blue)"), el("div", { class: "foot", "data-foot": "power" }, "–"))),
+    typeof spkMachinesPanel === "function" ? el("div", { class: "panel m-gap" }, spkMachinesPanel()) : null,
     el("div", { class: "split m-gap" },
       el("div", { class: "stack" },
         el("div", { class: "panel stack" }, el("div", { class: "kv" }, el("h2", { class: "m-flat" }, "GPU load"), el("span", {}, "last 10 minutes")), sparkline("gpu", "green"),

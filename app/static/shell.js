@@ -156,7 +156,7 @@ function jobShare(job) { const p = job.progress, elapsed = job.elapsed != null ?
 function bayUpdate() { const sum = $("#baysum"); if (!sum) return;
   const running = jobs.filter(j => j.status === "running"), queued = jobs.filter(j => j.status === "queued"), done = jobs.filter(j => j.status === "done").length, failed = jobs.filter(j => j.status === "failed").length;
   const lanes = running.map(j => { const { share, left } = jobShare(j);
-    return el("div", { class: "lane r", title: j.title }, el("span", { class: "onair" }, "ROLLING"), j.spark ? el("span", { class: "tcode" }, j.spark) : null, el("b", {}, j.title),
+    return el("div", { class: "lane r", title: j.title }, el("span", { class: "onair" }, "ROLLING"), j.spark ? el("span", { class: "tcode" }, typeof spkLabel === "function" ? spkLabel(j.spark) : j.spark) : null, el("b", {}, j.title),
       el("span", { class: "mini" }, el("i", { style: "width:" + share + "%" })), el("span", { class: "tcode" }, left == null ? share + "%" : left > 5 ? mmss(left) : "almost")); });
   if (!lanes.length) lanes.push(el("div", { class: "lane" }, el("span", { class: "dotl" + (queued.length ? " t" : "") }), el("span", { class: "tcode" }, queued.length ? "Next up: " + queued[0].title : "Ready. Nothing rolling.")));
   sum.replaceChildren(...lanes);

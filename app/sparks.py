@@ -21,6 +21,8 @@ A worker that stops answering while it renders is marked down and its clip goes 
 machine; a worker is never waited on for more than LOST seconds. One job runs on a Spark at a time.
 
 Kept in the studio folder, under sparks/:
+  labels.json    {"head": "fa5a (head)", "<address or name>": "Mac Studio"}: what each machine is called on the page, written by
+                 hand or by a script, never by this app (read by Hub.labels; sparks.json is rewritten on every save)
   sparks.json    {"workers": [{"address", "name", "folder", "enabled", "via"?}], "sparks": the number new jobs start with}
   takes.jsonl    one line per finished clip: its path, seed, settings and the Spark that rendered it
   tunnels.json   the tunnels this app has open (closed by the next start if this one was killed)
@@ -437,6 +439,7 @@ class Hub:
         self.folder = home / "sparks"
         self.book = self.folder / "sparks.json"
         self.name = socket.gethostname()
+        self.labelled: tuple = (None, {})  # (mtime of sparks/labels.json, its names): read again when the file changes
         self.live: dict[str, dict] = {}   # address -> state, why, info, base, tunnel, job, working, checked
         self.mutex = threading.RLock()    # over self.live; taken after the queue's lock, never before it
         self.kick = threading.Event()
@@ -468,6 +471,36 @@ class Hub:
         part = self.book.with_name(f"{self.book.stem}.{os.getpid()}.{threading.get_ident()}.part")
         part.write_text(json.dumps(found, indent=1))
         part.replace(self.book)
+
+    def labels(self) -> dict:
+        """What each machine is called on the page, from sparks/labels.json in the studio folder: ``{"head": "fa5a (head)",
+        "spark-d197": "d197", "user@100.98.90.106": "Mac Studio"}``. A key is "head" (or this machine's host name) for this
+        Spark, a worker's address or its listed name for a worker. The file is for people and scripts: this app only reads
+        it, so a Studio update or a save of the list never changes it. Display only: a job and a take still record the
+        machine's own name."""
+
+        path = self.folder / "labels.json"
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            self.labelled = (None, {})
+            return {}
+        if self.labelled[0] != stamp:
+            try:
+                found = json.loads(path.read_text())
+            except (OSError, ValueError):
+                found = {}
+            found = found if isinstance(found, dict) else {}
+            self.labelled = (stamp, {str(key): str(value).strip()[:60] for key, value in found.items() if isinstance(value, str) and value.strip()})
+        return self.labelled[1]
+
+    def label_of(self, worker: dict | None = None) -> str:
+        """A machine's name for the page: its label if it has one, else its name (this Spark's host name, a worker's listed name)."""
+
+        found = self.labels()
+        if worker is None:
+            return found.get("head") or found.get(self.name) or self.name
+        return found.get(worker["address"]) or found.get(worker.get("name") or "") or worker.get("name") or worker["address"]
 
     def workers(self) -> list[dict]:
         return self.config()["workers"]
@@ -526,13 +559,16 @@ class Hub:
         live = self.state(worker["address"])
         info, why = live["info"] or {}, self.usable(worker)
         memory = info.get("memory") or {}
-        return {"address": worker["address"], "name": worker.get("name") or worker["address"], "folder": worker.get("folder"),
+        return {"address": worker["address"], "name": worker.get("name") or worker["address"], "label": self.label_of(worker), "folder": worker.get("folder"),
                 "enabled": worker.get("enabled", True), "state": live["state"], "says": self.said(STATES.get(live["state"], live["state"])),
                 "why": self.said(live["why"]), "usable": not why, "unusable": self.said(why), "working": live["working"], "checked": live["checked"],
                 "job": live["job"], "version": info.get("version") or live.get("version"), "via": worker.get("via"),
                 "memory_gb": round(memory["available_mb"] / 1000, 1) if memory.get("available_mb") is not None else live.get("memory_gb"),
                 "disk_gb": info.get("disk_gb"),
                 "guard": bool(info.get("guard")),
+                # its own readings (GPU, memory, disk, temperature, the job it rolls), as of the last look the loop took
+                # at it (every 20 s): nothing here asks the worker anything; None from a Studio older than this field
+                "status": info.get("status"),
                 "can": {key: bool(info.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(info.get("loras") or [])} if info else None}
 
     def overview(self) -> dict:
@@ -544,8 +580,9 @@ class Hub:
         memory = (mine.get("memory") or {}).get("available_mb")
         return {"supported": True, "limit": LIMIT, "note": "", "available": 1 + sum(1 for row in rows if row["usable"]), "listed": 1 + len(rows),
                 "default": max(1, min(int(found.get("sparks") or 1), LIMIT)), "workers": rows, "folder": self.default_folder(),
+                "names": {**{self.name: self.label_of()}, **{key: row["label"] for row in rows for key in (row["name"], row["address"])}},
                 "head": "spark" if self.spark else "mac", "via": next((w.get("via") for w in reversed(found["workers"]) if w.get("via")), None),
-                "this": {"name": self.name, "kind": self.word, "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
+                "this": {"name": self.name, "label": self.label_of(), "status": mine.get("status"), "kind": self.word, "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
                          "guard": bool(mine.get("guard")), "memory_gb": round(memory / 1000, 1) if memory is not None else None, "disk_gb": mine.get("disk_gb"),
                          "can": {key: bool(mine.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(mine.get("loras") or [])}}}
 
@@ -1109,7 +1146,7 @@ class Hub:
         able, without = [], []
         for worker in self.workers():
             why = self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"], self.spark)
-            (without.append({"name": worker.get("name") or worker["address"], "why": self.said(why)}) if why else able.append(worker["address"]))
+            (without.append({"name": self.label_of(worker), "why": self.said(why)}) if why else able.append(worker["address"]))
         listed, available = 1 + len(able) + len(without), 1 + len(able)
         here = here_only(kind, params)
         used = 1 if here else min(chosen, available)
@@ -1271,8 +1308,10 @@ def command_of(pid: int) -> list[str]:
     return done.stdout.split()
 
 
-def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, models: Path, renders: dict | None = None) -> dict:
-    """What an app says of itself on /api/spark/self. ``renders``: the presets and qualities it renders."""
+def about(home: Path, code: dict, state: dict, loras: list, active: int, memory: dict, models: Path, renders: dict | None = None,
+          status: dict | None = None) -> dict:
+    """What an app says of itself on /api/spark/self. ``renders``: the presets and qualities it renders. ``status``: its own
+    readings (telemetry.compact), which the head's per-machine panel shows."""
 
     try:
         disk = round(shutil.disk_usage(home).free / 1e9, 1)
@@ -1283,4 +1322,4 @@ def about(home: Path, code: dict, state: dict, loras: list, active: int, memory:
             "fasth3": any((models / "FastH3-Comfy/diffusion_models").glob("*fasth3*")),
             "image": any((models / "Qwen-Image-2.1-Comfy/diffusion_models").glob("qwen_image_2.1*.safetensors")),
             "ref2va": state["ref2va"], "ref2va_turbo": state["ref2va_turbo"], "ffmpeg": state["ffmpeg"],
-            "loras": loras, "text_encoders": state["text_encoders"], **(renders or {})}
+            "loras": loras, "text_encoders": state["text_encoders"], "status": status, **(renders or {})}

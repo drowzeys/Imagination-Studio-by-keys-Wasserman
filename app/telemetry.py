@@ -193,6 +193,28 @@ def disk_of(path: Path) -> dict:
             "used_pct": round(100 * used / (used + avail), 1) if used + avail else None}
 
 
+def compact(snap: dict) -> dict:
+    """One machine's own status from its telemetry snapshot, small enough to ride on /api/spark/self: what the head's
+    per-machine panel shows (state of the GPU, the memory it shares or its own, RAM, disk, temperature, the job
+    rolling). A Mac has no GPU line and says so by ``gpu`` being None."""
+
+    gpu, mem, disk = snap.get("gpu"), snap.get("memory") or {}, snap.get("disk") or {}
+    total, free = mem.get("total_mb"), mem.get("available_mb")
+    jobs = snap.get("jobs") or {}
+    now = jobs.get("current")
+    card = mem.get("card")
+    return {"at": snap.get("time"), "host": snap.get("host"), "platform": snap.get("platform"),
+            "gpu": {key: gpu.get(key) for key in ("name", "util_pct", "temp_c", "power_w")} if gpu else None,
+            # unified: the GPU and the processor share this memory (a DGX Spark, a Mac); a card has its own, listed apart
+            "memory": {"total_mb": total, "free_mb": free, "used_mb": total - free if total and free is not None else None,
+                       "used_pct": mem.get("used_pct"), "floor_mb": mem.get("floor_mb"), "unified": not card},
+            "card": {key: card.get(key) for key in ("total_mb", "used_mb", "free_mb")} if card else None,
+            "disk": {key: disk.get(key) for key in ("total_gb", "free_gb", "used_pct")},
+            "cpu": snap.get("cpu"), "gpu_lock": bool((snap.get("gpu_lock") or {}).get("held")),
+            "job": {key: now.get(key) for key in ("id", "title", "kind", "progress", "elapsed")} if now else None,
+            "queued": jobs.get("queued", 0), "warnings": (snap.get("warnings") or [])[:3]}
+
+
 def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None, comfy_port: int | None = None,
            engines=None) -> APIRouter:
     """``guard`` is spark/memory_guard.py (its floor and the ComfyUI server's pid); ``comfy_port`` the port of the
@@ -454,4 +476,5 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         return storage_answer()
 
     threading.Thread(target=sample, daemon=True, name="telemetry").start()
+    router.snapshot = snapshot  # read in-process by app/server.py's /api/spark/self (compact)
     return router

@@ -195,3 +195,21 @@ def test_the_disk_reads_as_df_shows_it(tmp_path):
     line = sp.run(["df", "-k", str(tmp_path)], capture_output=True, text=True).stdout.splitlines()[-1].split()
     used_k, avail_k = int(line[2]), int(line[3])
     assert abs(mine["used_pct"] - 100 * used_k / (used_k + avail_k)) < 1.0  # df rounds its own Use% up
+
+
+def test_compact_is_one_machines_status_for_the_per_machine_panel():
+    import telemetry
+    snap = {"time": 1.0, "host": "h", "platform": "spark", "gpu": {"name": "GB10", "util_pct": 7, "temp_c": 51, "power_w": 20, "clock_mhz": 2000},
+            "memory": {"total_mb": 1000, "available_mb": 400, "used_pct": 60.0, "floor_mb": 100}, "cpu": {"load1": 0.5, "cores": 4},
+            "disk": {"path": "/x", "total_gb": 10, "free_gb": 4, "used_pct": 60}, "gpu_lock": {"held": True, "holder": "x"},
+            "jobs": {"running": 1, "queued": 2, "current": {"id": "a", "title": "t", "kind": "video", "progress": {"stage": "s", "at": 1, "of": 2}, "estimate": 9, "elapsed": 3.0}},
+            "warnings": ["w1", "w2", "w3", "w4"]}
+    out = telemetry.compact(snap)
+    assert out["gpu"] == {"name": "GB10", "util_pct": 7, "temp_c": 51, "power_w": 20}
+    assert out["memory"] == {"total_mb": 1000, "free_mb": 400, "used_mb": 600, "used_pct": 60.0, "floor_mb": 100, "unified": True}
+    assert out["card"] is None and out["gpu_lock"] is True and out["queued"] == 2 and out["job"]["title"] == "t" and "estimate" not in out["job"]
+    assert out["disk"] == {"total_gb": 10, "free_gb": 4, "used_pct": 60} and len(out["warnings"]) == 3
+    # a Mac: no GPU line, no job; a card with memory of its own is listed apart and the memory is not unified
+    mac = telemetry.compact({**snap, "platform": "mac", "gpu": None, "jobs": {"queued": 0, "current": None},
+                             "memory": {"total_mb": 500, "available_mb": None, "used_pct": None, "card": {"total_mb": 96000, "used_mb": 1000, "free_mb": 95000, "simulated": False}}})
+    assert mac["gpu"] is None and mac["job"] is None and mac["memory"]["used_mb"] is None and mac["memory"]["unified"] is False and mac["card"]["free_mb"] == 95000
