@@ -88,6 +88,35 @@ def test_delete_restore_empty():
     assert web.get("/api/trash").json() == {"files": 0, "bytes": 0, "folder": str(home / "trash"), "last": None}
 
 
+def test_a_song_goes_to_the_trash_with_its_yue2_folder_and_comes_back():
+    home, jobs, order, movable, web = studio()
+    (home / "music" / "m1.yue2").mkdir(parents=True)
+    write(home, "music/m1.wav"), write(home, "music/m1.yue2/score.abc"), write(home, "music/m1.yue2/settings.json")
+    write(home, "music/notes.txt")
+    assert refused(movable, "music/notes.txt") and refused(movable, "music/m1.yue2")
+    jobs["m1"] = {"id": "m1", "kind": "music", "status": "done", "outputs": ["music/m1.wav"], "params": {}, "created": 0}
+    order.append("m1")
+    write(home, "music/m1.take.json", "{}")
+    (home / "music/m1.yue2/more").mkdir()
+    write(home, "music/m1.yue2/more/x.npy")
+    out = web.post("/api/clear", json={"jobs": ["m1"]}).json()
+    assert out["files"] == 5 and not (home / "music/m1.wav").exists() and not (home / "music/m1.yue2").exists(), out
+    assert web.post("/api/trash/restore").json()["files"] == 5
+    assert (home / "music/m1.wav").is_file() and (home / "music/m1.yue2/score.abc").is_file() and (home / "music/m1.take.json").is_file()
+    # a song a film names by its take id (a soundtrack) stays, and so does its folder; so does a song being made
+    write(home, "projects/p1/project.json", json.dumps({"soundtrack": {"take": "m1", "music_db": -12}}))
+    out = web.post("/api/clear", json={"paths": ["music/m1.wav"]}).json()
+    assert out["files"] == 0 and (home / "music/m1.wav").is_file() and (home / "music/m1.yue2/score.abc").is_file(), out
+    (home / "projects/p1/project.json").unlink()
+    jobs["m2"] = {"id": "m2", "kind": "music", "status": "running", "outputs": [], "params": {}, "created": 1}
+    write(home, "music/m2.wav")
+    out = web.post("/api/clear", json={"paths": ["music/m2.wav"]}).json()
+    assert out["files"] == 0 and (home / "music/m2.wav").is_file() and "being made" in out["skipped"][0]["why"], out
+    # an export queued with the song as its soundtrack keeps it too
+    jobs["e1"] = {"id": "e1", "kind": "export", "status": "queued", "outputs": [], "params": {"soundtrack": {"take": "m1"}}, "created": 2}
+    assert web.post("/api/clear", json={"paths": ["music/m1.wav"]}).json()["files"] == 0
+
+
 if __name__ == "__main__":
-    test_paths(), test_delete_restore_empty()
+    test_paths(), test_delete_restore_empty(), test_a_song_goes_to_the_trash_with_its_yue2_folder_and_comes_back()
     print("ok")

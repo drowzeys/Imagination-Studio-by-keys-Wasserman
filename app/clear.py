@@ -3,7 +3,7 @@
 Nothing here erases a file except "Empty trash". A deletion moves each file to ~/ImaginationStudio/trash under a
 timestamped name (the convention of the library's and the LoRA hub's delete) and writes down where it came from, so
 the last deletion can be put back. What can be moved: pictures, clips and sound in renders, exports, scouts, uploads
-and qa, Drama 3 voice takes in voice, and clips in projects and slate. Never a project file, a LoRA, a model, or a file a queued or running job
+and qa, Drama 3 voice takes in voice, songs in music (a YuE2 song with its score folder), and clips in projects and slate. Never a project file, a LoRA, a model, or a file a queued or running job
 still reads or writes.
 """
 
@@ -19,7 +19,9 @@ from fastapi import APIRouter, HTTPException
 
 MEDIA = (".mp4", ".mov", ".png", ".jpg", ".jpeg", ".webp", ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
 FOLDERS = {"renders": MEDIA, "exports": MEDIA, "scouts": MEDIA, "uploads": MEDIA, "qa": MEDIA,
-           "voice": MEDIA, "projects": (".mp4",), "slate": (".mp4",)}  # in a film's folder only its clips, never its project file
+           "voice": MEDIA, "music": (".wav",), "projects": (".mp4",), "slate": (".mp4",)}  # in a film's folder only its clips, never its project file
+# a YuE2 song's own folder beside it (music/<job>.yue2: its score and what it was made from), which goes with the song
+SONG_FOLDER = (".abc", ".npy", ".json", ".txt", ".mid", ".wav")
 BUSY = ("queued", "running")
 REFERENCES = ("image", "references", "reference_videos", "reference_audios", "first_frame_from", "ref_audio")
 LAST = "last-deletion.json"
@@ -42,7 +44,9 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         parts = target.relative_to(root).parts
         if parts[0] not in FOLDERS or len(parts) < 2:
             raise ValueError("not in a folder of clips or pictures")
-        if target.suffix.lower() not in FOLDERS[parts[0]]:
+        song_folder = parts[0] == "music" and len(parts) >= 3 and parts[1].endswith(".yue2")
+        song_note = parts[0] == "music" and len(parts) == 2 and target.name.endswith(".take.json")  # the song's record
+        if not song_note and target.suffix.lower() not in (SONG_FOLDER if song_folder else FOLDERS[parts[0]]):
             raise ValueError("not a clip, picture or sound file")
         if target.is_symlink() or (home / text).is_symlink() or not target.is_file():
             raise ValueError("no such file")
@@ -88,10 +92,32 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         found += [p for p in named(job["params"]) if p.startswith("uploads/")]
         return list(dict.fromkeys(found))
 
+    def with_song(moved: list[dict], gone: set[str], keep_films: bool) -> tuple[list[dict], list[dict]]:
+        """What goes with a song that went to the trash: its record (music/<id>.take.json) and a YuE2 song's folder of
+        its score and what it was made from (music/<id>.yue2/), emptied and removed. Never without the song itself."""
+
+        extra = []
+        for one in moved:
+            name = Path(one["from"])
+            if name.parts[0] == "music" and len(name.parts) == 2 and name.suffix == ".wav":
+                extra += [f"music/{name.stem}.take.json"]
+                extra += sorted(rel(p) for p in (home / "music" / f"{name.stem}.yue2").rglob("*") if p.is_file())
+        more, skipped = move(extra, gone, keep_films) if extra else ([], [])
+        for one in moved:
+            folder = home / "music" / f"{Path(one['from']).stem}.yue2"
+            if one["from"].startswith("music/") and folder.is_dir() and not folder.is_symlink():
+                for inner in sorted((p for p in folder.rglob("*") if p.is_dir()), key=lambda p: -len(p.parts)) + [folder]:
+                    try:  # emptied, bottom up (restoring makes them again); a file left in one keeps it
+                        inner.rmdir()
+                    except OSError:
+                        pass
+        return more, [one for one in skipped if one.get("why") != "no such file"]
+
     def move(paths: list[str], gone: set[str], keep_films: bool) -> tuple[list[dict], list[dict]]:
         """Called with the lock held. (moved, skipped)."""
 
         busy_text = json.dumps([[j["params"], j.get("outputs")] for j in jobs.values() if j["status"] in BUSY])
+        busy_ids = {i for i, j in jobs.items() if j["status"] in BUSY}
         used = set().union(*[named(j["params"]) for i, j in jobs.items() if i not in gone]) if jobs else set()
         film = films() if keep_films else ""
         stamp, moved, skipped = time.strftime("%Y%m%d-%H%M%S-"), [], []
@@ -105,6 +131,11 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
             name = rel(target)
             if json.dumps(name)[1:-1] in busy_text:
                 skipped.append({"path": name, "why": "a queued or running job uses it"})
+            elif name.startswith("music/") and (Path(name).parts[1].split(".")[0] in busy_ids or
+                                                 json.dumps(Path(name).parts[1].split(".")[0]) in busy_text + film):
+                # a song is named by its take id (a project's soundtrack, an export's or a finish's), and one being
+                # made is its job's own id
+                skipped.append({"path": name, "why": "a film, a queued job or the song being made uses it"})
             elif name.startswith("uploads/") and name in used:
                 skipped.append({"path": name, "why": "another job in the queue list uses it"})
             elif film and json.dumps(name)[1:-1] in film:
@@ -135,6 +166,8 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
             gone = [i for i in picked if i not in waiting]
             paths = [p for i in gone for p in of_job(jobs[i])] + [str(p) for p in (body.get("paths") or [])]
             moved, skipped = move(paths, set(gone), not body.get("films"))
+            more, also = with_song(moved, set(gone), not body.get("films"))
+            moved, skipped = moved + more, skipped + also
             records = [jobs.pop(i) for i in gone]
             order[:] = [i for i in order if i in jobs]
             if moved or records:

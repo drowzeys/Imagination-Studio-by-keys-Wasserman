@@ -226,10 +226,10 @@ def test_a_graphic_is_queued_with_its_title_and_made(installed, monkeypatch, spa
         job["log"] += " ".join(command)
         return True
     monkeypatch.setattr(server, "run", run)
-    unloaded = []  # a graphic uses no GPU: Drama 3, Music 3 and Bolt stay loaded
-    monkeypatch.setattr(server.voice, "release", lambda why: unloaded.append("voice"))
-    monkeypatch.setattr(server.music, "release", lambda why: unloaded.append("music"))
-    monkeypatch.setattr(server.bolt, "admit", lambda job, need: unloaded.append("bolt") or "")
+    unloaded = []  # a graphic uses no GPU: Drama 3, Music 3 and Bolt stay loaded (for it: another test's job may still run)
+    monkeypatch.setattr(server.voice, "release", lambda why: "graphics" in why and unloaded.append("voice"))
+    monkeypatch.setattr(server.music, "release", lambda why: "graphics" in why and unloaded.append("music"))
+    monkeypatch.setattr(server.bolt, "admit", lambda job, need: (job["kind"] == "graphics" and unloaded.append("bolt")) or "")
     job = client.post("/api/jobs", json={"kind": "graphics", "params": {"template": "title", "title": "The  Long Night"}}).json()
     assert job["kind"] == "graphics" and job["title"] == "Title: The Long Night", job
     ends = time.time() + 30
