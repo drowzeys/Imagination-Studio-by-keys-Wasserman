@@ -127,6 +127,16 @@ def requests_of(folder: Path) -> list[dict]:
     return [json.loads(line) for line in file.read_text().splitlines()] if file.is_file() else []
 
 
+@pytest.fixture(autouse=True)
+def fresh_engines():
+    """Each test makes its own engines: one cached by another test file (with its platform's answer) is put back after."""
+
+    had = music._engine, music_yue2._engine
+    music._engine = music_yue2._engine = None
+    yield
+    music._engine, music_yue2._engine = had
+
+
 # ---------- which engine ----------
 
 def test_a_mac_makes_songs_with_minimax_music_3_and_yue2_says_why_not():

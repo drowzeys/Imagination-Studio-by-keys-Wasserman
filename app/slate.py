@@ -524,10 +524,29 @@ def sentence(text: str) -> str:
     return text if not text or text[-1] in ".!?\"”" else text + "."
 
 
+NOTHING = {"none", "n/a", "na", "null", "nil", "unknown", "not specified", "unspecified", "-", "--"}
+
+
+def said(value) -> str:
+    """A sheet's field as words for a prompt: "" for anything but text, and for a brain's "None", "N/A" or "unknown"."""
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = f"{value:g}"
+    words = value.strip() if isinstance(value, str) else ""
+    return "" if words.rstrip(".").strip().lower() in NOTHING or words in ("—", "–") else words
+
+
+def age_words(value) -> str:
+    """An age for a prompt: "40 years old" for a number, the words as given otherwise ("an adult"), "" for none."""
+
+    age = said(value)
+    return f"{age} years old" if age.isdigit() else age
+
+
 def person(sheet: dict) -> str:
-    bits = [f"{sheet.get('age')} years old" if str(sheet.get("age") or "").strip().isdigit() else sheet.get("age"), sheet.get("gender"),
-            sheet.get("ethnicity"), sheet.get("faceFeatures"), sheet.get("hair") and "hair: " + sheet["hair"],
-            sheet.get("clothing") and "wearing " + sheet["clothing"]]
+    hair, clothing = said(sheet.get("hair")), said(sheet.get("clothing"))
+    bits = [age_words(sheet.get("age")), said(sheet.get("gender")), said(sheet.get("ethnicity")), said(sheet.get("faceFeatures")),
+            hair and "hair: " + hair, clothing and "wearing " + clothing]
     return ", ".join(bit.strip().rstrip(".") for bit in bits if bit and bit.strip())
 
 

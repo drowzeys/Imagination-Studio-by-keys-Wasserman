@@ -8,7 +8,8 @@
 #   bash oneshot-setup-spark.sh --image-only  # Qwen-Image-2.1 only (26 GB)
 #   bash oneshot-setup-spark.sh --no-render   # skip the test clip
 #   bash oneshot-setup-spark.sh --ref2va      # add MiniMax H3 Ref2VA (reference pictures hold a face), 39 GB more
-#   bash oneshot-setup-spark.sh --swap        # add the Library's Swap the character, 2.1 GB more beside Ref2VA (which it adds):
+#   bash oneshot-setup-spark.sh --swap        # add the Library's Swap the character, 2.1 GB more beside Ref2VA (its 8-bit copy
+#                                             # where it is here, else the bf16 one, which it adds):
 #                                             # Akatz Labs' Character Swap LoRA v1.5 and LightX2V's 8-step Turbo LoRA, and
 #                                             # SAM 3.1 when it is not here yet (spark/setup-swap.sh). MiniMax H3 Community
 #                                             # License: not licensed for use in the EU, the UK, South Korea or the US
@@ -115,7 +116,7 @@ STUDIO_PIN=(huggingface_hub==1.33.0 fastapi==0.142.2 uvicorn==0.54.0 python-mult
 IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0
 for arg in "$@"; do
   case "$arg" in
-    --ref2va) REF2VA=1;; --swap) SWAP=1; REF2VA=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
+    --ref2va) REF2VA=1;; --swap) SWAP=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --all) SWAP=1; REF2VA=1; H3_BASE=1; IMAGE_EDIT=1; FLUX3=1; MOSS=1; MUSIC=1; YUE2=1; SOUND=1; BOLT=1; VOICE=1; MOTION=1; TRAIN=1; GRAPHICS=1; FINISH=1;;  # every feature
     --no-workflows) WORKFLOWS=0;;
     --yes|-y) ;;  # the plain install without the checklist
@@ -204,6 +205,10 @@ if [ "$UPGRADE" = 0 ]; then
   fi
 fi
 [ "${STUDIO_GATE_DRY:-0}" != 1 ] || { echo "flux3=$FLUX3 sound=$SOUND"; exit 0; }
+# the swap runs on Ref2VA in either form (app/swap.py): its 8-bit copy where it is here, else the bf16 file, which it
+# adds. --ref2va itself is the bf16 file: Create's Turbo adapter and the Library's other actions need that one.
+REF2VA_INT8="$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+if [ "$SWAP" = 1 ] && [ "$REF2VA" = 0 ] && [ ! -s "$REF2VA_INT8" ]; then REF2VA=1; fi
 # disk for what is still to fetch (GB, with room): each part asked for whose weights are not here yet, by the file that
 # says it is (the sizes in the header above); a machine that holds some of them already needs only the rest
 missing() { [ ! -s "$1" ]; }

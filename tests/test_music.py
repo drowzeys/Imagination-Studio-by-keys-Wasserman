@@ -419,13 +419,15 @@ def cuda_install(folder: Path, binary: bool = True, weights: bool = True) -> Non
 
 
 class Spark:
-    """music.py as on a DGX Spark with its install under ``folder`` (PREFIX, SPARK_MODELS), the chosen engine reset."""
+    """music.py as on a DGX Spark with its install under ``folder`` (PREFIX, SPARK_MODELS), the chosen engine reset, and
+    Models & weights' scan of the real machine left out (a Spark that runs the tests has its own music3-generate)."""
 
     def __init__(self, folder: Path, **env):
         self.folder, self.env = folder, {"SPARK_MODELS": str(folder / "models"), "FAKE_MUSIC3_LOG": str(folder / "requests.jsonl"), **env}
 
     def __enter__(self):
         self.had = (music.SPARK, music.PREFIX, music._engine, music._chosen_why, {k: os.environ.get(k) for k in self.env})
+        self.discover, voice.discover = voice.discover, None
         music.SPARK, music.PREFIX, music._engine = True, self.folder / "prefix", None
         for key in ("MUSIC3_BACKEND", "MUSIC3_CUDA_BIN", "MUSIC3_MODEL", "MUSIC3_WEIGHTS"):
             self.had[4].setdefault(key, os.environ.get(key))
@@ -437,6 +439,7 @@ class Spark:
         if music._engine is not None and hasattr(music._engine, "release"):
             music._engine.release("test over")
         music.SPARK, music.PREFIX, music._engine, music._chosen_why, saved = self.had
+        voice.discover = self.discover
         for key, value in saved.items():
             if value is None:
                 os.environ.pop(key, None)

@@ -88,7 +88,7 @@ def test_the_canvas_keeps_the_clip_shape_on_32():
 
 # ---------------------------------------------------------------- the action's settings
 
-def stand_in(tmp_path, spark=True, length=8.0, installed=True):
+def stand_in(tmp_path, spark=True, length=8.0, installed=True, room=lambda: 120_000):
     home = tmp_path / "home"
     for name in ("renders", "uploads", "scouts", "masks"):
         (home / name).mkdir(parents=True, exist_ok=True)
@@ -112,7 +112,7 @@ def stand_in(tmp_path, spark=True, length=8.0, installed=True):
         return found
 
     router, build, title, source, guess = swap.attach(home, ROOT, spark, inside, lambda p: str(Path(p).relative_to(home.resolve())),
-                                                      lambda path: (length, True))
+                                                      lambda path: (length, True), room)
     return SimpleNamespace(home=home, router=router, build=build, title=title, source=source, guess=guess, models=models, prefix=prefix)
 
 
@@ -207,9 +207,10 @@ def test_what_a_swap_refuses_before_it_is_queued(tmp_path, change, said):
 
 def test_where_it_cannot_run_it_says_what_to_install(tmp_path):
     mac = stand_in(tmp_path / "mac", spark=False)
-    with pytest.raises(HTTPException) as refused:
-        mac.build("swap", GOOD, "j1")
-    assert "not on a Mac" in refused.value.detail
+    for asked in (GOOD, {**GOOD, "seconds": 3}, {**GOOD, "start": 99}):  # a part too short or past the clip's end: still the Mac's reason
+        with pytest.raises(HTTPException) as refused:
+            mac.build("swap", asked, "j1")
+        assert "not on a Mac" in refused.value.detail
     bare = stand_in(tmp_path / "bare", installed=False)
     with pytest.raises(HTTPException) as refused:
         bare.build("swap", GOOD, "j1")
@@ -334,18 +335,79 @@ def test_the_stages_are_said_for_the_job_card(capsys):
     assert [name for name, _ in stages.took] == ["the part", "the person"]
 
 
-def test_a_first_frame_with_nobody_in_it_is_refused(monkeypatch, tmp_path):
-    monkeypatch.setattr(spark_swap, "sg", FakeComfy(), raising=False)
-    monkeypatch.setattr(spark_swap, "run_graph", lambda w, sampler, named=None: "p1")
-    monkeypatch.setattr(spark_swap, "collect", lambda prompt, node: [])
-    monkeypatch.setattr(spark_swap, "fetch_all", lambda items, folder: [])
+def person_guesses(monkeypatch, tmp_path, boxes, masks=()):
+    """find_person with SAM 3.1's boxes (as PreviewAny shows them) and its masks (pictures) stood in for; the graphs."""
+
     pytest.importorskip("numpy")
-    pytest.importorskip("PIL")
+    Image = pytest.importorskip("PIL.Image")
+    graphs = []
+    monkeypatch.setattr(spark_swap, "sg", FakeComfy(), raising=False)
+    monkeypatch.setattr(spark_swap, "run_graph", lambda w, sampler, named=None: graphs.append(w) or f"p{len(graphs)}")
+    monkeypatch.setattr(spark_swap, "preview_text", lambda prompt, node: [boxes])
+    saved = []
+    for i, (w, h) in enumerate(masks):
+        mask = Image.new("L", (64, 32))
+        mask.paste(255, (0, 0, w, h))
+        mask.save(tmp_path / f"m{i}.png")
+        saved.append(tmp_path / f"m{i}.png")
+    monkeypatch.setattr(spark_swap, "collect", lambda prompt, node: [{"filename": p.name} for p in saved])
+    monkeypatch.setattr(spark_swap, "fetch_all", lambda items, folder: saved)
     frame = tmp_path / "f.png"
-    __import__("PIL.Image").Image.new("RGB", (64, 32)).save(frame)
+    Image.new("RGB", (64, 32)).save(frame)
+    return graphs, {"frames": [frame], "width": 64, "height": 32}
+
+
+def test_a_first_frame_with_nobody_in_it_is_refused(monkeypatch, tmp_path):
+    # SAM 3.1 found nothing at all (a flat colour): refused before any mask is asked for, so no empty mask breaks ComfyUI
+    graphs, part = person_guesses(monkeypatch, tmp_path, [])
     with pytest.raises(SystemExit) as refused:
-        spark_swap.find_person({"frames": [frame], "width": 64, "height": 32}, tmp_path)
-    assert "no person was found in the part's first frame" in str(refused.value)
+        spark_swap.find_person(part, tmp_path)
+    assert "no person was found in the part's first frame" in str(refused.value) and len(graphs) == 1
+    assert graphs[0]["4"]["inputs"]["individual_masks"] is False and graphs[0]["5"]["class_type"] == "PreviewAny"
+
+
+def test_a_guess_that_is_not_a_person_is_refused_with_its_score(monkeypatch, tmp_path):
+    # a gradient: 0.54 over 56% of the frame; an empty car park: 0.49 over 1%. Neither is a person
+    for score, width, height in ((0.541, 48, 24), (0.485, 9, 3), (0.97, 4, 4)):  # the last: a person too small to swap
+        graphs, part = person_guesses(monkeypatch, tmp_path, [{"x": 0, "y": 0, "width": width, "height": height, "score": score}])
+        with pytest.raises(SystemExit) as refused:
+            spark_swap.find_person(part, tmp_path)
+        said = str(refused.value)
+        assert "no person was found" in said and f"scored {score:.2f}" in said and len(graphs) == 1
+
+
+def test_a_person_is_found_and_the_largest_mask_is_swapped(monkeypatch, tmp_path, capsys):
+    graphs, part = person_guesses(monkeypatch, tmp_path, [{"x": 0, "y": 0, "width": 30, "height": 30, "score": 0.97}],
+                                  masks=[(10, 10), (30, 30)])
+    chosen = spark_swap.find_person(part, tmp_path)
+    assert chosen == tmp_path / "person.png" and chosen.read_bytes() == (tmp_path / "m1.png").read_bytes()
+    assert graphs[1]["4"]["inputs"]["threshold"] == spark_swap.PERSON_SCORE and graphs[1]["4"]["inputs"]["individual_masks"] is True
+    assert "2 people in the first frame" in capsys.readouterr().out
+
+
+def test_preview_text_reads_what_sam_showed(monkeypatch):
+    shown = [[{"x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0, "score": 0.9}]]
+
+    class History(FakeComfy):
+        text = __import__("json").dumps(shown)
+
+        def history_of(self, prompt_id):
+            return {"status": {"status_str": "success"}, "outputs": {"5": {"text": [self.text]}}}
+
+    comfy = History()
+    monkeypatch.setattr(spark_swap, "sg", comfy, raising=False)
+    assert spark_swap.preview_text("p", "5") == shown and spark_swap.preview_text("p", "9") == []
+    comfy.text = "tensor([0.91])"  # not JSON: said, not taken for an empty frame
+    with pytest.raises(SystemExit) as unread:
+        spark_swap.preview_text("p", "5")
+    assert "could not be read" in str(unread.value) and "tensor" in str(unread.value)
+
+
+def test_boxes_of_another_shape_are_said_not_taken_for_nobody(monkeypatch, tmp_path):
+    graphs, part = person_guesses(monkeypatch, tmp_path, [{"x": 0, "y": 0, "w": 30, "h": 30, "confidence": 0.97}])
+    with pytest.raises(SystemExit) as unread:
+        spark_swap.find_person(part, tmp_path)
+    assert "boxes could not be read" in str(unread.value) and "no person" not in str(unread.value)
 
 
 needs_ffmpeg = pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg is not installed")
@@ -415,8 +477,18 @@ def test_a_swap_s_work_folder_is_removed_however_the_job_ended(tmp_path):
     (left / "window1" / "00001.png").write_bytes(b"x")
     job = {"id": "0101-000000-tidy01", "kind": "swap", "status": "running", "params": {"image": "uploads/x.png"}, "log": "",
            "outputs": [], "progress": None, "error": None}
-    server.perform(job)  # refused when its turn comes (no clip): the job fails, and its folder goes with it
-    assert job["status"] == "failed" and not left.exists()
+    made = [server.HOME / "masks" / job["id"] / "person.mp4", server.HOME / "scouts" / job["id"] / "anchor.png"]
+    for one in made:  # what a swap cancelled after its person and anchor stages has made
+        one.parent.mkdir(parents=True, exist_ok=True)
+        one.write_bytes(b"x")
+    server.perform(job)  # refused when its turn comes (no clip): the job fails, and its folders go with it
+    assert job["status"] == "failed" and not left.exists() and not any(one.parent.exists() for one in made)
+    for one in made:  # a swap that finished keeps its mask preview and anchor
+        one.parent.mkdir(parents=True, exist_ok=True)
+        one.write_bytes(b"x")
+    swap.tidy(server.HOME, job["id"], done=True)
+    assert all(one.is_file() for one in made)
+    swap.tidy(server.HOME, job["id"])
 
 
 # ---------------------------------------------------------------- the studio around it
@@ -527,10 +599,19 @@ def test_the_installer_fetches_the_swaps_files_and_the_checklist_lists_it():
                    "sam3.1_multiplex_fp16.safetensors", "mv -n", "South Korea"):
         assert needed in setup
     cuda = (ROOT / "oneshot-setup-cuda.sh").read_text()
-    assert "--swap) SWAP=1; REF2VA=1;;" in cuda and 'bash "$HERE/spark/setup-swap.sh"' in cuda and "--swap \"Swap the character\"" in cuda
-    rows = subprocess.run(["bash", "-c", f'. "{ROOT}/scripts/install-checklist.sh"; checklist_rows_cuda aarch64'], capture_output=True, text=True).stdout
-    row = next(r for r in rows.splitlines() if r.startswith("swap|")).split("|")
-    assert row[5] == "--swap" and row[7] == "ref2va" and row[4] == "2100"
+    assert "--swap) SWAP=1;;" in cuda and 'if [ "$SWAP" = 1 ] && [ "$REF2VA" = 0 ] && [ ! -s "$REF2VA_INT8" ]; then REF2VA=1; fi' in cuda and 'bash "$HERE/spark/setup-swap.sh"' in cuda and "--swap \"Swap the character\"" in cuda
+    def swap_row(models):
+        rows = subprocess.run(["bash", "-c", f'. "{ROOT}/scripts/install-checklist.sh"; checklist_rows_cuda aarch64'], capture_output=True,
+                              text=True, env={**os.environ, "SPARK_MODELS": str(models)}).stdout
+        return next(r for r in rows.splitlines() if r.startswith("swap|")).split("|")
+
+    models = Path(tempfile.mkdtemp())
+    row = swap_row(models)
+    assert row[5] == "--swap" and row[7] == "ref2va" and row[4] == "2100"  # no Ref2VA here: ticking the swap ticks it
+    int8 = models / "MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+    int8.parent.mkdir(parents=True)
+    int8.write_bytes(b"x")
+    assert swap_row(models)[7] == ""  # its 8-bit copy is here: the swap runs on it, no 40 GB more
 
 
 def test_the_credits_name_everyone_the_swap_runs():
@@ -618,3 +699,42 @@ def test_a_clip_gets_swap_the_character_and_its_panel_queues_one_job():
                                                                    "quality": 480, "anchor": True, "direction": "keep the scarf", "seed": 904239}}]
     assert "job j7" in got["done"] and "Swapped" in got["done"] and "Who was swapped, in green" in got["done"] and "The first frame it started from" in got["done"]
     assert "not on a Mac" in got["mac"]
+
+
+# ---------------------------------------------------------------- memory
+
+def test_the_memory_guard_s_swap_line_holds_the_measured_runs():
+    import memory_guard as G
+
+    for quality, runs in G.SWAP_MEASURED.items():
+        assert runs, quality
+        fixed, per_second = G.SWAP_ESTIMATE[quality]
+        for seconds, measured in runs:
+            line = fixed + per_second * seconds
+            assert measured <= line <= measured + 3_000, (quality, seconds, measured, line)  # never under, at most 3 GB over
+    assert set(G.SWAP_ESTIMATE) == set(swap.QUALITIES)
+
+
+def test_a_swap_that_does_not_fit_is_refused_before_it_is_queued(tmp_path):
+    import memory_guard as G
+
+    if not G.meminfo().get("MemTotal"):
+        pytest.skip("no /proc/meminfo: everything fits on this machine")
+    tight = stand_in(tmp_path, room=lambda: 40_000)  # a Spark with 40 GB for the job
+    with pytest.raises(HTTPException) as refused:
+        tight.build("swap", GOOD, "j1")
+    said = refused.value.detail
+    assert refused.value.status_code == 400 and "a Character Swap of 5 s at 768 needs about" in said and "refused" in said
+    roomy = stand_in(tmp_path / "roomy")
+    assert roomy.build("swap", GOOD, "j2")[0]
+
+
+def test_a_32_gb_card_refuses_a_swap_and_a_spark_takes_one():
+    import memory_guard as G
+
+    card = G.swap_check(768, 5, available_mb=30_000, total_mb=128_000, card=True)
+    assert card["fits"] is False and ("this GPU" in card["reason"] or "this machine" in card["reason"])
+    spark = G.swap_check(480, 15, available_mb=110_000, total_mb=124_000)  # an idle Spark
+    assert spark["fits"] is True and spark["route"] == "swap-480"
+    assert G.swap_check(1080, 5, available_mb=110_000, total_mb=124_000)["fits"] is False  # not measured: refused
+    assert G.swap_check(480, 5, total_mb=0)["fits"] is True  # no /proc/meminfo (a Mac)

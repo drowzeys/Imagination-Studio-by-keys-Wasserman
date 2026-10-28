@@ -238,8 +238,14 @@ def test_the_bible_puts_the_casts_and_the_places_pictures_in_a_shot():
         made["scenes"][0]["shots"][0]["tf"]["cast"] = []
         assert slate.compile_shot(made, "shot-1")["mode"] == "text"
     with_ref2va(test)
-    # without the Ref2VA model a shot from text stays one, and says nothing of pictures
-    told = slate.compile_shot(bible_film(), "shot-1")
+    # without the Ref2VA model a shot from text stays one, and says nothing of pictures (stood in for: a Spark that runs
+    # the tests may have Ref2VA installed)
+    had = slate.ready
+    slate.ready = lambda: {"ref2va": False}
+    try:
+        told = slate.compile_shot(bible_film(), "shot-1")
+    finally:
+        slate.ready = had
     assert told["mode"] == "text" and not any("Ref2VA" in w for w in told["warnings"])
 
 

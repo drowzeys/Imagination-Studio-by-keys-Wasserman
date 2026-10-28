@@ -62,6 +62,10 @@ TURBO_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"
 STEPS, CFG, SAMPLER, SCHEDULER = 8, 1.0, "er_sde", "normal"
 SHIFT_VIDEO, SHIFT_AUDIO = 12.0, 3.0
 DETECT, REFINE, TRACK, GROW = 0.35, 2, 0.5, 64
+# what counts as a person in the first frame: SAM 3.1's score for "person" and the box's share of the frame. Measured
+# 2026-10-27 on a DGX Spark: people (real and drawn, 13 to 58% of the frame) 0.94 to 0.98; a frame with nobody in it
+# 0.31 (a flat colour), 0.40 (a Mandelbrot), 0.44 to 0.49 (an empty car park) and 0.54 (a gradient, 56% of the frame)
+PERSON_SCORE, PERSON_AREA = 0.7, 0.02
 EMPTY = 64  # pixels: a mask smaller than this is a frame where the tracker lost the person
 SOUND_RATE = 48000
 # <Video 1>, the part as the model reads its performance, at half the canvas (448x256 for 864x480, 672x384 for
@@ -256,16 +260,64 @@ def sam_nodes() -> dict:
 
 # ---------------------------------------------------------------- 2. the person
 
+def preview_text(prompt_id: str, node: str) -> list:
+    """What a finished workflow's PreviewAny node showed, read back as JSON (an empty list when it showed nothing)."""
+
+    record = sg.history_of(prompt_id)
+    if record["status"].get("status_str") != "success":
+        collect(prompt_id, node)  # says why and exits
+    shown = (record.get("outputs", {}).get(node) or {}).get("text") or []
+    if not shown or not str(shown[0]).strip():
+        return []
+    try:
+        return json.loads(shown[0])
+    except (TypeError, ValueError):  # not "nobody there": what it showed is said, so a changed node is seen at once
+        sys.exit(f"SAM 3.1's boxes could not be read (ComfyUI showed: {str(shown[0])[:200]})")
+
+
+def people_in(frame: str, width: int, height: int) -> list[dict]:
+    """SAM 3.1's guesses at a person in an uploaded frame, best first: {"score", "share"} with the box's share of the
+    frame. A frame with nobody in it still gives guesses (a gradient, an empty room): PERSON_SCORE and PERSON_AREA
+    tell a person from them."""
+
+    w = sam_nodes()
+    w["3"] = {"class_type": "LoadImage", "inputs": {"image": frame}}
+    w["4"] = {"class_type": "SAM3_Detect", "inputs": {"model": ["1", 0], "image": ["3", 0], "conditioning": ["2", 0],
+                                                      "threshold": DETECT, "refine_iterations": 0, "individual_masks": False}}
+    w["5"] = {"class_type": "PreviewAny", "inputs": {"source": ["4", 1]}}
+    shown = preview_text(run_graph(w, "4"), "5")
+    boxes = shown[0] if shown and isinstance(shown[0], list) else shown  # one list of boxes for each frame given
+    out = []
+    for box in boxes if isinstance(boxes, list) else []:
+        try:
+            share = float(box["width"]) * float(box["height"]) / float(width * height)
+            out.append({"score": float(box["score"]), "share": share})
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    if boxes and not out:  # boxes of another shape: said, never read as nobody in the frame
+        sys.exit(f"SAM 3.1's boxes could not be read (ComfyUI showed: {json.dumps(boxes)[:200]})")
+    return sorted(out, key=lambda one: -one["score"])
+
+
 def find_person(part: dict, work: Path) -> Path:
     """The largest person SAM 3.1 finds in the first frame, as a mask picture; exits when there is none."""
 
     import numpy as np
     from PIL import Image
 
+    nobody = ("no person was found in the part's first frame: Character Swap replaces a person who is in the first frame. "
+              "Start the part where the person is in view")
+    frame = sg.upload(str(part["frames"][0]))
+    guesses = people_in(frame, part["width"], part["height"])
+    people = [one for one in guesses if one["score"] >= PERSON_SCORE and one["share"] >= PERSON_AREA]
+    if not people:
+        best = (f" (SAM 3.1's best guess scored {guesses[0]['score']:.2f} over {guesses[0]['share'] * 100:.0f}% of the frame; "
+                f"a person scores {PERSON_SCORE:g} or more over {PERSON_AREA * 100:g}% or more)") if guesses else ""
+        sys.exit(nobody + best)
     w = sam_nodes()
-    w["3"] = {"class_type": "LoadImage", "inputs": {"image": sg.upload(str(part["frames"][0]))}}
+    w["3"] = {"class_type": "LoadImage", "inputs": {"image": frame}}
     w["4"] = {"class_type": "SAM3_Detect", "inputs": {"model": ["1", 0], "image": ["3", 0], "conditioning": ["2", 0],
-                                                      "threshold": DETECT, "refine_iterations": REFINE, "individual_masks": True}}
+                                                      "threshold": PERSON_SCORE, "refine_iterations": REFINE, "individual_masks": True}}
     w["5"] = {"class_type": "MaskToImage", "inputs": {"mask": ["4", 0]}}
     w["6"] = {"class_type": "SaveImage", "inputs": {"images": ["5", 0], "filename_prefix": f"studio/swap_find_{uuid.uuid4().hex[:8]}"}}
     found = fetch_all(collect(run_graph(w, "4"), "6"), work / "found")
@@ -275,8 +327,7 @@ def find_person(part: dict, work: Path) -> Path:
         areas.append((int(mask.sum()), path))
     areas = [one for one in areas if one[0] >= EMPTY]
     if not areas:
-        sys.exit("no person was found in the part's first frame: Character Swap replaces a person who is in the first frame. "
-                 "Start the part where the person is in view")
+        sys.exit(nobody)
     areas.sort(key=lambda one: -one[0])
     say(f"{len(areas)} {'person' if len(areas) == 1 else 'people'} in the first frame; the largest ({areas[0][0] * 100 / (part['width'] * part['height']):.0f}% of the frame) is swapped")
     chosen = work / "person.png"
@@ -677,7 +728,7 @@ def main() -> None:
 
         stages.next("finding the person in the first frame")
         server("swap")
-        need(("SAM3_Detect", "SAM3_VideoTrack", "SAM3_TrackToMask", "MiniMaxH3ReferenceToVideo", "MiniMaxH3AddGuide",
+        need(("SAM3_Detect", "PreviewAny", "SAM3_VideoTrack", "SAM3_TrackToMask", "MiniMaxH3ReferenceToVideo", "MiniMaxH3AddGuide",
               "LTXVConcatAVLatent", "LTXVSeparateAVLatent", "SetLatentNoiseMask"))
         if SAM not in sg.call("/object_info/CheckpointLoaderSimple")["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]:
             sys.exit("SAM 3.1 is not installed: bash oneshot-setup-spark.sh --swap")

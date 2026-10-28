@@ -1432,6 +1432,11 @@ def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
             said = memory_guard.sound_check(kind, float(params.get("seconds") or 10), available_mb=room, card=on_card)
             if said.get("need_mb") is None:
                 return None
+        elif kind in swap.KINDS:
+            said = memory_guard.swap_check(int(params.get("quality") or swap.QUALITY), float(params.get("seconds") or 5),
+                                           available_mb=room, card=on_card)
+            if said.get("need_mb") is None:
+                return None
         elif kind == "voice":
             one = voice.backend()
             need = 0 if one.loaded() else int(float(getattr(one, "NEED_GB", 50)) * 1024)
@@ -2051,8 +2056,8 @@ def perform(job: dict, worker: dict | None = None) -> None:
     finally:
         if job["status"] != "queued":
             job["finished"] = time.time()
-            if job["kind"] in swap.KINDS:  # a cancelled or failed swap's frames do not stay behind
-                swap.tidy(HOME, job["id"])
+            if job["kind"] in swap.KINDS:  # a cancelled or failed swap's frames, mask and anchor do not stay behind
+                swap.tidy(HOME, job["id"], done=job["status"] == "done")
 
 
 def work() -> None:
@@ -2491,12 +2496,14 @@ def failed_takes() -> set[str]:
             stamp = file.stat().st_mtime_ns
             if FAILED_SEEN.get(file, (None,))[0] != stamp:
                 film, found = json.loads(file.read_text()), set()
-                for scene in (film.get("scenes") or []) if isinstance(film, dict) else []:
-                    for shot in scene.get("shots") or [] if isinstance(scene, dict) else []:
-                        found.update(take["mediaPath"] for take in shot.get("takes") or [] if isinstance(take, dict) and isinstance(take.get("mediaPath"), str)
+                listed = lambda value: value if isinstance(value, list) else []  # a hand-edited file holds anything
+                for scene in listed(film.get("scenes")) if isinstance(film, dict) else []:
+                    for shot in listed(scene.get("shots")) if isinstance(scene, dict) else []:
+                        found.update(take["mediaPath"] for take in (listed(shot.get("takes")) if isinstance(shot, dict) else [])
+                                     if isinstance(take, dict) and isinstance(take.get("mediaPath"), str)
                                      and (director.failed_check(take) or take.get("rating") == "no-good" and str(take.get("origin") or "").startswith("The Director")))
                 FAILED_SEEN[file] = (stamp, found)
-        except (OSError, ValueError):
+        except (OSError, ValueError, AttributeError, TypeError):  # a project.json that is not Slate's shape lists nothing
             continue
         out |= FAILED_SEEN[file][1]
     for gone in set(FAILED_SEEN) - seen:
@@ -2924,7 +2931,7 @@ app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)
 action_router, action_build, action_title, action_source = actions.attach(HOME, PACK, SPARK, inside, relative)
 import swap  # noqa: E402  (Character Swap: the person in a part of a clip replaced by a character, a Library action, beside this file)
-swap_router, swap_build, swap_title, swap_source, swap_estimate = swap.attach(HOME, PACK, SPARK, inside, relative, media_seconds)
+swap_router, swap_build, swap_title, swap_source, swap_estimate = swap.attach(HOME, PACK, SPARK, inside, relative, media_seconds, held_room)
 app.include_router(swap_router)
 import sound  # noqa: E402  (sound effects and foley: Stable Audio Open and MMAudio, run locally, beside this file)
 sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative, held_room, media_seconds)

@@ -81,10 +81,15 @@ def work_folder(home: Path, job_id: str) -> Path:
     return home / "renders" / f".swap-{job_id}"
 
 
-def tidy(home: Path, job_id: str) -> None:
-    """After a swap job, however it ended (server.perform): its work folder, if the script could not remove it."""
+def tidy(home: Path, job_id: str, done: bool = False) -> None:
+    """After a swap job, however it ended (server.perform): its work folder, if the script could not remove it, and
+    unless it is ``done``, the mask preview and the anchor it made on the way (masks/<job>/, scouts/<job>/: folders of
+    this job's own)."""
 
     shutil.rmtree(work_folder(home, job_id), ignore_errors=True)
+    if not done:
+        for folder in (home / "masks" / job_id, home / "scouts" / job_id):
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 def on_card() -> bool:
@@ -98,8 +103,9 @@ def on_card() -> bool:
         return False
 
 
-def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds):
-    """``media_seconds(path)``: (seconds, has sound) of a media file, or (None, None) when it cannot be measured."""
+def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds, room=None):
+    """``media_seconds(path)``: (seconds, has sound) of a media file, or (None, None) when it cannot be measured.
+    ``room()``: what the machine has for a job while Drama 3, a song engine or Bolt is loaded (server.held_room)."""
 
     router = APIRouter()
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
@@ -113,6 +119,19 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds)
 
         beside = models() / SWAP_LORA
         return beside if beside.is_file() else None
+
+    def guard(quality: int, seconds: float) -> dict:
+        """The memory guard's word on a swap (memory_guard.swap_check), as sound.py asks it for a sound."""
+
+        import memory_guard  # spark/, on the server's path
+        if memory_guard.card_room_applies():
+            # Drama 3, Music and Bolt are unloaded before this job (server.perform): their room counts as the swap's
+            import bolt
+            import music
+            import voice
+            have = memory_guard.card_room_for_job([voice.room_mb(), music.room_mb(), bolt.room_mb()])
+            return memory_guard.swap_check(quality, seconds, available_mb=have, card=True)
+        return memory_guard.swap_check(quality, seconds, available_mb=room() if room else None)
 
     def missing() -> str:
         """Why Character Swap cannot run here, or '' when it can."""
@@ -209,10 +228,17 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds)
 
         if kind not in KINDS:
             raise HTTPException(400, f"unknown job kind {kind}")
+        if not spark:  # the clip and the picture are asked for first; then the platform's reason, before any part's length
+            media(params, "video", CLIPS, "a clip")
+            media(params, "image", PICTURES, "the character's picture")
+            raise HTTPException(400, missing())
         chosen = settings(params)
         why = missing()
         if why:
             raise HTTPException(400, why)
+        found = guard(chosen["quality"], chosen["seconds"])  # the heaviest job of the studio: asked before it is queued
+        if not found["fits"]:
+            raise HTTPException(400, found["reason"])
         target = home / "renders" / f"{job_id}.mp4"
         mask = home / "masks" / job_id / "person.mp4"
         still = home / "scouts" / job_id / "anchor.png"

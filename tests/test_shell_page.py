@@ -751,6 +751,7 @@ def test_each_search_result_can_be_ticked_on_its_own():
 def test_the_pages_inline_script_and_every_module_parse(tmp_path):
     """index.html's own script and every static module must parse: a merge that leaves a stray line blanks the whole page."""
     import re
+    need_node()
     html = (ROOT / "app/static/index.html").read_text()
     scripts = [m.group(1) for m in re.finditer(r"<script(?![^>]*src=)[^>]*>(.*?)</script>", html, re.S)]
     assert scripts, "index.html has inline scripts"

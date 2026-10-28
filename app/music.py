@@ -584,7 +584,7 @@ class Cuda(voice.Served):
         free = voice.mem_available_gb()
         if 0 <= free < self.NEED_GB and not voice.comfy_up():
             who = "GPU" if voice.has_card_memory() else "Spark"
-            return (f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this {who} has {free:.0f} GB available "
+            return (f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this {who} has {free:.1f} GB available "
                     "now (something outside the studio holds the rest).")
         return ""
 
@@ -712,7 +712,7 @@ class Metal(Cuda):
             return why
         free = voice.mem_available_gb()
         if 0 <= free < self.NEED_GB:
-            return f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this Mac has {free:.0f} GB available now."
+            return f"MiniMax Music 3 needs about {self.NEED_GB:.0f} GB of free memory and this Mac has {free:.1f} GB available now."
         return ""
 
     def make_room(self, job: dict) -> None:

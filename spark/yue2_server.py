@@ -447,6 +447,18 @@ def main() -> int:
             note("failed: " + traceback.format_exc(limit=3).replace("\n", " | ")[-800:])
             answer = {"ok": False, "error": f"{type(error).__name__}: {error}"[-600:]}
         say({"id": job, **answer})
+        if not answer.get("ok", True):
+            # what the failed song held on the GPU goes back before the next one (an out-of-memory most of all): here,
+            # once the error and its frames are gone, so the song's tensors can be collected
+            try:
+                import gc
+
+                import torch
+
+                gc.collect()
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 - no torch or no GPU: nothing to give back
+                pass
     return 0
 
 

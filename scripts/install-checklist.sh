@@ -149,6 +149,11 @@ checklist_note_mac() {
 
 checklist_rows_cuda() {
   local arch="$1" finish="Final cut and mix to Resolve, Premiere, After Effects" bolt="NVIDIA Nemotron 3.5 Bolt as the studio's own brain"
+  # the swap runs on Ref2VA's 8-bit copy where it is here; elsewhere it needs Ref2VA (the installer adds its bf16 file)
+  local swap_needs="ref2va" swap_note="ticks Ref2VA"
+  if [ -s "${SPARK_MODELS:-$HOME/spark-studio-models}/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" ]; then
+    swap_needs="" swap_note="on Ref2VA's 8-bit copy, here already"
+  fi
   case "$arch" in
     aarch64|arm64) finish="Fonts only here; Tesseract runs on your Mac";;
     *) bolt="Nemotron 3.5 Bolt as the brain, through llama.cpp here";;
@@ -170,7 +175,7 @@ checklist_rows_cuda() {
     "flux3|opt|0|0|41000|--flux3|||FLUX3-K|Black Forest Labs' picture models (gated: accept first)" \
     "moss|opt|0|0|30000|--moss|||MOSS-Image|OpenMOSS's picture model (Apache 2.0)" \
     "yue2|opt|0|0|13700|--yue2|||YuE2 songs|YuE2 for the Music tab (creators may sell songs; companies need a licence)" \
-    "swap|opt|0|0|2100|--swap||ref2va|Character Swap|A picture's character in place of a person in a clip (ticks Ref2VA; H3 licence: not EU, UK, KR, US)"
+    "swap|opt|0|0|2100|--swap||$swap_needs|Character Swap|A picture's character in place of a person in a clip ($swap_note; H3 licence: not EU, UK, KR, US)"
 }
 
 # a size in MB as people read it: 150 MB, 2.3 GB, 41 GB

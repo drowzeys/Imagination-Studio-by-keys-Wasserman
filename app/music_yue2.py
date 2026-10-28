@@ -137,6 +137,12 @@ class Yue2(music.Cuda):
                 str(self.model / "YuE2-Vae"), "--src", str(self.src), "--quant", self.weights,
                 "--backend", self.backend if self.backend in ("torch", "blocks") else "torch", "--serve"]
 
+    def check(self) -> str:
+        """music.Cuda.check, but off a Spark the platform's answer is given as it is now, never one cached from a
+        moment ago when the platform read otherwise."""
+
+        return self.present() if not music.SPARK else music.Cuda.check(self)
+
     def present(self) -> str:
         """What is missing for YuE2 here ("" when its environment and weights are there): files only, no process."""
 
@@ -161,7 +167,7 @@ class Yue2(music.Cuda):
         free = voice.mem_available_gb()
         if 0 <= free < self.NEED_GB and not voice.comfy_up():
             who = "GPU" if voice.has_card_memory() else "machine"
-            return (f"YuE2 needs about {self.NEED_GB:.0f} GB of free memory and this {who} has {free:.0f} GB available "
+            return (f"YuE2 needs about {self.NEED_GB:.0f} GB of free memory and this {who} has {free:.1f} GB available "
                     "now (something outside the studio holds the rest).")
         return ""
 

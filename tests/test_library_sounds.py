@@ -85,3 +85,16 @@ def test_a_take_that_failed_its_check_is_in_the_library_and_says_so():
     assert "failed" not in listed["slate/p-lib/takes/mine.mp4"]  # rated no good by hand: listed, but no check failed it
     assert "qa/fetched/q9.mp4" not in listed and "qa/job1-take1.jpg" not in listed
     assert client.delete("/api/library", params={"path": "qa/job1-take1.mp4"}).status_code == 200
+
+
+def test_a_project_file_of_another_shape_does_not_break_the_library():
+    home = server.HOME
+    for name, film in (("p-odd1", {"scenes": [{"shots": ["not a shot", 3, None]}]}), ("p-odd2", {"scenes": [{"shots": [{"takes": "x"}]}]}),
+                       ("p-odd3", {"scenes": "none"}), ("p-odd4", ["a list"])):
+        (home / "slate" / name).mkdir(parents=True, exist_ok=True)
+        (home / "slate" / name / "project.json").write_text(json.dumps(film))
+    try:
+        assert client.get("/api/library").status_code == 200
+    finally:
+        for name in ("p-odd1", "p-odd2", "p-odd3", "p-odd4"):
+            (home / "slate" / name / "project.json").unlink()

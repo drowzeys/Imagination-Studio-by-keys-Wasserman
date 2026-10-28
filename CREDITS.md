@@ -215,6 +215,9 @@ additional individual creator permission**: personal users, content creators and
 capacity may generate, publish, sell, license or otherwise monetize their outputs free of charge, with no fees or
 royalties; companies need a commercial licence from the authors; no illegal, harmful, deceptive or unethical use.
 YuE2's decoder carries code derived from Stability AI's stable-audio-tools (MIT) and NVIDIA's BigVGAN SnakeBeta (MIT).
+YuE2-3B reads its text with **qwen.tiktoken**, the BPE vocabulary of **Alibaba Cloud's Qwen team** (from the Qwen-7B
+release, github.com/QwenLM/Qwen, under the Tongyi Qianwen License Agreement), shipped beside its weights and required
+by `spark/setup-yue2.sh`, through **OpenAI's tiktoken** (MIT, 0.12.0 in YuE2's environment).
 The pack ships no weights. **YuE2.**
 
 ## Sound effects and foley: Stability AI, and Ho Kei Cheng and the MMAudio authors

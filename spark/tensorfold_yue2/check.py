@@ -35,14 +35,20 @@ def neighbours():
     import os
     import subprocess
     seen = {"reservations": [], "processes": []}
-    governor = os.environ.get("SPARK_GOVERNOR", "/data/model_vault/spark-workload-governor/admission_client.py")
-    try:
-        status = json.loads(subprocess.run(["python3", governor, "--owner", "probe", "--status"], capture_output=True,
-                                           text=True, timeout=20).stdout)
-        seen["reservations"] = sorted(r["owner"] for r in status.get("reservations", [])
-                                      if not str(r["owner"]).startswith("claude-34-tfyue"))
-    except Exception:
-        seen["reservations"] = ["unknown"]
+    # a workload governor's admission client, where the machine has one (SPARK_GOVERNOR names it; none is asked
+    # otherwise), and the owner prefix of this check's own reservations (SPARK_GOVERNOR_SELF), which are not neighbours
+    governor = os.environ.get("SPARK_GOVERNOR", "").strip()
+    mine = os.environ.get("SPARK_GOVERNOR_SELF", "tensorfold-yue2").strip()
+    if not governor:
+        seen["reservations"] = ["not asked"]  # no governor named: not the same as a quiet machine
+    else:
+        try:
+            status = json.loads(subprocess.run(["python3", governor, "--owner", "probe", "--status"], capture_output=True,
+                                               text=True, timeout=20).stdout)
+            seen["reservations"] = sorted(r["owner"] for r in status.get("reservations", [])
+                                          if not (mine and str(r["owner"]).startswith(mine)))
+        except Exception:
+            seen["reservations"] = ["unknown"]
     try:
         rows = subprocess.run(["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"], capture_output=True,
                               text=True, timeout=20).stdout.split()

@@ -16,9 +16,11 @@ const muOn = () => !!(S && S.music && S.music.available);
 const muEngine = () => (S && S.music && S.music.engines && MU.engine && S.music.engines[MU.engine] ? MU.engine : (S && S.music && S.music.engine) || "music3");
 const muState = () => (S && S.music && S.music.engines && S.music.engines[muEngine()]) || (S && S.music);
 const muCredit = name => name === "yue2" ? "YuE2" : "MiniMax-Music3";
-// the picker: shown where YuE2 is installed (a Linux machine with an NVIDIA GPU), else MiniMax Music 3 alone
+// the picker: shown where YuE2 is installed (a Linux machine with an NVIDIA GPU), else MiniMax Music 3 alone, with
+// the reason YuE2 is not here (on a Mac: it has no Mac build)
 function muPicker() {
-  const all = S && S.music && S.music.engines; if (!all || !all.yue2 || !(all.yue2.installed || all.yue2.available)) return null;
+  const all = S && S.music && S.music.engines; if (!all || !all.yue2) return null;
+  if (!(all.yue2.installed || all.yue2.available)) return all.yue2.why ? el("p", { class: "note", style: "margin:6px 0 4px" }, all.yue2.why) : null;
   const now = muEngine(), names = S.music.engine_names || { yue2: "YuE2", music3: "MiniMax Music 3" };
   return el("div", { class: "row", style: "margin:6px 0 4px;align-items:center" },
     el("div", { class: "seg-ctl fit", role: "radiogroup", "aria-label": "Song engine" }, Object.keys(names).filter(k => all[k]).map(k =>

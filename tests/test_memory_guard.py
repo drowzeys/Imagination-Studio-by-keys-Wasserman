@@ -226,8 +226,9 @@ def test_the_app_refuses_before_the_job_is_queued():
     if not server.SPARK:
         return
     client = TestClient(server.app)
-    had, had_device, had_held = G.room_mb, G.device_room_mb, server.held_room
+    had, had_device, had_held, had_engine = G.room_mb, G.device_room_mb, server.held_room, server.SPARK_ENGINE_LIB
     G.room_mb = lambda: IDLE  # an idle Spark, whatever this machine is doing now
+    server.SPARK_ENGINE_LIB = Path(tempfile.mkdtemp()) / "none.so"  # ComfyUI's route, whatever this Spark has built
     G.device_room_mb = lambda: None  # a card reads its own room and would ignore the stand-in above
     server.held_room = lambda: None
     try:
@@ -248,7 +249,7 @@ def test_the_app_refuses_before_the_job_is_queued():
         finally:
             server.lora_resolve = was
     finally:
-        G.room_mb, G.device_room_mb, server.held_room = had, had_device, had_held
+        G.room_mb, G.device_room_mb, server.held_room, server.SPARK_ENGINE_LIB = had, had_device, had_held, had_engine
 
 
 

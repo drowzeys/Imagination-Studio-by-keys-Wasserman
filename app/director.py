@@ -360,14 +360,17 @@ def sheet_picture(c: dict) -> str:
     uniform the portrait is from the knees up and shows all of it: later shots match the costume to this picture, and a
     head-and-shoulders crop with "no props" lost a period overcoat and a fedora."""
 
-    who = ", ".join(x for x in (text(c.get("gender")), text(c.get("ethnicity"))) if x)
+    said = slate.said  # a brain's "None" or "N/A" is left out, not written into the picture's prompt
+    who = ", ".join(x for x in (slate.age_words(c.get("age")), said(c.get("gender")), said(c.get("ethnicity"))) if x)
+    hair, clothing = said(c.get("hair")), said(c.get("clothing"))
     framing = ("three-quarter length from the knees up, facing the camera, the whole costume in frame as described, hat and coat included, "
-               "plain seamless backdrop, generous headroom" if COSTUME.search(text(c.get("clothing"))) else
+               "plain seamless backdrop, generous headroom" if COSTUME.search(clothing) else
                "centered head-and-shoulders, facing the camera, plain seamless backdrop, generous headroom, no props")
-    words = (f"{c.get('name')}, " + (f"{c['age']} years old, " if c.get("age") else "") + f"{who}. {text(c.get('faceFeatures'))}. Hair: {text(c.get('hair'))}. "
-             f"Wearing {text(c.get('clothing'))}. {text(c.get('expression'))}. Character reference portrait: {framing}. "
-             f"{c.get('keyLightSide') or 'Key light from left'}, {c.get('lightingMood') or 'natural soft light'}, "
-             "clean catchlights, gentle fill. Photoreal, neutral grade, true-to-skin color, crisp detail for identity reference.")
+    bits = [f"{c.get('name')}" + (f", {who}" if who else ""), said(c.get("faceFeatures")), hair and f"Hair: {hair}",
+            clothing and f"Wearing {clothing}", said(c.get("expression")), f"Character reference portrait: {framing}",
+            f"{said(c.get('keyLightSide')) or 'Key light from left'}, {said(c.get('lightingMood')) or 'natural soft light'}, clean catchlights, gentle fill",
+            "Photoreal, neutral grade, true-to-skin color, crisp detail for identity reference."]
+    words = ". ".join(bit.strip() for bit in bits if bit and bit.strip())
     return re.sub(r"\.\s*\.", ".", re.sub(r"\s+\.", ".", words))
 
 
@@ -815,15 +818,18 @@ def queue(body: dict) -> dict | None:
 
 
 def cast_stage(run: dict, stop: threading.Event) -> None:
-    """A reference still and its turnaround for each character without a picture, a plate for each place without one."""
+    """A reference still and its turnaround for each character without a picture, a plate for each place without one:
+    those a shot of the run has in its cast or as its place (a portrait of someone no shot shows is never used)."""
 
     project, casting = run["project"], run.setdefault("casting", {})
     film = film_of(project)
+    used = [tf_of(s) for sc in film.get("scenes") or [] for s in sc.get("shots") or [] if (s.get("prompt") or "").strip()]
+    seen = {i for tf in used for i in tf.get("cast") or []} | {tf.get("location") for tf in used if tf.get("location")}
     for c in film.get("characters") or []:
-        if not (c.get("images") or []) and c["id"] not in casting:
+        if not (c.get("images") or []) and c["id"] not in casting and c["id"] in seen:
             casting[c["id"]] = {"kind": "cast", "name": c.get("name"), "step": "scout", "job": None}
     for l in film.get("locations") or []:
-        if not (l.get("images") or []) and (l.get("description") or "").strip() and l["id"] not in casting:
+        if not (l.get("images") or []) and (l.get("description") or "").strip() and l["id"] not in casting and l["id"] in seen:
             casting[l["id"]] = {"kind": "place", "name": l.get("name"), "step": "scout", "job": None}
     save(run)
     while True:
@@ -1119,14 +1125,35 @@ def check(run: dict, sid: str, one: dict) -> None:
     say(run, f"Checking {run['shots'][sid]['name']}", job=gate["id"], shot=sid)
 
 
+def reason_of(take: dict) -> str:
+    """Why one checked take failed: the shot check's reason, else the QA gate's notes on the gates that failed (the
+    line heard, the look held)."""
+
+    said = [str(take.get("reason") or take.get("why") or "")]
+    said += [f"{gate}: {take[gate]['note']}" for gate in ("audio", "identity")
+             if isinstance(take.get(gate), dict) and take[gate].get("result") == "fail" and take[gate].get("note")]
+    return "; ".join(one for one in said if one)
+
+
 def verdict(run: dict, sid: str, one: dict, report: dict, unchecked: str = "") -> None:
+    key = "qa"
     if report.get("passed") is None:
         shot_check = (job_of(one["job"]) or {}).get("shot") or {} if one.get("job") else {}
         if shot_check.get("passed") is False:
-            report = {"passed": False, "takes": shot_check.get("takes") or [], "why": "the shot check"}
+            report, key = {"passed": False, "takes": shot_check.get("takes") or [], "why": "the shot check"}, "shot"
     takes = report.get("takes") or []
-    reason = "; ".join(str(t.get("reason") or t.get("why") or "") for t in takes if isinstance(t, dict) and t.get("passed") is False and (t.get("reason") or t.get("why")))
+    reason = "; ".join(filter(None, (reason_of(t) for t in takes if isinstance(t, dict) and t.get("passed") is False)))
     one.update(checked=True, passed=report.get("passed"), reason=reason or report.get("why") or unchecked)
+    if report.get("passed") is not None and one.get("take"):  # a QA job of its own: its report on the take, as a job's is
+        def put(film):
+            try:
+                _, shot, _ = slate.find_shot(film, sid)
+            except HTTPException:
+                return
+            for take in shot.get("takes") or []:
+                if take.get("id") == one["take"] and not take.get(key):
+                    take[key] = report
+        change(run["project"], put)
     name = run["shots"][sid]["name"]
     say(run, f"{name}: " + ("passed the check" if one["passed"] else "failed the check" + (f" ({one['reason'][:160]})" if one["reason"] else "")
                            if one["passed"] is False else "not checked" + (f" ({unchecked[:160]})" if unchecked else "")), shot=sid)
@@ -1187,7 +1214,7 @@ def cut_stage(run: dict, stop: threading.Event) -> None:
     if not run["asked"].get("cut"):
         return
     film = film_of(run["project"])
-    clips, takes, left = [], [], []
+    clips, takes, left, gone = [], [], [], []
     for sid in run["order"]:
         rec = run["shots"].get(sid) or {}
         path = rec.get("best")  # a take that failed its check is not cut in unless it is circled
@@ -1204,8 +1231,10 @@ def cut_stage(run: dict, stop: threading.Event) -> None:
             takes.append(take)
         else:
             left.append(f"{shot.get('name')} ({OUTCOMES.get(outcome_of(rec) or '', 'no take')})")
-    if not clips:
-        raise Failed("no shot has a take to cut: " + ", ".join(left))
+            if outcome_of(rec) in IN_CUT:  # its outcome would have cut it in: its file is what is missing
+                gone.append(shot.get("name") or "?")
+    if not clips:  # the run ends on its outcomes, as one that cut does
+        raise Failed(summary(run) + ", nothing to cut" + (f" (the take of {', '.join(gone)} is no longer on disk)" if gone else ""))
     if left:
         say(run, f"Left out of the cut: {', '.join(left)}")
     settings = (takes[0] if takes else {}).get("settings") or {}

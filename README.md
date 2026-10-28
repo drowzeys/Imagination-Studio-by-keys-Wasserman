@@ -128,7 +128,7 @@ FastH3 video with sound (125 GB), motion graphics, Finish and phone notification
 | `--all` | Every feature below, about 400 GB (on a Mac, every feature its memory runs, without `--train`) |
 | `--image-only` | Qwen-Image-2.1 only (26 GB) |
 | `--ref2va` | Reference pictures to video (39 GB more) |
-| `--swap` | The Library's Character Swap: two LoRAs and SAM 3.1 beside Ref2VA (2.1 GB more; adds `--ref2va`). DGX Spark and CUDA only |
+| `--swap` | The Library's Character Swap: two LoRAs and SAM 3.1 beside Ref2VA (2.1 GB more; adds `--ref2va` unless Ref2VA's 8-bit copy is there). DGX Spark and CUDA only |
 | `--h3-base` | MiniMax H3's own transformer, for keyframe LoRAs and the Library actions (40 GB more) |
 | `--image-edit` | Qwen-Image-2.1's 40-step model (14 GB more) |
 | `--flux3` | FLUX3-K pictures (41 GB more, gated) |
@@ -201,15 +201,35 @@ and restart the app (`git pull`, then quit and reopen the Mac app, or `bash scri
   shot before. "The shots of a scene follow each other without a cut" is gone from what the brain is asked.
 - **Costumes in the reference stills.** When a character's clothing names a hat, a coat or a uniform, the reference
   portrait is from the knees up with all of it in frame, instead of a head-and-shoulders with "no props".
-- **A brain reply with a stray think tag still reads.** When a reply carries `</think>`, the answer after it is read;
-  when the first JSON in a reply is broken, the longest whole one is.
+- **A brain reply with a stray think tag still reads.** When a reply carries `</think>`, the answer after it is read
+  first, then the whole reply as before. A reply cut off inside its JSON still says there is no valid JSON.
+- **Why a take failed, in words.** The QA gate's own reason (*audio: 2 of the line's 4 words heard*) is in the
+  Director's log, the shot's outcome and the take's record. A run in which every shot failed ends on the same count
+  (*0 of 1 shot passed the check, 1 failed the check ...: Lamp turns, 0 retakes, nothing to cut*).
+- **Only who is in the shots is cast.** The Director makes reference stills for the characters and places its shots
+  use, not for everyone in the bible, and a brain's *None* or *N/A* or an age in words (*Adult*) never reaches a
+  portrait's prompt as written.
 - **One render in the queue for each machine.** The Director keeps one clip in the queue for each machine that renders
   (this one and its Sparks, at most three), so on one Spark a retake no longer waits behind the next shots. A render
   the machine's workload limits stopped (heat, memory pressure) is not a take: it is queued once more, at the same
   seed, after the queue's own cool-down gate, and left out after a second stop. The limits themselves are unchanged.
+- **Character Swap is held to the memory guard.** A swap is checked against its measured peak before it is queued, as
+  clips, songs and sound are, and beside Bolt (on a DGX Spark a 5 s part takes about 58 GB at 480 and 62 GB at 768, a 15 s one at 768 about 63 GB). A
+  card too small for it refuses it with the reason instead of starting.
+- **Character Swap needs a person.** The first frame's person is one SAM 3.1 is sure of (a score of 0.7 or more,
+  over 2% of the frame): a gradient, a pattern or an empty room is refused at once with SAM's best guess, where it
+  used to render for minutes, and a frame with nothing in it gets the same sentence instead of a ComfyUI error. A
+  cancelled or failed swap leaves no mask preview or anchor behind, and a Mac says first that the swap is not for a Mac.
 - **Setup.** `scripts/setup-voice.sh` stops at once, before the engine, when the folder for Fish's checkpoint is not
   yours to write (a root-owned `~/models`), and says how to fix it. An app that is already running picks up the Bolt
   engine within a minute of `oneshot-setup-spark.sh --bolt`, with no restart (before, it stayed *external* until one).
+  `--swap` uses Ref2VA's 8-bit copy where it is there, without the 40 GB bf16 file (`--ref2va` is still that file:
+  Create's Turbo adapter and the Library's other actions need it).
+- **Songs.** Clearing a song's job moves the song to the trash, a YuE2 song with its score folder, and *Put back*
+  restores both. The Music tab on a Mac says why YuE2 is not offered. YuE2 gives its GPU memory back after a song that
+  failed.
+- **Credits.** tiktoken and the Qwen tokenizer YuE2 reads (with its licence), and Comfy Org's Openjutsu in Settings'
+  short list.
 
 ## New in 3.4.0 (2026-10-27)
 
@@ -239,8 +259,8 @@ A Mac has nothing new to install: neither runs on a Mac, and its Music tab stays
   It runs on the studio's own MiniMax H3 Ref2VA (int8), with LightX2V's 8-step Turbo LoRA, Akatz Labs' Character Swap
   LoRA v1.5 and SAM 3.1 to find and follow the person. Measured on a DGX Spark with the GPU to itself: a 5 s part in
   about **6 minutes** at Fast and about **12 minutes** at High. A part with a hard cut, or with nobody in its first
-  frame, is refused before anything is drawn. DGX Spark and CUDA only. `--swap` is 2.1 GB beside Ref2VA (it ticks
-  `--ref2va` when Ref2VA is not there). [Character Swap](#character-swap).
+  frame, is refused before anything is drawn. DGX Spark and CUDA only. `--swap` is 2.1 GB beside Ref2VA (it adds
+  `--ref2va` when neither Ref2VA's bf16 file nor its 8-bit copy is there). [Character Swap](#character-swap).
 
 Licences, also in Settings → About and beside each choice in the app:
 

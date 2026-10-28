@@ -269,6 +269,9 @@ copied into this pack.
 - YuE2's environment also installs, at the versions YuE2 pins: Hugging Face transformers 4.57.6, huggingface_hub
   0.36.2, safetensors 0.7.0 and accelerate 1.13.0 (Apache 2.0), tiktoken 0.12.0 (MIT, OpenAI), NumPy 2.2.6 (BSD-3),
   soundfile 0.13.1 (BSD-3), and the studio's PyTorch 2.14.1 for CUDA 13 (BSD-3) with Triton (MIT).
+- YuE2-3B's tokenizer file `qwen.tiktoken` (downloaded with its weights, never shipped in this pack) is the BPE
+  vocabulary of Alibaba Cloud's Qwen models (Qwen-7B, github.com/QwenLM/Qwen), released under the Tongyi Qianwen
+  License Agreement; its terms apply to the file beside YuE2's own CC BY-NC 4.0.
 
 ## TensorFold yue2 decode engine (CUDA)
 

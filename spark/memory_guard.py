@@ -653,6 +653,48 @@ def sound_check(kind: str, seconds: float, available_mb: int | None = None, tota
         out["reason"] += "." + note if note else ""
     return out
 
+# Character Swap (spark/spark_swap.py: SAM 3.1, the anchor's picture model, then MiniMax H3 Ref2VA int8 with two LoRAs,
+# window by window): quality (pixels on the short side) -> (MB, MB per second of the part). Measured 2026-10-27 on a
+# DGX Spark (GB10, 13.5 GB in use before each run, ComfyUI's models unloaded): the peak the run took from the machine,
+# MemTotal - MemAvailable sampled twice a second, less the idle machine's 13.5 GB. One person, the anchor on, int8
+# Ref2VA: 480 at 5 s (one window) 57.7 GB in 384 s; 768 at 5 s 62.0 GB in 795 s and at 15 s (four windows) 63.3 GB in
+# 2264 s. The models are held from window to window, so the length adds little: 0.13 GB a second at 768, and at 480
+# that slope scaled by the frame's pixels. On a workstation's card the same line is asked of the card's room: its own
+# peak is lower (49 GB at 480 under a 96 GB card's cap), so the line never admits a swap the card cannot hold.
+SWAP_ESTIMATE: dict = {480: (57_500, 50), 768: (61_400, 130)}
+# quality -> ((seconds of the part, MB), ...): the measured runs; tests/test_swap.py holds each line to them
+SWAP_MEASURED: dict = {480: ((5, 57_736),), 768: ((5, 62_045), (15, 63_302))}
+
+
+def swap_check(quality: int, seconds: float, available_mb: int | None = None, total_mb: int | None = None,
+               card: bool = False) -> dict:
+    """Whether a Character Swap of a ``seconds`` part at ``quality`` fits this machine, as ``sound_check`` answers;
+    a quality not measured here is refused with that reason. Everything fits where there is no /proc/meminfo."""
+
+    if total_mb is None:
+        total_mb = meminfo().get("MemTotal", 0)
+    if not total_mb:
+        return {"fits": True, "reason": "", "route": None}
+    measured_here = available_mb is None and not card
+    available_mb, floor, on_card = _pool(available_mb, total_mb, card)
+    out = {"fits": False, "reason": "", "need_mb": None, "error_mb": ERROR_MB, "left_mb": None, "floor_mb": floor,
+           "available_mb": available_mb, "route": f"swap-{quality}", "rows": None, "nearest": None}
+    if quality not in SWAP_ESTIMATE:
+        out["reason"] = f"a Character Swap at {quality} has not been measured, and nothing renders without a measured memory estimate"
+        return out
+    fixed, per_second = SWAP_ESTIMATE[quality]
+    need = int(fixed + per_second * float(seconds))
+    left = available_mb - need - ERROR_MB
+    out.update(fits=left >= floor, need_mb=need, left_mb=left)
+    if not out["fits"]:
+        who = "GPU" if on_card else "machine"
+        out["reason"] = (f"a Character Swap of {seconds:g} s at {quality} needs about {need / 1000:.0f} GB at its peak (give or "
+                         f"take {ERROR_MB / 1000:g}); this {who} has {available_mb / 1000:.0f} GB for it and keeps "
+                         f"{floor / 1000:.0f} GB free as its floor, so it is refused. Something outside the studio holds the rest")
+        note = held_note() if measured_here and not on_card else ""
+        out["reason"] += "." + note if note else ""
+    return out
+
 # ---------- layer 2: the floor under a running server ----------
 
 def verdict(samples: list[tuple[float, int]], floor: int, stalled: float = 0.0) -> str:

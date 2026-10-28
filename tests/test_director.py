@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -473,6 +474,33 @@ def test_a_refused_shot_is_never_called_rendered_and_a_failed_take_stays_out_of_
     assert failed_take["mediaPath"] in [c_["path"] for c_ in made["saved"]["timeline"]]
 
 
+class Deaf(Queue):
+    """A queue whose QA gate fails every clip on its line, as qa.py words it (the reason under audio.note)."""
+
+    def qa(self, body):
+        job_id = f"qa{len(self.jobs)}"
+        self.checked.append(body)
+        take = {"passed": False, "audio": {"result": "fail", "note": "2 of the line's 4 words heard"},
+                "identity": {"result": "pass", "note": "Bolt: the same face throughout"}, "take": 1, "seed": 1}
+        self.jobs[job_id] = {"id": job_id, "kind": "qa", "status": "done", "qa": {"passed": False, "takes": [take]}}
+        return self.jobs[job_id]
+
+
+def test_the_gate_s_reason_is_kept_and_a_run_where_every_shot_failed_ends_on_its_outcomes(studio):
+    studio(Deaf(), Brain())
+    project = new_film()
+    client.post("/api/slate/direct", json={"project": project, "scenes": 1, "shotsPerScene": 1, "seconds": 5, "retakes": 0, "cut": True})
+    run = until(project)
+    shot = slate.get_project(project)["scenes"][0]["shots"][0]
+    rec = run["shots"][shot["id"]]
+    assert rec["outcome"] == "failed" and "audio: 2 of the line's 4 words heard" in rec["why"]
+    assert any(f"{shot['name']}: failed the check (audio: 2 of the line's 4 words heard)" in line["text"] for line in run["log"])
+    take = shot["takes"][0]
+    assert take["qa"]["passed"] is False and take["qa"]["takes"][0]["audio"]["note"] == "2 of the line's 4 words heard"
+    last = run["log"][-1]["text"]
+    assert last == f"Failed: 0 of 1 shot passed the check, 1 failed the check (in the Library, out of the cut): {shot['name']}, 0 retakes, nothing to cut", last
+
+
 def test_a_render_the_workload_limits_stopped_is_queued_once_more_and_is_not_a_retake(studio):
     queue, brain = Picky(stop="Ada walks", stops=1), Brain()
     studio(queue, brain)
@@ -551,6 +579,11 @@ def test_a_costume_portrait_shows_the_costume():
     assert "knees up" in period and "hat and coat included" in period and "no props" not in period
     plain = director.sheet_picture({"name": "Ada", "clothing": "a grey sweater"})
     assert "head-and-shoulders" in plain and "no props" in plain
+    # a brain's "None" and "N/A" and an age in words never reach the picture's prompt as written
+    odd = director.sheet_picture({"name": "Bo", "age": "Adult", "hair": "None", "clothing": "N/A", "faceFeatures": "none.", "gender": "man"})
+    assert odd.startswith("Bo, Adult, man. Character reference portrait:") and "years old" not in odd and "None" not in odd and "N/A" not in odd
+    assert "40 years old" in period
+    assert slate.person({"age": 31, "hair": "None", "clothing": "a red coat"}) == "31 years old, wearing a red coat"
 
 
 def test_a_run_written_before_outcomes_were_kept_still_counts_true():
@@ -618,3 +651,17 @@ def test_a_heat_stop_queued_again_survives_a_restart_and_a_kept_take_that_failed
     assert director.kept_take(shot) is None
     shot["takes"][0]["rating"] = "circled"
     assert director.kept_take(shot) == "slate-old.mp4"
+
+
+def test_only_the_characters_and_places_a_shot_shows_are_cast(monkeypatch):
+    film = {"characters": [{"id": "ada", "name": "Ada"}, {"id": "bo", "name": "Bo"}],
+            "locations": [{"id": "pier", "name": "The Pier", "description": "a wooden pier"}, {"id": "loft", "name": "The Loft", "description": "a loft"}],
+            "scenes": [{"id": "s1", "shots": [{"id": "lamp", "prompt": "# Subject\nA lamp turns on.", "tf": {"cast": [], "location": "pier"}},
+                                              {"id": "ada1", "prompt": "# Subject\nAda waits.", "tf": {"cast": ["ada"], "location": "pier"}},
+                                              {"id": "empty", "prompt": "", "tf": {"cast": ["bo"], "location": "loft"}}]}]}
+    monkeypatch.setattr(director, "film_of", lambda project: film)
+    monkeypatch.setattr(director, "save", lambda run: None)
+    monkeypatch.setattr(director, "cast_queue", lambda run, sid, one: one.update(step="done"))
+    run = {"project": "p"}
+    director.cast_stage(run, threading.Event())
+    assert sorted(run["casting"]) == ["ada", "pier"]  # Bo and the loft are only in a shot with no prompt
