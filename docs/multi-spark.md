@@ -1,10 +1,41 @@
-# More than one DGX Spark: the Sparks setting
+# Workers: local GPUs and remote DGX Sparks
 
 A job in the Studio can use more than one DGX Spark. You choose a number from 1 to 5, **Sparks**: how many machines
 the job may use, the one the app runs on counted as one. The app shows how many are there and able, uses that many,
 and says what the number will do before you queue anything.
 
 The app on a Mac leads worker Sparks too: see *A Mac at the head* below.
+
+## Local GPUs on one workstation
+
+The same **Sparks** room also manages one head GPU plus up to three local NVIDIA workers. Open **Machine → Sparks**
+to discover cards, start/stop owned local workers and select required/preferred VIDEO placement. Local workers use
+private loopback HTTP, not SSH, with isolated homes/ports and shared core runtime/model paths.
+[Local setup, memory rules and physical smoke evidence](rtx-pro-6000.md#one-to-four-local-gpus).
+
+The local limit of four includes the head. The remote-only limit remains five participants including the head;
+up to three local workers can raise the combined chooser to eight. A running local worker still counts when **use**
+is unticked. A combined fleet is labelled **Workers**; the Spark-only measurements below do not establish local/mixed
+throughput. One clip is never split across workers.
+
+## Required and preferred placement
+
+**Default VIDEO placement** is saved for new single video jobs only. It does not redirect pictures, audio,
+training, long videos or studio chains. **Require** waits for its target when busy/stopped and never reroutes on a
+failure. **Prefer** uses that target when free and capable, otherwise allows the normal eligible workers/head.
+The selected worker's own memory guard answers preflight; a full head GPU does not veto a fitting required worker.
+
+The API accepts top-level placement on job, estimate and plan requests. Omit it to inherit the saved video default.
+Use `kind` on an estimate for a non-video job. Clear the saved default with `POST /api/sparks` and `{"placement":null}`.
+For a single job on the head:
+
+```json
+{"kind":"video","placement":{"worker":"head","policy":"require"},"params":{"prompt":"A paper boat","preset":"small","quality":"fh4","frames":22}}
+```
+
+For another worker, use its opaque `address` from `GET /api/sparks`; do not identify a GPU by its display name or
+current index. Local addresses remain tied to their GPU UUID. Non-video placement on another worker is refused.
+Initial required-worker unavailability queues a wait; loss/refusal after dispatch fails explicitly, never on another GPU.
 
 ## What you need
 
@@ -16,7 +47,7 @@ The app on a Mac leads worker Sparks too: see *A Mac at the head* below.
 
 ## Set it up: the Sparks tab
 
-1. Open **Sparks** (the tab beside Library).
+1. Open **Machine → Sparks**.
 2. Under *Add a Spark*, type the other machine's address as you would after `ssh` (`10.0.10.5`, or
    `user@spark-5`) and press **Add**. If its Studio is not in the same folder as on this Spark, give the folder.
 3. The app looks at it and shows one of: *idle*, *rendering*, *its Studio app is not running*, *its Studio code
@@ -106,15 +137,15 @@ display only: jobs, takes and the log keep each machine's own name, and the page
   given nothing until it is idle.
 - **Every clip passes the worker's own memory guard** (*The memory guard* in the README): this app asks it before
   anything is sent, the worker's app asks it again when it queues the job, and the guard stands beside the worker's
-  ComfyUI server while it renders. A clip a worker refuses is rendered on another machine and the worker stays in
-  use for other clips.
-- **A worker that stops answering is not waited on.** After 60 seconds of silence while it renders it is marked
-  *stopped answering*, its tunnel is closed, and its clip goes back to the queue for another machine. It is given
-  nothing more until you press **Check**. A clip is taken back from a worker at most twice; after that it renders
-  on this Spark.
+  ComfyUI server while it renders. Automatic/preferred jobs may move after refusal; a required target never silently
+  falls back to another machine.
+- **A worker that stops answering is bounded.** After 60 seconds of silence while rendering it is marked *stopped
+  answering*, its tunnel is closed, and automatic/preferred work can return to the queue. A required job fails instead.
+  A down worker is given nothing more until **Check**. Automatic movement is bounded to two attempts, then the head;
+  that fallback is never applied to required placement.
 - **Cancel** cancels the clip on the worker too.
-- **Stopping the app** closes its tunnels. The workers' apps keep running, idle, until you press **Stop** on each;
-  their models stay in memory until then.
+- **Stopping the app** closes its tunnels. Remote worker apps keep running until **Stop** on each; their models can
+  stay warm. Owned local workers are drained and stopped with their head, not left unmanaged.
 
 ## Measured
 
@@ -219,7 +250,8 @@ Spark still passes that Spark's. The Mac renders the clips no Spark can take, at
 - **A long video's pieces side by side.** The pieces are a chain. Rendering them at once needs keyframes between
   the pieces, which is another way of making a long video and is not built.
 - **Pictures and Library actions on a worker.** Only single clips are handed over.
-- **The queue across a restart.** Jobs are kept in memory: if this app stops while a worker renders, the worker
-  finishes its clip in its own folder and this app, started again, does not fetch it.
+- **The queue across a restart.** Jobs are kept in memory. A remote worker may finish in its own folder, but a restarted
+  head does not fetch that clip. Owned local workers stop with their head.
 - **Starting a worker's install.** The app sends code, not models or the environment.
-- **Five Sparks at most.** The limit is 5 (`LIMIT` in `app/sparks.py`), the most that have been measured.
+- **Five remote-only participants at most.** The limit is 5 (`LIMIT` in `app/sparks.py`), including the head. Local
+  workers have a separate four-card bound; the combined selector is at most eight, not eight remote Sparks.

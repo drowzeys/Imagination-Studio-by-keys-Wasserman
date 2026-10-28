@@ -887,3 +887,106 @@ def test_the_palette_and_the_more_sheet_name_every_new_room():
     for words in ("Creative Engines", "Cast & Places", "Director", "Motion graphics", "Night shift", "Studio Vaults"):
         assert words in out["sheet"], words
     assert out["fromSheet"] == "Night shift"
+
+
+def test_selected_worker_estimates_bypass_only_the_heads_card_sample_filter():
+    out = run("""S.platform_label = "CUDA · NVIDIA synthetic GPU · H3-CUDA";
+      const worker = { address: "worker@example.invalid", name: "Selected Spark" };
+      out.selected = estimateWhere({ seconds: 73, worker });
+      out.noSample = estimateWhere({ seconds: 73 });
+      answers["/api/estimate"] = { seconds: 73, worker, memory: { fits: true } };
+      HC.est = {}; HC.estInfo = {}; HC.seconds = 5; HC.recipe = "quick";
+      hcEstimate(); await new Promise(r => setTimeout(r, 20));
+      out.home = text(hcLength()); out.body = calls.find(c => c[0] === "/api/estimate")[1];
+      answers["/api/estimate"] = { worker, seconds: null, memory: { fits: false, reason: "Selected GPU needs more free VRAM" } };
+      HC.est = {}; HC.estInfo = {}; hcEstimate(); await new Promise(r => setTimeout(r, 20));
+      out.refused = text(hcLength());""")
+    assert out["selected"] == "≈ 73 s on Selected Spark" and out["noSample"] == ""
+    assert "about 73 s on Selected Spark" in out["home"]
+    assert out["body"]["kind"] == "video" and "placement" not in out["body"]
+    assert "Selected GPU needs more free VRAM" in out["refused"] and "Selected Spark" in out["refused"]
+
+
+def test_home_estimates_follow_saved_video_placement_but_long_jobs_identify_their_kind():
+    out = run("""globalThis.SPK = { data: { placement: { worker: "head", policy: "require" } } };
+      HC.est = {}; HC.estInfo = {}; HC.seconds = 5; HC.recipe = "quick"; calls.length = 0;
+      answers["/api/estimate"] = { seconds: 12, worker: { address: "head", name: "Head GPU" } };
+      hcEstimate(); await new Promise(r => setTimeout(r, 20)); out.first = text(hcLength());
+      SPK.data.placement = { worker: "worker@example.invalid", policy: "require" };
+      answers["/api/estimate"] = { seconds: 24, worker: { address: "worker@example.invalid", name: "Video worker" } };
+      hcEstimate(); await new Promise(r => setTimeout(r, 20)); out.second = text(hcLength());
+      HC.seconds = 30; hcEstimate(); await new Promise(r => setTimeout(r, 20));
+      out.requests = calls.filter(c => c[0] === "/api/estimate").map(c => c[1]);""")
+    assert "12 s on Head GPU" in out["first"] and "24 s on Video worker" in out["second"]
+    assert [body["kind"] for body in out["requests"]] == ["video", "video", "long"]
+    assert all("placement" not in body for body in out["requests"])
+
+
+def test_create_estimate_uses_actual_kind_and_preserves_worker_memory_refusals():
+    source = (ROOT / "app/static/index.html").read_text()
+    start = source.index("async function showEstimate(")
+    function = source[start:source.index("\n\n", start)]
+    out = run(function + r"""
+      globalThis.lengthOf = obj => ({ seconds: Number(obj.seconds) }); globalThis.noFrame = () => true;
+      globalThis.refMedia = () => false; globalThis.isLong = () => Number(C.seconds) > 15;
+      C.preset = "small"; C.quality = "fh4"; C.seconds = 5;
+      S.platform_label = "CUDA · NVIDIA synthetic GPU · H3-CUDA";
+      const worker = { address: "worker@example.invalid", name: "Video worker" };
+      answers["/api/estimate"] = { seconds: 22, worker, memory: { fits: true, need_mb: 16000 } };
+      const first = el("div"); await showEstimate(C, first); out.time = first.textContent; out.memory = text(first);
+      answers["/api/estimate"] = { seconds: null, worker, memory: { fits: false, reason: "Worker VRAM is full" } };
+      const refused = el("div"); await showEstimate(C, refused); out.refused = text(refused);
+      C.seconds = 30; await showEstimate(C, el("div")); out.kinds = calls.filter(c => c[0] === "/api/estimate").map(c => c[1].kind);""")
+    assert out["time"] == "≈ 22 s on Video worker"
+    assert "16 GB of Video worker's available memory" in out["memory"] and "this GPU's memory" not in out["memory"]
+    assert "Worker VRAM is full" in out["refused"] and "memory on Video worker" in out["refused"]
+    assert out["kinds"] == ["video", "video", "long"]
+
+
+def test_home_memory_refusal_clears_when_preferred_worker_is_ready_without_telemetry_refetch_storms():
+    out = run("""globalThis.SPK = { data: {
+        placement: { worker: "worker@example.invalid", policy: "prefer" },
+        this: { state: "ready", memory_gb: 8, guard: true },
+        workers: [{ address: "worker@example.invalid", state: "busy", working: "job-old", enabled: true, usable: false, memory_gb: 40, guard: true }],
+        local_gpus: { devices: [{ id: "local:GPU-00000000-0000-0000-0000-000000000001", free_mb: 8000, temp_c: 40, util_pct: 0, power_w: 30, reason: "" }] }
+      } };
+      HC.seconds = 5; HC.recipe = "quick"; HC.est = {}; calls.length = 0;
+      answers["/api/estimate"] = { memory: { fits: false, reason: "Head cannot fit while preferred worker is busy" } };
+      hcLength(); await new Promise(r => setTimeout(r, 20)); out.before = text(hcLength());
+      const gpu = SPK.data.local_gpus.devices[0]; gpu.temp_c = 80; gpu.util_pct = 95; gpu.power_w = 250;
+      for (let i = 0; i < 10; i++) hcLength();
+      out.telemetryRequests = calls.filter(c => c[0] === "/api/estimate").length;
+      const worker = SPK.data.workers[0]; worker.state = "ready"; worker.working = ""; worker.usable = true;
+      answers["/api/estimate"] = { seconds: 34, worker: { address: worker.address, name: "Preferred GPU" }, memory: { fits: true } };
+      out.refreshing = text(hcLength()); for (let i = 0; i < 10; i++) hcLength();
+      await new Promise(r => setTimeout(r, 20)); out.after = text(hcLength());
+      out.readyRequests = calls.filter(c => c[0] === "/api/estimate").length;
+      worker.guard = false; worker.memory_gb = 4;
+      answers["/api/estimate"] = { worker: { address: worker.address, name: "Preferred GPU" }, memory: { fits: false, reason: "Preferred GPU no longer has enough memory" } };
+      hcLength(); await new Promise(r => setTimeout(r, 20)); out.lowMemory = text(hcLength());""")
+    assert "Head cannot fit" in out["before"] and "will be refused" in out["before"]
+    assert out["telemetryRequests"] == 1 and out["readyRequests"] == 2
+    assert "will be refused" not in out["refreshing"] and "will be refused" not in out["after"]
+    assert "about 34 s on Preferred GPU" in out["after"]
+    assert "Preferred GPU no longer has enough memory" in out["lowMemory"]
+
+
+def test_home_ignores_inflight_memory_answer_for_an_obsolete_worker_state():
+    out = run("""globalThis.SPK = { data: {
+        placement: { worker: "worker@example.invalid", policy: "prefer" }, this: { state: "ready" },
+        workers: [{ address: "worker@example.invalid", state: "busy", enabled: true, usable: false }]
+      } };
+      HC.seconds = 5; HC.recipe = "quick"; HC.est = {}; let release, requests = 0;
+      const gate = new Promise(resolve => { release = resolve; }), original = api;
+      globalThis.api = async (path, body) => {
+        if (path !== "/api/estimate") return original(path, body);
+        requests++; if (requests === 1) { await gate; return { memory: { fits: false, reason: "Obsolete head refusal" } }; }
+        return { seconds: 18, worker: { address: "worker@example.invalid", name: "Ready GPU" }, memory: { fits: true } };
+      };
+      hcLength(); SPK.data.workers[0].state = "ready"; SPK.data.workers[0].usable = true;
+      for (let i = 0; i < 10; i++) hcLength(); out.pendingRequests = requests;
+      release(); await new Promise(r => setTimeout(r, 20)); out.between = text(hcLength());
+      await new Promise(r => setTimeout(r, 20)); out.after = text(hcLength()); out.requests = requests;""")
+    assert out["pendingRequests"] == 1 and out["requests"] == 2
+    assert "Obsolete head refusal" not in out["between"] and "Obsolete head refusal" not in out["after"]
+    assert "about 18 s on Ready GPU" in out["after"]

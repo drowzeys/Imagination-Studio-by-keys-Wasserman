@@ -39,7 +39,7 @@ bash scripts/app.sh
 
 What the installer does differently on this card:
 
-- **Name the card when the machine has more than one compute GPU.** `STUDIO_GPU` is the nvidia-smi index for this process. Indexes are not the same on every machine, so the installer does not pick one of several compute cards. A single compute card behind a display GPU is used on its own. `nvidia-smi` ignores `CUDA_VISIBLE_DEVICES`; the studio passes `-i`. One studio uses one card. A second card is a second process with its own `STUDIO_GPU`, `PORT`, `SPARK_COMFY_PORT`, `STUDIO_HOME` and `STUDIO_GPU_LOCK`, sharing the same install.
+- **Name the head card when the machine has more than one compute GPU.** `STUDIO_GPU` is its nvidia-smi index, not a UUID. Indexes differ by machine, so the installer does not pick one of several compute cards. A single compute card behind a display GPU is used on its own. `nvidia-smi` ignores `CUDA_VISIBLE_DEVICES`; the Studio passes `-i`. Add the other cards through **Machine → Sparks**, rather than maintaining a second launcher or localhost SSH worker by hand.
 - **It checks the card, not the machine.** It wants 90 GB or more of VRAM for video and 64 GB of RAM beside it.
 - **It builds every CUDA engine from source for sm_120.** The video engine (TensorFold's H3 int8 blocks), Music
   (MiniMax-Music3) and Voice (Fish Audio Drama 3) each take a few minutes. Each build reads the card's compute
@@ -58,6 +58,54 @@ What the installer does differently on this card:
   If this llama.cpp has no NVFP4 kernels for the GGUF's Mamba tensors, use a copy with those
   tensors rewritten as Q8_0, as on a Mac. Or leave Bolt out and set any OpenAI-compatible server in Settings →
   Connections.
+
+## One to four local GPUs
+
+Launch one head with the same `PREFIX`, `SPARK_MODELS`, `STUDIO_HOME` and explicit numeric `STUDIO_GPU` as above.
+Then open **Machine → Sparks**:
+
+1. **Local GPUs** shows every detected card separately, including its own VRAM and current GPU readings. The head
+   has no Start/Stop control. Another card can be started only when it has dedicated VRAM and no external compute
+   workload or competing Studio ownership. A display card asks for consent.
+2. Press **Start** on an additional card. This creates a private local Studio process, app/Comfy ports, home and GPU
+   lock for that UUID. It shares `PREFIX` and `SPARK_MODELS`; it does not copy the core weights or need SSH.
+   Starting the worker does not preload a model.
+3. A Studio manages **four local GPUs including its head**. Extra cards remain visible; stop and disable/remove a
+   worker before choosing a different subset. Unticking **use** stops new assignment, not its process, and a running
+   unticked worker still occupies a slot. Missing cards remain identified by UUID, never replaced by the new occupant
+   of their old index.
+4. Set **Default VIDEO placement** to the desired card. **Require** waits while that worker is busy or stopped and
+   never falls back; a failure after dispatch fails the job explicitly. **Prefer** can use the head or another
+   eligible worker when the selected worker is unavailable or cannot fit the clip. **Automatic** uses the worker count.
+5. **Check** only refreshes status. **Stop** drains that owned worker and its model processes, leaving external
+   workloads and the other GPUs alone. Quitting the head stops its local workers too. Remote Sparks remain separately
+   managed through their existing SSH controls.
+
+On two cards, a useful separation is required VIDEO placement on the second GPU, with pictures and native voice/music
+on the head. This avoids the head's audio/image switches evicting the second GPU's video model. It is not a model
+preloader or a guarantee that every model remains resident: existing idle/memory guards and switches on the same card
+still apply. Only independent single video jobs move to workers; images, audio, training, exports and long/compound
+jobs remain on the head. No render spans multiple cards and their VRAM is never added together.
+
+Optional LoRAs are per-studio, not inherited from the head's registry. Install the desired adapters into the worker's
+`<head studio>/sparks/local/<GPU UUID>` studio folder with the existing `app/loras.py install GROUP|all` CLI, using that
+folder as `STUDIO_HOME`, and press **Check**. The same authors' licences and gates apply. The scheduler checks actual
+worker capabilities and does not silently drop a missing adapter.
+
+**Shared host RAM matters even with four large cards.** Local queues coordinate through a private per-user RAM ledger;
+the existing measured peaks and error margins remain unchanged, with at least max(8 GiB, 10% of physical RAM) free.
+Already allocated anonymous RAM in this GPU session's identity-validated model servers is not counted twice; file
+cache and other GPUs are not credited. Other active GPUs still see the full peak reservation. Unmeasured GPU work is
+exclusive rather than assigned a fabricated budget. Jobs can wait for **shared host RAM** even when their card has room.
+This does not replace the per-card preflight or the runtime guards.
+
+**Physical smoke, not a throughput benchmark:** two RTX PRO 6000 Blackwell Max-Q 96 GB cards, 128 GB-class host RAM.
+GPU 1 rendered 864x480 FastH3 at 22 frames and four passes, producing H.264 with AAC. A cold clip took 26.04 s; the
+next clip took 4.12 s. With native Drama 3 resident on GPU 0, another clip took 4.11 s on the same GPU 1 Comfy process.
+Native MiniMax Music 3 and a 44.1 kHz PCM voice take also completed on the head. The UI showed both cards; stopping
+GPU 1 through it freed that card while preserving the resident head voice process. One run per case, not a scaling
+claim. Three/four GPUs, excess inventory, missing/reordered UUIDs and mixed capacities have deterministic test coverage;
+three/four physical cards have not been measured.
 
 ## How memory works on a card
 

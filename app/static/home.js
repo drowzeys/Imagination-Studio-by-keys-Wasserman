@@ -53,7 +53,7 @@ const startShown = (look, id) => (look.start_cards || []).includes(id) || (START
 const homePrefs = () => typeof prefs === "function" ? prefs() : { appearance: { start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], poster: true }, presets: { recipe: "quick", mode: "clip", seconds: 5, seed: "fixed", qa_gate: true, image_model: "qwen" } };
 
 /* ---------- the composer: one box, four kinds of take, one Generate ---------- */
-const HC = { text: "", mode: null, recipe: null, seconds: null, est: {}, made: [], busy: false, image: null };
+const HC = { text: "", mode: null, recipe: null, seconds: null, est: {}, estInfo: {}, estAdmission: {}, estPending: {}, made: [], busy: false, image: null };
 const hcSpan = sec => sec == null ? "" : sec < 90 ? Math.round(sec) + " s" : sec < 5400 ? Math.round(sec / 60) + " min" : Math.floor(sec / 3600) + " h " + Math.round(sec % 3600 / 60) + " min";
 const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe the shot: who is there, what happens, what is heard."],
   picture: ["Picture", "qwen", "Qwen 2.1", "Describe the picture: the subject, the place, the light, the lens."],
@@ -75,13 +75,42 @@ function hcLength() { const now = hcSeconds(), shorts = Object.keys((S && S.dura
     el("select", { "aria-label": "Clip length", onchange: e => { HC.seconds = Number(e.target.value); render(); } },
       shorts.sort((a, b) => a - b).map(k => el("option", { value: k, selected: k === now }, k + " s")),
       Object.entries(longs).map(([k, label]) => el("option", { value: k, selected: Number(k) === now }, label + " · " + Math.ceil(k / 15) + " clips chained"))),
-    (est => est ? el("small", { class: "note m-flat" }, "about " + hcSpan(est)) : null)(hcEstimate())); }
+    hcEstimateNote()); }
 // the expected time of this length with this recipe (server.estimate: a long take adds up its clips), asked once a choice
-function hcEstimate() { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" }, seconds = hcSeconds(), key = [r.preset, r.quality, seconds].join("|");
-  if (!(key in HC.est)) { HC.est[key] = undefined;
-    api("/api/estimate", { preset: r.preset, quality: r.quality, seconds, text_only: true }).then(d => {
-      const card = typeof cardFace === "function" && cardFace();
-      HC.est[key] = d && d.seconds != null && (!card || d.where === "card") ? d.seconds : null; render(); }, () => { HC.est[key] = null; }); }
+const hcEstimateKey = () => {
+  const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" },
+    placement = typeof SPK !== "undefined" && SPK.data && !hcLongs()[hcSeconds()] ? JSON.stringify(SPK.data.placement) : "";
+  return [r.preset, r.quality, hcSeconds(), ...(placement ? [placement] : [])].join("|");
+};
+// Admission changes independently of a recipe's timing. Temperature, utilization and power do not affect it.
+const hcAdmissionSig = () => {
+  const d = typeof SPK !== "undefined" && SPK.data;
+  if (!d) return "";
+  const head = d.this || {};
+  return JSON.stringify([d.placement, head.state, head.job, head.memory_gb, head.guard,
+    (d.workers || []).map(w => [w.address, w.state, w.enabled, w.working, w.job, w.usable, w.guard, w.memory_gb]),
+    d.local_gpus && d.local_gpus.devices.map(g => [g.id, g.free_mb, g.reason])]);
+};
+function hcEstimateNote() {
+  const seconds = hcEstimate(), info = HC.estInfo[hcEstimateKey()], worker = estimateWorkerName(info);
+  if (info && info.memory && info.memory.fits === false) return el("small", { class: "note m-flat", style: "color:var(--warn)" }, "This clip will be refused: " + (info.memory.reason || "not enough available memory") + (worker ? " on " + worker : ""));
+  return seconds ? el("small", { class: "note m-flat" }, "about " + hcSpan(seconds) + (worker ? " on " + worker : "")) : null;
+}
+function hcEstimate() { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" }, seconds = hcSeconds(), key = hcEstimateKey(), admission = hcAdmissionSig();
+  if (!(key in HC.est) || HC.estAdmission[key] !== admission) {
+    HC.est[key] = undefined; delete HC.estInfo[key];
+    // One request per recipe at a time. A response to an obsolete fleet state is never displayed.
+    if (!HC.estPending[key]) {
+      HC.estPending[key] = true;
+      api("/api/estimate", { kind: hcLongs()[seconds] ? "long" : "video", preset: r.preset, quality: r.quality, seconds, text_only: true }).then(d => {
+        if (hcAdmissionSig() !== admission) { delete HC.est[key]; return; }
+        const card = typeof cardFace === "function" && cardFace(); HC.estInfo[key] = d; HC.estAdmission[key] = admission;
+        HC.est[key] = d && d.seconds != null && (d.worker || !card || d.where === "card") ? d.seconds : null;
+      }, () => {
+        HC.est[key] = null; HC.estInfo[key] = null; HC.estAdmission[key] = admission;
+      }).finally(() => { delete HC.estPending[key]; render(); });
+    }
+  }
   return HC.est[key]; }
 // what Generate sends for each kind of take: the same endpoints and bodies the tabs use
 async function hcRequest(mode, text, seed, retake) {

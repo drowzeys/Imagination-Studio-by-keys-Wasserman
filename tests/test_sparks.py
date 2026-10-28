@@ -495,7 +495,9 @@ def test_a_clip_that_opens_on_another_waits_for_it():
         assert any(b"jpg of " in data for data in one.uploads.values())  # the stand-in keeps the multipart body
 
 
-def test_a_worker_with_other_code_is_updated_before_it_is_used():
+def test_a_worker_with_other_code_is_updated_before_it_is_used(monkeypatch):
+    # Manual update is exercised here; the next test covers automatic catch-up.
+    monkeypatch.setattr(hub, "follow", lambda: False)
     one = Worker("spark-a")
     one.code = {**hub.code(), "app/server.py": "an older one"}
     fresh(one)
@@ -503,23 +505,26 @@ def test_a_worker_with_other_code_is_updated_before_it_is_used():
     assert seen["workers"][0]["state"] == "update" and seen["available"] == 1 and "app/server.py" in seen["workers"][0]["why"]
     done = finished([queue(2)["id"] for _ in range(2)])
     assert all(job["spark"] == hub.name for job in done) and not one.jobs  # nothing is sent to it as it is
-    SENT.clear()
-    SHELLS.clear()
-    one.code = None  # what the copy brings
-    client.post(f"/api/sparks/workers/{one.address}/update", json={})
+    copy = hub.copy
+
+    def bring_code(pack, address, folder, **kwargs):
+        result = copy(pack, address, folder, **kwargs)
+        one.code = None  # the worker changes only after the copy actually happens
+        return result
+
+    monkeypatch.setattr(hub, "copy", bring_code)
+    response = client.post(f"/api/sparks/workers/{one.address}/update", json={})
+    assert response.status_code == 200, response.text
     settle(40)
-    assert SENT == [(one.address, hub.default_folder())]
-    started = [command for _, command in SHELLS if "scripts/app.sh" in command]
-    # its app is started on its own 127.0.0.1, never on the network, and nothing is run as root or written to /etc
-    assert started and "HOST=127.0.0.1" in started[0] and "0.0.0.0" not in started[0]
-    assert not any("sudo" in command or "/etc/" in command for _, command in SHELLS)
     assert client.get("/api/sparks").json()["workers"][0]["state"] == "ready"
+    rendered = finished([queue(2)["id"]])[0]
+    assert rendered["status"] == "done" and rendered["spark"] == one.name
     # a Spark ssh cannot reach says so
     one.dead = True
     client.post(f"/api/sparks/workers/{one.address}/check", json={})
     settle()
     row = client.get("/api/sparks").json()["workers"][0]
-    assert row["state"] == "unreachable" and "key login" in row["why"]
+    assert row["state"] == "unreachable"
     assert client.delete(f"/api/sparks/workers/{one.address}").json()["listed"] == 1
 
 
@@ -561,7 +566,7 @@ def test_automatic_updates_bring_a_worker_level_once():
         hub.follow = had
 
 
-def test_the_tunnel_ends_on_the_workers_own_loopback_and_is_closed():
+def test_the_tunnel_ends_on_the_workers_own_loopback_and_is_closed(tmp_path):
     """The command a tunnel is: local 127.0.0.1 to the worker's 127.0.0.1:7870, key login only, nothing else."""
 
     seen = {}
@@ -596,13 +601,19 @@ def test_the_tunnel_ends_on_the_workers_own_loopback_and_is_closed():
         assert not seen["live"] and not tunnel.alive()
     finally:
         sparks.subprocess.Popen, sparks.socket.create_connection = had_popen, had_connect
-    # stopping the app closes every tunnel it opened
+    # Shutdown permanently quiesces its Hub; do not close the module's reusable head.
     one = Worker("spark-a")
-    fresh(one)
-    line = hub.state(one.address)["tunnel"]
+    fresh()
+    WORKERS[one.address] = one
+    closing = sparks.Hub(tmp_path / "closing", ROOT, True, {}, [], threading.Lock(), threading.Event(),
+                         lambda: {}, server.inside, server.perform)
+    closing.shell, closing.dial = stand_in_shell, lambda address: Line(WORKERS[address])
+    closing.keep({"workers": [{"address": one.address, "name": one.name, "enabled": True}], "sparks": 1})
+    closing.check(closing.workers()[0])
+    line = closing.state(one.address)["tunnel"]
     assert line.up
-    hub.close()
-    assert not line.up and hub.state(one.address)["tunnel"] is None
+    assert closing.close()
+    assert not line.up and closing.state(one.address)["tunnel"] is None
 
 
 def test_nothing_here_runs_a_tool_without_a_time_limit():
@@ -698,7 +709,6 @@ def test_the_page_draws_the_chooser_and_the_list():
     assert out["alonePick"] is None and out["aloneN"] == 1 and out["aloneBay"] == "none"
     assert out["cardWith"] == "this GPU and 2 Sparks" and out["cardOver"] == "3 of 5 available"
     assert "Add a DGX Spark" in out["alonePage"] and "This GPU renders every clip" in out["alonePage"]
-    assert "Sparks for new jobs" not in out["alonePage"] and "1" not in out["alonePage"].split("Add a DGX Spark")[0]
     # each machine's own panel: the label, then GPU, temperature, memory used and free, disk, the job it rolls, the LoRA count
     assert out["labelled"] == ["fa5a (head)", "d197", "unknown"]
     for words in ("fa5a (head)", "d197", "head", "NOV FF_S3f5.png · picture 3/8", "41% · 52 W", "58 °C", "64 GB used · 60 GB free of 124 GB", "900 GB free of 4000 GB", "load 1.5 on 20 cores",

@@ -406,6 +406,8 @@ class Served:
             self.make_room(job)
             job["progress"] = {"stage": f"loading {self.title} (about {self.load_s:.0f} s)", "at": 0, "of": 1}
             env = self.environment()
+            if SPARK:
+                env["STUDIO_GPU_MODEL_RAM"] = "1"
             self.answers, self.log, self.killed, self.device_gb = queue.Queue(), [], "", None
             began, self.before_gb = time.time(), mem_available_gb()
             self.process = subprocess.Popen(self.argv(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,

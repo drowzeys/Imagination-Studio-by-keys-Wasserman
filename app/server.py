@@ -45,6 +45,12 @@ for name in ("projects", "uploads", "renders", "scouts", "exports"):
 import access  # noqa: E402  (the studio's access key, beside this file)
 ACCESS_KEY = access.ensure(HOME)  # <studio folder>/access-key, 0600, made once and kept
 APP_PORT = os.environ.get("PORT", "7870")
+LOCAL_GPU_CHILD = os.environ.get("STUDIO_LOCAL_GPU_CHILD") == "1"
+LOCAL_GPU_KEY = os.environ.get("STUDIO_LOCAL_GPU_KEY", "")
+if LOCAL_GPU_CHILD:
+    if not LOCAL_GPU_KEY:
+        raise RuntimeError("a managed local GPU worker requires its private control key")
+    os.environ["STUDIO_DISCOVER_DELAY"] = "-1"
 
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
@@ -206,6 +212,9 @@ lock = threading.Lock()
 wake = threading.Event()
 running: dict = {"process": None, "id": None}
 update_writes = 0
+stopping = threading.Event()
+local_work = threading.Condition()
+local_threads: set[threading.Thread] = set()
 
 
 @app.middleware("http")
@@ -343,6 +352,12 @@ class WriteGuard:
         if scope["type"] not in ("http", "websocket"):
             return await self.app(scope, receive, send)
         headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope["headers"]}
+        if LOCAL_GPU_CHILD and ((scope.get("client") or (None,))[0] not in access.LOOPBACK_CLIENTS
+                                or not access.matches(headers.get(access.HEADER.lower()), LOCAL_GPU_KEY)):
+            if scope["type"] == "websocket":
+                return await send({"type": "websocket.close", "code": 4403})
+            return await JSONResponse({"error": "a managed local GPU worker requires its private control key"},
+                                      status_code=403)(scope, receive, send)
         if not trusted_host(headers.get("host", "")):
             if scope["type"] == "websocket":
                 return await send({"type": "websocket.close", "code": 1008})
@@ -573,6 +588,8 @@ app.add_middleware(SecurityHeaders)
 
 def accepting_jobs():
     """Called under the queue lock, shared with the updater's idle check."""
+    if stopping.is_set():
+        raise HTTPException(503, "Studio is shutting down.")
     if updater.maintenance.is_set():
         raise HTTPException(503, "Studio is restarting for an update. Try again after it reconnects.")
 
@@ -1762,11 +1779,20 @@ RAN_ON = re.compile(r"\[tensorfold\] engine: (\w+)")
 
 
 def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
-    """Run one script for ``job``, following its progress; False when the job was cancelled meanwhile."""
+    """Run one script for ``job``, following its progress; False when cancelled."""
 
-    process = subprocess.Popen(command, cwd=PACK, env=environment(env), stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, start_new_session=True)
-    running.update(process=process, id=job["id"])
+    managed = SPARK and (LOCAL_GPU_CHILD or hub.local.active)
+    child_env = environment(env)
+    job_key = uuid.uuid4().hex if managed else None
+    if job_key:
+        child_env["STUDIO_GPU_JOB_KEY"] = job_key
+    with lock:  # cancellation must see either no launch, or the published owned process
+        if job["status"] in ("cancelled", "failed", "done") or stopping.is_set():
+            return False
+        process = subprocess.Popen(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, start_new_session=True)
+        start = local_gpus.process_identity(process.pid) if managed else None
+        running.update(process=process, id=job["id"], start=start, key=job_key)
     try:
         for line in process.stdout:
             job["log"] = (job["log"] + line)[-20000:]
@@ -1778,20 +1804,27 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
                 kind, at, total = found.group(1), int(found.group(2)), int(found.group(3))
                 job["progress"] = {"stage": label + STEP_WORDS[kind], "at": at, "of": total}
         code = process.wait()
-    finally:  # a reader that died mid-render must not leave the detached group owning the GPU
-        if process.poll() is None:
+    finally:
+        # Successful scripts leave ComfyUI warm; only aborted/failed runner trees are drained here.
+        if managed and (process.poll() != 0 or job["status"] == "cancelled"):
+            while not local_gpus.stop_job_tree(process.pid, start, key=job_key):
+                job["progress"] = {"stage": "Waiting for owned job processes to exit", "at": 0, "of": 1}
+                time.sleep(0.2)  # keep RAM admission and device ownership while a driver still holds the process
+        elif process.poll() is None:
             with contextlib.suppress(ProcessLookupError, OSError):
                 os.killpg(process.pid, signal.SIGKILL)
         with contextlib.suppress(subprocess.TimeoutExpired, OSError):
             process.wait(10)
-        running.update(process=None, id=None)
+        with lock:
+            if running["process"] is process:
+                running.update(process=None, id=None, start=None, key=None)
     if job["status"] == "cancelled":
         return False
     if code:
-        # the script's own last words say why: a file out of range, a model not installed, memory
         said = [line.strip() for line in job["log"].splitlines() if line.strip() and not STEP.search(line)]
         raise RuntimeError((said[-1][-400:] if said else "the script stopped") + f" (status {code})")
     return True
+
 
 
 def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str]]:
@@ -1962,7 +1995,64 @@ def long_take(job: dict) -> bool:
     return True
 
 
+def local_ram_need(job: dict) -> int | None:
+    """Conservative shared-host reservations from existing peaks; unmeasured GPU jobs run exclusively."""
+    kind, params = job["kind"], job["params"]
+    if kind == "long":
+        params = {**params, "seconds": max(plan(int(params["total_seconds"]), int(params.get("segment_seconds", LONGEST))))}
+    if kind in ("video", "long"):
+        chosen, _ = custom(params)
+        sized = {**(PRESETS[params["preset"]][2] if params.get("preset") in PRESETS else {}), **chosen}
+        frames = lengths.of({"frames": params.get("frames"), "seconds": min(float(params.get("seconds") or 5), LONGEST)})
+        found = references(params) if kind == "video" else None
+        room = memory_of(params, sized, frames, bool(params.get("loras")), found)
+    elif kind == "voice":
+        return int(voice.backend().NEED_GB * 1024)
+    elif kind == "music":
+        room = memory_guard.music_check(float(params.get("seconds") or 60),
+                                         route=getattr(music.engine(), "guard_route", "music"))
+    elif kind in sound.KINDS:
+        room = memory_guard.sound_check(kind, float(params.get("seconds") or 10))
+    elif kind in train.KINDS:
+        return int(train.NEED_GB * 1024)
+    else:
+        return None
+    return int(room["need_mb"] + (room.get("error_mb") or 0)) if room.get("need_mb") is not None else None
+
+
 def perform(job: dict, worker: dict | None = None) -> None:
+    """Reserve shared RAM for local execution and drain managed jobs before releasing ownership."""
+    managed = SPARK and (LOCAL_GPU_CHILD or hub.local.active)
+    if not managed:
+        return perform_job(job, worker)
+    current = threading.current_thread()
+    with lock:
+        if stopping.is_set() or job["status"] == "cancelled":
+            job.update(status="cancelled", finished=time.time())
+            return
+        with local_work:
+            local_threads.add(current)
+    try:
+        if worker is not None or job.get("remote") or job["kind"] in ("export", "soundtrack", "finish", "graphics"):
+            return perform_job(job, worker)
+        with local_gpus.ram_reservation(local_ram_need(job), job) as admitted:
+            if admitted and job["status"] != "cancelled":
+                if LOCAL_GPU_CHILD:
+                    local_gpus.check_child_comfy()
+                perform_job(job, worker)
+            else:
+                job["finished"] = time.time()
+    except Exception as error:
+        if job["status"] != "cancelled":
+            job.update(status="failed", error=str(getattr(error, "detail", error)), finished=time.time())
+    finally:
+        with local_work:
+            local_threads.discard(current)
+            local_work.notify_all()
+
+
+
+def perform_job(job: dict, worker: dict | None = None) -> None:
     """One claimed job to its end: on this machine, or its clip on the Spark it was handed to (``worker``, sparks.py)
     with everything else done here: the frame it opens on is cut here, the clip comes back to its own path, and the
     QA gate, the shot check and the sound follow as on a clip made here."""
@@ -2054,6 +2144,8 @@ def work() -> None:
     while True:
         wake.wait()
         with lock:
+            if stopping.is_set():
+                return
             job = hub.claim()  # the next job for this machine; on a DGX Spark a worker may have taken others (sparks.py)
             if job is None:
                 wake.clear()
@@ -2070,7 +2162,7 @@ threading.Thread(target=work, daemon=True).start()
 def public(job: dict) -> dict:
     out = {k: job.get(k) for k in ("id", "kind", "status", "title", "outputs", "progress", "error", "created",
                                     "started", "finished", "estimate", "engine", "qa", "passes", "pace", "source", "shot",
-                                    "negations", "sparks", "spark", "moved", "voice", "music", "soundtrack")}
+                                    "negations", "sparks", "spark", "placement", "moved", "voice", "music", "soundtrack")}
     # by this machine's clock: the page may be open on another one
     out["elapsed"] = (job.get("finished") or time.time()) - job["started"] if job.get("started") else None
     out["log"] = job["log"][-3000:]
@@ -2100,7 +2192,7 @@ def state() -> dict:
             "ffmpeg": media_tools()["ffmpeg"], "ffmpeg_note": "" if media_tools()["ffmpeg"] else FFMPEG_NOTE,
             "shot_check": True, "negation_reason": negation.REASON,
             # how many DGX Sparks a job may use (sparks.py), this machine counted: a Spark or a Mac at the head
-            "sparks": {"supported": True, "limit": sparks.LIMIT},
+            "sparks": {"supported": True, "limit": hub.chooser_limit()},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
             # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py): MLX on a Mac, CUDA on a DGX Spark
@@ -2179,6 +2271,10 @@ def estimate_time(body: dict) -> dict:
             lengths.of({"frames": body["frames"]})
         except ValueError as error:
             raise HTTPException(400, str(error))
+    placement = hub.placement(body.get("placement"), kind=str(body.get("kind") or "video"))
+    selected = hub.estimate_worker(body, placement)
+    if selected is not None:
+        return selected
     room = None
     if SPARK and float(body.get("seconds") or 5) <= LONGEST + 1:
         try:
@@ -2249,6 +2345,7 @@ def queue_job(body: dict) -> dict:
     params = dict(body.get("params") or {})
     if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS + sound.KINDS + finish.KINDS + graphics.KINDS:
         raise HTTPException(400, "unknown job kind")
+    placement = hub.placement(body.get("placement"), kind=kind)
     if kind == "long" and (params.get("last_image") or params.get("last_same") or params.get("last_frame_from")):
         raise HTTPException(400, "a last frame is for single clips: a long video is a chain of clips")
     if kind == "long":
@@ -2286,24 +2383,33 @@ def queue_job(body: dict) -> dict:
         raise HTTPException(400, "MiniMax H3 Turbo is not installed here (oneshot-setup.sh --turbo adds it): use FastH3, quality fh4, fh8 or fh20")
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     # how many Sparks the job may use, this one counted (sparks.py): the number given, or the one set on the Sparks page
+    limit = hub.chooser_limit()
     try:
         chosen = int(body.get("sparks") or hub.config()["sparks"])
+        if not body.get("sparks"):
+            chosen = max(1, min(chosen, limit))
     except (TypeError, ValueError):
-        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
-    if not 1 <= chosen <= sparks.LIMIT:
-        raise HTTPException(400, f"sparks is a whole number from 1 to {sparks.LIMIT}")
-    said = hub.plan({"sparks": chosen, "kind": kind, "params": params})
+        raise HTTPException(400, f"sparks is a whole number from 1 to {limit}")
+    if not 1 <= chosen <= limit:
+        raise HTTPException(400, f"sparks is a whole number from 1 to {limit}")
+    said = hub.plan({"sparks": chosen, "kind": kind, "params": params, "placement": placement})
+    selected = hub.estimate_worker(params, placement)
+    if selected is not None and (selected.get("memory") or {}).get("fits") is False:
+        raise HTTPException(400, selected["memory"].get("reason") or "the selected worker cannot fit this clip")
+    required_worker = placement and placement["worker"] != "head" and placement["policy"] == "require"
     if kind not in ("export", "long"):
         # reject bad settings now, not when the job's turn comes; a clip other Sparks may take is held to their memory
         # guards (asked before it is handed over), not to this one's
         build(kind, params, "check" if kind in finish.KINDS + graphics.KINDS else job_id,  # these write their folder when built
-              room=not (kind in ("video", "studio") and said["used"] > 1))
+              room=not (selected is not None or required_worker or (kind in ("video", "studio") and said["used"] > 1)))
     if kind in graphics.KINDS and not body.get("title"):
         body = {**body, "title": graphics_title(params)}
     job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else sound_title(kind, params) if kind in sound.KINDS else kind), "params": params,
            "source": action_source(kind, params) if kind in actions.KINDS else sound_source(kind, params) if kind in sound.KINDS else None,
            "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(), "started": None,
            "finished": None, "estimate": clip_estimate(kind, params, referenced, ref_media)}
+    if placement is not None:
+        job["placement"] = placement
     if referenced:  # the passes a reference clip runs: the number set by hand, or the model's 20, or the adapter's 4
         job["passes"] = int(params["steps"]) if params.get("steps") not in (None, "") else 4 if params.get("ref_turbo") else 20
     if kind in ("video", "studio", "long"):
@@ -2336,21 +2442,27 @@ def get_job(job_id: str) -> dict:
 
 @app.post("/api/jobs/{job_id}/cancel")
 def cancel(job_id: str) -> dict:
-    job = jobs.get(job_id)
-    if job is None:
-        raise HTTPException(404, "no such job")
-    if job["status"] in ("queued", "running"):
-        job["status"] = "cancelled"
-        process = running["process"] if running["id"] == job_id else None
+    with lock:
+        job = jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "no such job")
+        active = job["status"] in ("queued", "running")
+        if active:
+            job["status"] = "cancelled"
+        process = running["process"] if active and running["id"] == job_id else None
+        start, key = running.get("start"), running.get("key")
+    if active:
         if process is not None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass  # it ended on its own meanwhile
+            if SPARK and (LOCAL_GPU_CHILD or hub.local.active):
+                local_gpus.stop_job_tree(process.pid, start, key=key)
+            else:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGTERM)
             if SPARK and job["kind"] not in NOT_ON_COMFY:
                 stop_comfy(job)
-        hub.kick.set()  # a clip on another Spark is cancelled there by the thread that follows it
+        hub.kick.set()
     return public(job)
+
 
 
 NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa", "train", "finish", "graphics")  # jobs a Spark runs without its ComfyUI server
@@ -2898,6 +3010,7 @@ app.include_router(graphics_router)
 import clear  # noqa: E402  (finished jobs and their files into the trash folder, and back, beside this file)
 app.include_router(clear.attach(HOME, jobs, order, lock)[0])
 import sparks  # noqa: E402  (worker Sparks behind this queue: a job's "sparks" number, beside this file)
+import local_gpus  # noqa: E402  (bounded local GPU workers and shared-host RAM admission)
 
 
 def about_this_spark() -> dict:
@@ -2926,7 +3039,9 @@ def about_this_spark() -> dict:
         status = telemetry.compact(TELEMETRY.snapshot())
     except Exception:  # noqa: BLE001
         status = None
-    return sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent, renders, status)
+    info = sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent, renders, status)
+    info["gpu_uuid"] = os.environ.get("STUDIO_LOCAL_GPU_UUID")
+    return info
 
 
 def clip_time(kind: str, params: dict) -> int | None:
@@ -2955,7 +3070,7 @@ def update_busy():
 
 
 updater = updates.Manager(PACK, HOME, lock, update_busy)
-hub.follow = updater.automatic  # automatic updates here bring the workers to this code too (sparks.Hub.catch_up)
+hub.follow = (lambda: False) if LOCAL_GPU_CHILD else updater.automatic
 
 
 def fits_here(job: dict) -> bool:
@@ -2971,12 +3086,14 @@ def fits_here(job: dict) -> bool:
 
 
 hub.fits_here = fits_here
-app.include_router(updater.router())
-app.router.on_startup.append(updater.start)
-app.router.on_shutdown.append(updater.stop.set)
+if not LOCAL_GPU_CHILD:
+    app.include_router(updater.router())
+    app.router.on_startup.append(updater.start)
+    app.router.on_shutdown.append(updater.stop.set)
 if hasattr(app.router, "on_shutdown"):
+    app.router.on_shutdown.append(lambda: stop_local_jobs())
+    app.router.on_shutdown.append(bolt.shutdown)
     app.router.on_shutdown.append(hub.close)
-    app.router.on_shutdown.append(bolt.shutdown)  # the Studio's Bolt engine ends with the app (its leash also sees the pipe close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
 import telemetry  # noqa: E402  (this machine's readings for the status bar: GPU, memory, disk, queue, beside this file)
 TELEMETRY = telemetry.attach(HOME, jobs, order, lock, memory_guard, engines=lambda: {"bolt": bolt.summary()})
 app.include_router(TELEMETRY)
@@ -3019,9 +3136,29 @@ app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 if not media_tools()["ffmpeg"]:
     print("[studio] " + FFMPEG_NOTE, flush=True)
 
+def stop_local_jobs() -> None:
+    """Drain this managed session before its GPU leases or shared RAM can be released."""
+    if not SPARK or not (LOCAL_GPU_CHILD or hub.local.active):
+        return
+    stopping.set()
+    hub.quiesce()
+    with lock:
+        pending = [job["id"] for job in jobs.values() if job["status"] in ("queued", "running")]
+    for job_id in pending:
+        cancel(job_id)
+    wake.set()
+    with local_work:
+        while local_threads:
+            local_work.wait(0.2)
+    voice.release("the Studio session is ending")
+    music.release("the Studio session is ending")
+    stop_session_comfy()
+
+
 def begin_shutdown(sig_handler, sig, frame) -> None:
     """Ctrl-C and an update's restart end the open event streams, then the server closes."""
 
+    stopping.set()
     telemetry.STOPPING.set()
     sig_handler(sig, frame)
 
@@ -3048,6 +3185,9 @@ def catch_exit(handle_exit):
 def stop_session_comfy() -> None:
     """ComfyUI runs in its own session so the models stay loaded between clips. This process is the session:
     quitting it stops that server. PREFIX and SPARK_COMFY_PORT are already this install's, on a Spark and on a card."""
+    if LOCAL_GPU_CHILD:
+        local_gpus.stop_child_comfy()
+        return
 
     script = PACK / ("mac/comfy.sh" if sys.platform == "darwin" else "spark/comfy.sh")
     if not script.is_file():
@@ -3077,16 +3217,21 @@ if __name__ == "__main__":
     if os.environ.get("STUDIO_PIDFILE"):  # a worker Spark's app, started by another Spark's Studio: how that one finds it again
         Path(os.environ["STUDIO_PIDFILE"]).write_text(str(os.getpid()))
     hub.start()
-    nightshift.start()  # the night shift's scheduler: planned shifts start at their time or when the queue is idle
-    if not os.environ.get("STUDIO_PIDFILE"):  # the captioner describes this studio's Library, not a worker Spark's
-        caption_router.captioner["start"]()
-    director.resume_later()  # the Director's runs a restart cut off
-    app.router.on_shutdown.append(stop_session_comfy)  # the detached ComfyUI belongs to this process, not to one render
+    if hub.local.active and not LOCAL_GPU_CHILD:
+        os.environ["STUDIO_LOCAL_GPU_KEY"] = hub.local.key  # private model ownership, not the head's browser access key
+    if not LOCAL_GPU_CHILD:
+        nightshift.start()  # schedules belong to the head, never to its private workers
+        if not os.environ.get("STUDIO_PIDFILE"):
+            caption_router.captioner["start"]()
+        director.resume_later()
+    if not SPARK or not (LOCAL_GPU_CHILD or hub.local.active):
+        app.router.on_shutdown.append(stop_session_comfy)
 
     # Update authorization needs the actual socket peer. Tailscale Serve forwards the browser's IP,
     # but its authenticated local proxy is the peer allowed to manage this loopback installation.
     web_server = StudioServer(uvicorn.Config(app, host=os.environ.get("HOST", "127.0.0.1"),
                                port=int(os.environ.get("PORT", "7870")), log_level="warning", proxy_headers=False,
+                               fd=int(os.environ["STUDIO_LOCAL_GPU_FD"]) if LOCAL_GPU_CHILD else None,
                                timeout_graceful_shutdown=10))  # open connections (event streams) never hold a restart
 
     def restart() -> None:
