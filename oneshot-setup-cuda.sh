@@ -332,7 +332,10 @@ elsewhere() {
   [ -z "$said" ] || { echo "  found elsewhere on this machine, linking instead of downloading:"; echo "$said" | sed 's/^/    /'; }
 }
 
-# fetch <repo> <folder under $MODELS> <file in the repo>...: download what is not there yet
+# fetch <repo> <folder under $MODELS> <file in the repo>...: download what is not there yet. Where --upgrade leaves a
+# file missing (it fetches no weights), GAP is set, so the step's got line says nothing instead of a ✓
+GAP=0
+got() { if [ "$GAP" = 0 ]; then ok "$@"; fi; GAP=0; }
 fetch() {
   local repo="$1" folder="$2" missing=(); shift 2
   for file in "$@"; do [ -s "$MODELS/$folder/$file" ] || missing+=("$file"); done
@@ -342,29 +345,51 @@ fetch() {
   elsewhere "${found[@]}"
   missing=(); for file in "$@"; do [ -s "$MODELS/$folder/$file" ] || missing+=("$file"); done
   [ ${#missing[@]} = 0 ] && return 0
-  if [ "$UPGRADE" = 1 ]; then echo "  ! missing in $MODELS/$folder: ${missing[*]}: --upgrade fetches no weights (run oneshot-setup-spark.sh without it)"; return 0; fi
+  if [ "$UPGRADE" = 1 ]; then echo "  ! missing in $MODELS/$folder: ${missing[*]}: --upgrade fetches no weights (run oneshot-setup-spark.sh without it)"; GAP=1; return 0; fi
   "$PREFIX/venv/bin/hf" download "$repo" "${missing[@]}" --local-dir "$MODELS/$folder" >/dev/null
   for file in "${missing[@]}"; do [ -s "$MODELS/$folder/$file" ] || die "$file did not download"; done
 }
 
+# Qwen-Image-2.1-Turbo is the default picture model, not a must: where FLUX3-K is installed pictures and edits use it,
+# so --verify and --upgrade say a missing Qwen is optional instead of stopping or warning (a fresh install fetches it)
+QWEN_FILES=(diffusion_models/qwen_image_2.1_turbo_bf16.safetensors text_encoders/qwen3vl_8b_int8_convrot.safetensors
+  vae/qwen_image_2.1_vae_bf16.safetensors)
+qwen_here() { local file; for file in "${QWEN_FILES[@]}"; do [ -s "$MODELS/Qwen-Image-2.1-Comfy/$file" ] || return 1; done; }
+klein_here() {
+  [ -s "$MODELS/FLUX3-K-Comfy/system_prompts.json" ] || return 1
+  local unet; for unet in flux3-image-klein-bf16 flux3-image-klein-base-bf16 flux3_image_klein_sd_bf16 flux3_image_klein_base_bf16; do
+    [ -s "$MODELS/FLUX3-K-Comfy/diffusion_models/$unet.safetensors" ] && return 0
+  done
+  return 1
+}
 say "Qwen-Image-2.1-Turbo for ComfyUI (24 GB) -> $MODELS"
-fetch Comfy-Org/Qwen-Image-2.1 Qwen-Image-2.1-Comfy diffusion_models/qwen_image_2.1_turbo_bf16.safetensors \
-  text_encoders/qwen3vl_8b_int8_convrot.safetensors vae/qwen_image_2.1_vae_bf16.safetensors
-ok "Qwen-Image-2.1-Turbo (8 steps), its text encoder and decoder"
+if { [ "$VERIFY" = 1 ] || [ "$UPGRADE" = 1 ]; } && ! qwen_here && klein_here; then
+  QWEN_PATHS=(); for file in "${QWEN_FILES[@]}"; do QWEN_PATHS+=("$MODELS/Qwen-Image-2.1-Comfy/$file"); done
+  elsewhere "${QWEN_PATHS[@]}"
+  if qwen_here; then ok "Qwen-Image-2.1-Turbo (8 steps), its text encoder and decoder"
+  else echo "  - Qwen-Image-2.1-Turbo is not installed (optional: pictures use FLUX3-K; bash oneshot-setup-spark.sh without --verify or --upgrade adds it, 24 GB, non-commercial licence)"
+  fi
+else
+  # the files spelled out: app/discover.py reads every fetch line for its catalogue (the same three as QWEN_FILES)
+  fetch Comfy-Org/Qwen-Image-2.1 Qwen-Image-2.1-Comfy diffusion_models/qwen_image_2.1_turbo_bf16.safetensors \
+    text_encoders/qwen3vl_8b_int8_convrot.safetensors vae/qwen_image_2.1_vae_bf16.safetensors
+  got "Qwen-Image-2.1-Turbo (8 steps), its text encoder and decoder"
+fi
+# the end of the Qwen-Image-2.1-Turbo step
 
 if [ "$IMAGE_ONLY" = 0 ]; then
   say "FastH3 8-Step V2 for ComfyUI (75 GB) -> $MODELS"
   fetch FastVideo/FastVideo-FastH3-Comfy FastH3-Comfy diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors \
     text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors vae/minimax_h3_video_vae_int8_convrot.safetensors \
     vae/minimax_h3_audio_vae_fp32.safetensors
-  ok "FastH3 transformer (bf16), H3 text encoder (8-bit), video decoder (8-bit) and audio decoder"
+  got "FastH3 transformer (bf16), H3 text encoder (8-bit), video decoder (8-bit) and audio decoder"
 fi
 
 if [ "$REF2VA" = 1 ] && [ "$IMAGE_ONLY" = 0 ]; then
   say "MiniMax H3 Ref2VA for ComfyUI and its Turbo adapter (39 GB) -> $MODELS"
   fetch Comfy-Org/MiniMax-H3 MiniMax-H3-Comfy diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors \
     loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors
-  ok "Ref2VA transformer (bf16) and LightX2V's Ref2VA Turbo adapter (4 passes)"
+  got "Ref2VA transformer (bf16) and LightX2V's Ref2VA Turbo adapter (4 passes)"
   # a running ComfyUI read its model folders when it started
   if bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
@@ -376,7 +401,7 @@ if [ "$SWAP" = 1 ] && [ "$IMAGE_ONLY" = 0 ] && missing "$MODELS/MiniMax-H3-Comfy
    && { [ "$VERIFY" = 0 ] || missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors"; }; then
   say "MiniMax H3 Ref2VA for Character Swap, int8 (21 GB) -> $MODELS"
   fetch Comfy-Org/MiniMax-H3 MiniMax-H3-Comfy "$REF2VA_INT8"
-  ok "Ref2VA transformer (int8)"
+  got "Ref2VA transformer (int8)"
 fi
 
 if [ "$IMAGE_EDIT" = 1 ] && [ "$VERIFY" = 0 ]; then
@@ -384,7 +409,7 @@ if [ "$IMAGE_EDIT" = 1 ] && [ "$VERIFY" = 0 ]; then
   echo "  Qwen-Image-2.1 is under the Qwen Research License Agreement: NON-COMMERCIAL use only. Read it first:"
   echo "  https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE"
   fetch Comfy-Org/Qwen-Image-2.1 Qwen-Image-2.1-Comfy diffusion_models/qwen_image_2.1_bf16.safetensors
-  ok "Qwen-Image-2.1 base model (bf16): BASE=1 bash scripts/edit.sh, and the 40 steps choice of Edit a picture"
+  got "Qwen-Image-2.1 base model (bf16): BASE=1 bash scripts/edit.sh, and the 40 steps choice of Edit a picture"
   if bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
@@ -406,7 +431,7 @@ if [ "$FLUX3" = 1 ]; then
   fetch black-forest-labs/flux-3-image-klein-comfy FLUX3-K-Comfy "${KLEIN[@]}" text_encoders/qwen3vl_4b_bf16.safetensors \
     text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors vae/flux2-vae.safetensors
   fetch black-forest-labs/flux-3-image-klein-pup FLUX3-K-Comfy system_prompts.json
-  ok "FLUX3-K Fast and Full (bf16), Qwen3-VL-4B text encoder, BFL's prompt upsampler (8-bit) and the decoder"
+  got "FLUX3-K Fast and Full (bf16), Qwen3-VL-4B text encoder, BFL's prompt upsampler (8-bit) and the decoder"
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
@@ -416,7 +441,7 @@ if [ "$MOSS" = 1 ]; then
   fetch Comfy-Org/MOSS-Image MOSS-Image-Comfy diffusion_models/moss_image_sft_bf16.safetensors \
     text_encoders/qwen3.5_9b_bf16.safetensors vae/flux2-vae_small.safetensors
   [ -f "$PREFIX/ComfyUI/comfy_extras/nodes_moss_image.py" ] || die "this ComfyUI has no MOSS-Image nodes: run without --verify to move it to ${COMFY_COMMIT:0:8}"
-  ok "MOSS-Image: a picture model (IMAGE_MODEL=moss-image)"
+  got "MOSS-Image: a picture model (IMAGE_MODEL=moss-image)"
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
@@ -428,7 +453,7 @@ if [ "$MUSIC" = 1 ]; then
   fetch Comfy-Org/MiniMax-Music-3 MiniMax-Music3-Comfy diffusion_models/minimax_music3_dit_fp16.safetensors \
     text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors vae/minimax_music3_dav.safetensors
   [ -f "$PREFIX/ComfyUI/comfy_extras/nodes_minimax_music.py" ] || die "this ComfyUI has no MiniMax Music 3 nodes: run without --verify to move it to ${COMFY_COMMIT:0:8}"
-  ok "MiniMax Music 3: the Music tab (MiniMax-Music3)"
+  got "MiniMax Music 3: the Music tab (MiniMax-Music3)"
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see them: bash spark/comfy.sh stop (the next render starts it)"; fi
   # TensorFold's CUDA engine for it (2.3x faster than ComfyUI's nodes, 18 GB instead of 29): the Music tab uses it
   # where it is built, ComfyUI's nodes where it is not (MUSIC3_BACKEND=cuda|comfy chooses)
@@ -514,7 +539,7 @@ if [ "$SOUND" = 1 ]; then
     mmaudio_synchformer_fp16.safetensors apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors
   # the vocoder the 44 kHz decoder loads by folder name (kijai's loader would download it at the first foley otherwise)
   fetch nvidia/bigvgan_v2_44khz_128band_512x Sound-Comfy/mmaudio/nvidia/bigvgan_v2_44khz_128band_512x bigvgan_generator.pt config.json
-  ok "MMAudio large_44k_v2 (fp16 safetensors), its VAE, Synchformer, Apple's DFN5B CLIP and NVIDIA's BigVGAN v2: foley"
+  got "MMAudio large_44k_v2 (fp16 safetensors), its VAE, Synchformer, Apple's DFN5B CLIP and NVIDIA's BigVGAN v2: foley"
   # Stable Audio Open: the checkpoint (DiT and VAE) and its T5-base encoder, from the gated repo with the person's own
   # token (app/hf_gate.py keeps it where hf reads it), linked under the names ComfyUI's loaders list
   SAO_REPO=stabilityai/stable-audio-open-1.0 SAO="$SND/stable-audio-open-1.0"
@@ -547,7 +572,7 @@ fi
 if [ "$H3_BASE" = 1 ] && [ "$IMAGE_ONLY" = 0 ] && [ "$VERIFY" = 0 ]; then
   say "MiniMax H3's own first-and-last-frame transformer for ComfyUI (40 GB) -> $MODELS"
   fetch Comfy-Org/MiniMax-H3 MiniMax-H3-Comfy diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors
-  ok "MiniMax H3 FL2VA transformer (bf16): SPARK_BASE=h3, and keyframe LoRAs from the hub"
+  got "MiniMax H3 FL2VA transformer (bf16): SPARK_BASE=h3, and keyframe LoRAs from the hub"
   if bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
