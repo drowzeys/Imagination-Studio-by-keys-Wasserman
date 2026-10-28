@@ -681,8 +681,15 @@ def picture_in(r: Run) -> str:
     return r.ctx.get("picture") or r.ctx["up_still"]
 
 
+def qwen_edits(r: Run):
+    """Qwen-Image-2.1-Turbo is optional where FLUX3-K is installed: its edit checks are n/a without it, not failures."""
+    if not (r.ctx.get("edit_state") or {}).get("qwen"):
+        raise Skip("Qwen-Image-2.1-Turbo is not installed here (optional: FLUX3-K edits are checked instead)")
+
+
 @check("edit-qwen", "short")
 def c_edit(r: Run):
+    qwen_edits(r)
     job = r.job({"kind": "edit", "title": "studio-check edit", "params": {"image": picture_in(r), "seed": 0, "size": "model", "resolution": 512,
                                                                       "image_model": "qwen", "base": False, "loras": [], "prompt": "make it night, with stars"}})
     return picture(r.output(job, r"\.png$")) | {"_job": job}
@@ -690,6 +697,7 @@ def c_edit(r: Run):
 
 @check("edit-angles", "short")
 def c_angles(r: Run):
+    qwen_edits(r)
     state = r.ctx.get("edit_state") or {}
     lora = state.get("angle_lora") or "qwen-multiple-angles"
     if not (r.ctx.get("loras", {}).get(lora) or {}).get("installed"):
