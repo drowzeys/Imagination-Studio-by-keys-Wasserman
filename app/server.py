@@ -1801,7 +1801,8 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     if code:
         # the script's own last words say why: a file out of range, a model not installed, memory
         said = [line.strip() for line in job["log"].splitlines() if line.strip() and not STEP.search(line)]
-        raise RuntimeError((said[-1][-400:] if said else "the script stopped") + f" (status {code})")
+        # the exit status only where the script gave no words of its own: a refusal reads as the script wrote it
+        raise RuntimeError(said[-1][-400:] if said else f"the script stopped (status {code})")
     return True
 
 
