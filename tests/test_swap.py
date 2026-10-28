@@ -522,6 +522,16 @@ def test_the_studio_takes_a_swap_job_and_shows_its_stages(tmp_path):
     assert progress("[tensorfold] stage 5/7 window 2 of 3", "[tensorfold] step 3/8") == {"stage": "window 2 of 3 · picture", "at": 3, "of": 8}
     assert progress("[tensorfold] stage 2/7 following the person", "[tensorfold] frame 40/192") == {"stage": "following the person · frame", "at": 40, "of": 192}
 
+    # a refusal reads as the script wrote it; the exit status only where the script said nothing
+    def failure(code):
+        job = {"id": "t2", "log": "", "status": "running", "progress": None}
+        try:
+            server.run(job, [sys.executable, "-c", code], {})
+        except RuntimeError as error:
+            return str(error)
+    assert failure("print('no one stands in this part of the clip'); raise SystemExit(1)") == "no one stands in this part of the clip"
+    assert failure("raise SystemExit(4)") == "the script stopped (status 4)"
+
 
 def test_the_agents_swap_a_character_through_the_studio_tools(monkeypatch):
     spec = importlib.util.spec_from_file_location("studio_mcp_swap", ROOT / "mcp/studio-mcp.py")

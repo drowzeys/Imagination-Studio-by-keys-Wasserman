@@ -68,6 +68,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$(uname -s)" = Linux ]; then
   # A GB10, and a failed nvidia-smi, keep the Spark lines. A discrete card is told this is a GPU. The hand-off below does not change.
   GPU_NAME=""
+  # shellcheck disable=SC1091
+  . "$HERE/spark/gpu.sh"
+  studio_pin_gpu || exit 1  # several GPUs: the one STUDIO_GPU names, or the only compute card (spark/gpu.sh)
   if [ -n "${STUDIO_GPU:-}" ]; then
     GPU_NAME="$(nvidia-smi -i "$STUDIO_GPU" --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
   else

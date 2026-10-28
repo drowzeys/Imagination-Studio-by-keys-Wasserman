@@ -575,7 +575,7 @@ def test_a_heat_stop_in_the_governor_s_own_words_is_queued_once_more_at_its_seed
         def submit(self, body):
             job = super().submit(body)
             if job["status"] == "failed":
-                job["error"] = said + " (status 1)"  # as server.run reports a script that exited
+                job["error"] = said  # as server.run reports a script that exited with words of its own
             return job
 
     for stops, tries, outcome in ((1, 2, "passed"), (2, director.WORKLOAD_STOPS, "stopped")):

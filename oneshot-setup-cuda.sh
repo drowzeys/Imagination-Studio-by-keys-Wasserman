@@ -93,6 +93,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 MODELS="${SPARK_MODELS:-$HOME/spark-studio-models}"
+# Several NVIDIA GPUs: the card STUDIO_GPU names, or the only one not driving a display; two compute cards and no
+# STUDIO_GPU stop here and say so (spark/gpu.sh). Every nvidia-smi query below then answers for that card alone
+# (spark/smi-pin), whichever entry ran this: oneshot-setup.sh, oneshot-setup-spark.sh or oneshot-setup-rtx-6000.sh.
+# shellcheck disable=SC1091
+. "$HERE/spark/gpu.sh"
+studio_pin_gpu || exit 1
+[ -z "${STUDIO_GPU:-}" ] || export PATH="$HERE/spark/smi-pin:$PATH"
 COMFY_COMMIT=b9b290e43f1eb379946dfeb013faf9bbefa1a618  # v0.42.0 and later: ComfyUI's FLUX 3 and MOSS-Image nodes
 # In a terminal with no feature flag: the checklist of parts (scripts/install-checklist.sh), every part ticked; what is
 # ticked becomes this script's own flags below. --yes, any flag, no terminal: no list. (On a Mac oneshot-setup.sh shows it.)

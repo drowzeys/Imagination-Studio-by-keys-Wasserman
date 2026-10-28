@@ -1,7 +1,7 @@
 # Pin this process to one NVIDIA GPU. Source this, then call studio_pin_gpu.
 # STUDIO_GPU is an nvidia-smi index. It is required when more than one GPU is not driving a display:
 # indexes differ by machine, and two equal cards are not a choice this script makes.
-# One compute card behind a display GPU is used on its own. One GPU (a DGX Spark) stays on the default device.
+# One compute card beside a display GPU is used on its own, pinned. One GPU (a DGX Spark) stays on the default device.
 # CUDA_DEVICE_ORDER=PCI_BUS_ID makes the index match CUDA. nvidia-smi ignores CUDA_VISIBLE_DEVICES,
 # so readers pass -i "$STUDIO_GPU" (studio_smi does).
 
@@ -34,6 +34,11 @@ studio_compute_indexes() {
     '
 }
 
+studio_gpu_rows() {
+  # every GPU nvidia-smi lists, display cards and a GB10 included, one per line
+  nvidia-smi --query-gpu=index,memory.total,display_active --format=csv,noheader,nounits 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' '
+}
+
 studio_pin_gpu() {
   if [ -n "${STUDIO_GPU:-}" ]; then
     studio_export_gpu
@@ -55,8 +60,9 @@ studio_pin_gpu() {
     return 1
   fi
   pick=$(printf '%s\n' "$indexes" | sed '/^$/d' | head -1)
-  # Index 0 is already the default device. Pin only when the only compute card is another one.
-  if [ -n "$pick" ] && [ "$pick" != 0 ]; then
+  # Index 0 is already CUDA's default device, but nvidia-smi and the memory guard read every card listed: beside a
+  # display card the only compute card is pinned wherever it is, so they read it alone. One GPU is left as it is.
+  if [ -n "$pick" ] && { [ "$pick" != 0 ] || [ "$(studio_gpu_rows)" -gt 1 ]; }; then
     STUDIO_GPU="$pick"
     studio_export_gpu
   fi
