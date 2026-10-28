@@ -1273,7 +1273,11 @@ class Hub:
         if devices["supported"]:
             # Claim the physical head before any workers. Another Studio cannot take
             # the head card as one of its children while this session is alive.
-            self.local.acquire_head(devices["devices"])
+            try:
+                self.local.acquire_head(devices["devices"])
+            except (ValueError, OSError) as error:  # the Studio still starts, on its own card, with no local workers
+                self.local.unavailable = str(error)
+                print("[sparks] local GPU workers are off: " + str(error), file=sys.stderr, flush=True)
         self.sweep()
         atexit.register(self.close)
         threading.Thread(target=self.loop, daemon=True).start()

@@ -152,6 +152,7 @@ function spkLocal(d) {
   if (!local || !local.supported && !(local.devices || []).some(g => g.worker)) return null;
   const limit = local.limit || 4, devices = local.devices || [], managed = local.managed;
   return el("div", { class: "local-gpus" }, el("h3", {}, "Local GPUs"),
+    local.unavailable ? el("p", { class: "note m-flat", style: "color:var(--warn)" }, "Local GPU workers are off. " + local.unavailable) : null,
     el("div", { class: "note" }, "Manage 1–" + limit + " NVIDIA GPUs per workstation, including the head GPU. " + managed + " of " + limit + " managed; " + devices.filter(g => g.index != null).length + " detected. One render uses one GPU; VRAM is not pooled. Host RAM is shared and reserved separately."),
     devices.length ? devices.map(g => {
       const w = g.worker, head = !!g.head, owned = !!(w && w.owned), busy = !!(w && (w.working || w.job)),

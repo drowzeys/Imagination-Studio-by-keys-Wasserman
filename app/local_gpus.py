@@ -452,6 +452,7 @@ class Manager:
         self.closing = False
         self.head_uuid: str | None = None
         self.active = False
+        self.unavailable = ""  # why this Studio manages no local GPU (no head card it can claim), said in the room
         self.key: str | None = None
         self.child = bool(os.environ.get("STUDIO_LOCAL_GPU_CHILD"))
         self._owner: str | None = None
@@ -524,7 +525,12 @@ class Manager:
             if explicit and not explicit.isdigit():
                 return None
         if not explicit and len(devices) > 1:
-            return None  # never silently select a head from several physical cards
+            # as spark/gpu.sh picks: the only card with memory of its own that is not driving a display. Two such
+            # cards are never chosen between silently: STUDIO_GPU names the head (``unavailable`` says so)
+            compute = [d for d in devices if d["total_mb"] and not d["display_active"]]
+            if len(compute) != 1:
+                return None
+            explicit = str(compute[0]["index"])
         selected = None
         if UUID.fullmatch(explicit):
             selected = next((d for d in devices if d["gpu_uuid"] == explicit), None)
@@ -549,7 +555,8 @@ class Manager:
     def acquire_head(self, devices: list[dict]) -> None:
         ident = self.head(devices)
         if not ident or not any(d["gpu_uuid"] == ident and d["total_mb"] for d in devices):
-            raise ValueError("The head GPU is missing or has no dedicated VRAM; select STUDIO_GPU before starting the Studio.")
+            raise ValueError("This Studio's own GPU is not known: with two or more compute cards, set STUDIO_GPU to the "
+                             "nvidia-smi index it renders on and start the Studio again.")
         with locked(runtime_dir() / "devices.lock"):
             why = self.conflict(ident)
             if why:
@@ -617,7 +624,7 @@ class Manager:
                                 "display_active": False, "head": worker["gpu_uuid"] == head, "worker": shown(worker),
                                 "reason": "This GPU UUID is not present; reconnect the card before starting it."})
         return {"supported": found["supported"] and not self.child, "limit": LIMIT, "head_id": "local:" + head if head else None,
-                "managed": managed, "devices": devices}
+                "managed": managed, "devices": devices, "unavailable": self.unavailable}
 
     def start_worker(self, worker: dict, workers: list[dict], *, allow_display: bool = False) -> None:
         if self.child:

@@ -514,3 +514,33 @@ def test_device_overview_lists_every_physical_card(runtime, monkeypatch, count):
 def test_driver_power_layouts_preserve_available_readings_and_unknowns(power, expected):
     xml = xml_devices(1).replace("<gpu_power_readings><power_draw>25.5 W</power_draw></gpu_power_readings>", power)
     assert local_gpus.parse_inventory(xml)[0]["power_w"] == expected
+
+
+@pytest.mark.parametrize("display_first", [True, False])
+def test_the_only_compute_card_beside_a_display_is_the_head_with_no_studio_gpu(runtime, monkeypatch, display_first):
+    """As spark/gpu.sh picks it. With a display card at either index and no STUDIO_GPU, the Studio stopped at its start."""
+
+    monkeypatch.delenv("STUDIO_GPU", raising=False)
+    display, compute = (gpu(0, total=8000, display=True), gpu(1)) if display_first else (gpu(1, total=8000, display=True), gpu(0))
+    devices = [display, compute]
+    manager = local_gpus.Manager(runtime / "studio", runtime / "pack")
+    assert manager.head(devices) == compute["gpu_uuid"]
+    manager.acquire_head(devices)
+    assert manager.active
+
+
+def test_two_compute_cards_and_no_studio_gpu_start_the_studio_without_local_workers(runtime, monkeypatch):
+    import threading
+
+    import sparks
+
+    monkeypatch.delenv("STUDIO_GPU", raising=False)
+    devices = [gpu(0), gpu(1)]
+    monkeypatch.setattr(local_gpus, "inventory", lambda **kw: {"supported": True, "devices": devices})
+    hub = sparks.Hub(runtime / "studio", runtime / "pack", True, {}, [], threading.RLock(), threading.Event(),
+                     lambda: {}, lambda p: runtime / p, lambda j, w: None)
+    monkeypatch.setattr(hub, "loop", lambda: None)
+    monkeypatch.setattr(hub, "sweep", lambda: None)
+    hub.start()  # raised ValueError out of the app's start
+    assert not hub.local.active and "STUDIO_GPU" in hub.local.unavailable
+    assert hub.local.devices([], lambda w: w)["unavailable"] == hub.local.unavailable
