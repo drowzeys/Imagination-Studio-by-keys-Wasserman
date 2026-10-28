@@ -114,3 +114,52 @@ def test_this_run_is_pinned_to_the_choice_the_rows_give():
     else:
         assert os.environ["STUDIO_GPU"] == expect
         assert os.environ["CUDA_VISIBLE_DEVICES"] == expect
+
+
+def test_the_only_compute_card_at_index_0_beside_a_display_is_pinned(tmp_path):
+    """Left unpinned, nvidia-smi and the memory guard read the display card too (and #168's head choice found none)."""
+
+    done = pin(tmp_path, ["0, 97887, Disabled", "1, 16311, Enabled"])
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "gpu=0 cuda=0"
+
+
+def test_every_installer_entry_pins_before_it_reads_the_card():
+    """oneshot-setup.sh and oneshot-setup-spark.sh reached the CUDA installer unpinned: beside a display card at
+    index 0 it read the display card's name and memory and refused video."""
+
+    cuda = (ROOT / "oneshot-setup-cuda.sh").read_text()
+    pinned = cuda.index("studio_pin_gpu || exit 1")
+    assert pinned < cuda.index("nvidia-smi --query-gpu=name") and pinned < cuda.index("nvidia-smi --query-gpu=memory.total")
+    assert cuda.index('. "$HERE/spark/gpu.sh"') < pinned < cuda.index('[ -z "${STUDIO_GPU:-}" ] || export PATH="$HERE/spark/smi-pin:$PATH"')
+    entry = (ROOT / "oneshot-setup.sh").read_text()
+    assert entry.index("studio_pin_gpu || exit 1") < entry.index('GPU_NAME="$(nvidia-smi -i "$STUDIO_GPU"')
+
+
+def test_the_memory_guard_reads_the_compute_card_when_nothing_pinned_it(tmp_path, monkeypatch):
+    import sys
+    sys.path.insert(0, str(ROOT / "spark"))
+    import memory_guard
+
+    stub = tmp_path / "nvidia-smi"
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.delenv("STUDIO_GPU", raising=False)
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    def argv(rows):
+        stub.write_text("#!/bin/bash\nprintf '%s\\n' " + " ".join("'" + row + "'" for row in rows) + "\n")
+        stub.chmod(0o755)
+        memory_guard._CHOSEN.clear()
+        return memory_guard.nvidia_argv()
+
+    try:
+        assert argv(["0, 16311, Enabled", "1, 97887, Disabled"]) == ["nvidia-smi", "-i", "1"]
+        assert argv(["0, 97887, Disabled", "1, 16311, Enabled"]) == ["nvidia-smi", "-i", "0"]
+        assert argv(["0, [N/A], Disabled"]) == ["nvidia-smi"]  # a DGX Spark
+        assert argv(["0, 97887, Disabled", "1, 97887, Disabled"]) == ["nvidia-smi"]  # two compute cards: STUDIO_GPU's to say
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+        assert argv(["0, 97887, Disabled", "1, 97887, Disabled"]) == ["nvidia-smi", "-i", "1"]
+        monkeypatch.setenv("STUDIO_GPU", "0")
+        assert argv(["0, 97887, Disabled", "1, 97887, Disabled"]) == ["nvidia-smi", "-i", "0"]
+    finally:
+        memory_guard._CHOSEN.clear()

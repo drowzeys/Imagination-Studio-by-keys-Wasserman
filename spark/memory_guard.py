@@ -237,13 +237,39 @@ VRAM_MARGIN_MB = 2048  # kept free on the card: CUDA's own context and fragmenta
 _DEVICE: dict = {"at": 0.0, "value": None}
 
 
+_CHOSEN: dict = {}
+
+
+def chosen_gpu() -> str:
+    """The nvidia-smi index of the studio's card when ``STUDIO_GPU`` is unset, as ``spark/gpu.sh`` picks it: a single
+    ``CUDA_VISIBLE_DEVICES`` index, else the only GPU not driving a display when another one is listed (a server
+    started without scripts/app.sh beside a display card). "" for one GPU (a DGX Spark), for two compute cards (the
+    app asks for STUDIO_GPU there) and where nvidia-smi does not answer. Asked once."""
+
+    if "index" not in _CHOSEN:
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+        pick = visible if visible.isdigit() else ""
+        if not pick:
+            try:
+                said = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.total,display_active", "--format=csv,noheader,nounits"],
+                                      capture_output=True, text=True, timeout=5)
+                rows = [[part.strip() for part in line.split(",")] for line in said.stdout.splitlines() if line.strip()] if said.returncode == 0 else []
+            except (OSError, subprocess.SubprocessError):
+                rows = []
+            compute = [row[0] for row in rows if len(row) >= 3 and row[0].isdigit() and row[1].isdigit() and row[2].lower() != "enabled"]
+            pick = compute[0] if len(rows) > 1 and len(compute) == 1 else ""
+        _CHOSEN["index"] = pick
+    return _CHOSEN["index"]
+
+
 def nvidia_argv() -> list[str]:
     """`nvidia-smi` for the studio's card. `STUDIO_GPU` is an nvidia-smi index (`spark/gpu.sh`).
 
-    Unset, the first GPU, which is the only GPU on a DGX Spark. nvidia-smi ignores `CUDA_VISIBLE_DEVICES`, so the
-    index is passed with `-i`."""
+    Unset, the card ``chosen_gpu`` names, else the first GPU, which is the only GPU on a DGX Spark. nvidia-smi ignores
+    `CUDA_VISIBLE_DEVICES`, so the index is passed with `-i`."""
 
     raw = os.environ.get("STUDIO_GPU", "").strip()
+    raw = raw if raw.isdigit() else chosen_gpu()
     return ["nvidia-smi", "-i", raw] if raw.isdigit() else ["nvidia-smi"]
 
 
