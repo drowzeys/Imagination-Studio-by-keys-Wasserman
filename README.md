@@ -169,13 +169,40 @@ Full recipes, every option and the measured memory of each job: [Install, and th
 design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
-**4.2.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
+**4.2.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
 6000 (96 GB) ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA, TensorFold **1.1.8** for MiniMax Music 3 and both Bolt engines (**1.1.5** under YuE2):
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MOSS-Image** (text to image, DGX Spark) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **YuE2** and **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 4.2.1 (2026-10-29)
+
+No build machine's folders or user name ship in a prebuilt engine any more. Three CUDA binaries in the carrier, built
+before 3.3.0 and copied unchanged since, held their build folders in their debug sections: the H3 engine
+(`libtf_h3.so`) and Drama 3's `drama3-generate` and `libtensorfold_drama3.so`. So did the symbol table of the Mac's Bolt
+binary in the 4.2.0 release archive. Only those parts change: the debug sections and symbol tables are dropped. Every
+loaded segment (code, data, CUDA kernels) is byte for byte the same; only the file headers that point at the removed
+sections differ. To update, `git pull` and restart the app. An installed engine has the same commit and is kept; a new
+install takes the stripped one.
+
+- **Same output, checked on a DGX Spark, in the order old, new, new, old:**
+  - H3: a 5 s clip at 864x480 (FastH3, 8 steps, seed 7). The video stream, the decoded frames and the audio are identical
+    in all four runs; 117.6–118.4 s new against 118.1–124.6 s old.
+  - Drama 3: three lines in the default voice at seed 7. The WAV files are byte-identical in all four runs; median first
+    audio 256 ms new against 249 ms old, within run-to-run noise.
+- **The same on the Mac:** Bolt on Metal gives 7 of 7 identical greedy replies, with first tokens and tokens a second
+  within noise.
+- **Where they come from:**
+  - On a DGX Spark, H3 and Drama 3 now come from the carrier `ghcr.io/drowzeys/keys-tensorfold-studio:4.2.1`.
+  - The Mac's Bolt comes from this release's `bolt-metal-772da34b-macos-arm64.tar.gz` (a new SHA-256, pinned in
+    `scripts/setup-bolt.sh`).
+  - Everything else stays on 4.2.0's parts.
+- **It stays fixed:**
+  - `scripts/build-carrier.sh` drops the debug sections of every CUDA engine it copies.
+  - It refuses to build a carrier whose payload still names the building machine's home folder or user.
+- **Scan:** no file in the 4.2.1 carrier, nor in either Bolt archive, contains a home folder or a user name.
 
 ## New in 4.2.0 (2026-10-29)
 

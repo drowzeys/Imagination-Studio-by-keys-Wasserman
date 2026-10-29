@@ -14,11 +14,14 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio}"
-TAG="${TAG:-4.2.0}"
+TAG="${TAG:-4.2.1}"
 TF_REPO="https://github.com/drowzeys/TensorFold.git"
 TF_COMMIT="a2b592fef5366bf16d4729651b6549094981d3fe"
 cd "$HERE"
 mkdir -p payload
+# An engine's debug sections name the folders it was built in (the build machine's home and user). They are never
+# loaded, so they are dropped from every binary copied here: the code, data and CUDA kernels stay byte for byte.
+nodebug() { local f; for f in "$@"; do strip --strip-debug "$f"; done; }
 # WHEEL_DIR: a folder holding the wheel already built at TF_COMMIT (for a worker Spark without network: build it on a
 # machine with network, `python3 -m pip wheel --no-deps -w DIR "tensorfold @ git+$TF_REPO@$TF_COMMIT"`, and copy it)
 if [ -n "${WHEEL_DIR:-}" ]; then cp "$WHEEL_DIR"/tensorfold-*.whl payload/
@@ -32,6 +35,7 @@ SPARK_ENGINE="${PREFIX:-$HOME/.local/opt/tensorfold-studio}/tf-h3"
 if [ -s "$SPARK_ENGINE/libtf_h3.so" ]; then
   mkdir -p payload/spark-engine
   cp "$SPARK_ENGINE/libtf_h3.so" "$SPARK_ENGINE/commit" payload/spark-engine/
+  nodebug payload/spark-engine/libtf_h3.so
   ( cd payload/spark-engine && sha256sum libtf_h3.so commit > SHA256SUMS )
   echo "spark-engine: libtf_h3.so at $(cut -c1-8 payload/spark-engine/commit) ($(uname -m), sm_121)"
 else echo "NOTE: no engine at $SPARK_ENGINE: this carrier will not hold the DGX Spark engine" >&2; fi
@@ -40,6 +44,7 @@ SPARK_MUSIC3="${PREFIX:-$HOME/.local/opt/tensorfold-studio}/music3"
 if [ -x "$SPARK_MUSIC3/bin/music3-generate" ]; then
   mkdir -p payload/spark-music3
   cp "$SPARK_MUSIC3/bin/music3-generate" "$SPARK_MUSIC3/commit" payload/spark-music3/
+  nodebug payload/spark-music3/music3-generate
   ( cd payload/spark-music3 && sha256sum music3-generate commit > SHA256SUMS )
   echo "spark-music3: music3-generate at $(cut -c1-8 payload/spark-music3/commit) ($(uname -m), sm_121)"
 else echo "NOTE: no engine at $SPARK_MUSIC3: this carrier will not hold the DGX Spark's music engine" >&2; fi
@@ -49,6 +54,7 @@ SPARK_DRAMA3="${PREFIX:-$HOME/.local/opt/tensorfold-studio}/drama3"
 if [ -x "$SPARK_DRAMA3/bin/drama3-generate" ] && [ -s "$SPARK_DRAMA3/lib/libtensorfold_drama3.so" ] && [ -s "$SPARK_DRAMA3/commit" ]; then
   rm -rf payload/spark-drama3 && mkdir -p payload/spark-drama3
   cp "$SPARK_DRAMA3/bin/drama3-generate" "$SPARK_DRAMA3/lib/libtensorfold_drama3.so" "$SPARK_DRAMA3/commit" payload/spark-drama3/
+  nodebug payload/spark-drama3/drama3-generate payload/spark-drama3/libtensorfold_drama3.so
   ( cd payload/spark-drama3 && sha256sum drama3-generate libtensorfold_drama3.so commit > SHA256SUMS )
   echo "spark-drama3: drama3-generate + libtensorfold_drama3.so at $(cut -c1-8 payload/spark-drama3/commit) ($(uname -m), sm_121)"
 else echo "NOTE: no engine at $SPARK_DRAMA3 (or no commit file): this carrier will not hold the DGX Spark's voice engine" >&2; fi
@@ -63,6 +69,9 @@ if [ -x "$SPARK_BOLT/native/bin/tensorfold-native" ] && [ -f "$SPARK_BOLT/recipe
   echo "spark-bolt: Bolt engine, recipe $(cut -c1-8 payload/spark-bolt/recipe) ($(uname -m), sm_121)"
 else echo "NOTE: no engine at $SPARK_BOLT: this carrier will not hold the DGX Spark's Bolt engine" >&2; fi
 cat payload/SHA256SUMS
+# nothing of this machine's folders or user may ship: a binary built here names them unless its debug sections are gone
+leaks="$(grep -rlaF -e "$HOME/" -e "/$(id -un)/" payload 2>/dev/null || true)"
+if [ -n "$leaks" ]; then echo "the payload names this machine's folders or user (strip or rebuild these):" >&2; echo "$leaks" >&2; exit 1; fi
 if [ "${PUSH:-0}" = 1 ]; then
   docker buildx build --platform linux/arm64,linux/amd64 -f Dockerfile.ghcr -t "$IMAGE:$TAG" -t "$IMAGE:latest" --push .
   docker buildx imagetools inspect "$IMAGE:$TAG" | grep -E '^Digest' || true

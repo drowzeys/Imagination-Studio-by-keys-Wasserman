@@ -1,7 +1,7 @@
 # Agent one-shot — Imagination Studio by keys+Wasserman, powered by TensorFold (Mac + DGX Spark)
 
 **Repo:** https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman  
-**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:4.2.0` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, MiniMax Music 3, Fish Audio Drama 3 and Nemotron 3.5 Bolt). The Mac's native engine also comes from the v3.2.0 release (the same engine build as 3.1.0), and Bolt on Metal from the v4.2.0 release  
+**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:4.2.1` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, MiniMax Music 3, Fish Audio Drama 3 and Nemotron 3.5 Bolt). The Mac's native engine also comes from the v3.2.0 release (the same engine build as 3.1.0), and Bolt on Metal from the v4.2.1 release (its symbol table stripped of build paths; H3 and Drama 3 come from the 4.2.1 carrier, the other engines are the same as 4.2.0's)  
 **Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2b592fe`, own venv, int8 tensor-unit kernels
 
 ```bash
