@@ -14,7 +14,7 @@ if [ -s "$OUT/libtf_h3.so" ] && [ "$(cat "$OUT/commit" 2>/dev/null)" = "$TF_COMM
   echo "[tensorfold] engine already built at ${TF_COMMIT:0:8}"; exit 0
 fi
 # the prebuilt engine from the carrier image, when Docker is here and the image holds this commit's build
-IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:3.3.0}"
+IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:4.2.0}"
 if [ -z "${TF_SOURCE:-}" ] && [ "${ENGINE_FROM_SOURCE:-0}" != 1 ] && [ "$(uname -m)" = aarch64 ] && command -v docker >/dev/null 2>&1 \
    && docker info >/dev/null 2>&1 && docker pull -q "$IMAGE" >/dev/null 2>&1; then
   TMP="$PREFIX/tf-h3.fetch"
@@ -47,12 +47,9 @@ smi_i=()
 [ -z "${STUDIO_GPU:-}" ] || smi_i=(-i "$STUDIO_GPU")
 SM="${TF_SM:-$(nvidia-smi "${smi_i[@]}" --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' .')}"
 case "$SM" in ''|*[!0-9,]*) SM=121;; esac  # a driver without the field answers with words
-ZIG="$PREFIX/zig-$ZIG_VERSION/zig"
-if [ ! -x "$ZIG" ]; then
-  echo "[tensorfold] fetching Zig $ZIG_VERSION"
-  mkdir -p "$PREFIX/zig-$ZIG_VERSION"
-  curl -sfL "https://ziglang.org/download/$ZIG_VERSION/zig-$arch-linux-$ZIG_VERSION.tar.xz" | tar -xJ --strip-components=1 -C "$PREFIX/zig-$ZIG_VERSION"
-fi
+# Zig, checked against the SHA-256 ziglang.org publishes (spark/zig.sh)
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/zig.sh"
+ZIG="$(studio_zig "$PREFIX")" || exit 1
 SRC="${TF_SOURCE:-$PREFIX/tensorfold-src}"
 if [ -z "${TF_SOURCE:-}" ]; then
   [ -d "$SRC/.git" ] || git init -q "$SRC"

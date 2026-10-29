@@ -58,7 +58,7 @@ place() {
 
 # the prebuilt engine from the carrier image (one already here, else pulled), when Docker is here and the image holds
 # this commit's build: its commit file and checksums decide
-IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:3.3.0}"
+IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:4.2.0}"
 if [ -z "${DRAMA3_SOURCE:-}" ] && [ "${ENGINE_FROM_SOURCE:-0}" != 1 ] && [ "$(uname -m)" = aarch64 ] && command -v docker >/dev/null 2>&1 \
    && docker info >/dev/null 2>&1 && { docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null 2>&1; }; then
   TMP="$PREFIX/drama3.fetch"
@@ -84,12 +84,9 @@ version="$("$NVCC" --version | sed -n 's/.*release \([0-9]*\)\.\([0-9]*\).*/\1 \
 read -r major minor <<<"$version"
 [ "$major" -gt 12 ] || { [ "$major" = 12 ] && [ "$minor" -ge 9 ]; } || { echo "$NVCC is CUDA $major.$minor; the GB10 needs 12.9 or newer" >&2; exit 1; }
 case "$(uname -m)" in aarch64) arch=aarch64;; x86_64) arch=x86_64;; *) echo "no Zig build for $(uname -m)" >&2; exit 1;; esac
-ZIG="$PREFIX/zig-$ZIG_VERSION/zig"
-if [ ! -x "$ZIG" ]; then
-  echo "[tensorfold] fetching Zig $ZIG_VERSION"
-  mkdir -p "$PREFIX/zig-$ZIG_VERSION"
-  curl -sfL "https://ziglang.org/download/$ZIG_VERSION/zig-$arch-linux-$ZIG_VERSION.tar.xz" | tar -xJ --strip-components=1 -C "$PREFIX/zig-$ZIG_VERSION"
-fi
+# Zig, checked against the SHA-256 ziglang.org publishes (spark/zig.sh)
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/zig.sh"
+ZIG="$(studio_zig "$PREFIX")" || exit 1
 SRC="${DRAMA3_SOURCE:-$PREFIX/drama3-cuda-src}"
 if [ -z "${DRAMA3_SOURCE:-}" ]; then
   [ -d "$SRC/.git" ] || git init -q "$SRC"

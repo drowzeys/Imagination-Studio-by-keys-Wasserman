@@ -6,7 +6,7 @@ job in the app's queue, so it never runs beside a MiniMax H3 render or a Drama 3
 app's own process:
 
 - ``metal`` (a Mac with an M5 or later, preferred there when built): TensorFold's Metal port (fork branch
-  ``music3-metal-115`` on TensorFold 1.1.5, ``$PREFIX/music3/bin/music3-generate --serve 1``, Zig + Metal, no Python), the CUDA
+  ``music3-metal-118`` on TensorFold 1.1.8, ``$PREFIX/music3/bin/music3-generate --serve 1``, Zig + Metal, no Python), the CUDA
   route's binary protocol and lifecycle; int8 weights by default (``MUSIC3_WEIGHTS=bf16``). It does not stream yet.
   Without the binary or the weights, or on an M1 to M4, a Mac falls back to ``mlx``.
 - ``mlx`` (a Mac): TensorFold's MLX port (fork branch ``music3-mlx``, ``python -m tensorfold.music3 --serve`` in its
@@ -17,8 +17,8 @@ app's own process:
   studio's ComfyUI server (spark/comfy.sh, whose memory guard stands beside it). The server keeps the song's models
   loaded after it, which counts as loaded here: the GPU lock is held, and they are freed (ComfyUI's /free) after the
   idle time and before any other job, as for Drama 3. A song starts from a server with nothing else loaded.
-- ``cuda`` (a DGX Spark, preferred there when built): TensorFold's CUDA port (fork branch ``music3-cuda-115``, the
-  family on TensorFold 1.1.5,
+- ``cuda`` (a DGX Spark, preferred there when built): TensorFold's CUDA port (fork branch ``music3-cuda-118``, the
+  family on TensorFold 1.1.8,
   ``$PREFIX/music3/bin/music3-generate --serve 1``), the Mac engine's protocol and lifecycle (voice.Served), int8
   weights made on the GPU as it loads (``MUSIC3_WEIGHTS=bf16`` for the checkpoint's own). A ComfyUI holding models is
   stopped before it loads. Without the binary or the weights a Spark falls back to ``comfy``; ``MUSIC3_BACKEND``
@@ -507,7 +507,7 @@ class Comfy:
 
 class Cuda(voice.Served):
     """TensorFold's CUDA port of MiniMax Music 3 on a DGX Spark (``music3-generate --serve 1``, Zig + CUDA, no Python;
-    fork branch ``music3-cuda-115`` on TensorFold 1.1.5, built by ``spark/build-music3.sh`` into ``$PREFIX/music3``). It speaks the Mac
+    fork branch ``music3-cuda-118`` on TensorFold 1.1.8, built by ``spark/build-music3.sh`` into ``$PREFIX/music3``). It speaks the Mac
     engine's protocol (one JSON request a line on stdin, one answer a line on stderr), so it is a ``voice.Served``
     like the Mac route and Drama 3's CUDA engine: loaded on the first song, holding the GPU lock while loaded,
     unloaded after ``MUSIC3_IDLE_S`` and before any other job (``release``), under the kill-guard
@@ -654,7 +654,7 @@ class Cuda(voice.Served):
 
 class Metal(Cuda):
     """TensorFold's Metal port of MiniMax Music 3 on a Mac (``music3-generate --serve 1``, Zig + Metal, no Python;
-    fork branch ``music3-metal-115`` on TensorFold 1.1.5, built by ``scripts/build-music3-metal.sh`` into ``$PREFIX/music3``). The
+    fork branch ``music3-metal-118`` on TensorFold 1.1.8, built by ``scripts/build-music3-metal.sh`` into ``$PREFIX/music3``). The
     same binary's protocol and lifecycle as the CUDA route; it needs an M5 or later (the DiT, prompt rows and DAV run on
     its tensor units), so an older Mac stays on ``mlx``. Not streamed. Measured on a Mac Studio M5 Ultra
     (docs/recipes/minimax-music3-metal.md on the engine branch): see ``load_s``, ``RTF`` and ``NEED_GB``."""

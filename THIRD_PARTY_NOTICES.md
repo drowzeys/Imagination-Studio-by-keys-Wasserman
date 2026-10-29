@@ -213,15 +213,15 @@ clones at a pinned commit (GPL-3.0). None of its code is copied into this pack.
 ## TensorFold music3 (CUDA)
 
 On a DGX Spark the song runs on TensorFold's CUDA port of MiniMax Music 3 (drowzeys/TensorFold, branch
-`music3-cuda-115`, commit 5505dbfa: the music3 family on TensorFold 1.1.5, Apache-2.0, Ash Hart and the TensorFold
+`music3-cuda-118`, commit 8cd08c83: the music3 family on TensorFold 1.1.8, Apache-2.0, Ash Hart and the TensorFold
 contributors), from the carrier image or built from source into `$PREFIX/music3` by `spark/build-music3.sh` (Zig
 0.17.0, MIT; NVIDIA's CUDA toolkit).
 
 ## TensorFold music3 (Metal)
 
 On an M5 or later Mac the song runs on TensorFold's Metal port of MiniMax Music 3 (drowzeys/TensorFold, branch
-`music3-metal-115`, commit 91877e79, Apache-2.0: the code of pull request #987 to ashhart/TensorFold on the TensorFold 1.1.5
-release since 3.3.1), built from source into
+`music3-metal-118`, commit af17c54a, Apache-2.0: the code of pull request #987 to ashhart/TensorFold on the TensorFold 1.1.8
+release since 4.2.0, 1.1.5 from 3.3.1), built from source into
 `$PREFIX/music3` by `scripts/build-music3-metal.sh` (Zig 0.17.0, MIT, fetched from ziglang.org).
 
 ## TensorFold music3-mlx
@@ -320,7 +320,7 @@ Agreement, version 1.1 (https://github.com/OpenMDW/OpenMDW/blob/main/1.1/LICENSE
 ## Nemotron-3.5-Bolt-TensorFold-DGX-Spark (MiaAI-Lab)
 
 https://github.com/MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark at 89e1c8a0 (6f61d772 before 3.3.3), carried in the
-drowzeys/TensorFold branch bolt-lilicorr-115 (zig/bolt-cuda) the CUDA engine is built from. MIT
+drowzeys/TensorFold branch bolt-lilicorr-118 (zig/bolt-cuda) the CUDA engine is built from. MIT
 License, Copyright (c) 2026 MiaAI-Lab:
 
 > Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
@@ -333,11 +333,11 @@ License, Copyright (c) 2026 MiaAI-Lab:
 > COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 > OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-The engine the Studio runs on a DGX Spark is that recipe's build (`tensorfold-native` with `libbolt.so`): since 3.3.3 the
-recipe's `engine/` (in `zig/bolt-cuda`) and its registration patch rebased onto TensorFold 1.1.5
-(84e0d560303d85c50becb730720c04a56e38abe5; Apache-2.0, code before 0.6.0 MIT; Ash Hart and the TensorFold contributors),
-drowzeys/TensorFold branch bolt-lilicorr-115 at ecdc78923834c5e4d358432ccbb13809d819ab53 (6f61d772 on TensorFold
-46a08c18 before). The build also carries, each under its own licence (kept in `$PREFIX/bolt/share/doc/tensorfold`):
+The engine the Studio runs on a DGX Spark is that recipe's build (`tensorfold-native` with `libbolt.so`): since 4.2.0 the
+recipe's `engine/` (in `zig/bolt-cuda`) and its registration patch rebased onto TensorFold 1.1.8
+(03d08f1ef5e385f6ecccb49d54e31b44e75ed422; Apache-2.0, code before 0.6.0 MIT; Ash Hart and the TensorFold contributors),
+drowzeys/TensorFold branch bolt-lilicorr-118 at 7d124f36df08a5836d3a5e3e85c19b6d919c70dc (bolt-lilicorr-115 ecdc7892 on
+TensorFold 1.1.5 from 3.3.3, 6f61d772 on TensorFold 46a08c18 before). The build also carries, each under its own licence (kept in `$PREFIX/bolt/share/doc/tensorfold`):
 ggml's IQ2_XXS tables and block layouts (MIT), libjpeg-turbo 3.1.4.1 (BSD-3-Clause, IJG, zlib), FFmpeg 9.0.2's decoders
 in libtfvideo.so (LGPL 2.1 or later), xgrammar v0.2.8 with dlpack (Apache-2.0) and picojson (BSD-2-Clause) in
 libtfgrammar.so. It is built with the CUDA toolkit's nvcc and Zig; no container image is involved.

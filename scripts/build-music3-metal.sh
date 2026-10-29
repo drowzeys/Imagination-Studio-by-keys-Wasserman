@@ -6,17 +6,16 @@
 # Needs an Apple M5 or later (the engine's DiT, prompt rows and DAV run on its tensor units; an M1 to M4 keeps the MLX
 # port) and Xcode's Metal toolchain (xcrun metal; macOS 26: xcodebuild -downloadComponent MetalToolchain). It fetches
 # Zig 0.17.0 (unless one is on PATH) and the engine's source (drowzeys/TensorFold at MUSIC3_METAL_COMMIT, branch
-# music3-metal-115: the music3 Metal family on TensorFold 1.1.5) under $PREFIX. A few minutes.
+# music3-metal-118: the music3 Metal family on TensorFold 1.1.8) under $PREFIX. A few minutes.
 # Environment: PREFIX, MUSIC3_METAL_COMMIT, MUSIC3_SOURCE (an existing checkout to build instead of fetching one).
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
-MUSIC3_METAL_COMMIT="${MUSIC3_METAL_COMMIT:-91877e79c14652a7ce7dd2f464575c0e8782fd64}"
+MUSIC3_METAL_COMMIT="${MUSIC3_METAL_COMMIT:-af17c54ac580f47fd59e77be5ce91384fe34398c}"
 ZIG_VERSION=0.17.0
 # the sha256 ziglang publishes for the tarball below: the aarch64-macos entry's "tarball_sha256" in
-# https://ziglang.org/download/index.json (the release page for ZIG_VERSION lists the same). Fill it in whenever
-# ZIG_VERSION is bumped; the 0.17.0 release was not in the index when this was written, so it waits here empty and
-# the fetch says, loudly, that it could not verify.
-ZIG_SHA256=""
+# https://ziglang.org/download/index.json (the release page for ZIG_VERSION lists the same). Update it whenever
+# ZIG_VERSION is bumped.
+ZIG_SHA256="b607e9b9234790a008116ae5bdb71c6243b84b9fb42a53a9e70fde41c06c536a"  # zig-aarch64-macos-0.17.0.tar.xz
 OUT="$PREFIX/music3"
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || { echo "the Metal music3 engine builds on an Apple-silicon Mac" >&2; exit 1; }
 if [ -x "$OUT/bin/music3-generate" ] && [ "$(cat "$OUT/commit" 2>/dev/null)" = "$MUSIC3_METAL_COMMIT" ] && [ -z "${MUSIC3_SOURCE:-}" ]; then
