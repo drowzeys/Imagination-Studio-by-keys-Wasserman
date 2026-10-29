@@ -169,13 +169,29 @@ Full recipes, every option and the measured memory of each job: [Install, and th
 design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
-**4.1.1** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
+**4.1.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
 6000 (96 GB) ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
 runtime for FastH3 on Metal and on CUDA, TensorFold **1.1.5** for the music engines and both Bolt engines:
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MOSS-Image** (text to image, DGX Spark) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **YuE2** and **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 4.1.2 (2026-10-28)
+
+Fixes for machines with two or more NVIDIA cards, and for a Spark without Qwen. Update the clone, run
+`--upgrade` on Linux and restart the app; a Mac only needs the pull and a restart.
+
+- **Two or more NVIDIA cards and no `STUDIO_GPU`:** every installer entry (`oneshot-setup.sh`,
+  `oneshot-setup-cuda.sh`, the Spark and RTX scripts) now chooses the card the way the app's start script does. A
+  single compute card is used even at index 0 beside a display card, so a workstation with a small display card first
+  no longer installs against it (or refuses video because "this one has 8 GB"). With two compute cards the installer
+  stops and asks for `STUDIO_GPU`. The memory guard reads the same card when the server is started on its own.
+- **A script that says why it stopped is reported in its own words**, without " (status 1)" after it; the status is
+  kept only when the script printed nothing ("the script stopped (status N)"). Swap refusals read as written.
+- **Qwen is optional where FLUX3-K is installed:** `--verify` and `--upgrade` say "Qwen-Image-2.1-Turbo is not
+  installed (optional: pictures use FLUX3-K …)" instead of stopping at "✗ missing", and no longer print a ✓ for files
+  they just called missing. studio-check marks the Qwen edit and angle checks as not applicable on such a machine.
 
 ## New in 4.1.1 (2026-10-28)
 
