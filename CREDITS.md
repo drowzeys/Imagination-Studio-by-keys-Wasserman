@@ -194,8 +194,8 @@ autoregressive model that writes the acoustic tokens, a DiT that renders them, a
 Comfy-Org's repackaging of MiniMax's release (Comfy-Org/MiniMax-Music-3), under the **MiniMax-Music3 Community
 License**: commercial use is allowed, a commercial product shows "MiniMax-Music3" in its interface, a company above
 US$20 million of yearly revenue needs MiniMax's written authorisation, and a hosted service keeps safeguards against
-misuse. On a DGX Spark it runs on TensorFold's native CUDA port (`music3-cuda-115` in the drowzeys/TensorFold fork,
-on the **TensorFold 1.1.5** release of Ash Hart and the TensorFold contributors since 3.3.0), else on **ComfyUI**'s own
+misuse. On a DGX Spark it runs on TensorFold's native CUDA port (`music3-cuda-118` in the drowzeys/TensorFold fork,
+on the **TensorFold 1.1.8** release of Ash Hart and the TensorFold contributors since 4.2.0, 1.1.5 from 3.3.0), else on **ComfyUI**'s own
 MiniMax Music 3 nodes and blueprint (Comfy Org, GPL-3.0); on a Mac
 on TensorFold's native Metal port (Zig and Metal, on an M5 or later) or its MLX port (`music3-mlx` in the
 drowzeys/TensorFold fork), both following ComfyUI's reference code. The
@@ -296,10 +296,10 @@ Phosphene publishes. (Apache-2.0.)
 **Ash Hart** (ashhart) and the TensorFold contributors — **TensorFold**: the family and kernel structure this
 lives in, and the practice of reaching the M5 tensor units from `mx.fast.metal_kernel` that the int8 kernels
 are built on (`kernels/qwen/dense/v1/lane_qmm.py`). This pack pins TensorFold 0.6.5 with three commits on top.
-(Apache-2.0.) Since 3.3.0 the DGX Spark's music engine is built on the **TensorFold 1.1.5** release (its Zig + CUDA
-runtime, build and loaders; the music3 family on top is this pack's), and since 3.3.1 the Mac's Metal music engine
-(`music3-metal-115`) and the Mac's Metal Bolt engine (`bolt-metal-115`, `libbolt.dylib` on TensorFold's Bolt lane
-backend) are too. The YuE2 song model's decode engine on the DGX Spark (`libtf_yue2.so`) is built the same way: on
+(Apache-2.0.) Since 4.2.0 the DGX Spark's music engine is built on the **TensorFold 1.1.8** release (its Zig + CUDA
+runtime, build and loaders; the music3 family on top is this pack's; 1.1.5 from 3.3.0), and so are the Mac's Metal music engine
+(`music3-metal-118`) and the Mac's Metal Bolt engine (`bolt-metal-118`, `libbolt.dylib` on TensorFold's Bolt lane
+backend; 1.1.5 from 3.3.1). The YuE2 song model's decode engine on the DGX Spark (`libtf_yue2.so`) is built the same way: on
 TensorFold 1.1.5's CUDA runtime and the music3 family's decode GEMVs, with this pack's yue2 family on top.
 
 ## Sol-Engine, Sol-Attn and Sol-H3: NVIDIA Research
@@ -357,8 +357,8 @@ notices). No weights are in this pack.
 with TensorFold's native engine: the Bolt lane backend (`libbolt.so`, the packed-weight kernels, the LiLiCorr drafter
 run inside it) and the patches that register it in TensorFold. **ChriZzn** contributed the recipe's speed work (the
 TensorFold 1.1.0 rebase, the routed-expert ring, programmatic dependent launch, one Mamba state copy, the fp4 prompt
-projections). Since 3.3.3 the studio's CUDA engine is that recipe at 89e1c8a rebased onto TensorFold 1.1.5 (drowzeys/TensorFold
-branch `bolt-lilicorr-115`, with its first token sent before the drafter's first proposal and a turn's last cache mark
+projections). Since 4.2.0 the studio's CUDA engine is that recipe at 89e1c8a rebased onto TensorFold 1.1.8 (drowzeys/TensorFold
+branch `bolt-lilicorr-118`; on 1.1.5 as `bolt-lilicorr-115` from 3.3.3, with its first token sent before the drafter's first proposal and a turn's last cache mark
 kept at the prompt's end), installed by `spark/build-bolt.sh` from the release archive, the carrier or a source build
 with FFmpeg, libjpeg-turbo and **xgrammar**; the trimmed settings it runs with (4 streams, 65,536 tokens, 2 GiB of
 prompt cache) are the studio's. TensorFold is Ash Hart's and the contributors'; **llama.cpp** (Georgi Gerganov and the

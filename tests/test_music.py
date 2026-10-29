@@ -372,7 +372,7 @@ print("[tensorfold] " + json.dumps({"output": out, "audio_s": 3.0, "ar_s": 20.0,
         music._engine, voice.comfy_up = had, had_up
 
 
-# `music3-generate --model M --weights W --serve 1`, stood in for: TensorFold's CUDA engine (music3-cuda-115 5505dbfa)
+# `music3-generate --model M --weights W --serve 1`, stood in for: TensorFold's CUDA engine (music3-cuda-118 8cd08c83)
 # speaks the Mac engine's protocol, with "engine":"tensorfold-music3-cuda" and "weights" on its ready line
 CUDA_SERVE = r"""
 import json, os, struct, sys, wave

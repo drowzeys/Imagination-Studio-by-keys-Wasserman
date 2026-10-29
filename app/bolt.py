@@ -7,11 +7,11 @@ machine's queue needs its memory, before that job. Four backends, ``BOLT_BACKEND
 
 - ``cuda`` (a DGX Spark, the default on Linux where it is built): TensorFold's native engine, ``tensorfold-native
   serve``, with Mia's Bolt lane backend (libbolt.so and NVIDIA's LiLiCorr drafter): MiaAI-Lab's
-  Nemotron-3.5-Bolt-TensorFold-DGX-Spark recipe (89e1c8a, with ChriZzn's speed work) rebased onto TensorFold 1.1.5,
-  drowzeys/TensorFold branch ``bolt-lilicorr-115``; ``spark/build-bolt.sh`` puts it in ``$PREFIX/bolt`` (a release
+  Nemotron-3.5-Bolt-TensorFold-DGX-Spark recipe (89e1c8a, with ChriZzn's speed work) rebased onto TensorFold 1.1.8,
+  drowzeys/TensorFold branch ``bolt-lilicorr-118``; ``spark/build-bolt.sh`` puts it in ``$PREFIX/bolt`` (a release
   archive pinned by sha256, the carrier, or a build from source). No Docker at run time.
 - ``metal`` (a Mac, the default there when built): TensorFold's Metal port of the same engine (fork branch
-  ``bolt-metal-115`` on TensorFold 1.1.5, a release asset installed by ``scripts/setup-bolt.sh``), the same
+  ``bolt-metal-118`` on TensorFold 1.1.8, a release asset installed by ``scripts/setup-bolt.sh``), the same
   ``tensorfold-native serve`` command line.
 - ``llamacpp`` (a Mac, when ``BOLT_BACKEND`` says so): llama.cpp's ``llama-server`` with NVIDIA's GGUF, until the
   Metal engine lands. Never chosen by itself (a Mac may already run Bolt in a llama.cpp service of its own).
@@ -518,15 +518,15 @@ MODELS = Path(os.environ.get("BOLT_MODELS", Path(os.environ.get("SPARK_MODELS", 
 
 
 class Cuda(Engine):
-    """TensorFold 1.1.5's native engine with Mia's Bolt lane backend on a DGX Spark (``tensorfold-native serve``, Zig +
+    """TensorFold 1.1.8's native engine with Mia's Bolt lane backend on a DGX Spark (``tensorfold-native serve``, Zig +
     CUDA, libbolt.so, NVIDIA's LiLiCorr drafter; no Python, no Docker at run time), from ``$PREFIX/bolt``
-    (spark/build-bolt.sh, branch bolt-lilicorr-115). The Studio's settings, trimmed from Mia's defaults to sit beside renders: 4 streams, a
+    (spark/build-bolt.sh, branch bolt-lilicorr-118). The Studio's settings, trimmed from Mia's defaults to sit beside renders: 4 streams, a
     65,536-token window each, 2 GiB of prompt cache, pictures and video on, thinking off. Measured on a GB10 with
     those settings (3.3.3): 30.7 GB held, 32 to 74 s to answer (files in the page cache or not), 66 tokens a second
     for one stream in chat, 76 on a 600-token plan, 138 on an edit, 204 for four plans at once (the 1.0.12 engine
     before it: 28 GB, 57, 68, 118 and 140)."""
 
-    name, label = "cuda", "TensorFold 1.1.5 CUDA · DGX Spark (Mia's Bolt recipe)"
+    name, label = "cuda", "TensorFold 1.1.8 CUDA · DGX Spark (Mia's Bolt recipe)"
     load_s = 40.0
     # free memory wanted before it loads: Mia's start check for these settings (weights 23, vision 3, recurrent state
     # 2, attention 1, TensorFold's reserve 10, 2, prompt cache 2 GiB)
@@ -605,7 +605,7 @@ class Cuda(Engine):
 
 
 class Metal(Cuda):
-    """TensorFold's Metal port of the Bolt engine on a Mac (fork branch ``bolt-metal-115`` on TensorFold 1.1.5, the same
+    """TensorFold's Metal port of the Bolt engine on a Mac (fork branch ``bolt-metal-118`` on TensorFold 1.1.8, the same
     ``tensorfold-native serve`` command line), from ``$PREFIX/bolt-metal``. Not released yet: until it is built there,
     a Mac runs Bolt through llama.cpp (``Llamacpp``, BOLT_BACKEND=llamacpp). Swapping it in is building it into that
     folder (or naming it with BOLT_BIN) and setting BOLT_BACKEND=metal, or leaving it unset: nothing else changes."""
@@ -626,7 +626,7 @@ class Metal(Cuda):
         return super().present()
 
     def build_hint(self) -> str:
-        return "scripts/setup-bolt.sh (TensorFold's bolt-metal-115 engine, a release download into $PREFIX/bolt-metal)"
+        return "scripts/setup-bolt.sh (TensorFold's bolt-metal-118 engine, a release download into $PREFIX/bolt-metal)"
 
     def setup_hint(self) -> str:
         return "bash oneshot-setup.sh --bolt"

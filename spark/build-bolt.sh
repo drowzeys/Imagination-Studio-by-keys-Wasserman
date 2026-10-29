@@ -1,8 +1,8 @@
 #!/bin/bash
-# NVIDIA Nemotron 3.5 Bolt's engine for a DGX Spark into $PREFIX/bolt: TensorFold 1.1.5's native server
+# NVIDIA Nemotron 3.5 Bolt's engine for a DGX Spark into $PREFIX/bolt: TensorFold 1.1.8's native server
 # (tensorfold-native, Zig + CUDA) with MiaAI-Lab's Bolt lane backend (libbolt.so, which runs NVIDIA's LiLiCorr drafter),
-# drowzeys/TensorFold branch bolt-lilicorr-115 at BOLT_COMMIT: Mia's recipe (MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-
-# DGX-Spark 89e1c8a, MIT, with ChriZzn's speed work) rebased onto TensorFold 1.1.5, its libbolt in zig/bolt-cuda.
+# drowzeys/TensorFold branch bolt-lilicorr-118 at BOLT_COMMIT: Mia's recipe (MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-
+# DGX-Spark 89e1c8a, MIT, with ChriZzn's speed work) rebased onto TensorFold 1.1.8, its libbolt in zig/bolt-cuda.
 # oneshot-setup-spark.sh --bolt runs this; the Studio then runs it as its own brain engine (app/bolt.py, Cuda). Nothing
 # here runs a model, and nothing of Docker runs at run time.
 #   bash spark/build-bolt.sh            # skips when the pinned build is already installed
@@ -16,16 +16,16 @@
 # Environment: PREFIX, BOLT_COMMIT, BOLT_ASSET_URL, BOLT_ASSET_SHA256, IMAGE (the carrier), BOLT_FROM_SOURCE, NVCC.
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
-BOLT_COMMIT="${BOLT_COMMIT:-ecdc78923834c5e4d358432ccbb13809d819ab53}"
-BOLT_ASSET_URL="${BOLT_ASSET_URL:-https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/v3.3.3/bolt-cuda-${BOLT_COMMIT:0:8}-linux-aarch64.tar.gz}"
-BOLT_ASSET_SHA256="${BOLT_ASSET_SHA256:-a6ba33b9a78057c7bbbff4d7a4e93123b6cba1c183850b18e8b31235fdeebd02}"
-CARRIER="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:3.3.0}"
+BOLT_COMMIT="${BOLT_COMMIT:-7d124f36df08a5836d3a5e3e85c19b6d919c70dc}"
+BOLT_ASSET_URL="${BOLT_ASSET_URL:-https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/v4.2.0/bolt-cuda-${BOLT_COMMIT:0:8}-linux-aarch64.tar.gz}"
+BOLT_ASSET_SHA256="${BOLT_ASSET_SHA256:-ed84ec49414d823e9480b88086189f78eefd95d18196a0c29e332b2746698d90}"
+CARRIER="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:4.2.0}"
 ZIG_VERSION=0.17.0
 OUT="$PREFIX/bolt"
 STAMP="$BOLT_COMMIT"
 say() { echo "[tensorfold] $*"; }
 if [ -x "$OUT/native/bin/tensorfold-native" ] && [ -f "$OUT/native/lib/libbolt.so" ] && [ "$(cat "$OUT/recipe" 2>/dev/null)" = "$STAMP" ]; then
-  say "Bolt engine already installed (bolt-lilicorr-115 ${BOLT_COMMIT:0:8})"; exit 0
+  say "Bolt engine already installed (bolt-lilicorr-118 ${BOLT_COMMIT:0:8})"; exit 0
 fi
 # shellcheck disable=SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gpu.sh"
@@ -85,12 +85,9 @@ NVCC="${NVCC:-}"
 done
 [ -n "$NVCC" ] || { rm -rf "$TMP"; echo "no Bolt engine was installed: the release archive and the carrier had none for ${BOLT_COMMIT:0:8}, and there is no nvcc to build it (CUDA 12.9 or newer; NVCC names one)" >&2; exit 1; }
 for tool in git cmake curl make; do command -v "$tool" >/dev/null || { echo "building the Bolt engine needs $tool" >&2; exit 1; }; done
-ZIG="$PREFIX/zig-$ZIG_VERSION/zig"
-if [ ! -x "$ZIG" ]; then
-  say "fetching Zig $ZIG_VERSION"
-  mkdir -p "$PREFIX/zig-$ZIG_VERSION"
-  curl -sfL "https://ziglang.org/download/$ZIG_VERSION/zig-aarch64-linux-$ZIG_VERSION.tar.xz" | tar -xJ --strip-components=1 -C "$PREFIX/zig-$ZIG_VERSION"
-fi
+# Zig, checked against the SHA-256 ziglang.org publishes (spark/zig.sh)
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/zig.sh"
+ZIG="$(studio_zig "$PREFIX")" || exit 1
 SRC="$PREFIX/bolt-src"
 DEPS="$PREFIX/bolt-deps"
 [ -d "$SRC/.git" ] || git init -q "$SRC"

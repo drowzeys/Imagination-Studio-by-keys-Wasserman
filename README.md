@@ -169,13 +169,48 @@ Full recipes, every option and the measured memory of each job: [Install, and th
 design and build the studio in collaboration with Keys, made Wasserman's Filmmaker Suite, and shaped the production side (Slate, the Sharp Spec, Motion Previs). See
 [Big credit: Sam Wasserman and Wasserman Productions](#big-credit-sam-wasserman-and-wasserman-productions-wassermanproductionscom), below the release notes, and [CREDITS.md](CREDITS.md).*
 
-**4.1.2** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
+**4.2.0** · Apple-silicon Macs (measured on a Mac Studio M5 Ultra 256 GB), the NVIDIA DGX Spark, and the NVIDIA RTX Pro
 6000 (96 GB) ·
 [TensorFold](https://github.com/ashhart/TensorFold) **0.6.5** + two families, and TensorFold **1.0**'s native Zig
-runtime for FastH3 on Metal and on CUDA, TensorFold **1.1.5** for the music engines and both Bolt engines:
+runtime for FastH3 on Metal and on CUDA, TensorFold **1.1.8** for MiniMax Music 3 and both Bolt engines (**1.1.5** under YuE2):
 **Qwen 2.1 Turbo**, **Qwen 2.1 Full**, **FLUX3-K Fast** and **FLUX3-K Full** (text to image, and Edit a picture) · **MOSS-Image** (text to image, DGX Spark) · **MiniMax H3**
 (video with sound) · **Fish Audio Drama 3** (Voice) · **YuE2** and **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
+
+## New in 4.2.0 (2026-10-29)
+
+The engines built on TensorFold move from **1.1.5** to **1.1.8**, the latest release, with the same output: Nemotron
+3.5 Bolt on a DGX Spark and on a Mac, and MiniMax Music 3 on both. New prebuilt parts come with it: the carrier
+`ghcr.io/drowzeys/keys-tensorfold-studio:4.2.0` and the release's Bolt archives for CUDA and Metal. To update, run
+`git pull`, then `bash oneshot-setup-spark.sh --upgrade` (or `oneshot-setup-rtx-6000.sh --upgrade`) on Linux or
+`bash oneshot-setup.sh --upgrade` on a Mac, and restart the app. The engine each one replaces stays beside it
+(`bolt.previous`).
+
+- **Bolt on a DGX Spark** (drowzeys/TensorFold `bolt-lilicorr-118`): our LiLiCorr drafter patch on TensorFold 1.1.8.
+  The only conflict was the CUDA family list, where 1.1.6 added Spark-X2.6.
+  - Replies are identical, 7 of 7 greedy prompts in three alternating runs.
+  - Median first token 0.062–0.084 s against 0.064–0.102 s on 1.1.5; 74–82 tokens a second against 73–76.
+  - Memory is the same: 0.27 GiB a stream at 16k tokens.
+  - 1.1.8 also brings `--spill-gib` for Nemotron on CUDA and admission from the shard headers.
+- **Bolt on a Mac** (`bolt-metal-118`): identical replies on 7 of 7 in two passes. The first token came in 0.119 s
+  against 0.126 s, at 134 tokens a second on both, with the same memory. The patch that fixed one Drama 3 seed for
+  every request is dropped: TensorFold 1.1.6 takes a seed with each request instead.
+- **MiniMax Music 3** (`music3-cuda-118`, `music3-metal-118`): the song's bytes are identical on 1.1.5 and 1.1.8 for
+  the same seed.
+  - DGX Spark: 57–58 s for a 20 s int8 song on both, with the same 16.6 GB peak.
+  - Mac: 23.2 s on both.
+- **Kept on their pins:**
+  - **YuE2's decode engine stays on 1.1.5** (`music3-cuda-115`). The engine's GPU test passes on 1.1.8, but a whole
+    song was not timed against it.
+  - **Drama 3 on the DGX Spark stays on its engine** (plotarmordev's NVFP4 lineage, 96 commits on 1.0.7), which
+    is not rebased.
+  - **The H3 engines are unchanged.** The carrier holds the same H3 and Drama 3 builds as 3.3.0.
+- **Zig is checked before it is unpacked, in every build:**
+  - The CUDA builds of Bolt, H3, Music 3 and Drama 3 fetched Zig without a check. They now share `spark/zig.sh`,
+    which checks the archive against the SHA-256 ziglang.org publishes and refuses a mismatch.
+  - The Mac's Music 3 build had an empty checksum and unpacked Zig unverified; it now has the published sum.
+- **No machine paths in the engines.** The CUDA Bolt and Music 3 builds are made under neutral paths: `strings`
+  finds no home folder in any binary, and the archives are packed owner 0/0.
 
 ## New in 4.1.2 (2026-10-28)
 

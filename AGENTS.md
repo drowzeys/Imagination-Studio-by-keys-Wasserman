@@ -1,7 +1,7 @@
 # Agent one-shot — Imagination Studio by keys+Wasserman, powered by TensorFold (Mac + DGX Spark)
 
 **Repo:** https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman  
-**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:3.3.0` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, MiniMax Music 3, Fish Audio Drama 3 and Nemotron 3.5 Bolt). The Mac's native engine and Bolt on Metal also come from the v3.2.0 release (the same engine builds as 3.1.0)  
+**Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:4.2.0` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, MiniMax Music 3, Fish Audio Drama 3 and Nemotron 3.5 Bolt). The Mac's native engine also comes from the v3.2.0 release (the same engine build as 3.1.0), and Bolt on Metal from the v4.2.0 release  
 **Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2b592fe`, own venv, int8 tensor-unit kernels
 
 ```bash
@@ -271,7 +271,7 @@ Rules:
   song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a
   Mac it is TensorFold's MLX port (`music3-mlx`, pinned in `scripts/setup-music.sh`, `oneshot-setup.sh --music`) as a
   persistent `--serve` process (`music.Mlx`, voice's `Served`); on a DGX Spark TensorFold's CUDA port
-  (`music3-generate --serve 1`, branch `music3-cuda-115` 5505dbfa, the family on TensorFold 1.1.5, `spark/build-music3.sh` into `$PREFIX/music3`, carried
+  (`music3-generate --serve 1`, branch `music3-cuda-118` 8cd08c83, the family on TensorFold 1.1.8 since 4.2.0, `spark/build-music3.sh` into `$PREFIX/music3`, carried
   prebuilt in the carrier's `spark-music3`; `music.Cuda`, the same `Served` protocol; int8 by default, `MUSIC3_WEIGHTS=bf16`;
   `MUSIC3_CUDA_BIN`, `MUSIC3_MODEL`) where its binary and the weights are, else ComfyUI's own nodes through
   `spark_generate.py music` (`music_workflow`, the blueprint's layout), never standalone code; `MUSIC3_BACKEND=cuda|comfy`
@@ -298,10 +298,10 @@ Rules:
   unloaded), and no idle unload runs while a turn is open (`bolt.turn`). Do not make the render wait for the turn: the
   turn waits for its clip in `wait_for_jobs`, so that deadlocks. It never takes `~/studio-gpu.lock.d` (a resident brain
   must not hold the updater or the render scripts). `BOLT_BACKEND=cuda|metal|llamacpp|external`: `cuda` is Mia's
-  recipe (MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark 89e1c8a, MIT) rebased onto TensorFold 1.1.5 (drowzeys/TensorFold
-  `bolt-lilicorr-115`, since 3.3.3), installed by `spark/build-bolt.sh` into `$PREFIX/bolt` (the previous engine kept in
+  recipe (MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark 89e1c8a, MIT) rebased onto TensorFold 1.1.8 (drowzeys/TensorFold
+  `bolt-lilicorr-118`, since 4.2.0; `bolt-lilicorr-115` on 1.1.5 from 3.3.3), installed by `spark/build-bolt.sh` into `$PREFIX/bolt` (the previous engine kept in
   `$PREFIX/bolt.previous`), never run in Docker; `metal` is TensorFold's Metal port (branch
-  `bolt-metal-115` on TensorFold 1.1.5 since 3.3.1, same command line), installed into `$PREFIX/bolt-metal` by `scripts/setup-bolt.sh`; `llamacpp` only when set (a Mac may
+  `bolt-metal-118` on TensorFold 1.1.8 since 4.2.0, same command line), installed into `$PREFIX/bolt-metal` by `scripts/setup-bolt.sh`; `llamacpp` only when set (a Mac may
   run Bolt in its own llama.cpp service). The engine serves when the brains' address is empty or `studio:bolt`; a
   typed address stays external. Weights: NVIDIA's checkpoint a326822a and LiLiCorr drafter 4c6a5613
   (`scripts/setup-bolt.sh`, `--bolt`), OpenMDW 1.1. `NEED_GB`, `RESIDENT_GB` and `MAC_PEAK_GB` are measurements:
