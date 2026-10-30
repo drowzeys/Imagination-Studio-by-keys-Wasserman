@@ -17,6 +17,13 @@ import server  # noqa: E402
 import telemetry  # noqa: E402
 
 
+def test_importing_the_app_does_not_stop_comfy_on_its_own():
+    """Only the running app (register_session_stop, in __main__) stops ComfyUI or drains managed work at shutdown."""
+    assert server.stop_session_comfy not in server.app.router.on_shutdown
+    assert server.stop_local_jobs not in server.app.router.on_shutdown
+    assert not [callback for callback in server.app.router.on_shutdown if getattr(callback, "__qualname__", "").startswith("register_session_stop")]
+
+
 def test_quitting_stops_this_installs_comfy(monkeypatch, capsys):
     calls = []
 

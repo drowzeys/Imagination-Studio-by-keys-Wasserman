@@ -3210,8 +3210,9 @@ if not LOCAL_GPU_CHILD:
     app.router.on_startup.append(updater.start)
     app.router.on_shutdown.append(updater.stop.set)
 if hasattr(app.router, "on_shutdown"):
-    app.router.on_shutdown.append(bolt.shutdown)  # the brain server belongs to this app session
-    app.router.on_shutdown.append(hub.close)
+    # the Studio's Bolt engine ends with the app (its leash also sees the pipe close)
+    app.router.on_shutdown.append(bolt.shutdown)
+    app.router.on_shutdown.append(hub.close)  # the tunnels to the workers are this app's: closed with it (and at exit, sparks.py)
 import telemetry  # noqa: E402  (this machine's readings for the status bar: GPU, memory, disk, queue, beside this file)
 TELEMETRY = telemetry.attach(HOME, jobs, order, lock, memory_guard, engines=lambda: {"bolt": bolt.summary()})
 app.include_router(TELEMETRY)
