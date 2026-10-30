@@ -620,7 +620,7 @@ nav#rooms button.on, #subtabs button.on { animation:tally-pill 7s ease-in-out in
   aside#side { top:auto; right:0; width:auto; height:calc(var(--rail) + env(safe-area-inset-bottom,0px)); border-right:0; border-top:1px solid var(--line2); flex-direction:row; padding-bottom:env(safe-area-inset-bottom,0px); }
   .brand, .sidefoot { display:none; }
   nav#rooms { flex-direction:row; overflow:hidden; padding:6px 6px; gap:2px; align-items:stretch; }
-  nav#rooms .grp, nav#rooms button[data-group="vaults"], nav#rooms button[data-group="agent"] { display:none; }
+  nav#rooms .grp, nav#rooms button[data-group="vaults"], nav#rooms button[data-group="agent"], nav#rooms button[data-group="apps"] { display:none; }
   nav#rooms button[data-fold="more"] { display:none; }  /* the engines' rooms of their own are in More */
   nav#rooms button, nav#rooms button.more { display:flex; flex:1 1 0; min-width:0; width:auto; height:48px; flex-direction:column; gap:4px; justify-content:center; padding:0; font-size:11.5px; }
   nav#rooms button .lbl { display:block; flex:none; }
@@ -959,3 +959,25 @@ nav#rooms .grp.g-engines::after, nav#rooms .grp.g-vaults::after { content:""; fl
 .key-steps { display:grid; gap:16px; } .key-step { display:flex; flex-direction:column; gap:8px; padding:14px; border:1px solid var(--line); border-radius:var(--r1); }
 .key-qr { background:#fff; padding:10px; border-radius:8px; width:max-content; } .key-qr svg { display:block; width:200px; height:200px; }
 .key-shown { font:500 13px var(--mono); overflow-wrap:anywhere; }
+
+/* Apps (apps.js): the gallery of one-click apps, the models it runs on, and the take a Library action asks for */
+nav#rooms button[data-room="apps"] { margin-bottom:6px; }
+.apps .pagehead { align-items:end; }
+.ap-count { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; padding:10px 16px; border:1px solid var(--line); border-radius:var(--r2); background:var(--raise); }
+.ap-count b { font:600 22px/1 var(--mono); color:var(--amber); } .ap-count span { font:500 12px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+.ap-count .ap-n { white-space:nowrap; } .ap-count i { width:1px; height:18px; background:var(--line2); margin:0 6px; align-self:center; }
+.ap-built { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; margin:-6px 0 22px; color:var(--dim); font-size:14px; }
+.ap-built .eyebrow { color:var(--faint); }
+.apps .looksbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+.apps .ap-sec .sectionhead { margin-top:36px; }
+.apps-grid { grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); }
+.apps-grid .pcard span.one { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.ap-need { position:absolute; right:12px; top:12px; z-index:1; font:500 12px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--amber-ink); background:var(--amber); padding:4px 8px; border-radius:4px; }
+.appick { margin-top:18px; border-color:var(--amber-muted); }
+.appick .strip2 { margin-top:12px; } button.appick-t { padding:0; text-align:left; color:var(--text); }
+button.appick-t:hover { border-color:var(--amber-muted); }
+@media (max-width:720px) { .ap-count { width:100%; } .apps .looksbar .seg-ctl { width:100%; } .apps-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .apps-grid .pcard span.one { display:none; } .apps-grid .pcard .txt { padding:10px 12px; } .apps-grid .pcard b { font-size:15px; } }
+.apps-grid .pcard.ap-icon .art { background:radial-gradient(ellipse at 50% 60%, var(--amber-wash, rgba(241,173,102,.12)), transparent 70%), var(--bg2); }
+.apps-grid .pcard.ap-icon .art > img { position:static; width:auto; height:58%; aspect-ratio:1; object-fit:contain; border-radius:22%; box-shadow:0 12px 32px rgba(0,0,0,.45); }
+.apps-grid .pcard.ap-icon .art::after { display:none; }

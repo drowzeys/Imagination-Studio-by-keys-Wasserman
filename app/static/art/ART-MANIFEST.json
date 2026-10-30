@@ -472,6 +472,46 @@
    "aspect": "16:9",
    "purpose": "cover of the Night shift page: a batch rendered overnight",
    "ready": true
+  },
+  {
+   "name": "app-captions",
+   "file": "art/app-captions.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Apps: Captions, a clip's speech burned in word by word",
+   "ready": true
+  },
+  {
+   "name": "app-titles",
+   "file": "art/app-titles.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Apps: Titles & motion graphics",
+   "ready": true
+  },
+  {
+   "name": "app-restyle",
+   "file": "art/app-restyle.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Apps: Restyle a clip, the same motion in a new look",
+   "ready": true
+  },
+  {
+   "name": "app-fix",
+   "file": "art/app-fix.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Apps: Fix one thing in a clip",
+   "ready": true
+  },
+  {
+   "name": "app-extend",
+   "file": "art/app-extend.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "Apps: Extend a clip from its last frame",
+   "ready": true
   }
  ]
 }

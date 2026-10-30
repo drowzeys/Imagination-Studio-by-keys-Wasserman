@@ -147,13 +147,13 @@ def test_every_tab_has_one_room_and_old_links_still_work():
       go("Voice"); out.voice = tab; goRoom("edit"); out.edit = tab; goRoom("library"); out.lib = tab; go("Nowhere"); out.still = tab; out.names = TABS.map(t => TAB_NAMES[t] || "");
       C.goes = "video"; out.createVideo = roomOf("Create").id; C.goes = "edit"; out.createEdit = roomOf("Create").id; C.goes = "image"; out.createImage = roomOf("Create").id;
       out.keys = ROOMS.map(r => r.key);""")
-    assert out["rooms"] == ["Video", "Image", "Sound", "Story", "Cast & Places", "Director", "Previs", "Motion graphics", "Edit", "Night shift", "Agent", "Library", "Looks", "Wasserman's Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings"]
-    assert out["groups"] == ["Creative Engines:Video,Image,Sound,Story,Cast & Places,Director,Previs,Motion graphics,Edit,Night shift", ":Agent", "Studio Vaults:Library,Looks,Wasserman's Filmmaker Suite,Nodes,Machine,Learn,Settings"]
+    assert out["rooms"] == ["Apps", "Video", "Image", "Sound", "Story", "Cast & Places", "Director", "Previs", "Motion graphics", "Edit", "Night shift", "Agent", "Library", "Looks", "Wasserman's Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings"]
+    assert out["groups"] == [":Apps", "Creative Engines:Video,Image,Sound,Story,Cast & Places,Director,Previs,Motion graphics,Edit,Night shift", ":Agent", "Studio Vaults:Library,Looks,Wasserman's Filmmaker Suite,Nodes,Machine,Learn,Settings"]
     assert out["homeless"] == ["Home", "Create"]  # home sits outside the rooms; Create is in Image and in Video
     assert (out["createVideo"], out["createEdit"], out["createImage"]) == ("video", "image", "image")
     assert out["voice"] == "Voice" and out["edit"] == "Edit" and out["lib"] == "Library" and out["still"] == "Library"
     assert all(out["names"])
-    assert out["keys"] == ["1", "2", "3", "4", "", "", "5", "", "6", "", "", "7", "8", "9", "", "0", "", ","]  # ⌥1 to ⌥9, ⌥0 and ⌥, for Settings
+    assert out["keys"] == ["", "1", "2", "3", "4", "", "", "5", "", "6", "", "", "7", "8", "9", "", "0", "", ","]  # ⌥1 to ⌥9, ⌥0 and ⌥, for Settings
 
 
 def test_the_sidebar_shows_both_groups_and_marks_the_room():

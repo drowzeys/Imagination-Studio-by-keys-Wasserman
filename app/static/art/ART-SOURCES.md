@@ -91,3 +91,14 @@ Sam Wasserman's own custom artwork for the engines, the start and action cards a
 Sam Wasserman's own art: art/vault-library.webp, art/vault-looks.webp, art/vault-suite.webp, art/vault-nodes.webp, art/vault-agent.webp.
 Sam Wasserman's own art: art/engine-cast.webp (Cast & Places), art/engine-director.webp (Director), art/engine-night.webp
 (Night shift) and art/looks/realism-people.webp (the Realism People card in Looks).
+
+## Apps key art
+
+Generated for the Apps room on 2026-10-29 with the image generation of Sam Wasserman's ChatGPT desktop app, in the
+style of the key art above. Invented content only.
+
+- art/app-captions.webp: an old television on a desk at dusk, a close-up of an actor with a subtitle on the screen
+- art/app-titles.webp: glowing title-card bars floating in a hazy soundstage, one amber lamp
+- art/app-restyle.webp: one film frame on a desk, half rainy street at night, half painted
+- art/app-fix.webp: a loupe over a 35mm film strip, one frame lit amber
+- art/app-extend.webp: a film strip unspooling off a reel along an editing bench at night

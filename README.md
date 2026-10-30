@@ -177,6 +177,23 @@ runtime for FastH3 on Metal and on CUDA, TensorFold **1.1.8** for MiniMax Music 
 (video with sound) · **Fish Audio Drama 3** (Voice) · **YuE2** and **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
+## New in 4.3.0 (2026-10-29)
+
+**Apps**, a new room at the top of the sidebar: every tool of the Studio as a one-click app. The engines are the
+same as 4.2.1's; to update, `git pull` and reload the page.
+
+- **Nine kinds:** Cinema, Characters, Camera, Effects, Styles, Sound, Finish, Filmmaker Suite and Studio, with a
+  search box. Each app opens the Studio's own form with its model, LoRA or start already chosen. See
+  [Apps](#apps).
+- **Nothing to set up:** a LoRA app that is not installed yet opens Looks on that LoRA; a Library action (Character
+  Swap, Restyle, Fix, Extend, Remove a person, Upscale, Captions, Turnaround) asks for the clip or picture first,
+  from your newest takes; what this machine cannot run says why on its card. Every app is also in ⌘K.
+- **Character Swap · Openjutsu:** the swap is named for what it is, Comfy Org's Openjutsu made inside the studio and
+  fully local, and is found by searching Openjutsu or Genjutsu.
+- **Wasserman's Filmmaker Suite** gets a card for each of its apps, with its own icon and what it does.
+- **YuE2's own mark** sits beside its name in Music and in Apps, as the other models' marks do.
+- New key art for Captions, Titles, Restyle, Fix and Extend.
+
 ## New in 4.2.1 (2026-10-29)
 
 No build machine's folders or user name ship in a prebuilt engine any more. Three CUDA binaries in the carrier, built
@@ -1981,6 +1998,15 @@ step; this updater never downloads weights, changes memory guards, or runs setup
 
 ## Using the studio
 
+### Apps
+
+**Apps**, at the top of the sidebar, is every tool of the Studio as a one-click app, in nine kinds: Cinema,
+Characters, Camera, Effects, Styles, Sound, Finish, Filmmaker Suite and Studio. Search by name or pick a kind. An app
+opens the Studio's own form with its model, LoRA or start already chosen. A LoRA app that is not installed yet opens
+Looks on that LoRA (Install, then open the app again); a Library action (Character Swap, Restyle, Fix, Extend, Remove
+a person, Upscale, Captions, Turnaround) asks for the clip or picture first, from your newest takes. What this machine
+cannot run says why on its card. Every app is also in ⌘K.
+
 ![Create: text to video with FastH3](samples/ui_create_fasth3.png)
 
 Step 1 of **Create** is where every choice lives. Pick one card in each row; the bar under them shows what will run
@@ -2381,7 +2407,10 @@ returns the first job and `revise`, the steps so far; `GET /api/revise/<id>` fol
 
 *Swap the character* under a clip in the Library replaces the person in a part of the clip with the character in one
 picture. The scene, the performance and the clip's own sound stay: the person's moves, gaze and timing carry over, the
-room and the other people are the clip's own, and the part keeps its soundtrack.
+room and the other people are the clip's own, and the part keeps its soundtrack. It is Comfy Org's
+[Openjutsu](https://github.com/Comfy-Org/comfy-openjutsu) (MIT) made inside the studio, on ComfyUI's own nodes and
+fully local: FLUX3-K draws the first frame where Openjutsu used a paid picture service. In Apps it is
+**Character Swap · Openjutsu**.
 
 ![Character Swap in the Library: the clip, the character's picture, the part, Fast or High, the first-frame switch, a direction and the licence line](docs/screenshots/character-swap.webp)
 
