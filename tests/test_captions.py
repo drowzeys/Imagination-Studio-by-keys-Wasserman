@@ -156,3 +156,36 @@ def test_a_png_goes_to_the_vision_model_as_a_png(tmp_path, monkeypatch):
         captions._vision(tmp_path / name, "http://127.0.0.1:9", "a-model")
     urls = [one["messages"][0]["content"][1]["image_url"]["url"] for one in sent]
     assert urls[0].startswith("data:image/png;base64,") and urls[1].startswith("data:image/jpeg;base64,")
+
+
+def test_a_bolt_without_vision_is_not_loaded_for_a_caption(tmp_path, monkeypatch):
+    """The Metal Bolt (no vision tower) is never started for a caption: the round stops quietly instead (Busy), so an
+    idle Bolt stays unloaded. With a vision tower the engine is asked as before."""
+    import bolt
+
+    asked = []
+
+    class Engine:
+        vision = False
+
+        def request(self, stopped=None, wait=True, say=None):
+            asked.append(wait)
+            raise AssertionError("loaded for a caption")
+
+    blind = Engine()
+    monkeypatch.setattr(qa, "default_brain", lambda: {"endpoint": bolt.ENDPOINT, "model": ""})
+    monkeypatch.setattr(qa, "bolt_engine", lambda endpoint: bolt)
+    monkeypatch.setattr(bolt, "engine", lambda: blind)
+    (tmp_path / "still.png").write_bytes(b"picture")
+    try:
+        captions.ask_model(tmp_path / "still.png")
+        raise AssertionError("no Busy")
+    except captions.Busy as busy:
+        assert "no vision tower" in str(busy)
+    assert asked == []
+
+    import contextlib
+    blind.vision = True
+    blind.request = lambda stopped=None, wait=True, say=None: (asked.append(wait), contextlib.nullcontext("http://127.0.0.1:9/v1"))[1]
+    monkeypatch.setattr(captions, "_vision", lambda picture, live, model: f"{live} {model}")
+    assert captions.ask_model(tmp_path / "still.png") == "http://127.0.0.1:9/v1 " + bolt.SERVED and asked == [False]
