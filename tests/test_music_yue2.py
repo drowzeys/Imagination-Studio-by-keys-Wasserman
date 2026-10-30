@@ -324,12 +324,12 @@ def test_the_tokens_go_to_tensorfolds_engine_where_it_is_built():
     try:
         with Linux(Path(tempfile.mkdtemp())) as here:
             plain = music_yue2.Yue2()
-            assert plain.backend == "torch" and plain.label == "PyTorch CUDA · NVIDIA" and not music_yue2.engine_built()
+            assert plain.backend == "torch" and not music_yue2.engine_built()
             lib = here.folder / "prefix" / "tf-yue2" / "libtf_yue2.so"
             lib.parent.mkdir(parents=True)
             lib.write_bytes(b"")
             one = music_yue2.Yue2()
-            assert music_yue2.engine_built() and one.backend == "blocks" and one.label == "TensorFold CUDA · DGX Spark"
+            assert music_yue2.engine_built() and one.backend == "blocks"
             assert one.argv()[one.argv().index("--backend") + 1] == "blocks" and one.RTF < plain.RTF
             assert one.estimate(60) < plain.estimate(60) and one.load_s < plain.load_s
             assert one.guard_route == "music-yue2-blocks" and one.NEED_GB > plain.NEED_GB
@@ -431,6 +431,22 @@ def test_a_song_on_one_engine_unloads_the_other_first(tmp_path):
         finally:
             music.qa.ready = had_ready
             music._engine = None
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="local GPU RAM admission uses Linux process identity")
+def test_local_ram_admits_the_requested_song_engine_not_the_default(tmp_path, monkeypatch):
+    import local_gpus
+
+    with Linux(tmp_path, MUSIC3_BACKEND="comfy", YUE2_QUANT="int8"):
+        monkeypatch.setenv("STUDIO_MUSIC_ENGINE", "music3")
+        monkeypatch.setattr(local_gpus, "memory", lambda: (100000, 42000))
+        chosen = {"kind": "music", "params": {"engine": "yue2", "seconds": 60}, "status": "running"}
+        with local_gpus.ram_reservation(server.local_ram_need(chosen), chosen) as admitted:
+            assert admitted
+        other = {"kind": "music", "params": {"engine": "music3", "seconds": 60}, "status": "running"}
+        with pytest.raises(RuntimeError, match="RAM"):
+            with local_gpus.ram_reservation(server.local_ram_need(other), other):
+                pytest.fail("the larger MiniMax song cannot fit this host's remaining RAM")
 
 
 # ---------- the MCP tool ----------

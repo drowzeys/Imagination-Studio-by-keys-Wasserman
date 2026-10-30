@@ -112,7 +112,7 @@ def test_a_slot_in_bars_becomes_the_clip_length_that_covers_it():
         assert slate.song_of({"tf": {"song": bad}}) is None or bad.get("beatsPerBar") == 0 and slate.song_of({"tf": {"song": bad}})["beats"] == 4
 
 
-def test_a_shots_own_lora_goes_into_its_plan_and_through_the_memory_guard():
+def test_a_shots_own_lora_goes_into_its_plan_and_through_the_memory_guard(spark_memory):
     made = music_video()
     made["scenes"][0]["shots"][0]["tf"]["loras"] = [{"id": "camera-motion", "strength": 0.9, "style": "Orbit"}, {"id": ""}, "junk"]
     plan = slate.compile_shot(made, "shot-1")["plan"]

@@ -202,9 +202,9 @@ Rules:
   there and nobody knows why from its logs. Never merge a LoRA into the saved `.tf-int8` copy. Raise them only by measuring from below on a worker Spark, in small steps,
   under a second watchdog that kills your own server at 25 GB available; never by trying the size that failed, and
   never on a machine with `vm.panic_on_oom=1`. Do not lower the floor to make a job fit.
-- More than one DGX Spark (`app/sparks.py`, `app/static/sparks.js`, `docs/multi-spark.md`): a job's `sparks` (1 to
-  `LIMIT`, 8) is how many machines it may use, this one counted; the app uses what is there and says so. Only single
-  clips (`video` jobs) go to a worker, one per Spark at a time, through the worker's own job API over an ssh tunnel
+- More than one DGX Spark (`app/sparks.py`, `app/static/sparks.js`, `docs/multi-spark.md`): a job's `sparks` counts
+  participants including the head. The remote-only limit is `LIMIT`, 5; local workers can raise the combined chooser
+  to 8. Only single clips (`video` jobs) go to a worker, one per worker at a time, through its own job API over an ssh tunnel
   the app opens and closes itself: a worker's app listens on its own 127.0.0.1 and is never opened to the network, and
   nothing here runs as root, edits `/etc` or shares a folder. A worker renders only with this Spark's code (the files
   of `CODE`, compared by hash; *Update and start* sends them with rsync) and its own memory guard, which is asked
@@ -217,6 +217,26 @@ Rules:
   a Spark the Mac reaches that logs in to the worker with its own key (`Relay`: a socket in `~/.cache/studio-sparks`
   there, ended with the Mac's ssh or its heartbeat). Never add the Mac's key to a worker for it, and never open the
   relay to a network.
+- Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
+  explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
+  queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers
+  need explicit consent. An unticked but running worker still occupies a slot. Never kill a process merely because
+  its port, GPU or PID matches: private launch identity
+  and PID/start identity are required. Local child APIs require their private key even on loopback; never expose it
+  in public state, URLs or logs. Children do not start workers, schedules, discovery, captions or source updates.
+  Core runtime and weights are shared; worker homes and optional LoRA registries remain separate.
+  Start shared-RAM admission only with a running local worker, preserving the single-card queue. Honor
+  `memory_guard.floor_mb` / `SPARK_MEMORY_FLOOR_MB` and measured peak/error budgets. The plain int8 video host envelope
+  is measured separately on a 96 GB card; outside its bounds retain the conservative unified estimate.
+  Credit only identity-validated processes' anonymous PSS with an exact matching `comfy.kind` or private native
+  model/weight-route marker, never file cache or unrelated processes. Recompute each active reservation's outstanding
+  growth; unknown kinds run exclusively with FIFO admission. Fail impossible or stalled admission instead of waiting forever. Default leases/ledger use
+  `~/.cache/studio-gpus` regardless of `XDG_RUNTIME_DIR`; explicit overrides must agree between Studios.
+  Cancel and drain detached owned running work before releasing ownership; keep queued Director takes intact.
+  Shutdown has a deadline and retains leases for undrained work; successful jobs keep model servers warm.
+  Required placement never falls back; saved placement applies only to video, and preflight asks the selected worker.
+  Tests isolate GPU runtime directories and inventory; actual hardware probes require `STUDIO_TEST_HARDWARE=1`.
+  Three/four-card cases are deterministic simulations, not physical throughput measurements.
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
   cloud API. `DRAMA3_BACKEND=mlx|cuda` (`mlx` on a Mac, `cuda` on a DGX Spark). Both engines run as a persistent

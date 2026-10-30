@@ -98,6 +98,9 @@ def studio(tmp_path, monkeypatch):
                      {"path": "renders/shot_b.mp4", "in": 0, "out": 0, "duration": 5.0},
                      {"path": "renders/mute_c.mp4", "in": 2.0, "out": 4.0, "duration": 5.0}]}))
     monkeypatch.setattr(finish, "probe", seen)
+    font = tmp_path / "TestSerif.ttf"
+    font.write_bytes(b"stand-in font for the stand-in Tesseract")
+    monkeypatch.setattr(finish, "font_files", lambda: {"title": str(font), "text": str(font)})
     tool, log = stand_in(tmp_path)
     monkeypatch.setattr(finish, "ready", lambda fresh=False: {"ok": True, "where": "here", "path": str(tool), "version": "0.4.0",
                                                               "converter": {"ok": False}, "linux": False, "ffmpeg": None})
@@ -187,8 +190,10 @@ def test_the_job_command_and_what_is_refused(studio):
 
 
 def test_a_finish_job_runs_tesseract_and_writes_every_file(studio):
-    job = client.post("/api/jobs", json={"kind": "finish", "title": "Finish: Night Drive",
-                                         "params": {"project": "film1", "title": {"text": "Night Drive"}}}).json()
+    response = client.post("/api/jobs", json={"kind": "finish", "title": "Finish: Night Drive",
+                                             "params": {"project": "film1", "title": {"text": "Night Drive"}}})
+    assert response.status_code == 200, response.text
+    job = response.json()
     ends = time.time() + 60
     while time.time() < ends:
         job = client.get(f"/api/jobs/{job['id']}").json()

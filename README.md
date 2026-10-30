@@ -66,6 +66,17 @@ STUDIO_HOME=/data/studio/ImaginationStudio STUDIO_GPU=1 \
 bash scripts/app.sh
 ```
 
+**One to four local GPUs:** open **Machine → Sparks** to see each NVIDIA card's own VRAM, utilization,
+temperature, power and display status. The Studio manages its head GPU plus up to three local workers, sharing
+the installed runtime and core weights but isolating their processes, ports and studio folders. No localhost SSH
+setup is needed. Choose a required or preferred video worker to keep independent clips on another card; pictures,
+voice and music remain assigned to the head. Starting an extra worker enables shared host-RAM admission; a lone
+card retains its existing queue and shutdown behavior. VRAM is not pooled and no render is split. Measured plain
+int8 clips have a separate host-RAM budget; unknown GPU work remains exclusive, so not every job overlaps.
+Setup, adapter availability and the two-card smoke evidence:
+[Local GPUs](docs/rtx-pro-6000.md#one-to-four-local-gpus). Remote Spark behavior and limits remain separate:
+[Workers](docs/multi-spark.md).
+
 Ctrl-C in that terminal stops the app and the ComfyUI for this install, and the card is freed. The same quit works
 on a DGX Spark. ComfyUI stays loaded between clips while the app is running. To free the card and leave the app up,
 run this from the repo. `PREFIX` is this install. `STUDIO_GPU` is required when more than one GPU is not driving a

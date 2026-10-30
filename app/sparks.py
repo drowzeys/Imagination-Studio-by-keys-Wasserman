@@ -38,6 +38,7 @@ qualities or a text encoder file of the Mac's (capable).
 from __future__ import annotations
 
 import atexit
+import functools
 import hashlib
 import json
 import math
@@ -60,6 +61,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 import remote
+import local_gpus
 
 LIMIT = 5        # the most Sparks a job may ask for: five, the Sparks there are and the most that have been measured
 PORT = 7870      # a worker's app, on its own 127.0.0.1
@@ -364,7 +366,10 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     elif info.get("qualities") is not None and params.get("quality") and params["quality"] not in info["qualities"]:
         return (f"the {params['quality']} quality is MiniMax H3 Turbo, which is not on that machine: a Spark renders FastH3 "
                 "(fh4, fh8, fh20)")
-    missing = [str(one.get("id")) for one in params.get("loras") or [] if isinstance(one, dict) and one.get("id") not in (info.get("loras") or [])]
+    adapters = params.get("loras")
+    if not isinstance(adapters, (list, tuple)):
+        adapters = []
+    missing = [str(one.get("id")) for one in adapters if isinstance(one, dict) and one.get("id") not in (info.get("loras") or [])]
     if missing:
         return "the LoRA " + ", ".join(missing) + " is not installed there"
     encoder = params.get("text_encoder")
@@ -383,6 +388,20 @@ def here_only(kind: str, params: dict) -> str:
     if kind not in KINDS:
         return "Pictures, edits, Library actions and exports render on this Spark: only clips are handed to other Sparks."
     return ""
+
+
+def estimate_params(params: dict) -> dict:
+    """The worker estimate API takes counts/route flags, not uploaded media paths."""
+    references = params.get("references") or 0
+    if isinstance(references, (list, tuple)):
+        references = len(references)
+    return {**{key: params.get(key) for key in ("preset", "quality", "frames", "seconds", "width", "height", "steps", "text_encoder", "ref_turbo")},
+            "with_lora": bool(params.get("with_lora") or params.get("loras")),
+            "referenced": bool(params.get("referenced") or references or params.get("reference_videos") or params.get("reference_audios")),
+            "text_only": bool(params["text_only"]) if "text_only" in params else not bool(params.get("image") or params.get("first_frame_from")),
+            "ref_media": bool(params.get("ref_media") or params.get("reference_videos") or params.get("reference_audios")),
+            "loras": bool(params.get("loras") or params.get("with_lora")),
+            "references": references, "placement": {"worker": "head", "policy": "require"}}
 
 
 def speedup(used: int, clips: int) -> tuple[float, bool]:
@@ -452,6 +471,8 @@ class Hub:
         # workers that can take it, instead of failing here
         self.fits_here = lambda job: True
         self.started = False
+        self.local = local_gpus.Manager(home, pack)
+        self.closing = False
 
     # ---- the list ---------------------------------------------------------------------------------------------
 
@@ -462,6 +483,18 @@ class Hub:
             found = {}
         found.setdefault("workers", [])
         found.setdefault("sparks", 1)
+        found.setdefault("placement", None)
+        for worker in found["workers"]:
+            worker.setdefault("kind", "ssh")
+        found["workers"] = self.local.reconcile(found["workers"])
+        local_rows = [worker for worker in found["workers"] if worker.get("kind") == "local"]
+        if local_rows:
+            devices = {device["gpu_uuid"]: device for device in local_gpus.inventory()["devices"]}
+            for worker in local_rows:
+                if device := devices.get(worker["gpu_uuid"]):
+                    # Names follow the cached inventory immediately; labels.json
+                    # remains the person's separate, stable display override.
+                    worker["name"] = f"GPU {device['index']} · {device['name']}"
         return found
 
     def keep(self, found: dict) -> None:
@@ -502,8 +535,122 @@ class Hub:
             return found.get("head") or found.get(self.name) or self.name
         return found.get(worker["address"]) or found.get(worker.get("name") or "") or worker.get("name") or worker["address"]
 
+    def serialized(self, action):
+        """Configuration RMW and local lifecycle share one reentrant transaction lock."""
+        @functools.wraps(action)
+        def perform(*args, **kwargs):
+            with self.local.mutex:
+                if self.closing:
+                    raise HTTPException(503, "this Studio is closing")
+                return action(*args, **kwargs)
+        return perform
+
     def workers(self) -> list[dict]:
         return self.config()["workers"]
+
+    def chooser_limit(self) -> int:
+        return LIMIT + min(local_gpus.LIMIT - 1, sum(w.get("kind") == "local" for w in self.workers()))
+
+    def placement(self, value=None, *, kind: str = "video") -> dict | None:
+        """Normalize a top-level target. Only video inherits the saved video default."""
+        if value is None:
+            value = self.config().get("placement") if kind == "video" else None
+        if value is None:
+            return None
+        if not isinstance(value, dict) or set(value) != {"worker", "policy"}:
+            raise HTTPException(400, "Choose a render worker and whether to Require or Prefer it.")
+        target, policy = value["worker"], value["policy"]
+        if policy not in ("require", "prefer") or not isinstance(target, str):
+            raise HTTPException(400, "Choose a render worker, then Require it or Prefer it.")
+        if target != "head" and not any(w["address"] == target for w in self.workers()):
+            raise HTTPException(400, "That render worker is no longer in the list. Choose another worker.")
+        if target != "head" and kind not in KINDS:
+            raise HTTPException(400, "Only single video clips can render on another worker.")
+        return {"worker": target, "policy": policy}
+
+    def estimate_worker(self, params: dict, placement) -> dict | None:
+        """Ask the selected worker's own per-device guard, never this host's other GPU."""
+        if placement is None:
+            return None  # caller already normalized the actual job kind
+        selected = self.placement(placement)
+        if not selected or selected["worker"] == "head":
+            return None
+        worker = next(w for w in self.workers() if w["address"] == selected["worker"])
+        if worker.get("kind") == "local":
+            device = next((d for d in local_gpus.inventory()["devices"] if d["gpu_uuid"] == worker["gpu_uuid"]), None)
+            if device:
+                self.refresh_local_name(worker, device)
+        live = self.state(worker["address"])
+        why = self.usable(worker) or ("the selected worker is busy" if live["job"] or live["state"] == "busy" else "")
+        info = live["info"]
+        incapable = capable("video", params, info, self.spark) if info else ""
+        if incapable and selected["policy"] == "require":
+            return {"worker": {"address": worker["address"], "name": self.label_of(worker)},
+                    "memory": {"fits": False, "reason": "The required worker cannot render this clip: " + incapable},
+                    "waiting": False}
+        why = why or incapable
+        if why:
+            if selected["policy"] == "prefer":
+                return None
+            return {"worker": {"address": worker["address"], "name": worker.get("name") or worker["address"]},
+                    "memory": {"fits": None, "reason": "Waiting for required worker: " + why}, "waiting": True}
+        try:
+            result = call(self.connect(worker["address"]), "/api/estimate", estimate_params(params))
+            if selected["policy"] == "prefer" and (result.get("memory") or {}).get("fits") is False:
+                return None
+        except (OSError, Refused) as error:
+            if selected["policy"] == "prefer":
+                return None
+            raise HTTPException(503, "Required worker estimate is unavailable: " + str(error)[-160:]) from None
+        return {**result, "worker": {"address": worker["address"], "name": worker.get("name") or worker["address"]}}
+
+    def local_action(self, body: dict) -> dict:
+        with self.local.mutex:
+            return self._local_action(body)
+
+    def _local_action(self, body: dict) -> dict:
+        address, action = body.get("gpu"), body.get("action")
+        if self.closing:
+            raise HTTPException(503, "this Studio is closing")
+        if self.local.child:
+            raise HTTPException(403, "a local child cannot manage GPU workers")
+        if not isinstance(address, str) or not address.startswith("local:") or not local_gpus.UUID.fullmatch(address[6:]):
+            raise HTTPException(400, "gpu must be a discovered local GPU UUID")
+        if action not in ("start", "stop", "check"):
+            raise HTTPException(400, "action is start, stop or check")
+        found = self.config()
+        worker = next((w for w in found["workers"] if w["address"] == address), None)
+        if worker is None:
+            device = next((d for d in local_gpus.inventory()["devices"] if d["id"] == address), None)
+            if device is None:
+                raise HTTPException(404, "that GPU UUID is not present")
+            if action != "start":
+                return self.overview()  # checking discovery does not register or start anything
+            if device["gpu_uuid"] == self.local.head(local_gpus.inventory()["devices"]):
+                raise HTTPException(400, "the head GPU already runs this Studio")
+            worker = {"kind": "local", "address": address, "gpu_uuid": device["gpu_uuid"],
+                      "name": f"GPU {device['index']} · {device['name']}", "enabled": True}
+            # Validate ownership, inventory, capacity and display consent before persisting a row.
+            try:
+                self.local.start_worker(worker, found["workers"], allow_display=body.get("allow_display") is True)
+            except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+                raise HTTPException(400, str(error)) from None
+            worker["allow_display"] = body.get("allow_display") is True
+            found["workers"].append(worker)
+            self.keep(found)
+            self.act(address, "update")
+            return self.overview()
+        if action == "start":
+            # Explicit opt-in is persisted only for this UUID, not other display cards.
+            if body.get("allow_display") is True:
+                worker["allow_display"] = True
+            if not worker.get("enabled", True):
+                if not self.local.consumes_slot(worker) and 1 + len(self.local.slot_ids(found["workers"])) >= local_gpus.LIMIT:
+                    raise HTTPException(400, "at most four local GPUs, including the head")
+                worker["enabled"] = True
+            self.keep(found)
+        self.act(address, {"start": "update", "stop": "stop", "check": "check"}[action])
+        return self.overview()
 
     def said(self, text: str) -> str:
         """Words for the page. "this Spark" is this machine: left as written on a GB10, "this Mac" on a Mac, "this GPU" on a card.
@@ -520,6 +667,8 @@ class Hub:
 
     def on(self, worker: dict, command: str, timeout: float = 30) -> tuple[int, str]:
         """A command on a worker, through its ``via`` when it has one."""
+        if worker.get("kind") == "local":
+            raise ValueError("local GPU workers never use SSH")
 
         if worker.get("via"):
             return self.shell(worker["address"], command, timeout, via=worker["via"])
@@ -542,6 +691,12 @@ class Hub:
         """Why a worker is given no clip now ("" when it may be): switched off, not up, or rendering for someone else."""
 
         live = self.state(worker["address"])
+        if worker.get("kind") == "local" and self.local.active:
+            device = next((d for d in local_gpus.inventory()["devices"] if d["gpu_uuid"] == worker["gpu_uuid"]), None)
+            why = self.local.guard_reason(worker, device) if device else "This GPU UUID is not present; reconnect the card."
+            if why:
+                live.update(state="down", why=why, info=None)
+                return why
         if not worker.get("enabled", True):
             return "switched off"
         if live["working"]:
@@ -560,6 +715,7 @@ class Hub:
         info, why = live["info"] or {}, self.usable(worker)
         memory = info.get("memory") or {}
         return {"address": worker["address"], "name": worker.get("name") or worker["address"], "label": self.label_of(worker), "folder": worker.get("folder"),
+                "kind": worker.get("kind", "ssh"), **({"gpu_uuid": worker["gpu_uuid"], "owned": self.local.owned(worker)} if worker.get("kind") == "local" else {}),
                 "enabled": worker.get("enabled", True), "state": live["state"], "says": self.said(STATES.get(live["state"], live["state"])),
                 "why": self.said(live["why"]), "usable": not why, "unusable": self.said(why), "working": live["working"], "checked": live["checked"],
                 "job": live["job"], "version": info.get("version") or live.get("version"), "via": worker.get("via"),
@@ -578,8 +734,10 @@ class Hub:
         with self.lock:
             local = next((job["id"] for job in self.jobs.values() if job["status"] == "running" and job.get("spark") == self.name), None)
         memory = (mine.get("memory") or {}).get("available_mb")
-        return {"supported": True, "limit": LIMIT, "note": "", "available": 1 + sum(1 for row in rows if row["usable"]), "listed": 1 + len(rows),
-                "default": max(1, min(int(found.get("sparks") or 1), LIMIT)), "workers": rows, "folder": self.default_folder(),
+        return {"supported": not self.local.child, "limit": self.chooser_limit(), "remote_limit": LIMIT,
+                "local_gpus": self.local.devices(found["workers"], self.shown), "placement": found.get("placement"),
+                "note": "", "available": 1 + sum(1 for row in rows if row["usable"]), "listed": 1 + len(rows),
+                "default": max(1, min(int(found.get("sparks") or 1), self.chooser_limit())), "workers": rows, "folder": self.default_folder(),
                 "names": {**{self.name: self.label_of()}, **{key: row["label"] for row in rows for key in (row["name"], row["address"])}},
                 "head": "spark" if self.spark else "mac", "via": next((w.get("via") for w in reversed(found["workers"]) if w.get("via")), None),
                 "this": {"name": self.name, "label": self.label_of(), "status": mine.get("status"), "kind": self.word, "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
@@ -597,6 +755,12 @@ class Hub:
         """The worker's app as a local address, through a tunnel opened now if none is open."""
 
         live = self.state(address)
+        worker = next((w for w in self.workers() if w["address"] == address), None)
+        if worker and worker.get("kind") == "local":
+            base, key = self.local.credentials(worker)
+            KEYS[base] = key
+            live.update(base=base, tunnel=None)
+            return base
         with self.mutex:
             tunnel = live["tunnel"]
             if tunnel is not None and tunnel.alive() and live["base"]:
@@ -617,6 +781,8 @@ class Hub:
         the key, or one not started yet, which then answers 401 and the worker is checked again)."""
 
         worker = next((one for one in self.config()["workers"] if one["address"] == address), {"address": address})
+        if worker.get("kind") == "local":
+            return self.local.credentials(worker)[1]
         folder = worker.get("folder") or self.default_folder()
         code, said = self.on(worker, (f'H="$(cd "$HOME/{folder}" 2>/dev/null && python3 app/studio_home.py 2>/dev/null)"; '
                                       f'cat "${{H:-$HOME/ImaginationStudio}}/access-key" 2>/dev/null || cat "{THEIR_HOME}/access-key" 2>/dev/null; true'), 20)
@@ -644,13 +810,21 @@ class Hub:
         except OSError:
             pass
 
-    def close(self) -> None:
-        """Every tunnel closed: when the app stops."""
+    def quiesce(self) -> None:
+        """No new claims or lifecycle actions; existing work is drained by the server."""
+        self.closing = True
+        self.local.closing = True
+        self.kick.set()
 
-        with self.mutex:
-            addresses = list(self.live)
-        for address in addresses:
-            self.hang_up(address)
+    def close(self) -> bool:
+        """Close transports and drain every owned local lease, even without a row."""
+        self.quiesce()
+        with self.local.mutex:
+            with self.mutex:
+                addresses = list(self.live)
+            for address in addresses:
+                self.hang_up(address)
+            return self.local.close(self.workers())
 
     def sweep(self) -> None:
         """Tunnels a killed run of this app left open: ssh processes it wrote down that still forward to a worker's app."""
@@ -694,6 +868,8 @@ class Hub:
         """Look at a worker and say what state it is in. Nothing on it is started, stopped or changed."""
 
         address, live = worker["address"], self.state(worker["address"])
+        if worker.get("kind") == "local":
+            return self.check_local(worker)
         found = self.probe(worker)
         set_to = lambda state, why="", **more: live.update(state=state, why=why, checked=time.time(), fails=0, **more)
         if not found["reached"]:
@@ -741,19 +917,92 @@ class Hub:
             set_to("busy" if live["job"] else "ready", "", info=info)
         return live
 
+    def check_local(self, worker: dict) -> dict:
+        """Read-only authenticated handshake; a matching port alone is never a worker."""
+        live = self.state(worker["address"])
+        try:
+            devices = local_gpus.inventory()["devices"]
+            device = next((d for d in devices if d["gpu_uuid"] == worker["gpu_uuid"]), None)
+            if device is None:
+                raise OSError("This GPU UUID is not present")
+            why = self.local.guard_reason(worker, device)
+            if not why and self.local.active:
+                why = self.local.conflict(worker["gpu_uuid"])
+            if why:
+                raise OSError(why)
+            self.refresh_local_name(worker, device)
+            if not self.local.owned(worker):
+                self.hang_up(worker["address"])
+                live.update(state="stopped", why="Its owned local Studio process is not running; Start explicitly to use this GPU.",
+                            info=None, checked=time.time(), fails=0)
+                return live
+            info = call(self.connect(worker["address"]), "/api/spark/self", timeout=CALL)
+            if info.get("gpu_uuid") != worker["gpu_uuid"]:
+                raise OSError("Local worker GPU UUID handshake does not match its lease")
+            changed = differs(self.code(), info.get("code"))
+            if changed or not info.get("guard"):
+                live.update(state="update", why="Its code or memory guard differs; stop it and start it again.", info=info)
+            else:
+                busy = bool(live["job"] or info.get("active"))
+                live.update(state="busy" if busy else "ready", why="It is rendering another job." if info.get("active") and not live["job"] else "", info=info)
+            live.update(checked=time.time(), fails=0)
+        except (OSError, Refused, ValueError) as error:
+            self.hang_up(worker["address"])
+            live.update(state="down", why=str(error)[-200:], info=None, checked=time.time())
+        return live
+
+    def refresh_local_name(self, worker: dict, device: dict | None = None) -> dict:
+        """Distinct human labels follow current ordinals; stable addresses remain UUIDs."""
+        if device is None:
+            device = next((d for d in local_gpus.inventory()["devices"] if d["gpu_uuid"] == worker["gpu_uuid"]), None)
+        if device is None:
+            raise OSError("This GPU UUID is not present")
+        name = f"GPU {device['index']} · {device['name']}"
+        with self.local.mutex:
+            found = self.config()
+            row = next((w for w in found["workers"] if w["address"] == worker["address"]), None)
+            if row is not None and row.get("name") != name:
+                row["name"] = name
+                self.keep(found)
+            worker["name"] = name
+        return device
+
     def rename(self, address: str, name: str) -> None:
-        found = self.config()
-        taken = {worker.get("name") for worker in found["workers"] if worker["address"] != address} | {self.name}
-        for worker in found["workers"]:
-            if worker["address"] == address:
-                worker["name"] = name if name not in taken else f"{name} ({address})"
-        self.keep(found)
+        with self.local.mutex:
+            found = self.config()
+            taken = {worker.get("name") for worker in found["workers"] if worker["address"] != address} | {self.name}
+            for worker in found["workers"]:
+                if worker["address"] == address:
+                    worker["name"] = name if name not in taken else f"{name} ({address})"
+            self.keep(found)
 
     def update(self, worker: dict) -> dict:
         """This Spark's code sent to a worker (rsync, as this user), its app started from it, and the worker checked
         again. An app that is rendering is left alone; an app no head started is not stopped here."""
 
         address, live = worker["address"], self.state(worker["address"])
+        if worker.get("kind") == "local":
+            if live["job"]:
+                live.update(why="It is rendering: cancel its clip before restarting.")
+                return live
+            if live["state"] == "update" and self.local.owned(worker) and local_gpus.alive(self.local.record(worker["gpu_uuid"]), "child_"):
+                info = call(self.connect(address), "/api/spark/self", timeout=CALL)
+                if info.get("gpu_uuid") != worker["gpu_uuid"] or info.get("active"):
+                    live.update(why="Its identity changed or it is rendering another job; it is left running.")
+                    return live
+                self.local.stop_worker(worker)
+                self.hang_up(address)
+            self.local.start_worker(worker, self.workers(), allow_display=bool(worker.get("allow_display")))
+            for _ in range(60):
+                if self.closing:
+                    return live
+                self.check_local(worker)
+                if live["state"] in ("ready", "busy", "update"):
+                    return live
+                if not self.local.owned(worker):
+                    break
+                time.sleep(0.5)
+            return live
         folder = worker.get("folder") or self.default_folder()
         found = self.probe(worker)
         if not found["reached"]:
@@ -807,6 +1056,10 @@ class Hub:
         if live["job"]:
             live.update(why="It is rendering one of this Spark's clips: cancel the job first.")
             return live
+        if worker.get("kind") == "local":
+            self.local.stop_worker(worker)
+            self.hang_up(address)
+            return self.check_local(worker)
         found = self.probe(worker)
         if found["reached"] and found.get("app") and not found.get("ours"):
             live.update(why="The app on that Spark was not started by this Studio: it is left running.", checked=time.time())
@@ -816,6 +1069,12 @@ class Hub:
         return self.check(worker)
 
     def act(self, address: str, what: str) -> dict:
+        with self.local.mutex:
+            if self.closing:
+                raise HTTPException(503, "this Studio is closing")
+            return self._act(address, what)
+
+    def _act(self, address: str, what: str) -> dict:
         """Check, update or stop a worker in the background; the page reads the result from the list."""
 
         worker = next((one for one in self.workers() if one["address"] == address), None)
@@ -829,9 +1088,18 @@ class Hub:
 
         def go() -> None:
             try:
-                {"check": self.check, "update": self.update, "stop": self.stop}[what](worker)
+                if worker.get("kind") == "local":
+                    with self.local.mutex:
+                        if not self.closing:
+                            current = next((w for w in self.workers() if w["address"] == address), None)
+                            if current:
+                                {"check": self.check, "update": self.update, "stop": self.stop}[what](current)
+                elif not self.closing:
+                    {"check": self.check, "update": self.update, "stop": self.stop}[what](worker)
             except Exception as error:  # noqa: BLE001 - said beside the worker, never raised into a thread's void
                 live.update(why=f"{what} failed: {str(error)[-200:]}", checked=time.time())
+                if worker.get("kind") == "local" and not self.local.owned(worker):
+                    live.update(state="down", info=None)
             finally:
                 live["working"] = ""
                 self.kick.set()
@@ -847,6 +1115,8 @@ class Hub:
         never tried in a loop. A worker that is down, unreachable or bare is never touched here."""
 
         live = self.state(worker["address"])
+        if worker.get("kind") == "local":
+            return  # same checkout; never rsync or auto-restart a local GPU process
         if not self.follow() or not worker.get("enabled", True) or live["state"] != "update" or live["job"] or live["working"]:
             return
         version = hashlib.sha1(json.dumps(self.code(), sort_keys=True).encode()).hexdigest()
@@ -859,14 +1129,32 @@ class Hub:
 
     def asked(self, job: dict) -> int:
         try:
-            return max(1, min(int((job.get("sparks") or {}).get("chosen") or 1), LIMIT))
+            return max(1, min(int((job.get("sparks") or {}).get("chosen") or 1), self.chooser_limit()))
         except (TypeError, ValueError):
             return 1
 
     def team(self, job: dict) -> list[str]:
-        """The workers a job may render on, in the list's order: the first N - 1 that are up and can render it."""
-
+        """Eligible targets; explicit placement is independent of count and retry limits."""
+        if self.local.child:
+            return []
         sparks = job.get("sparks") or {}
+        selected = job.get("placement")
+        if selected and selected["worker"] == "head":
+            if selected["policy"] == "require" or not any(j["status"] == "running" and j.get("spark") == self.name for j in self.jobs.values()):
+                return []
+        preferred = None
+        if selected and selected["worker"] != "head":
+            worker = next((w for w in self.workers() if w["address"] == selected["worker"]), None)
+            if worker and not self.usable(worker) and not capable(job["kind"], job["params"], self.state(worker["address"])["info"], self.spark):
+                preferred = worker["address"]
+            if selected["policy"] == "prefer" and worker and worker["address"] in (sparks.get("not") or {}):
+                preferred = None
+            if selected["policy"] == "require":
+                return [preferred] if preferred else []
+            if preferred and not self.state(preferred)["job"]:
+                # Explicit preference precedes the count-based scheduling below;
+                # it must not silently widen a required worker's placement.
+                return [preferred]  # let the selected free worker take it before any fallback
         if self.asked(job) < 2 or here_only(job["kind"], job["params"]) or sparks.get("moves", 0) >= MOVES:
             return []
         found = []
@@ -890,22 +1178,54 @@ class Hub:
                     return True
         return False
 
+    def required_failure(self, job: dict) -> str:
+        """Temporary availability can change; an absent row or incompatible model cannot."""
+        selected = job.get("placement")
+        if not selected or selected["policy"] != "require" or selected["worker"] == "head":
+            return ""
+        worker = next((w for w in self.workers() if w["address"] == selected["worker"]), None)
+        if worker is None:
+            return "The required worker was removed from the list. Placement forbids fallback."
+        info = self.state(worker["address"])["info"]
+        why = capable(job["kind"], job["params"], info, self.spark) if info else ""
+        return f"Required worker {self.label_of(worker)} cannot render this clip: {why}. Placement forbids fallback." if why else ""
+
     def claim(self, address: str | None = None) -> dict | None:
         """The next queued job for a machine (None: this Spark), marked as running on it. Called with the queue's lock
         held. This Spark takes first what no idle worker could take, so a clip a worker can render is left to it."""
+        if self.closing:
+            return None
 
         ready = [self.jobs[i] for i in self.order if self.jobs[i]["status"] == "queued" and not self.waits(self.jobs[i])]
+        for queued in ready:
+            why = self.required_failure(queued)
+            if why:
+                queued.update(status="failed", error=why, finished=time.time(), progress=None)
+                queued["log"] = (queued.get("log", "") + "[sparks] " + why + "\n")[-20000:]
+        ready = [queued for queued in ready if queued["status"] == "queued"]
         if address is None:
             idle = {worker["address"] for worker in self.workers() if not self.usable(worker) and not self.state(worker["address"])["job"]}
-            ours = [job for job in ready if not self.team(job) or self.fits_here(job)]  # a clip too big here waits for a worker
+            ours = [job for job in ready
+                    if not (job.get("placement") and job["placement"]["policy"] == "require" and job["placement"]["worker"] != "head")
+                    and (not self.team(job) or self.fits_here(job))]
+            for queued in ready:
+                selected = queued.get("placement")
+                if selected and selected["policy"] == "require" and selected["worker"] != "head":
+                    worker = next((w for w in self.workers() if w["address"] == selected["worker"]), None)
+                    name = self.label_of(worker) if worker else "the selected worker"
+                    queued["progress"] = {"stage": "Waiting for required worker " + name, "at": 0, "of": 1}
             # a clip an idle worker can render is left to it (the hub's loop hands it over); this Spark takes it once
             # its workers are busy, and takes at once what only it can render
             job = next((job for job in ours if not idle.intersection(self.team(job))), None)
         else:
+            if self.state(address)["job"]:
+                return None
             job = next((job for job in ready if address in self.team(job)), None)
         if job is None:
             return None
         job["status"], job["started"] = "running", time.time()
+        if (job.get("progress") or {}).get("stage", "").startswith("Waiting for required worker "):
+            job["progress"] = None
         job["remote"] = address
         job["spark"] = self.name if address is None else next((w.get("name") or address for w in self.workers() if w["address"] == address), address)
         if address is not None:
@@ -918,6 +1238,15 @@ class Hub:
         address, live = worker["address"], self.state(worker["address"])
         try:
             info = call(self.connect(address), "/api/spark/self", timeout=5)
+            if worker.get("kind") == "local" and info.get("gpu_uuid") != worker["gpu_uuid"]:
+                raise OSError("Local worker GPU UUID handshake does not match its lease")
+            if worker.get("kind") == "local":
+                device = self.refresh_local_name(worker)
+                why = self.local.guard_reason(worker, device)
+                if why:
+                    self.hang_up(address)
+                    live.update(state="down", why=why, checked=time.time(), info=None)
+                    return False
         except (OSError, Refused) as error:
             live["fails"] += 1
             if live["fails"] >= 3:
@@ -938,12 +1267,14 @@ class Hub:
         """Hands queued clips to idle workers, one each; looks at every connected worker now and then."""
 
         looked = 0.0
-        while True:
+        while not self.closing:
             self.kick.wait(timeout=1.0)
             self.kick.clear()
+            if self.closing:
+                break
             try:
                 with self.lock:
-                    waiting = any(job["status"] == "queued" and self.asked(job) > 1 for job in self.jobs.values())
+                    waiting = any(job["status"] == "queued" and (self.asked(job) > 1 or job.get("placement")) for job in self.jobs.values())
                 refresh = time.time() - looked > 20
                 if refresh:
                     looked = time.time()
@@ -983,9 +1314,21 @@ class Hub:
     def start(self) -> None:
         """At the app's start: last run's tunnels closed, the loop started, the listed workers looked at."""
 
-        if self.started:
+        if self.local.child:
+            self.local.register_child()
+            return
+        if self.started or self.closing:
             return
         self.started = True
+        devices = local_gpus.inventory()
+        if devices["supported"]:
+            # Discover the head without taking a lease or changing single-card
+            # execution. Device/RAM ownership starts only with an explicit worker.
+            try:
+                self.local.validate_head(devices["devices"])
+            except (ValueError, OSError) as error:  # the Studio still starts, on its own card, with no local workers
+                self.local.unavailable = str(error)
+                print("[sparks] local GPU workers are off: " + str(error), file=sys.stderr, flush=True)
         self.sweep()
         atexit.register(self.close)
         threading.Thread(target=self.loop, daemon=True).start()
@@ -1007,6 +1350,9 @@ class Hub:
         with self.lock:
             if job["status"] != "running":
                 return
+            selected = job.get("placement")
+            if selected and selected["policy"] == "require":
+                raise RuntimeError(f"Required worker {name} failed: {why}. Placement forbids fallback.")
             sparks = job.setdefault("sparks", {"chosen": 1})
             sparks.setdefault("not", {})[address] = why
             sparks["moves"] = sparks.get("moves", 0) + 1
@@ -1040,12 +1386,11 @@ class Hub:
         try:
             base = self.connect(address)
             # the worker's own memory guard, asked before anything is sent (its app asks it again when the job is queued)
-            room = (call(base, "/api/estimate", {**{key: params.get(key) for key in ("preset", "quality", "frames", "seconds", "width", "height", "steps", "text_encoder", "ref_turbo")},
-                                                 "with_lora": bool(params.get("loras")), "referenced": bool(params.get("references") or params.get("reference_videos")),
-                                                 "references": len(params.get("references") or [])}) or {}).get("memory") or {}
+            room = (call(base, "/api/estimate", estimate_params(params)) or {}).get("memory") or {}
             if room.get("fits") is False:
                 raise Refused(400, room.get("reason") or "its memory guard refused the clip")
-            made = call(base, "/api/jobs", {"kind": job["kind"], "title": f"{job['title']} · for {self.name}", "params": self.outbound(base, params)}, timeout=60)
+            made = call(base, "/api/jobs", {"kind": job["kind"], "title": f"{job['title']} · for {self.name}",
+                                          "placement": {"worker": "head", "policy": "require"}, "params": self.outbound(base, params)}, timeout=60)
         except Refused as error:
             self.move(job, worker, f"it refused the clip: {error.said}", down=False)
             return False
@@ -1138,13 +1483,17 @@ class Hub:
 
     def plan(self, body: dict) -> dict:
         try:
-            chosen = max(1, min(int(body.get("sparks") or 1), LIMIT))
+            chosen = max(1, min(int(body.get("sparks") or 1), self.chooser_limit()))
             clips = max(1, int(body.get("clips") or 1))
         except (TypeError, ValueError):
             raise HTTPException(400, "sparks and clips are whole numbers")
         kind, params = str(body.get("kind") or "video"), body.get("params") if isinstance(body.get("params"), dict) else {}
+        selected = self.placement(body.get("placement"), kind=kind)
         able, without = [], []
-        for worker in self.workers():
+        workers = self.workers()
+        mixed = any(worker.get("kind") == "local" for worker in workers)
+        unit = "worker" if mixed else "Spark"
+        for worker in workers:
             why = self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"], self.spark)
             (without.append({"name": self.label_of(worker), "why": self.said(why)}) if why else able.append(worker["address"]))
         listed, available = 1 + len(able) + len(without), 1 + len(able)
@@ -1155,17 +1504,33 @@ class Hub:
             others = used - 1
             count = (f"{available} of {chosen} available" if chosen > available else
                      f"This {self.word} alone." if used < 2 else
-                     f"this {self.word} and {others} Spark" + ("" if others == 1 else "s"))
+                     f"this {self.word} and {others} {unit}" + ("" if others == 1 else "s"))
         else:
-            count = f"{available} of {chosen} available" if chosen > available else f"{used} Spark{'s' if used != 1 else ''}"
+            count = f"{available} of {chosen} available" if chosen > available else f"{used} {unit}{'s' if used != 1 else ''}"
         if here:
             mode, says = "one", self.said(here)
         elif used < 2:
-            mode, says = "one", (f"This {self.word} alone." if chosen < 2 else "No other Spark can take this job now, so it renders on this one.")
+            mode, says = "one", (f"This {self.word} alone." if chosen < 2 else f"No other {unit} can take this job now, so it renders on this one.")
         elif clips > 1:
-            mode, says = "parallel", f"One clip per Spark, {min(used, clips)} at a time: {clips} clips on {min(used, clips)} Sparks."
+            mode, says = "parallel", f"One clip per {unit}, {min(used, clips)} at a time: {clips} clips on {min(used, clips)} {unit}s."
         else:
-            mode, says = "one", f"This clip renders on one Spark, the first that is free of the {used}; other queued clips render beside it. " + ONE_CLIP
+            mode, says = "one", f"This clip renders on one {unit}, the first that is free of the {used}; other queued clips render beside it. " + (
+                "A single render is never split across workers." if mixed else ONE_CLIP)
+        if selected:
+            target = selected["worker"]
+            name = self.name if target == "head" else next(w.get("name") or target for w in self.workers() if w["address"] == target)
+            target_ready = target == "head" or target in able and not self.state(target)["job"]
+            if selected["policy"] == "require":
+                used, mode, count = 1, "one" if target_ready else "wait", name
+                says = f"Only {name} may render this clip. " + ("It waits while that worker is busy; failures never fall back." if target_ready else
+                        "The job waits for that worker to become available; it never falls back to the head or another worker.")
+                failed = self.required_failure({"placement": selected, "kind": kind, "params": params})
+                if failed:
+                    mode, says = "refused", failed
+            else:
+                says = (f"Prefer {name} when free; otherwise use another eligible worker at the chosen count."
+                        if target == "head" else
+                        f"Prefer {name} when free and capable; otherwise use the head or another eligible worker at the chosen count.")
         estimate = None
         try:  # one clip's time on one Spark: given, or the app's own measured figure for these settings
             seconds = float(body.get("seconds") or self.timing(kind, params) or 0)
@@ -1177,8 +1542,10 @@ class Hub:
             estimate = {"seconds": int(seconds * clips / faster), "one_spark": int(seconds * clips), "faster": round(faster, 2), "measured": measured and not mac,
                         "note": "an estimate from one measured run of 8 clips" + ("" if measured else f"; {used} Sparks were not measured (five exist)")
                         + ("; that run had a Spark at the head, not a Mac, and this time is the Mac's for one clip" if mac else "")}
-        return {"supported": True, "limit": LIMIT, "chosen": chosen, "available": available, "listed": listed, "used": used, "mode": mode,
-                "count": count, "says": says, "without": without, "estimate": estimate}
+            if mixed and mode == "parallel":
+                estimate.update(measured=False, note="An estimate from the Spark-only benchmark of 8 clips; scaling local or mixed workers has not been measured.")
+        return {"supported": not self.local.child, "limit": self.chooser_limit(), "chosen": chosen, "available": available, "listed": listed, "used": used, "mode": mode,
+                "count": count, "says": says, "without": without, "estimate": estimate, "placement": selected}
 
     # ---- the API ------------------------------------------------------------------------------------------------------
 
@@ -1196,19 +1563,32 @@ class Hub:
             return self.overview()
 
         @router.post("/api/sparks")
+        @self.serialized
         def settings(body: dict) -> dict:
             """``sparks``: the number new jobs start with."""
 
             found = self.config()
+            if self.local.child:
+                raise HTTPException(403, "a local child cannot change worker settings")
+            if "placement" in body:
+                found["placement"] = self.placement(body["placement"]) if body["placement"] is not None else None
             try:
-                found["sparks"] = max(1, min(int(body.get("sparks") or 1), LIMIT))
+                if "sparks" in body:
+                    found["sparks"] = max(1, min(int(body["sparks"] or 1), self.chooser_limit()))
             except (TypeError, ValueError):
                 raise HTTPException(400, "sparks is a whole number")
             self.keep(found)
             return self.overview()
 
+        @router.post("/api/sparks/local")
+        def local_gpu(body: dict) -> dict:
+            return self.local_action(body)
+
         @router.post("/api/sparks/workers")
+        @self.serialized
         def add(body: dict) -> dict:
+            if self.local.child:
+                raise HTTPException(403, "a local child cannot register workers")
             try:
                 address = address_of(str(body.get("address") or ""))
                 folder = folder_of(str(body["folder"])) if body.get("folder") else None
@@ -1218,24 +1598,33 @@ class Hub:
             found = self.config()
             if any(worker["address"] == address for worker in found["workers"]):
                 raise HTTPException(400, f"{address} is already in the list")
-            if len(found["workers"]) >= LIMIT - 1:
+            if sum(w.get("kind", "ssh") == "ssh" for w in found["workers"]) >= LIMIT - 1:
                 # said() rewrites "this Spark" only. This sentence does not say that, so the card branch is its own.
                 # A GB10 and a Mac keep the Spark sentence. A card does not call this machine a Spark.
                 if card_face():
                     raise HTTPException(400, f"at most {LIMIT} machines, this GPU included")
                 raise HTTPException(400, f"at most {LIMIT} Sparks, this one included")
-            found["workers"].append({"address": address, "name": str(body.get("name") or "").strip()[:60] or address, "folder": folder, "enabled": True,
+            found["workers"].append({"kind": "ssh", "address": address, "name": str(body.get("name") or "").strip()[:60] or address, "folder": folder, "enabled": True,
                                      **({"via": via} if via else {})})
             self.keep(found)
             self.act(address, "check")
             return self.overview()
 
         @router.post("/api/sparks/workers/{address}")
+        @self.serialized
         def change(address: str, body: dict) -> dict:
+            if self.local.child:
+                raise HTTPException(403, "a local child cannot change workers")
             found = self.config()
             worker = next((one for one in found["workers"] if one["address"] == address), None)
             if worker is None:
                 raise HTTPException(404, "no such Spark in the list")
+            if worker.get("kind") == "local":
+                if "folder" in body or "via" in body:
+                    raise HTTPException(400, "local GPU workers have no SSH folder or relay")
+                if "enabled" in body and bool(body["enabled"]) != worker.get("enabled", True):
+                    if body["enabled"] and not self.local.consumes_slot(worker) and 1 + len(self.local.slot_ids(found["workers"])) >= local_gpus.LIMIT:
+                        raise HTTPException(400, "at most four local GPUs, including the head")
             if "enabled" in body:
                 worker["enabled"] = bool(body["enabled"])
             if body.get("name"):
@@ -1258,11 +1647,26 @@ class Hub:
 
         @router.delete("/api/sparks/workers/{address}")
         def remove(address: str) -> dict:
+            if self.state(address)["working"]:
+                raise HTTPException(400, "that worker has a lifecycle action in progress")
+            return remove_ready(address)
+
+        @self.serialized
+        def remove_ready(address: str) -> dict:
+            if self.local.child:
+                raise HTTPException(403, "a local child cannot remove workers")
             found = self.config()
             if not any(one["address"] == address for one in found["workers"]):
                 raise HTTPException(404, "no such Spark in the list")
+            if self.state(address)["working"]:
+                raise HTTPException(400, "that worker has a lifecycle action in progress")
             if self.state(address)["job"]:
                 raise HTTPException(400, self.said("that Spark is rendering one of this Spark's clips: cancel the job first"))
+            worker = next(w for w in found["workers"] if w["address"] == address)
+            if worker.get("kind") == "local" and self.local.owned(worker):
+                raise HTTPException(400, "stop the owned local worker before removing it")
+            if (found.get("placement") or {}).get("worker") == address:
+                found["placement"] = None
             found["workers"] = [one for one in found["workers"] if one["address"] != address]
             self.keep(found)
             self.hang_up(address)  # its app, if a head started it, keeps running there: "Stop" first to free its memory
@@ -1272,6 +1676,8 @@ class Hub:
 
         @router.post("/api/sparks/workers/{address}/{what}")
         def action(address: str, what: str) -> dict:
+            if self.local.child:
+                raise HTTPException(403, "a local child cannot manage workers")
             if what not in ("check", "update", "stop"):
                 raise HTTPException(404, "check, update or stop")
             self.act(address, what)
@@ -1279,6 +1685,8 @@ class Hub:
 
         @router.post("/api/sparks/check")
         def check_all() -> dict:
+            if self.local.child:
+                raise HTTPException(403, "a local child cannot check other workers")
             for worker in self.workers():
                 self.act(worker["address"], "check")
             return self.overview()
