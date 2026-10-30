@@ -34,6 +34,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import memory_guard  # noqa: E402  (what a clip needs and whether this machine has it, beside this file)
+import progress_file  # noqa: E402  (SPARK_PROGRESS_FILE: a clip's progress for a governor, off by default)
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
 # On a Mac the same graphs run on a ComfyUI of their own (mac/comfy.sh, scripts/setup-comfy.sh): the Library actions
 # and MOSS-Image, on PyTorch's Metal device. Its port, its model folder and the names of the H3 files differ (MAC_FILES).
@@ -244,11 +245,14 @@ async def run(workflow: dict, sampler: str, named: dict | None = None, stages: l
                         print(f"[tensorfold] {named[node]} {data['value']}/{data['max']}", flush=True)
                 elif event["type"] == "progress" and str(data.get("node")) == sampler:
                     print(f"[tensorfold] step {data['value']}/{data['max']}", flush=True)
+                    progress_file.step(data["value"], data["max"])
                 elif event["type"] == "executing":
                     # SPARK_TIMING=1: how long each node of the workflow ran
                     if running is not None:
                         stages.append((workflow[running]["class_type"], time.time() - since))
                     running, since = (str(data["node"]) if data.get("node") is not None else None), time.time()
+                    if running is not None and running in workflow:
+                        progress_file.stage(workflow[running]["class_type"])
                     if running is None:
                         break
                 elif event["type"] in ("execution_error", "execution_interrupted", "execution_success"):
@@ -720,6 +724,7 @@ def reference(args) -> None:
           f"{count}, {steps} passes, generating {args.width}x{args.height}, {args.frames} frames", flush=True)
     for line in said:
         print(f"[tensorfold] reference {line}", flush=True)
+    progress_file.begin(f"H3 {kind} (ComfyUI) · {args.width}x{args.height} {args.frames}f", steps)
     try:
         item, seconds_taken = render(w, "12")
     finally:
@@ -729,6 +734,7 @@ def reference(args) -> None:
     finish_sound(item, target, args.frames)
     if not cropped:
         crop_file(target, args.crop)
+    progress_file.done(seconds_taken, target.name)
     print("[tensorfold] " + json.dumps({"output": str(target), "engine": "cuda", "model": "ref2va", "mode": mode,
                                         "forwards": steps, "total_s": round(seconds_taken, 1), "frames": args.frames,
                                         "size": [args.width, args.height], "references": len(pictures),
@@ -853,6 +859,7 @@ def video(args) -> None:
     runs = ("TensorFold int8 blocks in ComfyUI" + (", the LoRA merged into them" if loras else "")) if args.engine == "tensorfold" else "ComfyUI, MiniMax H3 bf16" if base else f"ComfyUI, FastH3 {args.weights}"
     print(f"[tensorfold] engine: cuda ({runs}, {attention}), generating "
           f"{args.width}x{args.height}, {args.frames} frames", flush=True)
+    progress_file.begin(f"{runs} · {args.width}x{args.height} {args.frames}f", args.steps)
     item, seconds = render(w, "12")
     target = Path(args.output)
     fetch(item, target)
@@ -863,6 +870,7 @@ def video(args) -> None:
                                         "total_s": round(seconds, 1), "frames": args.frames,
                                         "size": [args.width, args.height], "sparsity": sparsity,
                                         **({"cropped_to": args.crop} if args.crop else {})}), flush=True)
+    progress_file.done(seconds, target.name)
 
 
 def flux3_system_prompt(task: str = "t2i") -> str:
@@ -1408,4 +1416,9 @@ def stopped() -> str:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit as error:
+        if error.code not in (0, None):
+            progress_file.failed(error.code)  # a governor reading SPARK_PROGRESS_FILE sees why the clip stopped
+        raise

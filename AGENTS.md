@@ -194,7 +194,8 @@ Rules:
   governor, `spark/workload.py`) `comfy.sh` runs the server through `spark/managed_comfy.py`, which starts the same
   guard (and its plain-loop fallback) beside it inside a reservation, and `start_gate.py` runs before every submission;
   `DRAMA3_MANAGED_GUARD=1` does the same for Drama 3 (`spark/managed_voice.py`). Its limits add to the guard's, never
-  replace or lower them; unset, nothing of it runs. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
+  replace or lower them; unset, nothing of it runs. `SPARK_PROGRESS_FILE` (`spark/progress_file.py`, off by default)
+  lets such a governor show what a clip is doing: two lines, passes and engine, then the stage, replaced whole. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
   are measurements, one route each. A LoRA on FastH3 is merged into TensorFold's int8 engine (`TensorFoldH3Blocks`
   takes the block projections' patches off ComfyUI and calls `tf_h3_set_weight`; route `int8-lora`, measured to
   1376x768 at 243 frames); on ComfyUI's bfloat16 blocks (an engine without that symbol, `--engine comfy`, Ref2VA,
