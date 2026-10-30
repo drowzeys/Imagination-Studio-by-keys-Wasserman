@@ -12,9 +12,9 @@ function artSlot(name, cls = "", sign = "image") { const box = el("div", { class
   if (ART.ready.has(name)) box.append(el("img", { src: "art/" + name + ".webp", alt: "", loading: "lazy", decoding: "async" }));
   return box; }
 // a picture card: the picture, one label, one line, a chevron
-function pcard({ art, sign, title, one, run, k, off, src }) {
+function pcard({ art, sign, title, one, run, k, off, src, data }) {  // data: the card's data-* attributes
   const pic = src ? el("div", { class: "art" }, el("img", { src, alt: "", loading: "lazy" })) : artSlot(art, "", sign);
-  return el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "" }, pic, k ? el("span", { class: "k" }, k) : null,
+  return el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "", ...(data || {}) }, pic, k ? el("span", { class: "k" }, k) : null,
     el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, off || one) : null), icon("go", "go"))); }
 // a vault page's head with its cover, like an engine's; without a ready cover it is the plain head
 function vaultHead(id, title, line, right) {

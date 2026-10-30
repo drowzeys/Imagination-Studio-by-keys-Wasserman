@@ -16,7 +16,7 @@ def test_the_picker_starts_on_the_default_and_each_engine_shows_its_licence():
       MU.takes = []; MU.engine = null;
       let view = viewMusic(); out.title = text(view.kids[0]); out.text = text(view);
       const picker = find(view, n => n.attrs && n.attrs.class && String(n.attrs.class).includes("seg-ctl") && n.attrs["aria-label"] === "Song engine");
-      out.buttons = picker ? picker.kids.map(b => [text(b), b.attrs.class, b.attrs["aria-checked"]]) : null;
+      out.buttons = picker ? picker.kids.map(b => [text(b).trim(), b.attrs.class, b.attrs["aria-checked"]]) : null;
       picker.kids[1].attrs.onclick(); view = viewMusic(); out.title3 = text(view.kids[0]); out.text3 = text(view);
       Object.assign(MU, { caption: "Synthwave, 110 BPM", lyrics: "[Verse]\\nNeon", seconds: 60, seed: 4 });
       answers["/api/music/takes"] = { id: "m1", status: "queued" }; await muRender(); out.sent3 = calls.slice(-1)[0][1];

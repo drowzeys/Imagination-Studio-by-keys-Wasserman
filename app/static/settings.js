@@ -85,7 +85,7 @@ function setLayout() { const lay = prefs().layout, hidden = new Set(lay.hidden |
   const flip = id => { const next = new Set(hidden); next.has(id) ? next.delete(id) : next.add(id); settingsSave({ layout: { hidden: [...next] } }, true); };
   return [setPanel("Studio layout", "Show or hide each room in the sidebar, and put them in your order. A hidden room stays one ⌘K away; Home, Machine and Settings always stay.",
     groups.map(g => { const rooms = full().filter(r => r.group === g.id); if (!rooms.length) return null;
-      return el("div", { class: "st-group" }, el("div", { class: "eyebrow" }, g.name || "Agent"),
+      return el("div", { class: "st-group" }, el("div", { class: "eyebrow" }, g.name || g.label || "Agent"),
         rooms.map((r, i) => { const always = ALWAYS_ROOMS.includes(r.id), shown = always || !hidden.has(r.id);
           return el("div", { class: "st-room" + (shown ? "" : " off"), "data-room": r.id }, icon(r.id, "ic"), el("div", { class: "st-what" }, el("b", {}, r.name), el("span", {}, always ? "always in the sidebar" : r.says)),
             el("div", { class: "st-ctl" }, el("button", { type: "button", class: "small iconish", disabled: i === 0, "aria-label": "Move " + r.name + " up", onclick: () => move(r.id, -1) }, "↑"),

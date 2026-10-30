@@ -26,7 +26,7 @@ function muPicker() {
   return el("div", { class: "row", style: "margin:6px 0 4px;align-items:center" },
     el("div", { class: "seg-ctl fit", role: "radiogroup", "aria-label": "Song engine" }, Object.keys(names).filter(k => all[k]).map(k =>
       el("button", { type: "button", role: "radio", "aria-checked": now === k ? "true" : "false", class: now === k ? "on" : "", title: all[k].available ? "" : all[k].why || "",
-        onclick: () => { MU.engine = k; render(); } }, names[k] + (all[k].available ? "" : " (not ready)")))),
+        onclick: () => { MU.engine = k; render(); } }, typeof mark === "function" ? mark(k === "yue2" ? "yue" : "music3", names[k]) : names[k], all[k].available ? null : "(not ready)"))),  // the button's gap spaces it
     el("span", { class: "note", style: "margin:0" }, now === S.music.engine ? "The studio's default here (Settings, Presets, Song engine)." : "This song only; Settings, Presets, Song engine sets the default.")); }
 const muActive = () => MU.job && ["queued", "running"].includes(MU.job.status);
 // the structured helper: the style's parts in the order the model's own captions put them
@@ -117,7 +117,7 @@ function viewMusic() {
   if (MU.job) { const fresh = jobs.find(j => j.id === MU.job.id); if (fresh) { if (fresh.status === "done" && MU.job.status !== "done") muLoad(); MU.job = fresh; } }
   put(box, el("div", { class: "note", style: "margin-top:-4px" }, "A whole song from your lyrics and a style, on this machine: sung vocals, up to five minutes, " + (yue ? "48 kHz stereo; YuE2 writes the song's score (melody and chords) first, then the song" : "44.1 kHz stereo") + ". A song can go under a long video or the Editor's export (", el("b", {}, "Use as soundtrack"), ")."),
     muPicker(),
-    el("div", { class: "note vt-credit" }, typeof mark === "function" && !yue ? mark("music3", "") : null, el("b", {}, muCredit(muEngine()) + "."), " " + (st.licence || "") + " " + (st.label ? "Runs on " + (typeof measuredLabel === "function" ? measuredLabel(st.label) : st.label) + "." : "")));
+    el("div", { class: "note vt-credit" }, typeof mark === "function" ? mark(yue ? "yue" : "music3", "") : null, el("b", {}, muCredit(muEngine()) + "."), " " + (st.licence || "") + " " + (st.label ? "Runs on " + (typeof measuredLabel === "function" ? measuredLabel(st.label) : st.label) + "." : "")));
   if (!st.available) put(box, el("div", { class: "tip" }, el("b", {}, "Not available here. "), st.why || ""));
   const lyrics = bind(MU, "lyrics", el("textarea", { style: "min-height:170px", disabled: !st.available, placeholder: "[Verse]\nThe lines that are sung…\n\n[Chorus]\nThe hook…" }));
   const tagButton = name => el("button", { class: "small fit", type: "button", disabled: !st.available, title: "Add [" + name + "] on a line of its own", onclick: () => { MU.lyrics = (MU.lyrics.replace(/\s+$/, "") + (MU.lyrics.trim() ? "\n\n" : "") + "[" + name + "]\n"); render(); } }, "[" + name + "]");

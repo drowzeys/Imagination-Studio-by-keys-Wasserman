@@ -3,8 +3,10 @@
 // with its own tabs, Back and Home in the top bar, the render bay docked along the bottom, the ⌘K palette and the
 // machine chip. Every view is still drawn by its own module; this file only decides where it sits. Settings → Studio
 // layout hides and orders the rooms (settings.js roomsShown); a hidden room stays in ⌘K.
-const GROUPS = [{ id: "engines", name: "Creative Engines" }, { id: "agent", name: "" }, { id: "vaults", name: "Studio Vaults" }];
+const GROUPS = [{ id: "apps", name: "", label: "Apps" }, { id: "engines", name: "Creative Engines" }, { id: "agent", name: "" }, { id: "vaults", name: "Studio Vaults" }];
 const ROOMS = [
+  // every tool as a one-click app (apps.js), above the engines
+  { id: "apps", group: "apps", name: "Apps", key: "", tabs: ["Apps"], says: "every tool as a one-click app" },
   { id: "video", group: "engines", name: "Video", key: "1", tabs: ["Video", "Create"], says: "clips with sound, long takes, references" },
   { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create"], says: "stills, scouts, edit a picture" },
   { id: "sound", group: "engines", name: "Sound", key: "3", tabs: ["Sound", "Voice", "Music", "Foley"], says: "voices, score and sound effects" },
@@ -27,7 +29,7 @@ const ROOMS = [
 ];
 const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", Previs: "Overview", "Motion Previs": "Motion Previs",
   Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Foley: "Sound effects", Edit: "Overview", Editor: "Timeline", Graphics: "Graphics", Finish: "Finish",
-  "Cast & Places": "Cast & Places", Director: "Director", "Motion graphics": "Motion graphics", "Night shift": "Night shift", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
+  Apps: "Apps", "Cast & Places": "Cast & Places", Director: "Director", "Motion graphics": "Motion graphics", "Night shift": "Night shift", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
   Machine: "Telemetry", Models: "Models & weights", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn", Nodes: "Nodes", Settings: "Settings" };
 // Create is shared by Image and Video: it sits in the room of what the prompt goes to
 const roomOf = t => t === "Create" ? ROOMS.find(r => r.id === (typeof C !== "undefined" && C.goes === "video" ? "video" : "image"))
@@ -67,11 +69,12 @@ const ICON = {
   graphics: KIT("M18 12H46 M32 12V44 M8 22H20 M8 30H24 M8 38H20"),
   night: KIT("M44 33A18 18 0 1 1 23 12A14 14 0 0 0 44 33Z"),
   train: KIT("M24 8L28 20L40 24L28 28L24 40L20 28L8 24L20 20Z M42 34L44 40L50 42L44 44L42 50L40 44L34 42L40 40Z"),
+  apps: KIT("M8 8H24V24H8Z M32 8H48V24H32Z M8 32H24V48H8Z M32 32H48V48H32Z"),
   more: SVG('<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>'),
 };
 const icon = (name, cls) => { const n = el("span", { class: cls || "ico" }); n.innerHTML = ICON[name] || ICON.home; return n; };
 // the marks of the models and tools the Studio runs (app/static/brand, THIRD-PARTY-MARKS.md): identification only
-const MARKS = { qwen: ["brand/qwen.svg", "Qwen"], flux: ["brand/bfl-white.svg", "FLUX3-K"], minimax: ["brand/minimax.svg", "MiniMax H3"], music3: ["brand/minimax.svg", "MiniMax-Music3"],
+const MARKS = { qwen: ["brand/qwen.svg", "Qwen"], flux: ["brand/bfl-white.svg", "FLUX3-K"], minimax: ["brand/minimax.svg", "MiniMax H3"], music3: ["brand/minimax.svg", "MiniMax-Music3"], yue: ["brand/yue.png", "YuE2"],
   fish: ["brand/fish-audio.svg", "Fish Audio Drama 3"], comfy: ["brand/comfyui.svg", "ComfyUI"], tensorfold: ["brand/tensorfold.webp", "TensorFold"],
   claude: ["brand/claude.svg", "Claude"], openai: ["brand/openai.svg", "ChatGPT"], codex: ["brand/codex.svg", "Codex"], gemini: ["brand/gemini.svg", "Gemini"], grok: ["brand/grok.svg", "Grok"],
   hermes: ["brand/hermes-agent.png", "Hermes Agent"], nvidia: ["brand/nvidia.svg", "NVIDIA"] };
@@ -130,7 +133,7 @@ function moreOpen() { if ($("#moresheet")) return moreClose(); const now = tab =
     icon(ico, "ico"), el("span", { class: "t" }, el("b", {}, label, kbd ? el("kbd", {}, kbd) : null), el("small", {}, hint)));
   const sheet = el("div", { id: "moresheet", onclick: e => { if (e.target.id === "moresheet") moreClose(); } },
     el("div", { class: "box", role: "dialog", "aria-label": "More" },
-      shown(ROOMS.filter(r => r.group === "agent")).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
+      shown(ROOMS.filter(r => r.group === "apps" || r.group === "agent")).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
       // the engines' rooms of their own, which the bar has no room for
       shown(ROOMS.filter(r => r.fold)).length ? el("div", { class: "grp" }, "Creative Engines") : null,
       shown(ROOMS.filter(r => r.fold)).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
@@ -265,6 +268,8 @@ function palActions() { const a = (ico, label, hint, run, words = "") => ({ ico,
     a("settings", "Settings", "looks, layout, presets · ⌥,", () => typeof goSettings === "function" ? goSettings("appearance") : go("Settings"), "preferences appearance type size glow poster accent"),
     a("settings", "Studio layout", "Settings · show, hide, order rooms", () => typeof goSettings === "function" ? goSettings("layout") : go("Settings"), "sidebar rooms hide show order"),
     a("settings", "Connections", "Settings · subscriptions, local models", () => typeof goSettings === "function" ? goSettings("connections") : go("Settings"), "local model ollama lm studio vllm llama hermes oauth sign in"),
+    a("apps", "Apps", "every tool as a one-click app", () => go("Apps"), "apps gallery tools swap angles lipsync upscale captions"),
+    ...(typeof appsPalette === "function" ? appsPalette(a) : []),
     a("nodes", "Nodes", "a canvas of jobs", () => go("Nodes"), "graph comfyui canvas pipeline"),
     a("previs", "Motion Previs", "Previs", () => go("Motion Previs"), "pose depth skeleton motion reference"),
     a("sound", "Record a voice line", "Sound · Fish Audio Drama 3", () => go("Voice"), "fish drama speech"),
