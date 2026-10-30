@@ -34,7 +34,7 @@ def test_the_spark_h3_and_drama3_builds_and_the_mac_bolt_use_the_4_2_1_parts():
     url = re.search(r'^METAL_URL="([^"]+)"', bolt, re.M).group(1)
     assert url.endswith("/releases/download/v4.2.1/bolt-metal-772da34b-macos-arm64.tar.gz")
     assert re.search(r'^METAL_SHA256="04e73bf49246180bb13a7088415e559ff1288a983f0ce6b3f8643aaaaa9b6a01"', bolt, re.M)
-    assert (ROOT / "VERSION").read_text().strip() == "4.3.0"  # the app; its engines stay the 4.2.1 carrier's
+    assert (ROOT / "VERSION").read_text().strip() == "4.3.1"  # the app; its engines stay the 4.2.1 carrier's
 
 
 @pytest.mark.skipif(not shutil.which("cc") or not shutil.which("strip"), reason="needs a C compiler and binutils")

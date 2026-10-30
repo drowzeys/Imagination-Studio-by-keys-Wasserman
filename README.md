@@ -189,6 +189,21 @@ runtime for FastH3 on Metal and on CUDA, TensorFold **1.1.8** for MiniMax Music 
 (video with sound) · **Fish Audio Drama 3** (Voice) · **YuE2** and **MiniMax-Music3** (Music: songs with sung vocals) · int8 kernels on the M5 tensor units and on the GB10's tensor
 cores · a 2x video decoder for 2K finals on the Mac
 
+## New in 4.3.1 (2026-10-30)
+
+**One to four local NVIDIA GPUs** on one Linux machine, and a **96 GB** minimum for a Mac's default install. The
+engines are the same as 4.2.1's.
+
+- **Local GPU workers** (#177, akol1's #168 carried onto 4.3.0): on a workstation with up to four NVIDIA cards,
+  the Studio runs on one card and starts a worker on each other compute card. Workers are pinned by card UUID,
+  so a card whose order changed is caught. **Machine → Sparks** shows each card's VRAM, utilization and job. Jobs
+  wait their turn for the machine's RAM, and are refused at once, with the reason, when they can never fit. With
+  two or more compute cards, set `STUDIO_GPU` to the Studio's own card; the launch script asks for it. See
+  [Local GPUs](docs/rtx-pro-6000.md#one-to-four-local-gpus).
+- **A Mac needs 96 GB for the default install** (video, voice, music, Bolt), up from 64 GB (#178). Pictures only
+  (`--image-only`) still need 48 GB. On a 64 to 95 GB Mac that already has the Studio, `--upgrade` keeps and
+  updates what is installed and says the new minimum; the Voice and Music tabs say they need 96 GB.
+
 ## New in 4.3.0 (2026-10-29)
 
 **Apps**, a new room at the top of the sidebar: every tool of the Studio as a one-click app. The engines are the
