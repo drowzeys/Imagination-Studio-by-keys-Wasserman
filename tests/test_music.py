@@ -813,3 +813,34 @@ def test_a_song_cancelled_as_its_engine_finishes_leaves_no_take(monkeypatch):
     assert music.perform(job) is False
     wav = music.HOME / "music" / f"{job['id']}.wav"
     assert not wav.exists() and not wav.with_suffix(".yue2").exists() and not wav.with_suffix(".take.json").exists()
+
+
+def test_music3_on_a_mac_needs_96_gb(monkeypatch):
+    """The Studio's minimum for a Mac is 96 GB (64 up to 4.3.0): the Music tab says so on a smaller one."""
+
+    folder = Path(tempfile.mkdtemp())
+    python = folder / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+    for part in music.WEIGHTS:
+        (folder / "model" / part).parent.mkdir(parents=True, exist_ok=True)
+        (folder / "model" / part).write_bytes(b"")
+    monkeypatch.setenv("MUSIC3_VENV", str(folder / "venv"))
+    monkeypatch.setenv("MUSIC3_MODEL", str(folder / "model"))
+    monkeypatch.delenv("MUSIC3_SRC", raising=False)
+
+    def mac_with(gib: int) -> None:
+        def run(argv, *args, **kwargs):
+            if argv[:2] == ["sysctl", "-n"]:
+                return subprocess.CompletedProcess(argv, 0, stdout=f"{gib << 30}\n", stderr="")
+            raise OSError("the probe is not run here")
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(subprocess, "run", run)
+
+    assert music.Mlx.MEMORY_GB == 96
+    for gib in (64, 95):
+        mac_with(gib)
+        assert music.Mlx().look() == f"This Mac has {gib} GB of memory; MiniMax Music 3 takes about 33 GB, so 96 GB or more."
+    mac_with(96)
+    assert music.Mlx().look().startswith("The MiniMax Music 3 environment did not answer")

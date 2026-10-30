@@ -9,7 +9,7 @@
 # IMAGES (up to nine further pictures, one path a line: the prompt calls the edited picture image 1 and these
 # image 2, image 3, ...), SIZE (source, the default: the result has the picture's own size; model: about RESOLUTION
 # pixels squared, default 1024, keeping its shape), WIDTH and HEIGHT (another size for the result), LORA (one PATH or
-# PATH:STRENGTH a line), QUANTIZE (bits for the weights on a Mac: 8 on a 64 GB Mac; unset keeps bfloat16, 43 GiB at
+# PATH:STRENGTH a line), QUANTIZE (bits for the weights on a Mac: 8 on a Mac under 96 GB; unset keeps bfloat16, 43 GiB at
 # its peak with one picture), MOST_PIXELS (with SIZE=source: the most pixels an edit is made at; a larger picture is
 # made at this many, in its own shape. Unset is 1536x1536; the app sets 1280x1280 on a Mac under 96 GB), IMAGE_MODEL
 # (qwen, the default; flux3k-fast or flux3k-full: FLUX3-K through flux3-mlx, oneshot-setup.sh --flux3; no LORA, BASE

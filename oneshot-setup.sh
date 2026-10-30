@@ -12,9 +12,9 @@
 #   bash oneshot-setup.sh --image-edit  # also Qwen-Image-2.1's 40-step base transformer, 13 GB more (Qwen Research License,
 #                                       # non-commercial): Edit a picture works without it, on Turbo's 8 steps
 #   bash oneshot-setup.sh --voice       # also Fish Audio Drama 3 for the Voice tab (scripts/setup-voice.sh: TensorFold's
-#                                       # drama3-mlx in its own venv, 39 GB checkpoint + 39 GB MLX conversion, 64 GB of memory)
+#                                       # drama3-mlx in its own venv, 39 GB checkpoint + 39 GB MLX conversion, 96 GB of memory)
 #   bash oneshot-setup.sh --music       # also MiniMax Music 3 for the Music tab (scripts/setup-music.sh: TensorFold's
-#                                       # music3-mlx in its own venv, 22 GB of weights, 64 GB of memory; MiniMax-Music3
+#                                       # music3-mlx in its own venv, 22 GB of weights, 96 GB of memory; MiniMax-Music3
 #                                       # Community License: commercial use allowed, a commercial UI shows "MiniMax-Music3")
 #   bash oneshot-setup.sh --bolt        # also NVIDIA Nemotron 3.5 Bolt as the Studio's brain engine (scripts/setup-bolt.sh:
 #                                       # NVIDIA's 24 GB checkpoint and LiLiCorr drafter, about 25 GB; OpenMDW 1.1, commercial
@@ -48,9 +48,10 @@
 #                                       # Previs environment, motion graphics and Finish where they are installed), fetch no
 #                                       # weights, then --verify. Running it twice changes nothing.
 #
-# Memory: 48 GB for --image-only; 64 GB for the default install (M1 to M4 run FastH3 on the MLX engine with 8-bit
-# weights, 37 GB more on disk, much slower than an M5); 128 GB with --turbo. Disk: 33 GB, 175 GB and 240 GB, and about
-# 0.6 GB more for motion graphics (0.4 GB) and Finish (0.15 GB), which every install includes.
+# Memory: 48 GB for --image-only; 96 GB for the default install (64 GB up to 4.3.0; M1 to M4 run FastH3 on the MLX
+# engine with 8-bit weights, 37 GB more on disk, much slower than an M5); 128 GB with --turbo. Below 96 GB the default
+# install stops and offers --image-only; --upgrade and --verify of an install made under the 64 GB floor say so and go on.
+# Disk: 33 GB, 175 GB and 240 GB, and about 0.6 GB more for motion graphics (0.4 GB) and Finish (0.15 GB), which every install includes.
 # Engine payload order: this clone's ./payload -> GHCR carrier image -> release download -> git at the pinned commit.
 # CARRIER_DIGEST: when set, the GHCR carrier image pulled for the payload must have exactly this digest (what
 # docker pull resolved to, as printed in the install log) or the install stops -- see fetch_ghcr for why.
@@ -105,7 +106,7 @@ fi
 . "$HERE/scripts/install-checklist.sh"
 if checklist_wanted "$@"; then
   LIST_RAM=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
-  if [ "$LIST_RAM" -ge 64 ]; then  # below 64 GB the install below says what this Mac can run
+  if [ "$LIST_RAM" -ge 96 ]; then  # below 96 GB the install below says what this Mac can run (--image-only)
     LIST_CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "this Mac")"
     LIST_CMD="bash oneshot-setup.sh"; for arg in "$@"; do LIST_CMD="$LIST_CMD $arg"; done
     LIST_FLAGS="$(checklist_run "$(checklist_rows_mac "$LIST_RAM" "$LIST_CHIP")" "$(df -g "$HOME" | awk 'NR==2{print $4}')" \
@@ -198,7 +199,7 @@ ok "$CHIP, macOS $(sw_vers -productVersion), ${RAM} GB"
 if [ "$ALL" = 1 ]; then
   GRAPHICS="${GRAPHICS:-1}"; FINISH="${FINISH:-1}"
   echo "  --all: training a LoRA left out: it runs on a CUDA machine (oneshot-setup-spark.sh --train)"
-  if [ "$RAM" -lt 64 ]; then VIDEO=0; echo "  --all on ${RAM} GB: pictures only (video, voice and music need 64 GB)"
+  if [ "$RAM" -lt 96 ]; then VIDEO=0; echo "  --all on ${RAM} GB: pictures only (video, voice, music and Bolt need 96 GB)"
   else
     MOTION=1; VOICE=1; MUSIC=1; FLUX3=1; SOUND=1; IMAGE_EDIT=1; COMFY_ARGS+=(--moss)
     case "$CHIP" in *M[5-9]*) BOLT=1;; *) echo "  --all: NVIDIA Nemotron 3.5 Bolt left out: its Metal engine is measured on an M5 only (add --bolt to try it)";; esac
@@ -257,9 +258,24 @@ GRAPHICS="${GRAPHICS:-1}"; FINISH="${FINISH:-1}"
 # An install that already holds the Ref2VA transformer keeps it too. Reference to video peaks at 64 GiB in its 20
 # passes and at 103 GiB while its Turbo adapter is merged.
 [ "$VIDEO" = 0 ] || { ls "$H3_MODEL_DIR"/Ref2VA/transformer/*.safetensors >/dev/null 2>&1 && REF2VA=1; } || true
-FAST_NEED=64
+# The default install (video, voice, music, Bolt) needs 96 GB, the Studio's minimum for a Mac since the release after
+# 4.3.0 (64 GB before). Pictures only (--image-only) stays at 48 GB.
+FAST_NEED=96; FORMER_NEED=64  # the default install's floor up to 4.3.0
 if [ "$VIDEO" = 0 ]; then NEED=48; elif [ "$TURBO" = 1 ] || [ "$REF2VA" = 1 ]; then NEED=128; else NEED=$FAST_NEED; fi
-[ "$RAM" -ge "$NEED" ] || die "needs ${NEED} GB+ unified memory for this install$([ "$TURBO" = 1 ] && [ "$RAM" -ge "$FAST_NEED" ] && echo " (without --turbo it needs ${FAST_NEED} GB)") (measured on 256 GB only)"
+if [ "$RAM" -lt "$NEED" ] && [ "$NEED" = "$FAST_NEED" ] && [ "$RAM" -ge "$FORMER_NEED" ] \
+   && { [ "$UPGRADE" = 1 ] || [ "$MODE" = "--verify" ]; } && [ -x "$PREFIX/venv/bin/python" ]; then
+  # an install made under the 64 GB floor: kept and moved to this version, with nothing new added
+  echo "  ! The minimum for a Mac is now 96 GB (it was 64 GB up to 4.3.0); this one has ${RAM} GB."
+  echo "    What is installed is kept$([ "$UPGRADE" = 0 ] || echo " and moved to this version (no weights are fetched)"); video keeps running here."
+  echo "    The Voice and Music tabs now say they need 96 GB, and no new part that needs it is installed on this Mac."
+  echo "    Pictures need 48 GB: an install made from now on here would be bash oneshot-setup.sh --image-only."
+elif [ "$RAM" -lt "$NEED" ]; then
+  if [ "$NEED" = "$FAST_NEED" ] && [ "$RAM" -ge 48 ]; then
+    die "this Mac has ${RAM} GB; the default install (video, voice, music and Bolt) needs 96 GB or more of unified memory. Pictures only need 48 GB: bash oneshot-setup.sh --image-only"
+  fi
+  die "needs ${NEED} GB+ unified memory for this install$([ "$TURBO" = 1 ] && [ "$RAM" -ge "$FAST_NEED" ] && echo " (without --turbo it needs ${FAST_NEED} GB)") (measured on 256 GB only); this Mac has ${RAM} GB"
+fi
+[ "${STUDIO_MEMORY_DRY:-0}" != 1 ] || { echo "need=$NEED video=$VIDEO"; exit 0; }
 case "$CHIP" in *M5*) ok "M5: int8 kernels on the tensor units";;
   *) echo "  ! $CHIP is not M5: the int8 kernels need Metal 4 tensor operations; without them the engine runs bfloat16 and the README numbers do not apply";; esac
 export PATH="/opt/homebrew/bin:$PATH"

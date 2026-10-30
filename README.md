@@ -81,13 +81,14 @@ Untested. The CUDA engines are built and measured for the GB10.
 
 ### Apple silicon
 
-macOS 26 or later, for Metal 4. What runs depends on the memory. Every figure was measured on a Mac Studio M5 Ultra
+macOS 26 or later, for Metal 4. What runs depends on the memory: **96 GB or more** for video, voice, music and the
+Bolt brain (64 GB up to 4.3.0), 48 GB for pictures only. Every figure was measured on a Mac Studio M5 Ultra
 with 256 GB; smaller Macs and M1 to M4 follow from those measurements and are untested.
 
 | Memory | M5 family | M1 to M4 | Disk free for `--all` |
 |---|---|---|---|
-| 48 GB | Pictures only | Pictures only | 40 GB |
-| 64 GB | Pictures, FastH3 video, voice, music, sound, MOSS-Image, FLUX3-K, the Bolt brain | The same, video on the slower MLX engine, no Bolt | about 400 GB (440 on M1 to M4) |
+| 48 to 95 GB | Pictures only (`--image-only`) | Pictures only (`--image-only`) | 40 GB |
+| 96 GB | Pictures, FastH3 video, voice, music, sound, MOSS-Image, FLUX3-K, the Bolt brain | The same, video on the slower MLX engine, no Bolt | about 400 GB (440 on M1 to M4) |
 | 128 GB | Everything above, plus MiniMax H3 Turbo and reference pictures to video (Ref2VA) | The same, slowly | about 530 GB |
 | 192 GB or more | **Everything**, including Upscale and Remove a person (peaks of 125 and 135 GB) | The same, slowly | about 535 GB |
 
@@ -1136,21 +1137,19 @@ NVIDIA DGX Spark (GB10), models already loaded.
 
 ## Which Mac runs what
 
-Every row is Studio **2.3**. "Default" means images (Qwen-Image-2.1-Turbo) and FastH3 video with sound, the web app and
-the one-click app. Only the M5 Ultra with 256 GB has actually run it; every other row follows from memory measured
+Every row's measurements are Studio **2.3**'s; the memory column is the setup's floor after 4.3.0. "Default" means
+images (Qwen-Image-2.1-Turbo) and FastH3 video with sound, the web app and the one-click app. Only the M5 Ultra with 256 GB has actually run it; every other row follows from memory measured
 on that machine and is marked untested.
 
 | Chip | Memory | What runs | Install command | Video engine it uses | Peak memory | Status |
 |---|---|---|---|---|---|---|
-| M5 family | 64 GB | Default | `bash oneshot-setup.sh --app` | FastH3, native Zig engine | 32 GiB | Untested |
 | M5 family | 96 GB | Default | `bash oneshot-setup.sh --app` | FastH3, native Zig engine | 32 GiB | Untested |
 | M5 family | 128 GB | Default, and MiniMax H3 Turbo if wanted | `bash oneshot-setup.sh --turbo --app` | FastH3 native; Turbo on the MLX engine with int8 kernels | 32 GiB; 103 GiB for Turbo | Untested |
 | M5 family | 256 GB or more | Everything | `bash oneshot-setup.sh --turbo --app` | The same | The same | **Tested** (M5 Ultra, 256 GB) |
-| M1 to M4 | 64 GB | Default, slowly | `bash oneshot-setup.sh --app` (add `Q8_ONLY=1` in front to save 65 GB of disk) | FastH3, MLX engine, 8-bit weights | 37 GiB at 480p, 40 GiB at 720p | Untested; emulated on the M5 |
-| M1 to M4 | 96 GB | Default, slowly | `bash oneshot-setup.sh --app` | FastH3, MLX engine, 8-bit weights | 37 to 40 GiB | Untested; emulated on the M5 |
+| M1 to M4 | 96 GB | Default, slowly | `bash oneshot-setup.sh --app` (add `Q8_ONLY=1` in front to save 65 GB of disk) | FastH3, MLX engine, 8-bit weights | 37 GiB at 480p, 40 GiB at 720p | Untested; emulated on the M5 |
 | M1 to M4 | 128 GB | Default, slowly. Turbo installs but is not recommended | `bash oneshot-setup.sh --app` | FastH3, MLX engine, 8-bit weights | 37 to 40 GiB | Untested; Turbo's memory without the int8 kernels is not measured |
 | M1 to M4 | 256 GB or more | Default, slowly; Turbo should fit | `bash oneshot-setup.sh --turbo --app` | FastH3 MLX 8-bit; Turbo on the MLX engine in bfloat16 | 37 to 40 GiB; Turbo not measured | Untested |
-| Any | 48 GB | Images only | `bash oneshot-setup.sh --image-only` | none | 28 GiB | Untested below 256 GB |
+| Any | 48 to 95 GB | Images only | `bash oneshot-setup.sh --image-only` | none | 28 GiB | Untested below 256 GB |
 
 How to configure it:
 
@@ -1169,7 +1168,13 @@ How to configure it:
 |---|---|
 | 2.0 and earlier | 128 GB (M5 for the fast path) |
 | 2.1 | 64 GB on an M5; 96 GB on an M1 to M4 |
-| 2.2 to 2.5 | 64 GB on any Apple silicon |
+| 2.2 to 4.3.0 | 64 GB on any Apple silicon |
+| After 4.3.0 | 96 GB on any Apple silicon (the default install: video, voice, music and the Bolt brain) |
+
+Under 96 GB the setup stops before it downloads anything and offers `--image-only` (48 GB). An install made on a 64 GB
+Mac before the change is not removed: `oneshot-setup.sh --upgrade` and `--verify` say that the minimum is now 96 GB,
+keep and upgrade what is there (video keeps running) and add nothing that needs 96 GB; the Voice and Music tabs say
+they need 96 GB on such a Mac.
 
 On a **DGX Spark** the setup asks for 100 GB of memory for video (a Spark has 128 GB; about 70 GB was in use during a
 clip). No NVIDIA machine with 64 GB has been tried.
@@ -1860,13 +1865,13 @@ disk, nothing copied) and leaves `~/TensorFoldStudio` as a link to it (`app/stud
 | What you want to run | Memory | Disk | Chip |
 |---|---|---|---|
 | Images only (`--image-only`) | **48 GB** | 33 GB | Any Apple silicon; M5 for the int8 kernels |
-| The default: images and FastH3 video, the web app | **64 GB** | 175 GB | M5 family: the native engine, fastest |
-| The default on an M1 to M4 | **64 GB** | 212 GB | FastH3 on the MLX engine with 8-bit weights, much slower |
+| The default: images and FastH3 video, voice, music, the Bolt brain, the web app | **96 GB** | 175 GB | M5 family: the native engine, fastest |
+| The default on an M1 to M4 | **96 GB** | 212 GB | FastH3 on the MLX engine with 8-bit weights, much slower |
 | With `--turbo`: MiniMax H3 Turbo and its 20-step modes as well | **128 GB** | 240 GB | M5 family for the fast path |
 | With `--ref2va`: reference pictures to video (MiniMax H3 Ref2VA) | **128 GB** | 64 GB more | M5 family for the fast path |
 
-The setup enforces the memory figures. All of this was measured on one machine, a Mac Studio M5 Ultra with 256 GB:
-the figures below are what each stage of a job used there (`/usr/bin/time -l`, peak memory footprint), not a run
+The setup enforces the memory figures (the default's was 64 GB up to 4.3.0; under 96 GB it now offers
+`--image-only`). All of this was measured on one machine, a Mac Studio M5 Ultra with 256 GB: the figures below are what each stage of a job used there (`/usr/bin/time -l`, peak memory footprint), not a run
 on a smaller Mac.
 
 | FastH3 job, native engine (M5 Ultra, 2026-10-08) | Prompt export | Passes | Decode | **Peak** |
@@ -1901,9 +1906,9 @@ small change, as it does between bfloat16 and int8 on the M5).
 | Machine | Status |
 |---|---|
 | Mac Studio M5 Ultra, 256 GB, macOS 27 | **Tested.** Every number in this README is from this machine. |
-| M5 Max or M5 Pro, 64 GB or more | Untested. Meets the memory check for the default install with half the memory to spare; less GPU, so expect longer times. |
-| M5 family, 48 GB | Untested. Images only (`--image-only`); the setup refuses video under 64 GB, though the measured peak is 32 GiB. |
-| M1 to M4, 64 GB or more | Untested on real hardware; emulated on the M5 Ultra. No tensor units: FastH3 runs on the MLX engine with 8-bit weights, about six times slower a pass than the native engine even on an M5 Ultra's GPU, and slower again on an older one. |
+| M5 Max or M5 Pro, 96 GB or more | Untested. Meets the memory check for the default install with room to spare; less GPU, so expect longer times. |
+| M5 family, 48 to 95 GB | Untested. Images only (`--image-only`); the setup refuses the default install (video, voice, music) under 96 GB, though a video job's measured peak is 32 GiB. |
+| M1 to M4, 96 GB or more | Untested on real hardware; emulated on the M5 Ultra. No tensor units: FastH3 runs on the MLX engine with 8-bit weights, about six times slower a pass than the native engine even on an M5 Ultra's GPU, and slower again on an older one. |
 | macOS 26 | Untested. The kernels need Metal 4, so it is the likely minimum. |
 
 Installed size: about 175 GB, nearly all model weights (FastH3 65 GB, MiniMax H3's text encoder and decoders 72 GB,
@@ -1933,6 +1938,10 @@ bash oneshot-setup.sh --ref2va --app    # the same plus reference pictures to vi
 cd Imagination-Studio-by-keys-Wasserman && git pull
 bash oneshot-setup.sh --upgrade         # add --app to rebuild the double-clickable app as well
 ```
+
+On a Mac under 96 GB with an install made under the former 64 GB minimum, `--upgrade` says that the minimum is now
+96 GB, upgrades and keeps what is installed, and adds nothing that needs 96 GB. Video keeps running; the Voice and
+Music tabs say they need 96 GB.
 
 `--upgrade` moves an existing install to the version of the clone: it replaces the TensorFold engine and the native
 FastH3 engine in the install's own environment when they are older than this version pins, copies the render
@@ -2964,8 +2973,8 @@ take starts the engine's process and loads the model (3.7 s); the engine's own c
 Engine time is Drama 3's own (prefill, frames and codec); the process also loads the model (about 3 s) and the
 word check loads Whisper on the CPU. Peak memory 48 to 51 GB.
 
-**Mac requirements.** An Apple-silicon Mac with 64 GB of memory or more (the run peaks at about 52 GB; nothing else
-of the studio runs beside it), about 40 GB of disk for the converted weights (and 39 GB for Fish's checkpoint while
+**Mac requirements.** An Apple-silicon Mac with 96 GB of memory or more (64 GB up to 4.3.0; the run peaks at about
+52 GB; nothing else of the studio runs beside it), about 40 GB of disk for the converted weights (and 39 GB for Fish's checkpoint while
 converting), and TensorFold's Drama 3 port in an environment of its own. The port is on TensorFold's `drama3-mlx`
 branch of [drowzeys/TensorFold](https://github.com/drowzeys/TensorFold). `bash oneshot-setup.sh --voice` (or
 `bash scripts/setup-voice.sh` alone, `--verify` to check) does all of it: the clone at 8f3d4b33 in
@@ -3161,9 +3170,9 @@ autoregressive model with its depth decoder, the DiT and the DAV decoder, in MLX
 environment (`python -m tensorfold.music3 --serve`, Drama 3's protocol), under a memory guard (8 GB of vm_stat's free
 pages, `MUSIC3_GUARD_GB`). `bash oneshot-setup.sh --music` (`scripts/setup-music.sh`) clones the branch at that commit
 into `$PREFIX/music3-src`, makes `$PREFIX/music3-venv`, downloads the weights to `~/music3-models/MiniMax-Music3-Comfy`
-(`MUSIC3_MODEL` names another folder; `MUSIC3_VENV` another environment) and makes a 10 s test song. 64 GB of memory
-or more. Measured on a Mac Studio M5 Ultra 256 GB: the installer's test song, 10 s in 12.1 s, 28.1 GB at the peak;
-through the app, a 60 s song in 75.8 s (the autoregressive model 37.8 s, the DiT 34.6 s, the decoder 2.0 s), MLX's
+(`MUSIC3_MODEL` names another folder; `MUSIC3_VENV` another environment) and makes a 10 s test song. 96 GB of memory
+or more (64 GB up to 4.3.0). Measured on a Mac Studio M5 Ultra 256 GB: the installer's test song, 10 s in 12.1 s,
+28.1 GB at the peak; through the app, a 60 s song in 75.8 s (the autoregressive model 37.8 s, the DiT 34.6 s, the decoder 2.0 s), MLX's
 peak 27.6 GB. TensorFold's own run of the command line (the same hip-hop lyrics as the Spark's, seed 7): 30 s in
 61.2 s, 60 s in 82.5 s, both at 27.6 GB.
 
@@ -4470,7 +4479,7 @@ library: branch `h3-cuda-lora` @ `1f7ecc75`, which adds `tf_h3_set_weight` for L
   (video) run the base models.
 - **M5 only for these numbers.** The int8 kernels need Metal 4 tensor operations; elsewhere both families run
   bfloat16 and slower.
-- **Memory.** `--image-only` asks for 48 GB; the default install 64 GB; `--turbo` and `--ref2va` 128 GB. Measured on 256 GB only; see [Minimum requirements](#minimum-requirements).
+- **Memory.** `--image-only` asks for 48 GB; the default install 96 GB (64 GB up to 4.3.0); `--turbo` and `--ref2va` 128 GB. Measured on 256 GB only; see [Minimum requirements](#minimum-requirements).
 - **Not part of upstream TensorFold.** The H3 family, the Qwen-Image family and the audio step were offered to
   ashhart/TensorFold as draft pull requests (#384, #393, #405) and closed on 2026-10-07: the engine is built around
   token lanes with exact output, it does not trade precision as the int8 kernels do, its Python engine is frozen and
