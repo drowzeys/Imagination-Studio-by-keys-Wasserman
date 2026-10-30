@@ -19,7 +19,26 @@ studio_export_gpu() {
   esac
   export STUDIO_GPU
   export CUDA_DEVICE_ORDER=PCI_BUS_ID
-  export CUDA_VISIBLE_DEVICES="$STUDIO_GPU"
+  if [ -n "${STUDIO_LOCAL_GPU_UUID:-}" ]; then
+    # Managed workers pin CUDA by physical identity. The guard still uses the
+    # numeric nvidia-smi index, so refuse a stale guard rather than another GPU.
+    if [[ ! "$STUDIO_LOCAL_GPU_UUID" =~ ^GPU-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+      echo "The local GPU identity is invalid; restart its Studio." >&2
+      return 1
+    fi
+    local current
+    current=$(timeout 5 nvidia-smi -i "$STUDIO_LOCAL_GPU_UUID" --query-gpu=index --format=csv,noheader,nounits 2>/dev/null) || {
+      echo "The selected local GPU is unavailable; reconnect it and restart its Studio." >&2
+      return 1
+    }
+    if [ "$current" != "$STUDIO_GPU" ]; then
+      echo "The local GPU index changed; restart its Studio so the memory guard follows the same card." >&2
+      return 1
+    fi
+    export CUDA_VISIBLE_DEVICES="$STUDIO_LOCAL_GPU_UUID"
+  else
+    export CUDA_VISIBLE_DEVICES="$STUDIO_GPU"
+  fi
 }
 
 studio_compute_indexes() {
@@ -42,11 +61,13 @@ studio_gpu_rows() {
 studio_pin_gpu() {
   if [ -n "${STUDIO_GPU:-}" ]; then
     studio_export_gpu
-    return 0
+    return $?
   fi
   case "${CUDA_VISIBLE_DEVICES:-}" in
     ""|*,*|*[!0-9]*) ;;
-    *) STUDIO_GPU="$CUDA_VISIBLE_DEVICES"; studio_export_gpu; return 0;;
+    *) if [ "${CUDA_DEVICE_ORDER:-}" = PCI_BUS_ID ]; then
+         STUDIO_GPU="$CUDA_VISIBLE_DEVICES"; studio_export_gpu; return $?
+       fi;;
   esac
   command -v nvidia-smi >/dev/null 2>&1 || return 0
   local indexes count pick

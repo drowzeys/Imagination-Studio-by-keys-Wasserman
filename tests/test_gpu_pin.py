@@ -3,8 +3,10 @@
 Run: python3 -m pytest tests/test_gpu_pin.py
 """
 import os
+import sys
 import subprocess
 from pathlib import Path
+import pytest
 
 import suite_gpu
 
@@ -24,7 +26,8 @@ def pin(tmp_path, rows, **env):
         "studio_pin_gpu\n"
         'printf "gpu=%s cuda=%s\\n" "${STUDIO_GPU-}" "${CUDA_VISIBLE_DEVICES-}"\n'
     )
-    clean = {key: value for key, value in os.environ.items() if key not in ("STUDIO_GPU", "CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER")}
+    clean = {key: value for key, value in os.environ.items()
+             if key not in ("STUDIO_GPU", "CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER", "STUDIO_LOCAL_GPU_UUID")}
     return subprocess.run(["bash", "-c", script], cwd=tmp_path, env={**clean, "PATH": f"{bin_dir}:/usr/bin:/bin", **env},
                           capture_output=True, text=True, timeout=10)
 
@@ -95,6 +98,7 @@ def test_the_suite_reads_the_first_compute_gpu_and_leaves_a_spark_alone():
     assert suite_gpu.choose_suite_gpu([]) is None
 
 
+@pytest.mark.skipif(os.environ.get("STUDIO_TEST_HARDWARE") != "1", reason="real GPU inspection requires STUDIO_TEST_HARDWARE=1")
 def test_this_run_is_pinned_to_the_choice_the_rows_give():
     try:
         done = subprocess.run(
@@ -163,3 +167,30 @@ def test_the_memory_guard_reads_the_compute_card_when_nothing_pinned_it(tmp_path
         assert argv(["0, 97887, Disabled", "1, 97887, Disabled"]) == ["nvidia-smi", "-i", "0"]
     finally:
         memory_guard._CHOSEN.clear()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="managed local GPU scripts run only on Linux")
+def test_managed_worker_preserves_uuid_cuda_pin(tmp_path):
+    ident = "GPU-00000000-0000-0000-0000-000000000002"
+    done = pin(tmp_path, ["1"], STUDIO_GPU="1", STUDIO_LOCAL_GPU_UUID=ident)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == f"gpu=1 cuda={ident}"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="managed local GPU scripts run only on Linux")
+def test_managed_worker_refuses_stale_numeric_memory_guard(tmp_path):
+    ident = "GPU-00000000-0000-0000-0000-000000000002"
+    done = pin(tmp_path, ["2"], STUDIO_GPU="1", STUDIO_LOCAL_GPU_UUID=ident)
+    assert done.returncode == 1
+    assert "index changed" in done.stderr and "gpu=" not in done.stdout
+
+
+def test_bare_cuda_ordinal_is_not_mapped_without_pci_order(tmp_path):
+    done = pin(tmp_path, ["0, 24000, Disabled", "1, 24000, Disabled"], CUDA_VISIBLE_DEVICES="1")
+    assert done.returncode == 1 and "Set STUDIO_GPU" in done.stderr
+
+
+def test_cuda_ordinal_with_pci_order_is_a_guard_index(tmp_path):
+    done = pin(tmp_path, [], CUDA_VISIBLE_DEVICES="1", CUDA_DEVICE_ORDER="PCI_BUS_ID")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "gpu=1 cuda=1"

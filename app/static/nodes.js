@@ -126,13 +126,18 @@ async function ndDelete() {
   if (!ND.graph.id || !confirm("Delete " + ND.graph.name + "? It goes to the trash folder (nodes/.trash), not erased.")) return;
   try { await api("/api/nodes/graphs/" + encodeURIComponent(ND.graph.id), undefined, "DELETE"); } catch (e) { return toast(e.message); }
   ND.graph.id = null; ND.saved = null; ND.dirty = true; ndList(); ndPaintBar(); }
-// the memory guard's answer and the expected time for a clip card, before anything is queued (/api/estimate)
+// The server chooses the video worker (including saved placement) before estimating its memory and time.
 async function ndEstimate(node) {
   const refs = ND.graph.edges.filter(e => e.to === node.id && e.in === "refs").length;
-  try { ND.est[node.id] = await api("/api/estimate", { preset: node.params.preset, quality: node.params.quality, seconds: Number(node.params.seconds),
+  try { ND.est[node.id] = await api("/api/estimate", { kind: "video", preset: node.params.preset, quality: node.params.quality, seconds: Number(node.params.seconds),
     referenced: refs > 0, references: refs, with_lora: !!node.params.look, loras: node.params.look ? [{ id: node.params.look }] : [] }); }
   catch { delete ND.est[node.id]; }
   ndPaintOut(node.id); }
+const ndEstimateWhere = est => {
+  const name = est && est.worker ? (typeof est.worker === "string" ? est.worker : est.worker.name || est.worker.address) : "";
+  return name ? " on " + (name.startsWith("local:") ? "local GPU" : name) : "";
+};
+const ndMemoryReason = est => est.memory.reason || "the selected worker's available memory" + ndEstimateWhere(est);
 // Run is held off from the first click until the server has answered (a double click starts one run; the server
 // answers 409 to a second all the same)
 async function ndRun() {
@@ -146,7 +151,7 @@ async function ndStart() {
   if (!said.ok) { ndPaint(); return toast(said.problems[0].message + (said.problems.length > 1 ? " (and " + (said.problems.length - 1) + " more)" : "")); }
   const clips = ND.graph.nodes.filter(n => n.type === "clip"); await Promise.all(clips.map(ndEstimate));
   const full = clips.find(n => ND.est[n.id] && ND.est[n.id].memory && ND.est[n.id].memory.fits === false);
-  if (full) { ND.sel = { node: full.id }; ndPaint(); return toast(ndTitle(full) + ": " + (ND.est[full.id].memory.reason || "it does not fit " + (typeof cardFace === "function" && cardFace() ? "this GPU's memory" : "this machine's memory"))); }
+  if (full) { ND.sel = { node: full.id }; ndPaint(); return toast(ndTitle(full) + ": " + (ND.est[full.id].memory.reason || "it does not fit " + ndMemoryReason(ND.est[full.id]))); }
   try { ND.run = await api("/api/nodes/run", { graph: ndSerialize(), ...(ND.graph.id && !ND.dirty ? { id: ND.graph.id } : {}) }); } catch (e) { return toast(e.message); }
   toast("Running " + ND.graph.name + ": its jobs are in the queue"); ndPaintStatus(); ndWatch(); }
 async function ndCancel() {
@@ -231,8 +236,8 @@ function ndFields(node) {
 function ndOut(node) {
   const st = ND.run && ND.run.nodes && ND.run.nodes[node.id], out = [];
   const est = ND.est[node.id];
-  if (est && est.memory && est.memory.fits === false) out.push(el("div", { class: "nd-err" }, "Does not fit: " + (est.memory.reason || (typeof cardFace === "function" && cardFace() ? "this GPU's memory" : "this machine's memory"))));
-  else if (est && est.seconds && !st && (typeof cardFace !== "function" || !cardFace() || est.where === "card")) out.push(el("div", { class: "nd-meta" }, "About " + mmss(est.seconds)));
+  if (est && est.memory && est.memory.fits === false) out.push(el("div", { class: "nd-err" }, "Does not fit: " + ndMemoryReason(est)));
+  else if (est && est.seconds && !st && (est.worker || typeof cardFace !== "function" || !cardFace() || est.where === "card")) out.push(el("div", { class: "nd-meta" }, "About " + mmss(est.seconds) + ndEstimateWhere(est)));
   if (ND.problems[node.id]) out.push(el("div", { class: "nd-err" }, ND.problems[node.id]));
   if (!st) return out;
   if (st.status === "running") { const pr = st.progress;

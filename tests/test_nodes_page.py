@@ -223,3 +223,31 @@ def test_the_canvas_maths_follows_the_type_size_zoom():
     assert out["inside"]  # Fit keeps the whole graph inside the stage's own width
     assert out["pan"] == [110, 70]  # a drag of 100 page pixels moves the canvas 100 of its own
 
+
+def test_clip_estimates_use_the_server_selected_worker_not_the_heads_gpu():
+    out = run("""globalThis.cardFace = () => true;
+      ndLoad(ndBlank()); const clip = ndAdd("clip", 0, 0); viewNodes(); calls.length = 0;
+      answers["/api/estimate"] = { seconds: 84, where: "worker", worker: { address: "local:GPU-00000000-0000-0000-0000-000000000002", name: "Video GPU" }, memory: { fits: true } };
+      await ndEstimate(clip); out.card = text(ND.cards[clip.id]); out.sent = calls[0];
+      answers["/api/estimate"] = { worker: { address: "worker@example.invalid", name: "Remote Spark" }, memory: { fits: false } };
+      await ndEstimate(clip); out.refused = text(ND.cards[clip.id]);""")
+    assert "About 84 s on Video GPU" in out["card"]
+    assert out["sent"][0] == "/api/estimate" and out["sent"][1]["kind"] == "video"
+    assert "placement" not in out["sent"][1]  # saved VIDEO placement is resolved by the server
+    assert "selected worker's available memory on Remote Spark" in out["refused"]
+    assert "this GPU's memory" not in out["refused"]
+
+
+def test_clip_preflight_refuses_selected_worker_memory_and_does_not_pin_graph_to_head():
+    out = run("""globalThis.cardFace = () => true;
+      ndLoad(ndBlank("Worker memory")); const t = ndAdd("text", 0, 0), c = ndAdd("clip", 300, 0);
+      t.params.text = "synthetic clip"; ndConnect(t.id, "text", c.id, "prompt"); viewNodes(); calls.length = 0;
+      answers["/api/nodes/check"] = { ok: true, problems: [], order: [t.id, c.id] };
+      answers["/api/estimate"] = { worker: { address: "worker@example.invalid", name: "Remote Spark" }, memory: { fits: false } };
+      await ndRun(); out.refused = toasts.pop(); out.calls = calls.map(c => c[0]);
+      answers["/api/estimate"] = { seconds: 12, worker: { address: "worker@example.invalid", name: "Remote Spark" }, memory: { fits: true } };
+      answers["/api/nodes/run"] = { id: "r-worker", status: "done", order: [], nodes: {} };
+      await ndRun(); out.body = calls.find(c => c[0] === "/api/nodes/run")[1];""")
+    assert "selected worker's available memory on Remote Spark" in out["refused"]
+    assert out["calls"] == ["/api/nodes/check", "/api/estimate"]
+    assert "placement" not in out["body"] and out["body"]["graph"]["name"] == "Worker memory"

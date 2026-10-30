@@ -188,11 +188,16 @@ const platName = () => {
 function cardFace() {
   return !!(S && S.platform === "spark" && (S.platform_label || "").startsWith("CUDA · "));
 }
-// A video time on a card is a warm sample of that canvas (where === "card"). Anything else is no number and no suffix.
-// A GB10 keeps "on a DGX Spark, models loaded". A Mac keeps "on an M5 Ultra".
+const estimateWorkerName = r => {
+  const name = r && r.worker ? (typeof r.worker === "string" ? r.worker : r.worker.name || r.worker.address) : "";
+  return name && name.startsWith("local:") ? "local GPU" : name;
+};
+// Local-card times need a warm sample of this canvas. A selected worker supplies its own estimate.
+// Without a worker, GB10 and Mac keep their existing measured-machine labels.
 function estimateWhere(r) {
   const seconds = r && r.seconds;
   if (!seconds) return "";
+  if (r.worker) return "≈ " + mmss(seconds) + " on " + estimateWorkerName(r);
   if (cardFace()) return r.where === "card" ? "≈ " + mmss(seconds) + " on this card" : "";
   if (S && S.platform === "spark") return "≈ " + mmss(seconds) + " on a DGX Spark, models loaded";
   return "≈ " + mmss(seconds) + " on an M5 Ultra";

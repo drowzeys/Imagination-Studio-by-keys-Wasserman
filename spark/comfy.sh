@@ -36,6 +36,9 @@ case "${1:-start}" in
     pkill -f "$MATCH" 2>/dev/null && echo "stopped" || echo "not running"; rm -f "$COMFY_KIND";;
   status) pgrep -f "$MATCH" >/dev/null && echo "running on 127.0.0.1:$PORT" || echo "not running";;
   run)
+    # A warm server belongs to the GPU session, not to the first job that loaded it.
+    unset STUDIO_GPU_JOB_KEY
+    export STUDIO_GPU_MODEL_RAM=1
     export PATH="/usr/local/cuda/bin:$PATH" CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}" MAX_JOBS="${MAX_JOBS:-2}"
     # TensorFold's H3 engine as a ComfyUI node, when it has been built (spark/build-engine.sh)
     NODE="$PREFIX/ComfyUI/custom_nodes/tensorfold_h3"
