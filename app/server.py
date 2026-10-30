@@ -187,7 +187,7 @@ def machine() -> tuple[str, str]:
         # the same build on a CUDA workstation (an RTX Pro 6000): named by its card, not as a DGX Spark
         return "spark", (f"DGX SPARK · {GPU_NAME[0].upper()} · H3-CUDA" if "GB10" in GPU_NAME[0].upper()
                          else f"CUDA · {GPU_NAME[0].upper()} · H3-CUDA")
-    # no chip name: the same recipe runs from an M1 with 64 GB up
+    # no chip name: the same recipe runs from an M1 with 96 GB up (pictures only from 48 GB)
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
 

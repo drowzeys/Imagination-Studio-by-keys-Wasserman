@@ -15,7 +15,7 @@ app* buttons that take you to the control.
 | Need | Why |
 |---|---|
 | Apple silicon with an **M5-family** chip | the fast kernels use its tensor units; other chips run far slower |
-| **64 GB** memory or more | a FastH3 clip peaks near 32 GB on an M5, near 40 GB on an M1 to M4 (8-bit weights, much slower); 128 GB for the optional MiniMax H3 Turbo |
+| **96 GB** memory or more | the Studio's minimum for video, voice, music and the Bolt brain (64 GB up to 4.3.0; a FastH3 clip peaks near 32 GB on an M5, near 40 GB on an M1 to M4); 48 GB for pictures only (`--image-only`); 128 GB for the optional MiniMax H3 Turbo |
 | **185 GB** free disk (250 GB with Turbo) | model weights: 31 GB image, 65 GB FastH3, 72 GB text encoder and decoders |
 | Homebrew | to install Python 3.11, uv and ffmpeg |
 
@@ -36,10 +36,10 @@ run again; downloads resume. Variants:
 
 | Command | What it installs |
 |---|---|
-| `bash oneshot-setup.sh --app` | images and FastH3 video, motion graphics and Finish (about 175 GB); needs 64 GB of memory on an M5. In a terminal it first shows a checklist of parts; `--yes` skips it |
-| `bash oneshot-setup.sh --all --app` | every feature this Mac's memory runs (about 400 GB with 64 GB of memory, 530 GB with 128 GB or more) |
+| `bash oneshot-setup.sh --app` | images and FastH3 video, motion graphics and Finish (about 175 GB); needs 96 GB of memory (under it the setup offers `--image-only`). In a terminal it first shows a checklist of parts; `--yes` skips it |
+| `bash oneshot-setup.sh --all --app` | every feature this Mac's memory runs (about 400 GB with 96 GB of memory, 530 GB with 128 GB or more; pictures only under 96 GB) |
 | `bash oneshot-setup.sh --turbo --app` | also MiniMax H3 Turbo (about 240 GB); needs 128 GB of memory, and adds a second engine card |
-| `bash oneshot-setup.sh --image-only --app` | image model only (33 GB) |
+| `bash oneshot-setup.sh --image-only --app` | image model only (33 GB); needs 48 GB of memory |
 | add `--flux3` | the FLUX3-K Fast and Full picture models (41 GB; accept the FLUX Kommunity License on Hugging Face first) |
 | add `--image-edit` | Qwen's base weights: Qwen 2.1 Full and the 40-step choice in Edit a picture |
 | add `--ref2va` | reference pictures, videos and audio to video, MiniMax H3 Ref2VA (64 GB more; 128 GB of memory) |

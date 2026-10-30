@@ -126,7 +126,7 @@ class Mlx(voice.Served):
     # free memory wanted before it loads: MLX's own peak was 27.6 GB for that song and the machine's memory in use rose
     # by 32.9 GB, and the guard's 8 GB beside it
     NEED_GB = 42.0
-    MEMORY_GB = 64  # a Mac with less does not run it
+    MEMORY_GB = 96  # the Studio's minimum for a Mac (64 up to 4.3.0): a Mac with less does not run it
 
     def __init__(self) -> None:
         super().__init__()

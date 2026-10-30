@@ -45,7 +45,7 @@ Per picture is the model's own time with the model loaded: the median, with min-
 - **Qwen runs about 2x faster a step on the M5 Ultra than on a GB10.**
 - **FLUX3-K runs the same speed on both.**
 - **The upsampler costs more on the Spark:** 12 s against 5 s, once per prompt.
-- **Every model fits in 40 GB.** Each fits a 64 GB Mac, and fits beside nothing else heavy on a Spark.
+- **Every model fits in 40 GB.** Each fits a 96 GB Mac (the default install's minimum), and fits beside nothing else heavy on a Spark.
 
 The raw rows are in [results.csv](shootout/results.csv).
 

@@ -159,9 +159,9 @@ def test_the_mac_installer_turns_the_list_into_its_own_flags():
     assert flags == "--music" and "Optional, larger" not in drawn
     flags, drawn = dry("--app")
     ram = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout) // 2**30
-    if ram >= 64:
+    if ram >= 96:
         assert "Optional, larger" in drawn and flags.startswith("--app --motion --voice --music")
-    else:  # below 64 GB the install itself says what this Mac can run
+    else:  # below 96 GB the install itself says what this Mac can run (--image-only)
         assert flags == "--app" and "Optional, larger" not in drawn
 
 
@@ -301,3 +301,97 @@ def test_swap_no_longer_ticks_the_bf16_ref2va():
     rows = subprocess.run([BASH, "-c", f'. "{LIB}"; checklist_rows_cuda aarch64'], capture_output=True, text=True, timeout=20).stdout
     swap = next(line.split("|") for line in rows.splitlines() if line.startswith("swap|"))
     assert swap[4] == "23100" and swap[7] == ""
+
+
+def fake_mac(tmp_path, gib, chip="Apple M5 Max"):
+    """A PATH whose uname, sysctl, sw_vers and df answer as a Mac with ``gib`` GB of memory, on any machine."""
+
+    bin_dir = tmp_path / "fake-mac-bin"
+    bin_dir.mkdir(exist_ok=True)
+    tools = {
+        "uname": 'case "${1:-}" in -m) echo arm64;; *) echo Darwin;; esac',
+        "sysctl": f'case "$*" in *hw.memsize*) echo {gib << 30};; *brand_string*) echo "{chip}";; *) exit 1;; esac',
+        "sw_vers": "echo 26.0",
+        "df": 'printf "Filesystem 1G-blocks Used Available\\n/dev/disk 2000 1000 900\\n"',
+    }
+    for name, body in tools.items():
+        (bin_dir / name).write_text(f"#!/bin/sh\n{body}\n")
+        (bin_dir / name).chmod(0o755)
+    return f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+
+
+def mac_install(tmp_path, gib, *args, **extra):
+    """oneshot-setup.sh on a fake Mac with ``gib`` GB, stopped right after its memory decision (STUDIO_MEMORY_DRY)."""
+
+    done = subprocess.run([BASH, str(ROOT / "oneshot-setup.sh"), *args], capture_output=True, text=True, timeout=60,
+                          env=env(PATH=fake_mac(tmp_path, gib), STUDIO_NO_CHECKLIST="1", STUDIO_MEMORY_DRY="1",
+                                  PREFIX=str(tmp_path / "prefix"), H3_MODEL_DIR=str(tmp_path / "h3"), HOME=str(tmp_path), **extra))
+    return done.returncode, done.stdout + done.stderr
+
+
+@pytest.mark.parametrize("gib", [64, 95])
+def test_the_mac_checklist_is_not_shown_below_96_gb(tmp_path, gib):
+    done = subprocess.run([BASH, str(ROOT / "oneshot-setup.sh"), "--app"], capture_output=True, text=True, timeout=30,
+                          env=env(PATH=fake_mac(tmp_path, gib), STUDIO_CHECKLIST_DRY="1", STUDIO_CHECKLIST_INPUT="\\n"))
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "--app" and "Optional, larger" not in done.stderr  # the install says what runs here
+
+
+@pytest.mark.parametrize("gib", [96, 128])
+def test_the_mac_checklist_is_shown_from_96_gb(tmp_path, gib):
+    done = subprocess.run([BASH, str(ROOT / "oneshot-setup.sh"), "--app"], capture_output=True, text=True, timeout=30,
+                          env=env(PATH=fake_mac(tmp_path, gib), STUDIO_CHECKLIST_DRY="1", STUDIO_CHECKLIST_INPUT="\\n"))
+    assert done.returncode == 0, done.stderr
+    assert "Optional, larger" in done.stderr and done.stdout.strip().startswith("--app --motion --voice --music")
+    assert ("--turbo" in done.stdout) == (gib >= 128)
+
+
+def test_a_mac_below_96_gb_is_offered_pictures_only(tmp_path):
+    code, said = mac_install(tmp_path, 64, "--no-render")
+    assert code == 1 and "this Mac has 64 GB; the default install (video, voice, music and Bolt) needs 96 GB" in said
+    assert "bash oneshot-setup.sh --image-only" in said and "48 GB" in said
+    code, said = mac_install(tmp_path, 95, "--no-render")
+    assert code == 1 and "needs 96 GB" in said
+    code, said = mac_install(tmp_path, 96, "--no-render")
+    assert code == 0 and "need=96 video=1" in said
+    for gib in (48, 64):  # pictures only stay at 48 GB
+        code, said = mac_install(tmp_path, gib, "--image-only", "--no-render")
+        assert code == 0 and "need=48 video=0" in said
+    code, said = mac_install(tmp_path, 32, "--image-only", "--no-render")
+    assert code == 1 and "needs 48 GB+" in said
+    code, said = mac_install(tmp_path, 64, "--all", "--no-render")
+    assert code == 0 and "pictures only (video, voice, music and Bolt need 96 GB)" in said and "need=48 video=0" in said
+
+
+def test_an_upgrade_of_a_64_gb_mac_says_the_new_minimum_and_keeps_the_install(tmp_path):
+    python = tmp_path / "prefix" / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+    (tmp_path / "h3" / "FL2VA" / "text_encoder").mkdir(parents=True)
+    (tmp_path / "h3" / "FL2VA" / "text_encoder" / "model.safetensors").write_bytes(b"")
+    for args in (("--upgrade",), ("--verify",)):
+        code, said = mac_install(tmp_path, 64, *args)
+        assert code == 0 and "need=96 video=1" in said, said  # the video install stays one
+        assert "The minimum for a Mac is now 96 GB (it was 64 GB up to 4.3.0); this one has 64 GB." in said
+        assert "What is installed is kept" in said and "Voice and Music tabs now say they need 96 GB" in said
+    assert "moved to this version" in mac_install(tmp_path, 64, "--upgrade")[1]
+    code, said = mac_install(tmp_path, 96, "--upgrade")
+    assert code == 0 and "minimum for a Mac is now" not in said
+    code, said = mac_install(tmp_path, 48, "--upgrade")  # under the former floor too: not a video install it could have made
+    assert code == 1 and "needs 96 GB" in said
+
+
+@pytest.mark.parametrize("script,name", [("scripts/setup-voice.sh", "Drama 3 (the Voice tab)"), ("scripts/setup-music.sh", "MiniMax Music 3")])
+def test_voice_and_music_setup_need_96_gb_on_a_mac(tmp_path, script, name):
+    def run(gib, *args):
+        done = subprocess.run([BASH, str(ROOT / script), *args], capture_output=True, text=True, timeout=30,
+                              env=env(PATH=fake_mac(tmp_path, gib), HOME=str(tmp_path), PREFIX=str(tmp_path / "prefix"),
+                                      DRAMA3_SRC=str(tmp_path / "none"), MUSIC3_SRC=str(tmp_path / "none")))
+        return done.returncode, done.stdout + done.stderr
+    code, said = run(64)
+    assert code == 1 and f"FATAL: {name}" in said and "a Mac with 96 GB or more (this one has 64 GB)" in said
+    code, said = run(64, "--verify")  # an install made under the 64 GB floor is checked, not refused
+    assert f"this Mac has 64 GB: {name} needs 96 GB or more now" in said and "a Mac with 96 GB or more" not in said
+    code, said = run(96, "--verify")
+    assert "96 GB" not in said

@@ -10,7 +10,7 @@
 # show "MiniMax-Music3" in its interface, a company above US$20 million of yearly revenue needs MiniMax's written
 # authorisation, and a hosted service must keep safeguards against misuse. Do not redistribute them.
 #
-# Mac (Apple silicon, 64 GB or more): the engine runs as its own process in $PREFIX/music3-venv, never in the Studio's
+# Mac (Apple silicon, 96 GB or more): the engine runs as its own process in $PREFIX/music3-venv, never in the Studio's
 # venv. Environment: PREFIX, MUSIC3_SRC (the TensorFold clone, default $PREFIX/music3-src; an existing clone that has
 # the pinned commit is used as it is), MUSIC3_VENV ($PREFIX/music3-venv), MUSIC3_MODEL (~/music3-models/MiniMax-Music3-Comfy).
 # On a DGX Spark the song runs on TensorFold's CUDA engine (spark/build-music3.sh), else in the studio's ComfyUI:
@@ -47,7 +47,11 @@ if [ "$(uname -s)" = Linux ]; then
 fi
 [ "$(uname -m)" = arm64 ] || die "the MLX port of MiniMax Music 3 needs Apple silicon"
 MEM=$(sysctl -n hw.memsize)
-[ "$MEM" -ge $((64 * 1024 * 1024 * 1024)) ] || die "MiniMax Music 3 takes about 33 GB: a Mac with 64 GB or more"
+# 96 GB: the Studio's minimum for a Mac (64 GB up to 4.3.0). --verify of an install made under the old floor says so and goes on
+if [ "$MEM" -lt $((96 * 1024 * 1024 * 1024)) ]; then
+  [ "$VERIFY" = 1 ] || die "MiniMax Music 3 takes about 33 GB: a Mac with 96 GB or more (this one has $((MEM / 1073741824)) GB)"
+  echo "  ! this Mac has $((MEM / 1073741824)) GB: MiniMax Music 3 needs 96 GB or more now (64 GB up to 4.3.0); what is installed is checked and kept, and the app does not run it here"
+fi
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 SRC="${MUSIC3_SRC:-$PREFIX/music3-src}"
 VENV="${MUSIC3_VENV:-$PREFIX/music3-venv}"
