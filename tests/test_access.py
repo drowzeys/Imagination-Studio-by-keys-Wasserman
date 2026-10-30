@@ -208,5 +208,5 @@ def test_network_addresses_skip_containers_tunnels_and_tailscale(monkeypatch):
         stdout = shown
     monkeypatch.setattr(server.sys, "platform", "linux")
     monkeypatch.setattr(server.subprocess, "run", lambda *a, **k: Done())
-    monkeypatch.setattr(server, "_NETWORK", {"at": 0.0, "value": []})
+    monkeypatch.setattr(server, "_NETWORK", {"at": float("-inf"), "value": []})  # stale on any clock (a new runner)
     assert server.network_addresses() == ["192.168.1.10", "10.0.10.4"]
