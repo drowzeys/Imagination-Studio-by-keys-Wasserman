@@ -92,6 +92,10 @@ def ask_model(picture: Path) -> str:
         engine = qa.bolt_engine(endpoint)
         model = brain.get("model") or ""
         if engine is not None:
+            # the Studio's Bolt without a vision tower (the Metal engine, llama.cpp) cannot describe a picture: asking it
+            # would only load it (about 30 GB) for a refusal, every round, and keep it from unloading when idle
+            if not getattr(engine.engine(), "vision", False):
+                raise Busy(f"the Studio's {engine.NAME} here has no vision tower (BOLT_VISION=1 asks for one)")
             with engine.request(wait=False) as live:  # refused at once while a render holds the memory
                 return _vision(picture, live, model or qa.engine_model())
         if endpoint:
