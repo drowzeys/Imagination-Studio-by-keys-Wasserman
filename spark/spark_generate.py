@@ -1418,7 +1418,6 @@ def stopped() -> str:
 if __name__ == "__main__":
     try:
         main()
-    except SystemExit as error:
-        if error.code not in (0, None):
-            progress_file.failed(error.code)  # a governor reading SPARK_PROGRESS_FILE sees why the clip stopped
+    except BaseException as error:
+        progress_file.stopped_by(error)  # a governor reading SPARK_PROGRESS_FILE sees why the clip stopped
         raise
