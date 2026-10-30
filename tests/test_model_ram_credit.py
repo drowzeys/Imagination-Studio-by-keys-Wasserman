@@ -13,6 +13,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import local_gpus
 
+
+def own_sleep(monkeypatch, fake):
+    """Fake ``time.sleep`` for this test's thread only. ``local_gpus.time`` is the global ``time`` module, so a plain
+    patch also hands the fake to threads other tests left running (an engine's idle timer), which then call it."""
+    import threading
+    import time
+    main, real = threading.current_thread(), time.sleep
+    monkeypatch.setattr(local_gpus.time, "sleep", lambda seconds: fake(seconds) if threading.current_thread() is main else real(seconds))
+
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux GPU-session RAM accounting")
 
 
@@ -93,7 +102,7 @@ def test_concurrent_callers_cannot_spend_one_sessions_residency_twice(ledger, mo
     job = {"status": "running"}
     with local_gpus.ram_reservation(65000, {"status": "running"}, route="video") as first:
         assert first
-        monkeypatch.setattr(local_gpus.time, "sleep", lambda _: job.update(status="cancelled"))
+        own_sleep(monkeypatch, lambda _: job.update(status="cancelled"))
         with local_gpus.ram_reservation(10000, job, route="video") as second:
             assert not second
     assert_empty(ledger)
@@ -135,7 +144,7 @@ def test_configured_guard_floor_is_honored(ledger, monkeypatch):
 def test_no_live_reservation_means_admit_or_fail_without_sleep(ledger, monkeypatch, need):
     if need is None:
         monkeypatch.setattr(local_gpus, "memory", lambda: (100000, 9000))
-    monkeypatch.setattr(local_gpus.time, "sleep", lambda _: pytest.fail("impossible admission waited"))
+    own_sleep(monkeypatch, lambda _: pytest.fail("impossible admission waited"))
     with pytest.raises(RuntimeError, match="Not enough shared host RAM"):
         with local_gpus.ram_reservation(need, {"status": "running"}):
             pytest.fail("an impossible job was admitted")
@@ -265,7 +274,7 @@ def test_cancelled_and_stale_exclusive_waiters_do_not_block_new_jobs(ledger):
 def test_impossible_peak_fails_even_while_another_reservation_is_live(ledger, monkeypatch):
     with local_gpus.ram_reservation(1000, {"status": "running"}) as first:
         assert first
-        monkeypatch.setattr(local_gpus.time, "sleep", lambda _: pytest.fail("an impossible peak waited"))
+        own_sleep(monkeypatch, lambda _: pytest.fail("an impossible peak waited"))
         with pytest.raises(RuntimeError, match="Not enough shared host RAM"):
             with local_gpus.ram_reservation(1000000, {"status": "running"}):
                 pytest.fail("a peak larger than physical RAM was admitted")

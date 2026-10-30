@@ -13,6 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import local_gpus
 
 
+def own_sleep(monkeypatch, fake):
+    """Fake ``time.sleep`` for this test's thread only. ``local_gpus.time`` is the global ``time`` module, so a plain
+    patch also hands the fake to threads other tests left running (an engine's idle timer), which then call it."""
+    import threading
+    import time
+    main, real = threading.current_thread(), time.sleep
+    monkeypatch.setattr(local_gpus.time, "sleep", lambda seconds: fake(seconds) if threading.current_thread() is main else real(seconds))
+
+
 def gpu(index, *, total=24000, display=False, compute=()):
     ident = f"GPU-00000000-0000-0000-0000-{index + 1:012d}"
     return {"id": "local:" + ident, "gpu_uuid": ident, "index": index, "name": f"Synthetic GPU {index}",
@@ -292,7 +301,7 @@ def test_ram_contention_waits_and_releases(ram, monkeypatch):
             waited.append(second["progress"]["stage"])
             monkeypatch.setattr(local_gpus, "memory", lambda: (150000, 140000))
 
-        monkeypatch.setattr(local_gpus.time, "sleep", release_room)
+        own_sleep(monkeypatch, release_room)
         with local_gpus.ram_reservation(40000, second) as admitted_second:
             assert admitted_second and len(waited) == 1 and "progress" not in second
             assert len(local_gpus.load(ram)) == 2
@@ -311,7 +320,7 @@ def test_ram_wait_is_cancellable_and_preserves_floor(ram, monkeypatch):
     with local_gpus.ram_reservation(1000, {"status": "running"}) as first:
         assert first
         monkeypatch.setattr(local_gpus, "memory", lambda: (100000, 19000))
-        monkeypatch.setattr(local_gpus.time, "sleep", lambda seconds: job.update(status="cancelled"))
+        own_sleep(monkeypatch, lambda seconds: job.update(status="cancelled"))
         with local_gpus.ram_reservation(10000, job) as admitted:
             assert not admitted
     assert local_gpus.load(ram) == {}
@@ -321,14 +330,14 @@ def test_unmeasured_ram_reservation_is_exclusive(ram, monkeypatch):
     unknown, measured = {"status": "running"}, {"status": "running"}
     with local_gpus.ram_reservation(None, unknown) as admitted:
         assert admitted
-        monkeypatch.setattr(local_gpus.time, "sleep", lambda seconds: measured.update(status="cancelled"))
+        own_sleep(monkeypatch, lambda seconds: measured.update(status="cancelled"))
         with local_gpus.ram_reservation(1, measured) as second:
             assert not second
         assert len(local_gpus.load(ram)) == 1
     with local_gpus.ram_reservation(1000, {"status": "running"}) as admitted:
         assert admitted
         unknown = {"status": "running"}
-        monkeypatch.setattr(local_gpus.time, "sleep", lambda seconds: unknown.update(status="cancelled"))
+        own_sleep(monkeypatch, lambda seconds: unknown.update(status="cancelled"))
         with local_gpus.ram_reservation(None, unknown) as second:
             assert not second
     assert local_gpus.load(ram) == {}
@@ -374,7 +383,7 @@ def test_ram_ledger_coordinates_distinct_processes(ram, monkeypatch):
     try:
         assert ready.wait(timeout=5)
         job = {"status": "running"}
-        monkeypatch.setattr(local_gpus.time, "sleep", lambda seconds: job.update(status="cancelled"))
+        own_sleep(monkeypatch, lambda seconds: job.update(status="cancelled"))
         with local_gpus.ram_reservation(40000, job) as admitted:
             assert not admitted and job["progress"]
     finally:
