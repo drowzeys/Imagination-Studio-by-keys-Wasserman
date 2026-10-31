@@ -18,6 +18,7 @@ import ctypes
 import logging
 import math
 import os
+import threading
 import time
 import uuid
 
@@ -31,12 +32,13 @@ TILE = 64
 CUBE = (4, 4, 4)
 
 
-class Inputs(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_uint64), ("tables", ctypes.c_uint64), ("line", ctypes.c_uint64), ("cos", ctypes.c_uint64),
-                ("sin", ctypes.c_uint64), ("slot", ctypes.c_uint64), ("sizes", ctypes.c_uint64), ("rows", ctypes.c_uint32),
-                ("lines", ctypes.c_uint32), ("rot", ctypes.c_uint32), ("tiles", ctypes.c_uint32),
-                ("prefix_tiles", ctypes.c_uint32), ("keep", ctypes.c_uint32), ("blocks", ctypes.c_uint32),
-                ("attention_out", ctypes.c_uint64)]
+import sys  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tp  # noqa: E402  (two GPUs: the shared-memory world beside this file)
+
+# the engine's Model.Inputs; an engine from before the tile range reads only the fields it knows
+Inputs = tp.Inputs
 
 
 _library = None
@@ -69,6 +71,8 @@ def library():
             lib.tf_h3_set_weight.restype = ctypes.c_int
             lib.tf_h3_set_weight.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint64,
                                              ctypes.c_uint32, ctypes.c_uint32]
+        if hasattr(lib, "tf_h3_tp_init"):
+            tp.bind(lib)
         _library = lib
     return _library
 
@@ -88,7 +92,212 @@ def engine(path):
     return handle
 
 
+class World:
+    """Rank 1 on the second card (tp_rank.py) and this engine joined to it as rank 0, over shared memory."""
+
+    def __init__(self, path, handle):
+        import subprocess
+        import signal
+        tp.sweep()
+        self.name = f"tf-h3-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        self.region = int(float(os.environ.get("STUDIO_TP_REGION_GB", "4")) * (1 << 30))
+        self.box = tp.open_box(self.name, create=True)
+        self.head = tp.Header.from_buffer(self.box)
+        self.base = tp.address(self.box)
+        self.head.magic = tp.MAGIC
+        int8 = path + ".tf-int8"
+        if not os.path.exists(int8):
+            raise RuntimeError(f"no int8 copy at {int8} for the second card (one render on one card writes it)")
+        # the exchange: peer to peer (each GPU writes its tiles into the other's memory over PCIe) when the engine
+        # has it, else host shared memory; STUDIO_TP_EXCHANGE=shm|p2p|auto
+        self.kind = exchange_kind()
+        two = rank_one_gpu()
+        visible = [part.strip() for part in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",") if part.strip()]
+        # peer to peer opens rank 0's region on rank 0's card, so rank 1 sees that card too (its own still first: device 0)
+        cards = f"{two},{visible[0]}" if self.kind == "p2p" and visible and visible[0] != two else two
+        cards = os.environ.get("STUDIO_TP_RANK1_CARDS", "").strip() or cards  # a diagnostic: rank 1's CUDA_VISIBLE_DEVICES
+        env = {**os.environ, "CUDA_VISIBLE_DEVICES": cards,
+               "TF_H3_LIB": os.environ.get("TF_H3_LIB") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "libtf_h3.so")}
+        libc = ctypes.CDLL(None)
+
+        def die_with_parent():
+            libc.prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG: the rank goes when ComfyUI goes
+
+        mark = time.perf_counter()
+        self.proc = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tp_rank.py"),
+                                      self.name, int8, str(self.region), "2", "1", self.kind], env=env, preexec_fn=die_with_parent)
+        # this rank's region first (peer to peer: its IPC handle, which rank 1 opens before it says it is ready) ...
+        if library().tf_h3_tp_init(handle, f"{self.kind}:/{self.name}".encode(), 0, 2, 0, self.region) != 0:
+            self.close()
+            raise RuntimeError(f"tf_h3_tp_init ({self.kind}) failed on the first card")
+        self.handle = handle
+        while self.head.ready == 0:
+            if self.proc.poll() is not None or time.perf_counter() - mark > 600:
+                self.close(handle)
+                raise RuntimeError(f"rank 1 did not start: {self.head.message.decode(errors='replace')}")
+            time.sleep(0.05)
+        if self.head.ready != 1:
+            message = self.head.message.decode(errors="replace")
+            self.close(handle)
+            raise RuntimeError(message)
+        # ... then rank 1's, published by now: connecting never waits on a rank that has gone
+        if not tp.connect(library(), handle, 2, 0):
+            self.close(handle)
+            raise RuntimeError(f"connecting rank 1 ({self.kind}) failed on the first card")
+        logging.info(f"TensorFold H3: two GPUs, rank 1 on CUDA device {cards} ({self.head.message.decode(errors='replace')}), "
+                     f"exchange {self.kind} {self.region >> 20} MB in {self.name}")
+
+    def view(self, offset, dtype, count):
+        return torch.frombuffer(self.box, dtype=dtype, count=count, offset=offset)
+
+    def close(self, handle=None):
+        try:
+            self.head.stop = 1
+            if self.proc.poll() is None:
+                self.proc.wait(timeout=20)
+        except Exception:  # noqa: BLE001
+            self.proc.kill()
+        if handle is not None:
+            library().tf_h3_tp_close(handle)
+        tp.unlink(self.name)
+
+
+_worlds = {}    # checkpoint path -> World, while ComfyUI runs
+_tp_off = set()  # checkpoint paths whose two-GPU world failed this session: one GPU for them from then on
+
+
+def iommu_passthrough():
+    """True when no IOMMU translates the NVIDIA GPUs' DMA (no IOMMU group, or group type identity: iommu=pt). With the
+    IOMMU translating (AMD-Vi / VT-d DMA, DMA-FQ), CUDA peer copies report success and move nothing (CUDA guide:
+    P2P is unsupported on bare-metal Linux with the IOMMU on)."""
+    import glob
+    gpus = [d for d in glob.glob("/sys/bus/pci/devices/*") if open(d + "/vendor").read().strip() == "0x10de"
+            and open(d + "/class").read().strip().startswith("0x03")]
+    for d in gpus:
+        kind = os.path.join(d, "iommu_group", "type")
+        if os.path.exists(kind) and open(kind).read().strip() != "identity":
+            return False
+    return bool(gpus)
+
+
+_peer = {}  # (a, b) -> whether copies between CUDA devices a and b arrive intact
+
+
+def peer_copies_work(a=0, b=1):
+    """Whether torch's copies between CUDA devices a and b arrive intact both ways (checked once). With the IOMMU
+    translating (AMD-Vi / VT-d in DMA mode), or a PCIe path that drops peer writes, they report success and leave zeros
+    while the driver reports peer access: work for the other card then goes through host memory (docs/two-gpus.md)."""
+    key = (a, b)
+    if key not in _peer:
+        ok = False
+        if os.environ.get("STUDIO_PEER_COPIES", "auto").strip().lower() in ("0", "off", "no", "false"):
+            _peer[key] = False  # STUDIO_PEER_COPIES=off: every copy between the cards through host memory
+            return False
+        result, failure = [], []
+
+        def test():  # on a thread of its own: the engine's CUDA context may be current on the caller's
+            try:
+                if torch.cuda.device_count() > max(a, b):
+                    x = torch.randint(1, 255, (1 << 20,), dtype=torch.uint8, device=f"cuda:{a}")
+                    y = x.to(f"cuda:{b}")
+                    z = y.to(f"cuda:{a}")
+                    torch.cuda.synchronize(a)
+                    torch.cuda.synchronize(b)
+                    host = x.cpu()
+                    result.append(torch.equal(host, y.cpu()) and torch.equal(host, z.cpu()))
+            except Exception as error:  # noqa: BLE001
+                failure.append(error)
+
+        thread = threading.Thread(target=test, name="peer-copy-test")
+        thread.start()
+        thread.join()
+        ok = bool(result and result[0])
+        if failure:
+            logging.warning(f"TensorFold H3: the copy test between cuda:{a} and cuda:{b} failed: {failure[0]}")
+        if ok:
+            logging.info(f"TensorFold H3: copies between cuda:{a} and cuda:{b} checked, they arrive intact")
+        else:
+            logging.warning(f"TensorFold H3: copies between cuda:{a} and cuda:{b} do not arrive intact (an IOMMU in DMA "
+                            f"mode? boot with iommu=pt); the cards exchange through host memory")
+        _peer[key] = ok
+    return _peer[key]
+
+
+def exchange_kind():
+    """STUDIO_TP_EXCHANGE: shm (kernels pack into and unpack out of the shared host region), dma (the same region,
+    filled and read with bulk copy-engine copies; engine tf_h3_tp_dma) or p2p (GPU to GPU; engine tf_h3_tp_p2p).
+    p2p is used only when the GPUs' IOMMU groups pass through (iommu=pt), else dma: translated, peer copies move nothing."""
+    wanted = os.environ.get("STUDIO_TP_EXCHANGE", "shm").strip().lower()
+    lib = library()
+    if wanted == "p2p" and hasattr(lib, "tf_h3_tp_p2p"):
+        if iommu_passthrough() and peer_copies_work(0, 1):
+            return "p2p"
+        if not iommu_passthrough():
+            logging.warning("TensorFold H3: STUDIO_TP_EXCHANGE=p2p but the IOMMU translates the GPUs (boot with iommu=pt); using dma")
+        wanted = "dma"
+    if wanted == "dma" and hasattr(lib, "tf_h3_tp_dma"):
+        return "dma"
+    return "shm"
+
+
+def tp_chunks(w, keep):
+    """The parts a peer-to-peer pass's q k v work is cut into (STUDIO_TP_CHUNKS, default 4, at most 8); 0 for one part:
+    another exchange, dense attention, or an engine without tf_h3_tp_chunks."""
+    try:
+        wanted = int(os.environ.get("STUDIO_TP_CHUNKS", "4"))
+    except ValueError:
+        wanted = 4
+    if wanted < 2 or keep <= 0 or getattr(w, "kind", "") != "p2p" or not hasattr(library(), "tf_h3_tp_chunks"):
+        return 0
+    return min(wanted, 8)
+
+
+def rank_one_gpu():
+    """The second card for rank 1, as CUDA_VISIBLE_DEVICES names it: STUDIO_TP_GPU, else the second of the cards this
+    ComfyUI was pinned to (spark/gpu.sh, STUDIO_GPUS: the head's first), else index 1."""
+    explicit = os.environ.get("STUDIO_TP_GPU", "").strip()
+    if explicit:
+        return explicit
+    visible = [part.strip() for part in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",") if part.strip()]
+    return visible[1] if len(visible) >= 2 else "1"
+
+
+def tp_wanted():
+    wanted = os.environ.get("STUDIO_TP", "auto").strip().lower()
+    if wanted in ("0", "off", "no", "false"):
+        return False
+    try:
+        return torch.cuda.device_count() >= 2
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def world(path):
+    """The two-GPU world for this checkpoint, started on first use; None when it is off or has failed."""
+    if path in _tp_off or not tp_wanted() or not hasattr(library(), "tf_h3_tp_init"):
+        return None
+    if path not in _worlds:
+        try:
+            _worlds[path] = World(path, engine(path))
+        except Exception as error:  # noqa: BLE001
+            kind = exchange_kind()
+            if kind != "shm":
+                # peer to peer refused (no P2P between these cards, as on GeForce): bulk copies through host memory;
+                # those refused too: the plain shared-memory exchange
+                fallback = "dma" if kind == "p2p" and hasattr(library(), "tf_h3_tp_dma") else "shm"
+                logging.warning(f"TensorFold H3: the {kind} exchange failed ({error}); trying {fallback}")
+                os.environ["STUDIO_TP_EXCHANGE"] = fallback
+                return world(path)
+            logging.warning(f"TensorFold H3: two GPUs unavailable, one GPU from here: {error}")
+            _tp_off.add(path)
+            return None
+    return _worlds[path]
+
+
 def release():
+    for path, w in list(_worlds.items()):
+        w.close(_engines.get(path))
+    _worlds.clear()
     for handle in _engines.values():
         library().tf_h3_close(handle)
     _engines.clear()
@@ -203,6 +412,23 @@ def cosine(a, b):
     return float(torch.dot(a, b) / (a.norm() * b.norm()))
 
 
+_moved = {}  # (tiles, rows) of a pass -> rows moved from rank 0's half to rank 1's, learned from the passes' waits
+
+
+def balance(key, moved, mine, theirs, took1, rows1, rows):
+    """After a two-GPU pass: move rows towards the rank that waited longer for the other's tiles. A rank's wait is its
+    exchange time less its sending (tp.stats); its compute is its forward less that wait. STUDIO_TP_BALANCE=off keeps
+    the even split."""
+    if os.environ.get("STUDIO_TP_BALANCE", "on").strip().lower() in ("0", "off", "no", "false"):
+        return
+    wait0, wait1 = mine[0] - mine[2], theirs[0] - theirs[2]
+    compute1 = took1 - wait1
+    if rows1 <= 0 or compute1 <= 0 or abs(wait1 - wait0) < 0.02:
+        return
+    step = (wait1 - wait0) / (2 * compute1 / rows1)  # rows whose compute closes half the gap on each side
+    _moved[key] = max(-rows / 4, min(rows / 4, moved + 0.7 * step))
+
+
 class Blocks:
     """One patched model's state: the engine, and what stays the same through a sampling run."""
 
@@ -243,12 +469,132 @@ class Blocks:
                         tiles=sizes.shape[0], prefix_tiles=prefix, keep=keep, blocks=blocks, attention_out=0)
         handle = engine(self.path)
         merge(handle, self.path, self.patches)
+        capture = os.environ.get("TF_H3_CAPTURE", "").strip()
+        if capture and not os.path.exists(capture) and not self.patches and blocks == 0:
+            # the test rig (tests/tf_h3_tp_rig.py): this pass's inputs, to replay outside ComfyUI on one GPU and two
+            torch.save({"path": self.path, "h": h.detach().cpu().clone(), "tables": tables.cpu(), "line": line.cpu(),
+                        "cos": cos.cpu(), "sin": sin.cpu(), "slot": slot.cpu(), "sizes": sizes.cpu(), "prefix": int(prefix),
+                        "keep": int(keep), "lines": int(tables.shape[1]), "rot": int(cos.shape[1])}, capture)
+            logging.info(f"TensorFold H3: this pass's inputs saved to {capture} ({rows} rows, {sizes.shape[0]} tiles)")
+        # two GPUs: the pass split by tile (tp.py); not with a LoRA (the second card holds the checkpoint's weights)
+        # nor for the checks' partial passes
+        w = world(self.path) if not self.patches and blocks == 0 else None
+        if w is not None:
+            try:
+                return self.run_two(w, handle, h, tables, line, cos, sin, slot, sizes, prefix, keep), keep, sizes.shape[0]
+            except Exception as error:  # noqa: BLE001
+                logging.warning(f"TensorFold H3: the two-GPU pass failed, one GPU from here: {error}")
+                _tp_off.add(self.path)
+                _worlds.pop(self.path, None)
+                try:
+                    w.close(handle)
+                except Exception:  # noqa: BLE001
+                    pass
         # the engine's kernels go on the default stream: whatever torch has queued on its own must have landed
         torch.cuda.synchronize()
         took = library().tf_h3_forward(handle, ctypes.byref(inputs))
         if took < 0:
             raise RuntimeError("TensorFold H3: the forward failed")
         return took, keep, sizes.shape[0]
+
+    def run_two(self, w, handle, h, tables, line, cos, sin, slot, sizes, prefix, keep):
+        """One pass on two GPUs: rank 1 takes the tiles from ``cut`` on (about half the rows), rank 0 the rest; ``h``
+        is written only once both are done, so a failure leaves it as it was."""
+        tiles = sizes.shape[0]
+        clock = [time.perf_counter()]
+        cum = torch.cumsum(sizes.to(torch.int64), 0)
+        # half the rows each, less the rows the earlier passes of this shape moved to rank 1 (balance()): rank 0 also
+        # holds the prefix tiles, whose queries see every tile. The output does not depend on the cut.
+        key = (tiles, h.shape[0])
+        moved = _moved.get(key, 0.0)
+        cut = int(torch.searchsorted(cum, max(1, int(cum[-1]) // 2 - int(moved))).item()) + 1
+        cut = max(1, min(cut, tiles - 1))
+        tile_of = slot.to(torch.int64) // TILE
+        mask = tile_of >= cut
+        own = [torch.nonzero(~mask).flatten(), torch.nonzero(mask).flatten()]
+        cuts = [0, cut, tiles]
+        # peer to peer, sparse: the engine does each rank's q k v work in parts and sends a part while it computes the
+        # next (STUDIO_TP_CHUNKS, default 4; 0 or 1: one part). It needs each rank's rows tile by tile (slot order);
+        # the row order changes no bits (the kernels are row-wise and the int8 products exact).
+        chunks = tp_chunks(w, keep)
+        rows_at = [[0] * 9, [0] * 9]
+        if chunks:
+            own = [o[torch.argsort(slot.to(torch.int64)[o])] for o in own]
+            host_sizes = sizes.tolist()
+            for r in range(2):
+                rows_at[r][:chunks + 1] = tp.chunk_rows(host_sizes, cuts[r], cuts[r + 1], chunks)
+        hidden = h.shape[1]
+        # rank 1's job: its rows and the pass's tables and tile sizes, in the mailbox
+        head, base = w.head, w.base
+        parts = [h.index_select(0, own[1]), tables, line.index_select(0, own[1]), cos.index_select(0, own[1]),
+                 sin.index_select(0, own[1]), slot.index_select(0, own[1]), sizes]
+        at = tp.HEADER
+        offsets = []
+        for part in parts:
+            offsets.append(at)
+            n = part.numel()
+            w.view(at, part.dtype, n).copy_(part.reshape(-1))
+            at = (at + n * part.element_size() + 4095) // 4096 * 4096
+        if at > tp.BOX_BYTES:
+            raise RuntimeError(f"a pass of {at >> 20} MB does not fit the mailbox")
+        for i, offset in enumerate(offsets):
+            head.at[i] = offset
+        head.rows, head.lines, head.rot, head.tiles = own[1].numel(), tables.shape[1], cos.shape[1], tiles
+        head.prefix_tiles, head.keep, head.blocks, head.tile0, head.tile1 = prefix, keep, 0, cut, tiles
+        for i in range(9):
+            head.cuts[i] = cuts[i] if i < 3 else 0
+            head.chunk_rows[i] = rows_at[1][i]
+        head.chunks = chunks
+        job = (head.job + 1) & 0xffffffff
+        head.job = job
+        clock.append(time.perf_counter())  # rank 1's job in the mailbox
+        # rank 0's half here, at the same time
+        mine = [h.index_select(0, own[0]).contiguous(), line.index_select(0, own[0]).contiguous(),
+                cos.index_select(0, own[0]).contiguous(), sin.index_select(0, own[0]).contiguous(),
+                slot.index_select(0, own[0]).contiguous()]
+        inputs = Inputs(x=mine[0].data_ptr(), tables=tables.data_ptr(), line=mine[1].data_ptr(), cos=mine[2].data_ptr(),
+                        sin=mine[3].data_ptr(), slot=mine[4].data_ptr(), sizes=sizes.data_ptr(), rows=own[0].numel(),
+                        lines=tables.shape[1], rot=cos.shape[1], tiles=tiles, prefix_tiles=prefix, keep=keep, blocks=0,
+                        attention_out=0, tile0=0, tile1=cut)
+        for i in range(9):
+            inputs.cuts[i] = cuts[i] if i < 3 else 0
+            inputs.chunk_rows[i] = rows_at[0][i]
+        inputs.chunks = chunks
+        torch.cuda.synchronize()
+        clock.append(time.perf_counter())  # rank 0's rows ready
+        took = library().tf_h3_forward(handle, ctypes.byref(inputs))
+        mark = time.perf_counter()
+        clock.append(mark)  # rank 0's forward done
+        while head.done != job:
+            if w.proc.poll() is not None:
+                raise RuntimeError(f"rank 1 exited ({w.proc.returncode}): {head.message.decode(errors='replace')}")
+            if time.perf_counter() - mark > 120:
+                raise RuntimeError("rank 1 did not finish the pass in 120 s")
+            time.sleep(0.0005)
+        clock.append(time.perf_counter())  # rank 1 done
+        if took < 0 or head.status < 0:
+            raise RuntimeError(f"the forward failed: rank 0 {took:.2f}, rank 1 {head.message.decode(errors='replace')}")
+        theirs = w.view(offsets[0], torch.bfloat16, own[1].numel() * hidden).view(-1, hidden).to(h.device)
+        h.index_copy_(0, own[0], mine[0])
+        h.index_copy_(0, own[1], theirs)
+        mine_x, theirs_x = tp.stats(library(), handle), tuple(head.tp_stats)
+        balance(key, moved, mine_x, theirs_x, head.took, own[1].numel(), h.shape[0])
+        if os.environ.get("TF_H3_PROFILE") == "1" or self.passes == 0:
+            torch.cuda.synchronize()
+            clock.append(time.perf_counter())  # h written back
+            d = [b - a for a, b in zip(clock, clock[1:])]
+            line_ = (f"TensorFold H3 two-GPU pass {self.passes + 1}: {clock[-1] - clock[0]:.2f} s = mailbox {d[0]:.3f} "
+                     f"+ own rows {d[1]:.3f} + rank 0 forward {d[2]:.2f} + waiting for rank 1 {d[3]:.3f} "
+                     f"+ write back {d[4]:.3f}; exchanges rank 0 {mine_x[0]:.2f} s in {int(mine_x[1])} "
+                     f"(packing {mine_x[2]:.2f}), rank 1 {theirs_x[0]:.2f} s in {int(theirs_x[1])} (packing {theirs_x[2]:.2f}); "
+                     f"rank 1 forward {head.took:.2f} s; cut at tile {cut}, {moved:.0f} rows moved to rank 1; {chunks or 1} parts")
+            if head.spent_n:
+                line_ += f"; rank 1 stages: {tp.spent_line(head.spent, head.spent_n)}"
+            logging.info(line_)
+        if self.passes == 0:
+            logging.info(f"TensorFold H3: two GPUs, tiles 0-{cut - 1} ({own[0].numel()} rows) here and {cut}-{tiles - 1} "
+                         f"({own[1].numel()} rows) on rank 1; rank 0 {took:.2f} s, rank 1 {head.took:.2f} s")
+        return took
 
     def check(self, args):
         """The engine against ComfyUI's own blocks on this pass's stream: after one block and after all of them."""
@@ -460,3 +806,10 @@ class TensorFoldH3Blocks:
 
 NODE_CLASS_MAPPINGS = {"TensorFoldH3Blocks": TensorFoldH3Blocks}
 NODE_DISPLAY_NAME_MAPPINGS = {"TensorFoldH3Blocks": "TensorFold H3 Blocks (CUDA int8)"}
+
+try:  # the two-card video decode (decode2.py): a failure there must not take the engine's node with it
+    from . import decode2
+    NODE_CLASS_MAPPINGS.update(decode2.NODE_CLASS_MAPPINGS)
+    NODE_DISPLAY_NAME_MAPPINGS.update(decode2.NODE_DISPLAY_NAME_MAPPINGS)
+except Exception as error:  # noqa: BLE001
+    logging.warning(f"Studio two-card decode unavailable: {error}")
