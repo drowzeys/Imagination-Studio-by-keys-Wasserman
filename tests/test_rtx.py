@@ -67,6 +67,68 @@ def test_studio_gpu_is_the_card_nvidia_smi_is_asked_for(monkeypatch):
     assert seen[0][:3] == ["nvidia-smi", "-i", "1"]
 
 
+def test_two_cards_are_one_pool_and_a_single_card_engine_sees_one(monkeypatch):
+    # spark/gpus.py: two 48 GB cards, the transformer on one and the text encoder and decoders on the other
+    monkeypatch.delenv("STUDIO_GPU_SPLIT", raising=False)
+
+    def smi(*query):
+        if query[0].startswith("--query-gpu"):
+            return [["48935", "22000", "26935"], ["48935", "400", "48535"]]
+        return []
+    monkeypatch.setattr(memory_guard, "smi", smi)
+    card = memory_guard.device()
+    assert card["total_mb"] == 97870 and card["free_mb"] == 75470 and card["cards"] == 2
+    assert memory_guard.single_card_free_mb() == 48535
+    monkeypatch.setattr(memory_guard, "_DEVICE", {"at": 0.0, "value": None})
+    monkeypatch.setenv("STUDIO_GPU_SPLIT", "off")  # the first card only, as before
+    assert memory_guard.device() == {"total_mb": 48935, "used_mb": 22000, "free_mb": 26935, "simulated": False}
+
+
+def test_paired_cards_are_asked_for_together_the_heads_first(monkeypatch):
+    # STUDIO_GPUS (spark/gpu.sh): one Studio renders on cards 0 and 1, so the guard reads both
+    monkeypatch.delenv("STUDIO_GPU_SPLIT", raising=False)
+    monkeypatch.delenv("STUDIO_LOCAL_GPU_UUID", raising=False)
+    monkeypatch.setenv("STUDIO_GPU", "0")
+    monkeypatch.setenv("STUDIO_GPUS", "0,1")
+    assert memory_guard.paired_gpus() == ["0", "1"]
+    assert memory_guard.nvidia_argv() == ["nvidia-smi", "-i", "0,1"]
+    # not paired: the head's card alone, as 4.3 pins it
+    for env, value in (("STUDIO_GPU", "1"),          # the head's card must come first
+                       ("STUDIO_GPUS", "0"),          # one card is no pair
+                       ("STUDIO_GPUS", "0,x"),        # not indexes
+                       ("STUDIO_GPU_SPLIT", "off")):  # pairing switched off
+        monkeypatch.setenv("STUDIO_GPU", "0")
+        monkeypatch.setenv("STUDIO_GPUS", "0,1")
+        monkeypatch.setenv(env, value)
+        assert memory_guard.paired_gpus() == [], (env, value)
+        monkeypatch.delenv("STUDIO_GPU_SPLIT", raising=False)
+    # a managed local worker is pinned to one card by UUID and never pairs, whatever it inherited
+    monkeypatch.setenv("STUDIO_GPU", "0")
+    monkeypatch.setenv("STUDIO_GPUS", "0,1")
+    monkeypatch.setenv("STUDIO_LOCAL_GPU_UUID", "GPU-00000000-0000-0000-0000-000000000001")
+    assert memory_guard.paired_gpus() == [] and memory_guard.nvidia_argv() == ["nvidia-smi", "-i", "0"]
+
+
+def test_the_servers_child_processes_count_as_the_jobs(monkeypatch):
+    # a two-GPU pass: ComfyUI (pid 10) holds 25 GB on the first card, its rank 1 (pid 11) 22 GB on the second; a
+    # stranger (pid 99) holds 5 GB. Only the stranger's memory is not the job's.
+    monkeypatch.setattr(memory_guard, "device", lambda fresh=False: {"total_mb": 96 * GB, "used_mb": 52 * GB,
+                                                                     "free_mb": 44 * GB, "simulated": False})
+    monkeypatch.setattr(memory_guard, "server_pid", lambda: 10)
+    monkeypatch.setattr(memory_guard, "family", lambda pid: {10, 11})
+    monkeypatch.setattr(memory_guard, "processes_mb", lambda: {10: 25 * GB, 11: 22 * GB, 99: 5 * GB})
+    assert memory_guard.device_room_mb() == (44 + 25 + 22) * GB - memory_guard.VRAM_MARGIN_MB
+
+
+def test_family_finds_a_process_and_its_children():
+    import subprocess
+    child = subprocess.Popen(["sleep", "5"])
+    try:
+        assert {os.getpid(), child.pid} <= memory_guard.family(os.getpid())
+    finally:
+        child.kill()
+
+
 def test_a_dgx_spark_has_no_card_memory_of_its_own(monkeypatch):
     answers(monkeypatch, gpu=["[N/A]", "[N/A]", "[N/A]"])
     assert memory_guard.device() is None and not memory_guard.discrete() and memory_guard.device_room_mb() is None

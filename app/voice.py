@@ -123,7 +123,8 @@ def gpu_free_gb() -> float | None:
         card = memory_guard.device(fresh=True)
     except Exception:  # noqa: BLE001  (a reading, never a reason to fail)
         return None
-    return None if card is None else card["free_mb"] / 1024
+    # Drama 3 runs on one card: with two (spark/gpus.py) its room is the emptiest card's, not their sum
+    return None if card is None else card.get("largest_free_mb", card["free_mb"]) / 1024
 
 
 def has_card_memory() -> bool:
