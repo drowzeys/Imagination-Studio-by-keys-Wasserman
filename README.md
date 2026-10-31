@@ -74,7 +74,9 @@ voice and music remain assigned to the head. Starting an extra worker enables sh
 card retains its existing queue and shutdown behavior. VRAM is not pooled and no render is split. Measured plain
 int8 clips have a separate host-RAM budget; unknown GPU work remains exclusive, so not every job overlaps.
 Setup, adapter availability and the two-card smoke evidence:
-[Local GPUs](docs/rtx-pro-6000.md#one-to-four-local-gpus). Remote Spark behavior and limits remain separate:
+[Local GPUs](docs/rtx-pro-6000.md#one-to-four-local-gpus). To split one render across two cards instead (each pass and
+the decode shared, the one-card bytes, 1.74x at 5 s and 1.85x at 15 s on two 48 GB RTX PRO 5000):
+[Two GPUs in one machine](docs/two-gpus.md). Remote Spark behavior and limits remain separate:
 [Workers](docs/multi-spark.md).
 
 Ctrl-C in that terminal stops the app and the ComfyUI for this install, and the card is freed. The same quit works

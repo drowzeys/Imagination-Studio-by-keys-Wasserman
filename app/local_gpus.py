@@ -32,6 +32,22 @@ RAM_WAIT_SECONDS = 120
 UUID = re.compile(r"GPU-[A-Za-z0-9-]{8,100}\Z")
 _CACHE = {"at": float("-inf"), "value": {"supported": False, "devices": []}}
 _CACHE_LOCK = threading.Lock()
+PAIRED = ("This Studio renders on paired cards (STUDIO_GPUS: one render split over them), so it runs no local "
+          "workers; unset STUDIO_GPUS and restart the Studio to use them.")
+
+
+def paired_indexes() -> set[int]:
+    """The nvidia-smi indexes STUDIO_GPUS pairs with the head (spark/gpu.sh, spark/memory_guard.paired_gpus): those
+    cards already render this Studio's jobs together, so none of them can also be a local worker."""
+    raw = os.environ.get("STUDIO_GPUS", "").strip()
+    if not raw or os.environ.get("STUDIO_LOCAL_GPU_UUID") or os.environ.get("STUDIO_GPU_SPLIT", "auto").strip().lower() in (
+            "0", "off", "no", "false"):
+        return set()
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) < 2 or not all(part.isdigit() for part in parts):
+        return set()
+    head = os.environ.get("STUDIO_GPU", "").strip()
+    return {int(part) for part in parts} if not head or head == parts[0] else set()
 
 
 def process_identity(pid: int) -> str | None:
@@ -778,6 +794,8 @@ class Manager:
             worker = locals_.get(device["id"])
             is_head = raw["gpu_uuid"] == head
             reason = (self.conflict(raw["gpu_uuid"]) if self.active else "") if not self.child else "Local child workers cannot manage other GPUs."
+            if not reason and not is_head and paired_indexes():
+                reason = PAIRED
             if not reason and not raw["total_mb"]:
                 reason = "This device has no dedicated VRAM; it keeps the existing Spark path."
             if not reason and not is_head and not (worker and self.consumes_slot(worker)) and managed >= LIMIT:
@@ -799,6 +817,10 @@ class Manager:
     def start_worker(self, worker: dict, workers: list[dict], *, allow_display: bool = False) -> None:
         if self.child:
             raise ValueError("Local child workers cannot start other workers")
+        if paired_indexes():
+            # acquiring the head lease would pin this Studio to one card (CUDA_VISIBLE_DEVICES=<its UUID>), ending the
+            # pairing for every job after it: no local worker on any card while cards are paired
+            raise ValueError(PAIRED)
         with self.mutex:
             if self.closing:
                 raise ValueError("This Studio is closing; no local worker can start")

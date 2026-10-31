@@ -179,6 +179,16 @@ ok "$GPU, $(uname -m), ${MEM_GB} GB"
 # machine's RAM holds the rest (docs/rtx-pro-6000.md); on a DGX Spark both are one 128 GB pool
 VRAM_GB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
 case "$VRAM_GB" in ''|*[!0-9]*) VRAM_GB="";; *) VRAM_GB=$((VRAM_GB / 1024));; esac
+# paired cards (STUDIO_GPUS=0,1, spark/gpus.py): the transformer on the head's card, the text encoder and decoders on
+# the next, and each pass of the int8 engine split over them, so video needs their sum to reach a 96 GB card's and
+# each card to hold the int8 transformer (40 GB or more a card)
+if [ -n "$VRAM_GB" ] && [[ "${STUDIO_GPUS:-}" =~ ^[0-9]+(,[0-9]+)+$ ]] && [ "${STUDIO_GPU_SPLIT:-auto}" != off ]; then
+  PAIR_MB=$(nvidia-smi -i "$STUDIO_GPUS" --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | tr -d ' ' | grep -E '^[0-9]+$' || true)
+  if [ "$(printf '%s\n' "$PAIR_MB" | sed '/^$/d' | wc -l)" -ge 2 ] && [ "$(printf '%s\n' "$PAIR_MB" | sort -n | head -1)" -ge 40960 ]; then
+    VRAM_GB=$(printf '%s\n' "$PAIR_MB" | awk '{s+=$1} END {print int(s/1024)}')
+    echo "  ! cards ${STUDIO_GPUS} paired, ${VRAM_GB} GB together: each render is split over them (spark/gpus.py; STUDIO_GPU_SPLIT=off turns it off)"
+  fi
+fi
 case "$GPU" in *GB10*) ;; *) if [ -z "$VRAM_GB" ]; then echo "  ! measured only on a DGX Spark (GB10, 128 GB unified memory) and an RTX Pro 6000; other GPUs are untested"; fi;; esac
 if [ -n "$VRAM_GB" ]; then
   [ "$VRAM_GB" -ge 90 ] || [ "$IMAGE_ONLY" = 1 ] || [ "${STUDIO_ALLOW_SMALL_VRAM:-0}" = 1 ] || die "video needs a card of about 96 GB (an RTX Pro 6000 Blackwell); this one has ${VRAM_GB} GB. --image-only fits on 48 GB. STUDIO_ALLOW_SMALL_VRAM=1 installs video anyway: ComfyUI then holds the weights in RAM and streams blocks to the card (docs/rtx-5090.md)."

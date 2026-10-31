@@ -34,6 +34,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import memory_guard  # noqa: E402  (what a clip needs and whether this machine has it, beside this file)
+import gpus  # noqa: E402  (two or more cards: each stage of a workflow placed on its card)
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
 # On a Mac the same graphs run on a ComfyUI of their own (mac/comfy.sh, scripts/setup-comfy.sh): the Library actions
 # and MOSS-Image, on PyTorch's Metal device. Its port, its model folder and the names of the H3 files differ (MAC_FILES).
@@ -223,6 +224,7 @@ async def run(workflow: dict, sampler: str, named: dict | None = None, stages: l
     gate()
     import aiohttp
 
+    workflow = gpus.place(workflow)  # two cards: the text encoders and decoders on the second (spark/gpus.py)
     client = uuid.uuid4().hex
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(URL.replace("http", "ws", 1) + f"/ws?clientId={client}", max_msg_size=0) as ws:
@@ -853,6 +855,8 @@ def video(args) -> None:
     runs = ("TensorFold int8 blocks in ComfyUI" + (", the LoRA merged into them" if loras else "")) if args.engine == "tensorfold" else "ComfyUI, MiniMax H3 bf16" if base else f"ComfyUI, FastH3 {args.weights}"
     print(f"[tensorfold] engine: cuda ({runs}, {attention}), generating "
           f"{args.width}x{args.height}, {args.frames} frames", flush=True)
+    if gpus.split():
+        print(f"[tensorfold] gpus: {gpus.describe()}", flush=True)
     item, seconds = render(w, "12")
     target = Path(args.output)
     fetch(item, target)

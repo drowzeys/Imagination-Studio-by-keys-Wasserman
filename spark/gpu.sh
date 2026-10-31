@@ -36,9 +36,29 @@ studio_export_gpu() {
       return 1
     fi
     export CUDA_VISIBLE_DEVICES="$STUDIO_LOCAL_GPU_UUID"
+  elif studio_paired_gpus >/dev/null; then
+    # Paired cards (STUDIO_GPUS, spark/gpus.py): one Studio renders on all of them, the head's card first, so CUDA's
+    # device 0 is still STUDIO_GPU and the second card is device 1 (text encoders, decoders, rank 1 of a pass).
+    export STUDIO_GPUS
+    export CUDA_VISIBLE_DEVICES="$STUDIO_GPUS"
   else
     export CUDA_VISIBLE_DEVICES="$STUDIO_GPU"
   fi
+}
+
+studio_paired_gpus() {
+  # STUDIO_GPUS: two or more nvidia-smi indexes, comma separated, the head's card (STUDIO_GPU) first. Prints the list
+  # and succeeds when it is valid and STUDIO_GPU_SPLIT is not off; a managed local worker (a UUID pin) never pairs.
+  local list="${STUDIO_GPUS:-}" first
+  [ -n "$list" ] && [ -z "${STUDIO_LOCAL_GPU_UUID:-}" ] || return 1
+  case "${STUDIO_GPU_SPLIT:-auto}" in 0|off|no|false) return 1;; esac
+  [[ "$list" =~ ^[0-9]+(,[0-9]+)+$ ]] || { echo "STUDIO_GPUS must be two or more nvidia-smi indexes, e.g. 0,1" >&2; return 1; }
+  first="${list%%,*}"
+  if [ -n "${STUDIO_GPU:-}" ] && [ "$STUDIO_GPU" != "$first" ]; then
+    echo "STUDIO_GPUS ($list) must start with STUDIO_GPU ($STUDIO_GPU), the head's own card" >&2
+    return 1
+  fi
+  printf '%s\n' "$list"
 }
 
 studio_compute_indexes() {
@@ -59,6 +79,9 @@ studio_gpu_rows() {
 }
 
 studio_pin_gpu() {
+  if [ -z "${STUDIO_GPU:-}" ] && [ -n "${STUDIO_GPUS:-}" ] && [ -z "${STUDIO_LOCAL_GPU_UUID:-}" ]; then
+    STUDIO_GPU="${STUDIO_GPUS%%,*}"  # paired cards: the head's is the first
+  fi
   if [ -n "${STUDIO_GPU:-}" ]; then
     studio_export_gpu
     return $?
