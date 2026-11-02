@@ -84,6 +84,53 @@ def parse_gpu(line: str) -> dict | None:
             "clock_mhz": int(clock) if clock is not None else None}
 
 
+def parse_gpus(text: str) -> list[dict]:
+    """Every line of `nvidia-smi --query-gpu=index,memory.used,memory.total,<GPU_FIELDS> ...`: one reading a card,
+    each with its nvidia-smi index and its own memory (MB). A line of <GPU_FIELDS> alone still parses, without them."""
+
+    cards = []
+    for line in text.strip().splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 8 or not parts[0].isdigit():
+            one = parse_gpu(line)
+            if one is not None:
+                cards.append(one)
+            continue
+        one = parse_gpu(",".join(parts[3:]))
+        if one is None:
+            continue
+        used, total = number(parts[1]), number(parts[2])
+        one.update(index=parts[0], used_mb=int(used) if used is not None else None,
+                   total_mb=int(total) if total is not None else None)
+        cards.append(one)
+    return cards
+
+
+def combine_gpus(cards: list[dict]) -> dict | None:
+    """One reading for the cards a Studio renders on together (STUDIO_GPUS): the mean load, the hottest card, the power
+    of all of them, and each card under ``cards``. One card is its own reading, as before."""
+
+    if not cards:
+        return None
+    first = {key: cards[0].get(key) for key in ("name", "util_pct", "temp_c", "power_w", "clock_mhz")}
+    if len(cards) == 1:
+        return first
+
+    def known(key):
+        return [card[key] for card in cards if card.get(key) is not None]
+
+    utils, temps, powers, clocks = known("util_pct"), known("temp_c"), known("power_w"), known("clock_mhz")
+    names = {card.get("name") for card in cards}
+    return {"name": first["name"] if len(names) == 1 else " + ".join(card.get("name") or "?" for card in cards),
+            "util_pct": round(sum(utils) / len(utils), 1) if utils else None,
+            "temp_c": max(temps) if temps else None,
+            "power_w": round(sum(powers), 2) if powers else None,
+            "clock_mhz": max(clocks) if clocks else None,
+            "count": len(cards),
+            "cards": [{key: card.get(key) for key in ("index", "util_pct", "temp_c", "power_w", "clock_mhz",
+                                                       "used_mb", "total_mb")} for card in cards]}
+
+
 def parse_vm_stat(text: str, total_mb: int) -> int | None:
     """A Mac's available memory from vm_stat, in MB: free, file-backed and purgeable pages, what the kernel gets back
     without compressing anything. Inactive pages are not counted: most are a process's own memory, which macOS must
@@ -204,11 +251,12 @@ def compact(snap: dict) -> dict:
     now = jobs.get("current")
     card = mem.get("card")
     return {"at": snap.get("time"), "host": snap.get("host"), "platform": snap.get("platform"),
-            "gpu": {key: gpu.get(key) for key in ("name", "util_pct", "temp_c", "power_w")} if gpu else None,
+            "gpu": {key: gpu.get(key) for key in ("name", "util_pct", "temp_c", "power_w", "count", "cards")
+                    if key in gpu} if gpu else None,
             # unified: the GPU and the processor share this memory (a DGX Spark, a Mac); a card has its own, listed apart
             "memory": {"total_mb": total, "free_mb": free, "used_mb": total - free if total and free is not None else None,
                        "used_pct": mem.get("used_pct"), "floor_mb": mem.get("floor_mb"), "unified": not card},
-            "card": {key: card.get(key) for key in ("total_mb", "used_mb", "free_mb")} if card else None,
+            "card": {key: card.get(key) for key in ("total_mb", "used_mb", "free_mb", "cards") if key in card} if card else None,
             "disk": {key: disk.get(key) for key in ("total_gb", "free_gb", "used_pct")},
             "cpu": snap.get("cpu"), "gpu_lock": bool((snap.get("gpu_lock") or {}).get("held")),
             "job": {key: now.get(key) for key in ("id", "title", "kind", "progress", "elapsed")} if now else None,
@@ -241,10 +289,10 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
             return None
         try:
             argv = guard.nvidia_argv() if guard is not None and hasattr(guard, "nvidia_argv") else ["nvidia-smi"]
-            done = subprocess.run([*argv, f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader,nounits"],
-                                  capture_output=True, text=True, timeout=2)
-            lines = done.stdout.strip().splitlines()
-            return parse_gpu(lines[0]) if done.returncode == 0 and lines else None
+            # every card the argv names: the studio's own, or each paired card (STUDIO_GPUS), the head's first
+            done = subprocess.run([*argv, f"--query-gpu=index,memory.used,memory.total,{GPU_FIELDS}",
+                                   "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=2)
+            return combine_gpus(parse_gpus(done.stdout)) if done.returncode == 0 else None
         except (OSError, subprocess.TimeoutExpired):
             return None
 
@@ -266,6 +314,8 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         card = guard.device() if guard and SPARK else None  # a card with its own memory (an RTX Pro 6000): shown beside the RAM
         if card:
             out["card"] = {key: card[key] for key in ("total_mb", "used_mb", "free_mb", "simulated")}
+            if card.get("cards"):  # paired cards: how many, and whether a pass is split over them
+                out["card"].update(cards=card["cards"], split_pass=card.get("split_pass"))
         return out
 
     def gpu_lock() -> dict:

@@ -27,12 +27,16 @@ function machineLive(t) {
   ringSet("gpu", (g.util_pct || 0) / 100, g.util_pct == null ? "–" : g.util_pct + "%", g.util_pct > 60 ? "var(--amber)" : "var(--green)");
   ringSet("mem", used, Math.round(used * 100) + "%", used > .85 ? "var(--red)" : used > .65 ? "var(--amber)" : "var(--blue)");
   ringSet("temp", (g.temp_c || 0) / 100, g.temp_c == null ? "–" : g.temp_c + "°", g.temp_c > 85 ? "var(--red)" : g.temp_c > 70 ? "var(--amber)" : "var(--green)");
-  ringSet("power", (g.power_w || 0) / 240, g.power_w == null ? "–" : Math.round(g.power_w) + "W", "var(--blue)");
+  ringSet("power", (g.power_w || 0) / (240 * Math.max(1, (g.cards || []).length)), g.power_w == null ? "–" : Math.round(g.power_w) + "W", "var(--blue)");
   const foot = (k, s) => { const n = document.querySelector('[data-foot="' + k + '"]'); if (n) n.textContent = s; };
-  foot("gpu", (g.name || "GPU") + (g.clock_mhz ? " · " + g.clock_mhz + " MHz" : ""));
+  const many = g.cards && g.cards.length > 1 ? g.cards : null;  // paired cards (STUDIO_GPUS)
+  foot("gpu", many ? many.length + "× " + (g.name || "GPU").replace(/^NVIDIA\s+/, "") + " · " + many.map(c => "GPU " + c.index + " " + (c.util_pct == null ? "–" : c.util_pct + "%")).join(" · ")
+    : (g.name || "GPU") + (g.clock_mhz ? " · " + g.clock_mhz + " MHz" : ""));
   foot("mem", card ? Math.round(card.used_mb / 1024) + " of " + Math.round(card.total_mb / 1024) + " GB" : (mem.total_mb ? Math.round((mem.total_mb - mem.available_mb) / 1024) + " of " + Math.round(mem.total_mb / 1024) + " GB" + (mem.floor_mb ? " · guard floor " + Math.round(mem.floor_mb / 1024) + " GB" : "") : "–"));
   const noGpu = !t.gpu; if (noGpu) foot("gpu", "no GPU readings on this machine");
-  foot("temp", noGpu ? "reported on a DGX Spark" : g.temp_c > 85 ? "hot: renders may slow" : "GPU temperature"); foot("power", noGpu ? "reported on a DGX Spark" : "power draw");
+  foot("temp", noGpu ? "reported on a DGX Spark" : g.temp_c > 85 ? "hot: renders may slow" : many ? "hottest card · " + many.map(c => c.temp_c == null ? "–" : c.temp_c + "°").join(" / ") : "GPU temperature");
+  foot("power", noGpu ? "reported on a DGX Spark" : many ? "all " + many.length + " cards · " + many.map(c => c.power_w == null ? "–" : Math.round(c.power_w) + " W").join(" / ") : "power draw");
+  if (many && card) foot("mem", Math.round(card.used_mb / 1024) + " of " + Math.round(card.total_mb / 1024) + " GB · " + many.map(c => c.used_mb == null ? "–" : (c.used_mb / 1024).toFixed(1)).join(" / ") + " GB");
   // Server history is the RAM percent. On a card the chart is the card, from the live samples only, so the two are not mixed.
   const hist = (card ? SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem })) : [...(M.history || []), ...SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem }))]).slice(-300);
   sparkSet("gpu", hist.map(s => s.gpu), 100); sparkSet("mem", hist.map(s => s.mem), 100);
