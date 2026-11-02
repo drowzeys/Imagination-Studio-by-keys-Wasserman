@@ -116,12 +116,15 @@ function spkMachine(m) { const s = m.status, g = s && s.gpu, mem = s && s.memory
       el("span", { class: "pill " + (busy ? "running" : m.state === "ready" || m.head ? "done" : m.state === "new" || m.state === "stopped" ? "queued" : "failed") }, busy ? "rendering" : m.head ? "idle" : says)),
     el("div", { class: "note", style: "margin-top:2px" }, [m.host && m.host !== m.label ? m.host : null, m.version ? "Studio " + m.version : null].filter(Boolean).join(" · ")),
     el("div", { class: "kv", style: "margin-top:8px" }, el("span", {}, "Doing"), el("b", { style: "text-align:right;white-space:normal" }, what)),
-    live && g ? spkMeter("GPU", (g.util_pct != null ? g.util_pct + "%" : "–") + (g.power_w != null ? " · " + Math.round(g.power_w) + " W" : ""), g.util_pct, spkTone(g.util_pct, 95, 60))
+    live && g && g.cards && g.cards.length > 1 ? el("div", {}, g.cards.map(c => spkMeter("GPU " + c.index,
+        (c.util_pct != null ? c.util_pct + "%" : "–") + (c.power_w != null ? " · " + Math.round(c.power_w) + " W" : "") + (c.temp_c != null ? " · " + Math.round(c.temp_c) + " °C" : "")
+        + (c.total_mb ? " · " + spkGB(c.used_mb) + " of " + spkGB(c.total_mb) : ""), c.util_pct, spkTone(c.util_pct, 95, 60))))
+    : live && g ? spkMeter("GPU", (g.util_pct != null ? g.util_pct + "%" : "–") + (g.power_w != null ? " · " + Math.round(g.power_w) + " W" : ""), g.util_pct, spkTone(g.util_pct, 95, 60))
       : el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "GPU"), el("b", {}, live ? "no GPU reading on this machine" : "not reported")),
     el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Temperature"), el("b", {}, g && g.temp_c != null ? Math.round(g.temp_c) + " °C" : "not reported")),
     live && mem && mem.total_mb ? spkMeter(mem.unified ? "Memory (the GPU shares it)" : "RAM", spkGB(mem.used_mb) + " used · " + spkGB(mem.free_mb) + " free of " + spkGB(mem.total_mb), mem.used_pct)
       : m.memory_gb != null ? el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Memory"), el("b", {}, m.memory_gb + " GB free")) : el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Memory"), el("b", {}, "not reported")),
-    live && card && card.total_mb ? spkMeter("GPU memory", spkGB(card.used_mb) + " used · " + spkGB(card.free_mb) + " free of " + spkGB(card.total_mb), 100 * card.used_mb / card.total_mb) : null,
+    live && card && card.total_mb ? spkMeter(card.cards ? "GPU memory (" + card.cards + " cards)" : "GPU memory", spkGB(card.used_mb) + " used · " + spkGB(card.free_mb) + " free of " + spkGB(card.total_mb), 100 * card.used_mb / card.total_mb) : null,
     live && disk && disk.free_gb != null ? spkMeter("Disk", spkFree(disk.free_gb) + " free of " + spkFree(disk.total_gb), disk.used_pct, spkTone(disk.used_pct, 90, 80))
       : m.disk_gb != null ? el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Disk"), el("b", {}, m.disk_gb + " GB free")) : null,
     live && s.cpu && s.cpu.load1 != null ? el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Processor"), el("b", {}, "load " + s.cpu.load1 + " on " + (s.cpu.cores || "?") + " cores")) : null,

@@ -25,7 +25,7 @@ function machineStrip() {
   return el("div", { class: "mstrip", id: "homemachine" },
     el("div", { class: "who" }, el("span", { class: "dotl" + (running ? " r" : t && (t.warnings || []).length ? " t" : "") }),
       el("div", { style: "min-width:0" }, el("b", {}, platName() || "This machine"), el("span", {}, running ? "Rolling: " + running.title : t && (t.warnings || []).length ? t.warnings[0] : "Ready for the next take"))),
-    t && t.gpu ? m("GPU", t.gpu.util_pct, (t.gpu.util_pct ?? "–") + "%" + (t.gpu.temp_c != null ? " · " + t.gpu.temp_c + "°C" : ""), t.gpu.util_pct > 60 ? "var(--red)" : "var(--green)") : el("div", { class: "m" }, el("span", { class: "note", style: "margin:0" }, t ? "" : "Readouts appear once the machine reports them.")),
+    t && t.gpu ? m(t.gpu.count > 1 ? t.gpu.count + " GPUs" : "GPU", t.gpu.util_pct, (t.gpu.util_pct ?? "–") + "%" + (t.gpu.temp_c != null ? " · " + t.gpu.temp_c + "°C" : ""), t.gpu.util_pct > 60 ? "var(--red)" : "var(--green)") : el("div", { class: "m" }, el("span", { class: "note", style: "margin:0" }, t ? "" : "Readouts appear once the machine reports them.")),
     t && t.memory ? m("Memory", memUsed, (card ? gb(card.used_mb) + " of " + gb(card.total_mb) : gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb)) + " GB", memUsed > 85 ? "var(--red)" : "var(--amber)", card ? null : (t.memory.floor_mb ? 100 - pct(t.memory.floor_mb, t.memory.total_mb) : null)) : el("div", { class: "m" }),
     t && t.disk ? m("Disk", t.disk.used_pct, Math.round(t.disk.free_gb) + " GB free", t.disk.used_pct > 90 ? "var(--red)" : "var(--blue)", null, "disk") : el("div", { class: "m disk" }),
     el("button", { class: "small", onclick: () => go("Machine") }, "Telemetry"));

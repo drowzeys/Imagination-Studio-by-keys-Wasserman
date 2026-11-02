@@ -190,9 +190,12 @@ def machine() -> tuple[str, str]:
                                                capture_output=True, text=True, timeout=5).stdout.strip().splitlines()[0])
             except (OSError, IndexError, subprocess.TimeoutExpired):
                 return "spark", "DGX SPARK · CUDA · H3-CUDA"  # not kept: asked again on a later call
-        # the same build on a CUDA workstation (an RTX Pro 6000): named by its card, not as a DGX Spark
+        # the same build on a CUDA workstation (an RTX Pro 6000): named by its card, not as a DGX Spark; paired cards
+        # (STUDIO_GPUS) as "2× <card>"
+        paired = memory_guard.paired_gpus()
+        many = f"{len(paired)}× " if len(paired) > 1 else ""
         return "spark", (f"DGX SPARK · {GPU_NAME[0].upper()} · H3-CUDA" if "GB10" in GPU_NAME[0].upper()
-                         else f"CUDA · {GPU_NAME[0].upper()} · H3-CUDA")
+                         else f"CUDA · {many}{GPU_NAME[0].upper()} · H3-CUDA")
     # no chip name: the same recipe runs from an M1 with 96 GB up (pictures only from 48 GB)
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
@@ -2248,7 +2251,7 @@ def state() -> dict:
             # the picture models installed here, in the order the page offers them (IMAGE_MODELS)
             "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
             "platform": machine()[0], "platform_label": machine()[1],
-            "gpu_index": os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None,
+            "gpu_index": ",".join(memory_guard.paired_gpus()) or (os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None),
             "last_frame": True,
             # every clip length the model takes (lengths.py), and the longest this machine renders at each size
             "lengths": {"fps": FPS, "step": lengths.STEP, "shortest": lengths.SHORTEST, "longest": lengths.LONGEST,
