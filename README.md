@@ -90,6 +90,29 @@ PREFIX=/data/studio STUDIO_GPU=1 bash spark/comfy.sh stop
 
 Untested. The CUDA engines are built and measured for the GB10.
 
+### Windows (UI-only preview)
+
+Native Windows, including ARM64, can run the web UI without WSL, CUDA, or model downloads.
+This preview supports project/Slate planning, prompt compilation, settings, uploads, Motion Previs pack imports
+and browsing saved media.
+Rendering, model installation, agents, worker management and other unverified actions are refused explicitly.
+It is **not** a Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
+the Linux/Mac memory guards and hardware requirements have not been relaxed.
+
+Install Python 3.13 (`py install 3.13` with the Python install manager), then run in PowerShell:
+
+```powershell
+.\scripts\app.ps1 -Install
+```
+
+Open http://127.0.0.1:7870. Later, run `.\scripts\app.ps1` again; Ctrl+C stops it.
+The isolated environment is under `%LOCALAPPDATA%\ImaginationStudio\ui-venv`; projects and media stay under
+`%USERPROFILE%\ImaginationStudio` (or `STUDIO_HOME`). The launcher binds to loopback only and keeps the existing
+access-key checks. If PowerShell blocks scripts, use a process-only policy:
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\app.ps1 -Install`.
+FFmpeg is optional: add both `ffmpeg.exe` and `ffprobe.exe` to PATH for media inspection; missing tools are reported.
+The existing model licences still apply; this install downloads none of their weights.
+
 ### Apple silicon
 
 macOS 26 or later, for Metal 4. What runs depends on the memory: **96 GB or more** for video, voice, music and the

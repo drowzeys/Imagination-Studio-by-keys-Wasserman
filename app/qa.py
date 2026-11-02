@@ -48,7 +48,8 @@ def ready() -> dict:
 
     sheet = bool(tool("ffmpeg") and tool("ffprobe"))
     transcript = sheet and bool(importlib.util.find_spec("faster_whisper") or tool("whisper"))
-    missing = ([] if sheet else ["ffmpeg (" + ("sudo apt install ffmpeg" if os.uname().sysname == "Linux" else "brew install ffmpeg") + ")"]) + (
+    install = "add ffmpeg and ffprobe to PATH" if sys.platform == "win32" else "sudo apt install ffmpeg" if sys.platform.startswith("linux") else "brew install ffmpeg"
+    missing = ([] if sheet else ["ffmpeg (" + install + ")"]) + (
         [] if transcript or not sheet else ["a speech-to-text tool (pip install faster-whisper, or openai-whisper)"])
     return {"sheet": sheet, "transcript": transcript, "runs": sheet, "missing": missing}
 

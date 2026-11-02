@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import resource
 import shutil
 import subprocess
 import sys
@@ -1013,6 +1012,8 @@ def zip_folder(folder: Path, target: Path) -> None:
 
 
 def peak_memory_mb() -> dict:
+    import resource
+
     scale = 1 if sys.platform == "darwin" else 1024  # bytes on macOS, kilobytes on Linux
     own = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * scale / 1048576
     children = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * scale / 1048576

@@ -178,7 +178,11 @@ def save(body: dict) -> dict:
             target.parent.mkdir(parents=True, exist_ok=True)
             temp = target.with_name(target.name + "." + uuid.uuid4().hex + ".tmp")
             temp.write_text(json.dumps(fresh, indent=2) + "\n")
-            os.chmod(temp, 0o600)
+            if os.name == "nt":
+                from access import windows_private
+                windows_private(temp)
+            else:
+                os.chmod(temp, 0o600)
             temp.replace(target)
     return fresh
 

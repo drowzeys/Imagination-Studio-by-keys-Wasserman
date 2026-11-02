@@ -3,6 +3,7 @@ loads without it and asks; /?key= and the page's prompt keep it as this app's co
 Run: STUDIO_HOME=$(mktemp -d) python3 -m pytest tests/test_access.py"""
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -78,9 +79,22 @@ def test_off_when_asked(monkeypatch):
 def test_the_key_file_is_made_once_private_and_kept(tmp_path):
     made = access.ensure(tmp_path)
     assert len(made) >= 30 and access.read(tmp_path) == made == access.ensure(tmp_path)
-    assert stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
-    access.path(tmp_path).chmod(0o644)
-    assert access.ensure(tmp_path) == made and stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
+    if os.name == "nt":
+        def private():
+            target = str(access.path(tmp_path)).replace("'", "''")
+            done = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                   f"(Get-Acl -LiteralPath '{target}').Sddl -match 'D:P\\(A;;FA;;;OW\\)'"],
+                                  capture_output=True, text=True, timeout=10, check=True)
+            assert done.stdout.strip() == "True"
+        private()
+        access.rotate(tmp_path)
+        private()
+        made = access.read(tmp_path)
+        assert access.ensure(tmp_path) == made
+    else:
+        assert stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
+        access.path(tmp_path).chmod(0o644)
+        assert access.ensure(tmp_path) == made and stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
     assert access.headers_for(tmp_path) == {"X-Studio-Key": made} and access.headers_for(tmp_path / "none") == {}
     assert not access.matches("", "") and not access.matches(made, "")
 

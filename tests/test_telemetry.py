@@ -192,6 +192,12 @@ def test_the_gpu_is_asked_less_while_something_renders_and_the_governor_only_whe
 def test_the_disk_reads_as_df_shows_it(tmp_path):
     import subprocess as sp
     mine = telemetry.disk_of(tmp_path)
+    if sys.platform == "win32":
+        import shutil
+        total, used, available = shutil.disk_usage(tmp_path)
+        assert mine["total_gb"] == round(total / 1e9, 1)
+        assert abs(mine["used_pct"] - 100 * used / (used + available)) < 1.0
+        return
     line = sp.run(["df", "-k", str(tmp_path)], capture_output=True, text=True).stdout.splitlines()[-1].split()
     used_k, avail_k = int(line[2]), int(line[3])
     assert abs(mine["used_pct"] - 100 * used_k / (used_k + avail_k)) < 1.0  # df rounds its own Use% up

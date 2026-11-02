@@ -332,6 +332,11 @@ function palClose() { const p = $("#palette"); if (p) { p.remove(); releaseMedia
 // ⌥1 to ⌥9 and ⌥0: the rooms that carry a key, in the sidebar's order
 const roomForKey = d => ROOMS.find(r => r.key === d) || null;
 function shellStart() {
+  if (S && S.platform_note) {
+    const warning = $("#warnbar");
+    warning.textContent = [S.platform_note, S.ffmpeg_note].filter(Boolean).join(" ");
+    warning.classList.remove("hide");
+  }
   const up = $("#studio-updates-open"); up.replaceChildren(icon("update", "ic"), el("span", { class: "t" }, "Updates")); up.onclick = () => go("Updates");
   $("#helpbtn").innerHTML = ICON.learn; $("#baychev").innerHTML = ICON.chev;
   $("#helpbtn").onclick = () => go("Tutorial");

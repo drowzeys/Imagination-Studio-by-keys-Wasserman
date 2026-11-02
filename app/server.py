@@ -149,6 +149,10 @@ def lead(first: bool, last: bool, seconds: float = 5, frames: int | None = None)
 # On a DGX Spark (Linux, CUDA) the scripts hand over to spark/: FastH3 and Qwen-Image-2.1 through ComfyUI. There is no
 # 2x decoder and no MiniMax H3 Turbo there, so only the native sizes and the FastH3 qualities are offered.
 SPARK = sys.platform.startswith("linux")
+WINDOWS = sys.platform == "win32"
+WINDOWS_NOTE = ("Windows preview: project planning, saved settings, uploads and media browsing only. "
+                "Local rendering, model installation, agents and worker management are not supported yet. "
+                "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
     QUALITIES = {k: v for k, v in QUALITIES.items() if k.startswith("fh")}
@@ -183,6 +187,8 @@ def machine() -> tuple[str, str]:
     long as the driver takes when it is busy handing out memory, which is when a worker's API was seen to stop
     answering. A page that polls the state then holds one of the server's threads per call."""
 
+    if WINDOWS:
+        return "windows", "WINDOWS · UI-ONLY PREVIEW"
     if SPARK:
         if not GPU_NAME:
             try:
@@ -386,6 +392,8 @@ class WriteGuard:
                 return await too_large(scope, receive, send)
         except ValueError:
             return await JSONResponse({"error": "Content-Length is a number"}, status_code=400)(scope, receive, send)
+        if WINDOWS and not WINDOWS_WRITES.fullmatch(scope["path"]):
+            return await JSONResponse({"error": WINDOWS_NOTE}, status_code=501)(scope, receive, send)
         seen, over, started = 0, False, False
 
         async def counted():  # a body sent without a length (chunked) is counted as it comes
@@ -585,9 +593,17 @@ class SecurityHeaders:
 
 app.add_middleware(SecurityHeaders)
 
+WINDOWS_WRITES = re.compile(
+    r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|storage/refresh|motion/packs/import|"
+    r"projects(?:/[A-Za-z0-9_-]+)?|slate/(?:projects(?:/[A-Za-z0-9_-]+)?|exists|compile)|"
+    r"nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
+)
+
 
 def accepting_jobs():
     """Called under the queue lock, shared with the updater's idle check."""
+    if WINDOWS:
+        raise HTTPException(501, WINDOWS_NOTE)
     if stopping.is_set():
         raise HTTPException(503, "Studio is shutting down.")
     if updater.maintenance.is_set():
@@ -619,7 +635,7 @@ def hidden(relative_path: Path | str) -> bool:
 
 
 def relative(path: Path) -> str:
-    return str(Path(path).resolve().relative_to(HOME.resolve()))
+    return Path(path).resolve().relative_to(HOME.resolve()).as_posix()
 
 
 # What a Motion Previs layer shows, for the model: a control layer is a diagram of the shot, not footage of it.
@@ -1062,6 +1078,8 @@ def image_models() -> list[str]:
     """The picture models installed here, Qwen first: FLUX3-K's ComfyUI files on a Spark, its own venv and BFL's
     checkpoints on a Mac."""
 
+    if WINDOWS:
+        return []
     found = (["qwen"] if qwen_ready() else []) + (["qwen-full"] if qwen_base_ready() else [])
     for name, unets in FLUX3_FILES.items():
         if SPARK:
@@ -1284,6 +1302,8 @@ def references(params: dict) -> dict:
 
 def estimate(preset: str, quality: str, seconds: float, text_only: bool = False, referenced: bool = False,
              ref_turbo: bool = False, ref_media: bool = False) -> int | None:
+    if WINDOWS:
+        return None
     if card_face():
         # this GPU's own sample of this canvas, or no number. Not the GB10 table, and not a power of it.
         if referenced or ref_media or seconds > LONGEST:
@@ -1515,7 +1535,7 @@ def media_tools() -> dict:
     return {name: bool(shutil.which(name, path=path)) for name in ("ffmpeg", "ffprobe")}
 
 
-FFMPEG_HOW = "sudo apt install ffmpeg" if SPARK else "brew install ffmpeg"
+FFMPEG_HOW = "add ffmpeg and ffprobe to PATH" if WINDOWS else "sudo apt install ffmpeg" if SPARK else "brew install ffmpeg"
 FFMPEG_NOTE = ("ffmpeg is not installed on this machine (" + FFMPEG_HOW + "). Without it: no long videos, no timeline export, "
                "no frame taken from a clip (continue from a clip, end on a clip), no reference videos or audio, no silenced "
                "sound track" + (", and a clip keeps ComfyUI's own sound track instead of the limited 256 kb/s one. Single clips, "
@@ -2236,10 +2256,10 @@ def public(job: dict) -> dict:
 
 @app.get("/api/state")
 def state() -> dict:
-    return {"presets": {k: {"label": v[0], "size": v[1]} for k, v in PRESETS.items()},
+    out = {"presets": {k: {"label": v[0], "size": v[1]} for k, v in PRESETS.items()},
             "qualities": {k: v[0] for k, v in QUALITIES.items()}, "durations": DURATIONS, "long": LONG,
             "home": str(HOME), "pack": str(PACK), "version": (PACK / "VERSION").read_text().strip(),
-            "zig": zig_ready(), "turbo": turbo_ready() and not SPARK, "x2": not SPARK,
+            "zig": zig_ready() and not WINDOWS, "turbo": turbo_ready() and not SPARK and not WINDOWS, "x2": not SPARK and not WINDOWS,
             "ref2va": ref2va_ready(), "ref2va_turbo": ref2va_turbo_ready(), "reference_limit": REFERENCE_LIMIT,
             # reference videos and audio: wherever Ref2VA is installed
             "ref_media": ref2va_ready(), "reference_video_limit": REFERENCE_VIDEO_LIMIT,
@@ -2248,6 +2268,7 @@ def state() -> dict:
             # the picture models installed here, in the order the page offers them (IMAGE_MODELS)
             "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
             "platform": machine()[0], "platform_label": machine()[1],
+            "ui_only": WINDOWS, "platform_note": WINDOWS_NOTE if WINDOWS else "",
             "gpu_index": os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None,
             "last_frame": True,
             # every clip length the model takes (lengths.py), and the longest this machine renders at each size
@@ -2256,7 +2277,7 @@ def state() -> dict:
             "ffmpeg": media_tools()["ffmpeg"], "ffmpeg_note": "" if media_tools()["ffmpeg"] else FFMPEG_NOTE,
             "shot_check": True, "negation_reason": negation.REASON,
             # how many DGX Sparks a job may use (sparks.py), this machine counted: a Spark or a Mac at the head
-            "sparks": {"supported": True, "limit": hub.chooser_limit()},
+            "sparks": {"supported": not WINDOWS, "limit": hub.chooser_limit()},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
             # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py): MLX on a Mac, CUDA on a DGX Spark
@@ -2265,7 +2286,14 @@ def state() -> dict:
             "music": music.state(),
             # NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine (bolt.py): its state, backend and memory
             "bolt": bolt.summary(),
-            "engine": ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
+            "engine": "unavailable (Windows UI-only preview)" if WINDOWS else ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
+    if WINDOWS:
+        for key in ("ref2va", "ref2va_turbo", "ref_media", "last_frame", "shot_check"):
+            out[key] = False
+        out["text_encoders"] = []
+        for key in ("voice", "music"):
+            out[key].update(available=False, why=WINDOWS_NOTE)
+    return out
 
 
 def numbers(body: dict, keys: tuple) -> dict:
@@ -2401,6 +2429,8 @@ def submit(body: dict) -> dict:
 
 
 def queue_job(body: dict) -> dict:
+    if WINDOWS:
+        raise HTTPException(501, WINDOWS_NOTE)
     kind = body.get("kind")
     if body.get("params") is not None and not isinstance(body.get("params"), dict):
         raise HTTPException(400, "params is an object of the job's settings")
@@ -3306,6 +3336,8 @@ def catch_exit(handle_exit):
 def stop_session_comfy() -> None:
     """ComfyUI runs in its own session so the models stay loaded between clips. This process is the session:
     quitting it stops that server. PREFIX and SPARK_COMFY_PORT are already this install's, on a Spark and on a card."""
+    if WINDOWS:
+        return
     if LOCAL_GPU_CHILD:
         local_gpus.stop_child_comfy()
         return
@@ -3347,10 +3379,11 @@ if __name__ == "__main__":
 
     if os.environ.get("STUDIO_PIDFILE"):  # a worker Spark's app, started by another Spark's Studio: how that one finds it again
         Path(os.environ["STUDIO_PIDFILE"]).write_text(str(os.getpid()))
-    hub.start()
+    if not WINDOWS:
+        hub.start()
     if hub.local.active and not LOCAL_GPU_CHILD:
         os.environ["STUDIO_LOCAL_GPU_KEY"] = hub.local.key  # private model ownership, not the head's browser access key
-    if not LOCAL_GPU_CHILD:
+    if not LOCAL_GPU_CHILD and not WINDOWS:
         nightshift.start()  # schedules belong to the head, never to its private workers
         if not os.environ.get("STUDIO_PIDFILE"):
             caption_router.captioner["start"]()
