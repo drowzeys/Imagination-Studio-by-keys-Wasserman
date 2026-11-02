@@ -67,21 +67,41 @@ def test_studio_gpu_is_the_card_nvidia_smi_is_asked_for(monkeypatch):
     assert seen[0][:3] == ["nvidia-smi", "-i", "1"]
 
 
-def test_two_cards_are_one_pool_and_a_single_card_engine_sees_one(monkeypatch):
-    # spark/gpus.py: two 48 GB cards, the transformer on one and the text encoder and decoders on the other
+def test_paired_cards_and_what_a_single_card_engine_sees(monkeypatch, tmp_path):
+    # spark/gpus.py: two 48 GB cards paired by STUDIO_GPUS, the transformer on one and the text encoder and decoders
+    # on the other
     monkeypatch.delenv("STUDIO_GPU_SPLIT", raising=False)
+    monkeypatch.delenv("STUDIO_GPU", raising=False)
+    monkeypatch.delenv("STUDIO_LOCAL_GPU_UUID", raising=False)
+    monkeypatch.setenv("STUDIO_GPUS", "0,1")
+    lib = tmp_path / "libtf_h3.so"
+    lib.write_bytes(b"\x7fELF tf_h3_open\0tf_h3_forward\0")
+    monkeypatch.setenv("TF_H3_LIB", str(lib))
 
     def smi(*query):
         if query[0].startswith("--query-gpu"):
             return [["48935", "22000", "26935"], ["48935", "400", "48535"]]
         return []
     monkeypatch.setattr(memory_guard, "smi", smi)
+    # the pinned engine cannot split a pass: the head's card alone is the job's room
     card = memory_guard.device()
-    assert card["total_mb"] == 97870 and card["free_mb"] == 75470 and card["cards"] == 2
-    assert memory_guard.single_card_free_mb() == 48535
+    assert not memory_guard.tp_engine()
+    assert card["free_mb"] == 26935 and card["total_mb"] == 48935 and card["cards"] == 2 and not card["split_pass"]
+    assert memory_guard.single_card_free_mb() == 26935  # Drama 3, Bolt: the head's card, never the sum
+    # an engine with the exchange: each card holds its share, so the smallest card's free memory times two
+    lib.write_bytes(b"\x7fELF tf_h3_open\0tf_h3_tp_init\0tf_h3_forward\0")
     monkeypatch.setattr(memory_guard, "_DEVICE", {"at": 0.0, "value": None})
-    monkeypatch.setenv("STUDIO_GPU_SPLIT", "off")  # the first card only, as before
-    assert memory_guard.device() == {"total_mb": 48935, "used_mb": 22000, "free_mb": 26935, "simulated": False}
+    card = memory_guard.device()
+    assert memory_guard.tp_engine() and card["split_pass"]
+    assert card["free_mb"] == 2 * 26935 and card["total_mb"] == 2 * 48935
+    assert memory_guard.single_card_free_mb() == 26935
+    # not paired: two rows are never added up, the first card only, as before
+    for env, value in (("STUDIO_GPU_SPLIT", "off"), ("STUDIO_GPUS", "")):
+        monkeypatch.setattr(memory_guard, "_DEVICE", {"at": 0.0, "value": None})
+        monkeypatch.setenv("STUDIO_GPUS", "0,1")
+        monkeypatch.delenv("STUDIO_GPU_SPLIT", raising=False)
+        monkeypatch.setenv(env, value)
+        assert memory_guard.device() == {"total_mb": 48935, "used_mb": 22000, "free_mb": 26935, "simulated": False}
 
 
 def test_paired_cards_are_asked_for_together_the_heads_first(monkeypatch):

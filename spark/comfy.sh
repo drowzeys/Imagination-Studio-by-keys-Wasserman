@@ -41,7 +41,8 @@ case "${1:-start}" in
       [ -e "$SHM" ] || continue
       OWNER="${SHM#/dev/shm/tf-h3-}"; OWNER="${OWNER%%-*}"
       case "$OWNER" in ''|*[!0-9]*) continue;; esac
-      kill -0 "$OWNER" 2>/dev/null || rm -f "$SHM"
+      # kill -0 also fails on a live process of another user: only "no such process" means the world is dead
+      if ! kill -0 "$OWNER" 2>/dev/null && ! ps -p "$OWNER" >/dev/null 2>&1; then rm -f "$SHM" 2>/dev/null || true; fi
     done;;
   status) pgrep -f "$MATCH" >/dev/null && echo "running on 127.0.0.1:$PORT" || echo "not running";;
   run)
@@ -60,10 +61,14 @@ case "${1:-start}" in
       export TF_H3_LIB="$PREFIX/tf-h3/libtf_h3.so"
     fi
     # two cards: MiniMax H3's bf16 transformer blocks from STUDIO_SPLIT_BLOCK on the second card (spark/gpus.py,
-    # STUDIO_LAYER_SPLIT=on; off by default)
+    # STUDIO_LAYER_SPLIT=on; off by default). Only with paired cards (STUDIO_GPUS): one card gets no extra node
     NODE="$PREFIX/ComfyUI/custom_nodes/studio_split_h3"
-    mkdir -p "$NODE"
-    cp "$HERE/studio_split_h3/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
+    if [ -n "${STUDIO_GPUS:-}" ] && [ -f "$HERE/studio_split_h3/__init__.py" ]; then
+      mkdir -p "$NODE"
+      cp "$HERE/studio_split_h3/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
+    else
+      rm -rf "$NODE"
+    fi
     # the Studio's MMAudio sampler (foley), beside kijai's ComfyUI-MMAudio when oneshot-setup-spark.sh --sound put it there
     NODE="$PREFIX/ComfyUI/custom_nodes/studio_mmaudio"
     if [ -f "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio/nodes.py" ] && [ -f "$HERE/studio_mmaudio/__init__.py" ]; then

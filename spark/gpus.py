@@ -11,7 +11,7 @@ actions) is placed the same way without each one knowing about it.
 Environment:
   STUDIO_GPUS         the cards one Studio renders on together, nvidia-smi indexes with the head's card first (0,1);
                       spark/gpu.sh pins CUDA to them. Without it, 4.3's STUDIO_GPU pins one card and nothing is split
-  STUDIO_GPU_SPLIT    auto (default: on with two or more visible discrete cards), on, off
+  STUDIO_GPU_SPLIT    auto (default: on when STUDIO_GPUS pairs two or more visible discrete cards), on, off
   STUDIO_ENCODER_GPU  the card (ComfyUI's gpu:N index among the visible ones) for text encoders and decoders, default 1
   STUDIO_DECODER_GPU  the card for the decoders (VAEs) when it should differ from the encoders', default the same
   STUDIO_LAYER_SPLIT  off (default), on: MiniMax H3's bf16 transformer blocks from
@@ -23,7 +23,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import memory_guard  # noqa: E402  (paired_gpus: STUDIO_GPUS, the only way cards are split)
 
 # loaders whose outputs are (output index -> what it is); the model outputs stay on ComfyUI's default device (gpu:0)
 CLIP_OUTPUTS = {"CLIPLoader": (0,), "DualCLIPLoader": (0,), "TripleCLIPLoader": (0,), "QuadrupleCLIPLoader": (0,),
@@ -72,6 +76,8 @@ def split() -> bool:
         return False
     if os.environ.get("STUDIO_VRAM_GB", "").strip():
         return False  # the one-card simulation on a Spark
+    if not memory_guard.paired_gpus():
+        return False  # never without STUDIO_GPUS: two visible cards alone are not a pairing
     return len(cards()) >= 2  # "on" and "auto" alike: there is nothing to split on one card
 
 
@@ -95,7 +101,7 @@ def place(workflow: dict) -> dict:
     that already places a loader itself is left as it is for that loader."""
 
     if not split():
-        return workflow
+        return place_decode(workflow) if decode_self_check() else workflow
     out = {key: dict(node, inputs=dict(node.get("inputs", {}))) for key, node in workflow.items()}
     taken = {int(key) for key in out if str(key).isdigit()}
     next_id = max(taken, default=0) + 1000
@@ -131,7 +137,21 @@ def decode_split() -> bool:
     """Whether a MiniMax H3 video decode runs on two cards (STUDIO_DECODE_SPLIT, on by default with two cards)."""
 
     wanted = os.environ.get("STUDIO_DECODE_SPLIT", "on").strip().lower()
-    return wanted not in ("0", "off", "no", "false") and split()
+    return wanted not in ("0", "off", "no", "false") and split() and decode_node()
+
+
+def decode_node() -> bool:
+    """Whether ComfyUI has StudioTwoCardVAEDecode: comfy.sh installs it with the TensorFold node, only where the
+    engine library is (spark/tensorfold_h3/decode2.py)."""
+
+    return memory_guard.tf_h3_lib().is_file()
+
+
+def decode_self_check() -> bool:
+    """STUDIO_DECODE_SPLIT=self: the two-card decode's code path with one card standing in for both (a single
+    worker), for a byte check against the plain VAEDecode on a one-card machine. Not for renders."""
+
+    return os.environ.get("STUDIO_DECODE_SPLIT", "").strip().lower() == "self" and decode_node()
 
 
 def place_decode(out: dict) -> dict:
@@ -139,6 +159,13 @@ def place_decode(out: dict) -> dict:
     (spark/tensorfold_h3/decode2.py) with a second copy of the VAE on another card: the decoder's temporal chunks
     alternate between the two, blended in order on the decoder's card (byte for byte the one-card output)."""
 
+    if decode_self_check():
+        for key, node in list(out.items()):
+            ref = node["inputs"].get("vae") if node.get("class_type") == "VAEDecode" else None
+            loader = out.get(str(ref[0])) if isinstance(ref, list) and len(ref) == 2 else None
+            if loader and loader.get("class_type") == "VAELoader" and "h3_video_vae" in str(loader["inputs"].get("vae_name", "")):
+                out[key] = {"class_type": "StudioTwoCardVAEDecode", "inputs": {**node["inputs"], "vae_other": list(ref)}}
+        return out
     if not decode_split():
         return out
     home = f"gpu:{decoder_gpu()}"

@@ -50,7 +50,8 @@ def _unload_all_models(*args, **kwargs):
     return _unload(*args, **kwargs)
 
 
-comfy.model_management.unload_all_models = _unload_all_models
+if os.environ.get("STUDIO_GPUS", "").strip():  # paired cards only: one card keeps ComfyUI's own function
+    comfy.model_management.unload_all_models = _unload_all_models
 
 
 def to(value, device):

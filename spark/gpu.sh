@@ -100,7 +100,7 @@ studio_pin_gpu() {
     echo "This machine has ${count} compute GPUs. Set STUDIO_GPU to the nvidia-smi index this process should use:" >&2
     nvidia-smi --query-gpu=index,name,memory.total,display_active --format=csv >&2 || true
     echo "A row with display_active Enabled is a monitor card. It is not used unless STUDIO_GPU names it." >&2
-    echo "One studio uses one card. A second studio is another process with its own STUDIO_GPU, PORT, SPARK_COMFY_PORT, STUDIO_HOME and STUDIO_GPU_LOCK." >&2
+    echo "One studio uses one card, or two paired with STUDIO_GPUS=0,1 (docs/two-gpus.md). A second studio is another process with its own STUDIO_GPU, PORT, SPARK_COMFY_PORT, STUDIO_HOME and STUDIO_GPU_LOCK." >&2
     return 1
   fi
   pick=$(printf '%s\n' "$indexes" | sed '/^$/d' | head -1)

@@ -27,10 +27,15 @@ on a 15 s clip (the memory guard refuses it on a 48 GB card); two cards peak nea
 
   ```bash
   git clone -b studio-two-gpus https://github.com/davidlowjw/TensorFold.git
+  git -C TensorFold checkout 4711fbf5  # the commit this page was written against
   TF_SOURCE="$PWD/TensorFold" PREFIX=/path/to/the/install bash spark/build-engine.sh  # the PREFIX it was installed with
   ```
 
-  With an engine that lacks it the Studio renders on one card and says so in the ComfyUI log; nothing else changes.
+  That branch is far from the pinned engine (about 1900 commits ahead of `1f7ecc75`): its one-card output has not been
+  checked against the pinned engine's here. With an engine that lacks the exchange (the pinned one) each sampler pass
+  runs on the first card and the ComfyUI log says so ("this engine cannot split a pass"); the text encoder and
+  decoders still move to the second card and the decode is still shared, and the memory guard then counts only the
+  first card's memory for a render.
   An upgrade builds the pinned engine again: build this one again after it.
 - **For the fastest exchange, PCIe peer to peer that works.** On a desktop with the IOMMU in DMA mode (AMD-Vi or VT-d;
   `cat /sys/kernel/iommu_groups/*/type` says `DMA` or `DMA-FQ` for the cards' groups) copies between the cards report

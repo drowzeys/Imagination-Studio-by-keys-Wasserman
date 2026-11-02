@@ -23,9 +23,16 @@ def video_workflow():
     }
 
 
-def with_cards(monkeypatch, found, split="auto"):
+def with_cards(monkeypatch, found, split="auto", paired="0,1"):
     monkeypatch.setattr(gpus, "cards", lambda fresh=False: found)
     monkeypatch.setenv("STUDIO_GPU_SPLIT", split)
+    monkeypatch.delenv("STUDIO_GPU", raising=False)
+    monkeypatch.delenv("STUDIO_LOCAL_GPU_UUID", raising=False)
+    monkeypatch.delenv("STUDIO_DECODE_SPLIT", raising=False)
+    if paired:
+        monkeypatch.setenv("STUDIO_GPUS", paired)
+    else:
+        monkeypatch.delenv("STUDIO_GPUS", raising=False)
     monkeypatch.delenv("STUDIO_VRAM_GB", raising=False)
     monkeypatch.delenv("STUDIO_ENCODER_GPU", raising=False)
     monkeypatch.delenv("STUDIO_DECODER_GPU", raising=False)
@@ -177,3 +184,37 @@ def test_a_local_worker_never_splits(monkeypatch):
     assert not gpus.split()
     w = video_workflow()
     assert gpus.place(w) == w
+
+
+def test_two_visible_cards_without_studio_gpus_never_split(monkeypatch):
+    # two cards seen but not paired (no STUDIO_GPUS): one card's behaviour, as before the two-GPU work
+    with_cards(monkeypatch, TWO, paired="")
+    w = video_workflow()
+    assert not gpus.split() and gpus.place(w) == w
+
+
+def h3_workflow():
+    w = video_workflow()
+    w["4"]["inputs"]["vae_name"] = "minimax_h3_video_vae.safetensors"
+    return w
+
+
+def test_the_two_card_decode_only_where_its_node_is_installed(monkeypatch, tmp_path):
+    with_cards(monkeypatch, TWO)
+    monkeypatch.setattr(gpus.memory_guard, "tf_h3_lib", lambda: tmp_path / "libtf_h3.so")  # no engine: no node
+    assert "StudioTwoCardVAEDecode" not in {n["class_type"] for n in gpus.place(h3_workflow()).values()}
+    (tmp_path / "libtf_h3.so").write_bytes(b"x")
+    out = gpus.place(h3_workflow())
+    assert out["13"]["class_type"] == "StudioTwoCardVAEDecode"
+    assert out[out["13"]["inputs"]["vae_other"][0]]["inputs"]["device"] == "gpu:0"
+
+
+def test_the_decode_self_check_on_one_card(monkeypatch, tmp_path):
+    # STUDIO_DECODE_SPLIT=self: the split decode's code path on one unpaired card, for a byte check
+    with_cards(monkeypatch, TWO[:1], paired="")
+    monkeypatch.setattr(gpus.memory_guard, "tf_h3_lib", lambda: tmp_path / "libtf_h3.so")
+    (tmp_path / "libtf_h3.so").write_bytes(b"x")
+    monkeypatch.setenv("STUDIO_DECODE_SPLIT", "self")
+    out = gpus.place(h3_workflow())
+    assert out["13"] == {"class_type": "StudioTwoCardVAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0], "vae_other": ["4", 0]}}
+    assert out["14"]["class_type"] == "VAEDecodeAudio" and "SelectCLIPDevice" not in {n["class_type"] for n in out.values()}

@@ -264,8 +264,8 @@ def rank_one_gpu():
 
 def tp_wanted():
     wanted = os.environ.get("STUDIO_TP", "auto").strip().lower()
-    if wanted in ("0", "off", "no", "false"):
-        return False
+    if wanted in ("0", "off", "no", "false") or not os.environ.get("STUDIO_GPUS", "").strip():
+        return False  # only paired cards (spark/gpu.sh exports STUDIO_GPUS to this server when they are)
     try:
         return torch.cuda.device_count() >= 2
     except Exception:  # noqa: BLE001
@@ -274,7 +274,12 @@ def tp_wanted():
 
 def world(path):
     """The two-GPU world for this checkpoint, started on first use; None when it is off or has failed."""
-    if path in _tp_off or not tp_wanted() or not hasattr(library(), "tf_h3_tp_init"):
+    if path in _tp_off or not tp_wanted():
+        return None
+    if not hasattr(library(), "tf_h3_tp_init"):
+        logging.warning("TensorFold H3: two GPUs unavailable, one GPU from here: this engine cannot split a pass "
+                        "(no tf_h3_tp_init; spark/build-engine.sh with the two-GPU engine, docs/two-gpus.md)")
+        _tp_off.add(path)
         return None
     if path not in _worlds:
         try:
