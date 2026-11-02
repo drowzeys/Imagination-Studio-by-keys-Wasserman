@@ -22,7 +22,8 @@ import time
 STAGES = {"UNETLoader": "loading the model", "CLIPLoader": "loading the text encoder", "VAELoader": "loading the decoders",
           "MiniMaxH3ImageToVideo": "encoding the prompt",
           "MiniMaxH3ReferenceToVideo": "encoding the prompt", "SamplerCustomAdvanced": "generating", "KSampler": "generating",
-          "VAEDecode": "decoding the video", "VAEDecodeTiled": "decoding the video", "VAEDecodeAudio": "decoding the sound",
+          "VAEDecode": "decoding the video", "VAEDecodeTiled": "decoding the video",
+          "StudioTwoCardVAEDecode": "decoding the video", "VAEDecodeAudio": "decoding the sound",
           "CreateVideo": "writing the clip", "SaveVideo": "writing the clip", "LoadImage": "reading the pictures"}
 state = {"label": "", "done": 0, "total": 0, "stage": "", "since": time.time(), "clip": False}
 
