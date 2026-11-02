@@ -197,18 +197,9 @@ def disk_of(path: Path) -> dict:
 
 
 def windows_memory() -> tuple[int, int]:
-    import ctypes
+    from windows_memory import host_memory
 
-    class MemoryStatus(ctypes.Structure):
-        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
-                    *[(name, ctypes.c_ulonglong) for name in
-                      ("total", "available", "page_total", "page_available", "virtual_total", "virtual_available", "extended")]]
-
-    status = MemoryStatus()
-    status.length = ctypes.sizeof(status)
-    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-        raise ctypes.WinError()
-    return status.total // 2 ** 20, status.available // 2 ** 20
+    return host_memory()
 
 
 def compact(snap: dict) -> dict:

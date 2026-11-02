@@ -1,5 +1,6 @@
 param(
     [switch]$Verify,
+    [switch]$Guarded,
     [ValidateRange(0, 255)]
     [int]$DeviceIndex = 0,
     [ValidateRange(1, 300)]
@@ -36,6 +37,8 @@ if (-not $Verify) {
 }
 & $Python -m pip check
 if ($LASTEXITCODE -ne 0) { throw 'The isolated GPU environment has incompatible dependencies.' }
-& $Python -X utf8 (Join-Path $PSScriptRoot 'windows-comfy-check.py') `
-    --source $Source --device-index $DeviceIndex --timeout $StartupTimeout
+$CheckArgs = @('-X', 'utf8', (Join-Path $PSScriptRoot 'windows-comfy-check.py'),
+    '--source', $Source, '--device-index', "$DeviceIndex", '--timeout', "$StartupTimeout")
+if ($Guarded) { $CheckArgs += '--guarded' }
+& $Python @CheckArgs
 if ($LASTEXITCODE -ne 0) { throw 'No-model ComfyUI readiness or shutdown failed. Rendering remains unavailable.' }

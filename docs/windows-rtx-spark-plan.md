@@ -638,3 +638,39 @@ the existing UI available.
 
 Next: establish conservative Windows host/GPU admission and a model-job memory watchdog before enabling any
 render path. Optimized ComfyUI allocators, optional nodes, model loading and inference remain unqualified.
+
+## 13. Preliminary Windows admission and watchdog foundation
+
+[Windows memory helpers](../app/windows_memory.py) now provide native installed-physical/host memory readings,
+validated separate host/CUDA snapshots, reserve/pressure decisions and a measured-profile admission function.
+The existing UI telemetry reuses the host-memory reader; it does not start a GPU sampler in the UI environment.
+
+The preliminary policy:
+
+- Host reserve: at least **8,000 MiB**, or 10% of installed physical RAM if larger. This retains the repository
+  guard's current minimum rather than lowering it for a smaller machine.
+- CUDA reserve: **2,048 MiB**, consistent with the current device margin.
+- Larger `SPARK_MEMORY_FLOOR_MB` overrides are honored; invalid values fail explicitly and smaller values cannot
+  lower the base reserve.
+- Unknown/unmeasured profiles are refused. A profile must match the measured physical/host split.
+- Host peak allowance must include CPU staging and shared-GPU growth. CUDA peak allowance covers
+  dedicated/shared allocations. Compare these independently; do not add overlapping free-memory figures.
+- Floors and short-term falling-headroom checks are infrastructure safeguards, not calibrated model estimates.
+
+The no-model diagnostic has an opt-in `-Guarded` mode. A separate sampler process emits memory snapshots, while
+an independent supervisor rejects pressure, malformed/stale data, sampler exit or lost heartbeats. If a CUDA
+query stalls inside the sampler, the supervisor can still stop the private Windows job. Only the diagnostic's
+owned sampler/backend and their descendants are terminated; no port/PID search is used to select victims.
+The original unguarded no-model diagnostic retains its behavior and does not qualify model safety.
+
+Synthetic tests cover independent budgets, exact reserve boundaries, profile mismatch, unknown routes, invalid
+readings, falling headroom, sampler failure/staleness, healthy monitoring and preservation of an unrelated
+sleeping process. These are deterministic infrastructure tests, not GPU memory-pressure measurements.
+
+On the actual 48 GB dev box, the guarded run observed **6,146 MiB free host RAM** and refused startup against the
+**8,000 MiB** reserve. Its owned sampler was stopped and the existing UI remained available. This is an expected
+safe refusal for that observed configuration, not proof the machine can never qualify a smaller workflow.
+
+No Windows model peak profile has been qualified, no render route has been enabled, and no Linux/Mac measurement
+or guard has been changed. Next: validate sustained guarded operation with adequate host headroom, then measure
+one low-memory route under independent protection before wiring admission into model submission.

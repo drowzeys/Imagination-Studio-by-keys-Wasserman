@@ -155,6 +155,23 @@ and drains its own Windows job (including child processes). It never submits a w
 sets the startup deadline (1-300 seconds, default 120); `-DeviceIndex` selects the CUDA device.
 This is diagnostic tooling, not a persistent backend or a production render watchdog.
 
+The optional guarded diagnostic adds a separate memory sampler and an owned-process watchdog:
+
+```powershell
+.\scripts\setup-windows-comfy.ps1 -Verify -Guarded
+```
+
+It keeps at least 8,000 MiB or 10% of installed physical RAM free on the host (whichever is larger), and
+2,048 MiB free in the CUDA allocation budget. A larger `SPARK_MEMORY_FLOOR_MB` is honored; a smaller value
+does not reduce the minimum. Pressure, fast falling headroom, invalid readings, sampler exit or stale samples
+stop only this diagnostic's owned job. A guarded run can refuse startup even when the unguarded no-model
+diagnostic passes. It does not stop the already running Studio UI or other applications.
+
+The admission foundation requires a measured Windows profile for the actual host-memory split: host needs
+include CPU staging and shared-GPU growth, while CUDA needs cover dedicated/shared allocations. The two are
+checked independently, not added as separate physical pools. No model profiles are qualified yet; render
+routes remain disabled. Guarded infrastructure tests are not proof that a model is safe to load.
+
 ### Apple silicon
 
 macOS 26 or later, for Metal 4. What runs depends on the memory: **96 GB or more** for video, voice, music and the
