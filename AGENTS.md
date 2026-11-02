@@ -217,6 +217,7 @@ Rules:
   a Spark the Mac reaches that logs in to the worker with its own key (`Relay`: a socket in `~/.cache/studio-sparks`
   there, ended with the Mac's ssh or its heartbeat). Never add the Mac's key to a worker for it, and never open the
   relay to a network.
+- keys-HDR LORA, the HDR finish (`app/hlg.py`, the Library action `hlg`): processor and ffmpeg only, never under the GPU lock, numpy only (no OpenCV in the Studio's venv). It is a grade of an 8-bit SDR clip into BT.2020 / HLG: do not describe it as recovered detail or as what the model made. `TARGET` and `BANDS` are one look chosen by eye, not a standard. One curve for the whole clip: fit per frame or per shot, it flickers or jumps at cuts. A clip already HLG or PQ is refused.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers

@@ -88,6 +88,8 @@ const APPS = () => [
 
   { id: "upscale", cat: "finish", title: "Upscale", one: "A clip twice the size and sharper", art: "look-video-upscaler", sign: "video",
     off: () => apActReady("upscale"), run: apAct("upscale", "video", "Upscale") },
+  { id: "hlg", cat: "finish", title: "keys-HDR LORA", one: "A clip graded very bright and contrasty, as real HLG HDR", art: "look-video-upscaler", sign: "video",
+    off: () => apActReady("hlg"), run: apAct("hlg", "video", "keys-HDR LORA") },
   { id: "captions", cat: "finish", title: "Captions", one: "A clip's speech burned in, word by word", art: apArt("app-captions", ""), sign: "graphics", run: () => apPick("video", "Captions", path => gfxOpen("captions", path)) },
   { id: "titles", cat: "finish", title: "Titles & motion graphics", one: "Lower thirds, title cards, slideshows and music videos", art: apArt("app-titles", ""), sign: "graphics", run: () => go("Motion graphics") },
   { id: "timeline", cat: "finish", title: "Timeline editor", one: "Cut your takes together, with sound", art: "act-edit-timeline", sign: "edit", run: () => go("Editor") },

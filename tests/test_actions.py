@@ -125,7 +125,7 @@ def test_the_actions_run_on_character_swap_s_int8_ref2va_when_the_bf16_file_is_n
 def test_not_installed_and_mac():
     _, build, _, _, state = studio(installed=False)
     assert "setup-workflows.sh" in refused(build, "upscale", {"video": "renders/c.mp4"}, "j")
-    assert all(not one["ready"] and one["why"] for one in state().values())
+    assert all(not one["ready"] and one["why"] for kind, one in state().items() if kind != "hlg")  # the HDR finish needs only ffmpeg
     home, build, _, _, state = studio(spark=False)   # a Mac: the turnaround sheet alone, on the MLX engine
     os.environ["H3_MODEL_DIR"] = str(home / "h3")
     assert "Ref2VA is not installed" in refused(build, "turnaround", {"image": "uploads/a.png"}, "j")
@@ -134,11 +134,11 @@ def test_not_installed_and_mac():
     (home / "loras/turnaround.mlx.safetensors").write_bytes(b"x")
     command, env, _ = build("turnaround", {"image": "uploads/a.png", "prompt": "turn <Picture 1> round"}, "j")
     assert env["TURNAROUND_LORA"].endswith("turnaround.mlx.safetensors") and env["PROMPT"] == "turn <Picture 1> round" and "PREFIX" not in env
-    assert all("oneshot-setup.sh --" in one["why"] for kind, one in state().items() if kind != "turnaround") and state()["turnaround"]["ready"]
+    assert all("oneshot-setup.sh --" in one["why"] for kind, one in state().items() if kind not in ("turnaround", "hlg")) and state()["turnaround"]["ready"]
     assert "oneshot-setup.sh --upscale" in refused(build, "upscale", {"video": "renders/c.mp4"}, "j")
     assert "oneshot-setup.sh --remove" in refused(build, "mask", {"video": "renders/c.mp4", "person": "x"}, "j")
     _, _, _, _, state = studio()
-    assert all(one["ready"] for one in state().values())
+    assert all(one["ready"] for kind, one in state().items() if kind != "hlg")  # the HDR finish needs only ffmpeg
 
 
 def mac_comfy(home: Path, kinds=("upscale", "remove")) -> Path:

@@ -1592,7 +1592,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
     scripts = PACK / "scripts"
-    if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove
+    if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove, hlg
         built = action_build(kind, params, job_id)
         if room:
             mac_comfy_room(kind)
@@ -2063,7 +2063,7 @@ def perform(job: dict, worker: dict | None = None) -> None:
         with local_work:
             local_threads.add(current)
     try:
-        if worker is not None or job.get("remote") or job["kind"] in ("export", "soundtrack", "finish", "graphics"):
+        if worker is not None or job.get("remote") or job["kind"] in ("export", "soundtrack", "finish", "graphics", "hlg"):
             return perform_job(job, worker)
         if not LOCAL_GPU_CHILD:
             hub.local.validate_head(local_gpus.inventory()["devices"])
@@ -2124,15 +2124,15 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
     try:
         # a Drama 3 server kept loaded after a voice take (voice.py) never stands beside a render here, nor MiniMax Music 3
         # kept loaded after a song (music.py): each is unloaded before any other job of this machine's queue
-        if job["kind"] not in ("voice", "export", "soundtrack", "finish", "graphics") and worker is None and not job.get("remote"):
+        if job["kind"] not in ("voice", "export", "soundtrack", "finish", "graphics", "hlg") and worker is None and not job.get("remote"):
             if voice.release(f"a {job['kind']} job needs the GPU"):
                 job["log"] += "[tensorfold] Drama 3 was unloaded to give this job its memory\n"
-        if job["kind"] not in ("music", "export", "soundtrack", "finish", "graphics") and worker is None and not job.get("remote"):
+        if job["kind"] not in ("music", "export", "soundtrack", "finish", "graphics", "hlg") and worker is None and not job.get("remote"):
             if music.release(f"a {job['kind']} job needs the GPU"):
                 job["log"] += "[tensorfold] MiniMax Music 3 was unloaded to give this job its memory\n"
         # NVIDIA Nemotron 3.5 Bolt (bolt.py), the Studio's brain engine: unloaded before this job when the job's measured
         # peak does not fit beside it (bolt_need), after the answers in flight; held until the queue is empty
-        if job["kind"] not in ("export", "soundtrack", "finish", "graphics") and worker is None and not job.get("remote"):
+        if job["kind"] not in ("export", "soundtrack", "finish", "graphics", "hlg") and worker is None and not job.get("remote"):
             job["log"] += bolt.admit(job, lambda resident: bolt_need(job, resident))
         if job["kind"] in train.KINDS and worker is None:  # a LoRA run holds about 55 GB for hours: ComfyUI's models go first
             job["log"] += train_free(job)
@@ -2530,7 +2530,7 @@ def cancel(job_id: str) -> dict:
     return public(job)
 
 
-NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa", "train", "finish", "graphics")  # jobs a Spark runs without its ComfyUI server
+NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa", "train", "finish", "graphics", "hlg")  # jobs a Spark runs without its ComfyUI server
 
 
 COMFY_PROMPT = re.compile(r"^\[tensorfold\] comfy prompt ([0-9a-f-]{8,64})$", re.M)
