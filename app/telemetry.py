@@ -315,7 +315,9 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         if card:
             out["card"] = {key: card[key] for key in ("total_mb", "used_mb", "free_mb", "simulated")}
             if card.get("cards"):  # paired cards: how many, and whether a pass is split over them
-                out["card"].update(cards=card["cards"], split_pass=card.get("split_pass"))
+                out["card"].update(split_pass=bool(card.get("split_pass")))
+                if card.get("split_pass"):  # the memory above is all the cards' only then (else the head's card alone)
+                    out["card"]["cards"] = card["cards"]
         return out
 
     def gpu_lock() -> dict:

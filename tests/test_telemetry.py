@@ -48,6 +48,10 @@ def test_paired_cards_combine():
     assert four["count"] == 4 and four["util_pct"] == 15.0 and [c["index"] for c in four["cards"]] == ["0", "1", "2", "3"]
     old = telemetry.parse_gpus("99, 91, 80.0, 2400, NVIDIA GB10\n")  # the fields alone, no index or memory
     assert old == [telemetry.parse_gpu("99, 91, 80.0, 2400, NVIDIA GB10")]
+    # a DGX Spark's GB10 with the index and memory fields: nvidia-smi says [N/A] for the memory it has none of
+    spark = telemetry.parse_gpus("0, [N/A], [N/A], 99, 91, 80.0, 2400, NVIDIA GB10\n")
+    assert len(spark) == 1 and spark[0]["used_mb"] is None and spark[0]["util_pct"] == telemetry.parse_gpu("99, 91, 80.0, 2400, NVIDIA GB10")["util_pct"]
+    assert "cards" not in telemetry.combine_gpus(spark)
 
 
 def test_vm_stat_parses():
