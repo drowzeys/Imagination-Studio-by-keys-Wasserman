@@ -96,6 +96,10 @@ repository at a pinned commit when the Studio is installed; none of their code i
   (H3 Contact Sheet, GPL-3.0). The idea is theirs: five still pictures packed where a five-step video would go, so
   the model's consistency along time becomes consistency between views. On a Mac the MLX engine packs and decodes
   the five views the same way (`h3_generate.py --sheet`), written from their description of it.
+- **keys-HDR LORA (the HDR finish):** the HLG curve of ARIB STD-B67 and ITU-R BT.2100 and the colour matrix of ITU-R BT.2087; **x265** by
+  MulticoreWare (GPL-2.0, through the machine's own FFmpeg, not shipped here) writes the HEVC. Its tone curve and split
+  toning were set against a clip posted on X by hi_personality, measured for brightness and tint only; none of that
+  clip is in the repo.
 - **Upscale:** the Video Upscaler LoRA and the H3 Video Upsampler node by dntpi (Sandpies), MIT; the latent upscaler
   network it enlarges with by LBH-123-AI (weights Apache-2.0); the upscale recipe it follows by bbaudio-2025; the
   guide layout and the training set of the LoRA by Alissonerdx.

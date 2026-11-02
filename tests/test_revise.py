@@ -459,7 +459,7 @@ def test_a_clip_gets_restyle_extend_and_fix_and_each_opens_its_panel():
       jobs.push({ id: "j3", status: "done", outputs: ["renders/j3.mp4"] }); out.fix_done = text(actPanel());
       actOpen("upscale", "renders/a.mp4"); out.upscale = text(actPanel());
     """)
-    assert got["video"] == ["Upscale", "Remove a person", "Restyle", "Extend", "Fix"] and got["image"] == ["Turnaround"]
+    assert got["video"] == ["Upscale", "keys-HDR LORA", "Remove a person", "Restyle", "Extend", "Fix"] and got["image"] == ["Turnaround"]
     assert got["id"] == "actpanel" and "Restyle this clip" in got["restyle"] and "three steps" in got["restyle"]
     assert "the motion, camera and timing come from the clip’s depth" in got["restyle"] and "The whole frame is redrawn" in got["restyle"]
     assert got["refused"] == "Say what the clip should look like now"

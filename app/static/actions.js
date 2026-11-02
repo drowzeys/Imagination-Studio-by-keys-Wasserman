@@ -1,14 +1,15 @@
 "use strict";
-/* Library actions: Turnaround sheet (on a picture), Upscale and Remove a person (on a clip).
-   Each is built on a LoRA from the hub that is not for making a clip but has a job of its own (app/actions.py).
+/* Library actions: Turnaround sheet (on a picture), Upscale, HDR finish and Remove a person (on a clip).
+   All but the HDR finish (app/hlg.py) are built on a LoRA from the hub that is not for making a clip but has a job of its own (app/actions.py).
    Credit: Turnaround LoRA and its contact-sheet nodes by matlod / MATLOWAI; Video Upscaler LoRA and the H3 Video
    Upsampler node by dntpi (Sandpies), on LBH-123-AI's latent upscaler; Person Remover LoRA and H3 Relay by Akatz Labs,
    with Meta's SAM 3.1 for the mask. */
 const ACT = { state: null, open: null, busy: false, jobs: {},
   turn: { size: "1024", strength: "1", seed: 1, prompt: "" },
   up: { megapixels: "2", denoise: "0.1" },
+  hlg: { strength: "1", sdr: "1" },
   rm: { person: "", clean: "auto", clean_frame: null, window: "22", steps: 12, seed: 904234, silent: false, mask: null } };
-const ACT_KEY = { turnaround: "turn", upscale: "up", remove: "rm" };
+const ACT_KEY = { turnaround: "turn", upscale: "up", remove: "rm", hlg: "hlg" };
 async function actLoad() { try { ACT.state = await api("/api/actions"); } catch { ACT.state = {}; } }
 const actOf = kind => (ACT.state || {})[kind] || { ready: false, why: "" };
 function actOpen(kind, path) { ACT.open = { kind, path }; if (kind === "remove") ACT.rm.mask = null; tab = "Library"; history.replaceState(null, "", "#Library"); render();
@@ -18,6 +19,7 @@ function actButtons(m) { const gfx = typeof gfxButtons === "function" ? gfxButto
   if (!ACT.state) return gfx;
   const one = (kind, label, title) => el("button", { class: "small", title: actOf(kind).ready ? title : actOf(kind).why, onclick: () => actOpen(kind, m.path) }, label);
   return (m.kind === "video" ? [one("upscale", "Upscale", "Make this clip larger and sharper: a latent upscale, then one light re-draw guided by the clip itself"),
+                               one("hlg", "keys-HDR LORA", "Grade this clip very bright and contrasty and write it as real HDR (HLG, 10-bit), with an SDR copy"),
                                one("remove", "Remove a person", "Take one person out of this clip and rebuild the background")]
     : [one("turnaround", "Turnaround", "Five views of this picture's subject, from the front round to the side or back")])
     .concat(typeof revButtons === "function" ? revButtons(m) : [], typeof swapButtons === "function" ? swapButtons(m) : [], gfx); }  // Restyle, Extend, Fix (revise.js), then Add a title, Caption this clip (graphics.js)
@@ -59,6 +61,12 @@ function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KI
       field("Re-draw", choice(f, "denoise", { 0: ["None", "only enlarge"], 0.1: ["Light", "0.1, the tested setting"], 0.2: ["Stronger", "0.2, adds more of its own"] }, redraw, true)),
       by, el("button", { class: "hot", disabled: ACT.busy, onclick: () => actQueue("upscale", { video: o.path, megapixels: Number(f.megapixels), denoise: Number(f.denoise) }) }, "Upscale this clip"),
       actShow("upscale", job => el("video", { class: "main", src: file(job.outputs[0]), controls: true, style: "margin-top:8px" })));
+  } else if (o.kind === "hlg") {
+    put(box, el("div", { class: "note", style: "margin-top:0" }, "Grades a finished clip very bright and contrasty and writes it as real HDR: BT.2020, HLG, 10-bit HEVC. The clip’s own sound stays. It runs on the processor with no model, so it adds no detail. To finish a cut, finish the joined film as one clip, so the look does not jump at the cuts. Only an HDR screen shows the master’s full range: the SDR copy keeps the look on any other."),
+      field("Strength", choice(f, "strength", { 1: ["Full", "the whole look"], 0.6: ["Medium", "a milder curve and colour"], 0.3: ["Light", "a touch of it"] }, redraw, true)),
+      field("SDR copy", choice(f, "sdr", { 1: ["Yes", "for ordinary screens"], 0: ["No", "the HDR master alone"] }, redraw, true)),
+      by, el("button", { class: "hot", disabled: ACT.busy, onclick: () => actQueue("hlg", { video: o.path, strength: Number(f.strength), sdr: f.sdr === "1" || f.sdr === 1 }) }, "Finish this clip in HDR"),
+      actShow("hlg", job => el("div", {}, job.outputs.map(p => el("video", { class: "main", src: file(p), controls: true, style: "margin-top:8px" })))));
   } else {
     const up = el("input", { type: "file", accept: ".png,.jpg,.jpeg,.webp", onchange: async () => { if (!up.files[0]) return; const data = new FormData(); data.append("file", up.files[0]);
       try { const r = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (!r.path) throw new Error(r.error || "upload failed"); f.clean_frame = r.path; render(); } catch (e) { toast(e.message); } } });

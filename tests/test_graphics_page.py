@@ -126,6 +126,6 @@ def test_the_library_offers_add_a_title_and_caption_this_clip_on_a_clip():
     """)
     assert out["clip"] == ["Add a title", "Caption this clip"]
     assert out["picture"] == []
-    assert out["withActions"][:2] == ["Upscale", "Remove a person"] and out["withActions"][-2:] == ["Add a title", "Caption this clip"]  # the actions first, then revise (when loaded), then graphics
+    assert out["withActions"][:3] == ["Upscale", "keys-HDR LORA", "Remove a person"] and out["withActions"][-2:] == ["Add a title", "Caption this clip"]  # the actions first, then revise (when loaded), then graphics
     assert out["opened"] == ["captions", "renders/b.mp4", "match", "Graphics"]
     assert out["titled"] == ["lower-third", "renders/a.mp4", "Graphics"]
