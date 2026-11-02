@@ -159,18 +159,29 @@ The optional guarded diagnostic adds a separate memory sampler and an owned-proc
 
 ```powershell
 .\scripts\setup-windows-comfy.ps1 -Verify -Guarded
+.\scripts\setup-windows-comfy.ps1 -Verify -Guarded -HoldSeconds 30
 ```
 
-It keeps at least 8,000 MiB or 10% of installed physical RAM free on the host (whichever is larger), and
-2,048 MiB free in the CUDA allocation budget. A larger `SPARK_MEMORY_FLOOR_MB` is honored; a smaller value
-does not reduce the minimum. Pressure, fast falling headroom, invalid readings, sampler exit or stale samples
-stop only this diagnostic's owned job. A guarded run can refuse startup even when the unguarded no-model
-diagnostic passes. It does not stop the already running Studio UI or other applications.
+Windows low-memory notifications, commit headroom and live budgets govern this diagnostic; it does not impose
+the Linux guard's fixed 8,000 MiB host cutoff. Windows may reclaim/cache/compress/page ordinary CPU memory.
+An explicitly configured positive `SPARK_MEMORY_FLOOR_MB` is still honored. The CUDA margin remains 2,048 MiB.
+Pressure, fast falling headroom, invalid readings or lost monitoring stop only the diagnostic's owned job.
+The running Studio UI and other applications are not stopped. Linux/Mac guards are unchanged.
 
-The admission foundation requires a measured Windows profile for the actual host-memory split: host needs
-include CPU staging and shared-GPU growth, while CUDA needs cover dedicated/shared allocations. The two are
-checked independently, not added as separate physical pools. No model profiles are qualified yet; render
-routes remain disabled. Guarded infrastructure tests are not proof that a model is safe to load.
+The separate sampler reads OS memory and UUID-matched NVML dedicated GPU counters. Its CUDA free-memory query
+is context-scoped and cannot stand in for another process's allocations, so ComfyUI's own reported budget is
+monitored independently once the server is ready. Dedicated GPU memory, shared allocations and OS memory are
+not added as separate physical capacities. Commit/pagefile headroom is not extra GPU memory.
+
+`-HoldSeconds` keeps an empty-queue server under monitoring for 0-300 seconds (default 0); a positive hold requires
+`-Guarded`. JSON results include measured duration, OS/dedicated-budget minima and separate backend-budget samples.
+
+The admission foundation still requires a measured Windows profile matching the actual host/dedicated split.
+Resident staging, CPU/shared commitment and the target backend's CUDA needs are distinct requirements.
+Ordinary pageable demand is not refused just because it exceeds currently available physical RAM, but must
+fit commit headroom; resident requirements must fit usable host capacity. Runtime pressure can still stop a job.
+No model profiles are qualified yet; render routes remain disabled. This is infrastructure validation, not a
+guarantee of allocation success or safe model loading.
 
 ### Apple silicon
 

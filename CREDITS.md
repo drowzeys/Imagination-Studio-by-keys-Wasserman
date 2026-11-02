@@ -385,6 +385,8 @@ machine; none of their code ships in this pack.
 **NVIDIA** publishes the native Windows ARM64 CUDA builds of **PyTorch, TorchVision and TorchAudio**, made by
 the **PyTorch contributors**. The experimental Windows GPU setup uses those wheels in an isolated environment;
 the small verification operations do not download models or qualify Studio rendering support.
+**Microsoft** provides the Win32 memory-pressure, commitment and job-object APIs used by the Windows diagnostic;
+**NVIDIA** provides NVML's dedicated-memory counters and CUDA's context-budget queries.
 
 ## The RTX Pro 6000 build, run on the card: August Sturm
 

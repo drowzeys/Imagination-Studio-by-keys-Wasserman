@@ -641,6 +641,9 @@ render path. Optimized ComfyUI allocators, optional nodes, model loading and inf
 
 ## 13. Preliminary Windows admission and watchdog foundation
 
+This section records the first prototype. Its inherited automatic host reserve was superseded by the
+Windows-specific policy and measurements in [section 14](#14-os-aware-sustained-windows-diagnostic).
+
 [Windows memory helpers](../app/windows_memory.py) now provide native installed-physical/host memory readings,
 validated separate host/CUDA snapshots, reserve/pressure decisions and a measured-profile admission function.
 The existing UI telemetry reuses the host-memory reader; it does not start a GPU sampler in the UI environment.
@@ -674,3 +677,66 @@ safe refusal for that observed configuration, not proof the machine can never qu
 No Windows model peak profile has been qualified, no render route has been enabled, and no Linux/Mac measurement
 or guard has been changed. Next: validate sustained guarded operation with adequate host headroom, then measure
 one low-memory route under independent protection before wiring admission into model submission.
+
+## 14. OS-aware sustained Windows diagnostic
+
+The fixed 8,000 MiB host cutoff was inherited from the Linux guard, not established by Windows measurements.
+It blocked the no-model diagnostic even when Windows had no low-memory notification and substantial commit
+headroom. The Windows diagnostic now uses Windows' pressure signals rather than that automatic cutoff.
+Linux/Mac guards are unchanged.
+
+### Current preliminary policy
+
+- Query `CreateMemoryResourceNotification` / `QueryMemoryResourceNotification` for Windows low physical memory.
+- Read system commitment, commit limit and kernel nonpaged residency through `GetPerformanceInfo`.
+- Honor an explicit positive `SPARK_MEMORY_FLOOR_MB`; there is no automatic 8,000 MiB Windows host floor.
+- Retain the 2,048 MiB CUDA margin and failure on invalid/stale readings or loss of monitoring.
+- Read NVML dedicated total/free memory for the same GPU UUID CUDA selected, not by assuming NVML/CUDA indexes match.
+- Read the actual ComfyUI backend's reported reclaimable CUDA headroom independently after readiness.
+- A measured profile must account separately for resident staging/shared growth, CPU/shared commitment and
+  target-backend CUDA demand. Pageable demand may exceed currently available physical RAM if commit headroom
+  permits it; this is not a guarantee that residency, pinned allocations or subsequent allocation calls will succeed.
+- No model profile or submission route is qualified by this change.
+
+### Cross-process visibility check
+
+An owned child allocated a **16 MiB tensor**, without a model. Its CUDA free-budget reading decreased by
+**56 MiB** including allocation overhead, while the sampler process's CUDA reading did not change. NVML's global
+dedicated-free figure decreased by **174 MiB**, including the child context.
+
+Therefore the sampler's CUDA free figure must not be used as another process's remaining GPU budget.
+The sustained diagnostic separately polls ComfyUI's `/system_stats` with a bounded timeout and checks the
+responding instance's identity. Backend pressure or loss of its budget reporting stops the owned job even when
+the sampler's own CUDA budget remains high. A synthetic regression explicitly exercises that distinction.
+
+### Sustained no-model result on the 48 GB dev box
+
+Command:
+
+```powershell
+.\scripts\setup-windows-comfy.ps1 -Verify -Guarded -HoldSeconds 30
+```
+
+The final run held the empty-queue backend for **30.03 seconds**, collecting **167 sampler snapshots** and
+**57 backend-budget snapshots**, then stopped and drained the owned job.
+
+| Observation | Minimum / result |
+|---|---|
+| Windows available OS memory | 4,420 MiB |
+| Windows commit headroom | 26,352 MiB |
+| Windows low-memory notification | False throughout accepted samples |
+| Global dedicated GPU free memory | 24,395 MiB |
+| ComfyUI process's reported reclaimable CUDA headroom | 36,288 MiB |
+| Model/workflow submissions | None |
+
+These figures describe different accounting domains and must not be summed. Dedicated memory is reserved
+from the installed pool; shared GPU use competes with OS memory. Commit headroom includes virtual-memory backing,
+not additional physical/GPU RAM. Background activity can affect these global minima; they are not model peaks
+or measurements of paging performance.
+
+The first backend-monitoring attempt exposed a startup-order error: polling began before readiness. That was
+corrected, with a regression requiring backend monitoring to start only after core readiness. Subsequent sustained
+checks passed.
+
+This qualifies only bounded no-model monitoring on the observed configuration. Optional nodes, model load peaks,
+allocation failure recovery and render-time safety still require independent measurements and validation.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 from ctypes import wintypes
+from dataclasses import asdict, replace
 import json
 import os
 from pathlib import Path
@@ -135,7 +136,15 @@ class MemoryWatchdog:
         self.state_lock = threading.Lock()
         self.reason = ""
         self.latest = None
+        self.initial = None
+        self.minima = {}
+        self.max_commit_used_mb = 0
         self.samples = 0
+        self.backend_thread = None
+        self.backend_ready = threading.Event()
+        self.backend_samples = 0
+        self.backend_min_free_mb = None
+        self.backend_budget = None
         self.configured_floor = os.environ.get("SPARK_MEMORY_FLOOR_MB", "").strip()
         self.process = subprocess.Popen(
             [sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", str(device_index)],
@@ -216,7 +225,17 @@ class MemoryWatchdog:
                 return
             previous = snapshot
             with self.state_lock:
+                if self.initial is None:
+                    self.initial = snapshot
                 self.latest = snapshot
+                for name, value in (
+                    ("host_available_mb", snapshot.host_free_mb),
+                    ("host_commit_headroom_mb", snapshot.host_commit_limit_mb - snapshot.host_commit_used_mb),
+                    ("cuda_budget_free_mb", snapshot.gpu_free_mb),
+                    ("dedicated_gpu_free_mb", snapshot.gpu_dedicated_free_mb),
+                ):
+                    self.minima[name] = min(self.minima.get(name, value), value)
+                self.max_commit_used_mb = max(self.max_commit_used_mb, snapshot.host_commit_used_mb)
                 self.samples += 1
             self.ready.set()
 
@@ -230,14 +249,67 @@ class MemoryWatchdog:
             self.fail("memory sampler startup exceeded its deadline")
         self.check()
 
+    def start_backend(self, base: str, directory: str):
+        if self.backend_thread is not None:
+            raise RuntimeError("backend budget monitoring is already running")
+
+        def observe():
+            previous = None
+            while not self.stopping.is_set() and not self.failed.is_set():
+                try:
+                    stats = read_json(base, "/system_stats", timeout=1)
+                    validate_identity(stats, directory)
+                    total, free = backend_budget(stats)
+                    with self.state_lock:
+                        latest = self.latest
+                    if latest is None or time.monotonic() - latest.at > SAMPLE_FRESHNESS:
+                        raise RuntimeError("host memory samples are stale")
+                    current = replace(latest, gpu_total_mb=total, gpu_free_mb=free, at=time.monotonic())
+                    reason = pressure(current, self.configured_floor, previous)
+                    if reason:
+                        raise RuntimeError(reason)
+                except (OSError, RuntimeError, ValueError) as error:
+                    self.fail(f"backend budget monitoring failed: {error}")
+                    self.backend_ready.set()
+                    return
+                previous = current
+                with self.state_lock:
+                    self.backend_samples += 1
+                    self.backend_budget = {"total_mb": total, "free_mb": free}
+                    self.backend_min_free_mb = free if self.backend_min_free_mb is None else min(self.backend_min_free_mb, free)
+                self.backend_ready.set()
+                self.stopping.wait(0.5)
+
+        self.backend_thread = threading.Thread(target=observe, daemon=True)
+        self.backend_thread.start()
+        if not self.backend_ready.wait(2):
+            self.fail("backend memory reporting did not answer within its deadline")
+        self.check()
+
     def finish(self):
         self.process.wait(timeout=10)
         self.reader.join(timeout=3)
         self.supervisor.join(timeout=SAMPLE_FRESHNESS + 1)
-        if self.reader.is_alive() or self.supervisor.is_alive():
+        if self.backend_thread:
+            self.backend_thread.join(timeout=2)
+        if self.reader.is_alive() or self.supervisor.is_alive() or (self.backend_thread and self.backend_thread.is_alive()):
             raise RuntimeError("memory watchdog threads did not stop within their deadlines")
         self.process.stdout.close()
         self.check()
+
+    def metrics(self):
+        with self.state_lock:
+            if self.initial is None or self.latest is None:
+                raise RuntimeError("the memory watchdog has no valid samples")
+            return {"samples": self.samples, "minima": dict(self.minima),
+                    "max_host_commit_used_mb": self.max_commit_used_mb,
+                    "initial": asdict(self.initial), "final": asdict(self.latest),
+                    "sampler_cuda_scope": "sampler process context, not backend headroom",
+                    "backend_budget": self.backend_budget, "backend_budget_samples": self.backend_samples,
+                    "backend_min_free_mb": self.backend_min_free_mb,
+                    "host_policy": "Windows low-memory signal and commit headroom",
+                    "configured_host_floor_mb": host_floor_mb(self.latest, self.configured_floor),
+                    "cuda_floor_mb": 2048}
 
 
 def verify_source(source: Path) -> None:
@@ -251,9 +323,9 @@ def verify_source(source: Path) -> None:
         raise ValueError("the check requires an unmodified ComfyUI checkout")
 
 
-def read_json(base: str, path: str):
+def read_json(base: str, path: str, timeout: float = 3):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(base + path, timeout=3) as response:
+    with opener.open(base + path, timeout=timeout) as response:
         body = response.read((8 << 20) + 1)
     if len(body) > 8 << 20:
         raise RuntimeError("ComfyUI's readiness response exceeds the check's limit")
@@ -285,9 +357,37 @@ def validate_ready(queue: dict, nodes: dict) -> None:
         raise RuntimeError("ComfyUI's core loader/text/decoder nodes are missing")
 
 
-def run_check(source: Path, timeout: float, device_index: int, guarded: bool = False) -> dict:
+def backend_budget(stats: dict) -> tuple[int, int]:
+    devices = [device for device in stats.get("devices", []) if device.get("type") == "cuda"]
+    if len(devices) != 1:
+        raise RuntimeError("the diagnostic requires exactly one backend CUDA device")
+    total, free = devices[0].get("vram_total"), devices[0].get("vram_free")
+    if type(total) is not int or type(free) is not int or total <= 0 or not 0 <= free <= total:
+        raise RuntimeError("ComfyUI returned an invalid backend memory budget")
+    return total // (1 << 20), free // (1 << 20)
+
+def hold_no_model(process, monitor: MemoryWatchdog, seconds: int, base: str) -> float:
+    started = time.monotonic()
+    deadline, next_queue = started + seconds, started
+    while time.monotonic() < deadline:
+        monitor.check()
+        if process.poll() is not None:
+            raise RuntimeError("ComfyUI exited during the sustained check")
+        if time.monotonic() >= next_queue:
+            state = read_json(base, "/queue")
+            if not isinstance(state, dict) or state.get("queue_running") != [] or state.get("queue_pending") != []:
+                raise RuntimeError("a workflow appeared during the no-model check")
+            next_queue = time.monotonic() + 1
+        time.sleep(0.1)
+    monitor.check()
+    return time.monotonic() - started
+
+
+def run_check(source: Path, timeout: float, device_index: int, guarded: bool = False, hold_seconds: int = 0) -> dict:
     if sys.platform != "win32":
         raise RuntimeError("this lifecycle check requires native Windows")
+    if type(hold_seconds) is not int or not 0 <= hold_seconds <= 300 or (hold_seconds and not guarded):
+        raise ValueError("a sustained check requires --guarded and 0-300 hold seconds")
     verify_source(source)
     with socket.socket() as reserve:
         reserve.bind(("127.0.0.1", 0))
@@ -341,12 +441,17 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                 validate_ready(read_json(base, "/queue"), nodes)
                 if monitor:
                     monitor.check()
+                    monitor.start_backend(base, directory)
+                held = hold_no_model(process, monitor, hold_seconds, base) if hold_seconds else 0
                 result = {
                     "ok": True, "commit": COMMIT, "comfyui_version": stats["system"]["comfyui_version"],
                     "pytorch_version": stats["system"]["pytorch_version"], "registered_nodes": len(nodes),
                     "checks": ["owned loopback instance", "CUDA device", "core nodes", "empty queue"],
                     "scope": "no-model startup only; custom/API nodes and dynamic VRAM disabled",
+                    "steady_seconds": held,
                 }
+                if monitor:
+                    result["checks"].append("backend process memory budget")
                 try:
                     process.send_signal(signal.CTRL_BREAK_EVENT)
                     process.wait(timeout=10)
@@ -372,10 +477,7 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
         result["console_exit_code"] = console_exit_code
         result["memory_guard"] = {"active": guarded}
         if monitor:
-            result["memory_guard"].update(
-                samples=monitor.samples, host_floor_mb=host_floor_mb(monitor.latest, monitor.configured_floor),
-                gpu_floor_mb=2048,
-            )
+            result["memory_guard"].update(monitor.metrics())
         return result
 
 
@@ -385,11 +487,14 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument("--device-index", type=int, default=0)
     parser.add_argument("--guarded", action="store_true", help="Fail closed on memory pressure or missing/stale samples.")
+    parser.add_argument("--hold-seconds", type=int, default=0, help="Hold a guarded no-model server for 0-300 seconds.")
     args = parser.parse_args()
     if not 0 < args.timeout <= 300 or args.device_index < 0:
         parser.error("timeout must be in (0, 300] and device-index must be nonnegative")
+    if not 0 <= args.hold_seconds <= 300 or (args.hold_seconds and not args.guarded):
+        parser.error("hold-seconds must be in [0, 300] and a nonzero hold requires --guarded")
     try:
-        result = run_check(args.source.resolve(), args.timeout, args.device_index, args.guarded)
+        result = run_check(args.source.resolve(), args.timeout, args.device_index, args.guarded, args.hold_seconds)
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(json.dumps({"ok": False, "error": str(error)}), file=sys.stderr)
         return 1
