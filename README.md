@@ -113,6 +113,48 @@ access-key checks. If PowerShell blocks scripts, use a process-only policy:
 FFmpeg is optional: add both `ffmpeg.exe` and `ffprobe.exe` to PATH for media inspection; missing tools are reported.
 The existing model licences still apply; this install downloads none of their weights.
 
+#### Windows ARM64 CUDA feasibility check
+
+The optional GPU spike uses a **separate** `%LOCALAPPDATA%\ImaginationStudio\gpu-venv`, not the working UI
+environment. It installs NVIDIA's native Windows ARM64 PyTorch, TorchVision and TorchAudio wheels (the PyTorch
+wheel alone is about 1.85 GB; allow additional space for dependencies and installation). No model weights are
+downloaded. Python 3.13 ARM64 is required.
+
+```powershell
+.\scripts\setup-windows-gpu.ps1
+.\scripts\setup-windows-gpu.ps1 -Verify
+```
+
+`-Verify` checks the existing environment without installing packages. `-DeviceIndex N` selects a CUDA device
+(default 0). The check emits JSON and exits nonzero on missing CUDA, dependency errors or incorrect results.
+It tests tiny fp32/fp16/bf16 addition, matrix products and attention, TorchVision's CUDA NMS and TorchAudio
+resampling. A successful check is not a model render, capacity qualification, or admission-policy validation.
+It does **not** enable rendering in the Studio or change the memory guards.
+
+To preflight the existing pinned ComfyUI revision without installing it or changing the GPU environment:
+
+```powershell
+& "$env:LOCALAPPDATA\ImaginationStudio\gpu-venv\Scripts\python.exe" -m pip install --dry-run --only-binary=:all: -r .\app\requirements-windows-comfy.txt
+```
+
+This resolves dependencies only; it does not start ComfyUI or establish node/model compatibility. The version
+constraints record the dependency set used for the no-model lifecycle check; they are not a model qualification.
+
+After the GPU setup succeeds, install the pinned ComfyUI dependencies/source and run a bounded no-model check:
+
+```powershell
+.\scripts\setup-windows-comfy.ps1
+.\scripts\setup-windows-comfy.ps1 -Verify
+```
+
+The source checkout lives under `%LOCALAPPDATA%\ImaginationStudio\ComfyUI`. Existing checkouts must be clean and
+at the pinned revision; the script will not reset them. `-Verify` installs nothing. The check starts its own
+loopback instance with temporary empty model/state folders, custom/API nodes disabled, dynamic VRAM disabled
+and PyTorch attention. It checks CUDA device reporting, core node registration and an empty queue, then stops
+and drains its own Windows job (including child processes). It never submits a workflow. `-StartupTimeout`
+sets the startup deadline (1-300 seconds, default 120); `-DeviceIndex` selects the CUDA device.
+This is diagnostic tooling, not a persistent backend or a production render watchdog.
+
 ### Apple silicon
 
 macOS 26 or later, for Metal 4. What runs depends on the memory: **96 GB or more** for video, voice, music and the

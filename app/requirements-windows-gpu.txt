@@ -1,0 +1,6 @@
+--extra-index-url https://pypi.nvidia.com/nvtorch_oot/
+torch==2.14.0+cu134
+torchvision==0.29.0+cu134
+torchaudio==2.11.0+cu134
+numpy==2.4.6
+pillow==12.3.0

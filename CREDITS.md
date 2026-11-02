@@ -380,6 +380,12 @@ machine; none of their code ships in this pack.
   **Blender**.
 - The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
 
+## Windows ARM64 CUDA feasibility checks: NVIDIA and the PyTorch contributors
+
+**NVIDIA** publishes the native Windows ARM64 CUDA builds of **PyTorch, TorchVision and TorchAudio**, made by
+the **PyTorch contributors**. The experimental Windows GPU setup uses those wheels in an isolated environment;
+the small verification operations do not download models or qualify Studio rendering support.
+
 ## The RTX Pro 6000 build, run on the card: August Sturm
 
 **August Sturm (@auguststurm)** ran the Studio's core install on an RTX Pro 6000 Blackwell, the first run on the card

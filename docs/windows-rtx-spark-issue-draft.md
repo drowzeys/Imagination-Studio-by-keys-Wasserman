@@ -1,8 +1,5 @@
 # Exploratory hobby project: native Windows ARM64 / RTX Spark support
 
-Draft only. Replace `PLAN_URL` with the published plan link before posting. The fork exists; the local Windows
-changes and documents have not yet been pushed.
-
 ## Proposal
 
 I'm exploring a native Windows ARM64 port for NVIDIA RTX Spark as a personal, best-effort, AI-driven hobby
@@ -20,7 +17,10 @@ memory guards or change working Mac/Linux behavior. A 128 GB RTX Spark would be 
 target, but I don't have results from one.
 
 - Experimental fork: [ivberg/Imagination-Studio-by-keys-Wasserman](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman)
-- Findings and phased plan: `PLAN_URL`
+- Working branch: [port/windows-rtx-spark](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman/tree/port/windows-rtx-spark)
+- Findings and phased plan: [Windows RTX Spark plan](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman/blob/port/windows-rtx-spark/docs/windows-rtx-spark-plan.md)
+- UI preview launcher: [scripts/app.ps1](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman/blob/port/windows-rtx-spark/scripts/app.ps1)
+- Windows preview tests: [tests/test_windows_ui.py](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman/blob/port/windows-rtx-spark/tests/test_windows_ui.py)
 - Scope: native Windows; WSL is not assumed to be a supported fallback.
 
 Comments, existing work, test hardware and advice on the best integration seams would be welcome.

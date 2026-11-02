@@ -17,6 +17,10 @@ The work is therefore a combination of reusing and validating existing upstream 
 engine paths, and integrating Windows into Studio. It is not a clean-sheet Windows port of all four engines.
 See [the source audit](#10-source-level-follow-up-and-revised-confidence) for exact evidence and remaining limits.
 
+**Implementation update, 2026-11-02:** native ARM64 CUDA PyTorch operations now pass on the 48 GB development
+machine, and the pinned ComfyUI requirements resolve as wheels without replacing that PyTorch build.
+This advances the feasibility spike, not rendering support. See [the first implementation results](#11-first-implementation-results).
+
 There are two separate problems:
 
 1. **Platform support:** Windows ARM64 dependencies, process management, installers, memory guards, and native TensorFold engines.
@@ -70,7 +74,7 @@ Wheel availability is not proof that a complete workflow installs or runs. Depen
 ### Not verified
 
 - The available 64 GB test machine's configuration, Windows/CUDA budgets, or workflow behavior.
-- Any native Windows model render.
+- Any native Windows model render. Tiny PyTorch math/vision/audio operations are now verified separately.
 - Native Windows TensorFold compilation or inference on this machine. Existing upstream Windows support and
   contributor hardware reports have now been identified, but not reproduced here.
 - Windows ARM64 compatibility of every ComfyUI node pack and transitive dependency.
@@ -132,10 +136,10 @@ Statuses below describe the environment inspected during this work. "Missing" me
 | FastAPI, Uvicorn, multipart, NumPy, Pillow | Installed; UI verified | Existing preview baseline |
 | Git | Installed | Retain non-interactive, bounded operations |
 | NVIDIA ARM64 CUDA driver | Installed; driver calls verified | GPU tensor and sustained-load tests |
-| CUDA-enabled PyTorch / TorchVision / TorchAudio | Not installed | Use NVIDIA's native ARM64 index; validate the matched set |
+| CUDA-enabled PyTorch / TorchVision / TorchAudio | Installed in separate GPU environment; tiny operations verified | Model workflows and capacity remain unverified |
 | CUDA toolkit / nvcc | Not found | Required for custom CUDA builds; not necessarily for prebuilt PyTorch inference |
 | Native C++ build tools, CMake, Ninja, Zig | Not found | Needed for source extensions and TensorFold ports |
-| ComfyUI | Not installed | Install the pinned revision and validate requirements |
+| ComfyUI | Installed; pinned no-model server readiness and owned shutdown verified | Model workflows, optimized allocators and production lifecycle remain unverified |
 | Comfy Kitchen / AIMDO | Not installed | Pinned ARM64 wheels exist; execution still untested |
 | Transformers, Diffusers, Safetensors, Hugging Face Hub | Not installed in UI environment | Resolve and lock compatible ARM64 dependencies |
 | PyAV | Not installed | Compatible wheel exists; validate video read/write |
@@ -542,8 +546,95 @@ no basis to promise current H3/Drama routes on 48 GB or complete 128 GB parity w
 
 The experimental fork is
 [ivberg/Imagination-Studio-by-keys-Wasserman](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman).
-The local checkout's `origin` fetch and push URLs now point at this fork. The Windows changes and this plan remain
-uncommitted local work. The fork's existence does not mean the preview or these documents have been published.
+The initial plan and Windows UI preview are committed and published on
+[port/windows-rtx-spark](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman/tree/port/windows-rtx-spark).
+The local checkout's `origin` fetch and push URLs point at this fork.
 
-Use the [issue draft](./windows-rtx-spark-issue-draft.md) after publishing the intended changes to the fork and
-replacing `PLAN_URL` with the actual published plan link. No issue, comment or push was created during this research.
+The [issue draft](./windows-rtx-spark-issue-draft.md) includes full links to the published branch,
+[plan](https://github.com/ivberg/Imagination-Studio-by-keys-Wasserman/blob/port/windows-rtx-spark/docs/windows-rtx-spark-plan.md),
+launcher and tests. The exploratory discussion is now posted upstream as
+[issue 195](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/issues/195); no automated progress
+comment has been posted.
+
+## 11. First implementation results
+
+The exploratory issue is now posted as
+[drowzeys/Imagination-Studio-by-keys-Wasserman#195](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/issues/195).
+The following results are local development checks, not a feature-support announcement.
+
+### Isolated GPU baseline
+
+- Added [Windows GPU requirements](../app/requirements-windows-gpu.txt), using NVIDIA's official ARM64 index.
+- Added [setup/verify script](../scripts/setup-windows-gpu.ps1) and [tiny-operation checker](../scripts/windows-gpu-check.py).
+- Uses a separate `%LOCALAPPDATA%\ImaginationStudio\gpu-venv`; the UI environment remains separate.
+- Verified Python 3.13 ARM64, PyTorch `2.14.0+cu134`, TorchVision `0.29.0+cu134`, TorchAudio `2.11.0+cu134`,
+  NumPy `2.4.6` and Pillow `12.3.0`. `pip check` passes.
+- Passed fp32/fp16/bf16 addition, matrix products and scaled dot-product attention against known references.
+- Passed TorchVision's native CUDA NMS and TorchAudio's CUDA resampling checks.
+- Peak tensor allocation reported by PyTorch: **33,561,600 bytes**, about 32 MiB. This is not total process/driver
+  memory, and is not a model memory estimate.
+- CUDA budget query: **38,260,967,424 bytes total** (35.63 GiB). No large allocation or spill-limit test was performed.
+- Setup and subsequent `-Verify` execution both passed. The existing loopback UI still responds as UI-only.
+
+### Pinned ComfyUI dependency resolution
+
+[Windows ComfyUI requirements](../app/requirements-windows-comfy.txt) retain revision
+`b9b290e43f1eb379946dfeb013faf9bbefa1a618` and constrain the already verified Windows GPU packages.
+
+A real `pip install --dry-run --only-binary=:all:` resolution succeeded:
+
+- 72 additional distributions resolved.
+- All resolved distributions were wheels; no source builds were selected.
+- No PyTorch replacement was selected.
+- Includes pinned Comfy Kitchen `0.2.39`, AIMDO `0.5.6` and the existing frontend/template/doc package pins.
+
+This is stronger evidence than the earlier wheel-availability audit, but is still **not** an installation,
+import check, server startup, native-kernel test for those packages, or model render. The transitive dependency
+set is not yet a tested lockfile. Optional node-pack dependencies were not included.
+
+### Validation and next gate
+
+42 focused tests passed across the new diagnostic, existing Windows UI, credit and privacy checks. Hardware-free
+diagnostic tests include wrong/nonfinite results, missing CUDA, invalid device selection and nonzero error exits.
+No model weights were downloaded, no render routes were enabled, and no existing memory limits were lowered.
+
+The next gate at this point was installation and no-model startup/shutdown; its results are recorded below.
+
+## 12. No-model ComfyUI lifecycle results
+
+The resolved dependencies are installed in the separate GPU environment; `pip check` passes. The source checkout
+is at `b9b290e43f1eb379946dfeb013faf9bbefa1a618`, reporting ComfyUI `0.42.0` and PyTorch `2.14.0+cu134`.
+
+Added [ComfyUI setup/verify tooling](../scripts/setup-windows-comfy.ps1) and a
+[bounded lifecycle checker](../scripts/windows-comfy-check.py):
+
+- Source revision and clean-checkout checks; no automatic reset of existing files.
+- Temporary empty model/state folders and a loopback-only instance.
+- Custom/API nodes and dynamic VRAM disabled; PyTorch attention selected.
+- Readiness verified through `/system_stats`, `/object_info` and `/queue`.
+- The returned argument vector must match this check's unique temporary directory, so an unrelated server
+  answering the same port is not treated as success.
+- A CUDA device and the required core loader/text/decoder nodes were reported; **679 nodes registered**.
+- The queue stayed empty; no workflow was submitted and no model weights were downloaded.
+- Cleanup uses the original launched process handle and a private Windows job object, not a port/PID search.
+  The job is terminated/drained before temporary-file cleanup, including descendants.
+
+The first cold check exposed a Windows file-release race at cleanup. The harness now waits for the owned job's
+active-process count to reach zero before deleting its temporary state. Subsequent real lifecycle checks passed.
+The console-stop exit code was `0xC000013A`; this is recorded as console termination, **not** claimed as graceful
+draining of a running render. No running-render cancellation has been tested.
+
+[Version constraints](../app/requirements-windows-comfy-constraints.txt) capture the 86 installed distributions
+used for this baseline. These are version pins, not a hash-locked supply-chain manifest, and do not qualify
+unexercised node packs, kernels or model routes.
+
+Hardware-free protocol tests and a native Windows parent/child job-drain test cover instance identity, CPU-only
+responses, incomplete core readiness, unexpected queue contents and source-pin refusal. The job-drain test uses
+ordinary sleeping processes, not GPU/model work.
+
+The combined lifecycle, GPU diagnostic, UI, credit and privacy checks passed. A real deliberately short
+startup-deadline run also exited nonzero rather than claiming readiness, drained its owned process job, and left
+the existing UI available.
+
+Next: establish conservative Windows host/GPU admission and a model-job memory watchdog before enabling any
+render path. Optimized ComfyUI allocators, optional nodes, model loading and inference remain unqualified.

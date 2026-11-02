@@ -282,7 +282,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Multimodal Art Projection (m-a-p) and the YuE2 authors: YuE2 (songs), with the Qwen team's qwen.tiktoken read by OpenAI's tiktoken", "Built with Fish Audio: Fish Audio Drama 3",
       "Stability AI: Stable Audio Open · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio (sound effects and foley)",
       "Ash Hart and the TensorFold contributors: TensorFold (the music engines and both Bolt engines on the 1.1.8 release)",
-      "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine) · MiaAI-Lab (with ChriZzn): the Bolt TensorFold recipe for the DGX Spark, its libbolt and LiLiCorr drafter runtime",
+      "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine); native Windows ARM64 CUDA wheels for PyTorch, TorchVision and TorchAudio (PyTorch contributors) · MiaAI-Lab (with ChriZzn): the Bolt TensorFold recipe for the DGX Spark, its libbolt and LiLiCorr drafter runtime",
       "antirez: h3.c · RobZombAI: H3MLX · mrbizarro: minimax-h3-mlx (Phosphene) · Filip Strand and the mflux contributors · felix-ab: flux3-mlx",
       "comfyanonymous, Comfy Org and the ComfyUI contributors: ComfyUI, and Comfy Org's MOSS-Image and MiniMax-Music-3 files · Apple: MLX · mlx-vlm · Qwen team: Qwen3-VL · VisualInference",
       "NVIDIA Research: Sol · FastVideo (Hao AI Lab): FastH3 · LightX2V (ModelTC) · larryvrh · TaoLiveAIGC · Viggle · speach1sdef178 · rookiestar28 · ddalcu · Kijai · DeepBeepMeep",
