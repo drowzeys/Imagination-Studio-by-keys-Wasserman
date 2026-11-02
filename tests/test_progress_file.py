@@ -1,6 +1,9 @@
 """SPARK_PROGRESS_FILE (spark/progress_file.py): off by default, two whole lines when set, never in a render's way."""
 
 import importlib
+import os
+import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -106,3 +109,25 @@ def test_how_the_process_ended(tmp_path, monkeypatch):
     p.done(9.4, "clip.mp4")
     p.stopped_by(SystemExit(0))  # a clean exit after the clip changes nothing
     assert target.read_text().splitlines()[1] == "done in 9 s · clip.mp4"
+
+
+def _cancelled(env):
+    """A process in a clip, ended as the Studio's Cancel ends it: SIGTERM, no exception."""
+    code = ("import sys, time; sys.path.insert(0, sys.argv[1]); import progress_file as p; p.on_cancel(); "
+            "p.begin('clip', 8); p.step(3, 8); print('up', flush=True); time.sleep(30)")
+    run = subprocess.Popen([sys.executable, "-c", code, str(ROOT / "spark")], stdout=subprocess.PIPE, text=True, env=env)
+    assert run.stdout.readline().strip() == "up"
+    run.send_signal(signal.SIGTERM)
+    return run.wait(timeout=10)
+
+
+def test_cancel_says_so_and_still_ends_as_the_signal_does(tmp_path):
+    target = tmp_path / "progress"
+    assert _cancelled({**os.environ, "SPARK_PROGRESS_FILE": str(target)}) == -signal.SIGTERM
+    assert target.read_text(encoding="utf-8").splitlines() == ["3/8 passes · clip", "failed: cancelled"]
+
+
+def test_unset_keeps_the_default_signal_handling(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k != "SPARK_PROGRESS_FILE"}
+    assert _cancelled(env) == -signal.SIGTERM
+    assert list(tmp_path.iterdir()) == []

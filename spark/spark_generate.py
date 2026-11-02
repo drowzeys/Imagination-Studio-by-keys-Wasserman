@@ -1416,6 +1416,7 @@ def stopped() -> str:
 
 
 if __name__ == "__main__":
+    progress_file.on_cancel()
     try:
         main()
     except BaseException as error:

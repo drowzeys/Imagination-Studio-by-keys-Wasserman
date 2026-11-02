@@ -16,6 +16,7 @@ it on a local disk, such as /var/tmp: each write is a few dozen bytes on the ren
 from __future__ import annotations
 
 import os
+import signal
 import time
 
 STAGES = {"UNETLoader": "loading the model", "CLIPLoader": "loading the text encoder", "VAELoader": "loading the decoders",
@@ -84,6 +85,20 @@ def failed(why: object) -> None:
         return
     state.update(stage="failed: " + " ".join(str(why).split())[:60], clip=False)
     _write(timed=False)
+
+
+def on_cancel() -> None:
+    """The Studio's Cancel is a SIGTERM with no exception to catch: say so in the file, then end as the signal would
+    have ended the process. Only with the file set: unset, the process keeps the default handling."""
+    if not path():
+        return
+
+    def ended(number, _frame):
+        failed("cancelled")
+        signal.signal(number, signal.SIG_DFL)
+        os.kill(os.getpid(), number)
+
+    signal.signal(signal.SIGTERM, ended)
 
 
 def stopped_by(error: BaseException) -> None:
