@@ -123,7 +123,8 @@ def gpu_free_gb() -> float | None:
         card = memory_guard.device(fresh=True)
     except Exception:  # noqa: BLE001  (a reading, never a reason to fail)
         return None
-    return None if card is None else card["free_mb"] / 1024
+    # Drama 3 runs on one card: with paired cards (spark/gpus.py) its room is the head's card, never their sum
+    return None if card is None else card.get("head_free_mb", card["free_mb"]) / 1024
 
 
 def has_card_memory() -> bool:
@@ -148,7 +149,7 @@ def has_card_memory() -> bool:
     if card is None:
         return False
     ram = _linux_ram_gb()
-    return ram < 0 or card["free_mb"] / 1024 <= ram
+    return ram < 0 or card.get("head_free_mb", card["free_mb"]) / 1024 <= ram
 
 
 def comfy_up(port: int | None = None) -> bool:

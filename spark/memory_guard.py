@@ -74,11 +74,13 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import mmap
 import os
 import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 FPS, STEP, BASE, SHORTEST, LONGEST = 24, 17, 5, 22, 362
 # The sizes the app offers, smallest first: what "a smaller size" means when a clip does not fit.
@@ -226,6 +228,31 @@ def server_pid() -> int | None:
     return None
 
 
+def family(pid: int) -> set[int]:
+    """``pid`` and every process under it (the ComfyUI server's own: the second card's rank, spark/tensorfold_h3/tp.py)."""
+
+    children: dict[int, list[int]] = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return {pid}
+    for name in entries:
+        if name.isdigit():
+            try:
+                with open(f"/proc/{name}/stat", "rb") as handle:
+                    parent = int(handle.read().rsplit(b")", 1)[1].split()[1])
+                children.setdefault(parent, []).append(int(name))
+            except (OSError, ValueError, IndexError):
+                pass
+    found, todo = set(), [pid]
+    while todo:
+        one = todo.pop()
+        if one not in found:
+            found.add(one)
+            todo.extend(children.get(one, []))
+    return found
+
+
 # ---------- a discrete GPU: an NVIDIA card with memory of its own (an RTX Pro 6000 Blackwell, 96 GB) ----------
 # A DGX Spark's GB10 has one memory for the CPU and the GPU (nvidia-smi says [N/A] for the GPU's), and everything above
 # reads it as /proc/meminfo. A card with its own memory is full long before the machine's RAM is: there a job's room is
@@ -268,9 +295,28 @@ def nvidia_argv() -> list[str]:
     Unset, the card ``chosen_gpu`` names, else the first GPU, which is the only GPU on a DGX Spark. nvidia-smi ignores
     `CUDA_VISIBLE_DEVICES`, so the index is passed with `-i`."""
 
+    paired = paired_gpus()
+    if paired:
+        # paired cards (spark/gpus.py): every card this Studio renders on, the head's first
+        return ["nvidia-smi", "-i", ",".join(paired)]
     raw = os.environ.get("STUDIO_GPU", "").strip()
     raw = raw if raw.isdigit() else chosen_gpu()
     return ["nvidia-smi", "-i", raw] if raw.isdigit() else ["nvidia-smi"]
+
+
+def paired_gpus() -> list[str]:
+    """``STUDIO_GPUS`` (spark/gpu.sh): two or more nvidia-smi indexes one Studio renders on together, the head's card
+    (``STUDIO_GPU``) first. [] when unset or invalid, when STUDIO_GPU_SPLIT is off, and in a managed local worker (a
+    UUID pin: one card a worker)."""
+
+    raw = os.environ.get("STUDIO_GPUS", "").strip()
+    if not raw or os.environ.get("STUDIO_LOCAL_GPU_UUID") or not _split_allowed():
+        return []
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) < 2 or not all(part.isdigit() for part in parts) or len(set(parts)) != len(parts):
+        return []
+    head = os.environ.get("STUDIO_GPU", "").strip()
+    return parts if not head or head == parts[0] else []
 
 
 def smi(*query: str) -> list[list[str]]:
@@ -307,12 +353,71 @@ def device(fresh: bool = False) -> dict | None:
         except ValueError:
             value = None
     else:
-        rows_ = smi("--query-gpu=memory.total,memory.used,memory.free")
-        if rows_ and all(part.isdigit() for part in rows_[0][:3]):
+        rows_ = [row for row in smi("--query-gpu=memory.total,memory.used,memory.free")
+                 if len(row) >= 3 and all(part.isdigit() for part in row[:3])]
+        if len(rows_) >= 2 and paired_gpus():
+            # paired cards (STUDIO_GPUS, spark/gpus.py), the head's first. With an engine that splits a pass over them
+            # (tp_engine) each card holds its share, so the smallest card's free memory times the cards is the job's
+            # room; without one the whole pass runs on the head's card and only that card counts. ``head_free_mb`` is
+            # the head's card alone, for an engine that runs on one card (Drama 3, Bolt, Music 3).
+            cards = [tuple(int(part) for part in row[:3]) for row in rows_]
+            shared = tp_engine()
+            value = {"total_mb": len(cards) * min(c[0] for c in cards) if shared else cards[0][0],
+                     "used_mb": sum(c[1] for c in cards) if shared else cards[0][1],
+                     "free_mb": len(cards) * min(c[2] for c in cards) if shared else cards[0][2],
+                     "simulated": False, "cards": len(cards), "split_pass": shared,
+                     "head_free_mb": cards[0][2], "card_total_mb": min(c[0] for c in cards)}
+        elif rows_:
             total, used, free = (int(part) for part in rows_[0][:3])
             value = {"total_mb": total, "used_mb": used, "free_mb": free, "simulated": False}
     _DEVICE.update(at=time.monotonic(), value=value)
     return value
+
+
+def _split_allowed() -> bool:
+    """Whether paired cards are split (spark/gpus.py: STUDIO_GPU_SPLIT, on unless off; only with STUDIO_GPUS)."""
+
+    return os.environ.get("STUDIO_GPU_SPLIT", "auto").strip().lower() not in ("0", "off", "no", "false")
+
+
+def single_card_free_mb() -> int | None:
+    """What the head's card has free: what an engine that runs on one card (Drama 3, Bolt) can use. With paired cards
+    that is the first of them (CUDA's device 0), never their sum."""
+
+    card = device()
+    if card is None:
+        return None
+    return card.get("head_free_mb", card["free_mb"])
+
+
+_TP: dict = {}
+
+
+def tf_h3_lib() -> Path:
+    """The TensorFold engine library comfy.sh loads (TF_H3_LIB, else PREFIX/tf-h3/libtf_h3.so)."""
+
+    return Path(os.environ.get("TF_H3_LIB") or Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")) / "tf-h3/libtf_h3.so")
+
+
+def tp_engine() -> bool:
+    """Whether the installed TensorFold engine (libtf_h3.so) can split one pass over two cards (it exports
+    tf_h3_tp_init). The pinned engine does not: paired cards then place only the text encoders and decoders on the
+    second card, and the pass and its memory stay on the head's. Read once per library file and size."""
+
+    lib = tf_h3_lib()
+    try:
+        key = (str(lib), lib.stat().st_size, lib.stat().st_mtime_ns)
+    except OSError:
+        return False
+    if key not in _TP:
+        try:
+            with open(lib, "rb") as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
+                found = data.find(b"tf_h3_tp_init\0") >= 0
+        except (OSError, ValueError):
+            return False
+        _TP.clear()
+        _TP[key] = found
+    return _TP[key]
 
 
 def discrete() -> bool:
@@ -349,7 +454,9 @@ def device_room_mb() -> int | None:
     if card is None:
         return None
     pid = server_pid()
-    held = processes_mb().get(pid, 0) if pid else 0
+    used = processes_mb()
+    # what the server holds, its own processes too (the second card's rank of a two-GPU pass): all of it is the job's
+    held = sum(used.get(one, 0) for one in family(pid)) if pid else 0
     return max(0, card["free_mb"] + held - VRAM_MARGIN_MB)
 
 

@@ -388,6 +388,16 @@ DGX Spark and RTX Pro 6000 entries (`oneshot-setup-cuda.sh`), a compute card use
 studio on a second card. He also made **quitting the app stop that install's ComfyUI** (#119), so Ctrl-C frees the
 card on a DGX Spark and an RTX Pro 6000 alike, and the quit no longer ends in a traceback.
 
+## Two GPUs in one machine: David Low
+
+**David Low (@davidlowjw)** made one render split over two NVIDIA cards in the same machine (#184,
+`docs/two-gpus.md`): each sampler pass of the int8 FastH3 engine shared between the cards by tile, the MiniMax H3
+video decoder's chunks decoded on both from CUDA graphs, and the text encoder and decoders placed on the second card
+with ComfyUI's own Select CLIP / VAE Device nodes (Comfy Org, GPL-3.0, run as a separate program). The exchange
+between the cards lives in his TensorFold fork, **davidlowjw/TensorFold** `studio-two-gpus` (Apache-2.0, on Ash
+Hart's TensorFold), built by hand with `spark/build-engine.sh`. The decode runs ComfyUI's own `decode_temporal`
+unchanged and only does its chunks ahead on the cards: none of ComfyUI's code is copied.
+
 ## Bug reports from a film made in Slate: BTankut
 
 **BTankut (@BTankut)** made a 2-minute, continuity-first film entirely in Slate and reported what got in the way, each

@@ -277,6 +277,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
     el("ul", { class: "st-credits" }, ["Keys (drowzeys): the studio itself, its TensorFold families and int8 kernels, and its Mac and DGX Spark engines",
       "Sam Wasserman and Wasserman Productions: helped design and build the studio in collaboration with Keys; Wasserman's Filmmaker Suite (ScriptBreak, Cork Board, Master Canvas, Storyboard Reference Studio, Blockout, Motion Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the studio's art; More local agents and the memory guard's cold-load fix",
       "August Sturm: the RTX Pro 6000 build, run on the card; quitting the app stops its ComfyUI",
+      "David Low (davidlowjw): two GPUs in one machine, one render split over both cards, and his TensorFold fork studio-two-gpus (Apache-2.0) for the exchange",
       "BTankut: bug reports from a film made in Slate, with causes and fixes (export trims and size, the shot check button, Regenerate); the NVIDIA driver's memory pools on a DGX Spark",
       "drgw5b7gzv-ship-it and gsp-agent: the Qwen-Image-2.1-Turbo text encoder on a fresh Mac install, reported, diagnosed and worked around",
       "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Multimodal Art Projection (m-a-p) and the YuE2 authors: YuE2 (songs), with the Qwen team's qwen.tiktoken read by OpenAI's tiktoken", "Built with Fish Audio: Fish Audio Drama 3",

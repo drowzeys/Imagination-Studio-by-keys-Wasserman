@@ -238,6 +238,14 @@ Rules:
   Required placement never falls back; saved placement applies only to video, and preflight asks the selected worker.
   Tests isolate GPU runtime directories and inventory; actual hardware probes require `STUDIO_TEST_HARDWARE=1`.
   Three/four-card cases are deterministic simulations, not physical throughput measurements.
+- Two GPUs in one machine (`spark/gpus.py`, `spark/tensorfold_h3/decode2.py`, `tp.py`, `spark/studio_split_h3`,
+  `docs/two-gpus.md`): only with `STUDIO_GPUS` (`memory_guard.paired_gpus()`); two visible cards alone never pair, and
+  without it nothing is installed or patched (comfy.sh copies `studio_split_h3` only when paired; decode2 replaces no
+  ComfyUI class method, it gives one decoder instance stand-ins for one decode). Never copy ComfyUI source (GPL-3.0)
+  into this Apache-2.0 repo: call its methods. The guard counts paired cards as cards x the smallest card's free
+  memory only when the engine exports `tf_h3_tp_init` (`memory_guard.tp_engine()`), else the head's card alone;
+  one-card engines (Drama 3, Bolt, Music 3) read `head_free_mb`. `STUDIO_DECODE_SPLIT=self` runs the two-card decode
+  path on one card for a byte check. Our Sparks have one GPU each: the two-card path is the contributor's measurement.
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
   cloud API. `DRAMA3_BACKEND=mlx|cuda` (`mlx` on a Mac, `cuda` on a DGX Spark). Both engines run as a persistent
