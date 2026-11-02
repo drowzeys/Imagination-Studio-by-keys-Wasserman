@@ -32,7 +32,9 @@ SAMPLE_FRESHNESS = 2
 class OwnedJob:
     """Keep cleanup tied to the launched process handle, not a port or reusable PID."""
 
-    def __init__(self):
+    def __init__(self, process_commit_mb: int = 0, job_commit_mb: int = 0):
+        if any(type(value) is not int or value < 0 for value in (process_commit_mb, job_commit_mb)):
+            raise ValueError("Windows job commit limits must be nonnegative integers")
         self.lock = threading.RLock()
         size = ctypes.c_size_t
 
@@ -63,6 +65,7 @@ class OwnedJob:
             ]
 
         self.accounting_type = Accounting
+        self.extended_type = Extended
         self.api = ctypes.WinDLL("kernel32", use_last_error=True)
         self.api.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         self.api.CreateJobObjectW.restype = wintypes.HANDLE
@@ -83,6 +86,12 @@ class OwnedJob:
             raise ctypes.WinError(ctypes.get_last_error())
         limits = Extended()
         limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if process_commit_mb:
+            limits.basic.flags |= 0x100  # JOB_OBJECT_LIMIT_PROCESS_MEMORY
+            limits.process_memory = process_commit_mb << 20
+        if job_commit_mb:
+            limits.basic.flags |= 0x200  # JOB_OBJECT_LIMIT_JOB_MEMORY
+            limits.job_memory = job_commit_mb << 20
         if not self.api.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
             error = ctypes.WinError(ctypes.get_last_error())
             self.close()
@@ -100,6 +109,16 @@ class OwnedJob:
         with self.lock:
             if self.handle and not self.api.TerminateJobObject(self.handle, 0):
                 raise ctypes.WinError(ctypes.get_last_error())
+
+    def commitment(self) -> dict:
+        with self.lock:
+            if not self.handle:
+                raise RuntimeError("the owned job is closed")
+            limits = self.extended_type()
+            if not self.api.QueryInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return {"peak_process_commit_bytes": limits.peak_process_memory, "peak_job_commit_bytes": limits.peak_job_memory,
+                    "process_commit_limit_bytes": limits.process_memory, "job_commit_limit_bytes": limits.job_memory}
 
     def close(self):
         with self.lock:
@@ -141,6 +160,7 @@ class MemoryWatchdog:
         self.max_commit_used_mb = 0
         self.samples = 0
         self.backend_thread = None
+        self.backend_stopping = threading.Event()
         self.backend_ready = threading.Event()
         self.backend_samples = 0
         self.backend_min_free_mb = None
@@ -195,7 +215,7 @@ class MemoryWatchdog:
 
     def supervise(self):
         previous = None
-        while not self.stopping.is_set() and not self.failed.is_set():
+        while not self.stopping.is_set() and not self.backend_stopping.is_set() and not self.failed.is_set():
             try:
                 line = self.messages.get(timeout=SAMPLE_START_TIMEOUT if previous is None else SAMPLE_FRESHNESS)
             except queue.Empty:
@@ -269,6 +289,8 @@ class MemoryWatchdog:
                     if reason:
                         raise RuntimeError(reason)
                 except (OSError, RuntimeError, ValueError) as error:
+                    if self.backend_stopping.is_set() or self.stopping.is_set():
+                        return
                     self.fail(f"backend budget monitoring failed: {error}")
                     self.backend_ready.set()
                     return
@@ -296,6 +318,9 @@ class MemoryWatchdog:
             raise RuntimeError("memory watchdog threads did not stop within their deadlines")
         self.process.stdout.close()
         self.check()
+
+    def begin_backend_shutdown(self):
+        self.backend_stopping.set()
 
     def metrics(self):
         with self.state_lock:
@@ -383,11 +408,24 @@ def hold_no_model(process, monitor: MemoryWatchdog, seconds: int, base: str) -> 
     return time.monotonic() - started
 
 
-def run_check(source: Path, timeout: float, device_index: int, guarded: bool = False, hold_seconds: int = 0) -> dict:
+class CalibrationCase:
+    gpu_limit_mb = 12 * 1024
+    process_commit_mb = 12 * 1024
+    job_commit_mb = 16 * 1024
+
+    def __init__(self, prepare, exercise):
+        self.prepare = prepare
+        self.exercise = exercise
+
+
+def run_check(source: Path, timeout: float, device_index: int, guarded: bool = False, hold_seconds: int = 0,
+              calibration: CalibrationCase | None = None) -> dict:
     if sys.platform != "win32":
         raise RuntimeError("this lifecycle check requires native Windows")
     if type(hold_seconds) is not int or not 0 <= hold_seconds <= 300 or (hold_seconds and not guarded):
         raise ValueError("a sustained check requires --guarded and 0-300 hold seconds")
+    if calibration and (not guarded or hold_seconds or device_index != 0):
+        raise ValueError("calibration requires the guarded, single-device path without a no-model hold")
     verify_source(source)
     with socket.socket() as reserve:
         reserve.bind(("127.0.0.1", 0))
@@ -401,7 +439,15 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
             "--offline", "--disable-all-custom-nodes", "--disable-auto-launch",
             "--disable-dynamic-vram", "--use-pytorch-cross-attention",
         ]
-        job, process, monitor = OwnedJob(), None, None
+        if calibration:
+            calibration.prepare(Path(directory))
+            command = [sys.executable, "-X", "utf8", str(APP.parent / "scripts" / "windows-comfy-calibration-launcher.py"),
+                       "--comfy", str(source / "main.py"), "--gpu-limit-mb", str(calibration.gpu_limit_mb), "--",
+                       *command[4:], "--disable-cuda-malloc", "--whitelist-custom-nodes", "windows_calibration"]
+            job = OwnedJob(calibration.process_commit_mb, calibration.job_commit_mb)
+        else:
+            job = OwnedJob()
+        process, monitor = None, None
         console_stop = False
         console_exit_code = None
         try:
@@ -442,6 +488,20 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                 if monitor:
                     monitor.check()
                     monitor.start_backend(base, directory)
+                calibration_result = None
+                if calibration:
+                    if monitor is None or monitor.latest is None:
+                        raise RuntimeError("calibration requires a ready memory watchdog")
+                    latest = monitor.latest
+                    if latest.gpu_dedicated_free_mb < calibration.gpu_limit_mb + 2048:
+                        raise RuntimeError("the calibration cap does not fit dedicated GPU headroom with the reserve")
+                    limits = job.commitment()
+                    if (limits["process_commit_limit_bytes"], limits["job_commit_limit_bytes"]) != (
+                        calibration.process_commit_mb << 20, calibration.job_commit_mb << 20,
+                    ):
+                        raise RuntimeError("Windows did not apply the calibration commit limits")
+                    calibration_result = calibration.exercise(base, Path(directory), process, monitor)
+                    monitor.check()
                 held = hold_no_model(process, monitor, hold_seconds, base) if hold_seconds else 0
                 result = {
                     "ok": True, "commit": COMMIT, "comfyui_version": stats["system"]["comfyui_version"],
@@ -452,6 +512,12 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                 }
                 if monitor:
                     result["checks"].append("backend process memory budget")
+                if calibration:
+                    result["scope"] = "explicit model calibration, not a qualified Windows render route"
+                    result["calibration"] = calibration_result
+                    result["job_commitment"] = job.commitment()
+                if monitor:
+                    monitor.begin_backend_shutdown()
                 try:
                     process.send_signal(signal.CTRL_BREAK_EVENT)
                     process.wait(timeout=10)

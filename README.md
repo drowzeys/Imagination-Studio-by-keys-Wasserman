@@ -183,6 +183,33 @@ fit commit headroom; resident requirements must fit usable host capacity. Runtim
 No model profiles are qualified yet; render routes remain disabled. This is infrastructure validation, not a
 guarantee of allocation success or safe model loading.
 
+#### Explicit Windows sound-effect calibration
+
+Stable Audio Open 1.0 is gated under the Stability AI Community License. Accept its terms on Hugging Face and
+sign in locally with `hf auth login`; never put credentials in the repo or calibration parameters. Setup downloads
+only the checkpoint, T5 encoder and license at a fixed revision (about 5.3 GB of weights) outside the checkout,
+then verifies the published weight hashes.
+
+```powershell
+.\scripts\setup-windows-sfx.ps1
+.\scripts\setup-windows-sfx.ps1 -Verify
+.\scripts\check-windows-sfx.ps1 -Calibrate
+```
+
+`-Calibrate` is required: this is a one-job experiment, not an enabled Studio sound route. It uses the existing
+five-second, seed-7 sound workflow (100 passes, CFG 7), with a calibration-only GPU-first checkpoint loader using
+ComfyUI's load helpers and a non-inference peak-counter receipt node. The pinned ComfyUI checkout is not modified.
+The original CPU-first loading attempt hit Windows' actual low-memory signal; the GPU-first case completed.
+
+The test enforces a 12 GiB native PyTorch allocation cap, 12 GiB per-process Windows job commit cap and 16 GiB
+aggregate job commit cap, alongside OS/backend monitoring. These are experimental bounds, not minimum hardware
+requirements or total physical-memory estimates. Driver/library allocations still require monitoring.
+
+Validated FLAC audio and a `.calibration.json` receipt are saved under the Studio's `renders\calibration` folder.
+The receipt includes allocator peaks, budget minima and tool-content hashes; it contains no access key, model
+download token, server URL or GPU UUID. Output filenames are unique and existing files are not overwritten.
+No normal render route is qualified automatically, and no failed run increases its limits automatically.
+
 ### Apple silicon
 
 macOS 26 or later, for Metal 4. What runs depends on the memory: **96 GB or more** for video, voice, music and the

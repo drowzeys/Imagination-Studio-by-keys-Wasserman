@@ -118,6 +118,9 @@ def test_backend_monitor_starts_only_after_server_readiness(monkeypatch, tmp_pat
         def finish(self):
             pass
 
+        def begin_backend_shutdown(self):
+            pass
+
         def metrics(self):
             return {"samples": 1}
 
@@ -147,6 +150,55 @@ def test_backend_monitor_starts_only_after_server_readiness(monkeypatch, tmp_pat
 
     monkeypatch.setattr(check, "read_json", response)
     assert check.run_check(tmp_path, 5, 0, guarded=True)["ok"]
+
+
+@pytest.mark.parametrize("planned", [True, False])
+def test_inflight_backend_disconnect_is_ignored_only_during_planned_shutdown(monkeypatch, planned):
+    from windows_memory import Snapshot
+
+    monitor = check.MemoryWatchdog.__new__(check.MemoryWatchdog)
+    for name in ("stopping", "failed", "ready", "backend_ready", "backend_stopping"):
+        setattr(monitor, name, threading.Event())
+    monitor.state_lock = threading.Lock()
+    monitor.backend_thread = None
+    monitor.backend_samples = 0
+    monitor.backend_min_free_mb = None
+    monitor.backend_budget = None
+    monitor.configured_floor = ""
+    monitor.reason = ""
+    terminated = []
+    monitor.job = SimpleNamespace(terminate=lambda: terminated.append(True))
+    monitor.latest = Snapshot(48000, 22000, 12000, 36000, 24000, time.monotonic(),
+                              12000, 40000, 1000, False, 26000, 23000)
+    entered, release = threading.Event(), threading.Event()
+    calls = [0]
+
+    def response(*args, **kwargs):
+        calls[0] += 1
+        if calls[0] > 1:
+            entered.set()
+            assert release.wait(2)
+            raise ConnectionResetError("closed")
+        return {"system": {"argv": ["main.py", "--base-directory", "owned"]},
+                "devices": [{"type": "cuda", "vram_total": 36000 << 20, "vram_free": 24000 << 20}]}
+
+    monkeypatch.setattr(check, "read_json", response)
+    try:
+        monitor.start_backend("unused", "owned")
+        assert entered.wait(2)
+        if planned:
+            monitor.begin_backend_shutdown()
+        release.set()
+        monitor.backend_thread.join(2)
+        assert not monitor.backend_thread.is_alive()
+        assert monitor.failed.is_set() is (not planned)
+        assert bool(terminated) is (not planned)
+        assert not monitor.stopping.is_set()
+    finally:
+        release.set()
+        monitor.stopping.set()
+        if monitor.backend_thread:
+            monitor.backend_thread.join(2)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process ownership; no GPU is used")

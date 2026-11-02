@@ -740,3 +740,74 @@ checks passed.
 
 This qualifies only bounded no-model monitoring on the observed configuration. Optional nodes, model load peaks,
 allocation failure recovery and render-time safety still require independent measurements and validation.
+
+## 15. First explicit Windows sound-effect calibration
+
+After the model terms were accepted and Hugging Face login was completed locally, setup downloaded only the
+Stable Audio Open checkpoint, T5 encoder and license. The two weight files total **5,292,414,880 bytes** and passed
+their published SHA-256 checks at revision `f21265c1e2710b3bd2386596943f0007f55f802e`. They remain outside the repo.
+No credentials are included in model parameters or reports.
+
+The calibration reuses `spark_generate.sfx_workflow`: 5 seconds, seed 7, 100 passes, CFG 7, exponential schedule
+and `dpmpp_3m_sde_gpu`, including the existing -12 dB output adjustment. It is an explicit diagnostic exception,
+not normal job admission or an enabled Studio route.
+
+### Loading experiment and failures
+
+- The first attempt tripped an inherited linear forecast of falling available host RAM, despite no Windows
+  low-memory signal. The default Windows policy now relies on OS pressure/commitment instead; host-RAM trend
+  protection still applies if the user explicitly configures a host floor.
+- The unchanged CPU-first loader then reached Windows' actual low-physical-memory signal and was stopped.
+  This was a genuine guarded refusal; that protection was not disabled.
+- Source inspection found host pinning already disabled for integrated GPUs. Disabling pinning would not fix
+  this case.
+- With explicit approval, a calibration-only GPU-first loader now calls ComfyUI's existing load helpers,
+  initially loading checkpoint tensors to the selected CUDA device. It avoids retaining the same full
+  CPU-side checkpoint staging and preserves the model/sampler settings. The ComfyUI source remains untouched.
+- The first GPU-first run produced valid audio but exposed a shutdown-monitor race: an intentional connection
+  close was treated as unexpected failure. Backend polling now distinguishes planned shutdown; independent OS
+  monitoring stays active through cleanup. Both planned and unexpected disconnect cases have regression tests.
+
+### Bounds and results
+
+The same bounds were retained throughout:
+
+- Native PyTorch allocation cap: **12 GiB**. A separate 1 MiB-cap / 16 MiB-allocation test demonstrated that the
+  allocator refuses allocations above its configured limit.
+- Windows process commit cap: **12 GiB**; aggregate owned-job commit cap: **16 GiB**. Applied values are queried
+  back from the job object before the workflow is submitted.
+- Runtime OS/backend monitoring remains active. No failed run raises limits automatically.
+- One whitelisted calibration package contains the GPU-first loader and an in-process allocation receipt,
+  catching peaks that periodic budget samples can miss.
+
+Two subsequent GPU-first runs completed through validated output and owned shutdown. The final reproducible
+PowerShell command also saved a `.calibration.json` report with tool-content hashes:
+
+```powershell
+.\scripts\setup-windows-sfx.ps1 -Verify
+.\scripts\check-windows-sfx.ps1 -Calibrate
+```
+
+| Final calibration observation | Result |
+|---|---|
+| Audio | 44.1 kHz stereo FLAC, 221,184 samples/channel, **5.0155 s** |
+| Peak audio level | **-14.746 dBFS** |
+| Request to validated file | **10.73 s**, excluding setup/hash checks/server startup |
+| PyTorch peak tensor allocation | 7,009,132,544 bytes, about **6.53 GiB** |
+| PyTorch peak reserved allocation | 7,142,899,712 bytes, about **6.65 GiB** |
+| Peak process commitment | 12,880,076,800 bytes, very close to the 12 GiB cap |
+| Peak aggregate owned-job commitment | 14,701,903,872 bytes, below the 16 GiB cap |
+| Minimum available OS memory | 1,241 MiB, with no low-memory signal in accepted samples |
+| Minimum global dedicated GPU free memory | 17,101 MiB |
+
+Job commitment is Windows accounting, not a measurement of CPU resident RAM. Global OS/dedicated minima can be
+affected by background activity. PyTorch's cap and counters do not cover every driver/library allocation.
+The process-commit peak was close to its cap: this is not evidence that broader prompts, lengths or workflows
+have a comfortable margin.
+
+The output decoded successfully with PyAV; duration, stereo layout, finite/non-silent samples, audio headroom,
+allocator type and the actually applied GPU fraction were verified. Audio quality still needs a listening check.
+No Windows SFX profile was automatically promoted, no UI render route was enabled, and no other model was loaded.
+
+Next: review the loading/commit footprint, collect route-specific margins and additional controlled cases before
+considering normal queue/UI integration. Keep OS and GPU budgets separate and retain explicit unavailable reasons.

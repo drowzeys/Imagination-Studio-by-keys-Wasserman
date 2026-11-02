@@ -387,6 +387,9 @@ the **PyTorch contributors**. The experimental Windows GPU setup uses those whee
 the small verification operations do not download models or qualify Studio rendering support.
 **Microsoft** provides the Win32 memory-pressure, commitment and job-object APIs used by the Windows diagnostic;
 **NVIDIA** provides NVML's dedicated-memory counters and CUDA's context-budget queries.
+The explicit sound calibration uses **Stability AI**'s Stable Audio Open 1.0 and **Comfy Org / ComfyUI contributors**'
+checkpoint-loading helpers and existing audio nodes. Its GPU-first loader and peak receipt are calibration-only
+Studio additions, not changes to the downloaded ComfyUI source.
 
 ## The RTX Pro 6000 build, run on the card: August Sturm
 

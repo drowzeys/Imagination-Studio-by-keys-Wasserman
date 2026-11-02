@@ -81,10 +81,14 @@ def test_pressure_and_fast_growth_stop_before_exhaustion():
     assert "commit headroom" in pressure(snapshot(host_commit_used_mb=40000))
     assert "physical memory" in pressure(snapshot(host_free_mb=0))
     assert "CUDA budget" in pressure(snapshot(gpu_free_mb=2047))
-    assert "falling" in pressure(snapshot(host_free_mb=800, at=100.25), previous=snapshot())
+    assert "falling" in pressure(snapshot(host_free_mb=1500, at=100.25), configured="1000", previous=snapshot())
     assert "falling" in pressure(snapshot(gpu_free_mb=6000, at=100.25), previous=snapshot(gpu_free_mb=10000))
     assert "falling" in pressure(snapshot(host_commit_used_mb=39500, at=100.25),
                                  previous=snapshot(host_commit_used_mb=35000))
+
+
+def test_pageable_ram_drop_does_not_override_healthy_os_signals():
+    assert pressure(snapshot(host_free_mb=1500, at=100.25), previous=snapshot()) == ""
 
 
 def test_dedicated_depletion_is_not_combined_budget_exhaustion():

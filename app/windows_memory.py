@@ -204,11 +204,13 @@ def pressure(snapshot: Snapshot, configured: str = "", previous: Snapshot | None
         elapsed = snapshot.at - previous.at
         if not 0 < elapsed <= 2:
             raise ValueError("memory samples are out of order or stale")
-        for label, free, before, floor in (
-            ("host", snapshot.host_free_mb, previous.host_free_mb, host_floor),
+        trends = [
             ("commit", commit_free, previous.host_commit_limit_mb - previous.host_commit_used_mb, 0),
             ("CUDA", snapshot.gpu_free_mb, previous.gpu_free_mb, GPU_MIN_MB),
-        ):
+        ]
+        if host_floor:
+            trends.append(("host", snapshot.host_free_mb, previous.host_free_mb, host_floor))
+        for label, free, before, floor in trends:
             if free < before and free - (before - free) / elapsed * 0.5 < floor:
                 return f"{label} memory is falling toward its reserve within 0.5 seconds"
     return ""
