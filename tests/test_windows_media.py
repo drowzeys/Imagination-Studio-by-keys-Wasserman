@@ -85,3 +85,47 @@ def test_export_refuses_unqualified_settings(media, change):
         "clips": [{"path": sources[0]}], **change,
     }})
     assert response.status_code == 400
+
+
+def test_rapid_timeline_additions_are_serialized_and_keep_both_clips():
+    from test_shell_page import run
+    root = Path(__file__).resolve().parents[1]
+    code = (root / "app/static/index.html").read_text(encoding="utf-8").split("let timelineAdd = ")[1].split("function viewEditor()")[0]
+    out = run("""
+      %s
+      S.ffmpeg = true; tab = "Editor"; let saved = { id: "p1", name: "Disposable", timeline: [] };
+      globalThis.ensureProject = async () => ({ id: "p1" }); project = { ...saved };
+      globalThis.api = async (path, body) => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        if (path.startsWith("/api/probe")) return { duration: 2 };
+        if (body) saved = JSON.parse(JSON.stringify(body));
+        return JSON.parse(JSON.stringify(saved));
+      };
+      await Promise.all([addToTimeline("uploads/first.mp4"), addToTimeline("uploads/second.mp4")]);
+      out.paths = saved.timeline.map(c => c.path); out.durations = saved.timeline.map(c => c.duration);
+    """ % ("let timelineAdd = " + code))
+    assert out["paths"] == ["uploads/first.mp4", "uploads/second.mp4"]
+    assert out["durations"] == [2, 2]
+
+
+def test_a_failed_timeline_addition_reports_the_error_and_releases_the_next_one():
+    from test_shell_page import run
+    root = Path(__file__).resolve().parents[1]
+    code = (root / "app/static/index.html").read_text(encoding="utf-8").split("let timelineAdd = ")[1].split("function viewEditor()")[0]
+    out = run("""
+      %s
+      S.ffmpeg = true; let saved = { id: "p1", name: "Disposable", timeline: [] }, fail = true;
+      globalThis.ensureProject = async () => ({ id: "p1" });
+      globalThis.api = async (path, body) => {
+        if (path.startsWith("/api/probe")) return { duration: 2 };
+        if (fail) { fail = false; throw new Error("save source unavailable"); }
+        if (body) saved = JSON.parse(JSON.stringify(body));
+        return JSON.parse(JSON.stringify(saved));
+      };
+      try { await addToTimeline("uploads/bad.mp4"); } catch (e) { out.error = e.message; }
+      await addToTimeline("uploads/good.mp4");
+      out.paths = saved.timeline.map(c => c.path); out.notifications = [...toasts];
+    """ % ("let timelineAdd = " + code))
+    assert out["error"] == "save source unavailable"
+    assert out["paths"] == ["uploads/good.mp4"]
+    assert any("Could not add the clip" in note for note in out["notifications"])

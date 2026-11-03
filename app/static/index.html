@@ -838,8 +838,23 @@ function viewProduction() {
 }
 
 /* ---------- Editor ---------- */
-async function addToTimeline(path, from = 0, to = 0) { await ensureProject(); try { project = await api("/api/projects/" + project.id); } catch {} let duration = 5; try { duration = (await api("/api/probe?path=" + encodeURIComponent(path))).duration || 5; } catch {}
-  project.timeline.push({ path, in: from, out: to, duration }); await saveProject(); toast("Added to the timeline of " + project.name + (to > from ? ", trimmed to " + from.toFixed(2) + " to " + to.toFixed(2) + " s" : "")); if (tab === "Editor") render(); }
+let timelineAdd = Promise.resolve();
+async function addToTimeline(path, from = 0, to = 0) {
+  const id = (await ensureProject()).id, previous = timelineAdd; let release;
+  timelineAdd = new Promise(resolve => { release = resolve; });
+  await previous;
+  try { const target = await api("/api/projects/" + id); let duration;
+    try { duration = (await api("/api/probe?path=" + encodeURIComponent(path))).duration;
+      if (!Number.isFinite(duration) || duration <= 0) throw new Error("The clip has no readable duration.");
+    } catch (e) { if (S.ffmpeg) throw e; duration = 5; toast("Clip duration unavailable; using 5 s until media tools are installed: " + e.message); }
+    target.timeline.push({ path, in: from, out: to, duration });
+    const saved = await api("/api/projects/" + id, target, "PUT");
+    if (project && project.id === id) project = saved;
+    toast("Added to the timeline of " + saved.name + (to > from ? ", trimmed to " + from.toFixed(2) + " to " + to.toFixed(2) + " s" : ""));
+    if (tab === "Editor") render();
+  } catch (e) { toast("Could not add the clip: " + e.message); throw e; }
+  finally { release(); }
+}
 function viewEditor() {
   const box = el("section", { class: "card" }, el("h2", {}, "Clip editor"));
   ensureProject().then(async () => {

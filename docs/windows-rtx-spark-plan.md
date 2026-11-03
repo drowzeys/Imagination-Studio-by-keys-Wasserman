@@ -1073,3 +1073,30 @@ loaded, and a second five-second sound with seed zero was saved and listed corre
 a transient Windows sharing lock on an exited backend's log; cleanup now waits at most five seconds for
 only sharing/lock violations after process draining. Other cleanup errors remain explicit. The image job
 took 23.43 s and the following sound 38.62 s including startup. Studio was left running with sound loaded.
+
+## 24. Supported-path browser and lifecycle smoke
+
+A focused real-browser pass used disposable projects, not the saved demo:
+
+- Uploaded a two-scene Fountain script through the import page, queued its two missing storyboard stills,
+  converted it to Slate, edited its scene synopsis, and reopened the film with the edit and images intact.
+- Queued a five-second sound effect through Sound and confirmed the browser's audio element decoded it
+  (`readyState=4`, duration 5.01551 s, no media error). This is playback readiness, not a listening-quality review.
+- Added two disposable clips (one silent, one with sound) to a separate editor project, trimmed each from
+  0.25 to 1.25 s, and exported through the UI. The browser decoded the resulting 2.0 s, 1344x768 MP4.
+- Found a rapid-add race: two `+ timeline` clicks could both read the same old project and overwrite one
+  another. Additions now serialize their read/modify/save operations against the project selected when
+  clicked; failures are notified and release the next addition. Two focused regression tests passed, and
+  the two-click browser check then retained both clips.
+- Clicked Cancel on one running sound job and another still queued. The first had started, the second
+  never started, both became cancelled, and neither published a successful take. ComfyUI remained loaded.
+  A subsequent sound job reused it and completed in 5.62 s.
+
+The sound backend stayed loaded through 314.37 seconds idle while the editor was exercised. This is a bounded
+observed interval, not indefinite idle qualification.
+
+A separate disposable Studio on loopback exercised the real Ctrl+Break handler while sound was running.
+The launcher exited with status zero; the handle-owned job reported zero remaining processes, and both
+Studio and ComfyUI ports closed before any forced cleanup. Restarting that Studio preserved the completed
+sound take, did not publish the interrupted one, and did not inherit an old backend. Its final shutdown
+also drained. The saved demo projects were not edited by these checks.
