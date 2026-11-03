@@ -100,6 +100,10 @@ repository at a pinned commit when the Studio is installed; none of their code i
   (H3 Contact Sheet, GPL-3.0). The idea is theirs: five still pictures packed where a five-step video would go, so
   the model's consistency along time becomes consistency between views. On a Mac the MLX engine packs and decodes
   the five views the same way (`h3_generate.py --sheet`), written from their description of it.
+- **keys-HDR LORA (the HDR finish):** the HLG curve of ARIB STD-B67 and ITU-R BT.2100 and the colour matrix of ITU-R BT.2087; **x265** by
+  MulticoreWare (GPL-2.0, through the machine's own FFmpeg, not shipped here) writes the HEVC. Its tone curve and split
+  toning were set against a clip posted on X by hi_personality, measured for brightness and tint only; none of that
+  clip is in the repo.
 - **Upscale:** the Video Upscaler LoRA and the H3 Video Upsampler node by dntpi (Sandpies), MIT; the latent upscaler
   network it enlarges with by LBH-123-AI (weights Apache-2.0); the upscale recipe it follows by bbaudio-2025; the
   guide layout and the training set of the LoRA by Alissonerdx.
@@ -418,6 +422,16 @@ itself, and made the CUDA install pick the card by its `nvidia-smi` index (`STUD
 DGX Spark and RTX Pro 6000 entries (`oneshot-setup-cuda.sh`), a compute card used beside a display card, and a second
 studio on a second card. He also made **quitting the app stop that install's ComfyUI** (#119), so Ctrl-C frees the
 card on a DGX Spark and an RTX Pro 6000 alike, and the quit no longer ends in a traceback.
+
+## Two GPUs in one machine: David Low
+
+**David Low (@davidlowjw)** made one render split over two NVIDIA cards in the same machine (#184,
+`docs/two-gpus.md`): each sampler pass of the int8 FastH3 engine shared between the cards by tile, the MiniMax H3
+video decoder's chunks decoded on both from CUDA graphs, and the text encoder and decoders placed on the second card
+with ComfyUI's own Select CLIP / VAE Device nodes (Comfy Org, GPL-3.0, run as a separate program). The exchange
+between the cards lives in his TensorFold fork, **davidlowjw/TensorFold** `studio-two-gpus` (Apache-2.0, on Ash
+Hart's TensorFold), built by hand with `spark/build-engine.sh`. The decode runs ComfyUI's own `decode_temporal`
+unchanged and only does its chunks ahead on the cards: none of ComfyUI's code is copied.
 
 ## Bug reports from a film made in Slate: BTankut
 

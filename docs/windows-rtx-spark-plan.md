@@ -1327,3 +1327,20 @@ check. Decoded and cached results now share that check: exactly 600 seconds is a
 and missing, nonnumeric, boolean, negative or nonfinite cached durations are reported explicitly. Non-Windows
 cache behavior is unchanged. No model or browser render was needed for this correction.
 The boundary/cache and shared-page, credits and privacy follow-up passed **52 tests**, with no skips.
+
+## 29. Integration with the synced main branch
+
+Integrated `origin/main` at `8eef55a` into the Windows branch with a normal merge, not a rebase.
+The three conflicted files were the server, Home composer and Settings credits. Upstream's new
+FLUX3-K/YuE2 Home chips and selection behavior, paired-GPU reporting, HDR action, progress tracking
+and credits are preserved. Windows-specific availability checks and bounded still parameters are
+applied around that shared behavior, rather than replacing upstream functionality.
+
+The Windows tier does not advertise paired cards, FLUX3-K, YuE2 or the new HDR action as qualified.
+Library readiness and Apps cards agree with that restriction. Mac/Linux keep upstream behavior.
+Focused Windows/API/page/credits/telemetry checks plus synthetic upstream paired-GPU and HDR
+contracts passed **365 tests**, with one file-symlink privilege skip. No model download, GPU render,
+hosted CI or physical paired-card test was performed.
+
+The merge is resolved and staged for the user's merge commit and ordinary push. No branch history
+was rewritten or force-pushed. Hosted Ubuntu/Windows ARM64 checks remain the next PR gate.

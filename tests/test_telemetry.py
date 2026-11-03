@@ -32,6 +32,28 @@ def test_a_gb10_line_parses():
     assert telemetry.parse_gpu("garbage") is None
 
 
+def test_paired_cards_combine():
+    """Two paired cards (STUDIO_GPUS=0,1): each card kept, the mean load, the hotter card, the power of both."""
+
+    cards = telemetry.parse_gpus("0, 33005, 48935, 100, 61, 280.5, 2400, NVIDIA RTX PRO 5000 Blackwell\n"
+                                 "1, 33719, 48935, 90, 58, 270.1, 2385, NVIDIA RTX PRO 5000 Blackwell\n")
+    both = telemetry.combine_gpus(cards)
+    assert both["count"] == 2 and both["util_pct"] == 95.0 and both["temp_c"] == 61.0 and both["power_w"] == 550.6
+    assert [c["index"] for c in both["cards"]] == ["0", "1"] and both["cards"][1]["used_mb"] == 33719
+    assert both["name"] == "NVIDIA RTX PRO 5000 Blackwell"
+    one = telemetry.combine_gpus(cards[:1])
+    assert "cards" not in one and one["util_pct"] == 100.0  # one card: the reading as before
+    assert telemetry.combine_gpus([]) is None
+    four = telemetry.combine_gpus([dict(cards[0], index=str(i), util_pct=float(10 * i)) for i in range(4)])
+    assert four["count"] == 4 and four["util_pct"] == 15.0 and [c["index"] for c in four["cards"]] == ["0", "1", "2", "3"]
+    old = telemetry.parse_gpus("99, 91, 80.0, 2400, NVIDIA GB10\n")  # the fields alone, no index or memory
+    assert old == [telemetry.parse_gpu("99, 91, 80.0, 2400, NVIDIA GB10")]
+    # a DGX Spark's GB10 with the index and memory fields: nvidia-smi says [N/A] for the memory it has none of
+    spark = telemetry.parse_gpus("0, [N/A], [N/A], 99, 91, 80.0, 2400, NVIDIA GB10\n")
+    assert len(spark) == 1 and spark[0]["used_mb"] is None and spark[0]["util_pct"] == telemetry.parse_gpu("99, 91, 80.0, 2400, NVIDIA GB10")["util_pct"]
+    assert "cards" not in telemetry.combine_gpus(spark)
+
+
 def test_vm_stat_parses():
     text = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 1000.\nPages active: 5000.\n"
             "Pages inactive: 2000.\nPages speculative: 100.\nPages purgeable: 0.\n")

@@ -74,7 +74,9 @@ voice and music remain assigned to the head. Starting an extra worker enables sh
 card retains its existing queue and shutdown behavior. VRAM is not pooled and no render is split. Measured plain
 int8 clips have a separate host-RAM budget; unknown GPU work remains exclusive, so not every job overlaps.
 Setup, adapter availability and the two-card smoke evidence:
-[Local GPUs](docs/rtx-pro-6000.md#one-to-four-local-gpus). Remote Spark behavior and limits remain separate:
+[Local GPUs](docs/rtx-pro-6000.md#one-to-four-local-gpus). To split one render across two cards instead (each pass and
+the decode shared, the one-card bytes, 1.74x at 5 s and 1.85x at 15 s on two 48 GB RTX PRO 5000):
+[Two GPUs in one machine](docs/two-gpus.md). Remote Spark behavior and limits remain separate:
 [Workers](docs/multi-spark.md).
 
 Ctrl-C in that terminal stops the app and the ComfyUI for this install, and the card is freed. The same quit works
@@ -2653,6 +2655,7 @@ bfloat16. Credit and licences: [CREDITS.md](CREDITS.md), [THIRD_PARTY_NOTICES.md
 | Action | On | Does | With | Mac | DGX Spark |
 |---|---|---|---|---|---|
 | **Turnaround** | a picture | Five views of the picture's subject, turning from where it faces now, made together so they agree. Each is a picture of its own: a first frame, or reference pictures of one character. | Turnaround LoRA by matlod; contact-sheet nodes by MATLOWAI | yes: the MLX engine packs and decodes the five views itself (`h3_generate.py --sheet`) | yes |
+| **keys-HDR LORA** (HDR finish) | a clip | The clip graded very bright and contrasty and written as real HDR (BT.2020, HLG, 10-bit HEVC) with an SDR copy; its own sound stays. A grade on the processor with no model: it adds no detail. Finish a joined film as one clip. | ITU-R BT.2100 / ARIB STD-B67 (the HLG curve), FFmpeg and x265 |
 | **Upscale** | a clip | The clip made larger and sharper: a latent upscale, then one light re-draw in tiles that the clip itself guides. Motion, mouths and the clip's own sound stay. | Video Upscaler LoRA and H3 Video Upsampler by dntpi; latent upscaler by LBH-123-AI | yes: the same nodes on the Mac's ComfyUI (`oneshot-setup.sh --upscale`) | yes |
 | **Remove a person** | a clip | One person taken out and the background drawn again. The person is found from a few words and followed through the clip; "1. Find the person" shows the mask alone first. | Person Remover LoRA and H3 Relay by Akatz Labs; SAM 3.1 by Meta | yes: SAM 3.1 and the H3 Relay nodes on the Mac's ComfyUI (`oneshot-setup.sh --remove`) | yes |
 

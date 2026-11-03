@@ -143,6 +143,7 @@ async def follow(workflow: dict, sampler: str, parts: int) -> str:
     sg.gate()
     import aiohttp
 
+    workflow = sg.gpus.place(workflow)  # two cards: the text encoders and decoders on the second (spark/gpus.py)
     client = uuid.uuid4().hex
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(sg.URL.replace("http", "ws", 1) + f"/ws?clientId={client}", max_msg_size=0) as ws:

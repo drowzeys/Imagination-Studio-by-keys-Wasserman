@@ -33,7 +33,17 @@ case "${1:-start}" in
       for _ in $(seq 1 25); do pgrep -f "$MATCH" >/dev/null || break; sleep 1; done
       MATCH="^[^ ]+ main\.py --listen 127\.0\.0\.1 --port $PORT( |\$)"
     fi
-    pkill -f "$MATCH" 2>/dev/null && echo "stopped" || echo "not running"; rm -f "$COMFY_KIND";;
+    pkill -f "$MATCH" 2>/dev/null && echo "stopped" || echo "not running"; rm -f "$COMFY_KIND"
+    # a two-GPU world's shared memory (spark/tensorfold_h3/tp.py) is RAM until it is unlinked. Its name carries its
+    # ComfyUI's pid (tf-h3-<pid>-<id>): only worlds whose server is gone are removed (another Studio's stay)
+    for _ in $(seq 1 10); do pgrep -f "$MATCH" >/dev/null || break; sleep 1; done
+    for SHM in /dev/shm/tf-h3-*; do
+      [ -e "$SHM" ] || continue
+      OWNER="${SHM#/dev/shm/tf-h3-}"; OWNER="${OWNER%%-*}"
+      case "$OWNER" in ''|*[!0-9]*) continue;; esac
+      # kill -0 also fails on a live process of another user: only "no such process" means the world is dead
+      if ! kill -0 "$OWNER" 2>/dev/null && ! ps -p "$OWNER" >/dev/null 2>&1; then rm -f "$SHM" 2>/dev/null || true; fi
+    done;;
   status) pgrep -f "$MATCH" >/dev/null && echo "running on 127.0.0.1:$PORT" || echo "not running";;
   run)
     # A warm server belongs to the GPU session, not to the first job that loaded it.
@@ -44,8 +54,20 @@ case "${1:-start}" in
     NODE="$PREFIX/ComfyUI/custom_nodes/tensorfold_h3"
     if [ -s "$PREFIX/tf-h3/libtf_h3.so" ]; then
       mkdir -p "$NODE"
-      cp "$HERE/tensorfold_h3/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
+      # the node, and the two-GPU world beside it (tp.py, tp_rank.py: rank 1 on the second card)
+      for PYFILE in "$HERE/tensorfold_h3/"*.py; do
+        cp "$PYFILE" "$NODE/$(basename "$PYFILE").$$" && mv -f "$NODE/$(basename "$PYFILE").$$" "$NODE/$(basename "$PYFILE")"
+      done
       export TF_H3_LIB="$PREFIX/tf-h3/libtf_h3.so"
+    fi
+    # two cards: MiniMax H3's bf16 transformer blocks from STUDIO_SPLIT_BLOCK on the second card (spark/gpus.py,
+    # STUDIO_LAYER_SPLIT=on; off by default). Only with paired cards (STUDIO_GPUS): one card gets no extra node
+    NODE="$PREFIX/ComfyUI/custom_nodes/studio_split_h3"
+    if [ -n "${STUDIO_GPUS:-}" ] && [ -f "$HERE/studio_split_h3/__init__.py" ]; then
+      mkdir -p "$NODE"
+      cp "$HERE/studio_split_h3/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
+    else
+      rm -rf "$NODE"
     fi
     # the Studio's MMAudio sampler (foley), beside kijai's ComfyUI-MMAudio when oneshot-setup-spark.sh --sound put it there
     NODE="$PREFIX/ComfyUI/custom_nodes/studio_mmaudio"

@@ -181,7 +181,7 @@ const platName = () => {
   if (S.platform !== "spark") return S.platform_label || "";
   const label = S.platform_label || "";
   if (!label || label.startsWith("DGX SPARK")) return "DGX Spark";
-  const raw = (label.split(" · ")[1] || "").replace(/^NVIDIA\s+/, "");
+  const raw = (label.split(" · ")[1] || "").replace(/^(\d+×\s*)?NVIDIA\s+/, "$1");  // paired cards: "2× RTX PRO 5000"
   const card = raw.split(/\s+(?:BLACKWELL|ADA|AMPERE|MAX-Q|WORKSTATION)\b/)[0].trim();
   if (!card) return "DGX Spark";
   return S.gpu_index ? card + " · " + S.gpu_index : card;
@@ -231,7 +231,8 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   $("#mtxt").textContent = gpu != null ? gpu + "% GPU" : t.memory ? Math.round(t.memory.available_mb / 1024) + " GB free" : "";
   const gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1);
   const say = [(S && S.platform_label) || platName(), busy ? "rolling" : "ready", "GPU " + (gpu == null ? "n/a" : gpu + "%" + (t.gpu && t.gpu.temp_c != null ? " at " + t.gpu.temp_c + "°C" : "")),
-    card ? "memory " + gb(card.used_mb) + " of " + gb(card.total_mb) + " GB (" + used + "%)" : (t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : ""),
+    t.gpu && t.gpu.cards ? t.gpu.cards.map(c => "GPU " + c.index + " " + (c.util_pct == null ? "n/a" : c.util_pct + "%") + (c.temp_c != null ? " at " + c.temp_c + "°C" : "")).join(", ") : "",
+    card ? "memory " + gb(card.used_mb) + " of " + gb(card.total_mb) + " GB (" + used + "%)" + (card.cards ? " over " + card.cards + " cards" : "") : (t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : ""),
     // a card's memory is the memory clause above; this second clause is only where the page still leads with RAM
     !card && t.memory && t.memory.card ? "card " + gb(t.memory.card.used_mb) + " of " + gb(t.memory.card.total_mb) + " GB" : "",
     // the Studio's Bolt brain (app/bolt.py) while it holds memory

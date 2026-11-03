@@ -282,3 +282,14 @@ Pre-PR edge-case follow-up: cached beat results now obey the same Windows ten-mi
 decoded audio. Exactly 600 seconds is accepted; longer or invalid cached durations are refused explicitly.
 The existing non-Windows cache behavior is unchanged.
 The focused cache/shared-page/credits/privacy follow-up passed 52 tests without skips.
+
+## Update: 2026-11-03 - synced-main integration
+
+Integrated the synced main at `8eef55a` with a normal merge, preserving upstream FLUX3-K/YuE2 Home
+chips, paired-card reporting, HDR/progress features and credits while retaining Windows availability
+checks. Those additional generators/paired-card/HDR routes remain unqualified on Windows.
+The three content conflicts were resolved without discarding either platform's intended behavior.
+
+Focused model-free Windows/shared tests and synthetic upstream GPU/HDR contracts: 365 passed,
+one explicit symlink-privilege skip. No hosted, GPU-render or physical paired-card result is claimed.
+The merge is staged for a normal commit/push; no rebase or force-push was performed.

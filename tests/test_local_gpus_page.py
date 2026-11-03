@@ -171,12 +171,44 @@ def test_remote_actions_and_mac_behavior_remain_and_local_workers_have_no_ssh_ac
 
 
 def test_inventory_changes_trigger_redraw_and_plan_cache_invalidation():
-    out = run("""SPK.data = fixture(2); const before = spkSig(SPK.data); SPK.data.local_gpus.devices[1].temp_c = 70;
-      out.changed = spkSig(SPK.data) !== before;
+    out = run("""SPK.data = fixture(2); const before = spkSig(SPK.data); const gpu = SPK.data.local_gpus.devices[1];
+      gpu.temp_c = 70; gpu.util_pct = 99; gpu.power_w = 300; gpu.used_mb = 9000; gpu.free_mb = 15000; SPK.data.this.memory_gb = 12.3;
+      out.readingsOnly = spkSig(SPK.data) === before;  // live readings are drawn in place (#186)
+      gpu.reason = "Busy with another process"; out.changed = spkSig(SPK.data) !== before;
       const inventory = SPK.data; SPK.plans = { old: {} }; answers["/api/sparks"] = { ...inventory, placement: { worker: "head", policy: "require" } };
       await spkLoad(false); out.plans = Object.keys(SPK.plans); out.placement = SPK.data.placement;""")
-    assert out["changed"] and out["plans"] == []
+    assert out["readingsOnly"] and out["changed"] and out["plans"] == []
     assert out["placement"] == {"worker": "head", "policy": "require"}
+
+
+def test_live_readings_are_drawn_in_place_without_a_page_redraw():
+    """#186: a poll that only moves readings (a card's load, temperature, power, memory; a machine's free memory) must
+    not call render(), which rebuilt the page every 4 s and restarted a clip playing in the Library."""
+
+    out = run("""SPK.data = fixture(2); const d = SPK.data;
+      d.workers = [{ address: "user@spark-2", kind: "spark", name: "spark-2", state: "ready", says: "idle", enabled: true, memory_gb: 80.5, version: "4.3.1", guard: true }];
+      d.this.memory_gb = 96.8; d.local_gpus.supported = false;  // the head's own line as a Spark shows it
+      let page = viewSparks(); d.local_gpus.supported = true; page = [page, viewSparks()];
+      const nodes = all(page, n => n.attrs && "data-spk-reading" in n.attrs);
+      nodes.forEach(n => { n.getAttribute = k => n.attrs[k]; Object.defineProperty(n, "textContent", { get() { return text(n.kids); }, set(v) { n.kids = [v]; } }); });
+      document.querySelectorAll = selector => selector === "[data-spk-reading]" ? nodes : [];
+      const renders = []; globalThis.render = () => renders.push(tab);
+      SPK.plans = { kept: {} };
+      const hot = JSON.parse(JSON.stringify(d)); Object.assign(hot.local_gpus.devices[1], { temp_c: 71, util_pct: 97, power_w: 280 });
+      answers["/api/sparks"] = hot; await spkLoad(true);
+      out.hot = { renders: renders.length, plans: Object.keys(SPK.plans), lines: nodes.map(text) };
+      const full = JSON.parse(JSON.stringify(hot)); full.this.memory_gb = 40.1; full.workers[0].memory_gb = 12.0;
+      Object.assign(full.local_gpus.devices[1], { used_mb: 20000, free_mb: 4576 });
+      answers["/api/sparks"] = full; await spkLoad(true);
+      out.full = { renders: renders.length, plans: Object.keys(SPK.plans), lines: nodes.map(text) };
+      const changed = JSON.parse(JSON.stringify(full)); changed.local_gpus.devices[1].reason = "Driven by a display";
+      answers["/api/sparks"] = changed; await spkLoad(true); out.inventory = renders.length;""")
+    assert out["hot"]["renders"] == 0 and out["hot"]["plans"] == ["kept"]  # a reading alone keeps the plans
+    assert any("Temperature: 71 °C" in line and "97%" in line and "280 W" in line for line in out["hot"]["lines"])
+    assert out["full"]["renders"] == 0 and out["full"]["plans"] == []  # less room: plans asked again, page kept
+    lines = " | ".join(out["full"]["lines"])
+    assert "20,000 MiB used" in lines and "40.1 GB of memory available" in lines and "12 GB of memory available" in lines
+    assert out["inventory"] == 1  # an inventory change still redraws
 
 
 def test_stopped_workers_can_be_removed_and_use_toggle_preserves_gpu_identity():

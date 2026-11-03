@@ -37,6 +37,22 @@ def test_windows_state_is_not_a_mac_or_a_render_backend(client):
     assert server.estimate("small", "fh4", 5) is None
 
 
+def test_windows_keeps_upstream_paired_gpu_and_hdr_features_unqualified(client, monkeypatch):
+    monkeypatch.setenv("STUDIO_GPUS", "0,1")
+    monkeypatch.setenv("STUDIO_GPU", "0")
+    monkeypatch.setattr(server.memory_guard, "paired_gpus", lambda: pytest.fail("Windows must not advertise paired GPUs"))
+    state = client.get("/api/state").json()
+    assert state["gpu_index"] == "0" and state["ui_only"]
+    assert not state["capabilities"]["flux"]["available"] and not state["capabilities"]["hlg"]["available"]
+    assert client.post("/api/jobs", json={"kind": "hlg", "params": {"video": "uploads/unqualified.mp4"}}).status_code == 501
+    with pytest.raises(server.HTTPException) as error:
+        server.enqueue("hlg", "Unqualified", {})
+    assert error.value.status_code == 501
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server.memory_guard, "paired_gpus", lambda: ["0", "1"])
+    assert client.get("/api/state").json()["gpu_index"] == "0,1"
+
+
 @pytest.mark.parametrize("path", [
     "/api/jobs", "/api/bolt/load", "/api/nodes/run", "/api/discover/scan",
     "/api/voice/takes", "/api/music/takes",

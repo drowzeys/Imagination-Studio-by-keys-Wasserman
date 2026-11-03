@@ -1,11 +1,12 @@
-"""Three Library actions, each built on a LoRA from the hub that is not for making a clip but has a job of its own.
+"""The Library actions. Most are built on a LoRA from the hub that is not for making a clip but has a job of its own.
 
     Turnaround sheet   one picture in, five views of its subject out (matlod's Turnaround LoRA, MATLOWAI's nodes)
     Upscale            a finished clip made larger (dntpi's Video Upscaler LoRA and H3 Video Upsampler node)
     Remove a person    a person taken out of a clip (Akatz Labs' Person Remover LoRA and H3 Relay node)
     Find a person      the first half of the removal alone: the mask, to look at before the long render
+    HDR finish         a finished clip graded and written as BT.2020 / HLG with an SDR copy (hlg.py: ffmpeg and numpy, no model)
 
-They run as jobs in the Studio's queue (kinds turnaround, upscale, mask, remove). On a DGX Spark each goes through its
+They run as jobs in the Studio's queue (kinds turnaround, upscale, mask, remove, hlg). On a DGX Spark each goes through its
 author's own ComfyUI nodes (spark/spark_workflows.py, installed by spark/setup-workflows.sh). On a Mac the turnaround
 sheet is the MLX engine's own (h3_generate.py --sheet); Upscale, Find and Remove a person run the same
 spark/spark_workflows.py graphs on a ComfyUI of the Mac's own, on PyTorch's Metal device (mac/comfy.sh, installed by
@@ -16,20 +17,25 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-KINDS = ("turnaround", "upscale", "mask", "remove")
+import hlg
+
+KINDS = ("turnaround", "upscale", "mask", "remove", "hlg")
 PRESETS = Path(__file__).with_name("lora-presets.json")
 # the LoRA each action is built on (its id in the hub), and what the action is called on the page
-LORA = {"turnaround": "turnaround", "upscale": "video-upscaler", "remove": "person-remover", "mask": None}
-TITLES = {"turnaround": "Turnaround sheet", "upscale": "Upscale", "remove": "Remove a person", "mask": "Find a person"}
+LORA = {"turnaround": "turnaround", "upscale": "video-upscaler", "remove": "person-remover", "mask": None, "hlg": None}
+TITLES = {"turnaround": "Turnaround sheet", "upscale": "Upscale", "remove": "Remove a person", "mask": "Find a person", "hlg": "keys-HDR LORA"}
 SIZES = (512, 1024, 2048)                 # a turnaround view's side: 512 is what the LoRA was trained at
 MEGAPIXELS = (1.0, 2.0, 3.0, 4.0)         # an upscale's area: 2 is about 1920x1080
 WINDOWS = (22, 39, 56)                    # the remover's window: 22 is the author's proven default
 # On a Mac: the node pack and the files under $MAC_COMFY_MODELS each action needs, and the option that installs them
+X265 = {}                                 # whether this machine's ffmpeg has libx265: asked once, with a time limit
 MAC_NODES = {"upscale": "ComfyUI-H3-Video-Upsampler", "remove": "h3-relay", "mask": "h3-relay"}
 MAC_FILES = {"upscale": ["latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors",
                          "vae/minimax_h3_audio_vae_fp32.safetensors"],
@@ -40,7 +46,7 @@ MAC_OPTION = {"upscale": "--upscale", "remove": "--remove", "mask": "--remove"}
 MAC_H3 = ("Ref2VA/transformer", "FL2VA/text_encoder", "FL2VA/video_vae")
 
 
-def attach(home: Path, pack: Path, spark: bool, inside, relative):
+def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool = False):
     router = APIRouter()
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
     models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
@@ -68,6 +74,15 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
     def missing(kind: str) -> str:
         """Why an action cannot run here, or '' when it can."""
 
+        if kind == "hlg":
+            if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+                return "The HDR finish needs ffmpeg and ffprobe, which are not installed on this machine."
+            if "ok" not in X265:
+                try:
+                    X265["ok"] = "libx265" in subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=hlg.TIMEOUT).stdout
+                except (OSError, subprocess.SubprocessError):
+                    return "ffmpeg did not answer: try again."
+            return "" if X265["ok"] else "The HDR finish writes HEVC, and this machine's ffmpeg was built without libx265."
         if not spark:
             model = Path(os.environ.get("H3_MODEL_DIR", Path.home() / "h3-models/MiniMax-H3"))
             if not (model / "Ref2VA/transformer").is_dir():
@@ -104,12 +119,14 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
     def state() -> dict:
         out = {}
         for kind in KINDS:
-            why, card = missing(kind), recipe(LORA[kind] or "person-remover")
+            why = f"{TITLES[kind]} is not qualified in this Windows preview." if windows else missing(kind)
+            card = recipe(LORA[kind] or "person-remover") if kind != "hlg" else {}
             out[kind] = {"title": TITLES[kind], "ready": not why, "why": why, "lora": LORA[kind],
                          "lora_name": card.get("name"), "author": card.get("author")}
         out["turnaround"].update(sizes=SIZES, size=1024)
         out["upscale"].update(megapixels=MEGAPIXELS, megapixel=2.0)
         out["remove"].update(windows=WINDOWS, window=22, steps=12)
+        out["hlg"].update(strength=1.0)
         return out
 
     def media(params: dict, key: str, suffixes: tuple) -> Path:
@@ -133,6 +150,22 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
         why = missing(kind)
         if why:
             raise HTTPException(400, why)
+        if kind == "hlg":
+            clip = media(params, "video", (".mp4", ".mov"))
+            strength = number(params, "strength", 1.0)
+            if not 0.1 <= strength <= 1:
+                raise HTTPException(400, "the strength is between 0.1 and 1")
+            refused = hlg.refusal(clip)
+            if refused:
+                raise HTTPException(400, refused)
+            target, outputs = home / "renders" / f"{job_id}-hlg.mp4", []
+            command = [sys.executable, str(pack / "app/hlg.py"), "run", "--video", str(clip), "-o", str(target), "--strength", f"{strength:g}"]
+            outputs.append(str(target))
+            if params.get("sdr", True):
+                plain = home / "renders" / f"{job_id}-sdr.mp4"
+                command += ["--sdr", str(plain)]
+                outputs.append(str(plain))
+            return command, {}, outputs
         comfy = spark or kind != "turnaround"     # on a Mac the turnaround sheet is the MLX engine's
         python = str(prefix / ("venv/bin/python" if spark else "comfy-venv/bin/python"))
         script = [python, str(pack / "spark/spark_workflows.py"), kind]

@@ -194,7 +194,8 @@ Rules:
   governor, `spark/workload.py`) `comfy.sh` runs the server through `spark/managed_comfy.py`, which starts the same
   guard (and its plain-loop fallback) beside it inside a reservation, and `start_gate.py` runs before every submission;
   `DRAMA3_MANAGED_GUARD=1` does the same for Drama 3 (`spark/managed_voice.py`). Its limits add to the guard's, never
-  replace or lower them; unset, nothing of it runs. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
+  replace or lower them; unset, nothing of it runs. `SPARK_PROGRESS_FILE` (`spark/progress_file.py`, off by default)
+  lets such a governor show what a clip is doing: two lines, passes and engine, then the stage, replaced whole. `ESTIMATES`, `MEASURED_ROWS` and `MEASURED_PIXELS`
   are measurements, one route each. A LoRA on FastH3 is merged into TensorFold's int8 engine (`TensorFoldH3Blocks`
   takes the block projections' patches off ComfyUI and calls `tf_h3_set_weight`; route `int8-lora`, measured to
   1376x768 at 243 frames); on ComfyUI's bfloat16 blocks (an engine without that symbol, `--engine comfy`, Ref2VA,
@@ -217,6 +218,7 @@ Rules:
   a Spark the Mac reaches that logs in to the worker with its own key (`Relay`: a socket in `~/.cache/studio-sparks`
   there, ended with the Mac's ssh or its heartbeat). Never add the Mac's key to a worker for it, and never open the
   relay to a network.
+- keys-HDR LORA, the HDR finish (`app/hlg.py`, the Library action `hlg`): processor and ffmpeg only, never under the GPU lock, numpy only (no OpenCV in the Studio's venv). It is a grade of an 8-bit SDR clip into BT.2020 / HLG: do not describe it as recovered detail or as what the model made. `TARGET` and `BANDS` are one look chosen by eye, not a standard. One curve for the whole clip: fit per frame or per shot, it flickers or jumps at cuts. A clip already HLG or PQ is refused.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers
@@ -237,6 +239,14 @@ Rules:
   Required placement never falls back; saved placement applies only to video, and preflight asks the selected worker.
   Tests isolate GPU runtime directories and inventory; actual hardware probes require `STUDIO_TEST_HARDWARE=1`.
   Three/four-card cases are deterministic simulations, not physical throughput measurements.
+- Two GPUs in one machine (`spark/gpus.py`, `spark/tensorfold_h3/decode2.py`, `tp.py`, `spark/studio_split_h3`,
+  `docs/two-gpus.md`): only with `STUDIO_GPUS` (`memory_guard.paired_gpus()`); two visible cards alone never pair, and
+  without it nothing is installed or patched (comfy.sh copies `studio_split_h3` only when paired; decode2 replaces no
+  ComfyUI class method, it gives one decoder instance stand-ins for one decode). Never copy ComfyUI source (GPL-3.0)
+  into this Apache-2.0 repo: call its methods. The guard counts paired cards as cards x the smallest card's free
+  memory only when the engine exports `tf_h3_tp_init` (`memory_guard.tp_engine()`), else the head's card alone;
+  one-card engines (Drama 3, Bolt, Music 3) read `head_free_mb`. `STUDIO_DECODE_SPLIT=self` runs the two-card decode
+  path on one card for a byte check. Our Sparks have one GPU each: the two-card path is the contributor's measurement.
 - Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
   cloud API. `DRAMA3_BACKEND=mlx|cuda` (`mlx` on a Mac, `cuda` on a DGX Spark). Both engines run as a persistent

@@ -25,7 +25,7 @@ function machineStrip() {
   return el("div", { class: "mstrip", id: "homemachine" },
     el("div", { class: "who" }, el("span", { class: "dotl" + (running ? " r" : t && (t.warnings || []).length ? " t" : "") }),
       el("div", { style: "min-width:0" }, el("b", {}, platName() || "This machine"), el("span", {}, running ? "Rolling: " + running.title : t && (t.warnings || []).length ? t.warnings[0] : "Ready for the next take"))),
-    t && t.gpu ? m("GPU", t.gpu.util_pct, (t.gpu.util_pct ?? "–") + "%" + (t.gpu.temp_c != null ? " · " + t.gpu.temp_c + "°C" : ""), t.gpu.util_pct > 60 ? "var(--red)" : "var(--green)") : el("div", { class: "m" }, el("span", { class: "note", style: "margin:0" }, t ? "" : "Readouts appear once the machine reports them.")),
+    t && t.gpu ? m(t.gpu.count > 1 ? t.gpu.count + " GPUs" : "GPU", t.gpu.util_pct, (t.gpu.util_pct ?? "–") + "%" + (t.gpu.temp_c != null ? " · " + t.gpu.temp_c + "°C" : ""), t.gpu.util_pct > 60 ? "var(--red)" : "var(--green)") : el("div", { class: "m" }, el("span", { class: "note", style: "margin:0" }, t ? "" : "Readouts appear once the machine reports them.")),
     t && t.memory ? m("Memory", memUsed, (card ? gb(card.used_mb) + " of " + gb(card.total_mb) : gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb)) + " GB", memUsed > 85 ? "var(--red)" : "var(--amber)", card ? null : (t.memory.floor_mb ? 100 - pct(t.memory.floor_mb, t.memory.total_mb) : null)) : el("div", { class: "m" }),
     t && t.disk ? m("Disk", t.disk.used_pct, Math.round(t.disk.free_gb) + " GB free", t.disk.used_pct > 90 ? "var(--red)" : "var(--blue)", null, "disk") : el("div", { class: "m disk" }),
     el("button", { class: "small", onclick: () => go("Machine") }, "Telemetry"));
@@ -65,19 +65,35 @@ const START_NEW = ["sfx", "looks", "previs", "nodes", "film", "script", "graphic
 const startShown = (look, id) => (look.start_cards || []).includes(id) || (START_NEW.includes(id) && !(look.start_off || []).includes(id));
 const homePrefs = () => typeof prefs === "function" ? prefs() : { appearance: { start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], poster: true }, presets: { recipe: "quick", mode: "clip", seconds: 5, seed: "fixed", qa_gate: true, image_model: "qwen" } };
 
-/* ---------- the composer: one box, four kinds of take, one Generate ---------- */
+/* ---------- the composer: one box, a chip per kind of take and engine, one Generate ---------- */
 const HC = { text: "", mode: null, recipe: null, seconds: null, est: {}, estInfo: {}, estAdmission: {}, estPending: {}, made: [], busy: false, image: null };
 const hcSpan = sec => sec == null ? "" : sec < 90 ? Math.round(sec) + " s" : sec < 5400 ? Math.round(sec / 60) + " min" : Math.floor(sec / 3600) + " h " + Math.round(sec % 3600 / 60) + " min";
 const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe the shot: who is there, what happens, what is heard."],
   picture: ["Picture", "qwen", "Qwen 2.1", "Describe the picture: the subject, the place, the light, the lens."],
+  flux: ["Picture", "flux", "FLUX3 Klein", "Describe the picture: the subject, the place, the light, the lens."],
   voice: ["Voice", "fish", "Drama 3", "Write the line as it is said. A [direction] in brackets sets the voice."],
-  song: ["Song", "music3", "Music 3", "A style (genre, tempo, mood), or lyrics with [Verse] and [Chorus] tags."] };
+  song: ["Song", "music3", "Music 3", "A style (genre, tempo, mood), or lyrics with [Verse] and [Chorus] tags."],
+  yue: ["Song", "yue", "YuE2", "A style (genre, tempo, mood), or lyrics with [Verse] and [Chorus] tags."] };
 const HC_RECIPES = () => ({ quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K" });
-const hcKind = mode => ({ clip: "video", picture: "scout", voice: "voice", song: "music" })[mode];
-const hcMode = () => { const mode = HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
-  return capWhy(hcKind(mode)) && mode !== "picture" ? "picture" : mode; };
+const hcKind = mode => ({ clip: "video", picture: "scout", flux: "flux", voice: "voice", song: "music", yue: "music" })[mode];
+// FLUX3 Klein and YuE2 have a chip only where they are installed; where YuE2 is the only song engine ready, Music 3 has none
+const hcFluxModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models ? S.image_models.map(m => m.id).filter(id => /^flux/.test(id)) : [];
+  return have.includes(want) ? want : have.includes("flux3k-fast") ? "flux3k-fast" : have[0] || null; };
+const hcSongEngines = () => (S && S.music && S.music.engines) || null;
+const hcYue = () => { const e = hcSongEngines(); return !!(e && e.yue2 && (e.yue2.installed || e.yue2.available)); };
+const hcHas = id => id === "flux" ? !!hcFluxModel() : id === "yue" ? hcYue() : id !== "song" || !hcYue() || !hcSongEngines().music3 || !!hcSongEngines().music3.available;
+// Settings says the kind of take; the picture model and song engine it presets choose that kind's chip
+const hcMode = () => {
+  if (S && S.platform === "windows") { const mode = HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
+    return capWhy(hcKind(mode)) && mode !== "picture" ? "picture" : mode; }
+  if (HC.mode && hcHas(HC.mode)) return HC.mode;
+  const p = homePrefs().presets, want = HC_MODES[p.mode] ? p.mode : "clip";
+  if (want === "picture" && /^flux/.test(p.image_model || "") && hcHas("flux")) return "flux";
+  if (want === "song" && S && S.music && S.music.engine === "yue2" && hcHas("yue")) return "yue";
+  return hcHas(want) ? want : "clip"; };
 const hcRecipe = () => { const r = HC.recipe || homePrefs().presets.recipe; return HC_RECIPES()[r] ? r : "quick"; };
-const hcPictureModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"]; return have.includes(want) ? want : have[0]; };
+const hcPictureModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"];
+  return S && S.platform === "windows" ? have.includes(want) ? want : have[0] : have.includes(want) && !/^flux/.test(want) ? want : "qwen"; };
 const hcSeed = () => typeof prefSeed === "function" ? prefSeed() : 1;
 const hcTitle = t => t.replace(/\s+/g, " ").trim().slice(0, 48);
 // a clip's length: the one picked here, else the recipe's, else Settings → Presets; over 15 s it is a long take, a chain of 15 s clips
@@ -138,10 +154,11 @@ async function hcRequest(mode, text, seed, retake) {
     const params = { prompt: composed.prompt, image: still, preset: r.preset, quality: r.quality, seed: r.seed && !retake ? r.seed : seed, ...(p.qa_gate ? {} : { qa: false }) };
     return long ? ["/api/jobs", { kind: "long", title: long + ": " + hcTitle(text).slice(0, 40), params: { ...params, total_seconds: seconds, beats: [] } }]
       : ["/api/jobs", { kind: "video", title: hcTitle(text), params: { ...params, seconds } }]; }
-  if (mode === "picture") return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40), params: stillParams({ prompt: text, count: 1, seed, preset: "2k", image_model: hcPictureModel() }) }];
+  if (mode === "picture" || mode === "flux") return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40), params: stillParams({ prompt: text, count: 1, seed, preset: "2k", image_model: mode === "flux" ? hcFluxModel() : hcPictureModel() }) }];
   if (mode === "voice") return ["/api/voice/takes", { text, seed }];
   const lyrics = /\[(intro|verse|pre-chorus|chorus|bridge|instrumental|outro)\]/i.test(text);
-  return ["/api/music/takes", lyrics ? { caption: "A warm, cinematic song with a clear lead vocal.", lyrics: text, seconds: 60, seed } : { caption: text, lyrics: "", seconds: 60, seed }]; }
+  const chosen = hcSongEngines() ? { engine: mode === "yue" ? "yue2" : "music3" } : {};
+  return ["/api/music/takes", lyrics ? { caption: "A warm, cinematic song with a clear lead vocal.", lyrics: text, seconds: 60, seed, ...chosen } : { caption: text, lyrics: "", seconds: 60, seed, ...chosen }]; }
 async function hcGenerate(again) {
   const mode = again ? again.mode : hcMode(), text = (again ? again.text : HC.text).trim();
   if (!text) return toast("Say what you want to make first");
@@ -155,8 +172,8 @@ async function hcGenerate(again) {
 // the full form for this kind of take, with the words carried over
 function hcMore() { const mode = hcMode(), text = HC.text.trim();
   if (mode === "voice") { if (typeof VO !== "undefined") VO.text = text; return go("Voice"); }
-  if (mode === "song") { if (typeof MU !== "undefined") { if (/\[[A-Za-z-]+\]/.test(text)) MU.lyrics = text; else MU.caption = text; } return go("Music"); }
-  Object.assign(C, mode === "clip" ? { goes: "video", start: "text", ...(HC.seconds ? { seconds: HC.seconds } : {}) } : { goes: "image", imageModel: hcPictureModel() }); C.step = 0; C.scene = text; sync(); C.prompt = text; go("Create"); }
+  if (mode === "song" || mode === "yue") { if (typeof MU !== "undefined") { MU.engine = mode === "yue" ? "yue2" : "music3"; if (/\[[A-Za-z-]+\]/.test(text)) MU.lyrics = text; else MU.caption = text; } return go("Music"); }
+  Object.assign(C, mode === "clip" ? { goes: "video", start: "text", ...(HC.seconds ? { seconds: HC.seconds } : {}) } : { goes: "image", imageModel: mode === "flux" ? hcFluxModel() : hcPictureModel() }); C.step = 0; C.scene = text; sync(); C.prompt = text; go("Create"); }
 // a shot from the suite fills the box: its words, its length (the nearest the model makes) and its still as the first frame
 function hcFromSuite(p) { HC.text = p.prompt || ""; HC.mode = "clip"; HC.image = p.image || null;
   if (p.seconds) { const have = Object.keys((S && S.durations) || {}).map(Number); HC.seconds = have.length ? have.reduce((a, b) => Math.abs(b - p.seconds) < Math.abs(a - p.seconds) ? b : a) : Math.round(p.seconds); }
@@ -177,9 +194,9 @@ function homeComposer() {
   area.addEventListener("keydown", e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); hcGenerate(); } });
   const recipes = HC_RECIPES(), ids = Object.keys(recipes), rec = hcRecipe();
   return el("section", { class: "composer", id: "composer" },
-    el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).map(([id, [label, mk, model]]) =>
+    el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).filter(([id]) => hcHas(id)).map(([id, [label, mk, model]]) =>
       el("button", { type: "button", role: "tab", "data-mode": id, title: capWhy(hcKind(id)), disabled: !!capWhy(hcKind(id)), "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
-        el("b", {}, label), S && S.platform === "windows" && id === "picture" ? "SD-Turbo" : typeof mark === "function" ? mark(id === "picture" && /^flux/.test(hcPictureModel()) ? "flux" : mk, id === "picture" && /^flux/.test(hcPictureModel()) ? "FLUX3-K" : model) : model))),
+        el("b", {}, label), S && S.platform === "windows" && id === "picture" ? "SD-Turbo" : typeof mark === "function" ? mark(mk, model) : model))),
     area, el("div", { class: "cmp-hint" }, hint),
     el("div", { class: "cmp-bar" },
       el("button", { type: "button", class: "primary cmp-go", title: capWhy(hcKind(mode)), disabled: HC.busy || !!capWhy(hcKind(mode)), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),

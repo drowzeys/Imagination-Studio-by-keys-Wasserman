@@ -200,9 +200,12 @@ def machine() -> tuple[str, str]:
                                                capture_output=True, text=True, timeout=5).stdout.strip().splitlines()[0])
             except (OSError, IndexError, subprocess.TimeoutExpired):
                 return "spark", "DGX SPARK · CUDA · H3-CUDA"  # not kept: asked again on a later call
-        # the same build on a CUDA workstation (an RTX Pro 6000): named by its card, not as a DGX Spark
+        # the same build on a CUDA workstation (an RTX Pro 6000): named by its card, not as a DGX Spark; paired cards
+        # (STUDIO_GPUS) as "2× <card>"
+        paired = memory_guard.paired_gpus()
+        many = f"{len(paired)}× " if len(paired) > 1 else ""
         return "spark", (f"DGX SPARK · {GPU_NAME[0].upper()} · H3-CUDA" if "GB10" in GPU_NAME[0].upper()
-                         else f"CUDA · {GPU_NAME[0].upper()} · H3-CUDA")
+                         else f"CUDA · {many}{GPU_NAME[0].upper()} · H3-CUDA")
     # no chip name: the same recipe runs from an M1 with 96 GB up (pictures only from 48 GB)
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
@@ -1634,7 +1637,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
             raise HTTPException(501, WINDOWS_NOTE)
         return windows_storyboard.build(params, HOME, job_id)
     scripts = PACK / "scripts"
-    if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove
+    if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove, hlg
         built = action_build(kind, params, job_id)
         if room:
             mac_comfy_room(kind)
@@ -2185,7 +2188,7 @@ def perform(job: dict, worker: dict | None = None) -> None:
         with local_work:
             local_threads.add(current)
     try:
-        if worker is not None or job.get("remote") or job["kind"] in ("export", "soundtrack", "finish", "graphics"):
+        if worker is not None or job.get("remote") or job["kind"] in ("export", "soundtrack", "finish", "graphics", "hlg"):
             return perform_job(job, worker)
         if not LOCAL_GPU_CHILD:
             hub.local.validate_head(local_gpus.inventory()["devices"])
@@ -2246,15 +2249,15 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
     try:
         # a Drama 3 server kept loaded after a voice take (voice.py) never stands beside a render here, nor MiniMax Music 3
         # kept loaded after a song (music.py): each is unloaded before any other job of this machine's queue
-        if job["kind"] not in ("voice", "export", "soundtrack", "finish", "graphics") and worker is None and not job.get("remote"):
+        if job["kind"] not in ("voice", "export", "soundtrack", "finish", "graphics", "hlg") and worker is None and not job.get("remote"):
             if voice.release(f"a {job['kind']} job needs the GPU"):
                 job["log"] += "[tensorfold] Drama 3 was unloaded to give this job its memory\n"
-        if job["kind"] not in ("music", "export", "soundtrack", "finish", "graphics") and worker is None and not job.get("remote"):
+        if job["kind"] not in ("music", "export", "soundtrack", "finish", "graphics", "hlg") and worker is None and not job.get("remote"):
             if music.release(f"a {job['kind']} job needs the GPU"):
                 job["log"] += "[tensorfold] MiniMax Music 3 was unloaded to give this job its memory\n"
         # NVIDIA Nemotron 3.5 Bolt (bolt.py), the Studio's brain engine: unloaded before this job when the job's measured
         # peak does not fit beside it (bolt_need), after the answers in flight; held until the queue is empty
-        if job["kind"] not in ("export", "soundtrack", "finish", "graphics") and worker is None and not job.get("remote"):
+        if job["kind"] not in ("export", "soundtrack", "finish", "graphics", "hlg") and worker is None and not job.get("remote"):
             job["log"] += bolt.admit(job, lambda resident: bolt_need(job, resident))
         if job["kind"] in train.KINDS and worker is None:  # a LoRA run holds about 55 GB for hours: ComfyUI's models go first
             job["log"] += train_free(job)
@@ -2383,7 +2386,7 @@ def state() -> dict:
             "platform": machine()[0], "platform_label": machine()[1],
             "ui_only": WINDOWS, "platform_note": WINDOWS_NOTE if WINDOWS else "",
             "windows_stills": windows_storyboard.status() if WINDOWS else None,
-            "gpu_index": os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None,
+            "gpu_index": (",".join(memory_guard.paired_gpus()) if not WINDOWS else "") or (os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None),
             "last_frame": True,
             # every clip length the model takes (lengths.py), and the longest this machine renders at each size
             "lengths": {"fps": FPS, "step": lengths.STEP, "shortest": lengths.SHORTEST, "longest": lengths.LONGEST,
@@ -2410,12 +2413,12 @@ def state() -> dict:
             out[key].update(available=False, why=WINDOWS_NOTE)
         out["capabilities"] = {kind: {"available": False, "why": why + " is not qualified in this Windows preview."}
                                for kind, why in {
-                                   "video": "H3 video generation", "edit": "Generative picture editing",
+                                   "video": "H3 video generation", "edit": "Generative picture editing", "flux": "FLUX3-K image generation",
                                    "voice": "Drama 3 voice", "music": "Music generation", "foley": "MMAudio foley",
                                    "motion": "Motion analysis", "workers": "Worker routing", "nodes": "Graph execution",
                                    "captions": "Vision descriptions and speech transcription", "looks": "Model LoRAs",
                                    "models": "Automatic model installation", "updates": "Automatic source updates",
-                                   "image_actions": "Model-based Library actions", "finish": "Tesseract Finish",
+                                   "image_actions": "Model-based Library actions", "finish": "Tesseract Finish", "hlg": "keys-HDR LORA finishing",
                                }.items()}
         sound_ready = windows_sound.status()
         gfx_ready = graphics.ready()
@@ -2790,7 +2793,7 @@ def unload_windows_stills(request: Request) -> dict:
     return windows_storyboard.backend_status()
 
 
-NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa", "train", "finish", "graphics")  # jobs a Spark runs without its ComfyUI server
+NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa", "train", "finish", "graphics", "hlg")  # jobs a Spark runs without its ComfyUI server
 
 
 COMFY_PROMPT = re.compile(r"^\[tensorfold\] comfy prompt ([0-9a-f-]{8,64})$", re.M)
@@ -3378,7 +3381,7 @@ def bolt_unload(request: Request) -> dict:
 import motion  # noqa: E402  (Motion Previs: a Python port of Sam Wasserman's Motion Previs Studio analysis, beside this file)
 app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)
-action_router, action_build, action_title, action_source = actions.attach(HOME, PACK, SPARK, inside, relative)
+action_router, action_build, action_title, action_source = actions.attach(HOME, PACK, SPARK, inside, relative, windows=WINDOWS)
 import swap  # noqa: E402  (Character Swap: the person in a part of a clip replaced by a character, a Library action, beside this file)
 swap_router, swap_build, swap_title, swap_source, swap_estimate = swap.attach(HOME, PACK, SPARK, inside, relative, media_seconds, held_room)
 app.include_router(swap_router)

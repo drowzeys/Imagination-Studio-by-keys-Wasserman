@@ -193,6 +193,29 @@ def test_each_engine_opens_on_a_landing_whose_cards_open_the_views():
     assert out["art"] == "slot" and not out["img"]  # no art is ready in the manifest: a plain panel, never a broken image
 
 
+def test_the_composer_offers_flux_and_yue_only_where_they_are_installed():
+    out = run("""const chips = () => homeComposer().kids[0].kids.map(n => n.attrs["data-mode"]);
+      const logos = () => homeComposer().kids[0].kids.map(n => find(n, k => k.tag === "img").attrs.src);
+      out.bare = chips();
+      S.image_models = [{ id: "qwen", label: "Qwen 2.1 Turbo" }, { id: "flux3k-fast", label: "FLUX3-K Fast" }, { id: "flux3k-full", label: "FLUX3-K Full" }];
+      S.music = { available: true, engine: "yue2", engines: { yue2: { installed: true, available: true }, music3: { available: true } } };
+      out.chips = chips(); out.logos = logos(); out.words = text(homeComposer().kids[0]);
+      out.flux = (await hcRequest("flux", "a lens", 1))[1].params.image_model;
+      out.qwen = (await hcRequest("picture", "a lens", 1))[1].params.image_model;
+      out.yue = (await hcRequest("yue", "slow blues", 1))[1].engine;
+      out.music3 = (await hcRequest("song", "[Verse] words", 1))[1].engine;
+      HC.mode = "flux"; hcMore(); out.more = [tab, C.goes, C.imageModel];
+      globalThis.MU = {}; HC.mode = "yue"; hcMore(); out.moreSong = [tab, MU.engine];
+      HC.mode = null; S.music.engines.music3.available = false; out.onlyYue = chips();""")
+    assert out["bare"] == ["clip", "picture", "voice", "song"]
+    assert out["chips"] == ["clip", "picture", "flux", "voice", "song", "yue"]
+    assert "brand/bfl-white.svg" in out["logos"] and "brand/yue.png" in out["logos"]
+    assert "FLUX3 Klein" in out["words"] and "YuE2" in out["words"] and "Music 3" in out["words"]
+    assert (out["flux"], out["qwen"], out["yue"], out["music3"]) == ("flux3k-fast", "qwen", "yue2", "music3")
+    assert out["more"] == ["Create", "image", "flux3k-fast"] and out["moreSong"] == ["Music", "yue2"]
+    assert "song" not in out["onlyYue"] and "yue" in out["onlyYue"]
+
+
 def test_create_carries_what_the_prompt_goes_to_as_one_small_control():
     out = run("""C.goes = "image"; const bar = intentBar(); out.bar = text(bar);
       const seg = find(bar, n => n.attrs && n.attrs.role === "tablist"); out.on = seg.kids.filter(n => n.attrs.class === "on").map(text);
@@ -703,6 +726,26 @@ def test_windows_home_and_engine_cards_honor_the_qualified_capabilities():
     assert "512" in out["image"] and "Qwen 2.1 or" not in out["image"]
     assert "five-second" in out["sound"].lower() and out["descriptionDisabled"]
     assert out["mac"] == "clip" and "Qwen 2.1" in out["macImage"]
+
+
+def test_upstream_flux_and_yue_chips_cannot_bypass_windows_limits():
+    out = run("""
+      S.platform = "windows";
+      S.image_models = [{ id: "sd-turbo", label: "SD-Turbo" }];
+      S.capabilities = { scout: { available: true }, flux: { available: false, why: "FLUX is unqualified" },
+        music: { available: false, why: "Music is unqualified" } };
+      S.music = { available: false, engine: "yue2", engines: { yue2: { installed: true, available: true }, music3: { available: false } } };
+      HC.mode = "yue"; out.mode = hcMode(); out.model = hcPictureModel();
+      const chips = homeComposer().kids[0].kids;
+      out.fluxHidden = !chips.some(n => n.attrs["data-mode"] === "flux");
+      out.yueDisabled = chips.find(n => n.attrs["data-mode"] === "yue").attrs.disabled;
+      out.errors = [];
+      for (const mode of ["flux", "yue"]) { try { await hcRequest(mode, "A test", 0); } catch (e) { out.errors.push(e.message); } }
+      out.requests = calls.length;
+    """)
+    assert out["mode"] == "picture" and out["model"] == "sd-turbo"
+    assert out["fluxHidden"] and out["yueDisabled"]
+    assert out["errors"] == ["FLUX is unqualified", "Music is unqualified"] and out["requests"] == 0
 
 
 def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account():
