@@ -153,8 +153,9 @@ def lead(first: bool, last: bool, seconds: float = 5, frames: int | None = None)
 SPARK = sys.platform.startswith("linux")
 WINDOWS = sys.platform == "win32"
 import windows_storyboard
+import windows_sound
 WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
-                "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills and CPU media exports are supported; video generation, in-app model installation, other agents and worker management are not supported yet. "
+                "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills, five-second sound effects and CPU media exports are supported; video generation, foley, in-app model installation, other agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
@@ -610,6 +611,7 @@ def accepting_jobs(job: dict | None = None):
     """Called under the queue lock, shared with the updater's idle check."""
     allowed = not WINDOWS or (job is not None and
                (job.get("kind") == "scout" and windows_storyboard.status()["available"]
+                or job.get("kind") == "sfx" and windows_sound.status()["available"]
                 or job.get("kind") == "export" and all(media_tools().values())))
     if WINDOWS and not allowed:
         raise HTTPException(501, WINDOWS_NOTE)
@@ -1925,7 +1927,7 @@ def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str
     """One render of a job's clip, on this machine or on the Spark the job was handed to (sparks.py), which leaves the
     clip at the same path: (False when the job was cancelled meanwhile, the environment, the output paths)."""
 
-    if WINDOWS and job["kind"] == "scout":
+    if WINDOWS and job["kind"] in ("scout", "sfx"):
         expired = threading.Event()
         def timed_out():
             with lock:
@@ -1953,6 +1955,10 @@ def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str
         job["render"] = {"backend_reused": result["backend_reused"],
                          "request_seconds": result["request_to_files_seconds"]}
         job["log"] += f"[tensorfold] ComfyUI {'reused' if result['backend_reused'] else 'started'}; kept warm\n"
+        if job["kind"] == "sfx":
+            target = HOME / "sound" / "sfx" / job["id"] / "sound.wav"
+            job["_sound_seconds"] = result["audio"]["seconds"]
+            return True, {}, [str(target)]
         target = HOME / "scouts" / job["id"]
         paths = [str(target / name) for _, _, name in windows_storyboard.image_plan(params)]
         return True, {}, paths + [str(target / "sheet.jpg")]
@@ -2310,8 +2316,11 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
         hub.record(job)  # the clip, its seed and settings, and the Spark that rendered it (sparks/takes.jsonl)
         if params.get("then") and job["status"] != "cancelled":  # the next step of Extend or Fix (revise.py)
             revise_then(job)
-        if job["status"] != "cancelled":
-            job["status"] = "done"
+        with lock:
+            if job["status"] != "cancelled":
+                if WINDOWS and job["kind"] == "sfx":
+                    windows_sound.save_take(job, HOME, HOME / job["outputs"][0], job["_sound_seconds"])
+                job["status"] = "done"
     except sparks.Moved:  # the Spark it was on refused it, failed it or stopped answering: it is in the queue again
         params.clear()  # as it was queued: a retake's seed and the frames cut for it are made again
         params.update(asked)
@@ -2568,6 +2577,15 @@ def queue_job(body: dict) -> dict:
     if WINDOWS:
         if body.get("kind") == "export":
             return windows_export(body)
+        if body.get("kind") == "sfx":
+            if not windows_sound.status()["available"]:
+                raise HTTPException(501, windows_sound.status()["why"])
+            if body.get("placement") is not None or body.get("sparks") not in (None, 1):
+                raise HTTPException(400, "Windows sound effects run on this machine only")
+            params = windows_sound.parameters(body.get("params") or {})
+            if body.get("title") is not None and not isinstance(body["title"], str):
+                raise HTTPException(400, "title is text")
+            return enqueue("sfx", body.get("title") or sound_title("sfx", params), params)
         if body.get("kind") != "scout":
             raise HTTPException(501, WINDOWS_NOTE)
         if not windows_storyboard.status()["available"]:
@@ -2701,7 +2719,7 @@ def cancel(job_id: str) -> dict:
         if active:
             job["status"] = "cancelled"
     if active:
-        if WINDOWS and job["kind"] == "scout":
+        if WINDOWS and job["kind"] in ("scout", "sfx"):
             try:
                 windows_storyboard.cancel_job(job_id)
             except (OSError, RuntimeError, ValueError) as error:
@@ -2731,8 +2749,8 @@ def unload_windows_stills(request: Request) -> dict:
     if not WINDOWS:
         raise HTTPException(501, "this control is for the Windows storyboard backend")
     with lock:
-        if any(job["kind"] == "scout" and job["status"] in ("queued", "running") for job in jobs.values()):
-            raise HTTPException(409, "storyboards are queued or running; cancel them before unloading ComfyUI")
+        if any(job["kind"] in ("scout", "sfx") and job["status"] in ("queued", "running") for job in jobs.values()):
+            raise HTTPException(409, "images or sound effects are queued/running; cancel them before unloading ComfyUI")
     try:
         windows_storyboard.release_backend()
     except (OSError, RuntimeError) as error:
@@ -3236,6 +3254,12 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
         params = windows_storyboard.parameters(params)
         try:
             windows_storyboard.preflight()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            raise HTTPException(400, str(error)) from None
+    if WINDOWS and kind == "sfx":
+        params = windows_sound.parameters(params)
+        try:
+            windows_sound.preflight()
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             raise HTTPException(400, str(error)) from None
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]

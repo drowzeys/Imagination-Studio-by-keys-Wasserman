@@ -147,7 +147,7 @@ function localModelsCard() {
     b && b.set_missing && b.endpoint === (found && found.endpoint) ? el("div", { class: "note m-flat" }, "Set to " + b.set_model + ", which this server no longer runs: the studio uses " + b.model + ". ",
       el("button", { type: "button", class: "small", onclick: () => save1({ local_model: "" }) }, "Follow what the server runs")) : null,
     L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null,
-    comfy ? el("div", { class: "group" }, el("h3", {}, "Storyboard backend · ComfyUI"),
+    comfy ? el("div", { class: "group" }, el("h3", {}, "Image and sound backend · ComfyUI"),
       el("div", { class: "note" }, comfy.why || (comfy.loaded ? "Models kept warm between jobs, under the memory guard." : comfy.running ? "ComfyUI is running." : "ComfyUI starts with the first image job.")),
       el("button", { class: "small", disabled: comfy.busy || !(comfy.running || comfy.why), onclick: async () => {
         try { S.windows_stills.backend = await api("/api/windows/stills/unload", {}); toast("ComfyUI unloaded"); render(); } catch (e) { toast(e.message); }

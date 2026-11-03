@@ -148,12 +148,22 @@ class WindowsComfy:
             self.job.close()
         if self.process:
             self.process.wait(timeout=10)
-        if self.monitor:
-            self.monitor.finish()
-        if self.log:
-            self.log.close()
-        if self.temporary:
-            self.temporary.cleanup()
-        self.job = self.process = self.monitor = self.log = self.temporary = None
-        self.base = ""
-        self.loaded = False
+        try:
+            if self.monitor:
+                self.monitor.finish()
+        finally:
+            if self.log:
+                self.log.close()
+            if self.temporary:
+                deadline = time.monotonic() + 5
+                while True:
+                    try:
+                        self.temporary.cleanup()
+                        break
+                    except OSError as error:
+                        if getattr(error, "winerror", None) not in (32, 33) or time.monotonic() >= deadline:
+                            raise
+                        time.sleep(.05)
+            self.job = self.process = self.monitor = self.log = self.temporary = None
+            self.base = ""
+            self.loaded = False

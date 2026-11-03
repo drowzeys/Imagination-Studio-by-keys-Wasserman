@@ -34,6 +34,7 @@ MAX_COUNT = 6
 GPU_LIMIT_MB, PROCESS_LIMIT_MB, JOB_LIMIT_MB = 12288, 12288, 16384
 _backend: WindowsComfy | None = None
 _backend_error = ""
+_backend_kind = None
 _backend_lock = threading.RLock()
 _prompt_lock = threading.RLock()
 _active_job = _active_prompt = None
@@ -53,7 +54,7 @@ def verify_weights(root: Path) -> None:
 
 
 def tool_hashes() -> dict:
-    paths = ["app/windows_storyboard.py", "app/windows_comfy.py", "app/windows_brain.py", "app/windows_memory.py", "app/windows_process.py",
+    paths = ["app/windows_storyboard.py", "app/windows_sound.py", "app/windows_sfx.py", "app/windows_comfy.py", "app/windows_brain.py", "app/windows_memory.py", "app/windows_process.py",
              "scripts/windows-comfy-check.py", "scripts/windows-sfx-check.py",
              "scripts/windows-calibration-node.py", "scripts/windows-comfy-calibration-launcher.py"]
     return {name: hashlib.sha256((PACK / name).read_bytes()).hexdigest() for name in paths}
@@ -145,9 +146,9 @@ def image_plan(params: dict) -> list[tuple[str, int, str]]:
             for i, (prompt, seed) in enumerate(zip(prompts, seeds, strict=True))]
 
 
-def preflight() -> None:
+def preflight(qualification: dict | None = None) -> None:
     from windows_memory import DedicatedMemory, WindowsSignals, host_memory, physical_memory_mb
-    found = status()
+    found = status() if qualification is None else qualification
     if not found["available"]:
         raise RuntimeError(found["why"])
     hardware = found["hardware"]
@@ -338,7 +339,7 @@ def render(output: Path, params: dict, qualify: bool) -> dict:
 
 def backend_status() -> dict:
     state = _backend.summary() if _backend else {"running": False, "loaded": False, "address": "", "why": ""}
-    return {**state, "why": _backend_error or state["why"], "busy": _active_job is not None}
+    return {**state, "why": _backend_error or state["why"], "busy": _active_job is not None, "kind": _backend_kind}
 
 
 def cancel_job(job_id: str):
@@ -348,7 +349,7 @@ def cancel_job(job_id: str):
 
 
 def release_backend():
-    global _backend, _backend_error
+    global _backend, _backend_error, _backend_kind
     with _prompt_lock:
         if _active_job is not None:
             raise RuntimeError("a storyboard is still rendering; cancel it first")
@@ -357,22 +358,38 @@ def release_backend():
                 _backend.close()
             _backend = None
             _backend_error = ""
+            _backend_kind = None
 
 
 def shutdown_backend():
-    global _backend
+    global _backend, _backend_kind
     if _backend:
         _backend.close()
         _backend = None
+        _backend_kind = None
 
 
 atexit.register(shutdown_backend)
 
 
 def render_job(job: dict, home: Path) -> dict:
-    global _backend, _backend_error, _active_job, _active_prompt
-    params = parameters(job["params"])
-    preflight()
+    global _backend, _backend_error, _backend_kind, _active_job, _active_prompt
+    import windows_sound
+    route = windows_sound if job.get("kind") == "sfx" else sys.modules[__name__]
+    kind = job.get("kind", "scout")
+    params = route.parameters(job["params"])
+    with _backend_lock:
+        if _backend_error:
+            raise RuntimeError("ComfyUI needs explicit unloading before retry: " + _backend_error)
+        if _backend is not None and _backend_kind != kind:
+            try:
+                _backend.close()
+            except (OSError, RuntimeError) as error:
+                _backend_error = f"model switch cleanup failed: {error}"
+                raise
+            _backend = None
+            _backend_kind = None
+    route.preflight()
     with _prompt_lock:
         if job["status"] == "cancelled":
             return {"cancelled": True}
@@ -394,17 +411,19 @@ def render_job(job: dict, home: Path) -> dict:
                 _backend.drain(prompt_id)
             _active_prompt = None
     def progress(at, total):
-        job["progress"] = {"stage": "picture", "at": at, "of": total}
+        job["progress"] = {"stage": "sound" if kind == "sfx" else "picture", "at": at, "of": total}
     try:
-        case = render_case(home / "scouts" / job["id"], params, lambda: job["status"] == "cancelled",
+        output = home / "sound" / "sfx" / job["id"] if kind == "sfx" else home / "scouts" / job["id"]
+        case = route.render_case(output, params, lambda: job["status"] == "cancelled",
                            submit, completed, progress)
         with _backend_lock:
             if _backend_error:
                 raise RuntimeError("ComfyUI needs explicit unloading before retry: " + _backend_error)
             reused = _backend is not None
             if _backend is None:
-                verify_weights(folder())
+                route.verify_weights(route.folder())
                 _backend = WindowsComfy(tools().checker(), case.prepare)
+                _backend_kind = kind
                 _backend.start()
             _backend.check()
         result = case.exercise(_backend.base, _backend.directory, _backend.process, _backend.monitor)

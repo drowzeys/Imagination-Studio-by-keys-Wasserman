@@ -97,8 +97,8 @@ This preview supports script imports, project/Slate planning, manual storyboards
 uploads, Motion Previs pack imports and browsing saved media.
 Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
 An optional small local brain supports text-only Slate writing assistance.
-Only separately qualified 512x512 SD-Turbo stills and CPU media exports can render;
-video generation, in-app model installation, other
+Only separately qualified 512x512 SD-Turbo stills, five-second sound effects and CPU media exports can render;
+video generation, foley, in-app model installation, other
 agents, worker management and other unverified actions are refused explicitly.
 It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
@@ -175,6 +175,27 @@ trimmed/joined in **Edit/Editor**. The first Windows MP4 export route accepts 1-
 total, with even output sides up to 1920 pixels. It keeps existing audio and supplies silence for sources with
 no audio. Export runs in a privately owned cancellable process job with a ten-minute execution deadline.
 Adding a soundtrack during export, long-video generation and all unsupported GPU routes stay disabled.
+
+**Windows sound effects:** the existing Stable Audio Open files can now be qualified for the normal queue:
+
+```powershell
+.\scripts\setup-windows-sfx.ps1 -Verify
+.\scripts\check-windows-sound.ps1
+.\scripts\app.ps1
+```
+
+In **Sound -> Sound effects**, choose **A sound effect**, describe it and click **Make the sound**.
+The initial Windows recipe is fixed at **5 seconds, 100 passes, CFG 7** (the exact decoded duration is about
+5.0155 s). Seed and positive/negative sound descriptions are editable. A successful take is a lossless stereo
+44.1 kHz PCM WAV, listed on the sound tab and in the Library. Stability AI's Community License still applies.
+No new weights are downloaded by Check, and foley is not enabled.
+
+Images and sound share one guarded ComfyUI slot: consecutive jobs of the same kind stay warm, but changing
+kind drains the old owned backend before starting the other model. Both models never stay loaded together.
+The existing 12/12/16 GiB allocator/process/job caps and memory reserves are unchanged. The sound load runs
+close to its process-commit cap; this is not support for longer effects or a relaxed memory requirement.
+Stop targets that job's prompt, and a cancelled/failed job never publishes a successful sound take.
+The older `check-windows-sfx.ps1 -Calibrate` remains an isolated diagnostic, not the normal queue's qualification.
 
 For a short self-test, import a two-scene Fountain script in **Import**, choose **Fill missing storyboard stills**,
 and wait for its job to finish. Choose **Make a Slate film**, then open **Production -> Shots** to inspect and
@@ -276,8 +297,8 @@ The admission foundation still requires a measured Windows profile matching the 
 Resident staging, CPU/shared commitment and the target backend's CUDA needs are distinct requirements.
 Ordinary pageable demand is not refused just because it exceeds currently available physical RAM, but must
 fit commit headroom; resident requirements must fit usable host capacity. Runtime pressure can still stop a job.
-The no-model diagnostic does not qualify a render route. The separate storyboard Check above
-qualifies only its measured settings; this is not a guarantee of other allocation or loading paths.
+The no-model diagnostic does not qualify a render route. The separate storyboard and sound Checks above
+qualify only their measured settings; this is not a guarantee of other allocation or loading paths.
 
 #### Explicit Windows sound-effect calibration
 

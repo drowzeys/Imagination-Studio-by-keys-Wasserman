@@ -1047,3 +1047,29 @@ audio sources. The initial local export is bounded to 12 clips, ten minutes of o
 1920 pixels, and an owned cancellable runner with a 600-second deadline. Missing source sound becomes
 silence; existing sound retains its fades. Unsupported soundtrack addition and GPU/video generation
 remain refused. FFmpeg installation alone does not open those gates.
+
+## 23. Five-second sound effects in the Windows queue
+
+The existing pinned Stable Audio Open 1.0 files now have their own measured qualification for normal queued
+jobs. Only five seconds, 100 passes and CFG 7 are offered; the seed and sound descriptions are editable.
+The route reuses ComfyUI's sound graph and the already measured GPU-first loader. Lossless output is checked
+with native FFmpeg/ffprobe: stereo 44.1 kHz, finite/non-silent samples, the model's 221,184-sample latent
+window (5.0155 s), and peaks below -1 dBFS. The published take is PCM WAV and appears in Sound and Library.
+
+The guarded qualification completed in **9.29 s** after startup. Peak GPU tensors were **6.53 GiB**;
+reserved GPU tensors **6.65 GiB**; backend peak working set **5.73 GiB**; backend peak private commitment
+**11.99 GiB**; owned-job commitment **13.68 GiB**. The 12/12/16 GiB allocator/process/job limits were unchanged.
+Private commitment is near the process cap, not evidence that longer effects have margin.
+
+A real normal-queue request completed in **39.33 s** including startup and validation. Its 5.01551-second
+WAV was retrievable, probed successfully and appeared in both sound takes and Library. Qualification is
+file/code/memory-partition matched; the original calibration remains separate. Switching between pictures
+and sound drains the old privately owned backend before loading the new model; same-kind jobs stay warm.
+Failed or cancelled jobs do not publish successful take records. Foley, longer effects and video generation
+are still unqualified, and the saved demo has not been changed.
+
+The actual image -> sound switch also passed: the old owned backend was drained before the replacement
+loaded, and a second five-second sound with seed zero was saved and listed correctly. The switch exposed
+a transient Windows sharing lock on an exited backend's log; cleanup now waits at most five seconds for
+only sharing/lock violations after process draining. Other cleanup errors remain explicit. The image job
+took 23.43 s and the following sound 38.62 s including startup. Studio was left running with sound loaded.
