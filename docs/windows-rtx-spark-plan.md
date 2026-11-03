@@ -811,3 +811,56 @@ No Windows SFX profile was automatically promoted, no UI render route was enable
 
 Next: review the loading/commit footprint, collect route-specific margins and additional controlled cases before
 considering normal queue/UI integration. Keep OS and GPU budgets separate and retain explicit unavailable reasons.
+
+## 16. Backend memory accounting and targeted cancellation
+
+The accounting check now reports actual backend process memory, rather than inferring physical usage from
+Windows job commitment. The initial `Popen` handle reading measured the virtualenv's small launcher shim.
+The private job still contains the interpreter child and applies its caps to the whole tree; attribution now
+comes from inside ComfyUI. Launcher figures are labelled separately, and process-handle attribution also checks
+membership in the owned job.
+
+A tiny controlled test found that a warmed 16 MiB GPU allocation changed working set by about 0.004 MiB and
+private commitment by 0 MiB, whereas a 16 MiB CPU buffer increased working set by about 16.004 MiB and commitment
+by 16.039 MiB. This is a small allocation observation, not a complete explanation of the model's commitment.
+
+The subsequent normal five-second calibration completed with unchanged caps:
+
+| Backend observation | Result |
+|---|---|
+| Before-workflow working set | About 0.97 GiB |
+| Peak working set | **6,163,251,200 bytes, about 5.74 GiB** |
+| After-workflow working set | About 2.63 GiB |
+| Peak private commitment | About 12 GiB, near the process cap |
+| Peak GPU tensor allocation | About 6.53 GiB |
+| Audio | Same validated 5.0155-second stereo result |
+
+Working-set peaks include mapped/shared pages and need not coincide with commitment peaks. Page-fault counts
+include soft faults; they are not a measurement of disk paging. Do not describe the commitment figure as 12 GiB
+of resident OS RAM, or add it to the GPU allocation figure as a physical-memory estimate.
+
+### Cancellation test
+
+```powershell
+.\scripts\check-windows-sfx.ps1 -Calibrate -CancelDuringSampling
+```
+
+The test subscribes to the owned prompt's progress, waits for at least one completed step in node 12 (KSampler),
+and calls the pinned server's atomic targeted job-cancel API. It does not issue a global interrupt.
+
+The actual test confirmed:
+
+- Cancellation accepted for the owned prompt after **step 1 of 100**.
+- History recorded `execution_interrupted` for that same prompt in **KSampler**, not a later save node.
+- The queue drained; **no audio was copied or saved as a successful result**.
+- Observed cancellation-request-to-terminal-confirmation time: **about 0.51 seconds**.
+- In-process allocation counters remained within the same GPU cap; job caps were unchanged.
+- Owned backend/sampler processes were stopped and drained afterward.
+- A normal complete calibration subsequently passed, checking that cancellation did not leave stale work behind.
+
+The reported latency includes control-plane confirmation; it is not a GPU preemption benchmark. Cancellation
+reports are explicitly labelled as tests, not completed generation or route qualification.
+
+Next: qualify a small case matrix under unchanged bounds. Separately, prioritize low-memory script imports,
+scene/shot planning and manual storyboard/reference-image flows; do not make those depend on a large brain or
+image-generation model.

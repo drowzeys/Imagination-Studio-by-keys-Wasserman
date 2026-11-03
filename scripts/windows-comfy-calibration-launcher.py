@@ -38,6 +38,7 @@ def main() -> int:
     if "--disable-cuda-malloc" not in flags:
         raise RuntimeError("calibration must not enable cudaMallocAsync")
     sys.path.insert(0, str(args.comfy.parent))
+    sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "app"))
     sys.argv = [str(args.comfy), *flags]
     runpy.run_path(str(args.comfy), run_name="__main__")
     return 0

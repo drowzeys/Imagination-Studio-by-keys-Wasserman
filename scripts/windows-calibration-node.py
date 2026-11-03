@@ -4,6 +4,26 @@ import comfy.model_management
 import comfy.sd
 import comfy.utils
 import folder_paths
+from aiohttp import web
+from server import PromptServer
+from windows_memory import process_memory
+
+
+def allocation_receipt():
+    return {
+        "peak_tensor_bytes": torch.cuda.max_memory_allocated(0),
+        "peak_reserved_bytes": torch.cuda.max_memory_reserved(0),
+        "allocator": torch.cuda.memory.get_allocator_backend(),
+        "gpu_fraction": torch.cuda.get_per_process_memory_fraction(0),
+        "gpu_total_bytes": torch.cuda.get_device_properties(0).total_memory,
+        "process_memory": process_memory(-1),
+    }
+
+
+@PromptServer.instance.routes.get("/windows_calibration/metrics")
+async def metrics(_request):
+    # Do not synchronize: cancellation may be observed while a GPU step is still running.
+    return web.json_response(allocation_receipt())
 
 
 class WindowsCalibrationCheckpointLoader:
@@ -40,13 +60,7 @@ class WindowsCalibrationReceipt:
 
     def report(self, audio):
         torch.cuda.synchronize()
-        receipt = {
-            "peak_tensor_bytes": torch.cuda.max_memory_allocated(0),
-            "peak_reserved_bytes": torch.cuda.max_memory_reserved(0),
-            "allocator": torch.cuda.memory.get_allocator_backend(),
-            "gpu_fraction": torch.cuda.get_per_process_memory_fraction(0),
-            "gpu_total_bytes": torch.cuda.get_device_properties(0).total_memory,
-        }
+        receipt = allocation_receipt()
         return {"ui": {"windows_calibration": [receipt]}, "result": ()}
 
 

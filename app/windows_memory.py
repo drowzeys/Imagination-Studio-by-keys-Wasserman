@@ -40,6 +40,32 @@ def physical_memory_mb() -> int:
     return size_kb.value // 1024
 
 
+def process_memory(process_handle: int) -> dict:
+    """Query an owned Windows handle (-1 for this process), not a reusable PID.
+
+    Working set includes resident shared/mapped pages. Private commitment is not resident RAM.
+    """
+    from ctypes import wintypes
+
+    class Counters(ctypes.Structure):
+        _fields_ = [("size", wintypes.DWORD), ("page_faults", wintypes.DWORD)] + [
+            (name, ctypes.c_size_t) for name in
+            ("peak_working_set", "working_set", "peak_paged_pool", "paged_pool",
+             "peak_nonpaged_pool", "nonpaged_pool", "pagefile", "peak_pagefile", "private")
+        ]
+
+    api = ctypes.WinDLL("psapi", use_last_error=True)
+    api.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+    api.GetProcessMemoryInfo.restype = wintypes.BOOL
+    counters = Counters()
+    counters.size = ctypes.sizeof(counters)
+    if not api.GetProcessMemoryInfo(wintypes.HANDLE(process_handle), ctypes.byref(counters), counters.size):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return {"working_set_bytes": counters.working_set, "peak_working_set_bytes": counters.peak_working_set,
+            "private_commit_bytes": counters.private, "peak_commit_bytes": counters.peak_pagefile,
+            "page_fault_count": counters.page_faults}
+
+
 class WindowsSignals:
     def __init__(self):
         from ctypes import wintypes

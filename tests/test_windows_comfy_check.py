@@ -235,6 +235,9 @@ def test_owned_job_drains_parent_and_child(tmp_path):
         child_pid = int(child_text)
         child_handle = api.OpenProcess(0x100000, False, child_pid)
         assert child_handle
+        accounting = job.process_accounting(process)
+        assert accounting["peak_working_set_bytes"] >= accounting["working_set_bytes"] > 0
+        assert accounting["private_commit_bytes"] >= 0
         job.close()
         process.wait(timeout=10)
         assert api.WaitForSingleObject(child_handle, 5000) == 0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -107,12 +108,139 @@ def validate_receipt(receipt: dict, limit_bytes: int):
         raise RuntimeError("the calibration allocation cap was not applied")
 
 
-def exercise(check, base: str, directory: Path, process, monitor, output: Path) -> dict:
+def validate_queue(queue: dict, prompt_id: str) -> bool:
+    if not isinstance(queue, dict):
+        raise RuntimeError("invalid calibration queue")
+    active = False
+    for key in ("queue_running", "queue_pending"):
+        if not isinstance(queue.get(key), list):
+            raise RuntimeError("invalid calibration queue")
+        for entry in queue[key]:
+            if not isinstance(entry, list) or len(entry) < 2 or entry[1] != prompt_id:
+                raise RuntimeError("another workflow appeared in the isolated calibration queue")
+            active = True
+    return active
+
+
+def sampling_progress(message: dict, prompt_id: str) -> dict | None:
+    if not isinstance(message, dict) or message.get("type") != "progress":
+        return None
+    data = message.get("data")
+    if not isinstance(data, dict) or data.get("prompt_id") != prompt_id or data.get("node") != "12":
+        return None
+    value, maximum = data.get("value"), data.get("max")
+    if type(value) not in (int, float) or type(maximum) not in (int, float):
+        raise RuntimeError("invalid sampling progress")
+    if not math.isfinite(value) or not math.isfinite(maximum) or not 0 <= value <= maximum or maximum <= 0:
+        raise RuntimeError("invalid sampling progress")
+    return data if value > 0 else None
+
+
+def validate_cancelled(record: dict, prompt_id: str):
+    if not isinstance(record, dict) or not isinstance(record.get("status"), dict):
+        raise RuntimeError("invalid cancellation history")
+    status = record["status"]
+    if not isinstance(status.get("messages"), list):
+        raise RuntimeError("invalid cancellation messages")
+    interrupted = any(
+        isinstance(item, list) and len(item) == 2 and item[0] == "execution_interrupted"
+        and isinstance(item[1], dict) and item[1].get("prompt_id") == prompt_id
+        and item[1].get("node_id") == "12" and item[1].get("node_type") == "KSampler"
+        for item in status["messages"]
+    )
+    if status.get("status_str") == "success" or not interrupted:
+        raise RuntimeError("the targeted workflow was not confirmed interrupted")
+    outputs = record.get("outputs", {})
+    if not isinstance(outputs, dict):
+        raise RuntimeError("invalid cancellation outputs")
+    saved = outputs.get("18", {})
+    if not isinstance(saved, dict):
+        raise RuntimeError("invalid cancellation save output")
+    if any(isinstance(item, dict) and item.get("filename") for values in saved.values()
+           for item in (values if isinstance(values, list) else [])):
+        raise RuntimeError("audio was saved before the cancellation test completed")
+
+
+async def cancel_sampling(check, base: str, process, monitor, graph: dict) -> dict:
+    import aiohttp
+
+    client_id = uuid.uuid4().hex
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3), trust_env=False) as session:
+        async with session.ws_connect(base + "/ws", params={"clientId": client_id},
+                                      timeout=aiohttp.ClientWSTimeout(ws_close=1), max_msg_size=1 << 20) as socket:
+            async with session.post(base + "/prompt", json={"prompt": graph, "client_id": client_id}) as response:
+                response.raise_for_status()
+                reply = await response.json()
+            if reply.get("error") or reply.get("node_errors"):
+                raise RuntimeError("ComfyUI rejected the cancellation graph")
+            prompt_id = str(uuid.UUID(reply["prompt_id"]))
+            started = time.monotonic()
+            deadline, next_poll, trigger = started + 300, started, None
+            while True:
+                monitor.check()
+                if process.poll() is not None:
+                    raise RuntimeError("the cancellation server exited")
+                now = time.monotonic()
+                if now >= deadline:
+                    raise RuntimeError("the cancellation test exceeded its deadline")
+                if now >= next_poll:
+                    async with session.get(base + "/queue") as response:
+                        response.raise_for_status()
+                        active = validate_queue(await response.json(), prompt_id)
+                    async with session.get(base + "/history/" + prompt_id) as response:
+                        response.raise_for_status()
+                        history = await response.json()
+                    if prompt_id in history:
+                        if trigger is None:
+                            raise RuntimeError("the workflow finished before the sampling cancellation")
+                        validate_cancelled(history[prompt_id], prompt_id)
+                        if not active:
+                            break
+                    next_poll = time.monotonic() + 0.5
+                if trigger is None:
+                    try:
+                        message = await socket.receive(timeout=0.1)
+                    except asyncio.TimeoutError:
+                        continue
+                    if message.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        raise RuntimeError("sampling progress connection closed before cancellation")
+                    if message.type == aiohttp.WSMsgType.TEXT:
+                        progress = sampling_progress(json.loads(message.data), prompt_id)
+                        if progress:
+                            cancel_started = time.monotonic()
+                            async with session.post(base + "/api/jobs/" + prompt_id + "/cancel") as response:
+                                response.raise_for_status()
+                                reply = await response.json()
+                            if reply.get("cancelled") is not True:
+                                raise RuntimeError("the backend did not accept targeted cancellation")
+                            trigger = {"node": "12", "completed_steps": progress["value"], "max_steps": progress["max"]}
+                            deadline = cancel_started + 15
+                else:
+                    await asyncio.sleep(0.1)
+            async with session.get(base + "/windows_calibration/metrics") as response:
+                response.raise_for_status()
+                receipt = await response.json()
+            validate_receipt(receipt, check.CalibrationCase.gpu_limit_mb << 20)
+    return {"cancelled": True, "trigger": trigger, "cancel_to_terminal_seconds": time.monotonic() - cancel_started,
+            "request_to_terminal_seconds": time.monotonic() - started, "allocator_receipt": receipt,
+            "audio_saved": False, "qualified_route": False}
+
+
+def exercise(check, base: str, directory: Path, process, monitor, output: Path, cancel: bool = False) -> dict:
     graph = workflow()
     nodes = check.read_json(base, "/object_info")
     needed = {node["class_type"] for node in graph.values()}
     if not needed.issubset(nodes):
         raise RuntimeError("calibration nodes are missing: " + ", ".join(sorted(needed - set(nodes))))
+    if cancel:
+        import aiohttp
+
+        try:
+            result = asyncio.run(cancel_sampling(check, base, process, monitor, graph))
+        except aiohttp.ClientError as error:
+            raise RuntimeError(f"the targeted cancellation transport failed ({type(error).__name__})") from None
+        result.update(model_repo=windows_sfx.REPO, model_revision=windows_sfx.REVISION, seed=SEED)
+        return result
     reply = post_prompt(base, graph)
     if reply.get("error") or reply.get("node_errors"):
         raise RuntimeError("ComfyUI rejected the calibration graph")
@@ -122,13 +250,7 @@ def exercise(check, base: str, directory: Path, process, monitor, output: Path) 
         monitor.check()
         if process.poll() is not None:
             raise RuntimeError("the calibration server exited")
-        queue = check.read_json(base, "/queue")
-        for key in ("queue_running", "queue_pending"):
-            if not isinstance(queue.get(key), list):
-                raise RuntimeError("invalid calibration queue")
-            for entry in queue[key]:
-                if not isinstance(entry, list) or len(entry) < 2 or entry[1] != prompt_id:
-                    raise RuntimeError("another workflow appeared in the isolated calibration queue")
+        validate_queue(check.read_json(base, "/queue"), prompt_id)
         history = check.read_json(base, "/history/" + prompt_id)
         if prompt_id in history:
             record = history[prompt_id]
@@ -169,6 +291,7 @@ def main() -> int:
     parser.add_argument("--models", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--cancel-during-sampling", action="store_true")
     args = parser.parse_args()
     try:
         windows_sfx.verify(args.models)
@@ -178,7 +301,8 @@ def main() -> int:
         check = checker()
         case = check.CalibrationCase(
             lambda directory: prepare(directory, args.models),
-            lambda base, directory, process, monitor: exercise(check, base, directory, process, monitor, args.output),
+            lambda base, directory, process, monitor: exercise(check, base, directory, process, monitor, args.output,
+                                                              args.cancel_during_sampling),
         )
         result = check.run_check(args.source.resolve(), 120, 0, guarded=True, calibration=case)
         sources = [ROOT / "scripts" / name for name in
@@ -187,6 +311,7 @@ def main() -> int:
         sources += [ROOT / "app" / name for name in ("windows_sfx.py", "windows_memory.py")]
         result["tool_sha256"] = {path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in sources}
+        receipt_file.parent.mkdir(parents=True, exist_ok=True)
         with receipt_file.open("x", encoding="utf-8") as receipt:
             json.dump(result, receipt, indent=2)
             receipt.write("\n")

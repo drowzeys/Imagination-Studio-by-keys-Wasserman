@@ -194,6 +194,7 @@ then verifies the published weight hashes.
 .\scripts\setup-windows-sfx.ps1
 .\scripts\setup-windows-sfx.ps1 -Verify
 .\scripts\check-windows-sfx.ps1 -Calibrate
+.\scripts\check-windows-sfx.ps1 -Calibrate -CancelDuringSampling
 ```
 
 `-Calibrate` is required: this is a one-job experiment, not an enabled Studio sound route. It uses the existing
@@ -209,6 +210,14 @@ Validated FLAC audio and a `.calibration.json` receipt are saved under the Studi
 The receipt includes allocator peaks, budget minima and tool-content hashes; it contains no access key, model
 download token, server URL or GPU UUID. Output filenames are unique and existing files are not overwritten.
 No normal render route is qualified automatically, and no failed run increases its limits automatically.
+
+`-CancelDuringSampling` waits for a completed KSampler step, requests cancellation of that exact prompt through
+ComfyUI's targeted job API, and requires an interrupted KSampler history entry and an empty queue. It saves a
+cancellation receipt, not audio. HTTP acceptance alone is not treated as successful cancellation.
+
+Receipts distinguish the actual backend's in-process working set/private commitment from the small virtualenv
+launcher. Working set includes mapped/shared resident pages; commitment is not physical RAM. Peak GPU counters
+come from the backend itself. The readonly metrics endpoint exists only in the isolated calibration node pack.
 
 ### Apple silicon
 

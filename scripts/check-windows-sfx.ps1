@@ -1,4 +1,4 @@
-param([switch]$Calibrate)
+param([switch]$Calibrate, [switch]$CancelDuringSampling)
 
 $ErrorActionPreference = 'Stop'
 if (-not $Calibrate) { throw 'This runs an explicit bounded model experiment. Use -Calibrate to confirm.' }
@@ -12,7 +12,13 @@ $Output = Join-Path $Studio ("renders\calibration\windows-sfx-" + (Get-Date -For
 
 Write-Host 'Calibration only: native PyTorch allocation cap 12 GiB; process commit cap 12 GiB; job commit cap 16 GiB.'
 Write-Host 'Uses the verified Stable Audio Open files and a GPU-first ComfyUI helper; normal render routes remain disabled.'
-& $Python -X utf8 (Join-Path $Root 'scripts\windows-sfx-check.py') `
-    --calibrate --models $Models --source $Source --output $Output
+$Arguments = @('-X', 'utf8', (Join-Path $Root 'scripts\windows-sfx-check.py'),
+    '--calibrate', '--models', $Models, '--source', $Source, '--output', $Output)
+if ($CancelDuringSampling) { $Arguments += '--cancel-during-sampling' }
+& $Python @Arguments
 if ($LASTEXITCODE -ne 0) { throw 'The guarded SFX calibration did not complete; no route has been qualified.' }
-Write-Host 'Validated audio and a calibration receipt are in the Studio renders\calibration folder.'
+if ($CancelDuringSampling) {
+    Write-Host 'Sampling cancellation confirmed; a receipt was saved, without copying audio.'
+} else {
+    Write-Host 'Validated audio and a calibration receipt are in the Studio renders\calibration folder.'
+}

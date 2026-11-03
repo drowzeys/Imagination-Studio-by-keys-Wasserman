@@ -109,7 +109,10 @@ def test_gpu_first_loader_uses_comfy_helpers_without_cpu_fallback(monkeypatch):
     folders = SimpleNamespace(get_full_path_or_raise=lambda *args: r"C:\models\test.safetensors",
                               get_folder_paths=lambda *args: [])
     for name, value in (("torch", SimpleNamespace()), ("comfy", comfy), ("comfy.model_management", comfy.model_management),
-                        ("comfy.utils", comfy.utils), ("comfy.sd", comfy.sd), ("folder_paths", folders)):
+                        ("comfy.utils", comfy.utils), ("comfy.sd", comfy.sd), ("folder_paths", folders),
+                        ("aiohttp", SimpleNamespace(web=SimpleNamespace(json_response=lambda value: value))),
+                        ("server", SimpleNamespace(PromptServer=SimpleNamespace(
+                            instance=SimpleNamespace(routes=SimpleNamespace(get=lambda path: lambda fn: fn)))))):
         monkeypatch.setitem(sys.modules, name, value)
     nodes = module("test_calibration_node", "windows-calibration-node.py")
     assert nodes.WindowsCalibrationCheckpointLoader().load("test") == ("model", "clip", "vae")
@@ -128,3 +131,44 @@ def test_model_calibration_cannot_use_unguarded_diagnostic(monkeypatch, tmp_path
     with pytest.raises(ValueError, match="guarded"):
         check.run_check(tmp_path, 5, 0, calibration=case)
     assert prepared == []
+
+
+def test_only_owned_sampler_progress_can_trigger_cancel():
+    message = {"type": "progress", "data": {"prompt_id": "owned", "node": "12", "value": 1, "max": 100}}
+    assert sfx.sampling_progress(message, "owned")["value"] == 1
+    assert sfx.sampling_progress(message, "other") is None
+    message["data"]["node"] = "1"
+    assert sfx.sampling_progress(message, "owned") is None
+
+
+def test_targeted_cancel_requires_interruption_not_just_http_acceptance():
+    record = {"status": {"status_str": "error", "messages": [
+        ["execution_interrupted", {"prompt_id": "owned", "node_id": "12", "node_type": "KSampler"}]
+    ]}, "outputs": {}}
+    sfx.validate_cancelled(record, "owned")
+    with pytest.raises(RuntimeError, match="not confirmed"):
+        sfx.validate_cancelled(record, "other")
+    record["status"]["status_str"] = "success"
+    with pytest.raises(RuntimeError):
+        sfx.validate_cancelled(record, "owned")
+
+
+def test_cancel_in_a_later_node_does_not_qualify_sampler_cancellation():
+    record = {"status": {"status_str": "error", "messages": [
+        ["execution_interrupted", {"prompt_id": "owned", "node_id": "18", "node_type": "SaveAudio"}]
+    ]}, "outputs": {}}
+    with pytest.raises(RuntimeError):
+        sfx.validate_cancelled(record, "owned")
+
+
+def test_calibration_queue_refuses_other_jobs():
+    assert sfx.validate_queue({"queue_running": [[1, "owned"]], "queue_pending": []}, "owned")
+    with pytest.raises(RuntimeError, match="another"):
+        sfx.validate_queue({"queue_running": [[1, "another"]], "queue_pending": []}, "owned")
+
+
+@pytest.mark.parametrize("record", [None, {}, {"status": {"messages": None}},
+                                   {"status": {"messages": [], "status_str": "success"}}])
+def test_invalid_cancellation_history_is_not_success(record):
+    with pytest.raises(RuntimeError):
+        sfx.validate_cancelled(record, "owned")

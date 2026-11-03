@@ -23,7 +23,7 @@ import urllib.request
 COMMIT = "b9b290e43f1eb379946dfeb013faf9bbefa1a618"
 APP = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP))
-from windows_memory import Snapshot, host_floor_mb, pressure  # noqa: E402
+from windows_memory import Snapshot, host_floor_mb, pressure, process_memory  # noqa: E402
 
 SAMPLE_START_TIMEOUT = 30
 SAMPLE_FRESHNESS = 2
@@ -73,6 +73,8 @@ class OwnedJob:
         self.api.SetInformationJobObject.restype = wintypes.BOOL
         self.api.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
         self.api.AssignProcessToJobObject.restype = wintypes.BOOL
+        self.api.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+        self.api.IsProcessInJob.restype = wintypes.BOOL
         self.api.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
         self.api.TerminateJobObject.restype = wintypes.BOOL
         self.api.QueryInformationJobObject.argtypes = [
@@ -119,6 +121,18 @@ class OwnedJob:
                 raise ctypes.WinError(ctypes.get_last_error())
             return {"peak_process_commit_bytes": limits.peak_process_memory, "peak_job_commit_bytes": limits.peak_job_memory,
                     "process_commit_limit_bytes": limits.process_memory, "job_commit_limit_bytes": limits.job_memory}
+
+    def process_accounting(self, process) -> dict:
+        with self.lock:
+            if not self.handle:
+                raise RuntimeError("the owned job is closed")
+            contained = wintypes.BOOL()
+            handle = wintypes.HANDLE(int(process._handle))
+            if not self.api.IsProcessInJob(handle, self.handle, ctypes.byref(contained)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not contained.value:
+                raise RuntimeError("refusing to attribute another process's memory to this job")
+            return process_memory(int(process._handle))
 
     def close(self):
         with self.lock:
@@ -489,6 +503,8 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                     monitor.check()
                     monitor.start_backend(base, directory)
                 calibration_result = None
+                memory_before = None
+                launcher_before = None
                 if calibration:
                     if monitor is None or monitor.latest is None:
                         raise RuntimeError("calibration requires a ready memory watchdog")
@@ -500,6 +516,10 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                         calibration.process_commit_mb << 20, calibration.job_commit_mb << 20,
                     ):
                         raise RuntimeError("Windows did not apply the calibration commit limits")
+                    launcher_before = job.process_accounting(process)
+                    memory_before = read_json(base, "/windows_calibration/metrics").get("process_memory")
+                    if not isinstance(memory_before, dict):
+                        raise RuntimeError("the calibration backend did not report its process memory")
                     calibration_result = calibration.exercise(base, Path(directory), process, monitor)
                     monitor.check()
                 held = hold_no_model(process, monitor, hold_seconds, base) if hold_seconds else 0
@@ -516,6 +536,16 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                     result["scope"] = "explicit model calibration, not a qualified Windows render route"
                     result["calibration"] = calibration_result
                     result["job_commitment"] = job.commitment()
+                    result["backend_memory_before_workflow"] = memory_before
+                    memory_after = read_json(base, "/windows_calibration/metrics").get("process_memory")
+                    if not isinstance(memory_after, dict):
+                        raise RuntimeError("the calibration backend did not report final process memory")
+                    result["backend_memory_after_workflow"] = memory_after
+                    result["launcher_memory_before_workflow"] = launcher_before
+                    result["launcher_memory_after_workflow"] = job.process_accounting(process)
+                    if calibration_result.get("cancelled"):
+                        result["scope"] = "explicit model cancellation test, not completed generation or route qualification"
+                        result["checks"].append("targeted sampling cancellation confirmed")
                 if monitor:
                     monitor.begin_backend_shutdown()
                 try:
