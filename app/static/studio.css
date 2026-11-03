@@ -785,6 +785,15 @@ html.accent-cobalt nav#rooms button.on, html.accent-cobalt #subtabs button.on { 
 html.accent-cobalt nav#rooms button.on svg { stroke:var(--amber); }
 html.motion-reduce *, html.motion-reduce *::before, html.motion-reduce *::after { animation:none !important; transition:none !important; }
 
+/* Themes (Settings → Appearance): the studio's dark as shipped, or OLED, the same layout on true black and neutral
+   grays (the sidebar at #0C0C0C, every surface tint-free). Only the variables move; the class is set by prefsApply
+   and by the first paint in index.html. */
+html.theme-oled { --bg:#000000; --bg2:#0C0C0C; --panel:#0E0E0E; --raise:#141414; --raise2:#1C1C1C; --ink:#000000;
+  --line:rgba(245,239,223,.09); --line2:rgba(245,239,223,.15); --line3:rgba(245,239,223,.26);
+  --sh-card:inset 0 1px 0 rgba(255,255,255,.05),0 10px 28px -14px rgba(0,0,0,.9),0 1px 2px rgba(0,0,0,.65);
+  --sh-lift:inset 0 1px 0 rgba(255,255,255,.07),0 16px 34px -14px rgba(0,0,0,.95),0 2px 4px rgba(0,0,0,.65); }
+html.theme-oled aside#bay { background:#000000; border-top-color:transparent; }  /* the rail's teal tint and edge are hardcoded outside the variables */
+
 /* ---------- Settings ---------- */
 .st-wrap { display:grid; grid-template-columns:240px minmax(0,1fr); gap:28px; align-items:start; }
 .st-rail { position:sticky; top:calc(var(--head) + 18px); display:flex; flex-direction:column; gap:4px; }

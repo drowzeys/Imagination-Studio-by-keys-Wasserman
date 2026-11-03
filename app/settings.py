@@ -35,7 +35,7 @@ PROFILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 MODEL_ID = re.compile(r"[a-z0-9][a-z0-9_.-]{0,31}")
 
 DEFAULTS = {
-    "appearance": {"type_size": "comfortable", "glow": True, "poster": True, "accent": "amber", "motion": "system",
+    "appearance": {"theme": "studio", "type_size": "comfortable", "glow": True, "poster": True, "accent": "amber", "motion": "system",
                    "start_cards": ["clip", "scout", "still", "sharp", "long", "voice"], "start_off": []},
     "layout": {"hidden": [], "order": []},
     "presets": {"recipe": "quick", "image_model": "qwen", "seconds": 5, "qa_gate": True, "audio_rate": "keep",
@@ -44,6 +44,8 @@ DEFAULTS = {
     "hermes_command": "",
 }
 CHOICES = {
+    # the studio's dark as shipped, or the same on true black (OLED screens)
+    ("appearance", "theme"): ("studio", "oled"),
     ("appearance", "type_size"): ("comfortable", "large", "largest"),
     ("appearance", "accent"): ("amber", "cobalt"),
     ("appearance", "motion"): ("system", "reduce"),

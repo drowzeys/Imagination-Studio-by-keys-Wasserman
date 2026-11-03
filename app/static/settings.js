@@ -3,13 +3,13 @@
 // tools it connects to, and what it is. Kept by the server in the studio folder's settings.json (app/settings.py);
 // the look is also kept in this browser so the next load paints with it before the server answers.
 const SET_DEFAULTS = {
-  appearance: { type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], start_off: [] },
+  appearance: { theme: "studio", type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], start_off: [] },
   layout: { hidden: [], order: [] },
   presets: { recipe: "quick", image_model: "qwen", seconds: 5, qa_gate: true, audio_rate: "keep", seed: "fixed", mode: "clip", captions_auto: true, music_engine: "auto" },
   hermes_profile: "", hermes_command: "" };
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false },
   agents: { name: "", endpoint: "", model: "", nearby: null, finding: false, adding: false, said: {}, testing: {} }, about: null };
-const SET_SECTIONS = [["appearance", "Appearance", "type, glow, poster, accent"], ["layout", "Studio layout", "what the sidebar shows"],
+const SET_SECTIONS = [["appearance", "Appearance", "theme, type, glow, accent"], ["layout", "Studio layout", "what the sidebar shows"],
   ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"], ["access", "Access key", "sign in your phone, a new key"], ["notify", "Notifications", "a night shift done, on your phone"],
   ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to five DGX Sparks for a job"],
   ["brains", "Brains & tools", "your agents, another computer, MCP tools"], ["updates", "Updates", "the version and the branch it follows"], ["about", "About", "version, credits, licences"]];
@@ -24,7 +24,8 @@ function prefs() { const d = SET.data || {}, out = {};
 // the look on <html>: a type size class, glow and poster off, the accent, reduced motion
 function prefsApply(look) { const a = { ...SET_DEFAULTS.appearance, ...(look || prefs().appearance) }, root = typeof document !== "undefined" && document.documentElement;
   if (!root || !root.classList) return a;
-  for (const c of ["type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
+  for (const c of ["theme-oled", "type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
+  if (a.theme === "oled") root.classList.add("theme-oled");
   if (a.type_size !== "comfortable") root.classList.add("type-" + a.type_size);
   if (!a.glow) root.classList.add("no-glow"); if (!a.poster) root.classList.add("no-poster");
   if (a.accent === "cobalt") root.classList.add("accent-cobalt"); if (a.motion === "reduce") root.classList.add("motion-reduce");
@@ -62,6 +63,7 @@ const setPanel = (title, line, ...kids) => el("section", { class: "panel st-pane
 const START_NAMES = { clip: "A clip with sound", scout: "Scout, then animate", still: "A still", sharp: "Sharp Spec", long: "A long take", voice: "A voice line", song: "A song", sfx: "Sound effects & foley", looks: "Looks", previs: "Previs", nodes: "Nodes", agent: "Ask your agent" };
 function setAppearance() { const a = prefs().appearance, put1 = patch => settingsSave({ appearance: patch }, true);
   return [setPanel("Appearance", "Applied as you choose, on this screen and every other one that opens the studio.",
+    setRow("Theme", "The studio's dark, or the same on true black, for OLED screens", setSeg(a.theme || "studio", { studio: "Studio", oled: "Dark (OLED)" }, v => put1({ theme: v }), "Theme")),
     setRow("Type size", "Text and controls in the work area", setSeg(a.type_size, { comfortable: "Comfortable", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Type size")),
     setRow("Glowing pills", "The soft amber glow on the active place and the machine chip", setSwitch(a.glow, v => put1({ glow: v }), "Glowing pills")),
     setRow("Poster on Home", "The key art beside the greeting", setSwitch(a.poster, v => put1({ poster: v }), "Poster on Home")),
