@@ -37,6 +37,8 @@ from fastapi.staticfiles import StaticFiles
 
 HERE = Path(__file__).resolve().parent
 PACK = HERE.parent
+import windows_media
+os.environ["PATH"] = windows_media.search_path(os.environ.get("PATH", ""))
 from studio_home import studio_home  # noqa: E402  (~/ImaginationStudio, an older ~/TensorFoldStudio moved there once)
 HOME = studio_home(move=__name__ == "__main__")  # moved only when the studio starts, never by a script that imports this
 os.environ["STUDIO_HOME"] = str(HOME)  # the scripts and engines it starts keep everything in the same folder
@@ -152,7 +154,7 @@ SPARK = sys.platform.startswith("linux")
 WINDOWS = sys.platform == "win32"
 import windows_storyboard
 WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
-                "Local Copilot CLI agents can use Studio tools. Only qualified 512x512 SD-Turbo stills can render; video, in-app model installation, other agents and worker management are not supported yet. "
+                "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills and CPU media exports are supported; video generation, in-app model installation, other agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
@@ -595,7 +597,7 @@ class SecurityHeaders:
 app.add_middleware(SecurityHeaders)
 
 WINDOWS_WRITES = re.compile(
-    r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|storage/refresh|motion/packs/import|jobs(?:/[A-Za-z0-9_-]+/cancel)?|"
+    r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|frame|storage/refresh|motion/packs/import|jobs(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"projects(?:/[A-Za-z0-9_-]+)?|slate/(?:projects(?:/[A-Za-z0-9_-]+)?|exists|compile|brain)|"
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
@@ -606,7 +608,10 @@ WINDOWS_WRITES = re.compile(
 
 def accepting_jobs(job: dict | None = None):
     """Called under the queue lock, shared with the updater's idle check."""
-    if WINDOWS and (job is None or job.get("kind") != "scout" or not windows_storyboard.status()["available"]):
+    allowed = not WINDOWS or (job is not None and
+               (job.get("kind") == "scout" and windows_storyboard.status()["available"]
+                or job.get("kind") == "export" and all(media_tools().values())))
+    if WINDOWS and not allowed:
         raise HTTPException(501, WINDOWS_NOTE)
     if stopping.is_set():
         raise HTTPException(503, "Studio is shutting down.")
@@ -1357,7 +1362,10 @@ def environment(extra: dict) -> dict:
     for key, value in settings.job_env().items():  # Settings → Presets (the delivery sound rate); the environment's own wins
         env.setdefault(key, value)
     env.update({key: str(value) for key, value in extra.items() if value not in (None, "")})
-    env["PATH"] = "/opt/homebrew/bin:" + env.get("PATH", "")
+    if WINDOWS:
+        env["PATH"] = windows_media.search_path(env.get("PATH", ""))
+    else:
+        env["PATH"] = os.pathsep.join(["/opt/homebrew/bin", env.get("PATH", "")])
     return env
 
 
@@ -1540,7 +1548,7 @@ def media_tools() -> dict:
     return {name: bool(shutil.which(name, path=path)) for name in ("ffmpeg", "ffprobe")}
 
 
-FFMPEG_HOW = "add ffmpeg and ffprobe to PATH" if WINDOWS else "sudo apt install ffmpeg" if SPARK else "brew install ffmpeg"
+FFMPEG_HOW = "run scripts\\setup-windows-ffmpeg.ps1 and restart Studio, or add ffmpeg and ffprobe to PATH" if WINDOWS else "sudo apt install ffmpeg" if SPARK else "brew install ffmpeg"
 FFMPEG_NOTE = ("ffmpeg is not installed on this machine (" + FFMPEG_HOW + "). Without it: no long videos, no timeline export, "
                "no frame taken from a clip (continue from a clip, end on a clip), no reference videos or audio, no silenced "
                "sound track" + (", and a clip keeps ComfyUI's own sound track instead of the limited 256 kb/s one. Single clips, "
@@ -1784,17 +1792,25 @@ def export(job: dict) -> None:
         fade = min(0.08, length / 4)
         filters.append(f"[{index}:v]{span}scale={width}:{height}:force_original_aspect_ratio=decrease,"
                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={FPS}[v{index}]")
-        filters.append(f"[{index}:a]{aspan}afade=t=in:d={fade},afade=t=out:st={max(length - fade, 0)}:d={fade},"
-                       f"aresample=48000[a{index}]")
+        audio = f"[{index}:a]{aspan}"
+        if WINDOWS and not clip["sound"]:
+            audio = f"anullsrc=r=48000:cl=stereo,atrim=duration={length},"
+        layout = ",aformat=channel_layouts=stereo" if WINDOWS else ""
+        filters.append(f"{audio}afade=t=in:d={fade},afade=t=out:st={max(length - fade, 0)}:d={fade},"
+                       f"aresample=48000{layout}[a{index}]")
         labels.append(f"[v{index}][a{index}]")
     filters.append(f"{''.join(labels)}concat=n={len(clips)}:v=1:a=1[v][a]")
     command = ["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", "[v]", "-map",
                "[a]", "-c:v", "libx264", "-crf", "17", "-preset", "medium", "-pix_fmt", "yuv420p", "-c:a", "aac",
                "-b:a", "256k", str(target)]
-    done = subprocess.run(command, capture_output=True, text=True, env=environment({}))
-    job["log"] += done.stderr
-    if done.returncode:
-        raise RuntimeError("ffmpeg failed")
+    if WINDOWS:
+        if not run(job, command, {}):
+            return
+    else:
+        done = subprocess.run(command, capture_output=True, text=True, env=environment({}))
+        job["log"] += done.stderr
+        if done.returncode:
+            raise RuntimeError("ffmpeg failed")
     job["outputs"] = [relative(target)]
     if params.get("soundtrack"):  # a song of the Music tab laid under the whole export (music.lay)
         said = params["soundtrack"]
@@ -2515,8 +2531,43 @@ def submit(body: dict) -> dict:
         raise HTTPException(400, WRONG_TYPE) from None
 
 
+def windows_export(body: dict) -> dict:
+    params = body.get("params")
+    if not isinstance(params, dict) or set(params) - {"clips", "width", "height"}:
+        raise HTTPException(400, "Windows export takes clips, width and height only")
+    export_clips(params)
+    clips = params["clips"]
+    if not 1 <= len(clips) <= 12 or not all(media_tools().values()):
+        raise HTTPException(400, "Windows export needs FFmpeg/ffprobe and 1 to 12 clips")
+    if body.get("placement") is not None or body.get("sparks") not in (None, 1):
+        raise HTTPException(400, "Windows media exports run on this machine only")
+    for key, default in (("width", 1920), ("height", 1080)):
+        value = params.get(key, default)
+        if type(value) is not int or not 16 <= value <= 1920 or value % 2:
+            raise HTTPException(400, "export sides are even whole numbers from 16 to 1920")
+    checked, total = [], 0.0
+    for clip in clips:
+        info = probe(clip["path"])
+        duration = info["duration"]
+        if not info["width"] or not math.isfinite(duration) or duration <= 0:
+            raise HTTPException(400, "each timeline source must be a readable video")
+        start, end = clip.get("in") or 0, clip.get("out") or 0
+        if not math.isfinite(start) or not math.isfinite(end) or not 0 <= start < duration or end < 0 or end > duration:
+            raise HTTPException(400, "timeline trim points must be finite and inside the clip")
+        total += end - start if end > start else duration - start
+        checked.append({**clip, "in": start, "out": end, "duration": duration, "sound": info["sound"]})
+    if total > 600:
+        raise HTTPException(400, "the initial Windows export is limited to ten minutes")
+    title = body.get("title") or "Timeline export"
+    if not isinstance(title, str):
+        raise HTTPException(400, "title is text")
+    return enqueue("export", title, {**params, "clips": checked})
+
+
 def queue_job(body: dict) -> dict:
     if WINDOWS:
+        if body.get("kind") == "export":
+            return windows_export(body)
         if body.get("kind") != "scout":
             raise HTTPException(501, WINDOWS_NOTE)
         if not windows_storyboard.status()["available"]:
@@ -2924,6 +2975,8 @@ def probe(path: str) -> dict:
         raise HTTPException(400, "the file could not be read")
     if not isinstance(data, dict):
         raise HTTPException(400, "the file could not be read")
+    if out.returncode:
+        raise HTTPException(400, "the file is not readable media")
     streams = data.get("streams") or []
     stream = next((one for one in streams if one.get("codec_type") == "video"), {})
     # sound: whether the file has an audio track (a reference video's own sound, a reference audio clip)

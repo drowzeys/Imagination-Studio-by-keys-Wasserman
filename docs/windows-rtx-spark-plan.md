@@ -1020,3 +1020,30 @@ Longer idle checks still exposed intermittent sampler/backend-budget reporting t
 correctly stops the owned backend rather than leaving unmonitored GPU work resident. Warm reuse is verified,
 but reliable long-idle retention is not yet qualified; the Studio stays running and reports the failure.
 Do not treat the initial fast warm result as proof of indefinitely stable residency.
+
+After installing NVIDIA driver **621.01** and rebooting, a bounded render-idle-render check passed without
+changing the code, guard deadlines or memory limits: two distinct captions rendered, the backend stayed
+guarded and loaded for **60 seconds** idle, and a following image reused it in **0.69 s**. The check collected
+**400 host samples** and **124 backend budget samples**. The earlier timeout was not reproduced in this check;
+this is not evidence that the driver caused or permanently fixed it, nor a qualification of indefinite idle.
+
+The normal Studio was then restarted and left running. A separate two-scene Fountain example, *The Last Light*,
+was imported, rendered as one two-caption job and saved as a Slate film. Both saved images were retrieved
+successfully and ComfyUI was confirmed loaded afterward. This is a ready-made planning/storyboard demo,
+not a browser-interaction test or a video render.
+
+## 22. Native Windows FFmpeg and CPU media
+
+BtbN and the FFmpeg-Builds contributors' native Windows ARM64 GPL build
+`n8.1.3-27-g8dca1586f4` (dated `autobuild-2026-10-31-12-59`) is pinned by archive SHA-256.
+The 134,963,677-byte archive supplies FFmpeg and ffprobe outside Git. This is the retained month-end build
+(the provider keeps those for two years), not a daily build that disappears after fourteen days.
+Setup checks both PE architecture
+headers and executable versions; Studio adds the complete pair only to its own process PATH. No global
+PATH, administrator access or x64 emulation is needed. The encoder is VideoLAN/x264's H.264 implementation.
+
+CPU checks exercised actual media probing, frame extraction and a trimmed/joined MP4 with both silent and
+audio sources. The initial local export is bounded to 12 clips, ten minutes of output, even sides up to
+1920 pixels, and an owned cancellable runner with a 600-second deadline. Missing source sound becomes
+silence; existing sound retains its fades. Unsupported soundtrack addition and GPU/video generation
+remain refused. FFmpeg installation alone does not open those gates.

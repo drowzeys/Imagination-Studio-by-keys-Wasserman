@@ -435,7 +435,8 @@ built from the file's header, that the studio now makes itself.
 - **Qwen team (Alibaba)** — Qwen3-VL.
 - **Kijai**, **DeepBeepMeep**, **ddalcu** — the ComfyUI conversions, pruned checkpoints and MLX quants that the
   wider H3 ecosystem (and Phosphene's install) relies on.
-- **FFmpeg**.
+- **FFmpeg**; **BtbN and the FFmpeg-Builds contributors**, whose pinned native Windows ARM64 GPL build supplies
+  FFmpeg and ffprobe for the Windows preview. **VideoLAN and the x264 contributors** supply its H.264 encoder.
 - **OpenAI** — **Whisper**, and **SYSTRAN** — **faster-whisper**: the QA gate's and Voice's check of the spoken words.
 - **yt-dlp** contributors — Motion Previs reading a shot from a link.
 - **PyTorch**; **Hugging Face** — **diffusers**, **transformers** and **huggingface_hub**; **Patrick Kidger** and

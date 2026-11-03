@@ -31,7 +31,7 @@ if ($LocalBrain) {
     $env:STUDIO_LOCAL_ENDPOINT = 'http://127.0.0.1:8080/v1'
     $env:STUDIO_LOCAL_MODEL = 'Qwen3-4B'
 }
-Write-Host "Windows UI-only preview: http://127.0.0.1:$Port"
-Write-Host 'Only explicitly qualified Windows storyboard stills can render. Press Ctrl+C to stop.'
+Write-Host "Windows limited preview: http://127.0.0.1:$Port"
+Write-Host 'Qualified stills and CPU media exports only. Press Ctrl+C to stop.'
 & $Python -X utf8 (Join-Path $Root 'app\server.py')
 if ($LASTEXITCODE -ne 0) { throw "Studio exited with code $LASTEXITCODE." }

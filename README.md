@@ -97,7 +97,8 @@ This preview supports script imports, project/Slate planning, manual storyboards
 uploads, Motion Previs pack imports and browsing saved media.
 Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
 An optional small local brain supports text-only Slate writing assistance.
-Only the separately qualified 512x512 SD-Turbo still route can render; video, in-app model installation, other
+Only separately qualified 512x512 SD-Turbo stills and CPU media exports can render;
+video generation, in-app model installation, other
 agents, worker management and other unverified actions are refused explicitly.
 It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
@@ -113,7 +114,10 @@ The isolated environment is under `%LOCALAPPDATA%\ImaginationStudio\ui-venv`; pr
 `%USERPROFILE%\ImaginationStudio` (or `STUDIO_HOME`). The launcher binds to loopback only and keeps the existing
 access-key checks. If PowerShell blocks scripts, use a process-only policy:
 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\app.ps1 -Install`.
-FFmpeg is optional: add both `ffmpeg.exe` and `ffprobe.exe` to PATH for media inspection; missing tools are reported.
+FFmpeg is optional: `.\scripts\setup-windows-ffmpeg.ps1` installs native ARM64 FFmpeg/ffprobe per-user
+(about 135 MB, BtbN's GPL build), with SHA-256 verification and no system PATH changes. Restart Studio afterward.
+`-Verify` checks the pinned archive, executable architecture and version without downloading.
+An existing pair on PATH also works. Missing tools are reported.
 The existing model licences still apply; this install downloads none of their weights.
 
 **Copilot CLI (optional, no local model weights):** install version 1.0.105 or newer in your terminal with
@@ -165,6 +169,18 @@ Studio drains it. Memory pressure or lost monitoring can still stop it. An unhea
 unloading before retry; it is never quietly restarted.
 Queued jobs remain one-at-a-time. Larger canvases, edits and
 video remain refused. A changed memory partition or render code requires a fresh Check.
+
+**Windows CPU media:** with FFmpeg installed, uploaded clips can be inspected, have frames extracted, and be
+trimmed/joined in **Edit/Editor**. The first Windows MP4 export route accepts 1-12 local clips, up to ten minutes
+total, with even output sides up to 1920 pixels. It keeps existing audio and supplies silence for sources with
+no audio. Export runs in a privately owned cancellable process job with a ten-minute execution deadline.
+Adding a soundtrack during export, long-video generation and all unsupported GPU routes stay disabled.
+
+For a short self-test, import a two-scene Fountain script in **Import**, choose **Fill missing storyboard stills**,
+and wait for its job to finish. Choose **Make a Slate film**, then open **Production -> Shots** to inspect and
+edit the shots. Reopen the film to check the saved images, or download its project JSON from the **Bible**.
+This tests script breakdown, still generation and saved planning without asking for video. **First AD** writing
+also needs a connected Copilot CLI or the optional local brain below.
 
 **Small local writing brain (Windows ARM64, optional):** Qwen3-4B Q4_K_M (Apache-2.0) runs in the pinned native
 llama.cpp CUDA runtime (MIT), outside both Python environments. Setup downloads about 2.5 GB of weights plus
@@ -260,8 +276,8 @@ The admission foundation still requires a measured Windows profile matching the 
 Resident staging, CPU/shared commitment and the target backend's CUDA needs are distinct requirements.
 Ordinary pageable demand is not refused just because it exceeds currently available physical RAM, but must
 fit commit headroom; resident requirements must fit usable host capacity. Runtime pressure can still stop a job.
-No model profiles are qualified yet; render routes remain disabled. This is infrastructure validation, not a
-guarantee of allocation success or safe model loading.
+The no-model diagnostic does not qualify a render route. The separate storyboard Check above
+qualifies only its measured settings; this is not a guarantee of other allocation or loading paths.
 
 #### Explicit Windows sound-effect calibration
 
