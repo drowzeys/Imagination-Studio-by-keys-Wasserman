@@ -208,3 +208,32 @@ the UI into a clean Studio folder. Both board images loaded there; the included 
 and project links were preserved. No GPU jobs were needed. Missing media fails explicitly; the original
 screenplay is optional and its absence is reported. The existing ZIP limits/path checks and manifest
 size/SHA-256 verification apply. This qualifies the named handoff, not broader media/model support.
+## Update: 2026-11-03 - bounded motion graphics and capability cleanup
+
+The limited Windows tier now includes locally checked titles, lower thirds and short slideshows:
+at most 1280x720, 24 fps and ten seconds. All three rendered at that maximum in 17.05-20.55 seconds,
+with 887.7-926.6 MiB peak process-tree commitment under a separate 4 GiB cap. The lower-third check
+retained source audio. This reuses installed Node and Microsoft Edge, with locked HyperFrames/GSAP
+dependencies; no model or browser downloads. Captions/transcription and other graphics templates
+remain unqualified.
+
+Home, engine cards, unqualified rooms and the MCP catalog now reflect Windows route capabilities.
+The worker overview no longer advertises unsupported planning, and a selected, installed Copilot
+is not asked to reconnect merely because its session-only verification reset. Its saved choices and
+CLI-owned terminal login remain separate.
+
+Focused capability/graphics/page/MCP/Windows API/credits/privacy checks: 121 passed, two explicit
+skips. Existing model guards and Linux/Mac limits are unchanged; no paid Windows CI was provisioned.
+The real Graphics UI/queue also produced a browser-decoded title and cancelled a running render without
+publishing an output. Disposable test data was removed; existing models and saved demos were preserved.
+
+### Follow-up: browser launch isolation
+
+The first graphics qualification missed HyperFrames' unisolated `msedge.exe --version` probe, which
+can open a New Tab in the existing Windows Edge session. That explains unwanted windows from the
+repeated checks, despite successful rendered output. The qualification was invalidated.
+
+A checked Windows-only compatibility patch now probes through headless Puppeteer with a temporary
+profile and closes that browser in `finally`; unpatched builds are refused. All three maximum-bound
+renders passed again with **zero new visible browser windows**. Qualification now checks that explicitly.
+No existing user browser windows were closed and no browser or model download was required.

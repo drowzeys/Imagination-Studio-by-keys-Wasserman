@@ -660,6 +660,51 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
 
 
+def test_selected_copilot_is_not_asked_to_reconnect_after_server_restart():
+    out = run(CONNECT + """
+      const copilot = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here", signin_flow: "terminal" };
+      BR.data = { default: "copilot", settings: { agent: "copilot" }, backends: [copilot] };
+      BR.status = { copilot: { state: "unknown" } };
+      out.home = connectNudge("home"); out.agent = connectNudge("agent");
+      out.verifications = calls.filter(c => /\\/verify$/.test(c[0])).length;
+      out.word = brainWord(copilot)[0];
+      BR.data.default = "claude"; BR.data.settings.agent = "claude";
+      const card = connectNudge("home");
+      out.unselected = text(card); out.primary = text(find(card, n => n.tag === "button" && n.attrs.class === "primary"));
+      BR.data.default = "copilot"; BR.data.settings.agent = "copilot";
+      BR.status.copilot = { state: "signed_out" };
+      out.signedOut = text(connectNudge("home"));
+      BR.status.copilot = { state: "broken" };
+      out.broken = !!connectNudge("home");""")
+    assert out["home"] is None and out["agent"] is None
+    assert out["verifications"] == 0 and out["word"] == "Not checked"
+    assert "Check your agent" in out["unselected"] and "terminal sign-in separately" in out["unselected"]
+    assert out["primary"].endswith("Check GitHub Copilot CLI")
+    assert "Connect your agent" in out["signedOut"] and out["broken"]
+
+
+def test_windows_home_and_engine_cards_honor_the_qualified_capabilities():
+    out = run("""
+      S.platform = "windows"; S.capabilities = { scout: { available: true }, sfx: { available: true }, graphics: { available: true },
+        video: { available: false, why: "Video not qualified on Windows" }, edit: { available: false, why: "Picture edits not qualified" } };
+      HC.mode = "clip"; out.mode = hcMode(); out.cards = STARTS().map(c => [c.id, !!c.off]);
+      out.blocked = 0; try { await hcRequest("clip", "A test", 0); } catch (e) { out.blocked = e.message; }
+      out.sent = calls.length;
+      out.video = text(viewVideo()); out.videoButton = !!find(viewVideo(), n => n.tag === "button" && n.attrs.class === "primary").attrs.disabled;
+      out.image = text(viewImage()); out.sound = text(viewSound());
+      const description = capButton({ path: "uploads/test.png", kind: "image" });
+      CAP.map = {}; out.descriptionDisabled = !!capButton({ path: "uploads/test.png", kind: "image" }).attrs.disabled;
+      S.platform = "mac"; HC.mode = "clip"; out.mac = hcMode(); out.macImage = text(viewImage());""")
+    assert out["mode"] == "picture" and out["blocked"] == "Video not qualified on Windows" and out["sent"] == 0
+    cards = dict(out["cards"])
+    assert cards["clip"] and cards["voice"] and cards["song"]
+    assert not any(cards[c] for c in ("still", "sfx", "graphics", "film", "script", "agent"))
+    assert out["videoButton"] and "Video not qualified" in out["video"]
+    assert "512" in out["image"] and "Qwen 2.1 or" not in out["image"]
+    assert "five-second" in out["sound"].lower() and out["descriptionDisabled"]
+    assert out["mac"] == "clip" and "Qwen 2.1" in out["macImage"]
+
+
 def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account():
     """Your own local model (Nemotron 3.5 Bolt here) is one of the card's choices and is made the default in one
     click; Hermes signs in only to the account the person picks, never to ChatGPT by itself."""

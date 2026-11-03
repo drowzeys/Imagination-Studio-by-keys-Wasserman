@@ -19,7 +19,7 @@ See [the source audit](#10-source-level-follow-up-and-revised-confidence) for ex
 
 **Implementation update, 2026-11-03:** the 48 GB machine now runs a bounded Windows feature tier, not just a
 UI/dependency spike. Script imports/planning, 512x512 SD-Turbo storyboard drafts, five-second Stable Audio Open
-effects, a small Qwen3-4B writing brain, Copilot CLI Studio tools, and CPU FFmpeg media operations have real
+effects, bounded motion graphics, a small Qwen3-4B writing brain, Copilot CLI Studio tools, and CPU FFmpeg media operations have real
 local results. The table below and section 5 describe the current limits. Native TensorFold family engines,
 video generation, foley, larger image routes and the other hardware tiers remain unqualified.
 
@@ -32,6 +32,7 @@ video generation, foley, larger image routes and the other hardware tiers remain
 | Qwen3-4B Q4_K_M writing | One 4096-token slot, at most 1024 answer tokens; text-only Slate assistance | Native ARM64 llama.cpp CUDA; one scene/two-shot First AD answer applied and saved in 5.22 s |
 | Copilot CLI | Terminal sign-in, explicit Check, scoped This Studio tools and session continuity | Native CLI 1.0.105; real read-only `studio_state` turn completed; unknown sign-in status no longer blocks Check |
 | Native ARM64 FFmpeg/ffprobe | Probe, frame extraction and local MP4 trim/join export; 1-12 clips, ten minutes, even sides up to 1920 | Browser decoded a 2.0 s, 1344x768 export combining silent and audio sources |
+| Motion graphics | Title, lower-third and slideshow; at most 1280x720, 24 fps and ten seconds | Three real maximum-size/length renders, 17.67-20.72 s each; 888.0-926.4 MiB peak process-tree commitment; lower-third source audio retained; zero new visible browser windows |
 | Owned lifecycle | Warm reuse, running/queued cancellation, explicit unload, Ctrl+Break and restart | 314.37 s idle observed; cancelled jobs published no take; shutdown exited zero with no owned descendants |
 
 These are route-specific measurements, not a full-suite result or a general Windows generation guarantee.
@@ -167,7 +168,7 @@ Statuses below describe the environment inspected during this work. "Missing" me
 | PyAV | Not installed | Compatible wheel exists; validate video read/write |
 | FFmpeg / FFprobe | Not found | Install and verify codecs, probing, and subprocess handling |
 | Node.js / npm | Not found | Native runtime for graphics and relevant agent tools |
-| HyperFrames, GSAP, Playwright browser | Not installed by this setup | Port installer and validate Windows browser rendering |
+| HyperFrames, GSAP, browser | Pinned Windows npm setup; installed Microsoft Edge reused | Title, lower-third and slideshow checked to 1280x720, 24 fps and ten seconds |
 | OpenCV, ONNX Runtime, MediaPipe | Not installed in UI environment | Audit exact versions and wheels; source builds or explicit partial availability may be necessary |
 | Faster Whisper / CTranslate2 | Not installed | CTranslate2 wheel gap; do not silently claim speech QA works |
 | Cryptography / Web Push | Not installed in UI environment | Verify current compatible packages; source-build needs may include Rust and OpenSSL |
@@ -248,7 +249,7 @@ Software/dependency blockers are noted in the evidence column and apply regardle
 | Prompt compilation, graph editing | Expected fit; UI verified | Expected fit | Expected fit | Graph execution remains disabled |
 | FFmpeg inspection, trimming, joining, timeline export | **Verified: bounded CPU routes** | Expected fit at those settings | Expected fit at those settings | Native ARM64; 1-12 clips, ten minutes, even output sides up to 1920; silent/audio-source browser export |
 | Portable Slate ZIP export/import | **Verified: CPU-only round trip** | Expected fit within archive limits | Expected fit within archive limits | File inventory, sizes and SHA-256 checked; media/script paths rebased; source folder removed before import |
-| Motion graphics / titles | Expected fit | Expected fit | Expected fit | Node/browser/FFmpeg port; use bounded sizes |
+| Motion graphics / titles | **Verified: bounded three-template tier** | Expected fit | Expected fit | Title, lower-third, slideshow; 1280x720, 24 fps, ten seconds; installed Edge reused |
 | Finish / external-editor interchange | Expected fit for interchange | Expected fit for interchange | Expected fit for interchange | Proprietary Tesseract binary availability remains a separate unresolved blocker |
 | Qwen images, scouts, picture edits | Needs measurement | Expected fit at small test sizes | Expected fit at those sizes | Small-test GPU peaks about 22-25 GB; host staging also matters |
 | SD-Turbo storyboard drafts | **Verified: 512x512 stills** | Expected fit at those settings | Expected fit at those settings | Native Windows ComfyUI route; 3.01 GiB peak GPU tensors, scoped 12/12/16 GiB caps |
@@ -282,7 +283,7 @@ Software/dependency blockers are noted in the evidence column and apply regardle
 The realistic goal is **a useful partial studio, not a full H3 video workstation**:
 
 1. Planning and media management: the model-free flows are enabled.
-2. CPU editing/export: bounded FFmpeg routes are enabled; motion graphics remain separate work.
+2. CPU editing/export and graphics: bounded FFmpeg exports plus checked titles, lower thirds and short slideshows.
 3. Sound effects: the five-second route is enabled; short foley remains unqualified.
 4. Images: SD-Turbo drafts are enabled; other image models and short music need separate measurements.
 5. Brains: scoped Qwen3 writing and Copilot Studio tools are enabled; other routes remain separate.
@@ -1159,3 +1160,68 @@ was deleted, a fresh Studio accepted the ZIP through its actual import control a
 board images loaded. All four media/script references were retrievable under destination-relative paths,
 and no GPU jobs were queued. The integrated browser did not expose a download event; the prepared link's
 HTTP transfer was verified separately. The saved demo and the user's main Studio folder were not used.
+
+## 26. Capability cleanup and bounded Windows graphics
+
+The Windows state now lists route capabilities with explicit reasons. Home starts on a supported picture
+composer rather than an unavailable video recipe; engine cards and Library model actions reflect the same
+limits. Unqualified rooms show a Windows explanation instead of starting their controls or automatic work.
+Fountain/suite import copy no longer promises direct Final Draft import. Library frame extraction and
+trash/restore remain CPU operations; trash paths are canonical forward-slash media paths on Windows too.
+
+The worker overview previously claimed support even though the Windows state disabled workers. It could
+therefore trigger automatic planning POSTs that the API correctly refused. The overview now reports
+unsupported consistently; the page does not submit worker plans or settings in that state.
+The Studio MCP catalog also excludes unavailable Windows generation/automation tools and narrows
+the advertised still, sound and graphics schemas. Linux/Mac catalogs and limits are unchanged.
+
+Copilot's selected brain and agent were confirmed saved after a server restart. Its successful Check is
+session-local, while terminal credentials belong to the CLI. An installed, selected Copilot with unknown
+verification no longer gets a misleading reconnect card; actual signed-out/broken results still do.
+No automatic request or credential copying was added.
+
+Graphics reuses the existing native Node and installed Edge, with HyperFrames 0.8.186 and GSAP 3.14.2
+locked in npm (76 packages, about 102.3 MiB installed). Setup disables install scripts; no model or browser
+is downloaded. A successful local render receipt is required and becomes stale when the browser,
+runtime or rendering sources/assets change. Only title, lower-third and slideshow are offered.
+
+After the browser-probe correction below, all three templates rendered at the agreed maximum,
+**1280x720, 24 fps, ten seconds**, in **20.68 s, 20.72 s and 17.67 s** respectively.
+Peak process-tree commitment was **926.4, 916.5 and 888.0 MiB**,
+under a separate **4 GiB** owned-job cap. The lower-third fixture included audio and retained it.
+HyperFrames uses one software-rendering worker; normal jobs keep owned-tree cancellation and the
+existing 600-second deadline. Captions/transcription, other templates, larger canvases and longer
+outputs are refused before rendering. These figures are local measurements, not throughput promises.
+
+Focused capability, graphics, MCP, page, Windows API, credits and privacy regressions passed
+**121 tests**; two skips were explicit (optional real-render pytest and unavailable file-symlink privilege).
+Real graphics are checked separately by the setup script. Existing models/caches and memory guards
+were not changed. No Windows CI service was provisioned.
+
+A disposable Studio also made a three-second title through the actual Graphics controls and normal queue.
+The browser decoded the 1280x720 output with no media error, and its midpoint image was inspected.
+A second render was cancelled after progress began, finished cancelled without error and published no output.
+The tested supported views generated no automatic failed API requests. The main Studio was restarted:
+stills, sound and graphics all remained ready, with Copilot still selected and no reconnect card.
+Discovery's legacy POSIX `PREFIX` must not hide the Windows per-user graphics install; a regression holds
+that distinction. The disposable Studio and its files were removed; saved demos were not changed.
+
+### Browser-probe correction
+
+The initial qualification missed a visible side effect: HyperFrames 0.8.186 checks its browser by running
+the executable with `--version`, without a headless flag or private profile. On Windows, Edge can forward
+that to the existing browser session and open a New Tab. Three three-template check batches and two
+actual UI renders explain the user's later report of more than ten unwanted New Tab windows. Successful
+MP4s and drained owned renderer trees did not prove the absence of that side effect.
+
+A Windows-only compatibility patch now uses Puppeteer's headless launch and temporary profile for that
+probe, obtains the version through the browser protocol and closes it in `finally`. The package remains
+pinned; setup checks the patch context, and readiness checks the patched module's SHA-256. Linux/Mac
+keep their existing probe. The unsafe qualification was invalidated rather than carried over.
+
+The check now records visible Chromium window handles before and after each render and refuses qualification
+if a new visible window appears. The corrected maximum-size/length three-template check passed with
+**zero new visible windows**, retaining source audio and the existing owned-process/memory limits.
+Probe regressions cover missing/changed patches, headless options, cleanup after version failure and the
+unchanged non-Windows branch (**19 graphics tests passed, one optional pytest render skipped**).
+Existing user browser windows were not closed.

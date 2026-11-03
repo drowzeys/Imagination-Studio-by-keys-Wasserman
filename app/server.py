@@ -155,7 +155,7 @@ WINDOWS = sys.platform == "win32"
 import windows_storyboard
 import windows_sound
 WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
-                "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills, five-second sound effects and CPU media exports are supported; video generation, foley, in-app model installation, other agents and worker management are not supported yet. "
+                "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics are supported; video generation, foley, in-app model installation, other agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
@@ -598,7 +598,7 @@ class SecurityHeaders:
 app.add_middleware(SecurityHeaders)
 
 WINDOWS_WRITES = re.compile(
-    r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|frame|storage/refresh|motion/packs/import|jobs(?:/[A-Za-z0-9_-]+/cancel)?|"
+    r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|frame|clear|trash(?:/restore)?|storage/refresh|motion/packs/import|jobs(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"projects(?:/[A-Za-z0-9_-]+)?|slate/(?:projects(?:/[A-Za-z0-9_-]+)?|exists|compile|brain|package)|"
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
@@ -612,6 +612,7 @@ def accepting_jobs(job: dict | None = None):
     allowed = not WINDOWS or (job is not None and
                (job.get("kind") == "scout" and windows_storyboard.status()["available"]
                 or job.get("kind") == "sfx" and windows_sound.status()["available"]
+                or job.get("kind") == "graphics" and graphics.ready()["ok"]
                 or job.get("kind") == "export" and all(media_tools().values())))
     if WINDOWS and not allowed:
         raise HTTPException(501, WINDOWS_NOTE)
@@ -1627,6 +1628,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
     if WINDOWS:
+        if kind == "graphics":
+            return graphics_build(params, job_id)
         if kind != "scout":
             raise HTTPException(501, WINDOWS_NOTE)
         return windows_storyboard.build(params, HOME, job_id)
@@ -1850,7 +1853,7 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             raise RuntimeError("the previous Windows job did not drain; no new render was started")
         if WINDOWS:
             from windows_process import OwnedJob
-            owned = OwnedJob()
+            owned = OwnedJob(job_commit_mb=graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0)
             try:
                 process = owned.spawn(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -2405,6 +2408,23 @@ def state() -> dict:
         out["text_encoders"] = []
         for key in ("voice", "music"):
             out[key].update(available=False, why=WINDOWS_NOTE)
+        out["capabilities"] = {kind: {"available": False, "why": why + " is not qualified in this Windows preview."}
+                               for kind, why in {
+                                   "video": "H3 video generation", "edit": "Generative picture editing",
+                                   "voice": "Drama 3 voice", "music": "Music generation", "foley": "MMAudio foley",
+                                   "motion": "Motion analysis", "workers": "Worker routing", "nodes": "Graph execution",
+                                   "captions": "Vision descriptions and speech transcription", "looks": "Model LoRAs",
+                                   "models": "Automatic model installation", "updates": "Automatic source updates",
+                                   "image_actions": "Model-based Library actions", "finish": "Tesseract Finish",
+                               }.items()}
+        sound_ready = windows_sound.status()
+        gfx_ready = graphics.ready()
+        out["capabilities"].update(
+            scout={k: out["windows_stills"][k] for k in ("available", "why")},
+            sfx={k: sound_ready[k] for k in ("available", "why")},
+            graphics={"available": gfx_ready["ok"], "why": gfx_ready["why"]},
+            export={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."},
+            frame={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."})
     return out
 
 
@@ -2577,6 +2597,17 @@ def queue_job(body: dict) -> dict:
     if WINDOWS:
         if body.get("kind") == "export":
             return windows_export(body)
+        if body.get("kind") == "graphics":
+            if body.get("placement") is not None or body.get("sparks") not in (None, 1):
+                raise HTTPException(400, "Windows graphics runs on this machine only")
+            params = body.get("params") or {}
+            if not isinstance(params, dict):
+                raise HTTPException(400, "graphics params is an object")
+            graphics_build(params, "check")
+            title = body.get("title") or graphics_title(params)
+            if not isinstance(title, str):
+                raise HTTPException(400, "title is text")
+            return enqueue("graphics", title, params)
         if body.get("kind") == "sfx":
             if not windows_sound.status()["available"]:
                 raise HTTPException(501, windows_sound.status()["why"])
@@ -3250,6 +3281,8 @@ bolt.busy = local_running
 def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) -> dict:
     """A job that is not a clip (a voice take) into the queue: it renders on this machine, one at a time with the rest."""
 
+    if WINDOWS and kind == "graphics":
+        graphics_build(params, "check")
     if WINDOWS and kind == "scout":
         params = windows_storyboard.parameters(params)
         try:
@@ -3415,7 +3448,7 @@ def clip_time(kind: str, params: dict) -> int | None:
         return None
 
 
-hub = sparks.Hub(HOME, PACK, SPARK, jobs, order, lock, wake, about_this_spark, inside, perform, clip_time)
+hub = sparks.Hub(HOME, PACK, SPARK, jobs, order, lock, wake, about_this_spark, inside, perform, clip_time, enabled=not WINDOWS)
 app.include_router(hub.router())
 import updates  # noqa: E402  (Git source updates after an idle, graceful app shutdown)
 

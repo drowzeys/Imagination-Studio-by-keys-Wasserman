@@ -97,7 +97,7 @@ This preview supports script imports, project/Slate planning, manual storyboards
 uploads, Motion Previs pack imports and browsing saved media.
 Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
 An optional small local brain supports text-only Slate writing assistance.
-Only separately qualified 512x512 SD-Turbo stills, five-second sound effects and CPU media exports can render;
+Only separately qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics can render;
 video generation, foley, in-app model installation, other
 agents, worker management and other unverified actions are refused explicitly.
 It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
@@ -126,6 +126,24 @@ In **Settings → Connections**, choose **GitHub Copilot CLI** and **Check**, th
 **This Studio**. It uses your Copilot plan and consumes Copilot requests; Studio never asks for a token.
 The Windows preview does not automate the installer or browser sign-in. If the CLI is outside PATH, use its
 installed executable for login. [BRAINS.md](BRAINS.md#github-copilot-cli) explains the permissions and limitations.
+The saved brain/agent selections survive a server restart. Copilot's live verification does not: **Not checked**
+means Studio has not checked this session, not that the CLI lost its terminal login. A selected, installed Copilot
+is not prompted to reconnect just for that reason. Check is optional and is never run automatically on reload.
+
+**Motion graphics (Windows ARM64, optional):** `.\scripts\setup-windows-graphics.ps1` installs locked
+HyperFrames 0.8.186 and GSAP 3.14.2 dependencies (about 102 MiB installed), reusing a security-patched ARM64
+Node 22+ and the installed Microsoft Edge. Use `-NodePath` or `-BrowserPath` for an existing installation elsewhere.
+There are no model or browser downloads. The setup checks all three supported templates at **1280x720,
+24 fps and ten seconds**, including a lower third retaining its clip's sound, under a **4 GiB process-tree
+commitment cap**. In **Edit → Graphics**, make a title, lower third or short slideshow. Longer source clips
+must be trimmed in the Editor first. Captions, transcription and the other templates remain disabled.
+Changing the runtime, Edge or renderer/templates requires repeating the check; `python scripts\windows-graphics-check.py`
+checks installed dependencies without reinstalling them. Normal renders retain the queue's owned cancellation and
+ten-minute deadline. This is not H3/video-model generation.
+Setup also applies a checked Windows-only compatibility patch to the pinned HyperFrames build: its browser-version
+probe uses a headless temporary profile rather than launching `msedge.exe --version`, which can open a New Tab
+in the person's normal Edge session. Unpatched/changed installs are refused. Qualification also fails if new visible
+browser windows appear during the render check; existing browser windows are never closed.
 
 **Scripts and manual storyboards (no model required):** in **Import**, upload a Fountain screenplay, ScriptBreak
 project/prompt pack, or a Storyboard Reference ZIP, then choose **Make a Slate film**. The film preserves scenes,

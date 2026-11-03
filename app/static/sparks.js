@@ -39,10 +39,12 @@ async function spkLoad(draw) { const was = spkSig(SPK.data), before = SPK.n; try
   spkMachinesDraw();  // each machine's own readings move every few seconds: drawn in place, not by redrawing the whole page
   if (spkSig(SPK.data) === was && SPK.n === before) return; SPK.plans = {}; spkQueue();
   if (draw && typeof tab !== "undefined" && !document.activeElement.matches("input,textarea,select")) render(); }
-function spkSet(n) { SPK.n = SPK.data && SPK.data.supported ? Math.max(1, Math.min(Number(n) || 1, spkLimit())) : 1; SPK.plans = {};
+function spkSet(n) { if (!SPK.data || !SPK.data.supported) return toast(SPK.data && SPK.data.note || "Worker routing is unavailable.");
+  SPK.n = Math.max(1, Math.min(Number(n) || 1, spkLimit())); SPK.plans = {};
   try { localStorage.setItem("sparks", String(SPK.n)); } catch {} api("/api/sparks", { sparks: SPK.n }).catch(() => {}); spkQueue(); render(); }
 // What the number will do for this job, asked of the app (POST /api/sparks/plan) and said under the chooser
-async function spkPlan(node, what) { const body = { sparks: SPK.n, kind: what.kind || "video", params: what.params || {}, clips: what.clips || 1, seconds: what.seconds || 0, ...(what.placement !== undefined ? { placement: what.placement } : {}) }, key = JSON.stringify(body);
+async function spkPlan(node, what) { if (SPK.data && !SPK.data.supported) { node.replaceChildren(SPK.data.note); return; }
+  const body = { sparks: SPK.n, kind: what.kind || "video", params: what.params || {}, clips: what.clips || 1, seconds: what.seconds || 0, ...(what.placement !== undefined ? { placement: what.placement } : {}) }, key = JSON.stringify(body);
   let r = SPK.plans[key]; if (!r) { try { r = SPK.plans[key] = await api("/api/sparks/plan", body); } catch { return; } }
   node.replaceChildren(...spkSays(r)); }
 function spkSays(r) { if (!r.supported) return [r.says];

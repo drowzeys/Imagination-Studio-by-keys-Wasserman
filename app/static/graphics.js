@@ -19,10 +19,10 @@ const gfxOf = kind => (GFX.lib || []).filter(m => kind === "voice" || kind === "
 const gfxName = p => (p || "").split("/").slice(-2).join("/");
 // open the panel on a clip from the Library: "Add a title" (a lower third over it) or "Caption this clip"
 function gfxOpen(template, path) { GFX.template = template; if (GFX[template] && "video" in GFX[template]) GFX[template].video = path;
-  if (GFX_CLIP.includes(template)) GFX.size = "match"; GFX.job = null; go("Graphics"); }
+  if (GFX_CLIP.includes(template)) GFX.size = S && S.platform === "windows" ? "720p" : "match"; GFX.job = null; go("Graphics"); }
 function gfxButtons(m) { if (m.kind !== "video") return [];
-  return [el("button", { class: "small", title: "A name and a role over this clip, or a title", onclick: () => gfxOpen("lower-third", m.path) }, "Add a title"),
-    el("button", { class: "small", title: "Burn this clip's speech in as captions, word by word", onclick: () => gfxOpen("captions", m.path) }, "Caption this clip")]; }
+  return [el("button", { class: "small", title: capWhy("graphics") || "A name and a role over this clip, or a title", disabled: !!capWhy("graphics"), onclick: () => gfxOpen("lower-third", m.path) }, "Add a title"),
+    el("button", { class: "small", title: capWhy("captions") || "Burn this clip's speech in as captions, word by word", disabled: !!capWhy("captions"), onclick: () => gfxOpen("captions", m.path) }, "Caption this clip")]; }
 // one Library file from a list: a dropdown of its kind (as Sound effects picks its clip)
 function gfxPick(obj, key, kind, label, empty) { const list = gfxOf(kind);
   return field(label, el("select", { "aria-label": label, onchange: e => { obj[key] = e.target.value; render(); } },
@@ -37,7 +37,8 @@ function gfxMany(obj, key, kind, label) { const list = gfxOf(kind), chosen = obj
           el("div", { class: "cap" }, el("input", { type: "checkbox", checked: at >= 0, style: "width:auto;flex:none", "aria-label": "Use " + m.path,
             onchange: e => { const i = chosen.indexOf(m.path); if (e.target.checked && i < 0) chosen.push(m.path); if (!e.target.checked && i >= 0) chosen.splice(i, 1); render(); } }),
             el("span", { class: "note m-flat", style: "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, at >= 0 ? (at + 1) + ". " + gfxName(m.path) : gfxName(m.path)))); }))); }
-const gfxNum = (obj, key, attrs) => bind(obj, key, el("input", { type: "number", style: "max-width:120px", ...attrs }));
+const gfxNum = (obj, key, attrs) => bind(obj, key, el("input", { type: "number", style: "max-width:120px", ...attrs,
+  ...(S && S.platform === "windows" && ["seconds", "seconds_each"].includes(key) ? { max: Math.min(Number(attrs.max) || 10, 10) } : {}) }));
 const gfxText = (obj, key, placeholder, rows) => bind(obj, key, rows ? el("textarea", { rows, placeholder, "aria-label": placeholder }) : el("input", { placeholder, "aria-label": placeholder }));
 // a song's beats from the Music tab's beat finder when this Studio has one; otherwise the tempo makes an even grid
 async function gfxBeats(f) { if (!f.song) return toast("Choose the song first");
@@ -93,17 +94,19 @@ function gfxResult(job) { if (job.status !== "done" || !(job.outputs || [])[0]) 
 function graphicsPanel() {
   if (!GFX.state) { gfxLoad(); return el("div", { class: "note" }, "Looking…"); }
   if (GFX.state.error) return el("div", { class: "note" }, GFX.state.error);
-  const r = GFX.state.ready || {}, t = GFX.template, redraw = () => render();
+  const r = GFX.state.ready || {}, redraw = () => render();
   const cards = Object.fromEntries((GFX.state.templates || []).map(x => [x.id, [x.title, x.one]]));
-  const sizes = { ...(GFX_CLIP.includes(t) || (t === "title" && GFX.title.video) ? { match: ["Match the clip", "its own size"] } : {}),
+  if (!cards[GFX.template]) GFX.template = Object.keys(cards)[0] || "title";
+  const t = GFX.template;
+  const sizes = GFX.state.windows ? { "720p": ["720p", "1280 × 720, at most 10 seconds"] } : { ...(GFX_CLIP.includes(t) || (t === "title" && GFX.title.video) ? { match: ["Match the clip", "its own size"] } : {}),
     "1080p": ["1080p", "1920 × 1080"], "720p": ["720p", "1280 × 720, quicker"], vertical: ["Vertical", "1080 × 1920"], square: ["Square", "1080 × 1080"] };
-  if (!sizes[GFX.size]) GFX.size = "1080p";
+  if (!sizes[GFX.size]) GFX.size = GFX.state.windows ? "720p" : "1080p";
   const mine = (typeof jobs !== "undefined" ? jobs : []).filter(j => j.kind === "graphics");
   const current = mine.find(j => j.id === GFX.job);
   return el("div", { class: "stack gfx" },
     el("section", { class: "panel stack" },
       !r.ok ? el("div", { class: "note vt-bad" }, r.why || "Motion graphics are not installed on this machine.") : null,
-      !r.ok ? (() => { const cmd = GFX.state.spark ? "bash oneshot-setup-spark.sh --graphics" : "bash scripts/setup-graphics.sh";
+      !r.ok ? (() => { const cmd = GFX.state.windows ? "powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-graphics.ps1" : GFX.state.spark ? "bash oneshot-setup-spark.sh --graphics" : "bash scripts/setup-graphics.sh";
         return el("div", { class: "signin-cmd" }, el("code", {}, cmd), el("button", { type: "button", class: "small", onclick: () => copyText(cmd, "Command") }, "Copy")); })() : null,
       field("What to make", choice(GFX, "template", cards, () => { GFX.job = null;  // over a clip: the clip's size first
         GFX.size = GFX_CLIP.includes(GFX.template) ? "match" : GFX.size === "match" ? "1080p" : GFX.size; redraw(); })),
@@ -118,5 +121,5 @@ function graphicsPanel() {
         el("button", { class: "small", onclick: () => addToTimeline(j.outputs[0]) }, "+ timeline"))))));
 }
 function viewGraphics() {
-  return el("div", {}, pageHead("Edit", "Motion graphics", "Titles, lower thirds, captions, slideshows and music videos, made from your takes and rendered on this machine."),
+  return el("div", {}, pageHead("Edit", "Motion graphics", S && S.platform === "windows" ? "Titles, lower thirds and short slideshows: up to 720p and ten seconds, without model downloads." : "Titles, lower thirds, captions, slideshows and music videos, made from your takes and rendered on this machine."),
     graphicsPanel()); }

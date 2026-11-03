@@ -33,7 +33,8 @@ function machineStrip() {
 function homeLive() { const box = $("#homemachine"); if (box) box.replaceWith(machineStrip()); }
 
 // the eight ways in, each a picture card (art/start-*.webp); Settings → Appearance picks which show (six fill a row)
-const STARTS = () => [
+const STARTS = () => {
+  const cards = [
   { id: "clip", art: "start-clip", sign: "video", k: "VIDEO", title: "A clip with sound", one: "Text to video, with lines and a soundscape", run: () => startCreate({ goes: "video", start: "text" }) },
   { id: "scout", art: "start-scout", sign: "video", k: "VIDEO", title: "Scout, then animate", one: "First frames in one load; pick one, then roll", run: () => startCreate({ goes: "video", start: "scout" }, 1) },
   { id: "still", art: "start-still", sign: "image", k: "IMAGE", title: "A still", one: "Qwen 2.1 or FLUX3-K, any size", run: () => startCreate({ goes: "image" }) },
@@ -46,9 +47,21 @@ const STARTS = () => [
   { id: "previs", art: "engine-previs", sign: "previs", k: "PREVIS", title: "Previs", one: "Motion, depth and camera from a clip", run: () => go("Previs") },
   { id: "nodes", art: "vault-nodes", sign: "nodes", k: "NODES", title: "Nodes", one: "Words to pictures to clips, wired in order", run: () => go("Nodes") },
   { id: "agent", art: "start-agent", sign: "previs", k: "AGENT", title: "Ask your agent", one: "Claude, Codex or Hermes make it with the studio", run: () => go("Agent") },
-];
+  ];
+  if (S && S.platform === "windows") {
+    cards.find(c => c.id === "still").one = "SD-Turbo: 512 × 512 storyboard drafts";
+    cards.find(c => c.id === "sfx").title = "Sound effects";
+    cards.find(c => c.id === "sfx").one = "Stable Audio Open: five seconds";
+    cards.find(c => c.id === "agent").one = "Copilot CLI with This Studio tools";
+    cards.push({ id: "film", sign: "story", title: "Plan a film", one: "Slate, the Bible and portable project handoff", run: () => go("Production") },
+      { id: "script", sign: "suite", title: "Bring in a script", one: "Fountain or suite exports; no model required", run: () => go("Import") },
+      { id: "graphics", sign: "edit", title: "Motion graphics", one: "Titles, lower thirds and short slideshows", run: () => go("Graphics") });
+  }
+  const kinds = { clip: "video", scout: "video", still: "scout", sharp: "video", long: "video", voice: "voice", song: "music", sfx: "sfx", looks: "looks", previs: "motion", nodes: "nodes", graphics: "graphics" };
+  return cards.map(c => ({ ...c, off: capWhy(kinds[c.id]) }));
+};
 // 3.0's cards show unless switched off in Settings, even beside a start_cards list saved before they existed
-const START_NEW = ["sfx", "looks", "previs", "nodes"];
+const START_NEW = ["sfx", "looks", "previs", "nodes", "film", "script", "graphics"];
 const startShown = (look, id) => (look.start_cards || []).includes(id) || (START_NEW.includes(id) && !(look.start_off || []).includes(id));
 const homePrefs = () => typeof prefs === "function" ? prefs() : { appearance: { start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], poster: true }, presets: { recipe: "quick", mode: "clip", seconds: 5, seed: "fixed", qa_gate: true, image_model: "qwen" } };
 
@@ -60,7 +73,9 @@ const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe 
   voice: ["Voice", "fish", "Drama 3", "Write the line as it is said. A [direction] in brackets sets the voice."],
   song: ["Song", "music3", "Music 3", "A style (genre, tempo, mood), or lyrics with [Verse] and [Chorus] tags."] };
 const HC_RECIPES = () => ({ quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K" });
-const hcMode = () => HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
+const hcKind = mode => ({ clip: "video", picture: "scout", voice: "voice", song: "music" })[mode];
+const hcMode = () => { const mode = HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
+  return capWhy(hcKind(mode)) && mode !== "picture" ? "picture" : mode; };
 const hcRecipe = () => { const r = HC.recipe || homePrefs().presets.recipe; return HC_RECIPES()[r] ? r : "quick"; };
 const hcPictureModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"]; return have.includes(want) ? want : have[0]; };
 const hcSeed = () => typeof prefSeed === "function" ? prefSeed() : 1;
@@ -114,6 +129,7 @@ function hcEstimate() { const r = typeof recipeParams === "function" ? recipePar
   return HC.est[key]; }
 // what Generate sends for each kind of take: the same endpoints and bodies the tabs use
 async function hcRequest(mode, text, seed, retake) {
+  const why = capWhy(hcKind(mode)); if (why) throw new Error(why);
   const p = homePrefs().presets;
   if (mode === "clip") { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" };
     const seconds = hcSeconds(), long = hcLongs()[seconds];
@@ -131,7 +147,7 @@ async function hcGenerate(again) {
   if (!text) return toast("Say what you want to make first");
   if (HC.busy) return; HC.busy = true; render();
   try { const [path, body] = await hcRequest(mode, text, again ? again.seed + 1 : hcSeed(), !!again);
-    const job = await api(path, body), seed = (body.params ? body.params.seed : body.seed) || 1;
+    const job = await api(path, body), seed = (body.params ? body.params.seed : body.seed) ?? 1;
     HC.made.unshift({ id: job.id, mode, text, seed, title: job.title || hcTitle(text) }); HC.made = HC.made.slice(0, 12);
     HC.image = null; toast("Queued: " + (job.title || hcTitle(text))); if (typeof poll === "function") await poll(); }
   catch (e) { toast(e.message, 6000); }
@@ -162,11 +178,11 @@ function homeComposer() {
   const recipes = HC_RECIPES(), ids = Object.keys(recipes), rec = hcRecipe();
   return el("section", { class: "composer", id: "composer" },
     el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).map(([id, [label, mk, model]]) =>
-      el("button", { type: "button", role: "tab", "data-mode": id, "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
-        el("b", {}, label), typeof mark === "function" ? mark(id === "picture" && /^flux/.test(hcPictureModel()) ? "flux" : mk, id === "picture" && /^flux/.test(hcPictureModel()) ? "FLUX3-K" : model) : model))),
+      el("button", { type: "button", role: "tab", "data-mode": id, title: capWhy(hcKind(id)), disabled: !!capWhy(hcKind(id)), "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
+        el("b", {}, label), S && S.platform === "windows" && id === "picture" ? "SD-Turbo" : typeof mark === "function" ? mark(id === "picture" && /^flux/.test(hcPictureModel()) ? "flux" : mk, id === "picture" && /^flux/.test(hcPictureModel()) ? "FLUX3-K" : model) : model))),
     area, el("div", { class: "cmp-hint" }, hint),
     el("div", { class: "cmp-bar" },
-      el("button", { type: "button", class: "primary cmp-go", disabled: HC.busy, onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
+      el("button", { type: "button", class: "primary cmp-go", title: capWhy(hcKind(mode)), disabled: HC.busy || !!capWhy(hcKind(mode)), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
       mode === "clip" ? el("button", { type: "button", class: "small cmp-recipe", title: "The render recipe: click for the next one (Settings → Presets sets the default)",
         onclick: () => { HC.recipe = ids[(ids.indexOf(rec) + 1) % ids.length]; render(); } }, el("span", { class: "eyebrow" }, "Recipe"), recipes[rec]) : null,
       mode === "clip" ? hcLength() : null,

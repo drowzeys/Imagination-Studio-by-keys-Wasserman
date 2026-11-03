@@ -12,6 +12,7 @@ os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp(prefix="studio-te
 os.environ.setdefault("PREFIX", tempfile.mkdtemp(prefix="studio-test-runtime-"))
 os.environ.setdefault("STUDIO_WINDOWS_IMAGE_DIR", tempfile.mkdtemp(prefix="studio-test-images-"))
 os.environ.setdefault("STUDIO_WINDOWS_SOUND_DIR", tempfile.mkdtemp(prefix="studio-test-sounds-"))
+os.environ.setdefault("GRAPHICS_DIR", tempfile.mkdtemp(prefix="studio-test-graphics-"))
 # Import-time managers and per-test managers must never share the user's leases or RAM ledger.
 _gpu_temp = Path(tempfile.mkdtemp(prefix="studio-test-gpu-"))
 os.environ["STUDIO_GPU_RUNTIME_DIR"] = str(_gpu_temp / "runtime")

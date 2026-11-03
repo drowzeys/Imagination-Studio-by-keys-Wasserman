@@ -97,6 +97,9 @@ function goBack() { const h = SHELL.history; while (h.length && (h[h.length - 1]
   h.pop(); go(prev, { back: true }); }
 function goHome() { if (tab !== "Home") go("Home"); }
 function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
+function capWhy(kind) { if (!kind || !S || S.platform !== "windows") return "";
+  const c = (S.capabilities || {})[kind];
+  return c && c.available ? "" : c && c.why || "This action is not qualified in the Windows preview."; }
 
 const shown = list => typeof roomsShown === "function" ? roomsShown(list) : list;
 const aboutOn = () => tab === "Settings" && typeof SET !== "undefined" && SET.section === "about";

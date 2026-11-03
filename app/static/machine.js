@@ -476,14 +476,18 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
   for (const b of clis) if (b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(cnRedraw, () => {});
   if (clis.some(b => b.found && (!BR.status[b.id] || BR.status[b.id].state === "asking"))) return null;  // not yet known: nothing flashes up
   if (clis.some(b => BR.status[b.id] && BR.status[b.id].state === "signed_in")) return null;
-  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found) || order[0];
+  const selected = BR.data.settings && BR.data.settings.agent || BR.data.default;
+  if (clis.some(b => b.id === "copilot" && b.id === selected && b.found && !b.error && BR.status[b.id].state === "unknown")) return null;
+  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.id === selected && b.found) || order.find(b => b.found) || order[0];
   const locals = (BR.data.backends || []).filter(b => (b.id === "local" || b.local_agent) && b.found && !b.error);  // the local brain and each local agent added
   if (!pick) return null;
+  const unchecked = pick.id === "copilot" && pick.found && BR.status[pick.id] && BR.status[pick.id].state === "unknown";
   return el("section", { class: "panel cn-nudge", "data-card": "connect", "data-where": where },
-    el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, "One click"), el("h2", {}, "Connect your agent"),
-      el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
+    el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, unchecked ? "Installed" : "One click"), el("h2", {}, unchecked ? "Check your agent" : "Connect your agent"),
+      el("p", { class: "note m-flat" }, unchecked ? "Copilot CLI keeps its terminal sign-in separately. Studio has not checked it this session; an optional Check makes a small CLI request."
+        : "Claude Code, Codex, Copilot, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
-    el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
+    el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), (unchecked ? "Check " : "Connect ") + pick.label),
       order.length > 1 || locals.length ? el("span", { class: "cn-or" }, "or") : null,
       order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small cn-alt", onclick: () => connectGo(b) }, brainMarkOf(b.id, b) ? mark(brainMarkOf(b.id, b), "") : null, b.label)),
       locals.map(b => el("button", { type: "button", class: "small cn-alt" + (BR.data.default === b.id ? " on" : ""), "aria-pressed": BR.data.default === b.id ? "true" : "false", onclick: () => cnUseLocal(b) },

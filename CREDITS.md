@@ -260,6 +260,10 @@ titles, captions, slideshows and music videos: a web page seeked frame by frame 
 with FFmpeg. The motion in each template is written with **GSAP** by GreenSock (now part of Webflow), under its
 standard no-charge licence. Both are installed from npm at pinned versions by `scripts/setup-graphics.sh`; the pack
 ships neither. The browser is a Chromium already on the machine, else HyperFrames' own, and on a DGX Spark **Playwright**'s Chromium for arm64 (Microsoft, Apache-2.0).
+The bounded Windows graphics route reuses the person's installed **Microsoft Edge**, by **Microsoft**;
+it downloads neither Edge nor a separate browser and does not redistribute either.
+Its Windows-only HyperFrames compatibility patch uses **Puppeteer**, by **Google and the Puppeteer contributors**
+(Apache-2.0), to check the browser headlessly in a temporary profile instead of opening the person's browser.
 
 ## Training your own LoRA: kohya-ss's musubi-tuner and ostris
 

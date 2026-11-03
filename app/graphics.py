@@ -19,6 +19,7 @@ when the Studio's Python has it, else the whisper command (as the QA gate), cach
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -29,6 +30,11 @@ from pathlib import Path
 KINDS = ("graphics",)
 HYPERFRAMES = "0.8.186"   # the pinned hyperframes (scripts/setup-graphics.sh installs this one)
 GSAP = "3.14.2"
+WINDOWS = sys.platform == "win32"
+WINDOWS_TEMPLATES = ("title", "lower-third", "slideshow")
+WINDOWS_SECONDS = 10
+WINDOWS_COMMIT_MB = 4096
+WINDOWS_PROBE_SHA256 = "9fb1ffb62d77aec5585216f70d7a06f523d28a92312f566a0ed662f50dc01f63"
 TEMPLATES = Path(__file__).with_name("graphics")
 FONTS = Path(__file__).with_name("static") / "fonts"
 FONT_FILES = ("geist.woff2", "instrument-serif.woff2", "instrument-serif-italic.woff2", "OFL-geist.txt", "OFL-instrument-serif.txt")
@@ -62,6 +68,8 @@ def prefix() -> Path:
 
 
 def install_dir() -> Path:
+    if WINDOWS and not os.environ.get("GRAPHICS_DIR"):
+        return Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio" / "graphics"
     return Path(os.environ.get("GRAPHICS_DIR") or prefix() / "graphics").expanduser()
 
 
@@ -90,7 +98,8 @@ def node_bin() -> tuple[str | None, str]:
     """(the Node that runs HyperFrames, its version): the private one setup-graphics.sh installed, else the system's,
     each only when it has the latest security fixes of its line; (None, what was found) otherwise."""
 
-    private = install_dir() / "node" / "bin" / "node"
+    marker = install_dir() / "node-path"
+    private = Path(marker.read_text(encoding="utf-8").strip()) if WINDOWS and marker.is_file() else install_dir() / "node" / "bin" / "node"
     found = []
     for node in ([private] if private.is_file() and os.access(private, os.X_OK) else []) + [shutil.which("node", path=search_path())]:
         if not node:
@@ -123,7 +132,7 @@ def browser() -> str | None:
 
     chosen = os.environ.get("HYPERFRAMES_BROWSER_PATH")
     if not chosen and (install_dir() / "browser-path").is_file():
-        chosen = (install_dir() / "browser-path").read_text().strip()
+        chosen = (install_dir() / "browser-path").read_text(encoding="utf-8").strip()
     if chosen:
         return chosen if Path(chosen).is_file() and os.access(chosen, os.X_OK) else None
     own = sorted((Path.home() / ".cache/hyperframes/chrome").glob("chrome-headless-shell/*/*/chrome-headless-shell"))
@@ -140,13 +149,57 @@ def ready() -> dict:
     why = ("HyperFrames needs Node 22 or newer with the latest security fixes (this machine has " + node_said
            + ")" if not node
            else "HyperFrames is not installed" if not version
+           else f"Windows graphics needs HyperFrames {HYPERFRAMES}" if WINDOWS and version != HYPERFRAMES
            else "GSAP is not installed beside HyperFrames" if not gsap_file().is_file()
            else "no browser to render with" if not found
-           else "ffmpeg is not installed" if not ffmpeg else "")
-    if why:
+           else "ffmpeg is not installed" if not ffmpeg
+           else "ffprobe is not installed" if WINDOWS and not shutil.which("ffprobe", path=search_path()) else "")
+    if not why and WINDOWS:
+        why = windows_probe_error()
+    if not why and WINDOWS:
+        try:
+            receipt = json.loads((install_dir() / "windows-checked.json").read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict):
+                raise ValueError("the graphics check is not an object")
+            if receipt.get("visible_windows_added") != 0:
+                why = "The Windows browser-isolation check has not passed"
+            elif receipt.get("fingerprint") != windows_fingerprint():
+                why = "The graphics runtime, browser or templates changed; repeat the Windows graphics check"
+        except FileNotFoundError:
+            why = "The bounded Windows graphics render check has not passed"
+        except (OSError, ValueError) as error:
+            why = f"The Windows graphics check is unreadable: {type(error).__name__}"
+    if why and WINDOWS:
+        why += ": run `powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-graphics.ps1`."
+    elif why:
         why += ": run `bash scripts/setup-graphics.sh` (or oneshot-setup" + ("-spark" if sys.platform.startswith("linux") else "") + ".sh --graphics)."
     return {"ok": not why, "node": node, "node_version": node_said if node else None, "hyperframes": version,
             "pinned": HYPERFRAMES, "browser": found, "gsap": gsap_file().is_file(), "ffmpeg": ffmpeg, "why": why or None}
+
+
+def windows_probe_file() -> Path:
+    return install_dir() / "node_modules" / "hyperframes" / "dist" / "chunk-GTMBII7X.js"
+
+
+def windows_probe_error() -> str:
+    try:
+        actual = hashlib.sha256(windows_probe_file().read_bytes()).hexdigest()
+    except OSError as error:
+        return f"The Windows headless-browser compatibility fix is unavailable: {type(error).__name__}"
+    if actual != WINDOWS_PROBE_SHA256:
+        return "HyperFrames needs the pinned Windows headless-browser compatibility fix"
+    return ""
+
+
+def windows_fingerprint() -> list:
+    files = [Path(__file__), Path(__file__).with_name("windows_process.py"), Path(node_bin()[0]), Path(browser()),
+             cli(), gsap_file(), install_dir() / "package-lock.json",
+             Path(shutil.which("ffmpeg", path=search_path())), Path(shutil.which("ffprobe", path=search_path()))]
+    files += [windows_probe_file(), Path(__file__).resolve().parents[1] / "scripts" / "windows-graphics" / "hyperframes-browser.patch",
+              Path(__file__).resolve().parents[1] / "scripts" / "windows-graphics-check.py"]
+    files += [p for name in WINDOWS_TEMPLATES for p in (TEMPLATES / name).rglob("*") if p.is_file()]
+    files += [FONTS / name for name in FONT_FILES if (FONTS / name).is_file()]
+    return [{"path": str(p.resolve()), "size": p.stat().st_size, "mtime_ns": p.stat().st_mtime_ns} for p in files]
 
 
 def environment() -> dict:
@@ -321,7 +374,7 @@ def even(value: int) -> int:
 def page(template: str, width: int, height: int, duration: float, media: str) -> str:
     """The template's page with its size, length and media set (the root's data-* and the studio:media marker)."""
 
-    html = (TEMPLATES / template / "index.html").read_text()
+    html = (TEMPLATES / template / "index.html").read_text(encoding="utf-8")
     html = re.sub(r'content="width=\d+, height=\d+"', f'content="width={width}, height={height}"', html, count=1)
 
     def root(found: re.Match) -> str:
@@ -344,6 +397,8 @@ def plan(params: dict, resolve) -> dict:
     template = params.get("template")
     if template not in CATALOG:
         raise Refused("template is one of " + ", ".join(CATALOG))
+    if WINDOWS and template not in WINDOWS_TEMPLATES:
+        raise Refused("Windows graphics supports title, lower-third and slideshow only; no transcription runs")
     files: dict[str, Path] = {}
     tags: list[str] = []
     data: dict = {"template": template}
@@ -365,7 +420,8 @@ def plan(params: dict, resolve) -> dict:
     size = params.get("size")
     if size not in (None, "", "match") and size not in SIZES:
         raise Refused("size is one of " + ", ".join(SIZES) + " or match")
-    width, height = SIZES.get(size or "1080p", SIZES["1080p"])
+    default_size = "720p" if WINDOWS else "1080p"
+    width, height = SIZES.get(size or default_size, SIZES[default_size])
     if params.get("width") or params.get("height"):
         width, height = int(number(params, "width", 1920, 160, 3840)), int(number(params, "height", 1080, 160, 3840))
     data["seed"] = int(number(params, "seed", 1, 0, 2 ** 31))
@@ -529,6 +585,8 @@ def plan(params: dict, resolve) -> dict:
     width, height = even(width), even(height)
     if not (160 <= width <= 3840 and 160 <= height <= 3840):
         raise Refused("a graphic is 160 to 3840 pixels on a side")
+    if WINDOWS and (width > 1280 or height > 720 or duration > WINDOWS_SECONDS):
+        raise Refused("Windows graphics is limited to 1280x720 and 10 seconds; trim longer source clips in the Editor first")
     data.update(width=width, height=height, duration=round(duration, 3), fps=FPS)
     return {"template": template, "width": width, "height": height, "duration": duration, "data": data,
             "media": "\n  ".join(tags), "files": files, "transcribe": words}
@@ -541,7 +599,7 @@ def write(folder: Path, made: dict) -> None:
     if folder.exists():
         shutil.rmtree(folder)
     shutil.copytree(TEMPLATES / made["template"], folder)
-    (folder / "index.html").write_text(page(made["template"], made["width"], made["height"], made["duration"], made["media"]))
+    (folder / "index.html").write_text(page(made["template"], made["width"], made["height"], made["duration"], made["media"]), encoding="utf-8")
     write_data(folder, made["data"])
     (folder / "fonts").mkdir(exist_ok=True)
     for name in FONT_FILES:
@@ -560,13 +618,14 @@ def write(folder: Path, made: dict) -> None:
 
 def write_data(folder: Path, data: dict) -> None:
     said = json.dumps(data, indent=1, ensure_ascii=False)
-    (folder / "data.json").write_text(said)
-    (folder / "data.js").write_text("window.STUDIO_DATA = " + said.replace("</", "<\\/") + ";\n")
+    (folder / "data.json").write_text(said, encoding="utf-8")
+    (folder / "data.js").write_text("window.STUDIO_DATA = " + said.replace("</", "<\\/") + ";\n", encoding="utf-8")
 
 
 def command(folder: Path, target: Path, quality: str = "delivery") -> list[str]:
     node, _ = node_bin()
-    return [node or "node", str(cli()), "render", str(folder), "--quality", quality, "--fps", str(FPS), "-o", str(target)]
+    return [node or "node", str(cli()), "render", str(folder), "--quality", quality, "--fps", str(FPS), "-o", str(target)] + (
+        ["--workers", "1", "--no-browser-gpu"] if WINDOWS else [])
 
 
 def attach(home: Path, pack: Path, spark: bool, inside, relative):
@@ -627,8 +686,9 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
 
     @router.get("/api/graphics")
     def state() -> dict:
-        return {"ready": ready(), "templates": [{"id": k, "title": v[0], "one": v[1]} for k, v in CATALOG.items()],
-                "sizes": {k: list(v) for k, v in SIZES.items()}, "fps": FPS, "spark": spark}
+        return {"ready": ready(), "templates": [{"id": k, "title": v[0], "one": v[1]} for k, v in CATALOG.items() if not WINDOWS or k in WINDOWS_TEMPLATES],
+                "sizes": {k: list(v) for k, v in SIZES.items() if not WINDOWS or k == "720p"}, "fps": FPS, "spark": spark,
+                "windows": WINDOWS, "max_seconds": WINDOWS_SECONDS if WINDOWS else LONGEST}
 
     return router, build, title
 
@@ -681,13 +741,13 @@ def main(argv: list[str]) -> int:
         except Refused as error:
             print(str(error), flush=True)
             return 1
-        data = json.loads((folder / "data.json").read_text())
+        data = json.loads((folder / "data.json").read_text(encoding="utf-8"))
         data["words"] = found
         write_data(folder, data)
         print(f"[tensorfold] graphics: {len(found)} words", flush=True)
     if not rest:
         return 0
-    process = subprocess.Popen(rest, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    process = subprocess.Popen(rest, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8")
     last = -1
     for line in process.stdout:
         found = PROGRESS.match(line.strip())
