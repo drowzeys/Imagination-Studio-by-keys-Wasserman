@@ -1,5 +1,6 @@
 """Existing CPU beat/export routes on Windows; no model, GPU or browser."""
 import io
+import json
 import math
 import shutil
 import wave
@@ -58,6 +59,41 @@ def test_windows_beat_decode_is_bounded_and_never_returns_a_truncated_success(mo
     monkeypatch.setattr(beats, "WINDOWS", False)
     assert len(beats.decode(Path("fixture.wav"), rate=1)) == 601
     assert "-t" not in calls[-1][0]
+
+
+@pytest.mark.parametrize("duration,expected", [
+    (600, 200), (600.001, 400), (None, 400), (True, 400), ("600", 400),
+    (float("nan"), 400), (float("inf"), 400), (-1, 400),
+    pytest.param(10 ** 400, 400, id="oversized-integer"),
+])
+def test_cached_beats_honor_the_same_windows_duration_limit(windows, monkeypatch, duration, expected):
+    source = server.HOME / "uploads" / "cached beats.wav"
+    source.write_bytes(b"fixture")
+    stat = source.stat()
+    beats.sidecar(source).write_text(json.dumps({
+        "source": {"size": stat.st_size, "mtime": round(stat.st_mtime, 3), "version": beats.VERSION},
+        "duration": duration, "bpm": 120, "beats": [0, .5, 1, 1.5],
+    }))
+    monkeypatch.setattr(beats, "analyse", lambda *args: pytest.fail("A matching cache should not decode audio again"))
+    response = windows.post("/api/music/beats", json={"path": "uploads/cached beats.wav"})
+    assert response.status_code == expected, response.text
+    if expected == 200:
+        assert response.json()["duration"] == 600
+    else:
+        assert "duration" in response.json()["error"] or "ten minutes" in response.json()["error"]
+
+
+def test_non_windows_cached_beats_keep_the_existing_duration_behavior(tmp_path, monkeypatch):
+    monkeypatch.setattr(beats, "WINDOWS", False)
+    source = tmp_path / "long.wav"
+    source.write_bytes(b"fixture")
+    stat = source.stat()
+    beats.sidecar(source).write_text(json.dumps({
+        "source": {"size": stat.st_size, "mtime": round(stat.st_mtime, 3), "version": beats.VERSION},
+        "duration": 1200, "beats": [0, .5, 1, 1.5],
+    }))
+    monkeypatch.setattr(beats, "analyse", lambda *args: pytest.fail("Should read the matching cache"))
+    assert beats.cached(source)["duration"] == 1200
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg needed for the real CPU beat-finding check")

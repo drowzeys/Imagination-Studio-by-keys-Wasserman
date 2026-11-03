@@ -14,6 +14,7 @@ first beat is the one of the four phases where the low end hits hardest.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -42,6 +43,15 @@ def ffmpeg() -> str | None:
                                            if Path(p).is_file()), None)
 
 
+def check_windows_duration(seconds) -> None:
+    if not WINDOWS:
+        return
+    if type(seconds) not in (int, float) or seconds < 0 or (type(seconds) is float and not math.isfinite(seconds)):
+        raise RuntimeError("The beat analysis duration must be a finite, nonnegative number")
+    if seconds > WINDOWS_MAX_SECONDS:
+        raise RuntimeError("Windows beat detection takes at most ten minutes of audio; trim the source first")
+
+
 def decode(path: Path, rate: int = RATE):
     """The file's sound as mono float32 at ``rate``, through ffmpeg (with a time limit)."""
 
@@ -55,8 +65,7 @@ def decode(path: Path, rate: int = RATE):
                           capture_output=True, timeout=300)
     if done.returncode:
         raise RuntimeError("ffmpeg could not read the sound of " + Path(path).name + ": " + done.stderr.decode(errors="replace").strip()[-200:])
-    if WINDOWS and len(done.stdout) > WINDOWS_MAX_SECONDS * rate * 4:
-        raise RuntimeError("Windows beat detection takes at most ten minutes of audio; trim the source first")
+    check_windows_duration(len(done.stdout) / (rate * 4))
     return np.frombuffer(done.stdout, np.float32).copy()
 
 
@@ -249,6 +258,7 @@ def cached(path: Path) -> dict:
     try:
         said = json.loads(keep.read_text())
         if said.get("source") == stamp:
+            check_windows_duration(said.get("duration"))
             return {k: v for k, v in said.items() if k != "source"}
     except (OSError, ValueError, AttributeError):
         pass

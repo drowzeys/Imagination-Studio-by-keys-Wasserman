@@ -1321,3 +1321,9 @@ Final focused Windows/shared graphics, export, API, page, credits and privacy ru
 **325 passed, two explicit skips** (optional real-render pytest and unavailable file-symlink privilege).
 The six real renders were checked separately as described above; hosted CI and a Resolve application
 import remain separate follow-ups.
+
+A final pre-PR edge-case pass also found that a matching beat sidecar could bypass the Windows duration
+check. Decoded and cached results now share that check: exactly 600 seconds is accepted, over 600 is refused,
+and missing, nonnumeric, boolean, negative or nonfinite cached durations are reported explicitly. Non-Windows
+cache behavior is unchanged. No model or browser render was needed for this correction.
+The boundary/cache and shared-page, credits and privacy follow-up passed **52 tests**, with no skips.

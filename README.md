@@ -174,6 +174,7 @@ browser windows appear during the render check; existing browser windows are nev
 **Find beats (no model):** choose local audio in the kinetic-type or music-video Graphics panel and press
 **Find the beats**. The existing NumPy/FFmpeg algorithm measures tempo, beats and bars; Windows accepts up to
 ten minutes of audio and explicitly rejects longer sources rather than returning a truncated analysis.
+Cached analyses obey the same limit and must contain a valid duration.
 The same capability is available to the Studio agent as `music_beats`. This does not enable music generation,
 automatic rough-cut jobs, soundtrack mixing or foley.
 

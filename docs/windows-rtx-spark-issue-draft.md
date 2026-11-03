@@ -277,3 +277,8 @@ and Windows drive-letter/escaped file URLs. Media and trim timing were verified 
 an actual Windows Resolve import is not claimed. No cross-platform XML importer was added.
 Focused Windows/shared feature, page, export, credits and privacy tests: **325 passed, two explicit skips**.
 The six actual graphics renders were checked separately; no hosted CI result is implied.
+
+Pre-PR edge-case follow-up: cached beat results now obey the same Windows ten-minute limit as freshly
+decoded audio. Exactly 600 seconds is accepted; longer or invalid cached durations are refused explicitly.
+The existing non-Windows cache behavior is unchanged.
+The focused cache/shared-page/credits/privacy follow-up passed 52 tests without skips.
