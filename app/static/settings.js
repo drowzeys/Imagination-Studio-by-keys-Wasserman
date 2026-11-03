@@ -118,6 +118,7 @@ const LOCAL_PRESETS = [["Studio engine · Bolt", "studio:bolt"], ["Ollama", "htt
 // the Local models card: on Settings → Connections and at the top of Machine → Brains & tools
 function localModelsCard() {
   const windows = S && S.ui_only;
+  const comfy = windows && S.windows_stills && S.windows_stills.backend;
   const b = (typeof BR !== "undefined" && BR.data && BR.data.backends || []).find(x => x.id === "local"), set = typeof BR !== "undefined" && BR.data && BR.data.settings || {};
   const L = SET.local; if (L.endpoint === null) L.endpoint = set.local_endpoint || "";
   const found = L.found || (b ? { found: b.found, endpoint: b.endpoint, models: b.models || [] } : null);
@@ -145,7 +146,12 @@ function localModelsCard() {
     // a name set here that the server no longer runs: the studio asks for, and shows, the model it does run
     b && b.set_missing && b.endpoint === (found && found.endpoint) ? el("div", { class: "note m-flat" }, "Set to " + b.set_model + ", which this server no longer runs: the studio uses " + b.model + ". ",
       el("button", { type: "button", class: "small", onclick: () => save1({ local_model: "" }) }, "Follow what the server runs")) : null,
-    L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null); }
+    L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null,
+    comfy ? el("div", { class: "group" }, el("h3", {}, "Storyboard backend · ComfyUI"),
+      el("div", { class: "note" }, comfy.why || (comfy.loaded ? "Models kept warm between jobs, under the memory guard." : comfy.running ? "ComfyUI is running." : "ComfyUI starts with the first image job.")),
+      el("button", { class: "small", disabled: comfy.busy || !(comfy.running || comfy.why), onclick: async () => {
+        try { S.windows_stills.backend = await api("/api/windows/stills/unload", {}); toast("ComfyUI unloaded"); render(); } catch (e) { toast(e.message); }
+      } }, "Unload ComfyUI")) : null); }
 // More local agents: every other model server (a GLM, a DeepSeek, an Ollama) as a brain of its own, beside Bolt
 function localAgentsCard() {
   const d = typeof BR !== "undefined" && BR.data || {}, A = SET.agents, mine = (d.backends || []).filter(b => b.local_agent);

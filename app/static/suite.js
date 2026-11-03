@@ -21,18 +21,30 @@ function shotToCreate(s) { const lines = (s.dialogue || []).filter(d => d.line).
   if (s.reference_video && S.ref_media) { C.start = "refs"; if (!C.refVideos.includes(s.reference_video)) { C.refVideos.push(s.reference_video); C.video_subjects.push(""); } }
   sync(); go("Create"); toast("Shot " + (s.title || s.id) + " is in Create"); }
 async function stillsForAll(imp) { let n = 0; SU.busy = true; render();
-  for (const s of imp.shots || []) { if (S.ui_only && (s.image || jobs.some(j => j.params && j.params.suite_import === imp.id && j.params.suite_shot === s.id && ["queued", "running"].includes(j.status)))) continue;
+  if (S.ui_only) {
+    const limit = S.windows_stills.max_count, waiting = s => jobs.some(j => j.params && j.params.suite_import === imp.id
+      && (j.params.suite_shot === s.id || (j.params.suite_shots || []).includes(s.id)) && ["queued", "running"].includes(j.status));
+    if (!Number.isInteger(limit) || limit < 1) { SU.busy = false; render(); return toast("The backend has no valid storyboard batch limit."); }
+    const missing = (imp.shots || []).filter(s => !s.image && !waiting(s))
+      .map(s => ({ shot: s, prompt: [s.scene, s.action || s.title, s.camera].filter(Boolean).join(" ") })).filter(s => s.prompt.trim());
+    if (!missing.length) toast("There are no missing, unqueued storyboard stills with descriptions.");
+    for (let at = 0; at < missing.length; at += limit) { const batch = missing.slice(at, at + limit);
+      try { await api("/api/jobs", { kind: "scout", title: "Storyboard: " + (imp.title || imp.id), params: stillParams({
+        prompts: batch.map(s => s.prompt), seeds: batch.map(() => 1), suite_import: imp.id, suite_shots: batch.map(s => s.shot.id) }) }); n += batch.length;
+      } catch (e) { toast(e.message); break; }
+    }
+  } else for (const s of imp.shots || []) {
     const prompt = [s.scene, s.action || s.title, s.camera].filter(Boolean).join(" "); if (!prompt.trim()) continue;
     const params = { prompt, count: 1, seed: 1, width: 1344, height: 768, image_model: typeof imageModel === "function" ? imageModel() : "qwen" };
     try { await api("/api/jobs", { kind: "scout", title: "Still: " + (s.title || s.id || "").slice(0, 36),
-      params: S.ui_only ? { ...stillParams(params), suite_import: imp.id, suite_shot: s.id } : params }); n++; } catch (e) { toast(e.message); break; } }
+      params }); n++; } catch (e) { toast(e.message); break; } }
   SU.busy = false; render();
   if (n) { await poll(); bayOpen(true); toast(count(n, "still") + " queued"); } }
 function importView(imp) {
   const shots = imp.shots || [];
   if (S.ui_only) for (const j of jobs) { if (j.status !== "done" || !j.params || j.params.suite_import !== imp.id) continue;
-    const shot = shots.find(s => s.id === j.params.suite_shot), path = (j.outputs || []).find(p => p.endsWith(".png"));
-    if (shot && !shot.image && path) shot.image = path; }
+    const ids = j.params.suite_shots || [j.params.suite_shot], images = (j.outputs || []).filter(p => p.endsWith(".png"));
+    ids.forEach((id, i) => { const shot = shots.find(s => s.id === id); if (shot && !shot.image && images[i]) shot.image = images[i]; }); }
   return el("div", { class: "panel stack" },
     el("div", { class: "kv su-imphead" }, el("div", { class: "stack su-tight" }, el("span", { class: "eyebrow" }, "From " + (imp.app || "a file")), el("h2", { class: "su-title" }, imp.title || "Untitled"),
       el("span", { class: "note su-flat" }, [count(shots.length, "shot"), (imp.cast || []).length ? count(imp.cast.length, "character") : "", (imp.locations || []).length ? count(imp.locations.length, "location") : ""].filter(Boolean).join(" · "))),

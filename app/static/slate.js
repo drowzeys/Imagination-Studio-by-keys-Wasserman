@@ -503,6 +503,9 @@ function slShots() { const p = SL.p, scene = slScene(), shot = slShot(); if (sce
   const main = el("div"); if (!scene) put(main, el("div", { class: "note" }, "No scenes yet. Add one here, or open First AD and say what you are making: it lays out scenes and shots for you."));
   else { put(main, el("div", { class: "row" }, field("Scene", slIn(scene, "name")), field("Synopsis", slIn(scene, "synopsis", { placeholder: "What happens in this scene, in a sentence or two." })),
       el("button", { class: "small fit", onclick: () => { if (confirm("Remove the scene " + scene.name + " and its " + scene.shots.length + " shots?")) { p.scenes.splice(p.scenes.indexOf(scene), 1); SL.sceneId = null; slDraw(); } } }, "Remove scene")),
+    S.windows_stills && S.windows_stills.available ? el("button", { class: "fit", disabled: !!SL.storyboardBusy,
+      title: "Missing stills only, up to six shots per batch. Each shot keeps its seed. Stop cancels that batch.",
+      onclick: () => slSceneStoryboards(scene) }, "Fill missing scene storyboards") : null,
     slFold("coverage", "✦ Coverage · one scene description becomes a set of shots", () => el("div", {}, field("The scene to cover", bind(SL.cover, "text", el("textarea", { style: "min-height:60px", placeholder: scene.synopsis || "Two detectives argue in a parked car while rain hammers the roof; one of them finally gets out." }))),
       el("div", { class: "row" }, field("Coverage plan", select(SL.cover, "plan", { ...Object.fromEntries(SL.data.plans.map(c => [c.id, c.group + " · " + c.label + " (" + c.shots.length + " shots)"])), custom: "Call your own coverage" }, render)),
         SL.cover.plan === "custom" ? field("Your coverage, in plain English", bind(SL.cover, "ask", el("input", { placeholder: "three tight singles and one slow push-in on the windshield" }))) : null, el("button", { class: "primary fit", disabled: !!SL.busy, onclick: () => slCoverage(scene) }, "✦ Lay out the shots")),
@@ -516,7 +519,7 @@ function slShots() { const p = SL.p, scene = slScene(), shot = slShot(); if (sce
 
 function slStoryboard(shot) { const tf = slTf(shot), job = jobs.find(j => j.id === tf.storyboardJob);
   if (job && job.status === "done" && tf.storyboardPinned !== job.id) {
-    const path = (job.outputs || []).find(p => p.endsWith(".png"));
+    const path = (job.outputs || []).filter(p => p.endsWith(".png"))[tf.storyboardIndex || 0];
     if (path) { (shot.images = shot.images || []).push(path);
       if ((tf.image || "") === (tf.storyboardBefore || "")) { tf.image = path; tf.start = "image"; delete SL.plan[shot.id]; }
       tf.storyboardPinned = job.id; slSave(); }
@@ -526,9 +529,23 @@ function slStoryboard(shot) { const tf = slTf(shot), job = jobs.find(j => j.id =
     tf.image ? media(tf.image) : null,
     el("button", { class: "fit", disabled: !(shot.prompt || "").trim() || !!(job && ["queued", "running"].includes(job.status)),
       onclick: async () => { try { const made = await api("/api/jobs", { kind: "scout", title: "Storyboard: " + shot.name,
-        params: stillParams({ prompt: shot.prompt, count: 1, seed: tf.seed || 1 }) });
-        tf.storyboardJob = made.id; tf.storyboardBefore = tf.image || ""; await poll(); slDraw(); } catch (e) { toast(e.message); } } }, "Make storyboard still"),
+        params: stillParams({ prompt: shot.prompt, count: 1, seed: tf.seed ?? 1 }) });
+        tf.storyboardJob = made.id; tf.storyboardIndex = 0; tf.storyboardBefore = tf.image || ""; await poll(); slDraw(); } catch (e) { toast(e.message); } } }, "Make storyboard still"),
     job && job.status !== "done" ? jobCard(job) : null); }
+
+async function slSceneStoryboards(scene) { SL.storyboardBusy = true; render();
+  const missing = scene.shots.filter(shot => { const tf = slTf(shot), job = jobs.find(j => j.id === tf.storyboardJob);
+    return !tf.image && (shot.prompt || "").trim() && !(job && ["queued", "running"].includes(job.status)); });
+  const limit = S.windows_stills.max_count;
+  try { if (!Number.isInteger(limit) || limit < 1) throw new Error("The backend has no valid storyboard batch limit.");
+    if (!missing.length) toast("This scene has no missing, unqueued storyboard stills with prompts.");
+    for (let at = 0; at < missing.length; at += limit) { const batch = missing.slice(at, at + limit);
+    const made = await api("/api/jobs", { kind: "scout", title: "Storyboard: " + scene.name, params: stillParams({
+      prompts: batch.map(s => s.prompt), seeds: batch.map(s => slTf(s).seed ?? 1) }) });
+    batch.forEach((shot, i) => { const tf = slTf(shot); tf.storyboardJob = made.id; tf.storyboardIndex = i; tf.storyboardBefore = tf.image || ""; });
+    slSave();
+  } await poll(); } catch (e) { toast(e.message); } finally { SL.storyboardBusy = false; slDraw(); }
+}
 // the bible and the dialogue choices: the Bible tab and the Cast & Places room (rooms.js) both show them
 function slBibleChoices() { const film = slFilm(); if (!film.bible) film.bible = "off"; if (!film.dialogue) film.dialogue = slDialogue(); const again = () => { SL.plan = {}; slDraw(); };
   return [el("div", { class: "row" }, field("The bible in shots", slPick(film, "bible", { auto: "Used automatically: the cast's and the place's pictures and LoRAs", off: "Off: only what each shot sets" }, again))),

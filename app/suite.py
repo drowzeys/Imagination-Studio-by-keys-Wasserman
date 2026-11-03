@@ -846,13 +846,22 @@ def with_storyboards(folder: Path, found: dict, home: Path) -> dict:
 
 
 def keep_storyboard(home: Path, import_id: str, shot_id: str, image: str) -> None:
-    folder, _, _ = storyboard_import(home, import_id, shot_id)
-    path = (home / image).resolve()
-    if not path.is_relative_to(home.resolve()) or not path.is_file() or path.suffix.lower() != ".png":
-        raise RuntimeError("a storyboard must be a PNG inside this Studio")
+    keep_storyboards(home, import_id, [(shot_id, image)])
+
+
+def keep_storyboards(home: Path, import_id: str, images: list[tuple[str, str]]) -> None:
+    updates = {}
+    for shot_id, image in images:
+        folder, _, _ = storyboard_import(home, import_id, shot_id)
+        path = (home / image).resolve()
+        if not path.is_relative_to(home.resolve()) or not path.is_file() or path.suffix.lower() != ".png":
+            raise RuntimeError("a storyboard must be a PNG inside this Studio")
+        updates[shot_id] = path.relative_to(home.resolve()).as_posix()
+    if not updates:
+        raise ValueError("a storyboard update needs images")
     manifest = folder / "storyboards.json"
     saved = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
-    saved[shot_id] = path.relative_to(home.resolve()).as_posix()
+    saved.update(updates)
     temporary = manifest.with_suffix(".json.part")
     temporary.write_text(json.dumps(saved, indent=1), encoding="utf-8")
     temporary.replace(manifest)

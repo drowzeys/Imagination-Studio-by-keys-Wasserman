@@ -31,7 +31,7 @@ SAMPLE_FRESHNESS = 2
 class MemoryWatchdog:
     """Sample in a separate process so a stalled CUDA query cannot block the supervisor."""
 
-    def __init__(self, job: OwnedJob, device_index: int, log):
+    def __init__(self, job: OwnedJob, device_index: int, log, python: str | None = None):
         self.job = job
         self.stopping = threading.Event()
         self.failed = threading.Event()
@@ -52,7 +52,7 @@ class MemoryWatchdog:
         self.backend_budget = None
         self.configured_floor = os.environ.get("SPARK_MEMORY_FLOOR_MB", "").strip()
         self.process = job.spawn(
-            [sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", str(device_index)],
+            [python or sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", str(device_index)],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True, encoding="utf-8",
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
@@ -114,7 +114,9 @@ class MemoryWatchdog:
                 snapshot.validate()
                 if not 0 <= time.monotonic() - snapshot.at <= SAMPLE_FRESHNESS:
                     raise ValueError("memory sampler returned stale data")
-                reason = pressure(snapshot, self.configured_floor, previous)
+                # Current freshness is checked independently; old history is not a valid trend baseline.
+                trend = previous if previous is None or snapshot.at - previous.at <= SAMPLE_FRESHNESS else None
+                reason = pressure(snapshot, self.configured_floor, trend)
             except (TypeError, ValueError) as error:
                 self.fail(f"invalid memory sample: {error}")
                 return
@@ -139,6 +141,11 @@ class MemoryWatchdog:
 
     def check(self):
         with self.state_lock:
+            latest = self.latest
+        if (latest is not None and not self.stopping.is_set() and not self.backend_stopping.is_set()
+                and time.monotonic() - latest.at > SAMPLE_FRESHNESS):
+            self.fail("memory sampler stopped answering")
+        with self.state_lock:
             if self.failed.is_set():
                 raise RuntimeError(f"memory watchdog refused this check: {self.reason}")
 
@@ -155,7 +162,13 @@ class MemoryWatchdog:
             previous = None
             while not self.stopping.is_set() and not self.failed.is_set():
                 try:
-                    stats = read_json(base, "/system_stats", timeout=1)
+                    try:
+                        stats = read_json(base, "/system_stats", timeout=1)
+                    except (urllib.error.URLError, TimeoutError, ConnectionError):
+                        remaining = SAMPLE_FRESHNESS - (time.monotonic() - previous.at) if previous is not None else 0
+                        if remaining <= 0:
+                            raise
+                        stats = read_json(base, "/system_stats", timeout=min(1, remaining))
                     validate_identity(stats, directory)
                     total, free = backend_budget(stats)
                     with self.state_lock:
@@ -163,7 +176,8 @@ class MemoryWatchdog:
                     if latest is None or time.monotonic() - latest.at > SAMPLE_FRESHNESS:
                         raise RuntimeError("host memory samples are stale")
                     current = replace(latest, gpu_total_mb=total, gpu_free_mb=free, at=time.monotonic())
-                    reason = pressure(current, self.configured_floor, previous)
+                    trend = previous if previous is None or current.at - previous.at <= SAMPLE_FRESHNESS else None
+                    reason = pressure(current, self.configured_floor, trend)
                     if reason:
                         raise RuntimeError(reason)
                 except (OSError, RuntimeError, ValueError) as error:

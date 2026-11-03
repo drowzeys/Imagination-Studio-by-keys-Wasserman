@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import hashlib
 import importlib.util
 import json
@@ -10,11 +11,13 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import uuid
 
 from windows_brain import fetch, verify_file
+from windows_comfy import WindowsComfy
 
 PACK = Path(__file__).resolve().parents[1]
 MODEL = "sd-turbo"
@@ -29,6 +32,11 @@ MANIFEST_SHA256 = hashlib.sha256(json.dumps(FILES, sort_keys=True).encode()).hex
 SIDE = 512
 MAX_COUNT = 6
 GPU_LIMIT_MB, PROCESS_LIMIT_MB, JOB_LIMIT_MB = 12288, 12288, 16384
+_backend: WindowsComfy | None = None
+_backend_error = ""
+_backend_lock = threading.RLock()
+_prompt_lock = threading.RLock()
+_active_job = _active_prompt = None
 
 
 def folder() -> Path:
@@ -45,7 +53,7 @@ def verify_weights(root: Path) -> None:
 
 
 def tool_hashes() -> dict:
-    paths = ["app/windows_storyboard.py", "app/windows_brain.py", "app/windows_memory.py", "app/windows_process.py",
+    paths = ["app/windows_storyboard.py", "app/windows_comfy.py", "app/windows_brain.py", "app/windows_memory.py", "app/windows_process.py",
              "scripts/windows-comfy-check.py", "scripts/windows-sfx-check.py",
              "scripts/windows-calibration-node.py", "scripts/windows-comfy-calibration-launcher.py"]
     return {name: hashlib.sha256((PACK / name).read_bytes()).hexdigest() for name in paths}
@@ -78,14 +86,20 @@ def status() -> dict:
 def parameters(params: dict) -> dict:
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    allowed = {"prompt", "count", "seed", "width", "height", "image_model", "suite_import", "suite_shot"}
+    allowed = {"prompt", "prompts", "seeds", "count", "seed", "width", "height", "image_model",
+               "suite_import", "suite_shot", "suite_shots"}
     extra = set(params) - allowed
     if extra:
         raise ValueError("unsupported Windows still settings: " + ", ".join(sorted(extra)))
-    prompt = params.get("prompt")
-    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 20000:
-        raise ValueError("a still needs a prompt of 1 to 20,000 characters")
-    out = {"prompt": prompt, "count": params.get("count", 1), "seed": params.get("seed", 1),
+    batch = "prompts" in params
+    prompts = params["prompts"] if batch else [params.get("prompt")]
+    if (not isinstance(prompts, list) or not 1 <= len(prompts) <= MAX_COUNT
+            or any(not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 20000 for prompt in prompts)):
+        raise ValueError("provide 1 to 6 prompts, each of 1 to 20,000 characters")
+    if batch and "prompt" in params:
+        raise ValueError("use prompt or prompts, not both")
+    out = {"prompts" if batch else "prompt": prompts if batch else prompts[0],
+           "count": params.get("count", len(prompts) if batch else 1), "seed": params.get("seed", 1),
            "width": params.get("width", SIDE), "height": params.get("height", SIDE),
            "image_model": params.get("image_model", MODEL)}
     if out["image_model"] != MODEL:
@@ -94,6 +108,14 @@ def parameters(params: dict) -> dict:
         raise ValueError("count, seed, width and height must be whole numbers")
     if not 1 <= out["count"] <= MAX_COUNT or not 0 <= out["seed"] <= 2 ** 32 - MAX_COUNT:
         raise ValueError("Windows stills take 1 to 6 sequential images and a seed from 0 to 4294967290")
+    if batch and out["count"] != len(prompts):
+        raise ValueError("count must match the number of prompts")
+    if "seeds" in params:
+        seeds = params["seeds"]
+        if (not batch or not isinstance(seeds, list) or len(seeds) != len(prompts)
+                or any(type(seed) is not int or not 0 <= seed <= 2 ** 32 - 1 for seed in seeds)):
+            raise ValueError("seeds must give one unsigned 32-bit whole number per batched prompt")
+        out["seeds"] = list(seeds)
     if (out["width"], out["height"]) != (SIDE, SIDE):
         raise ValueError("the measured Windows storyboard route is 512x512 only; larger canvases are not enabled")
     for key in ("suite_import", "suite_shot"):
@@ -101,9 +123,26 @@ def parameters(params: dict) -> dict:
             if not isinstance(params[key], str) or not params[key] or len(params[key]) > 64:
                 raise ValueError(f"{key} must be an import/shot id")
             out[key] = params[key]
-    if ("suite_import" in out) != ("suite_shot" in out):
-        raise ValueError("suite_import and suite_shot are supplied together")
+    if "suite_shots" in params:
+        ids = params["suite_shots"]
+        if (not batch or "suite_shot" in out or not isinstance(ids, list) or len(ids) != len(prompts)
+                or any(not isinstance(one, str) or not one or len(one) > 64 for one in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError("suite_shots must give one distinct import shot id per batched prompt")
+        out["suite_shots"] = list(ids)
+    if ("suite_import" in out) != ("suite_shot" in out or "suite_shots" in out):
+        raise ValueError("suite_import and its shot id(s) are supplied together")
+    if batch and "suite_shot" in out:
+        raise ValueError("batched prompts use suite_shots, not suite_shot")
     return out
+
+
+def image_plan(params: dict) -> list[tuple[str, int, str]]:
+    batch = "prompts" in params
+    prompts = params["prompts"] if batch else [params["prompt"]] * params["count"]
+    seeds = params.get("seeds", [params["seed"] + i for i in range(params["count"])])
+    return [(prompt, seed, f"scout_s{seed}_shot{i + 1}.png" if batch else f"scout_s{seed}.png")
+            for i, (prompt, seed) in enumerate(zip(prompts, seeds, strict=True))]
 
 
 def preflight() -> None:
@@ -122,7 +161,9 @@ def preflight() -> None:
         used, limit, _, low = signals.read()
     if low or not available or available < int(floor or "0"):
         raise RuntimeError("Windows reports low physical memory or the configured host reserve was reached")
-    if limit - used < JOB_LIMIT_MB + 2048:
+    backend = _backend
+    credit = backend.accounting() if backend is not None else {"commit_mb": 0, "reserved_mb": 0}
+    if limit - used < JOB_LIMIT_MB - credit["commit_mb"] + 2048:
         raise RuntimeError("the Windows image job cap does not fit commit headroom with its reserve")
     device = subprocess.run(["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader", "--id=0"],
                             capture_output=True, text=True, timeout=5, check=True).stdout.strip()
@@ -130,7 +171,7 @@ def preflight() -> None:
         dedicated, free = memory.read()
     if dedicated != hardware["gpu_dedicated_total_mb"]:
         raise RuntimeError("the dedicated GPU partition changed; repeat storyboard qualification")
-    if free < GPU_LIMIT_MB + 2048:
+    if free < GPU_LIMIT_MB - credit["reserved_mb"] + 2048:
         raise RuntimeError("the Windows image allocation cap does not fit dedicated GPU headroom with its reserve")
 
 
@@ -142,8 +183,13 @@ def build(params: dict, home: Path, job_id: str) -> tuple[list[str], dict, list[
         raise RuntimeError("the separate Windows GPU environment is missing")
     command = [str(python), "-X", "utf8", str(Path(__file__).resolve()), "--render", "--output", str(target),
                "--count", str(params["count"]), "--seed", str(params["seed"])]
-    outputs = [str(target / f"scout_s{params['seed'] + i}.png") for i in range(params["count"])]
-    return command, {"STUDIO_IMAGE_PROMPT": params["prompt"]}, outputs + [str(target / "sheet.jpg")]
+    outputs = [str(target / name) for _, _, name in image_plan(params)]
+    if "prompts" in params:
+        command.append("--prompts-stdin")
+        env = {}
+    else:
+        env = {"STUDIO_IMAGE_PROMPT": params["prompt"]}
+    return command, env, outputs + [str(target / "sheet.jpg")]
 
 
 def tools():
@@ -168,14 +214,10 @@ def workflow(prompt: str, seed: int) -> dict:
     }
 
 
-def render(output: Path, prompt: str, count: int, seed: int, qualify: bool) -> dict:
+def render_case(output: Path, params: dict, cancelled=lambda: False, submit=None, completed=None, progress=None):
     from PIL import Image, ImageDraw, ImageStat
-    root = folder()
-    verify_weights(root)
-    if qualify:
-        (root / "qualification.json").unlink(missing_ok=True)
-    if not qualify:
-        preflight()
+    root, plan = folder(), image_plan(params)
+    count = len(plan)
     if output.exists():
         raise RuntimeError("the output folder already exists; existing files are not replaced")
     helper = tools()
@@ -193,15 +235,23 @@ def render(output: Path, prompt: str, count: int, seed: int, qualify: bool) -> d
     def exercise(base, directory, process, monitor):
         images, receipts = [], []
         started = time.monotonic()
-        for index in range(count):
-            graph = workflow(prompt, seed + index)
-            reply = helper.post_prompt(base, graph)
+        for index, (prompt, seed, name) in enumerate(plan):
+            if cancelled():
+                return {"cancelled": True}
+            graph = workflow(prompt, seed)
+            reply = submit(graph) if submit else helper.post_prompt(base, graph)
+            if reply is None:
+                return {"cancelled": True}
             if reply.get("error") or reply.get("node_errors"):
                 raise RuntimeError("ComfyUI rejected the Windows image workflow")
             prompt_id = str(uuid.UUID(reply["prompt_id"]))
             deadline = time.monotonic() + 120
             while True:
                 monitor.check()
+                if cancelled():
+                    if completed:
+                        completed(prompt_id, True)
+                    return {"cancelled": True}
                 if process.poll() is not None:
                     raise RuntimeError("the owned image server exited")
                 helper.validate_queue(check.read_json(base, "/queue"), prompt_id)
@@ -218,6 +268,10 @@ def render(output: Path, prompt: str, count: int, seed: int, qualify: bool) -> d
                 if time.monotonic() > deadline:
                     raise RuntimeError("the Windows still exceeded its 120 second render deadline")
                 time.sleep(0.25)
+            if completed:
+                completed(prompt_id, False)
+            if cancelled():
+                return {"cancelled": True}
             receipt = record["outputs"]["19"]["windows_calibration"][0]
             helper.validate_receipt(receipt, GPU_LIMIT_MB << 20)
             receipts.append(receipt)
@@ -234,22 +288,38 @@ def render(output: Path, prompt: str, count: int, seed: int, qualify: bool) -> d
             if image.size != (SIDE, SIDE) or max(ImageStat.Stat(image).stddev) < 1:
                 raise RuntimeError("the generated still has the wrong size or is blank")
             output.mkdir(parents=True, exist_ok=True)
-            image.save(output / f"scout_s{seed + index}.png")
+            image.save(output / name)
             images.append(image)
-            print(f"[tensorfold] step {index + 1}/{count}", flush=True)
+            if progress:
+                progress(index + 1, count)
+            else:
+                print(f"[tensorfold] step {index + 1}/{count}", flush=True)
+        if cancelled():
+            return {"cancelled": True}
         columns = min(2 if count <= 4 else 3, count)
         sheet = Image.new("RGB", (columns * SIDE, ((count + columns - 1) // columns) * SIDE), "black")
         for index, image in enumerate(images):
             tile = image.copy()
             draw = ImageDraw.Draw(tile)
             draw.rectangle((0, 0, 110, 26), fill="black")
-            draw.text((8, 6), f"seed {seed + index}", fill="white")
+            draw.text((8, 6), f"seed {plan[index][1]}", fill="white")
             sheet.paste(tile, ((index % columns) * SIDE, (index // columns) * SIDE))
         sheet.save(output / "sheet.jpg", quality=90)
         return {"model": MODEL, "count": count, "width": SIDE, "height": SIDE,
                 "request_to_files_seconds": time.monotonic() - started, "allocator_receipts": receipts}
 
-    case = check.CalibrationCase(prepare, exercise)
+    return check.CalibrationCase(prepare, exercise)
+
+
+def render(output: Path, params: dict, qualify: bool) -> dict:
+    root = folder()
+    verify_weights(root)
+    if qualify:
+        (root / "qualification.json").unlink(missing_ok=True)
+    else:
+        preflight()
+    check = tools().checker()
+    case = render_case(output, params)
     source = Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio" / "ComfyUI"
     result = check.run_check(source, 120, 0, guarded=True, calibration=case)
     if qualify:
@@ -266,6 +336,89 @@ def render(output: Path, prompt: str, count: int, seed: int, qualify: bool) -> d
     return result
 
 
+def backend_status() -> dict:
+    state = _backend.summary() if _backend else {"running": False, "loaded": False, "address": "", "why": ""}
+    return {**state, "why": _backend_error or state["why"], "busy": _active_job is not None}
+
+
+def cancel_job(job_id: str):
+    with _prompt_lock:
+        if _active_job == job_id and _active_prompt and _backend:
+            _backend.cancel(_active_prompt)
+
+
+def release_backend():
+    global _backend, _backend_error
+    with _prompt_lock:
+        if _active_job is not None:
+            raise RuntimeError("a storyboard is still rendering; cancel it first")
+        with _backend_lock:
+            if _backend:
+                _backend.close()
+            _backend = None
+            _backend_error = ""
+
+
+def shutdown_backend():
+    global _backend
+    if _backend:
+        _backend.close()
+        _backend = None
+
+
+atexit.register(shutdown_backend)
+
+
+def render_job(job: dict, home: Path) -> dict:
+    global _backend, _backend_error, _active_job, _active_prompt
+    params = parameters(job["params"])
+    preflight()
+    with _prompt_lock:
+        if job["status"] == "cancelled":
+            return {"cancelled": True}
+        _active_job = job["id"]
+    def submit(graph):
+        global _active_prompt
+        with _prompt_lock:
+            if job["status"] == "cancelled":
+                return None
+            reply = _backend.post("/prompt", {"prompt": graph, "client_id": uuid.uuid4().hex})
+            if reply.get("error") or reply.get("node_errors"):
+                raise RuntimeError("ComfyUI rejected the storyboard workflow")
+            _active_prompt = str(uuid.UUID(reply["prompt_id"]))
+            return reply
+    def completed(prompt_id, cancelled):
+        global _active_prompt
+        with _prompt_lock:
+            if cancelled:
+                _backend.drain(prompt_id)
+            _active_prompt = None
+    def progress(at, total):
+        job["progress"] = {"stage": "picture", "at": at, "of": total}
+    try:
+        case = render_case(home / "scouts" / job["id"], params, lambda: job["status"] == "cancelled",
+                           submit, completed, progress)
+        with _backend_lock:
+            if _backend_error:
+                raise RuntimeError("ComfyUI needs explicit unloading before retry: " + _backend_error)
+            reused = _backend is not None
+            if _backend is None:
+                verify_weights(folder())
+                _backend = WindowsComfy(tools().checker(), case.prepare)
+                _backend.start()
+            _backend.check()
+        result = case.exercise(_backend.base, _backend.directory, _backend.process, _backend.monitor)
+        if not result.get("cancelled"):
+            _backend.loaded = True
+        return {**result, "backend_reused": reused}
+    except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        _backend_error = str(error)
+        raise
+    finally:
+        with _prompt_lock:
+            _active_job = _active_prompt = None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--download", action="store_true")
@@ -273,8 +426,9 @@ def main() -> int:
     parser.add_argument("--qualify", action="store_true")
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--count", type=int, default=1)
+    parser.add_argument("--count", type=int)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--prompts-stdin", action="store_true")
     args = parser.parse_args()
     try:
         if os.name != "nt":
@@ -290,13 +444,25 @@ def main() -> int:
                     (root / name).write_bytes(answer.read(1 << 20))
         verify_weights(root)
         if args.qualify or args.render:
-            prompt = os.environ.get("STUDIO_IMAGE_PROMPT")
-            if not prompt and args.qualify:
-                prompt = "A sunlit empty corridor, a closed oak door, wide cinematic storyboard frame."
-            parameters({"prompt": prompt, "count": args.count, "seed": args.seed})
+            if args.prompts_stdin:
+                data = sys.stdin.read((1 << 20) + 1)
+                if len(data) > 1 << 20:
+                    raise ValueError("the batched prompt payload exceeds 1 MiB")
+                given = json.loads(data)
+                if not isinstance(given, dict):
+                    raise ValueError("the batched prompt payload must be an object")
+            else:
+                prompt = os.environ.get("STUDIO_IMAGE_PROMPT")
+                if not prompt and args.qualify:
+                    prompt = "A sunlit empty corridor, a closed oak door, wide cinematic storyboard frame."
+                given = {"prompt": prompt}
+            given["seed"] = args.seed
+            if args.count is not None:
+                given["count"] = args.count
+            params = parameters(given)
             if args.output is None:
                 raise ValueError("an output folder is required")
-            result = render(args.output, prompt, args.count, args.seed, args.qualify)
+            result = render(args.output, params, args.qualify)
         else:
             result = {"ok": True, "scope": "checkpoint verified; no inference"}
     except (ImportError, OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as error:

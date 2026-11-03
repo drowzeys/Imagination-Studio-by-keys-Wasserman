@@ -987,3 +987,36 @@ The actual normal Studio queue also completed **Fountain -> two generated stills
 save/reload**, with both image paths retrievable and no video jobs, in **63.46 s** overall. That includes a cold
 ComfyUI startup/shutdown for each shot. The one-step image itself is not the whole job's latency.
 Real browser clicks remain unvalidated; page code was exercised in Node.
+
+## 21. Warm ComfyUI and different-shot batches
+
+The normal Windows queue now keeps one privately owned, guarded ComfyUI instance warm between image jobs.
+Only explicit idle unloading, Studio shutdown, or a watchdog/stalled-cancellation failure stops it. The
+diagnostic Check remains bounded and closes its own instance. Stop cancels only the active owned prompt and
+the remaining frames of its batch; it does not routinely unload the model.
+
+Missing import stills and missing shots in one Slate scene are grouped into at most six distinct captions
+per job. Explicit per-frame seeds, including zero and repeated seeds, are preserved. Indexed filenames prevent
+two frames with the same seed overwriting each other. Import mappings are committed together to the atomic
+storyboard manifest; Slate shots keep their own output index and retain a manually changed first frame.
+
+Warm admission recomputes outstanding growth against the same 12/12/16 GiB allocator/process/job caps.
+Only current private commitment and reserved CUDA tensors from the identity-validated owned backend are
+credited; working set, file cache, unrelated processes and peak counters are not credit. Host low-memory
+signals, explicit host floors and the 2 GiB GPU reserve are unchanged.
+
+A longer idle session exposed a distinction in watchdog timing: a fresh current sample can arrive after its
+historical trend baseline has expired. Current sample age and lost-monitoring waits still keep their 2-second
+limits; expired history is not used for slope extrapolation. Live render/admission checks now also reject
+stale latest host samples directly. No timeout or memory floor was raised.
+
+Actual normal-queue checks on this 48 GB machine completed two different shots in one job, retained the same
+backend for the following job, and preserved script/import -> generated images -> Slate save/reload. The
+initial two-image job took **28.08 s** including startup; a subsequent two-caption warm job took **0.84 s**.
+Earlier per-shot cold-start rendering took 63.46 s for two shots. These are small-case measurements, not a
+whole-screenplay performance guarantee.
+
+Longer idle checks still exposed intermittent sampler/backend-budget reporting timeouts. The watchdog
+correctly stops the owned backend rather than leaving unmonitored GPU work resident. Warm reuse is verified,
+but reliable long-idle retention is not yet qualified; the Studio stays running and reports the failure.
+Do not treat the initial fast warm result as proof of indefinitely stable residency.

@@ -1,5 +1,6 @@
 """No model or GPU probes: protocol checks and Windows job ownership."""
 import ctypes
+import json
 import importlib.util
 import os
 from pathlib import Path
@@ -24,6 +25,90 @@ def stats(directory):
 
 def test_owned_instance_identity():
     check.validate_identity(stats("owned"), "owned")
+
+
+def test_live_checks_refuse_stale_host_samples():
+    from windows_memory import Snapshot
+    monitor = check.MemoryWatchdog.__new__(check.MemoryWatchdog)
+    monitor.state_lock = threading.Lock()
+    monitor.failed = threading.Event()
+    monitor.stopping = threading.Event()
+    monitor.backend_stopping = threading.Event()
+    monitor.reason = ""
+    monitor.latest = Snapshot(48000, 22000, 12000, 36000, 24000, time.monotonic() - 3,
+                              12000, 40000, 1000, False, 26000, 23000)
+    reasons = []
+    def fail(reason):
+        reasons.append(reason)
+        monitor.reason = reason
+        monitor.failed.set()
+    monitor.fail = fail
+    with pytest.raises(RuntimeError, match="stopped answering"):
+        monitor.check()
+    assert reasons == ["memory sampler stopped answering"]
+
+
+def test_fresh_sample_after_scheduler_gap_does_not_use_expired_trend(monkeypatch):
+    from windows_memory import Snapshot
+    from dataclasses import asdict
+    monitor = check.MemoryWatchdog.__new__(check.MemoryWatchdog)
+    for name in ("stopping", "failed", "ready", "backend_stopping"):
+        setattr(monitor, name, threading.Event())
+    monitor.state_lock = threading.Lock()
+    monitor.latest = monitor.initial = None
+    monitor.configured_floor = ""
+    monitor.minima = {}
+    monitor.max_commit_used_mb = monitor.samples = 0
+    now = [0.0]
+    sample = Snapshot(48000, 22000, 12000, 36000, 24000, 0.0, 12000, 40000, 1000, False, 26000, 23000)
+    class Messages:
+        def __init__(self):
+            self.count = 0
+        def get(self, timeout):
+            self.count += 1
+            if self.count > 2:
+                monitor.stopping.set()
+                return None
+            now[0] = 0.0 if self.count == 1 else 3.0
+            return json.dumps({**asdict(sample), "at": now[0]})
+    monitor.messages = Messages()
+    monitor.fail = lambda reason: pytest.fail(reason)
+    monkeypatch.setattr(check.time, "monotonic", lambda: now[0])
+    monitor.supervise()
+    assert monitor.samples == 2 and monitor.latest.at == 3.0
+
+
+def test_backend_transport_retry_stays_within_the_existing_freshness_window(monkeypatch):
+    from windows_memory import Snapshot
+    monitor = check.MemoryWatchdog.__new__(check.MemoryWatchdog)
+    for name in ("stopping", "failed", "ready", "backend_ready", "backend_stopping"):
+        setattr(monitor, name, threading.Event())
+    monitor.state_lock = threading.Lock()
+    monitor.backend_thread = None
+    monitor.backend_samples = 0
+    monitor.backend_min_free_mb = None
+    monitor.backend_budget = None
+    monitor.configured_floor = ""
+    monitor.reason = ""
+    monitor.latest = Snapshot(48000, 22000, 12000, 36000, 24000, 0.0, 12000, 40000, 1000, False, 26000, 23000)
+    now, waits = [0.0], []
+    def response(base, path, timeout):
+        waits.append(timeout)
+        if len(waits) == 2:
+            now[0] = 1.5
+            raise TimeoutError("one delayed response")
+        now[0] = 0.25 if len(waits) == 1 else 1.6
+        if len(waits) == 3:
+            monitor.stopping.set()
+        return stats("owned")
+    monkeypatch.setattr(check.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(check, "read_json", response)
+    monkeypatch.setattr(check, "backend_budget", lambda *args: (36000, 24000))
+    monitor.fail = lambda reason: pytest.fail(reason)
+    monitor.start_backend("http://127.0.0.1:1", "owned")
+    monitor.backend_thread.join(timeout=2)
+    assert monitor.backend_samples == 2
+    assert waits == [1, 1, 0.75]
 
 
 @pytest.mark.parametrize("given", [None, {}, {"system": {}}, stats("another")])

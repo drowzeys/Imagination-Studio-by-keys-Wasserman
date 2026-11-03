@@ -13,6 +13,7 @@ def allocation_receipt():
     return {
         "peak_tensor_bytes": torch.cuda.max_memory_allocated(0),
         "peak_reserved_bytes": torch.cuda.max_memory_reserved(0),
+        "reserved_bytes": torch.cuda.memory_reserved(0),
         "allocator": torch.cuda.memory.get_allocator_backend(),
         "gpu_fraction": torch.cuda.get_per_process_memory_fraction(0),
         "gpu_total_bytes": torch.cuda.get_device_properties(0).total_memory,

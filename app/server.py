@@ -600,7 +600,7 @@ WINDOWS_WRITES = re.compile(
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"threads(?:/[A-Za-z0-9_-]+(?:/(?:messages|cancel))?)?)|"
-    r"nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
+    r"windows/stills/unload|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
 )
 
 
@@ -1835,7 +1835,8 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             owned = OwnedJob()
             try:
                 process = owned.spawn(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT, text=True, encoding="utf-8")
+                                      stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                      stdin=subprocess.PIPE if "prompts" in job["params"] else subprocess.DEVNULL)
             except (OSError, RuntimeError):
                 owned.close()
                 raise
@@ -1851,6 +1852,15 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
         start = local_gpus.process_identity(process.pid) if managed else None
         running.update(process=process, id=job["id"], start=start, key=job_key, owned_job=owned)
     try:
+        if WINDOWS and "prompts" in job["params"]:
+            try:
+                with process.stdin as pipe:
+                    pipe.write(json.dumps({key: job["params"][key] for key in ("prompts", "seeds")
+                                           if key in job["params"]}, ensure_ascii=False))
+            except BrokenPipeError as error:
+                if job["status"] == "cancelled":
+                    return False
+                raise RuntimeError("the Windows renderer could not read its batched prompts") from error
         for line in process.stdout:
             job["log"] = (job["log"] + line)[-20000:]
             engine = RAN_ON.search(line)
@@ -1899,6 +1909,37 @@ def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str
     """One render of a job's clip, on this machine or on the Spark the job was handed to (sparks.py), which leaves the
     clip at the same path: (False when the job was cancelled meanwhile, the environment, the output paths)."""
 
+    if WINDOWS and job["kind"] == "scout":
+        expired = threading.Event()
+        def timed_out():
+            with lock:
+                if job["status"] not in ("queued", "running"):
+                    return
+                expired.set()
+                job["status"] = "cancelled"
+            try:
+                windows_storyboard.cancel_job(job["id"])
+            except (OSError, RuntimeError, ValueError) as error:
+                job["log"] += f"[tensorfold] timed-out ComfyUI prompt cancellation failed: {error}\n"
+        deadline = threading.Timer(600, timed_out)
+        deadline.daemon = True
+        deadline.start()
+        try:
+            result = windows_storyboard.render_job(job, HOME)
+        finally:
+            deadline.cancel()
+        if expired.is_set():
+            job["status"] = "failed"
+            raise RuntimeError("the Windows image job exceeded its 600 second deadline")
+        if result.get("cancelled") or job["status"] == "cancelled":
+            return False, {}, []
+        job["engine"] = "cuda"
+        job["render"] = {"backend_reused": result["backend_reused"],
+                         "request_seconds": result["request_to_files_seconds"]}
+        job["log"] += f"[tensorfold] ComfyUI {'reused' if result['backend_reused'] else 'started'}; kept warm\n"
+        target = HOME / "scouts" / job["id"]
+        paths = [str(target / name) for _, _, name in windows_storyboard.image_plan(params)]
+        return True, {}, paths + [str(target / "sheet.jpg")]
     worker = job.get("remote") and next((one for one in hub.workers() if one["address"] == job["remote"]), {"address": job["remote"]})
     if worker:
         _, env, outputs = build(job["kind"], params, job["id"], room=False)
@@ -2228,7 +2269,13 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             if not job["outputs"]:
                 raise RuntimeError("the script finished without writing its output")
             if WINDOWS and job["kind"] == "scout" and params.get("suite_import"):
-                suite.keep_storyboard(HOME, params["suite_import"], params["suite_shot"], job["outputs"][0])
+                ids = params["suite_shots"] if "suite_shots" in params else [params["suite_shot"]]
+                images = [path for path in job["outputs"] if path.endswith(".png")]
+                if len(images) != len(ids):
+                    raise RuntimeError("the storyboard batch returned the wrong number of images")
+                with lock:
+                    if job["status"] != "cancelled":
+                        suite.keep_storyboards(HOME, params["suite_import"], list(zip(ids, images, strict=True)))
             if job["kind"] == "video" and params.get("preset") == "sharp" and params.get("qa", True):
                 if not gated(job, Path(outputs[0])):
                     return
@@ -2284,7 +2331,7 @@ threading.Thread(target=work, daemon=True).start()
 def public(job: dict) -> dict:
     out = {k: job.get(k) for k in ("id", "kind", "status", "title", "outputs", "progress", "error", "created",
                                     "started", "finished", "estimate", "engine", "qa", "passes", "pace", "source", "shot",
-                                    "negations", "sparks", "spark", "placement", "moved", "voice", "music", "soundtrack")}
+                                    "negations", "sparks", "spark", "placement", "moved", "voice", "music", "soundtrack", "render")}
     # by this machine's clock: the page may be open on another one
     out["elapsed"] = (job.get("finished") or time.time()) - job["started"] if job.get("started") else None
     out["log"] = job["log"][-3000:]
@@ -2327,6 +2374,7 @@ def state() -> dict:
             "bolt": bolt.summary(),
             "engine": ("CUDA · SD-Turbo (512x512 only)" if windows_storyboard.status()["available"] else "unavailable (Windows UI-only preview)") if WINDOWS else ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
     if WINDOWS:
+        out["windows_stills"]["backend"] = windows_storyboard.backend_status()
         for key in ("ref2va", "ref2va_turbo", "ref_media", "last_frame", "shot_check"):
             out[key] = False
         out["text_encoders"] = []
@@ -2479,7 +2527,8 @@ def queue_job(body: dict) -> dict:
             raise HTTPException(400, "title is text")
         params = windows_storyboard.parameters(body.get("params") or {})
         if params.get("suite_import"):
-            suite.storyboard_import(HOME, params["suite_import"], params["suite_shot"])
+            for shot_id in params["suite_shots"] if "suite_shots" in params else [params["suite_shot"]]:
+                suite.storyboard_import(HOME, params["suite_import"], shot_id)
         return enqueue("scout", body.get("title") or "Storyboard draft", params)
     kind = body.get("kind")
     if body.get("params") is not None and not isinstance(body.get("params"), dict):
@@ -2601,6 +2650,11 @@ def cancel(job_id: str) -> dict:
         if active:
             job["status"] = "cancelled"
     if active:
+        if WINDOWS and job["kind"] == "scout":
+            try:
+                windows_storyboard.cancel_job(job_id)
+            except (OSError, RuntimeError, ValueError) as error:
+                raise HTTPException(409, f"owned ComfyUI cancellation failed: {error}") from None
         if process is not None:
             if WINDOWS:
                 try:
@@ -2618,6 +2672,21 @@ def cancel(job_id: str) -> dict:
                 stop_comfy(job)
         hub.kick.set()  # a worker's render loop sees the cancelled job and interrupts its own prompt
     return public(job)
+
+
+@app.post("/api/windows/stills/unload")
+def unload_windows_stills(request: Request) -> dict:
+    agents.local(request, True)
+    if not WINDOWS:
+        raise HTTPException(501, "this control is for the Windows storyboard backend")
+    with lock:
+        if any(job["kind"] == "scout" and job["status"] in ("queued", "running") for job in jobs.values()):
+            raise HTTPException(409, "storyboards are queued or running; cancel them before unloading ComfyUI")
+    try:
+        windows_storyboard.release_backend()
+    except (OSError, RuntimeError) as error:
+        raise HTTPException(409, str(error)) from None
+    return windows_storyboard.backend_status()
 
 
 NOT_ON_COMFY = ("voice", "export", "soundtrack", "qa", "train", "finish", "graphics")  # jobs a Spark runs without its ComfyUI server
@@ -3369,6 +3438,8 @@ def stop_local_jobs() -> None:
             print("[studio] Owned jobs did not finish shutdown within 30 s; their GPU leases are retained.", flush=True)
     voice.release("the Studio session is ending")
     music.release("the Studio session is ending")
+    if WINDOWS:
+        windows_storyboard.shutdown_backend()
     stop_session_comfy()
 
 
@@ -3424,7 +3495,7 @@ def stop_session_comfy() -> None:
 def register_session_stop() -> None:
     """Only the running app owns engine shutdown; workers may start after app startup."""
     def stop():
-        if SPARK and (LOCAL_GPU_CHILD or hub.local.managed or getattr(hub.local, "active", False) or local_threads):
+        if WINDOWS or SPARK and (LOCAL_GPU_CHILD or hub.local.managed or getattr(hub.local, "active", False) or local_threads):
             stop_local_jobs()
         else:
             stop_session_comfy()

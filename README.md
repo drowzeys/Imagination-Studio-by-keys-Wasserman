@@ -151,12 +151,19 @@ import, then **Make a Slate film**, or **Send into a film** to attach them to an
 For a First AD-created film, **Production → Shots → Make storyboard still** saves a candidate and pins it
 unless you changed the first frame while its job ran. Home/Create stills and the Copilot `queue_still` tool
 use the same queue and restrictions.
+Missing import stills and **Production -> Shots -> Fill missing scene storyboards** are grouped into batches
+of at most six different captions. Each result stays with its own shot; per-shot seeds and manual pictures
+are preserved.
 
 These are **512x512 square drafts**, not video frames, final artwork or a guarantee of matching faces.
 A job takes 1-6 images sequentially, one step each, in the pinned ComfyUI server using its own Diffusers loader.
 The route keeps the existing 12 GiB native allocator cap, 12 GiB process / 16 GiB owned-job commitment caps,
-Windows low-memory/commit checks and 2 GiB GPU reserve. Stop drains only the job's privately owned process tree.
-The backend is unloaded at the end of each job; queued jobs remain one-at-a-time. Larger canvases, edits and
+Windows low-memory/commit checks and 2 GiB GPU reserve. Normal jobs share one privately owned ComfyUI backend,
+kept warm between jobs. Stop targets the active prompt and stops the rest of that batch; it does not normally
+unload the models. **Settings -> Connections -> Unload ComfyUI** explicitly frees the idle backend, and closing
+Studio drains it. Memory pressure or lost monitoring can still stop it. An unhealthy backend needs explicit
+unloading before retry; it is never quietly restarted.
+Queued jobs remain one-at-a-time. Larger canvases, edits and
 video remain refused. A changed memory partition or render code requires a fresh Check.
 
 **Small local writing brain (Windows ARM64, optional):** Qwen3-4B Q4_K_M (Apache-2.0) runs in the pinned native
