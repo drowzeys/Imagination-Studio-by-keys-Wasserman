@@ -93,8 +93,8 @@ Untested. The CUDA engines are built and measured for the GB10.
 ### Windows (UI-only preview)
 
 Native Windows, including ARM64, can run the web UI without WSL, CUDA, or model downloads.
-This preview supports project/Slate planning, prompt compilation, settings, uploads, Motion Previs pack imports
-and browsing saved media.
+This preview supports script imports, project/Slate planning, manual storyboards, prompt compilation, settings,
+uploads, Motion Previs pack imports and browsing saved media.
 Rendering, model installation, agents, worker management and other unverified actions are refused explicitly.
 It is **not** a Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
@@ -112,6 +112,17 @@ access-key checks. If PowerShell blocks scripts, use a process-only policy:
 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\app.ps1 -Install`.
 FFmpeg is optional: add both `ffmpeg.exe` and `ffprobe.exe` to PATH for media inspection; missing tools are reported.
 The existing model licences still apply; this install downloads none of their weights.
+
+**Scripts and manual storyboards (no model required):** in **Import**, upload a Fountain screenplay, ScriptBreak
+project/prompt pack, or a Storyboard Reference ZIP, then choose **Make a Slate film**. The film preserves scenes,
+shots, cast, locations and dialogue. A board ZIP brings `prompts.json` plus each frame's `NN_label/still.png`;
+`prompts.json` alone brings descriptions, not pictures. **Send into a film** attaches boards to existing or new
+shots without replacing existing prompts or intent. In **Production**, edit the shot plan, choose **An image**
+and upload your own first frame, or pin pictures to cast/location sheets. Save/reload and download the film's
+project JSON or shot lists (Markdown/CSV). Project JSON keeps media paths; it does not bundle the images for a
+different computer. Export a Final Draft script as Fountain first: direct `.fdx` import is not implemented.
+AI writing, generated storyboard stills and rendering remain unavailable in this preview; a smaller local brain
+and lighter image model are separate next steps.
 
 #### Windows ARM64 CUDA feasibility check
 

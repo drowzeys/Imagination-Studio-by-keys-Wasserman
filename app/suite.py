@@ -19,6 +19,8 @@ a ZIP is taken apart by hand: no absolute paths, no "..", no links, and a cap on
 from __future__ import annotations
 
 import json
+import ntpath
+import os
 import re
 import shutil
 import subprocess
@@ -86,6 +88,8 @@ def safe_name(name: str) -> str | None:
     parts = [part for part in name.split("/") if part not in ("", ".")]
     if not parts or any(part == ".." for part in parts):
         return None
+    if os.name == "nt" and any(ntpath.isreserved(part) for part in parts):
+        return None
     return "/".join(parts)
 
 
@@ -103,7 +107,7 @@ def unpack(archive: Path, folder: Path) -> dict[str, Path]:
             raise HTTPException(400, f"this ZIP holds more than {ZIP_FILES} files or {ZIP_BYTES // 1024 ** 3} GB")
         for item in entries:
             if safe_name(item.filename) is None or (item.external_attr >> 16) & 0o170000 == 0o120000:
-                raise HTTPException(400, f"this ZIP has a file that would land outside its folder: {item.filename[:120]}")
+                raise HTTPException(400, f"this ZIP has a file outside its folder or with an invalid name: {item.filename[:120]}")
         out, root = {}, folder.resolve()
         for item in entries:
             name = safe_name(item.filename)
@@ -436,8 +440,9 @@ def blockout(exports: list[tuple[Path, dict]], files: dict, home: Path) -> dict:
     for base, meta in exports:
         info = meta.get("shot") or {}
         name = str(info.get("name") or "")
-        inside = {key[len(str(base)) + 1:] if str(base) != "." else key: path for key, path in files.items()
-                  if str(base) == "." or key.startswith(str(base) + "/")}
+        prefix = base.as_posix()
+        inside = {key[len(prefix) + 1:] if prefix != "." else key: path for key, path in files.items()
+                  if prefix == "." or key.startswith(prefix + "/")}
         find = lambda *names: next((inside[n] for n in names if n in inside), None)
         reference = find(f"{name}_reference.mp4", "reference.mp4")
         depth = find(f"{name}_depth.mp4", "depth.mp4")
@@ -516,7 +521,7 @@ def relative_to(path: Path | None, home: Path) -> str | None:
     if not path:
         return None
     try:
-        return str(Path(path).resolve().relative_to(home.resolve()))
+        return Path(path).resolve().relative_to(home.resolve()).as_posix()
     except ValueError:
         return None
 
@@ -827,7 +832,7 @@ def bring_file(home: Path, path, target: Path, name: str) -> str | None:
     target.mkdir(parents=True, exist_ok=True)
     out = target / name
     shutil.copyfile(home / path, out)
-    return str(out.resolve().relative_to(home.resolve()))
+    return out.resolve().relative_to(home.resolve()).as_posix()
 
 
 def attach_shots(film: dict, found: dict, mapping: list, home: Path, pack: str | None = None) -> int:

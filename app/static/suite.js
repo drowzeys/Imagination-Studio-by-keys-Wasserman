@@ -31,7 +31,7 @@ function importView(imp) {
       el("span", { class: "note su-flat" }, [count(shots.length, "shot"), (imp.cast || []).length ? count(imp.cast.length, "character") : "", (imp.locations || []).length ? count(imp.locations.length, "location") : ""].filter(Boolean).join(" · "))),
       el("div", { class: "chips" },
         el("button", { class: "primary", disabled: !shots.length, onclick: async () => { try { const r = await api("/api/suite/imports/" + imp.id + "/slate", {}); SL.mode = "slate"; SL.p = await api("/api/slate/projects/" + r.project); SL.metas = null; SL.view = "shots"; go("Production"); toast("A Slate film is ready"); } catch (e) { toast(e.message); } } }, "Make a Slate film"),
-        el("button", { disabled: !shots.length, onclick: () => stillsForAll(imp) }, "A still for every shot"),
+        el("button", { disabled: !shots.length || !!(S && S.ui_only), title: S && S.ui_only ? "Image generation is not enabled in the Windows preview; import or upload storyboard stills instead." : "", onclick: () => stillsForAll(imp) }, "A still for every shot"),
         /blockout/i.test(imp.app || "") ? el("button", { onclick: async () => { try { const r = await api("/api/suite/imports/" + imp.id + "/motion", {}); toast("Motion pack " + (r.pack || "") + " is in Motion Previs"); go("Motion Previs"); } catch (e) { toast(e.message); } } }, "Use as motion reference") : null)),
     (imp.warnings || []).length ? el("div", { class: "note su-flat vt-warn" }, imp.warnings.join(" · ")) : null,
     shots.length ? el("div", { class: "shots" }, shots.map((s, i) => el("div", { class: "shot" },

@@ -864,3 +864,33 @@ reports are explicitly labelled as tests, not completed generation or route qual
 Next: qualify a small case matrix under unchanged bounds. Separately, prioritize low-memory script imports,
 scene/shot planning and manual storyboard/reference-image flows; do not make those depend on a large brain or
 image-generation model.
+
+## 17. Model-free script and storyboard workflow
+
+The Windows preview now permits script/suite imports, conversion to Slate, attachment of imported storyboard
+frames and import of an existing motion pack. Importing a motion pack is not motion analysis or video generation.
+The GPU generation, brain and agent execution gates remain closed.
+
+The CPU-only tests on this machine covered:
+
+- Fountain script to scenes, shots, cast and dialogue with stable links, then project save/reload and JSON reimport.
+- Uploading a reference still, retrieving it and preserving its media path across the project round-trip.
+- Storyboard ZIP import, including mixed path separators, then attachment to existing and new shots without
+  overwriting an existing shot's prompt or intent.
+- Canonical forward-slash media paths and Windows ZIP-name refusals, including reserved devices, alternate data
+  streams and trailing dots/spaces; a rejected import leaves no import files behind.
+- The actual JavaScript download handlers for project JSON and Markdown/CSV shot lists, including quote/comma
+  escaping and preservation of manually supplied image paths, without a network or model request.
+- Disabling "A still for every shot" in the Windows preview while keeping planning and attachment available.
+
+The related import, Slate-page, Windows API, access, handler-timeout, credits and privacy checks passed:
+**92 passed, 5 skipped**. Node was required for the page-code checks, rather than silently skipping them.
+The five skipped checks need FFmpeg, which is not installed here. Real browser upload/click interactions have not
+yet been validated. These results do not qualify generated storyboard images, AI writing, video, or a 32 GB tier.
+
+This flow loads no model weights. Direct Final Draft FDX import is not implemented: export Fountain first.
+Project JSON records media paths; it is not a portable ZIP containing the referenced images.
+Restart the Windows launcher after updating the Python code so the running app picks up the new capability gate.
+
+The next model work remains a small optional local brain and a lighter image model, not Bolt. Neither is required
+for importing a script, planning shots or maintaining a manual reference board.

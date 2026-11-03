@@ -150,7 +150,7 @@ def lead(first: bool, last: bool, seconds: float = 5, frames: int | None = None)
 # 2x decoder and no MiniMax H3 Turbo there, so only the native sizes and the FastH3 qualities are offered.
 SPARK = sys.platform.startswith("linux")
 WINDOWS = sys.platform == "win32"
-WINDOWS_NOTE = ("Windows preview: project planning, saved settings, uploads and media browsing only. "
+WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, saved settings, uploads and media browsing. "
                 "Local rendering, model installation, agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 if SPARK:
@@ -596,6 +596,7 @@ app.add_middleware(SecurityHeaders)
 WINDOWS_WRITES = re.compile(
     r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|storage/refresh|motion/packs/import|"
     r"projects(?:/[A-Za-z0-9_-]+)?|slate/(?:projects(?:/[A-Za-z0-9_-]+)?|exists|compile)|"
+    r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
 )
 
