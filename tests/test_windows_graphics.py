@@ -1,7 +1,10 @@
 """Windows graphics limits and admission; no browser, GPU or model is started."""
 import json
 import hashlib
+import ctypes
+import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,7 +43,7 @@ def test_title_defaults_to_the_qualified_size_and_enforces_exact_bounds(windows)
                      {"size": "1080p"}, {"size": "vertical"}, {"size": "square"}):
         with pytest.raises(graphics.Refused, match="1280x720 and 10 seconds"):
             graphics.plan({"template": "title", "title": "Outside", **settings}, no_media)
-    for template in ("captions", "kinetic", "music-video", "explainer"):
+    for template in ("captions",):
         with pytest.raises(graphics.Refused, match="only; no transcription"):
             graphics.plan({"template": template}, no_media)
 
@@ -52,7 +55,8 @@ def test_windows_catalog_and_worker_state_match_admission(windows, monkeypatch):
     assert not state["capabilities"]["captions"]["available"]
     assert not state["capabilities"]["workers"]["available"]
     catalog = windows.get("/api/graphics").json()
-    assert [t["id"] for t in catalog["templates"]] == ["title", "lower-third", "slideshow"]
+    assert [t["id"] for t in catalog["templates"]] == list(graphics.WINDOWS_TEMPLATES)
+    assert state["capabilities"]["graphics"]["templates"] == list(graphics.WINDOWS_TEMPLATES)
     assert catalog["sizes"] == {"720p": [1280, 720]} and catalog["max_seconds"] == 10
     workers = windows.get("/api/sparks").json()
     assert workers["supported"] is False and workers["workers"] == []
@@ -68,6 +72,21 @@ def test_windows_catalog_and_worker_state_match_admission(windows, monkeypatch):
     response = windows.post("/api/jobs", json={"kind": "graphics", "params": {"template": "title", "title": "Allowed", "seconds": 10}})
     assert response.status_code == 200 and response.json()["status"] == "queued"
     assert response.json()["outputs"] == []
+
+
+@pytest.mark.parametrize("params", [
+    {"template": "kinetic", "text": "Words move in time", "song": "song.wav", "beats": [0, 2.7, 5.4, 8.2]},
+    {"template": "music-video", "song": "song.wav", "clips": ["clip.mp4"], "seconds": 10, "transition": "cut"},
+    {"template": "explainer", "sections": [{"heading": "One"}, {"heading": "Two"}], "seconds_each": 5, "song": "song.wav"},
+])
+def test_existing_templates_keep_the_same_windows_limits(windows, monkeypatch, tmp_path, params):
+    monkeypatch.setattr(graphics, "probe", lambda path: {"seconds": 10, "width": 1280, "height": 720, "audio": True})
+    resolve = lambda value, *args: tmp_path / value
+    made = graphics.plan(params, resolve)
+    assert (made["width"], made["height"], made["duration"], made["data"]["fps"]) == (1280, 720, 10, 24)
+    assert made["transcribe"] is None
+    with pytest.raises(graphics.Refused, match="1280x720 and 10 seconds"):
+        graphics.plan({**params, "size": "1080p"}, resolve)
 
 
 def test_renderer_is_one_software_worker(windows, monkeypatch, tmp_path):
@@ -138,6 +157,34 @@ def test_windows_probe_uses_headless_puppeteer_and_closes_it_on_errors():
     assert out["error"] == "probe failed" and out["windowsEvents"] == ["closed", "closed"]
     assert all(p["headless"] and p["executablePath"] == "edge.exe" and p["timeout"] == 1000 for p in out["launches"])
     assert out["linuxEvents"] == ["closed", "closed", "unsafe-version"]
+
+
+def test_visible_browser_check_uses_executable_identity_not_electrons_window_class(monkeypatch, tmp_path):
+    source = Path(__file__).resolve().parents[1] / "scripts" / "windows-graphics-check.py"
+    spec = importlib.util.spec_from_file_location("graphics_isolation_check", source)
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+    edge = (tmp_path / "msedge.exe").resolve()
+    monkeypatch.setattr(check.graphics, "browser", lambda: str(edge))
+    monkeypatch.setattr(check, "window_process_path", lambda window: edge if window == 1 else tmp_path / "Code.exe")
+    def enumerate_windows(callback, _):
+        for window in (1, 2):
+            if not callback(window, 0):
+                return False
+        return True
+    def class_name(window, name, size):
+        name.value = "Chrome_WidgetWin_1"
+        return len(name.value)
+    api = SimpleNamespace(EnumWindows=enumerate_windows, IsWindowVisible=lambda handle: True,
+                          IsWindow=lambda handle: True, GetClassNameW=class_name)
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: api, raising=False)
+    monkeypatch.setattr(ctypes, "WINFUNCTYPE", lambda *args: lambda callback: callback, raising=False)
+    assert check.visible_browser_windows() == {1}
+    def unreadable(window):
+        raise PermissionError("Window owner cannot be inspected")
+    monkeypatch.setattr(check, "window_process_path", unreadable)
+    with pytest.raises(PermissionError, match="cannot be inspected"):
+        check.visible_browser_windows()
 
 
 def test_windows_media_can_be_trashed_and_restored_with_canonical_paths(windows):

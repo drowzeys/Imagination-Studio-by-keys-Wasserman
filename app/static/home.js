@@ -55,7 +55,7 @@ const STARTS = () => {
     cards.find(c => c.id === "agent").one = "Copilot CLI with This Studio tools";
     cards.push({ id: "film", sign: "story", title: "Plan a film", one: "Slate, the Bible and portable project handoff", run: () => go("Production") },
       { id: "script", sign: "suite", title: "Bring in a script", one: "Fountain or suite exports; no model required", run: () => go("Import") },
-      { id: "graphics", sign: "edit", title: "Motion graphics", one: "Titles, lower thirds and short slideshows", run: () => go("Graphics") });
+      { id: "graphics", sign: "edit", title: "Motion graphics", one: "Six templates from your own words, clips and audio", run: () => go("Graphics") });
   }
   const kinds = { clip: "video", scout: "video", still: "scout", sharp: "video", long: "video", voice: "voice", song: "music", sfx: "sfx", looks: "looks", previs: "motion", nodes: "nodes", graphics: "graphics" };
   return cards.map(c => ({ ...c, off: capWhy(kinds[c.id]) }));

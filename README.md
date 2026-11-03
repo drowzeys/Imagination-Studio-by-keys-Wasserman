@@ -156,10 +156,13 @@ is not prompted to reconnect just for that reason. Check is optional and is neve
 **Motion graphics (Windows ARM64, optional):** `.\scripts\setup-windows-graphics.ps1` installs locked
 HyperFrames 0.8.186 and GSAP 3.14.2 dependencies (about 102 MiB installed), reusing a security-patched ARM64
 Node 22+ and the installed Microsoft Edge. Use `-NodePath` or `-BrowserPath` for an existing installation elsewhere.
-There are no model or browser downloads. The setup checks all three supported templates at **1280x720,
+There are no model or browser downloads. The setup checks all six supported templates at **1280x720,
 24 fps and ten seconds**, including a lower third retaining its clip's sound, under a **4 GiB process-tree
 commitment cap**. In **Edit → Graphics**, make a title, lower third or short slideshow. Longer source clips
-must be trimmed in the Editor first. Captions, transcription and the other templates remain disabled.
+must be trimmed in the Editor first. Kinetic type, music-video edits and explainers also use the existing renderer
+and your uploaded media; audio pickers accept imported recordings/songs, without a voice/music generator.
+For an explainer without voice-over, choose seconds per section so the whole output stays within ten seconds.
+Captions and transcription remain disabled.
 Changing the runtime, Edge or renderer/templates requires repeating the check; `python scripts\windows-graphics-check.py`
 checks installed dependencies without reinstalling them. Normal renders retain the queue's owned cancellation and
 ten-minute deadline. This is not H3/video-model generation.
@@ -167,6 +170,16 @@ Setup also applies a checked Windows-only compatibility patch to the pinned Hype
 probe uses a headless temporary profile rather than launching `msedge.exe --version`, which can open a New Tab
 in the person's normal Edge session. Unpatched/changed installs are refused. Qualification also fails if new visible
 browser windows appear during the render check; existing browser windows are never closed.
+
+**Find beats (no model):** choose local audio in the kinetic-type or music-video Graphics panel and press
+**Find the beats**. The existing NumPy/FFmpeg algorithm measures tempo, beats and bars; Windows accepts up to
+ten minutes of audio and explicitly rejects longer sources rather than returning a truncated analysis.
+The same capability is available to the Studio agent as `music_beats`. This does not enable music generation,
+automatic rough-cut jobs, soundtrack mixing or foley.
+
+**Editor handoff:** the existing timeline FCPXML, EDL and media-ZIP downloads need no model. Windows drive
+file URLs and ZIP media names are handled for spaces/special characters and case-colliding basenames.
+These exports have route/file-structure tests; an actual import into DaVinci Resolve on Windows is not yet verified.
 
 **Scripts and manual storyboards (no model required):** in **Import**, upload a Fountain screenplay, ScriptBreak
 project/prompt pack, or a Storyboard Reference ZIP, then choose **Make a Slate film**. The film preserves scenes,

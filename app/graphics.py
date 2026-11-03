@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from fractions import Fraction
 import os
 import re
 import shutil
@@ -31,7 +32,7 @@ KINDS = ("graphics",)
 HYPERFRAMES = "0.8.186"   # the pinned hyperframes (scripts/setup-graphics.sh installs this one)
 GSAP = "3.14.2"
 WINDOWS = sys.platform == "win32"
-WINDOWS_TEMPLATES = ("title", "lower-third", "slideshow")
+WINDOWS_TEMPLATES = ("title", "lower-third", "kinetic", "slideshow", "music-video", "explainer")
 WINDOWS_SECONDS = 10
 WINDOWS_COMMIT_MB = 4096
 WINDOWS_PROBE_SHA256 = "9fb1ffb62d77aec5585216f70d7a06f523d28a92312f566a0ed662f50dc01f63"
@@ -219,13 +220,13 @@ def environment() -> dict:
 # ---------- media ----------
 
 def probe(path: Path) -> dict:
-    """{seconds, width, height, audio} of a clip, picture or sound (ffprobe, with a time limit)."""
+    """{seconds, width, height, audio, fps} of a clip, picture or sound (bounded ffprobe)."""
 
     ffprobe = shutil.which("ffprobe", path=search_path())
     if not ffprobe:
         raise Refused("ffprobe is not installed on this machine (it comes with ffmpeg)")
     try:
-        said = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height",
+        said = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height,avg_frame_rate",
                                "-of", "json", str(path)], capture_output=True, text=True, timeout=30)
         data = json.loads(said.stdout or "{}")
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -236,7 +237,12 @@ def probe(path: Path) -> dict:
         seconds = float((data.get("format") or {}).get("duration") or 0)
     except (TypeError, ValueError):
         seconds = 0.0
+    try:
+        fps = float(Fraction(picture.get("avg_frame_rate") or "0/1"))
+    except (TypeError, ValueError, ZeroDivisionError):
+        fps = 0.0
     return {"seconds": seconds, "width": int(picture.get("width") or 0), "height": int(picture.get("height") or 0),
+            "fps": fps,
             "audio": any(s.get("codec_type") == "audio" for s in streams)}
 
 
@@ -398,7 +404,7 @@ def plan(params: dict, resolve) -> dict:
     if template not in CATALOG:
         raise Refused("template is one of " + ", ".join(CATALOG))
     if WINDOWS and template not in WINDOWS_TEMPLATES:
-        raise Refused("Windows graphics supports title, lower-third and slideshow only; no transcription runs")
+        raise Refused("Windows graphics supports " + ", ".join(WINDOWS_TEMPLATES) + " only; no transcription runs")
     files: dict[str, Path] = {}
     tags: list[str] = []
     data: dict = {"template": template}

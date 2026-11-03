@@ -32,7 +32,9 @@ video generation, foley, larger image routes and the other hardware tiers remain
 | Qwen3-4B Q4_K_M writing | One 4096-token slot, at most 1024 answer tokens; text-only Slate assistance | Native ARM64 llama.cpp CUDA; one scene/two-shot First AD answer applied and saved in 5.22 s |
 | Copilot CLI | Terminal sign-in, explicit Check, scoped This Studio tools and session continuity | Native CLI 1.0.105; real read-only `studio_state` turn completed; unknown sign-in status no longer blocks Check |
 | Native ARM64 FFmpeg/ffprobe | Probe, frame extraction and local MP4 trim/join export; 1-12 clips, ten minutes, even sides up to 1920 | Browser decoded a 2.0 s, 1344x768 export combining silent and audio sources |
-| Motion graphics | Title, lower-third and slideshow; at most 1280x720, 24 fps and ten seconds | Three real maximum-size/length renders, 17.67-20.72 s each; 888.0-926.4 MiB peak process-tree commitment; lower-third source audio retained; zero new visible browser windows |
+| Motion graphics | Title, lower-third, kinetic, slideshow, music-video and explainer; at most 1280x720, 24 fps and ten seconds | Six real renders, 10.82-20.83 s each; 892.3-934.4 MiB peak process-tree commitment; source/song audio checked; zero new visible browser windows |
+| Beat detection | Existing NumPy/FFmpeg analysis of local audio; at most ten minutes, no generation model | Synthetic 120 BPM click track measured within 2 BPM; cache and canonical paths checked |
+| Editor handoff | Existing FCPXML, EDL and media ZIP exports; no generation model | Trim timing, drive-letter file URLs and collision-safe media verified at API/file level; actual Windows Resolve import not yet verified |
 | Owned lifecycle | Warm reuse, running/queued cancellation, explicit unload, Ctrl+Break and restart | 314.37 s idle observed; cancelled jobs published no take; shutdown exited zero with no owned descendants |
 
 These are route-specific measurements, not a full-suite result or a general Windows generation guarantee.
@@ -249,7 +251,7 @@ Software/dependency blockers are noted in the evidence column and apply regardle
 | Prompt compilation, graph editing | Expected fit; UI verified | Expected fit | Expected fit | Graph execution remains disabled |
 | FFmpeg inspection, trimming, joining, timeline export | **Verified: bounded CPU routes** | Expected fit at those settings | Expected fit at those settings | Native ARM64; 1-12 clips, ten minutes, even output sides up to 1920; silent/audio-source browser export |
 | Portable Slate ZIP export/import | **Verified: CPU-only round trip** | Expected fit within archive limits | Expected fit within archive limits | File inventory, sizes and SHA-256 checked; media/script paths rebased; source folder removed before import |
-| Motion graphics / titles | **Verified: bounded three-template tier** | Expected fit | Expected fit | Title, lower-third, slideshow; 1280x720, 24 fps, ten seconds; installed Edge reused |
+| Motion graphics / titles | **Verified: bounded six-template tier** | Expected fit | Expected fit | All existing templates except captions; 1280x720, 24 fps, ten seconds; installed Edge reused |
 | Finish / external-editor interchange | Expected fit for interchange | Expected fit for interchange | Expected fit for interchange | Proprietary Tesseract binary availability remains a separate unresolved blocker |
 | Qwen images, scouts, picture edits | Needs measurement | Expected fit at small test sizes | Expected fit at those sizes | Small-test GPU peaks about 22-25 GB; host staging also matters |
 | SD-Turbo storyboard drafts | **Verified: 512x512 stills** | Expected fit at those settings | Expected fit at those settings | Native Windows ComfyUI route; 3.01 GiB peak GPU tensors, scoped 12/12/16 GiB caps |
@@ -446,7 +448,7 @@ The branch provides an **experimental, bounded Windows ARM64 tier**, not general
 - [Windows preview tests](../tests/test_windows_ui.py).
 - [Offline install verification](../scripts/check-windows-install.ps1), without downloads or model/browser startup.
 - Qualified 512x512 SD-Turbo storyboard drafts and five-second Stable Audio Open sound effects.
-- Native FFmpeg CPU media operations and bounded title/lower-third/slideshow rendering.
+- Native FFmpeg CPU media operations, beat detection and six bounded shared graphics templates.
 - Local Qwen3 writing, Copilot CLI Studio tools and portable Slate projects with their media.
 - Capability-aware Windows UI/API/MCP limits and explicit refusal of unverified actions.
 - Native memory/disk telemetry and browser-compatible media paths.
@@ -1277,3 +1279,45 @@ the proposed Windows CI selection plus related graphics, credits and privacy tes
 optional real graphics render, a symlink test requiring a Windows privilege, and a POSIX-only CLI-path test.
 The workflow YAML/public-repository guard and both new PowerShell entry-point/CI command blocks were
 parsed successfully. This was CPU/model-free verification, not a Linux, hosted-runner or GPU result.
+
+## 28. Existing generic features: enabling and small compatibility fixes
+
+The existing beat finder and three more graphics templates were enabled without changing their algorithms
+or downloading weights. Beat detection uses NumPy and native FFmpeg; the decoder caps Windows reads at
+601 seconds and explicitly refuses output over the ten-minute bound instead of silently truncating it.
+The API returns canonical forward-slash media paths, caches its analysis and remains restricted to files
+inside Studio. Its Graphics buttons and MCP tool follow the same capability.
+A real eight-second synthetic 120 BPM WAV passed the measured-tempo tolerance of 2 BPM.
+
+Kinetic type, music-video edits and explainers now join title, lower-third and slideshow under the same
+1280x720/24 fps/ten-second bounds and 4 GiB owned-process commitment cap. Windows audio selectors can use
+uploaded recordings/songs; no Music or Voice model is needed. Music-video length defaults to ten seconds,
+and an explainer exposes the existing seconds-per-section setting. Captions/transcription, automatic
+rough cuts, Nodes execution and soundtrack jobs remain disabled.
+
+All six existing templates rendered at the maximum bounds in one completed check with the patched,
+headless browser probe and **zero new visible browser windows**. The new templates measured:
+
+| Template | Render time | Peak process-tree commitment |
+|---|---|---|
+| Kinetic type | 10.82 s | 902.0 MiB |
+| Music-video edit | 20.83 s | 934.4 MiB |
+| Explainer | 18.36 s | 899.7 MiB |
+
+Output dimensions, duration, actual frame rate and expected audio tracks were checked with ffprobe.
+Midpoint images of the new templates were inspected. The first attempt stopped on the visible-window
+check; that monitor also counted VS Code because Electron uses the same window class as Chromium.
+It now compares the owning executable to the selected browser, retaining failure on a new browser window
+or an unreadable live window owner. The completed check above used that corrected monitor.
+
+The already-accessible Editor handoff routes needed two small shared fixes: media basenames are unique
+case-insensitively inside ZIPs, and file URLs preserve a Windows drive's colon while escaping spaces and
+other filename characters. Relative ZIP references are escaped too. Tests cover trim timing, FCPXML/EDL,
+both relative and destination-root ZIP links and preservation of both media files. These are endpoint/file
+tests, not a claim that the Resolve application imported them successfully.
+
+No XML importer, model/generator, native engine, GPU-memory-policy change or new runtime dependency was added.
+Final focused Windows/shared graphics, export, API, page, credits and privacy run:
+**325 passed, two explicit skips** (optional real-render pytest and unavailable file-symlink privilege).
+The six real renders were checked separately as described above; hosted CI and a Resolve application
+import remain separate follow-ups.

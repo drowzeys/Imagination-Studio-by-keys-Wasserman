@@ -1269,18 +1269,18 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
                 continue
             stem, suffix, n = Path(path).stem, Path(path).suffix, 1
             name = stem + suffix
-            while name in used:
+            while name.casefold() in used:
                 n += 1
                 name = f"{stem}-{n}{suffix}"
-            used.add(name)
+            used.add(name.casefold())
             names[key] = name
         base = root.rstrip("/\\") + "/" + project_id if root else ""
         def where(path):
             name = names[str(Path(path))]
             if not base:
-                return "media/" + name
+                return "media/" + quote(name)
             if re.match(r"[A-Za-z]:", base):  # a Windows folder
-                return "file:///" + quote(base.replace("\\", "/") + "/media/" + name)
+                return "file:///" + quote(base.replace("\\", "/") + "/media/" + name, safe="/:")
             return "file://" + quote(base + "/media/" + name)
         exports = home / "exports"
         exports.mkdir(parents=True, exist_ok=True)

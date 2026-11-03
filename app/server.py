@@ -603,7 +603,7 @@ WINDOWS_WRITES = re.compile(
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"threads(?:/[A-Za-z0-9_-]+(?:/(?:messages|cancel))?)?)|"
-    r"windows/stills/unload|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
+    r"music/beats|windows/stills/unload|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
 )
 
 
@@ -2422,7 +2422,8 @@ def state() -> dict:
         out["capabilities"].update(
             scout={k: out["windows_stills"][k] for k in ("available", "why")},
             sfx={k: sound_ready[k] for k in ("available", "why")},
-            graphics={"available": gfx_ready["ok"], "why": gfx_ready["why"]},
+            graphics={"available": gfx_ready["ok"], "why": gfx_ready["why"], "templates": list(graphics.WINDOWS_TEMPLATES)},
+            beats={"available": bool(out["ffmpeg"]), "why": out["ffmpeg_note"], "max_seconds": beats.WINDOWS_MAX_SECONDS},
             export={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."},
             frame={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."})
     return out

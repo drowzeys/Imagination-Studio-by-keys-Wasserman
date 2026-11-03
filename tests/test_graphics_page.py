@@ -116,6 +116,35 @@ def test_beats_come_from_the_beat_finder_or_the_tempo():
     assert "beats" not in out["withTempo"] and out["withTempo"]["bpm"] == 120 and out["withTempo"]["every"] == 2
 
 
+def test_windows_existing_templates_use_uploaded_audio_and_bounded_defaults():
+    out = run("""
+      S.platform = "windows";
+      const templates = STATE.templates.filter(t => t.id !== "captions");
+      answers["/api/graphics"] = { ...STATE, windows: true, templates };
+      answers["/api/library"] = [...LIB, { path: "uploads/my song.wav", kind: "audio", sound: "sfx" }];
+      await gfxLoad(); out.defaultSeconds = GFX["music-video"].seconds;
+      const panel = graphicsPanel();
+      out.templates = all(find(panel, n => n.attrs && n.attrs.role === "radiogroup"), n => n.tag === "b").map(text);
+      GFX.template = "music-video"; GFX["music-video"].song = "uploads/my song.wav"; GFX["music-video"].clips = ["renders/a.mp4"];
+      const form = graphicsPanel(); out.audio = all(form, n => n.tag === "option").map(n => n.attrs.value);
+      out.params = gfxParams();
+      GFX.template = "explainer"; GFX.explainer.sections = [{ heading: "First", text: "One" }, { heading: "Second", text: "Two" }];
+      out.explainer = gfxParams();
+      GFX.kinetic.song = "uploads/my song.wav";
+      globalThis.capWhy = kind => kind === "beats" ? "Install FFmpeg first" : "";
+      GFX.template = "kinetic"; out.beatsDisabled = button(graphicsPanel(), "Find the beats").attrs.disabled;
+      S.platform = "mac"; out.macAudio = gfxOf("music").map(m => m.path);
+      GFX.template = "explainer"; out.macExplainer = gfxParams();
+    """)
+    assert out["defaultSeconds"] == 10
+    assert out["templates"] == ["Title", "Lower third", "Kinetic type", "Slideshow", "Music video", "Explainer"]
+    assert "uploads/my song.wav" in out["audio"] and "voice/v1.wav" in out["audio"]
+    assert out["params"]["seconds"] == 10 and out["params"]["size"] == "720p"
+    assert out["explainer"]["seconds_each"] == 5 and out["beatsDisabled"]
+    assert out["macAudio"] == ["music/song.wav"]
+    assert "seconds_each" not in out["macExplainer"]
+
+
 def test_the_library_offers_add_a_title_and_caption_this_clip_on_a_clip():
     out = run("""
       out.clip = actButtons({ kind: "video", path: "renders/a.mp4" }).map(n => n.kids[0]);

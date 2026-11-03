@@ -67,14 +67,16 @@ def test_every_tool_is_listed_with_its_required_arguments(studio):
 
 def test_windows_tools_advertise_only_qualified_routes_and_limits(monkeypatch):
     monkeypatch.setattr(mcp, "call", lambda *args: {"platform": "windows", "capabilities": {
-        "scout": {"available": True}, "sfx": {"available": True}, "graphics": {"available": True},
+        "scout": {"available": True}, "sfx": {"available": True}, "graphics": {"available": True,
+            "templates": ["title", "lower-third", "kinetic", "slideshow", "music-video", "explainer"]},
+        "beats": {"available": True},
         "export": {"available": False}}})
     tools = {t["name"]: t for t in mcp.answer({"method": "tools/list"})["tools"]}
-    assert {"studio_state", "slate_add_shot", "queue_still", "queue_sound", "make_graphics"} <= tools.keys()
+    assert {"studio_state", "slate_add_shot", "queue_still", "queue_sound", "make_graphics", "music_beats"} <= tools.keys()
     assert not {"queue_clip", "queue_voice", "queue_song", "queue_edit", "check_clip", "train_lora", "export_timeline"} & tools.keys()
     assert tools["queue_sound"]["inputSchema"]["properties"]["seconds"]["const"] == 5
     assert tools["queue_sound"]["inputSchema"]["properties"]["kind"]["enum"] == ["sfx"]
-    assert tools["make_graphics"]["inputSchema"]["properties"]["template"]["enum"] == ["title", "lower-third", "slideshow"]
+    assert tools["make_graphics"]["inputSchema"]["properties"]["template"]["enum"] == ["title", "lower-third", "kinetic", "slideshow", "music-video", "explainer"]
     assert next(t for t in mcp.TOOLS if t["name"] == "queue_sound")["inputSchema"]["properties"]["kind"]["enum"] == ["sfx", "foley"]
 
 

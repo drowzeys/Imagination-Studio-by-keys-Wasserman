@@ -18,6 +18,34 @@ from windows_process import OwnedJob
 from PIL import Image
 
 
+def window_process_path(window) -> Path:
+    user = ctypes.WinDLL("user32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    user.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user.GetWindowThreadProcessId.restype = wintypes.DWORD
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    kernel.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    pid = wintypes.DWORD()
+    if not user.GetWindowThreadProcessId(window, ctypes.byref(pid)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    handle = kernel.OpenProcess(0x1000, False, pid.value)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        path = ctypes.create_unicode_buffer(32768)
+        size = wintypes.DWORD(len(path))
+        if not kernel.QueryFullProcessImageNameW(handle, 0, path, ctypes.byref(size)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return Path(path.value).resolve()
+    finally:
+        if not kernel.CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
 def visible_browser_windows() -> set[int]:
     api = ctypes.WinDLL("user32", use_last_error=True)
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -29,6 +57,7 @@ def visible_browser_windows() -> set[int]:
     api.IsWindow.restype = wintypes.BOOL
     api.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     api.GetClassNameW.restype = ctypes.c_int
+    browser = Path(graphics.browser()).resolve()
     found, errors = set(), []
 
     @callback_type
@@ -39,7 +68,13 @@ def visible_browser_windows() -> set[int]:
                 errors.append(ctypes.WinError(ctypes.get_last_error()))
                 return False
             if name.value == "Chrome_WidgetWin_1":
-                found.add(handle)
+                try:
+                    if window_process_path(handle) == browser:
+                        found.add(handle)
+                except OSError as error:
+                    if api.IsWindow(handle):
+                        errors.append(error)
+                        return False
         return True
 
     if not api.EnumWindows(collect, 0):
@@ -89,6 +124,12 @@ def check() -> dict:
         pictures = [root / "one.png", root / "two.png"]
         for path, color in zip(pictures, ("navy", "darkred")):
             Image.new("RGB", (1280, 720), color).save(path)
+        song = root / "song.wav"
+        run([str(windows_media.bin_folder() / "ffmpeg.exe"), "-nostdin", "-v", "error", "-i", str(clip),
+             "-vn", "-c:a", "pcm_s16le", str(song)])
+        other_clip = root / "other.mp4"
+        run([str(windows_media.bin_folder() / "ffmpeg.exe"), "-nostdin", "-v", "error", "-f", "lavfi",
+             "-i", "color=c=darkred:s=1280x720:r=24:d=10", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(other_clip)])
 
         def resolve(value, kinds, what):
             source = Path(value)
@@ -99,7 +140,12 @@ def check() -> dict:
         cases = [
             {"template": "title", "title": "Windows graphics", "subtitle": "Bounded render check", "seconds": 10},
             {"template": "lower-third", "name": "Graphics check", "role": "Local renderer", "video": str(clip)},
+            {"template": "kinetic", "text": "Words move in time", "song": str(song), "beats": [0, 2.7, 5.4, 8.2]},
             {"template": "slideshow", "pictures": list(map(str, pictures)), "seconds_each": 5},
+            {"template": "music-video", "clips": [str(clip), str(other_clip)], "song": str(song), "seconds": 10, "bpm": 120, "transition": "cut"},
+            {"template": "explainer", "sections": [{"heading": "The idea", "text": "Words with a picture.", "picture": str(pictures[0])},
+                                                 {"heading": "The result", "text": "Another section.", "picture": str(pictures[1])}],
+             "seconds_each": 5, "song": str(song)},
         ]
         for params in cases:
             made = graphics.plan({**params, "size": "720p"}, resolve)
@@ -109,11 +155,11 @@ def check() -> dict:
             result = run([sys.executable, "-X", "utf8", str(Path(graphics.__file__)), "run", str(folder),
                           "--", *graphics.command(folder, target)], graphics.environment())
             if visible_browser_windows() - before:
-                raise RuntimeError("New visible browser windows appeared during rendering; graphics remains unqualified")
+                raise RuntimeError(f"New visible browser windows appeared during {params['template']}; graphics remains unqualified")
             info = graphics.probe(target)
-            if (info["width"], info["height"]) != (1280, 720) or abs(info["seconds"] - 10) > 1 / 24:
-                raise RuntimeError("The graphics output does not match the 720p, ten-second profile")
-            if bool(info["audio"]) != (params["template"] == "lower-third"):
+            if (info["width"], info["height"]) != (1280, 720) or abs(info["seconds"] - 10) > 1 / 24 or info["fps"] != 24:
+                raise RuntimeError("The graphics output does not match the 720p, 24 fps, ten-second profile")
+            if bool(info["audio"]) != (params["template"] == "lower-third" or bool(params.get("song"))):
                 raise RuntimeError("The graphics output lost its source sound or added an unexpected track")
             results.append({"template": params["template"], **result, "seconds": info["seconds"]})
     if graphics.windows_fingerprint() != fingerprint:

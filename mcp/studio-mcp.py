@@ -754,7 +754,7 @@ def answer(message: dict):
         allowed = {"studio_state", "list_library", "search_library", "cancel_job", "list_projects", "add_to_timeline",
                    "job_status", "wait_for_jobs", "list_jobs", "slate_films", "slate_film", "slate_new_film",
                    "slate_add_scene", "slate_add_shot", "suite_imports", "suite_attach", "upload_file"}
-        for name, kind in {"queue_still": "scout", "queue_sound": "sfx", "make_graphics": "graphics", "export_timeline": "export"}.items():
+        for name, kind in {"queue_still": "scout", "queue_sound": "sfx", "make_graphics": "graphics", "export_timeline": "export", "music_beats": "beats"}.items():
             if (state.get("capabilities", {}).get(kind) or {}).get("available"):
                 allowed.add(name)
         tools = copy.deepcopy([tool for tool in TOOLS if tool["name"] in allowed])
@@ -765,9 +765,12 @@ def answer(message: dict):
                 props["kind"]["enum"] = ["sfx"]
                 props["seconds"] = {"type": "number", "const": 5, "description": "Windows: five seconds only (the default)."}
             elif tool["name"] == "make_graphics":
-                tool["description"] = "Queue a title, lower-third or slideshow; at most 1280x720, 24 fps and ten seconds. No transcription."
-                props["template"]["enum"] = ["title", "lower-third", "slideshow"]
+                templates = state["capabilities"]["graphics"]["templates"]
+                tool["description"] = "Queue a checked Windows graphic (" + ", ".join(templates) + "); at most 1280x720, 24 fps and ten seconds. No transcription."
+                props["template"]["enum"] = templates
                 props["size"]["enum"] = ["720p", "match"]
+            elif tool["name"] == "music_beats":
+                tool["description"] = "Measure tempo, beats and bars of existing local audio with NumPy/FFmpeg; Windows accepts up to ten minutes. No generation model."
             elif tool["name"] == "queue_still":
                 props.pop("preset", None)
                 props["width"] = {"type": "integer", "const": 512}

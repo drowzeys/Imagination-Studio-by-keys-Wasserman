@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -28,6 +29,8 @@ BANDS = 40
 LOW_HZ = 200.0  # the bands under this are the kick and the bass, which mark the bar
 AUDIO = (".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".aif", ".aiff", ".mp4", ".mov")
 VERSION = 1
+WINDOWS = sys.platform == "win32"
+WINDOWS_MAX_SECONDS = 600
 
 router = APIRouter()
 HOME: Path = Path.home() / "ImaginationStudio"
@@ -47,10 +50,13 @@ def decode(path: Path, rate: int = RATE):
     tool = ffmpeg()
     if not tool:
         raise RuntimeError("finding the beats needs ffmpeg, which is not installed on this machine")
-    done = subprocess.run([tool, "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", str(rate), "-f", "f32le", "pipe:1"],
+    limit = ["-t", str(WINDOWS_MAX_SECONDS + 1)] if WINDOWS else []
+    done = subprocess.run([tool, "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", str(rate), *limit, "-f", "f32le", "pipe:1"],
                           capture_output=True, timeout=300)
     if done.returncode:
         raise RuntimeError("ffmpeg could not read the sound of " + Path(path).name + ": " + done.stderr.decode(errors="replace").strip()[-200:])
+    if WINDOWS and len(done.stdout) > WINDOWS_MAX_SECONDS * rate * 4:
+        raise RuntimeError("Windows beat detection takes at most ten minutes of audio; trim the source first")
     return np.frombuffer(done.stdout, np.float32).copy()
 
 
@@ -290,7 +296,7 @@ def beats_route(body: dict) -> dict:
         raise HTTPException(503, "finding the beats needs numpy, which is not installed in the app's Python")
     except (RuntimeError, subprocess.TimeoutExpired) as error:
         raise HTTPException(400, str(error)[-300:])
-    return {**found, "path": str(target.resolve().relative_to(HOME.resolve()))}
+    return {**found, "path": target.resolve().relative_to(HOME.resolve()).as_posix()}
 
 
 def attach(home: Path, within) -> APIRouter:

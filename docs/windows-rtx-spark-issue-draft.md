@@ -259,3 +259,21 @@ checked separately from newer target-tip changes; those upstream changes were no
 Final clean-environment local result: **433 passed, three explicit skips** (optional real render,
 unavailable symlink privilege and a POSIX-only CLI test). Workflow YAML and PowerShell commands parsed
 successfully. No hosted Actions run, GPU/render qualification or Linux execution is claimed by that result.
+
+## Update: 2026-11-03 - existing generic CPU features
+
+Enabled the existing NumPy/FFmpeg beat finder for local audio up to ten minutes, plus kinetic type,
+music-video edits and explainers in the existing renderer. No new model downloads or algorithms:
+six graphics templates now share the same 1280x720/24 fps/ten-second bounds and 4 GiB process-tree cap.
+The completed six-template check added zero visible browser windows. The new templates took
+10.82-20.83 seconds and peaked at 899.7-934.4 MiB of process-tree commitment.
+
+Graphics can use uploaded audio without a Music/Voice generator. Captions/transcription, automatic rough
+cuts, Nodes execution and soundtrack jobs remain disabled. A synthetic 120 BPM click track checked the
+existing beat finder, including canonical paths and cache reuse.
+
+Existing FCPXML/EDL/media-ZIP routes were checked and received small fixes for case-colliding filenames
+and Windows drive-letter/escaped file URLs. Media and trim timing were verified at endpoint/file level;
+an actual Windows Resolve import is not claimed. No cross-platform XML importer was added.
+Focused Windows/shared feature, page, export, credits and privacy tests: **325 passed, two explicit skips**.
+The six actual graphics renders were checked separately; no hosted CI result is implied.
