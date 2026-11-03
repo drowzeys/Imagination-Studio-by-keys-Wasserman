@@ -11,12 +11,14 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import server
+import agents
 import telemetry
 
 
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(server, "WINDOWS", True)
+    monkeypatch.setattr(agents, "WINDOWS", True)
     monkeypatch.setattr(server, "SPARK", False)
     return TestClient(server.app, base_url="http://127.0.0.1")
 

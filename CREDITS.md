@@ -371,6 +371,7 @@ machine; none of their code ships in this pack.
 
 - **Anthropic** — **Claude Code**.
 - **OpenAI** — **Codex** (the CLI, and the copy the ChatGPT desktop app carries).
+- **GitHub** — **GitHub Copilot CLI**.
 - **Google** — **Gemini CLI**.
 - **xAI** — **Grok CLI**.
 - **Nous Research** — **Hermes Agent**.

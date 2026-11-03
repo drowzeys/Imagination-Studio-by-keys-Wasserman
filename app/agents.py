@@ -1,18 +1,18 @@
 """Brains and agents: the user's own subscriptions wired into the Studio.
 
-A brain is a coding CLI the user is already signed in to (Claude Code, Codex with a ChatGPT sign-in, Gemini CLI,
+A brain is a coding CLI the user is already signed in to (Claude Code, Codex with a ChatGPT sign-in, Copilot CLI, Gemini CLI,
 Grok CLI) or a local OpenAI-compatible server. No API keys: each CLI uses its own sign-in, in print mode. A CLI may
 run here or on another machine over ssh (a DGX Spark often has none installed, the Mac beside it does): the prompt
 goes on stdin, the arguments are quoted for the remote shell, and nothing is left behind there.
 
-"Ask your agent" runs Claude Code or Codex once, non-interactively, with MCP tools (Blender, Blockout, this Studio)
+"Ask your agent" runs Claude Code, Codex or Copilot CLI once, non-interactively, with MCP tools (Blender, Blockout, this Studio)
 in a working folder of its own, $STUDIO_HOME/agent/<id>, one task at a time. What it saves there is listed as the
 task's outputs and served by the Studio's /files route.
 
 The Agent room keeps conversations: a thread ($STUDIO_HOME/.studio-agents/threads/<id>.json) is a list of turns
 {role: user|agent|tool, text, attachments, at}, and each user turn is one agent task run in the thread's own working
 folder, $STUDIO_HOME/agent/<thread id>. The next turn continues the harness's own session: Claude Code with
-`--session-id` then `--resume`, Codex with `codex exec resume <thread id>`, Hermes with `chat --continue <name>` then
+`--session-id` then `--resume`, Codex with `codex exec resume <thread id>`, Copilot CLI with `--session-id`, Hermes with `chat --continue <name>` then
 `--resume <session id>`. A local model whose server takes tool calls is run by the Studio's own loop with the same MCP
 tools (drive, below). Gemini, Grok and a local model have no session the Studio can name: they get the thread's
 recent turns ahead of the message. Only the session's id is kept, never a secret. An agent that ends its answer on a
@@ -38,6 +38,7 @@ import concurrent.futures
 import difflib
 import json
 import os
+import platform
 import queue
 import re
 import shlex
@@ -62,6 +63,7 @@ import bolt  # NVIDIA Nemotron 3.5 Bolt as the Studio's own engine: the local br
 
 HOME: Path | None = None
 PACK = Path(__file__).resolve().parent.parent
+WINDOWS = os.name == "nt"
 TEST_TIMEOUT = 180
 PROBE_TIMEOUT = 8  # an ssh look at another machine
 PROBE_TTL = 60
@@ -89,19 +91,26 @@ ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 CLIS = {
     "claude": ("Claude Code", "claude", "Run `claude auth login` in a terminal on that machine (your Claude subscription)."),
     "codex": ("Codex · ChatGPT sign-in", "codex", "Run `codex login` in a terminal on that machine and choose Sign in with ChatGPT."),
+    "copilot": ("GitHub Copilot CLI", "copilot", "Run `copilot login` in a terminal on that machine (your Copilot plan)."),
     "gemini": ("Gemini CLI", "gemini", "Run `gemini` once in a terminal on that machine and sign in with Google."),
     "grok": ("Grok CLI", "grok", "Run `grok login` in a terminal on that machine."),
     "hermes": ("Hermes", "hermes", "Run `hermes setup` in a terminal on that machine to sign in to a provider (`hermes model` picks it)."),
 }
 BACKENDS = (*CLIS, "local")
-HARNESSES = ("claude", "codex")  # run with the Studio's MCP tools; every other brain is a conversation in the Agent room
+HARNESSES = ("claude", "codex", "copilot")  # run with the Studio's MCP tools
 # ... and "local", when its server takes OpenAI tool calls (local_tools): the Studio runs that loop itself (drive)
 AGENTS = (*HARNESSES, "local")  # what the Agent room's first choice may be
-SESSIONS = ("claude", "codex", "hermes")  # keep a session of their own from one turn to the next
+SESSIONS = ("claude", "codex", "copilot", "hermes")  # keep a session of their own from one turn to the next
 # local models the Studio calls by their own name, known from the model names the server lists: (pattern, name)
 LOCAL_NAMES = ((re.compile(r"nemotron[-_. ]*3[-_. ]*5[-_. ]*bolt", re.I), "NVIDIA Nemotron 3.5 Bolt"),)
 # what a CLI says when its sign-in or install is the trouble, and what to tell the user
 HINTS = {
+    "copilot": [(r"no authentication|not authenticated|not logged in|login|unauthori[sz]ed|401",
+                 "Copilot CLI is not signed in {where}: run `copilot login` in a terminal there, then Check again."),
+                (r"unknown option|unexpected argument|invalid.*output.format|CLI.*older",
+                 "Update Copilot CLI {where} (`npm install -g @github/copilot`), then retry."),
+                (r"premium request|quota|rate.?limit|402",
+                 "Copilot's request allowance is unavailable {where}: check your Copilot plan or wait for its limit to reset.")],
     "claude": [(r"authenticat|oauth|401|logged? ?in|revoked|/login", "Claude Code's sign-in has expired or was never made {where}: run `claude auth login` in a terminal there, then retry.")],
     "codex": [(r"not supported when using Codex with a ChatGPT account|Error loading config|unknown variant",
                "This Codex CLI {where} is older than your ChatGPT account's models or settings: update it (`npm install -g @openai/codex` or `brew upgrade codex`), then retry."),
@@ -158,9 +167,9 @@ ROOM_TOOLS = (" The Studio's tools ({names}) make stills, clips with sound, voic
 CHAT = ("You are the filmmaker's assistant inside Imagination Studio, a local AI film studio (stills, clips with sound, "
         "voice lines, songs, a timeline). In this conversation you cannot run the Studio's tools: help plan (prompts, shot "
         "lists, lines, lyrics), and when the filmmaker wants something made, give the exact prompt to paste into the "
-        "Studio, or say that Claude Code or Codex can make it here with the Studio's tools.")
+        "Studio, or say that Claude Code, Codex or Copilot CLI can make it here with the Studio's tools.")
 NO_STUDIO = (" The Studio's own tools are not connected in this conversation: for a still, a clip, a voice line or a song, "
-             "give the exact prompt to paste into the Studio, or say that Claude Code or Codex can make it here with them.")
+             "give the exact prompt to paste into the Studio, or say that Claude Code, Codex or Copilot CLI can make it here with them.")
 QUESTION = re.compile(r"\[question\]", re.I)
 LOST_SESSION = re.compile(r"no conversation found|no session found|session[^\n]{0,40}not found|could not find[^\n]{0,20}session|"
                           r"thread[^\n]{0,40}not found|no rollout found", re.I)
@@ -570,7 +579,11 @@ def scp_target(host: str) -> tuple[list[str], str]:
 
 def search_path() -> str:
     # ~/.npm-global/bin: where Connect's install puts an npm CLI when npm's own prefix is not the user's to write
-    return os.pathsep.join([os.environ.get("PATH", ""), *slate.CLI_DIRS, str(Path.home() / ".npm-global/bin")])
+    extra = [str(Path(os.environ["APPDATA"]) / "npm")] if WINDOWS and os.environ.get("APPDATA") else []
+    if WINDOWS and os.environ.get("LOCALAPPDATA"):
+        extra.append(str(Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio" / "copilot-cli"))
+        extra.append(str(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Links"))
+    return os.pathsep.join([os.environ.get("PATH", ""), *slate.CLI_DIRS, str(Path.home() / ".npm-global/bin"), *extra])
 
 
 # names that mark an environment variable as a credential: a name carrying one of these never reaches a child
@@ -622,6 +635,10 @@ def cli(name: str) -> str | None:
     if name == "hermes" and studio_settings()["hermes_command"]:
         return studio_settings()["hermes_command"]
     found = shutil.which(CLIS[name][1] if name in CLIS else name, path=search_path())
+    if name == "copilot" and WINDOWS and found and Path(found).suffix.lower() in (".cmd", ".bat"):
+        arch = {"arm64": "arm64", "aarch64": "arm64", "amd64": "x64", "x86_64": "x64"}.get(platform.machine().lower())
+        native = Path(found).parent / "node_modules" / "@github" / "copilot" / "node_modules" / "@github" / f"copilot-win32-{arch}" / "copilot.exe"
+        return str(native) if arch and native.is_file() else None
     if name == "codex" and sys.platform == "darwin":
         app = next(filter(None, (bundled_codex(p) if os.path.isdir(p) else p if os.access(p, os.X_OK) else None for p in MAC_CODEX)), None)
         if not found:
@@ -860,6 +877,21 @@ def run_cli(args: list[str], text: str, host: str, timeout: int) -> subprocess.C
         line = (REMOTE_PATH + 'd=$(mktemp -d) && cd "$d" && ' + remote_line(args) + '; s=$?; cd / && rm -rf "$d"; exit $s')
         return subprocess.run([*ssh_of(host), line], input=text, capture_output=True, text=True, timeout=timeout)
     with tempfile.TemporaryDirectory() as scratch:  # the brain writes text; it has no files to act on
+        if os.name == "nt":
+            from windows_process import OwnedJob
+            job, process = OwnedJob(), None
+            try:
+                process = job.spawn(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, encoding="utf-8", cwd=scratch, env=child_env())
+                stdout, stderr = process.communicate(text, timeout=timeout)
+                return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+            finally:
+                job.close()
+                if process is not None:
+                    process.wait(timeout=10)
+                    for pipe in (process.stdin, process.stdout, process.stderr):
+                        if pipe:
+                            pipe.close()
         return subprocess.run(args, input=text, capture_output=True, text=True, timeout=timeout, cwd=scratch, env=child_env())
 
 
@@ -981,6 +1013,16 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
     if not tool:
         raise RuntimeError(f"{CLIS[backend][0]} is not installed on this machine: install it and sign in, or pick another brain in Settings → Connections")
     joined = f"{system}\n\n---\n\n{prompt}" if system else prompt
+    if backend == "copilot":
+        copilot_version(tool, host)
+        done = run_cli([tool, "--output-format", "json", "--disable-builtin-mcps", "--no-custom-instructions",
+                        "--available-tools", "report_intent"], joined, host, timeout)
+        task = {"reply": "", "_host": host}
+        for line in done.stdout.splitlines():
+            render("copilot", line, task)
+        if not done.returncode and not task.get("_error") and task["reply"].strip():
+            return task["reply"].strip()
+        raise RuntimeError(hinted("copilot", task.get("_error") or done.stderr or "Copilot CLI gave no answer", host))
     if backend == "codex":
         done = run_cli([tool, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "-"], joined, host, timeout)
         _, reply, error = codex_events(done.stdout)
@@ -1055,7 +1097,9 @@ def default_tools() -> list[dict]:
 
 def tools() -> list[dict]:
     saved = read_json(folder() / "tools.json" if folder() else None, None)
-    return saved if isinstance(saved, list) else default_tools()
+    out = saved if isinstance(saved, list) else default_tools()
+    return [{**t, **({"enabled": False, "unsupported": "This MCP tool is not validated in the Windows preview."}
+                    if t["id"] != "studio" else {})} for t in out] if WINDOWS else out
 
 
 def tool_of(tool_id: str) -> dict:
@@ -1221,6 +1265,14 @@ def check_tool(tool: dict) -> dict:
 
 
 def stop(process) -> None:
+    if os.name == "nt":
+        job = getattr(process, "_studio_job", None)
+        if job is None:
+            raise RuntimeError("Windows agent cleanup requires an owned process job")
+        job.terminate()
+        process.wait(timeout=10)
+        job.close()
+        return
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
@@ -1427,14 +1479,14 @@ def changed_files(task: dict) -> list[str]:
     out = []
     for name, seen in snapshot(here).items():
         if name not in skip and before.get(name) != seen:
-            out.append(str((here / name).relative_to(HOME)))
+            out.append((here / name).relative_to(HOME).as_posix())
     return out[:500]
 
 
 def snapshot(here: Path) -> dict:
     out = {}
     for path in sorted(here.rglob("*")) if here.is_dir() else []:
-        name = str(path.relative_to(here))
+        name = path.relative_to(here).as_posix()
         if path.is_file() and not any(part.startswith(".") for part in Path(name).parts):
             try:
                 stat = path.stat()
@@ -1577,6 +1629,8 @@ def submit(body: dict) -> dict:
         backend = body.get("backend") or config["agent"] or (config["default"] if config["default"] in HARNESSES else "claude")
     if not is_backend(backend):
         raise HTTPException(400, "an agent is one of " + ", ".join(BACKENDS) + ", or a local agent from Settings → Connections")
+    if WINDOWS and (backend != "copilot" or where_of(backend)):
+        raise HTTPException(501, "The Windows preview runs only Copilot CLI locally; other agent backends are not validated.")
     harness = is_harness(backend)
     known = {t["id"]: t for t in tools()}
     if body.get("tools") is not None:
@@ -1662,9 +1716,9 @@ def outputs_of(task: dict) -> list[str]:
     skip = {"task.json", "mcp.json", "log.txt", "stream.jsonl", "stderr.txt", ".pid", *task.get("inputs", [])}
     out = []
     for path in sorted(here.rglob("*")) if here.is_dir() else []:
-        name = str(path.relative_to(here))
+        name = path.relative_to(here).as_posix()
         if path.is_file() and name not in skip and not any(part.startswith(".") for part in Path(name).parts):
-            out.append(str(path.relative_to(HOME)))
+            out.append(path.relative_to(HOME).as_posix())
     return out[:500]
 
 
@@ -1674,6 +1728,8 @@ def mcp_servers(task: dict, harness_host: str, config: dict) -> dict:
         tool = tool_of(tool_id)
         argv, env = remote_launch(tool, harness_host, config) if harness_host else launch_of(tool, config)
         servers[tool_id] = {"command": argv[0], "args": argv[1:], **({"env": env} if env else {})}
+        if task["backend"] == "copilot":
+            servers[tool_id].update(type="local", tools=["*"])
     return servers
 
 
@@ -1690,9 +1746,27 @@ HERMES_ASK_TOOLSETS = "todo"  # a brain's one answer (the Slate's First AD, a pr
 CLAUDE_FILES = json.dumps({"permissions": {"blockReadsOutsideWorkingDirectories": True}})
 
 
+def copilot_version(tool: str, host: str = "") -> None:
+    key = version_key(tool) if not host else tuple(int(x) for x in re.findall(
+        r"\d+", (probe_remote(host, ["copilot"]).get("copilot") or ("", ""))[1])[:3])
+    if key < (1, 0, 105):
+        raise RuntimeError("Copilot CLI 1.0.105 or newer is required for the Studio's JSONL/MCP integration; update Copilot CLI.")
+
+
 def harness_args(task: dict, tool: str, config_path: str, servers: dict, system: str, session: str | None = None) -> list[str]:
     """The harness's command line; `session` is the id of the thread's session to continue, None for a first turn."""
 
+    if task["backend"] == "copilot":
+        copilot_version(tool, task.get("_host") or "")
+        args = [tool, "--output-format", "json", "--disable-builtin-mcps", "--no-custom-instructions",
+                "--additional-mcp-config", "@" + config_path, "--available-tools", *servers]
+        for name in servers:
+            args += ["--allow-tool", name]
+        if not servers:
+            args += ["report_intent"]
+        if task.get("thread"):
+            args += ["--session-id", session or task["_session"]["id"]]
+        return args
     if task["backend"] == "claude":
         # Read, Write and Glob only inside the work folder: acceptEdits approves them there, nothing pre-approves them
         # anywhere else, and CLAUDE_FILES makes the file tools refuse reads outside it (checked with Claude Code 2.1.293:
@@ -1784,7 +1858,32 @@ def render(backend: str, line: str, task: dict) -> str:
     if not isinstance(event, dict):
         return ""
     out, steps = [], []
-    if backend == "claude":
+    if backend == "copilot":
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        kind = event.get("type")
+        if kind == "assistant.message" and isinstance(data.get("content"), str):
+            task["reply"] = data["content"]
+            if data["content"].strip():
+                out.append(data["content"].strip())
+        elif kind == "tool.execution_start":
+            name = str(data.get("toolName") or "tool")
+            out.append("→ " + name)
+            steps.append("→ " + tool_name(name))
+        elif kind == "tool.execution_complete":
+            steps += note_results(task, data.get("result"))
+            if data.get("success") is False:
+                out.append("tool failed: " + str(data.get("toolCallId") or "tool"))
+        elif kind == "session.error":
+            task["_error"] = hinted("copilot", str(data.get("message") or "Copilot session failed"), task.get("_host") or "")
+        elif kind == "result":
+            if event.get("exitCode") != 0:
+                task["_error"] = hinted("copilot", f"Copilot turn stopped with code {event.get('exitCode')}", task.get("_host") or "")
+            if event.get("sessionId") and task.get("_session") is not None:
+                try:
+                    task["_session"]["id"] = str(uuid.UUID(str(event["sessionId"])))
+                except ValueError:
+                    task["_error"] = "Copilot CLI returned an invalid session id."
+    elif backend == "claude":
         if event.get("session_id") and task.get("_session"):
             task["_session"]["id"] = str(event["session_id"])
         if event.get("type") == "assistant":
@@ -1886,12 +1985,25 @@ def stream(task: dict, argv: list[str], cwd: str | None, text: str, log) -> int:
     """Run the harness, its stream to the log and the task's steps; the return code (None when cancelled first)."""
 
     here = task_folder(task["id"])
+    job = None
     with lock:
         if task["status"] == "cancelled":
             return None
         with open(here / "stderr.txt", "w") as errors:  # the child holds its own copy of the handle
-            process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors,
-                                       text=True, cwd=cwd, env=child_env(), start_new_session=True)
+            kwargs = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": errors,
+                      "text": True, "cwd": cwd, "env": child_env()}
+            if task["backend"] == "copilot":
+                kwargs["encoding"] = "utf-8"
+            if os.name == "nt":
+                from windows_process import OwnedJob
+                job = OwnedJob()
+                try:
+                    process = job.spawn(argv, **kwargs)
+                except BaseException:
+                    job.close()
+                    raise
+            else:
+                process = subprocess.Popen(argv, **kwargs, start_new_session=True)
         running.update(id=task["id"], process=process)
     # the time limit runs from the start, and the prompt is written beside the reading: a CLI that prints a lot before
     # it reads its stdin can neither hang the write past the limit nor fill its pipe while nobody reads it
@@ -1926,6 +2038,8 @@ def stream(task: dict, argv: list[str], cwd: str | None, text: str, log) -> int:
         process.wait()
     finally:
         timer.cancel()
+        if job:
+            job.close()
     writer.join(5)
     return process.returncode
 
@@ -1974,6 +2088,8 @@ def perform(task: dict) -> None:
     work_.mkdir(parents=True, exist_ok=True)
     log = open(here / "log.txt", "a")
     try:
+        if WINDOWS and (task["backend"] != "copilot" or host):
+            raise RuntimeError("Only local Copilot CLI agent tasks are validated in the Windows preview.")
         if is_local(task["backend"]):  # a local agent runs as the local brain does, at its own address and model
             config = as_local(task["backend"], config)
         if task["backend"] not in SESSIONS and not (is_local(task["backend"]) and task["tools"]):
@@ -2032,7 +2148,7 @@ def perform(task: dict) -> None:
         log.write(f"[{task['backend']} {'on ' + host if host else 'here'}{' · continues its session' if continuing else ''}] {task['prompt'][:200]}\n")
         log.flush()
         for attempt in (0, 1):
-            task.update(reply="", _session={"backend": task["backend"], "id": continuing or (str(uuid.uuid4()) if task["backend"] == "claude" else ""),
+            task.update(reply="", _session={"backend": task["backend"], "id": continuing or (str(uuid.uuid4()) if task["backend"] in ("claude", "copilot") else ""),
                                             "where": where_s} if task.get("thread") else None)
             task.pop("_error", None)
             message = (task["prompt"] if continuing else with_history(thread, task["prompt"])) + attached_note(task, names)
@@ -2042,6 +2158,8 @@ def perform(task: dict) -> None:
             argv, cwd = ([*ssh_of(host), REMOTE_PATH + f"cd {shlex.quote(where)} && echo $$ > .pid && exec " + remote_line(args)], None) if host \
                 else (args, str(work_))
             code = stream(task, argv, cwd, text, log)
+            if task["backend"] == "copilot" and code == 0 and not task.get("reply", "").strip() and not task.get("_error"):
+                task["_error"] = "Copilot CLI finished without an answer; check the task log and update or reconnect the CLI."
             if code is None or task["status"] == "cancelled":
                 break
             said = (here / "stderr.txt").read_text(errors="replace")
@@ -2075,6 +2193,8 @@ def perform(task: dict) -> None:
             task["_session"] = None  # the thread keeps the session it had: only a finished turn names a new one
     finally:
         log.close()
+        if task["status"] == "cancelled":
+            task["_session"] = None
         task.pop("_host", None)
         task.pop("_error", None)
         task.pop("_quiet", None)
@@ -2618,7 +2738,7 @@ atexit.register(end_signin)
 def terminal_line(backend: str) -> str:
     """What to type in a terminal instead, shown on the card for every brain."""
 
-    return {"claude": "claude auth login", "codex": "codex login", "grok": "grok login", "gemini": "gemini",
+    return {"claude": "claude auth login", "codex": "codex login", "copilot": "copilot login", "grok": "grok login", "gemini": "gemini",
             "hermes": " ".join(["hermes", *profile_args(), "setup"])}.get(backend, "")
 
 
@@ -2825,7 +2945,6 @@ def finish(state: dict, ended: str, reason: str | None) -> None:
 
 
 def start_signin(backend: str, body: dict) -> dict:
-    import pty  # noqa: F401  (POSIX only; the import fails loudly on a machine without ptys)
     if backend not in CLIS:
         raise HTTPException(404, "no such brain")
     host = where_of(backend)
@@ -2834,6 +2953,7 @@ def start_signin(backend: str, body: dict) -> dict:
         recipe = {"flow": "pty", "args": ["setup-token"], "token": True}  # the Keychain cannot be read over ssh: a token kept there
     if recipe["flow"] != "pty":
         raise HTTPException(400, f"{CLIS[backend][0]} signs in inside its own terminal: run `{terminal_line(backend)}` there")
+    import pty  # noqa: F401  (the automated sign-in recipes need POSIX ptys)
     with lock:  # the place is taken under the lock, so two quick starts never both run a CLI
         if (signin.get("process") is not None or signin.get("starting")) and not signin.get("ended"):
             raise HTTPException(409, f"{CLIS[signin['backend']][0]} is signing in: finish or cancel that first")
@@ -2996,6 +3116,12 @@ def status_of(backend: str) -> dict:
     if cached and time.monotonic() - cached[0] < STATUS_TTL:
         return cached[1]
     where = {"where": f"ssh:{host}" if host else "here"}
+    if backend == "copilot":
+        last = verified.get((backend, host))
+        checked = bool(last and last.get("ok") and time.time() - last["at"] < STATUS_TTL)
+        return {"backend": backend, **where, "state": "signed_in" if checked else "unknown",
+                "detail": "Copilot answered the Check." if checked else
+                "Check to confirm Copilot's sign-in; use copilot login in a terminal if needed. Copilot CLI has no auth-status subcommand."}
     try:
         answer = gemini_status(host) if backend == "gemini" else read_status(backend, run_short(status_args(backend), backend, host))
         if backend == "claude" and host and answer.get("state") == "signed_out" and keychain_signed(host):
@@ -3059,6 +3185,8 @@ INSTALLERS = {
                ("curl", "curl -fsSL https://claude.ai/install.sh | bash", "Anthropic's installer")],
     "codex": [("npm", "npm install -g @openai/codex@latest", "npm"),
               ("brew", "brew upgrade --cask codex 2>/dev/null || brew install --cask codex", "Homebrew")],
+    "copilot": [("npm", "npm install -g @github/copilot", "npm"),
+                ("brew", "brew install copilot-cli", "Homebrew")],
     "gemini": [("npm", "npm install -g @google/gemini-cli@latest", "npm"),
                ("brew", "brew upgrade gemini-cli 2>/dev/null || brew install gemini-cli", "Homebrew")],
     "grok": [("curl", "curl -fsSL https://x.ai/cli/install.sh | bash", "xAI's installer")],
@@ -3152,6 +3280,10 @@ def install_plan(backend: str, host: str = "") -> dict:
 
     if backend not in INSTALLERS:
         raise HTTPException(404, "no such brain")
+    if WINDOWS and not host:
+        return {"ok": False, "where": "here", "os": "Windows",
+                "reason": "Install Copilot CLI in a terminal with `winget install GitHub.Copilot` or `npm install -g @github/copilot`, then restart Studio."
+                if backend == "copilot" else "This CLI's Windows installer is not validated in the Studio preview."}
     try:
         done = shell_here(LOOK_TOOLS, PROBE_TIMEOUT + 2, host)
         said = done.stdout.splitlines()

@@ -1,6 +1,6 @@
 # Brains: connecting an agent
 
-A brain is a coding CLI the user is already paying for (Claude Code, Codex with a ChatGPT sign-in, Gemini CLI, Grok
+A brain is a coding CLI the user is already paying for (Claude Code, Codex with a ChatGPT sign-in, GitHub Copilot CLI, Gemini CLI, Grok
 CLI, Hermes) or a local OpenAI-compatible server. The studio never asks for an API key and keeps nothing of a
 sign-in: each CLI keeps its own credentials where it always does. Code: `app/agents.py` (the `signin` and `connect`
 sections), `app/static/machine.js` (`connectCard`, `connectPanel`, `linkPanel`, `connectNudge`, `qrMatrix`).
@@ -28,6 +28,7 @@ Everything technical (path, version, the CLI's own words, Test, Sign out) is und
    | --- | --- |
    | Claude Code | `npm install -g @anthropic-ai/claude-code@latest`, else `curl -fsSL https://claude.ai/install.sh \| bash` |
    | Codex | `npm install -g @openai/codex@latest`, else `brew install --cask codex`. On a Mac with the ChatGPT app nothing is installed: the app's own Codex is used (it shares the app's ChatGPT sign-in) |
+   | GitHub Copilot CLI | `npm install -g @github/copilot`, else `brew install copilot-cli`; on Windows, install in a terminal with `winget install GitHub.Copilot` or npm |
    | Gemini CLI | `npm install -g @google/gemini-cli@latest`, else `brew install gemini-cli` |
    | Grok CLI | `curl -fsSL https://x.ai/cli/install.sh \| bash` |
    | Hermes | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash` |
@@ -49,11 +50,31 @@ Everything technical (path, version, the CLI's own words, Test, Sign out) is und
 3. **Check it answers.** One short real answer (`claude -p`, `codex exec`, `hermes -z`, …: "Reply with the single
    word: ok"), 60 seconds at most. A failure shows the CLI's exact words and the one action that fixes it: install or
    update, sign in again, check the link, or check again.
-4. **Make it your default.** The default brain and, for Claude Code and Codex (the agents that drive the studio's
+4. **Make it your default.** The default brain and, for Claude Code, Codex and Copilot CLI (the agents that drive the studio's
    tools), the Agent room's default (`agent` in `.studio-agents/settings.json`). This happens by itself only while the
    current default is not signed in; otherwise the line offers a button.
 
 Home and the Agent room show a *Connect your agent* card while no agent is signed in (Home's can be dismissed).
+
+## GitHub Copilot CLI
+
+The Studio requires Copilot CLI **1.0.105 or newer** and your own Copilot sign-in (`copilot login` in a terminal).
+It uses your Copilot plan and the CLI's selected model, not local GPU model weights. Check, writing assistance and
+agent turns consume Copilot requests. Credentials stay in the CLI's own credential store; Studio never requests
+or saves a token. The CLI has no auth-status subcommand: the connection card is unknown until **Check** verifies
+a real answer, rather than treating installation as proof of sign-in.
+
+Agent turns use JSONL output and piped prompts, keep an explicitly named session, and approve only the MCP servers
+selected for that conversation. Built-in GitHub MCP servers and custom instructions are disabled for Studio turns;
+no blanket shell or filesystem permission is granted. A one-shot brain has only the CLI's intent-reporting tool,
+not shell, file or MCP actions. Copilot's own update/install commands stay in your terminal on Windows.
+
+The Windows preview supports **local Copilot CLI with This Studio**. Blender, Blockout, other agents and remote
+agent execution remain unvalidated there. Copilot can plan and edit Slate projects through Studio tools, but it
+does not enable an unqualified GPU route or the preview's disabled First AD / picture-generation buttons.
+Timeout, Stop and normal completion drain the handle-owned Windows process job, including its MCP children.
+Restart Studio after changing Python code or installing the CLI. The npm-installed native Windows executable is
+used directly, not through a command-shell wrapper.
 
 ## Linking another computer
 

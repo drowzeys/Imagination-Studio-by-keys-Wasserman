@@ -238,6 +238,8 @@ def look(picture: Path, brain: dict) -> tuple[str, str]:
     order = ["local"] if brain.get("backend") == "local" else [brain.get("backend")] + ["claude", "codex", "local"]
     tried = []
     for backend in dict.fromkeys(b for b in order if b):
+        if backend == "copilot":
+            continue  # Copilot's vision route is not qualified; keep the existing vision-model fallback.
         try:
             if backend == "local":
                 endpoint, model = brain.get("endpoint"), brain.get("model")

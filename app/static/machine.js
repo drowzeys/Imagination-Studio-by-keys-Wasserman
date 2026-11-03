@@ -236,7 +236,7 @@ function qrSvg(text, px) { const m = qrMatrix(text); if (!m) return null; const 
    Find it (install it when it is missing), sign in (the CLI's own flow: the page opens in a new tab, with the code, a QR
    code and Copy link), check it answers, make it the default. CN.data[id] is GET /api/brains/{id}/connect. */
 const CN = { open: null, data: {}, plan: {}, install: {}, verifying: {}, tried: {}, timer: null, win: null, tick: 0, link: null, linkHost: null, linkSaid: null, linkBusy: false, linkOpen: false };
-const CN_ORDER = ["claude", "codex", "hermes", "gemini", "grok"];
+const CN_ORDER = ["claude", "codex", "copilot", "hermes", "gemini", "grok"];
 const cnRedraw = () => { if (typing()) return; if (CN.sheet) cnSheetDraw(); else if (["Brains", "Settings", "Home", "Agent"].includes(tab)) render(); };
 const cnWhere = b => b && b.where && b.where !== "here" ? b.where.replace(/^ssh:/, "") : "";
 const cnHere = () => typeof location === "undefined" || ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
@@ -527,9 +527,9 @@ function viewBrains() {
     el("details", { class: "fold m-fold", open: CN.linkOpen || false }, el("summary", {}, "Set the other computer by hand"),
       el("div", { class: "panel stack" },
       el("div", { class: "note m-flat" }, "Studio runs the CLI there over SSH, with key login only. A DGX Spark usually has no Claude or Codex sign-in of its own: name the Mac (or any machine) where you are signed in."),
-      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "gemini", "grok", "hermes"].filter(id => id !== "hermes" || (d.backends || []).some(b => b.id === "hermes")).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
+      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "copilot", "gemini", "grok", "hermes"].filter(id => !["hermes", "copilot"].includes(id) || (d.backends || []).some(b => b.id === id)).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
         el("input", { type: "checkbox", checked: (remote.backends || []).includes(id), class: "hide", onchange: e => { const list = new Set(remote.backends || []); e.target.checked ? list.add(id) : list.delete(id); remote.backends = [...list]; e.target.parentNode.classList.toggle("on", e.target.checked); } }),
-        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
+        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", copilot: "GitHub Copilot CLI", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
       el("div", {}, el("button", { class: "primary", onclick: () => save({ remote: { host: host.value.trim(), backends: remote.backends || [], studio_host: studioHost.value.trim() } }) }, "Save"))))));
   const tools = BR.tools;
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Tools your agent can use"), el("button", { class: "small", onclick: () => go("Agent") }, "Ask your agent →")),

@@ -869,7 +869,7 @@ image-generation model.
 
 The Windows preview now permits script/suite imports, conversion to Slate, attachment of imported storyboard
 frames and import of an existing motion pack. Importing a motion pack is not motion analysis or video generation.
-The GPU generation, brain and agent execution gates remain closed.
+The GPU generation and other brain/agent execution gates remain closed; the optional Copilot agent is covered below.
 
 The CPU-only tests on this machine covered:
 
@@ -894,3 +894,29 @@ Restart the Windows launcher after updating the Python code so the running app p
 
 The next model work remains a small optional local brain and a lighter image model, not Bolt. Neither is required
 for importing a script, planning shots or maintaining a manual reference board.
+
+## 18. Optional native Copilot CLI Studio agent
+
+GitHub Copilot CLI is now a full Studio-tool agent alongside Claude Code and Codex, with explicit session
+continuity and selected MCP-server permissions. The Windows preview admits only the local Copilot route and
+This Studio; other agents, remote agent execution, Blender, Blockout and GPU generation remain unvalidated.
+
+The official **Windows ARM64 CLI 1.0.105** was installed outside Git and signed in through its own terminal flow.
+Actual checks on this machine, using a disposable loopback Studio, verified:
+
+- A piped prompt and JSONL answer, without putting the filmmaker's prompt in command-line arguments.
+- Calls to Studio MCP tools, creation of a Slate film, and addition of one scene and one shot without GPU jobs.
+- A second turn that resumed the same session and recalled the edited film id without replaying its instructions.
+- The Settings connection Check, a real one-word brain answer and the signed-in checklist state.
+- Cancellation of an owned native task. The first bounded project test was stopped at its test deadline;
+  it had created the film but was not labelled a successful generation. A subsequent test completed the
+  scene/shot operations on that existing film rather than silently duplicating it.
+
+Windows subprocesses start suspended, are assigned to the same handle-owned job mechanism as the ComfyUI
+diagnostic, and resume only after ownership is established. Stop, timeout and completion drain their MCP children.
+The diagnostic's memory caps and hardware guards have not changed. Unit tests also check native descendant
+cleanup and a one-shot CLI timeout without network or GPU use.
+
+This is an optional cloud/subscription agent, not the planned small local brain. Copilot requests may consume
+the person's plan allowance, and image/vision QA through Copilot is not qualified. Real browser click tests and
+physical 32 GB or 64 GB measurements are still separate work.

@@ -226,7 +226,7 @@ def test_brains_are_found_with_their_versions(fake):
     (fake["bin"] / "grok").unlink()
     answer = client.get("/api/brains").json()
     found = {b["id"]: b for b in answer["backends"]}
-    assert list(found) == ["claude", "codex", "gemini", "grok", "hermes", "local"]
+    assert list(found) == ["claude", "codex", "copilot", "gemini", "grok", "hermes", "local"]
     assert found["hermes"]["found"] and found["hermes"]["version"].startswith("Hermes Agent") and found["hermes"]["label"] == "Hermes"
     assert found["hermes"]["harness"] is False and found["hermes"]["session"] and "hermes setup" in found["hermes"]["signin"]
     assert found["claude"]["harness"] and found["codex"]["harness"] and not found["gemini"]["harness"] and found["local"]["harness"] is False
