@@ -39,7 +39,7 @@ def test_windows_state_is_not_a_mac_or_a_render_backend(client):
 
 @pytest.mark.parametrize("path", [
     "/api/jobs", "/api/bolt/load", "/api/nodes/run", "/api/discover/scan",
-    "/api/slate/brain", "/api/voice/takes", "/api/music/takes",
+    "/api/voice/takes", "/api/music/takes",
     "/api/sparks", "/api/updates/apply",
     "/api/motion/analyse", "/api/slate/render",
 ])

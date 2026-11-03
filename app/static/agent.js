@@ -57,7 +57,8 @@ const agBadge = id => agMark(id) || el("span", { class: "agr-mono", "aria-hidden
 // reached, and not known to be signed out (the CLI's own word, as Settings → Connections shows it: BR.status, machine.js)
 const AG_NOT_SIGNED = { signed_out: "Not signed in", broken: "Cannot start", missing: "Not found" };
 const agSignState = b => { const st = b && typeof BR !== "undefined" && BR.status ? BR.status[b.id] : null; return st && AG_NOT_SIGNED[st.state] ? st : null; };
-const agReady = b => !!b && !b.error && (!!b.found || /^ssh:./.test(b.where || "")) && !agSignState(b);
+const agUnsupported = b => S && S.ui_only && b && b.id !== "copilot" ? "Windows agents use Copilot CLI only; the local brain supports Slate writing." : "";
+const agReady = b => !!b && !agUnsupported(b) && !b.error && (!!b.found || /^ssh:./.test(b.where || "")) && !agSignState(b);
 // each found CLI's sign-in, asked once (kept with Settings' own answers) and the room redrawn when it comes
 function agAskSignins(found) { if (typeof brainStatus !== "function") return;
   for (const b of found) if (b.kind === "cli" && b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(() => { if (tab === "Agent") agRender(); }).catch(() => {}); }
@@ -289,7 +290,7 @@ function agChooser(found) {
     // an agent that is not ready is one click from ready: its card opens the Connect checklist over the room
     const fix = id !== "local" && !id.startsWith("local:") && typeof connectOpen === "function";
     return el("button", { class: "agr-card" + (on ? " on" : "") + (ready ? "" : " off"), role: "radio", "aria-checked": on ? "true" : "false", disabled: !ready && !fix, "aria-disabled": ready ? false : "true",
-      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : ((b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it")) +
+      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : (agUnsupported(b) || (b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it")) +
         (fix ? " · Click to connect it: the studio installs it if needed, signs you in and checks it answers." : ""),
       onclick: () => { if (!ready) { if (fix) connectOpen(id); else if (typeof goSettings === "function") goSettings("connections"); return; } AG.backend = id; render(); } },
       el("span", { class: "agr-top" }, agBadge(id), (b && b.label && (!["codex", "local"].includes(id) || b.named) ? b.label : name)),

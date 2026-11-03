@@ -1,5 +1,6 @@
 param(
     [switch]$Install,
+    [switch]$LocalBrain,
     [ValidateRange(1, 65535)]
     [int]$Port = 7870
 )
@@ -26,6 +27,10 @@ $env:HOST = '127.0.0.1'
 $env:PORT = "$Port"
 $env:STUDIO_DISCOVER_DELAY = '-1'
 $env:BOLT_BACKEND = 'external'
+if ($LocalBrain) {
+    $env:STUDIO_LOCAL_ENDPOINT = 'http://127.0.0.1:8080/v1'
+    $env:STUDIO_LOCAL_MODEL = 'Qwen3-4B'
+}
 Write-Host "Windows UI-only preview: http://127.0.0.1:$Port"
 Write-Host 'No local rendering or model downloads. Press Ctrl+C to stop.'
 & $Python -X utf8 (Join-Path $Root 'app\server.py')

@@ -150,8 +150,8 @@ def lead(first: bool, last: bool, seconds: float = 5, frames: int | None = None)
 # 2x decoder and no MiniMax H3 Turbo there, so only the native sizes and the FastH3 qualities are offered.
 SPARK = sys.platform.startswith("linux")
 WINDOWS = sys.platform == "win32"
-WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, saved settings, uploads and media browsing. "
-                "Local Copilot CLI agents can use Studio tools. Rendering, model installation, other agents and worker management are not supported yet. "
+WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
+                "Local Copilot CLI agents can use Studio tools. Rendering, in-app model installation, other agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
@@ -595,9 +595,9 @@ app.add_middleware(SecurityHeaders)
 
 WINDOWS_WRITES = re.compile(
     r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|storage/refresh|motion/packs/import|"
-    r"projects(?:/[A-Za-z0-9_-]+)?|slate/(?:projects(?:/[A-Za-z0-9_-]+)?|exists|compile)|"
+    r"projects(?:/[A-Za-z0-9_-]+)?|slate/(?:projects(?:/[A-Za-z0-9_-]+)?|exists|compile|brain)|"
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
-    r"brains/copilot/(?:verify|default)|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
+    r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"threads(?:/[A-Za-z0-9_-]+(?:/(?:messages|cancel))?)?)|"
     r"nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
 )

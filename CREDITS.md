@@ -126,6 +126,10 @@ move in words and the hand-off of one layer as a motion reference for MiniMax H3
 
 ## The image model: the Qwen team
 
+The **Qwen team at Alibaba** also made **Qwen3-4B**, the optional small Windows writing brain (Apache-2.0).
+Its official Q4_K_M GGUF runs in **llama.cpp**, by **Georgi Gerganov and the ggml contributors** (MIT), using their
+pinned native Windows ARM64 CUDA release. The Studio downloads neither model nor runtime into the repository.
+
 The **Qwen team at Alibaba** released **Qwen-Image-2.1**: the 7B single-stream transformer with its causal text
 prefix, the 64-channel VAE and the Qwen3-VL text encoder, with code in diffusers. The image half of this pack is
 their model. The weights are under the Qwen Research License Agreement (non-commercial); this pack ships none of

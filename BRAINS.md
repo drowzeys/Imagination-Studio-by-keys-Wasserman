@@ -71,10 +71,24 @@ not shell, file or MCP actions. Copilot's own update/install commands stay in yo
 
 The Windows preview supports **local Copilot CLI with This Studio**. Blender, Blockout, other agents and remote
 agent execution remain unvalidated there. Copilot can plan and edit Slate projects through Studio tools, but it
-does not enable an unqualified GPU route or the preview's disabled First AD / picture-generation buttons.
+does not enable an unqualified GPU route or the preview's disabled picture-generation buttons.
 Timeout, Stop and normal completion drain the handle-owned Windows process job, including its MCP children.
 Restart Studio after changing Python code or installing the CLI. The npm-installed native Windows executable is
 used directly, not through a command-shell wrapper.
+
+## Small Windows local writing brain
+
+The optional Windows ARM64 launcher uses Qwen3-4B Q4_K_M (Qwen team, Apache-2.0) and llama.cpp
+(Georgi Gerganov and the ggml contributors, MIT). Run `scripts\setup-windows-brain.ps1`, then
+`scripts\brain.ps1`; launch Studio in another terminal with `scripts\app.ps1 -LocalBrain`.
+Select Local model in the film's Bible. Existing saved connection settings win over launcher defaults;
+Settings -> Connections can set `http://127.0.0.1:8080/v1`, check it and choose the writing default.
+
+This first Windows route supports text-only Slate/First AD assistance, not a local MCP agent or vision.
+It keeps Copilot as the Studio-tool agent and never enables GPU render routes or the Bolt engine.
+The native server has one 4096-token slot and a 1024-token answer limit; a full screenplay may need to be
+worked on scene by scene. The separately owned foreground server stops with Ctrl+C, not merely when the
+Studio window closes. `-Cpu` chooses CPU explicitly. See README's Windows section for downloads and guards.
 
 ## Linking another computer
 

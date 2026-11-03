@@ -67,6 +67,18 @@ def test_copilot_is_a_full_agent_and_unvalidated_windows_tools_stay_off():
     assert out["disabled"] == "true"
 
 
+def test_windows_local_writing_brain_is_not_offered_as_an_mcp_agent():
+    out = run(BRAINS + """
+      S.ui_only = true;
+      BR.data.backends.push({ id: "copilot", label: "GitHub Copilot CLI", found: true, where: "here", harness: true });
+      out.local = agReady(BR.data.backends.find(b => b.id === "local"));
+      out.copilot = agReady(BR.data.backends.find(b => b.id === "copilot"));
+      out.reason = agUnsupported(BR.data.backends.find(b => b.id === "local"));
+      const page = viewAgent(); out.backend = AG.backend;""")
+    assert not out["local"] and out["copilot"]
+    assert "Slate writing" in out["reason"] and out["backend"] == "copilot"
+
+
 def test_a_new_conversation_starts_and_opens_its_thread():
     out = run(BRAINS + """
       answers["/api/agent/tasks"] = { id: "0101-000000-abcdef", status: "queued", thread: "th-1018-100000-bbbbbb" };

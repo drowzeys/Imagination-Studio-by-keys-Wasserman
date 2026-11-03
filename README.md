@@ -96,7 +96,8 @@ Native Windows, including ARM64, can run the web UI without WSL, CUDA, or model 
 This preview supports script imports, project/Slate planning, manual storyboards, prompt compilation, settings,
 uploads, Motion Previs pack imports and browsing saved media.
 Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
-Rendering, model installation, other agents, worker management and other unverified actions are refused explicitly.
+An optional small local brain supports text-only Slate writing assistance.
+Rendering, in-app model installation, other agents, worker management and other unverified actions are refused explicitly.
 It is **not** a Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
 
@@ -129,8 +130,34 @@ shots without replacing existing prompts or intent. In **Production**, edit the 
 and upload your own first frame, or pin pictures to cast/location sheets. Save/reload and download the film's
 project JSON or shot lists (Markdown/CSV). Project JSON keeps media paths; it does not bundle the images for a
 different computer. Export a Final Draft script as Fountain first: direct `.fdx` import is not implemented.
-AI writing, generated storyboard stills and rendering remain unavailable in this preview; a smaller local brain
-and lighter image model are separate next steps.
+Generated storyboard stills and rendering remain unavailable. AI writing can use the optional brain below.
+
+**Small local writing brain (Windows ARM64, optional):** Qwen3-4B Q4_K_M (Apache-2.0) runs in the pinned native
+llama.cpp CUDA runtime (MIT), outside both Python environments. Setup downloads about 2.5 GB of weights plus
+310 MB of runtime archives, verifies SHA-256, and stores them under
+`%LOCALAPPDATA%\ImaginationStudio\llama-cpp\b12063`.
+
+```powershell
+.\scripts\setup-windows-brain.ps1
+.\scripts\brain.ps1
+# In another terminal:
+.\scripts\app.ps1 -LocalBrain
+```
+
+Choose **Local model** in the film's **Bible** to use prompt transforms, beat sheets and First AD writing.
+Existing saved connection settings take precedence over the launcher's defaults: in that case set the local
+endpoint to `http://127.0.0.1:8080/v1` in **Settings → Connections** and click **Check**.
+This initial route is text-only, not image understanding or a qualified local MCP agent; Copilot still drives
+Studio tools. A lighter image model remains separate work.
+
+The brain binds only to loopback, has one 4096-token context and at most 1024 answer tokens. Oversized prompts
+fail explicitly instead of silently dropping script context. Its supervisor owns the process tree, imposes
+a 12 GiB process/job commitment cap, and checks Windows low-memory signals, commit headroom, any explicitly
+configured host reserve and dedicated GPU headroom. The startup's 6 GiB GPU allowance is a conservative
+experimental bound, not a measured capacity claim. The live GPU reserve is 2 GiB; Linux/Mac guards are unchanged.
+`-Cpu` explicitly selects CPU execution; it is not a silent fallback. `-Check` starts, checks readiness and stops
+the owned server; `setup-windows-brain.ps1 -Verify` checks files only. Ctrl+C stops the foreground brain; closing
+Studio alone does not stop this separate terminal. Its log is the runtime folder's `server.log`.
 
 #### Windows ARM64 CUDA feasibility check
 

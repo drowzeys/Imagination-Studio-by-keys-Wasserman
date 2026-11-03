@@ -425,7 +425,7 @@ def is_harness(backend: str, config: dict | None = None) -> bool:
 
     if backend in HARNESSES:
         return True
-    if not is_local(backend):
+    if not is_local(backend) or WINDOWS:
         return False
     config = as_local(backend, config or saved_settings())
     return local_tools(config["local_endpoint"], config["local_model"])
@@ -435,7 +435,7 @@ def automatic_agent(default: str, endpoint: str, model: str) -> str:
     """The Agent room's first choice when nobody chose one: the local model, when it is the brain (chosen, or the
     automatic default because its server answers) and its server takes tool calls; else none (the page picks)."""
 
-    return "local" if default == "local" and local_tools(endpoint, model, wait=False) else ""
+    return "local" if not WINDOWS and default == "local" and local_tools(endpoint, model, wait=False) else ""
 
 
 def saved_settings() -> dict:
@@ -990,19 +990,34 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
     one = local_agent(backend, config)
     if one:  # another local agent: its own address and model
         config, endpoint, model, backend = as_local(backend, config), "", "", "local"
+    if WINDOWS and (backend not in ("copilot", "local") or backend == "copilot" and where_of(backend, config)):
+        raise RuntimeError("Windows writing assistance supports local Copilot CLI or an explicit loopback model server only.")
     if backend == "local":
-        base, models = slate.find_local(endpoint or config["local_endpoint"])
+        address = endpoint or config["local_endpoint"]
+        if WINDOWS:
+            parts = urllib.parse.urlsplit(slate.endpoint_of(address))
+            if (not address or parts.scheme != "http" or parts.hostname not in ("127.0.0.1", "::1", "localhost")
+                    or parts.username or parts.password):
+                raise RuntimeError("Set an explicit loopback local-brain address, such as http://127.0.0.1:8080/v1; Bolt is not enabled on Windows.")
+        base, models = slate.find_local(address)
         if not base and one:
             raise RuntimeError(f"{one['name']} does not answer at {one['endpoint']}: start its server, or change its address in Settings → Connections")
         if not base:
             raise RuntimeError("no local model server answers: start Ollama, LM Studio, vLLM or llama.cpp, or set its address in Settings → Connections")
         body = json.dumps({"model": answering_model(models, model or config["local_model"]), "temperature": 0.7,
-                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}).encode()
+                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                           **({"max_tokens": 1024} if WINDOWS else {})}).encode()
 
         def asked(live: str) -> str:
             request = urllib.request.Request(live + "/chat/completions", body, {"Content-Type": "application/json"})
             with urllib.request.urlopen(request, timeout=timeout) as answer:
-                return json.loads(answer.read())["choices"][0]["message"]["content"]
+                choice = json.loads(answer.read())["choices"][0]
+            if WINDOWS and choice.get("finish_reason") == "length":
+                raise RuntimeError("The local brain reached its answer limit; shorten the scene or ask for fewer changes.")
+            text = choice["message"]["content"]
+            if WINDOWS and (not isinstance(text, str) or not text.strip()):
+                raise RuntimeError("The local brain gave no text answer.")
+            return text
         if base == bolt.ENDPOINT:  # the Studio's engine: loaded on this first question; refused (with why) while a job holds its memory
             return bolt.answered(asked, wait=False)
         return asked(base)

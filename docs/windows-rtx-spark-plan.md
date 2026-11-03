@@ -920,3 +920,29 @@ cleanup and a one-shot CLI timeout without network or GPU use.
 This is an optional cloud/subscription agent, not the planned small local brain. Copilot requests may consume
 the person's plan allowance, and image/vision QA through Copilot is not qualified. Real browser click tests and
 physical 32 GB or 64 GB measurements are still separate work.
+
+## 19. Small local writing brain
+
+The optional native Windows ARM64 route uses the Qwen team's official Qwen3-4B Q4_K_M GGUF
+(2,497,280,256 bytes, Apache-2.0) at revision `bc640142c66e1fdd12af0bd68f40445458f3869b`.
+Georgi Gerganov and the ggml contributors' llama.cpp `b12063` CUDA 13.4 ARM64 release (MIT) supplies the server
+and CUDA DLLs, about 310 MB of archives. Files are SHA-256 verified and stay outside the repository.
+
+`scripts/brain.ps1` supervises a loopback-only, handle-owned native server. It sets a single 4096-token context,
+1024 answer tokens and 12 GiB process/job commitment bounds, and monitors Windows low-memory/commit signals
+and dedicated GPU headroom. Startup asks for 6 GiB free dedicated memory as a conservative experimental
+allowance, not a newly measured profile; runtime keeps 2 GiB. An explicit host reserve remains honored.
+`-Cpu` is an explicit mode, never an automatic GPU-failure fallback.
+
+`scripts/app.ps1 -LocalBrain` supplies the local API defaults without changing a saved brain choice.
+Slate's writing endpoint and the local connection's Check/default controls are enabled; unsupported CLIs,
+implicit Bolt, remote model addresses, local MCP agent execution and all render routes remain refused.
+The first goal is scene-sized writing and shot planning, not a whole-screenplay context or generated stills.
+
+On the 48 GB development machine, the actual Slate First AD prompt produced one scene and two shots in
+**5.22 seconds**, including applying its JSON actions through the page's own code and saving/reloading the film.
+No image/video job was queued. The native server offloaded **37/37 layers**: model buffer **2375.91 MiB**,
+KV cache **576 MiB**, compute buffer **20.25 MiB**. These are runtime buffer figures, not a complete GPU peak.
+A bounded final startup measured about **693 MiB working set** and **3969 MiB private commitment**;
+neither is interchangeable with resident GPU memory or installed RAM. The owned server drained and its port
+closed after the check. Browser interactions remain unvalidated; this is not a 32/64 GB capacity claim.
