@@ -249,6 +249,7 @@ function brainWord(b) { if (!b || b.kind !== "cli") return [b && b.found ? "Read
   if (st.state === "broken" || st.state === "missing") return ["Cannot start", "connect", "Fix it"];
   if (st.state === "keychain") return ["Signed in elsewhere", "connect", "Allow over SSH"];
   if (st.state === "signed_in" || ok) return ["Ready", def ? null : "default", "Make default"];
+  if (b.id === "copilot" && st.state === "unknown") return ["Not checked", "connect", "Check"];
   return ["Not signed in", "connect", "Connect"]; }
 // the Connect button's click: a tab is opened now (a click may open one, a timer may not) and pointed at the sign-in page later
 function cnPrepareTab(b) { const st = BR.status[b.id];
@@ -368,18 +369,24 @@ function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : 
   else if (st.state === "keychain") steps.push(["signin", "Allow it over SSH", "wait", st.detail, el("div", { class: "note m-flat" }, "macOS keeps Claude Code’s sign-in in that Mac’s Keychain, which an SSH session cannot open. Allow over SSH signs in once more and keeps a sign-in token only on that Mac, in your own folder, readable only by you."),
     el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Allow over SSH"))]);
   else if (st.state === "broken") steps.push(["signin", "Sign in", "failed", st.detail, st.hint ? el("div", { class: "note m-flat" }, st.hint) : null, el("button", { type: "button", class: "small", onclick: () => cnInstall(b.id) }, "Update " + b.label)]);
-  else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait", b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
+  else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait",
+    b.id === "copilot" ? "Copilot CLI cannot report its sign-in status. If you already signed in, press Check below. Otherwise run this in a terminal" + (where ? " on " + where : "") + ", then press Check:"
+      : b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
     el("div", { class: "signin-cmd" }, el("code", {}, b.signin_command || ""), el("button", { type: "button", class: "small", onclick: () => copyText(b.signin_command || "", "Command") }, "Copy"))]);
   else if (b.id === "hermes") steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Which account should Hermes use? It signs in there, then picks a model that account has.",
     el("div", { class: "chips" }, HERMES_PROVIDERS.map(([provider, label]) => el("button", { type: "button", class: "small", onclick: () => { CN.hermesProvider = provider; cnPrepareTab(b); cnSignin(b.id, { provider }); } }, label)))]);
   else steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Not signed in yet.", el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Sign in"))]);
   // c. one real answer
-  const v = d.verify, signed = st.state === "signed_in";
+  const v = d.verify, signed = st.state === "signed_in",
+    canCheck = found && (signed || b.id === "copilot" && st.state === "unknown");
   if (CN.verifying[b.id]) steps.push(["verify", "Check it answers", "running", "Asking " + b.label + " to say ok (one short answer, a minute at most)…"]);
   else if (v && v.ok) steps.push(["verify", "Check it answers", "done", "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s"]);
-  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" }, act = { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action];
-    steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, fix.label)) : el("div", { class: "note m-flat" }, fix.label)]); }
-  else steps.push(["verify", "Check it answers", signed ? "wait" : "todo", signed ? "" : "After it is signed in.", signed ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
+  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" },
+      terminalLogin = b.id === "copilot" && fix.action === "signin",
+      act = terminalLogin ? () => cnVerify(b.id) : { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action],
+      label = terminalLogin ? "Check again after copilot login" : fix.label;
+    steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, label)) : el("div", { class: "note m-flat" }, label)]); }
+  else steps.push(["verify", "Check it answers", canCheck ? "wait" : "todo", canCheck ? "" : "After it is signed in.", canCheck ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
   // d. the default
   const names = d.harness ? "your default brain and the Agent room's" : "your default brain";
   if (d.default) steps.push(["default", "Make it your default", "done", "It is " + (d.harness && !d.agent_default ? "your default brain" : names) + "."]);

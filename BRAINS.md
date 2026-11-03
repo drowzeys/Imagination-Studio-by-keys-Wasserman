@@ -63,6 +63,9 @@ It uses your Copilot plan and the CLI's selected model, not local GPU model weig
 agent turns consume Copilot requests. Credentials stay in the CLI's own credential store; Studio never requests
 or saves a token. The CLI has no auth-status subcommand: the connection card is unknown until **Check** verifies
 a real answer, rather than treating installation as proof of sign-in.
+After signing in in a separate terminal, open the connection sheet and press **Check** under **Check it answers**.
+The installed-but-unverified card says **Not checked**, not **Not signed in**. Checking is available while sign-in
+status is unknown; it is an explicit billed request, never proof inferred from installation or a token file.
 
 Agent turns use JSONL output and piped prompts, keep an explicitly named session, and approve only the MCP servers
 selected for that conversation. Built-in GitHub MCP servers and custom instructions are disabled for Studio turns;

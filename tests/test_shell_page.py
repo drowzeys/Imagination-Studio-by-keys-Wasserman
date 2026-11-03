@@ -529,6 +529,49 @@ def test_connect_ticks_find_signin_verify_and_default_by_itself():
     assert out["s2"] == {"find": "done", "signin": "done", "verify": "done", "default": "done"} and "Answered “ok” in 2.1 s" in out["done"] and "is ready" in out["done"]
 
 
+def test_copilot_terminal_login_can_be_checked_while_auth_status_is_unknown():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "unknown" }, default_ready: true });
+      await connectStart(b); await settle();
+      out.word = brainWord(b)[0]; out.initial = steps("copilot"); out.instructions = text(panel("copilot"));
+      out.automaticChecks = calls.filter(c => c[0] === "/api/brains/copilot/verify").length;
+      answers["/api/brains/copilot/verify"] = { ok: true, text: "ok", elapsedMs: 120 };
+      await button(panel("copilot"), "Check").attrs.onclick();
+      out.checked = CN.data.copilot.verify.ok;
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "signed_in" },
+        verify: CN.data.copilot.verify, default_ready: true });
+      await cnLoad("copilot");
+      out.finished = steps("copilot"); out.readyWord = brainWord(b)[0];
+      out.signinRequests = calls.filter(c => c[0] === "/api/brains/copilot/signin").length;
+    """)
+    assert out["word"] == "Not checked" and out["initial"]["verify"] == "wait"
+    assert "If you already signed in, press Check" in out["instructions"]
+    assert out["automaticChecks"] == 0 and out["signinRequests"] == 0
+    assert out["checked"] and out["readyWord"] == "Ready"
+    assert out["finished"]["signin"] == out["finished"]["verify"] == "done"
+
+
+def test_copilot_failed_login_offers_check_after_terminal_login_not_an_app_signin():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      CN.open = "copilot"; CN.data.copilot = base("copilot", { signin: { state: "unknown" },
+        verify: { ok: false, error: "Run copilot login, then Check again.", fix: { action: "signin", label: "Sign in again" } } });
+      answers["/api/brains/copilot/verify"] = { ok: false, error: "Still not signed in." };
+      await button(panel("copilot"), "Check again after copilot login").attrs.onclick();
+      out.verify = calls.some(c => c[0] === "/api/brains/copilot/verify");
+      out.signin = calls.some(c => c[0] === "/api/brains/copilot/signin");
+      CN.data.copilot = base("copilot", { find: { found: false }, signin: { state: "unknown" } });
+      out.missingCheck = !!button(panel("copilot"), "Check");
+    """)
+    assert out["verify"] and not out["signin"]
+    assert not out["missingCheck"]
+
+
 def test_connect_installs_a_missing_cli_shows_a_device_code_and_the_fix_for_a_failed_answer():
     out = run(CONNECT + """
       const b = { id: "codex", label: "Codex", kind: "cli", found: false, where: "ssh:mac", signin_flow: "pty" };
