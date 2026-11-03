@@ -11,6 +11,7 @@ from test_shell_page import need_node
 ROOT = Path(__file__).resolve().parent.parent
 HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
+globalThis.S = { platform: "mac" }; globalThis.capWhy = () => "";
 globalThis.tab = "Graphics"; globalThis.renders = 0; globalThis.render = () => { renders++; };
 globalThis.toasts = []; globalThis.toast = t => toasts.push(String(t));
 globalThis.calls = []; globalThis.answers = {};

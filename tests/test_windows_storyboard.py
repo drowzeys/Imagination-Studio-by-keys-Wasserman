@@ -18,7 +18,7 @@ def enabled(client, monkeypatch):
     monkeypatch.setattr(image, "_active_job", None)
     monkeypatch.setattr(image, "_active_prompt", None)
     monkeypatch.setattr(image, "status", lambda: {
-        "available": True, "model": image.MODEL, "width": 512, "height": 512, "max_count": 6,
+        "available": True, "why": "", "model": image.MODEL, "width": 512, "height": 512, "max_count": 6,
     })
     checked = []
     monkeypatch.setattr(image, "preflight", lambda: checked.append(True))

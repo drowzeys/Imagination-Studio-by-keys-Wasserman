@@ -237,3 +237,25 @@ A checked Windows-only compatibility patch now probes through headless Puppeteer
 profile and closes that browser in `finally`; unpatched builds are refused. All three maximum-bound
 renders passed again with **zero new visible browser windows**. Qualification now checks that explicitly.
 No existing user browser windows were closed and no browser or model download was required.
+
+## Update: 2026-11-03 - PR preparation and affordable ARM64 CI
+
+The branch now has an offline installation audit: UI-only by default, selected optional components or
+all eight already-installed components. It checks dependency pins, clean ComfyUI source and cached
+model/runtime hashes without importing torch, starting a browser/model, downloading files or changing
+render qualifications. All eight passed on the current installation; no weights were downloaded again.
+
+A model-free `windows-11-arm` GitHub Actions job is configured alongside the unchanged Ubuntu suite.
+GitHub lists this standard runner as free for public repositories; private repositories explicitly skip
+the new job. It uses native ARM64 Python/Node and tests CPU/API/page/owned-process behavior, not RTX/CUDA
+rendering. A manual workflow trigger allows checking a pushed branch before a PR. Hosted/Linux results
+remain pending; local Windows checks must not be presented as a hosted or Linux pass.
+
+The same lightweight CI dependencies were installed into a disposable ARM64 environment using cached
+wheels. Related test-fixture/harness regressions were fixed, including keeping native Windows process
+integration out of Linux runs while retaining portable validation tests. The PR merge-base diff was
+checked separately from newer target-tip changes; those upstream changes were not reverted.
+
+Final clean-environment local result: **433 passed, three explicit skips** (optional real render,
+unavailable symlink privilege and a POSIX-only CLI test). Workflow YAML and PowerShell commands parsed
+successfully. No hosted Actions run, GPU/render qualification or Linux execution is claimed by that result.

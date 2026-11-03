@@ -439,17 +439,23 @@ measured memory, known limits, and explicit unavailable reasons. Unperformed tes
 
 ## 8. Current repository state
 
-The current change provides a **Windows UI-only preview**, not a GPU backend:
+The branch provides an **experimental, bounded Windows ARM64 tier**, not general DGX/Mac parity:
 
 - [PowerShell launcher](../scripts/app.ps1).
 - [Windows UI dependencies](../app/requirements-windows.txt).
 - [Windows preview tests](../tests/test_windows_ui.py).
-- Windows platform labelling and explicit refusal of unverified actions.
+- [Offline install verification](../scripts/check-windows-install.ps1), without downloads or model/browser startup.
+- Qualified 512x512 SD-Turbo storyboard drafts and five-second Stable Audio Open sound effects.
+- Native FFmpeg CPU media operations and bounded title/lower-third/slideshow rendering.
+- Local Qwen3 writing, Copilot CLI Studio tools and portable Slate projects with their media.
+- Capability-aware Windows UI/API/MCP limits and explicit refusal of unverified actions.
 - Native memory/disk telemetry and browser-compatible media paths.
 - Protected Windows access-key file permissions.
 - Planning, settings, uploads and Motion Previs pack import support.
 
-No model weights were downloaded during the preview or inventory work. PyTorch/ComfyUI inference is still untested.
+The overview table gives actual limits and measurements. H3 video, foley, large models and other hardware
+tiers remain unqualified. The Ubuntu suite is retained; a public-repository-only, model-free Windows ARM64
+CI job is configured, with hosted results pending a pushed workflow run.
 
 ## 9. Sources
 
@@ -1225,3 +1231,49 @@ if a new visible window appears. The corrected maximum-size/length three-templat
 Probe regressions cover missing/changed patches, headless options, cleanup after version failure and the
 unchanged non-Windows branch (**19 graphics tests passed, one optional pytest render skipped**).
 Existing user browser windows were not closed.
+
+## 27. PR preparation: offline verification and model-free Windows CI
+
+`scripts/check-windows-install.ps1` verifies only the UI by default. `-Components` names already-installed
+optional components; `-All` requires all eight components (UI, GPU dependencies, ComfyUI, storyboard files,
+sound files, small brain files, native media tools and graphics). Each selected component reports success
+or an explicit error and the command exits nonzero on any failure. Missing optional installs are not
+silently treated as passes.
+
+The audit checks Python/distribution metadata without importing torch, checks dependency consistency
+with `pip check`, reuses the ComfyUI pin/clean-source check and the existing cached-file hash helpers,
+and validates the graphics lock, patched browser probe and saved qualification without opening a browser.
+It neither downloads nor repairs files, starts models/servers, submits GPU work, contacts an agent nor
+writes qualification receipts. Cached integrity and existing route qualification are separate results;
+this is not a new inference or memory qualification.
+
+On the current installation, all eight components passed from existing caches. A separate disposable
+ARM64 Python 3.13 environment then installed the exact lightweight CI dependencies, using cached wheels,
+and ran the Windows model-free selection. No model or browser was downloaded or started.
+
+The existing Ubuntu job remains unchanged. A second job uses GitHub's standard `windows-11-arm` runner,
+ARM64 Python 3.13 and ARM64 Node 22.23.4. This runner is listed as free for public repositories in
+[GitHub's runner specifications](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories);
+the job explicitly skips private repositories so it does not opt private forks into billed minutes.
+It installs only UI/test dependencies, not CUDA, model weights, a browser or graphics packages.
+Native owned-process tests and portable/API/page contracts run there; unavailable FFmpeg/symlink cases
+remain explicit skips. This cannot qualify NVIDIA rendering.
+
+The workflow can also be started manually after pushing a branch. No hosted run or Linux result is
+claimed from this Windows machine: those results remain pending a remote workflow run.
+
+PR hardening also corrected two stale page-test harnesses/expectations and a readiness fixture, added
+the current unavailable reason to the storyboard import button, and limited the actual Windows
+owned-process media integration test to Windows. Its portable request-validation/page tests still run
+in Ubuntu's suite.
+
+The three-dot merge-base diff is the PR scope, not the direct diff against a newer target tip. At the
+start of this pass it contained 97 changed files, 10,940 additions and 204 removals. The much larger
+apparent removals in a direct tip-to-tip comparison were target-branch changes, not deletions made by
+this port; they were not copied, reverted or otherwise rewritten.
+
+Final local validation in that clean ARM64 environment: **433 passed, three explicit skips**, covering
+the proposed Windows CI selection plus related graphics, credits and privacy tests. The skips were the
+optional real graphics render, a symlink test requiring a Windows privilege, and a POSIX-only CLI-path test.
+The workflow YAML/public-repository guard and both new PowerShell entry-point/CI command blocks were
+parsed successfully. This was CPU/model-free verification, not a Linux, hosted-runner or GPU result.

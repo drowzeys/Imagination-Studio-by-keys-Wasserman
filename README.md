@@ -120,6 +120,29 @@ FFmpeg is optional: `.\scripts\setup-windows-ffmpeg.ps1` installs native ARM64 F
 An existing pair on PATH also works. Missing tools are reported.
 The existing model licences still apply; this install downloads none of their weights.
 
+**Verify an existing installation without downloading or rendering:**
+
+```powershell
+.\scripts\check-windows-install.ps1                    # UI dependencies only
+.\scripts\check-windows-install.ps1 -All               # every optional component must already be installed
+.\scripts\check-windows-install.ps1 -Components ui,media,graphics
+```
+
+This read-only audit checks installed package pins and `pip check`, the clean ComfyUI source pin, cached
+model/runtime SHA-256 values, native FFmpeg/ffprobe and the existing graphics qualification.
+It does not import PyTorch, probe CUDA, launch Edge, contact Copilot, download files or change qualifications.
+Missing or corrupt selected components fail explicitly; uninstalled optional features are not reported as passes.
+Model-file integrity and the existing render qualification are reported separately: this does not establish
+new memory limits, requalify a changed renderer, or replace a first-install render check.
+
+The test workflow keeps Ubuntu's existing suite and adds a model-free **`windows-11-arm`** job for public
+repositories only. GitHub lists that standard ARM64 Windows runner as
+[free for public repositories](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories).
+It checks native Windows ARM64 Python/Node, owned processes, API/page behavior and portable projects;
+it has no RTX/CUDA qualification and downloads no model weights or browser. Private forks skip this job.
+After pushing a branch, **Actions → tests → Run workflow** can check it before opening a PR; Actions must be
+enabled in the repository. Hosted results are separate from local tests.
+
 **Copilot CLI (optional, no local model weights):** install version 1.0.105 or newer in your terminal with
 `winget install GitHub.Copilot` or `npm install -g @github/copilot`, run `copilot login` yourself, and restart Studio.
 In **Settings → Connections**, choose **GitHub Copilot CLI** and **Check**, then select it in **Agent** with

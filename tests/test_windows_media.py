@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -46,6 +47,7 @@ def media(client, monkeypatch):
     return client, sources
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Native Windows owned process-tree media integration")
 def test_probe_frame_and_trim_join_export_with_and_without_sound(media):
     client, sources = media
     for path in sources:

@@ -193,14 +193,19 @@ def test_windows_import_page_keeps_planning_but_disables_generated_stills():
       S.ui_only = true;
       const page = importView(imp);
       out.planning = button(page, "Make a Slate film").attrs.disabled;
-      out.stills = button(page, "A still for every shot").attrs.disabled;
-      out.reason = button(page, "A still for every shot").attrs.title;
+      out.stills = button(page, "Fill missing storyboard stills").attrs.disabled;
+      out.reason = button(page, "Fill missing storyboard stills").attrs.title;
       out.attach = text(page).includes("Send into a film");
+      S.windows_stills = { available: false, why: "Qualification changed; repeat the check." };
+      out.stale = button(importView(imp), "Fill missing storyboard stills").attrs.title;
+      S.windows_stills = { available: true };
+      out.qualified = button(importView(imp), "Fill missing storyboard stills").attrs.disabled;
       S.ui_only = false;
       out.original = button(importView(imp), "A still for every shot").attrs.disabled;""")
     assert out["planning"] is False and out["stills"] is True and out["attach"]
     assert "import or upload storyboard stills" in out["reason"]
-    assert out["original"] is False
+    assert out["stale"] == "Qualification changed; repeat the check."
+    assert out["qualified"] is False and out["original"] is False
 
 
 def test_model_free_project_and_shot_list_downloads_preserve_the_plan():

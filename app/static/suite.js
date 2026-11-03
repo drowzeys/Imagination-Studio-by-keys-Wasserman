@@ -51,7 +51,9 @@ function importView(imp) {
       el("div", { class: "chips" },
         el("button", { class: "primary", disabled: !shots.length, onclick: async () => { try { const r = await api("/api/suite/imports/" + imp.id + "/slate", {}); SL.mode = "slate"; SL.p = await api("/api/slate/projects/" + r.project); SL.metas = null; SL.view = "shots"; go("Production"); toast("A Slate film is ready"); } catch (e) { toast(e.message); } } }, "Make a Slate film"),
         el("button", { disabled: SU.busy || !shots.length || !!(S && S.ui_only && !(S.windows_stills && S.windows_stills.available)),
-          title: S && S.ui_only ? "512x512 SD-Turbo drafts; existing manual stills are kept. Make a Slate film after rendering, or Send into a film." : "",
+          title: S && S.ui_only ? S.windows_stills && S.windows_stills.available
+            ? "512x512 SD-Turbo drafts; existing manual stills are kept. Make a Slate film after rendering, or Send into a film."
+            : S.windows_stills && S.windows_stills.why || "Generated stills are unavailable; import or upload storyboard stills." : "",
           onclick: () => stillsForAll(imp) }, S.ui_only ? "Fill missing storyboard stills" : "A still for every shot"),
         /blockout/i.test(imp.app || "") ? el("button", { onclick: async () => { try { const r = await api("/api/suite/imports/" + imp.id + "/motion", {}); toast("Motion pack " + (r.pack || "") + " is in Motion Previs"); go("Motion Previs"); } catch (e) { toast(e.message); } } }, "Use as motion reference") : null)),
     (imp.warnings || []).length ? el("div", { class: "note su-flat vt-warn" }, imp.warnings.join(" · ")) : null,

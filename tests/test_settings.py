@@ -84,7 +84,7 @@ def a_program(tmp_path, mode=0o755) -> str:
     return str(program)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX CLI executable paths; Windows agents are not supported")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX CLI executable paths; Windows CLI discovery has separate tests")
 def test_the_hermes_keys_are_the_ones_agents_reads(fresh, tmp_path):
     command = a_program(tmp_path)
     reply = client.post("/api/settings", json={"hermes_profile": "studio", "hermes_command": command})
