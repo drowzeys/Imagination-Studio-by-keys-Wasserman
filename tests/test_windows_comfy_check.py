@@ -128,7 +128,7 @@ def test_backend_monitor_starts_only_after_server_readiness(monkeypatch, tmp_pat
                               send_signal=lambda *args: None, returncode=0)
     monkeypatch.setattr(check.sys, "platform", "win32")
     monkeypatch.setattr(check, "verify_source", lambda *args: None)
-    monkeypatch.setattr(check, "OwnedJob", lambda: SimpleNamespace(attach=lambda *args: None, close=lambda: None))
+    monkeypatch.setattr(check, "OwnedJob", lambda: SimpleNamespace(spawn=lambda *args, **kwargs: process, close=lambda: None))
     monkeypatch.setattr(check, "MemoryWatchdog", Monitor)
     monkeypatch.setattr(check.subprocess, "Popen", lambda *args, **kwargs: process)
     monkeypatch.setattr(check.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)

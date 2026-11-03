@@ -281,7 +281,10 @@ function changed() { sync(); C.prompt = ""; render(); }
 // where oneshot-setup --flux3 put them, MOSS-Image on a DGX Spark with --moss. Only installed ones are offered; a choice
 // that is not installed falls back to Qwen.
 const imageModels = () => (S.image_models && S.image_models.length ? S.image_models : [{ id: "qwen", label: "Qwen 2.1 Turbo", note: "" }]);
-const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : "qwen");
+const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : imageModels()[0].id);
+const stillParams = params => { if (!(S.windows_stills && S.windows_stills.available)) return params;
+  const { preset, ...rest } = params;
+  return { ...rest, width: S.windows_stills.width, height: S.windows_stills.height, image_model: S.windows_stills.model }; };
 const imageModelName = () => imageModels().find(m => m.id === imageModel()).label;
 const imageModelPick = after => imageModels().length < 2 ? null : el("div", {}, el("label", {}, "Picture model"),
   choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), after || render, true));
@@ -624,13 +627,16 @@ function viewCreate() {
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
+    if (S.windows_stills && S.windows_stills.available) C.imageSize = "512x512";
     const [w, h] = C.imageSize.split("x").map(Number);
     put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
-      el("label", {}, "Size"), choice(C, "imageSize", { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
+      el("label", {}, "Size"), choice(C, "imageSize", S.windows_stills && S.windows_stills.available ? { "512x512": ["Storyboard draft", "512 × 512 square"] }
+        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
       el("div", { class: "row" },
-        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
+        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: S.windows_stills && S.windows_stills.available ? S.windows_stills.max_count : 12 }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
-      el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
+      el("div", { class: "note" }, (imageModel() === "sd-turbo" ? "SD-Turbo makes square storyboard drafts, one step and one image at a time; it does not guarantee matching faces across shots"
+        : imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
         : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");

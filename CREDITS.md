@@ -126,6 +126,12 @@ move in words and the hand-off of one layer as a motion reference for MiniMax H3
 
 ## The image model: the Qwen team
 
+**Stability AI** made **SD-Turbo** and its Adversarial Diffusion Distillation method, used for the optional
+512x512 Windows storyboard drafts (Stability AI Community License). **comfyanonymous, Comfy Org and the ComfyUI
+contributors** supply the checkpoint, conditioning, sampler, decoder and image-saving nodes. The contact-sheet
+layout follows the Studio's existing scout script by Keys (drowzeys).
+Stability AI's **SDXL-Turbo** was also evaluated; it is not a qualified Windows render route.
+
 The **Qwen team at Alibaba** also made **Qwen3-4B**, the optional small Windows writing brain (Apache-2.0).
 Its official Q4_K_M GGUF runs in **llama.cpp**, by **Georgi Gerganov and the ggml contributors** (MIT), using their
 pinned native Windows ARM64 CUDA release. The Studio downloads neither model nor runtime into the repository.

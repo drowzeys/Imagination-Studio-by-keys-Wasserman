@@ -818,6 +818,46 @@ def prompt_of(one: dict) -> str:
     return "\n\n".join(bit for bit in parts if bit)
 
 
+def storyboard_import(home: Path, import_id: str, shot_id: str) -> tuple[Path, dict, dict]:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", import_id):
+        raise HTTPException(400, "bad import id")
+    folder = home / "uploads" / "suite" / import_id
+    if not (folder / "import.json").is_file():
+        raise HTTPException(404, "no such import")
+    found = json.loads((folder / "import.json").read_text(encoding="utf-8"))
+    shot = next((one for one in found.get("shots") or [] if one.get("id") == shot_id), None)
+    if shot is None:
+        raise HTTPException(400, "no such shot in this import")
+    return folder, found, shot
+
+
+def with_storyboards(folder: Path, found: dict, home: Path) -> dict:
+    manifest = folder / "storyboards.json"
+    if not manifest.exists():
+        return found
+    generated = json.loads(manifest.read_text(encoding="utf-8"))
+    for shot in found.get("shots") or []:
+        image = generated.get(shot.get("id"))
+        if image and not shot.get("image"):
+            path = (home / image).resolve()
+            if path.is_relative_to(home.resolve()) and path.is_file():
+                shot["image"] = image
+    return found
+
+
+def keep_storyboard(home: Path, import_id: str, shot_id: str, image: str) -> None:
+    folder, _, _ = storyboard_import(home, import_id, shot_id)
+    path = (home / image).resolve()
+    if not path.is_relative_to(home.resolve()) or not path.is_file() or path.suffix.lower() != ".png":
+        raise RuntimeError("a storyboard must be a PNG inside this Studio")
+    manifest = folder / "storyboards.json"
+    saved = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+    saved[shot_id] = path.relative_to(home.resolve()).as_posix()
+    temporary = manifest.with_suffix(".json.part")
+    temporary.write_text(json.dumps(saved, indent=1), encoding="utf-8")
+    temporary.replace(manifest)
+
+
 def prompts_of(found: dict, home: Path) -> list[dict]:
     return [{"title": one.get("title") or one.get("id") or f"Shot {number}", "prompt": prompt_of(one), "seconds": one.get("seconds"),
              **({"image": one["image"]} if one.get("image") and (home / one["image"]).is_file() else {})}
@@ -1050,14 +1090,15 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
 
     @router.get("/api/suite/imports/{import_id}")
     def one_import(import_id: str) -> dict:
-        return json.loads((import_folder(import_id) / "import.json").read_text())
+        folder = import_folder(import_id)
+        return with_storyboards(folder, json.loads((folder / "import.json").read_text()), home)
 
     @router.post("/api/suite/imports/{import_id}/slate")
     def to_slate(import_id: str, request: Request) -> dict:
         local(request, json_body=True)
         import slate  # the Studio's Slate (app/slate.py): its project shape and its folder
         folder = import_folder(import_id)
-        found = json.loads((folder / "import.json").read_text())
+        found = with_storyboards(folder, json.loads((folder / "import.json").read_text()), home)
         if found.get("app") == "slate" and (folder / "project.json").is_file():
             given = json.loads((folder / "project.json").read_text())  # a Slate film comes in as it is
             project = {**slate.blank(given.get("name") or "Imported film"), **given}
@@ -1090,14 +1131,15 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
 
     @router.get("/api/suite/imports/{import_id}/prompts")
     def import_prompts(import_id: str) -> list[dict]:
-        return prompts_of(json.loads((import_folder(import_id) / "import.json").read_text()), home)
+        folder = import_folder(import_id)
+        return prompts_of(with_storyboards(folder, json.loads((folder / "import.json").read_text()), home), home)
 
     @router.post("/api/suite/imports/{import_id}/attach")
     def attach_to_film(import_id: str, request: Request, body: dict) -> dict:  # sync: its file work runs in the thread pool
         local(request, json_body=True)
         import slate
         folder = import_folder(import_id)
-        found = json.loads((folder / "import.json").read_text())
+        found = with_storyboards(folder, json.loads((folder / "import.json").read_text()), home)
         mapping = [row for row in body.get("mapping") or [] if isinstance(row, dict) and row.get("shot")]
         if not mapping:
             raise HTTPException(400, "pick at least one shot to send")

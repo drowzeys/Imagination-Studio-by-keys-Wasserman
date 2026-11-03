@@ -62,7 +62,7 @@ const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe 
 const HC_RECIPES = () => ({ quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K" });
 const hcMode = () => HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
 const hcRecipe = () => { const r = HC.recipe || homePrefs().presets.recipe; return HC_RECIPES()[r] ? r : "quick"; };
-const hcPictureModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"]; return have.includes(want) ? want : "qwen"; };
+const hcPictureModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"]; return have.includes(want) ? want : have[0]; };
 const hcSeed = () => typeof prefSeed === "function" ? prefSeed() : 1;
 const hcTitle = t => t.replace(/\s+/g, " ").trim().slice(0, 48);
 // a clip's length: the one picked here, else the recipe's, else Settings → Presets; over 15 s it is a long take, a chain of 15 s clips
@@ -122,7 +122,7 @@ async function hcRequest(mode, text, seed, retake) {
     const params = { prompt: composed.prompt, image: still, preset: r.preset, quality: r.quality, seed: r.seed && !retake ? r.seed : seed, ...(p.qa_gate ? {} : { qa: false }) };
     return long ? ["/api/jobs", { kind: "long", title: long + ": " + hcTitle(text).slice(0, 40), params: { ...params, total_seconds: seconds, beats: [] } }]
       : ["/api/jobs", { kind: "video", title: hcTitle(text), params: { ...params, seconds } }]; }
-  if (mode === "picture") return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40), params: { prompt: text, count: 1, seed, preset: "2k", image_model: hcPictureModel() } }];
+  if (mode === "picture") return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40), params: stillParams({ prompt: text, count: 1, seed, preset: "2k", image_model: hcPictureModel() }) }];
   if (mode === "voice") return ["/api/voice/takes", { text, seed }];
   const lyrics = /\[(intro|verse|pre-chorus|chorus|bridge|instrumental|outro)\]/i.test(text);
   return ["/api/music/takes", lyrics ? { caption: "A warm, cinematic song with a clear lead vocal.", lyrics: text, seconds: 60, seed } : { caption: text, lyrics: "", seconds: 60, seed }]; }

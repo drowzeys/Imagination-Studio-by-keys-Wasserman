@@ -51,18 +51,11 @@ class MemoryWatchdog:
         self.backend_min_free_mb = None
         self.backend_budget = None
         self.configured_floor = os.environ.get("SPARK_MEMORY_FLOOR_MB", "").strip()
-        self.process = subprocess.Popen(
+        self.process = job.spawn(
             [sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", str(device_index)],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True, encoding="utf-8",
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
-        try:
-            job.attach(self.process)
-        except (OSError, RuntimeError):
-            self.process.kill()
-            self.process.wait(timeout=10)
-            self.process.stdout.close()
-            raise
         self.reader = threading.Thread(target=self.read, daemon=True)
         self.supervisor = threading.Thread(target=self.supervise, daemon=True)
         self.reader.start()
@@ -340,17 +333,11 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                 if guarded:
                     monitor = MemoryWatchdog(job, device_index, output)
                     monitor.wait_ready()
-                process = subprocess.Popen(
+                process = job.spawn(
                     command, cwd=source, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                     env={**os.environ, "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1"},
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 )
-                try:
-                    job.attach(process)
-                except (OSError, RuntimeError):
-                    process.kill()
-                    process.wait(timeout=10)
-                    raise
                 base, deadline = f"http://127.0.0.1:{port}", time.monotonic() + timeout
                 last_error = "server has not answered"
                 while True:

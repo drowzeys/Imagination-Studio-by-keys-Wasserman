@@ -90,15 +90,16 @@ PREFIX=/data/studio STUDIO_GPU=1 bash spark/comfy.sh stop
 
 Untested. The CUDA engines are built and measured for the GB10.
 
-### Windows (UI-only preview)
+### Windows (limited preview)
 
 Native Windows, including ARM64, can run the web UI without WSL, CUDA, or model downloads.
 This preview supports script imports, project/Slate planning, manual storyboards, prompt compilation, settings,
 uploads, Motion Previs pack imports and browsing saved media.
 Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
 An optional small local brain supports text-only Slate writing assistance.
-Rendering, in-app model installation, other agents, worker management and other unverified actions are refused explicitly.
-It is **not** a Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
+Only the separately qualified 512x512 SD-Turbo still route can render; video, in-app model installation, other
+agents, worker management and other unverified actions are refused explicitly.
+It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
 
 Install Python 3.13 (`py install 3.13` with the Python install manager), then run in PowerShell:
@@ -130,7 +131,33 @@ shots without replacing existing prompts or intent. In **Production**, edit the 
 and upload your own first frame, or pin pictures to cast/location sheets. Save/reload and download the film's
 project JSON or shot lists (Markdown/CSV). Project JSON keeps media paths; it does not bundle the images for a
 different computer. Export a Final Draft script as Fountain first: direct `.fdx` import is not implemented.
-Generated storyboard stills and rendering remain unavailable. AI writing can use the optional brain below.
+Generated storyboard stills need the optional image setup below; video remains unavailable.
+AI writing can use the optional brain below.
+
+**Generated storyboard drafts (Windows ARM64, optional):** the official SD-Turbo FP16 components total about
+2.6 GB, under the Stability AI Community License. Hobby use is permitted; commercial use requires registration
+and has the license's $1M annual-revenue threshold. Weights stay outside Git.
+
+```powershell
+.\scripts\setup-windows-storyboard.ps1
+.\scripts\check-windows-storyboard.ps1
+.\scripts\app.ps1
+```
+
+Setup checks SHA-256; Check renders a bounded draft and writes a qualification matching the render code and
+memory partition. Only after a successful Check does **Import → Fill missing storyboard stills** become
+available. Existing manual pictures are kept. Finished stills are saved with the import's links: reload the
+import, then **Make a Slate film**, or **Send into a film** to attach them to an existing film.
+For a First AD-created film, **Production → Shots → Make storyboard still** saves a candidate and pins it
+unless you changed the first frame while its job ran. Home/Create stills and the Copilot `queue_still` tool
+use the same queue and restrictions.
+
+These are **512x512 square drafts**, not video frames, final artwork or a guarantee of matching faces.
+A job takes 1-6 images sequentially, one step each, in the pinned ComfyUI server using its own Diffusers loader.
+The route keeps the existing 12 GiB native allocator cap, 12 GiB process / 16 GiB owned-job commitment caps,
+Windows low-memory/commit checks and 2 GiB GPU reserve. Stop drains only the job's privately owned process tree.
+The backend is unloaded at the end of each job; queued jobs remain one-at-a-time. Larger canvases, edits and
+video remain refused. A changed memory partition or render code requires a fresh Check.
 
 **Small local writing brain (Windows ARM64, optional):** Qwen3-4B Q4_K_M (Apache-2.0) runs in the pinned native
 llama.cpp CUDA runtime (MIT), outside both Python environments. Setup downloads about 2.5 GB of weights plus

@@ -225,6 +225,7 @@ Software/dependency blockers are noted in the evidence column and apply regardle
 | Motion graphics / titles | Expected fit | Expected fit | Expected fit | Node/browser/FFmpeg port; use bounded sizes |
 | Finish / external-editor interchange | Expected fit for interchange | Expected fit for interchange | Expected fit for interchange | Proprietary Tesseract binary availability remains a separate unresolved blocker |
 | Qwen images, scouts, picture edits | Needs measurement | Expected fit at small test sizes | Expected fit at those sizes | Small-test GPU peaks about 22-25 GB; host staging also matters |
+| SD-Turbo storyboard drafts | **Verified: 512x512 stills** | Expected fit at those settings | Expected fit at those settings | Native Windows ComfyUI route; 3.01 GiB peak GPU tensors, scoped 12/12/16 GiB caps |
 | FLUX3-K Fast/Full images and edits | Needs measurement | Needs measurement | Expected fit at test sizes | Checkpoint, upsampler and staging need separate measurements |
 | MOSS-Image | Needs measurement / tight | Needs measurement | Expected fit at test sizes | Small tests about 22-25 GB GPU; model-switch run reached 56.8 GB |
 | Stable Audio Open sound effects | Expected fit | Expected fit | Expected fit | Linux small-run peaks about 5-9 GB; first GPU target |
@@ -946,3 +947,43 @@ KV cache **576 MiB**, compute buffer **20.25 MiB**. These are runtime buffer fig
 A bounded final startup measured about **693 MiB working set** and **3969 MiB private commitment**;
 neither is interchangeable with resident GPU memory or installed RAM. The owned server drained and its port
 closed after the check. Browser interactions remain unvalidated; this is not a 32/64 GB capacity claim.
+
+## 20. Generated storyboard drafts
+
+The next target is Stability AI's SD-Turbo, through ComfyUI's own Diffusers loader. Its official FP16 UNet,
+text encoder and VAE total 2,580,060,470 bytes at revision `b261bac6fd2cf515557d5d0707481eafa0485ec2`.
+The Stability AI Community License permits hobby use and imposes registration/revenue conditions on commercial
+use. Files are verified individually by SHA-256 and are not redistributed.
+
+SDXL-Turbo was tried first with its 6.9 GB FP16 checkpoint. A tiny storage probe demonstrated that even reading
+one CPU tensor through safetensors' PyTorch interface can transiently commit two whole-file copies on this
+Windows build: private commitment peaked around 14.4 GiB while the working set was below 0.6 GiB.
+Read-only file-backed loading avoided that particular commitment, but the guarded model attempts then hit
+the allocation cap or Windows' actual low-physical-memory signal. The guards were not weakened, the attempts
+were stopped, and SDXL-Turbo was not qualified. Its cached weights remain outside Git for later work.
+The smaller model's separate FP16 files avoid a single whole-checkpoint load; no model code is run standalone
+and the pinned ComfyUI checkout is unchanged.
+
+The image route is gated by a successful measured Check and matching files/render code. It permits only
+512x512, one step, one image at a time, 1-6 sequential images per job. The initial allocator/process/job caps
+stay 12/12/16 GiB. The sampler, supervisor and backend budget checks remain active; processes start suspended
+and are assigned to private Windows jobs before resuming, including the diagnostic's backend and sampler.
+Cancellation and the 600-second job deadline drain only that owned tree.
+
+Imported scripts can fill missing storyboard stills without replacing manual ones. A separate atomic
+storyboard manifest retains their media links across reloads and subsequent Slate conversion/attachment.
+First AD-created shots have a still action too; its finished image is kept as a candidate and only replaces
+the shot's first frame if that frame did not change during rendering. No exact face continuity, larger canvas,
+image editing, video or 32/64 GB tier is claimed by this work.
+
+On this 48 GB machine, the standard ComfyUI component loader completed a 512x512 draft in **5.39 s**
+after server startup. The exposed six-image limit also completed under the same bounds: **5.01 s** from
+submission through all six PNGs and their contact sheet, excluding startup. Peak allocated GPU tensors were
+**3.01 GiB**, peak reserved tensors **3.31 GiB**, backend peak working set **4.21 GiB**, backend private
+commitment **7.57 GiB**, and aggregate owned-job commitment **9.27 GiB**. These are different counters, not
+additive physical capacities. The native allocator/process/job limits remained 12/12/16 GiB.
+
+The actual normal Studio queue also completed **Fountain -> two generated stills -> Slate conversion ->
+save/reload**, with both image paths retrievable and no video jobs, in **63.46 s** overall. That includes a cold
+ComfyUI startup/shutdown for each shot. The one-step image itself is not the whole job's latency.
+Real browser clicks remain unvalidated; page code was exercised in Node.

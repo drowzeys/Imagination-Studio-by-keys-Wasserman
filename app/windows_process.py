@@ -89,7 +89,8 @@ class OwnedJob:
                 raise ctypes.WinError(ctypes.get_last_error())
 
     def spawn(self, argv, **kwargs):
-        process = subprocess.Popen(argv, creationflags=0x4, **kwargs)  # CREATE_SUSPENDED
+        flags = kwargs.pop("creationflags", 0) | 0x4  # CREATE_SUSPENDED
+        process = subprocess.Popen(argv, creationflags=flags, **kwargs)
         try:
             self.attach(process)
             resume = ctypes.WinDLL("ntdll").NtResumeProcess

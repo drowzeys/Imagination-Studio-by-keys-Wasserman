@@ -150,8 +150,9 @@ def lead(first: bool, last: bool, seconds: float = 5, frames: int | None = None)
 # 2x decoder and no MiniMax H3 Turbo there, so only the native sizes and the FastH3 qualities are offered.
 SPARK = sys.platform.startswith("linux")
 WINDOWS = sys.platform == "win32"
+import windows_storyboard
 WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
-                "Local Copilot CLI agents can use Studio tools. Rendering, in-app model installation, other agents and worker management are not supported yet. "
+                "Local Copilot CLI agents can use Studio tools. Only qualified 512x512 SD-Turbo stills can render; video, in-app model installation, other agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
@@ -188,7 +189,7 @@ def machine() -> tuple[str, str]:
     answering. A page that polls the state then holds one of the server's threads per call."""
 
     if WINDOWS:
-        return "windows", "WINDOWS · UI-ONLY PREVIEW"
+        return "windows", "WINDOWS · STORYBOARD PREVIEW" if windows_storyboard.status()["available"] else "WINDOWS · UI-ONLY PREVIEW"
     if SPARK:
         if not GPU_NAME:
             try:
@@ -594,7 +595,7 @@ class SecurityHeaders:
 app.add_middleware(SecurityHeaders)
 
 WINDOWS_WRITES = re.compile(
-    r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|storage/refresh|motion/packs/import|"
+    r"/api/(?:key(?:/new)?|settings|compose|prompt/check|estimate|upload|storage/refresh|motion/packs/import|jobs(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"projects(?:/[A-Za-z0-9_-]+)?|slate/(?:projects(?:/[A-Za-z0-9_-]+)?|exists|compile|brain)|"
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
@@ -603,9 +604,9 @@ WINDOWS_WRITES = re.compile(
 )
 
 
-def accepting_jobs():
+def accepting_jobs(job: dict | None = None):
     """Called under the queue lock, shared with the updater's idle check."""
-    if WINDOWS:
+    if WINDOWS and (job is None or job.get("kind") != "scout" or not windows_storyboard.status()["available"]):
         raise HTTPException(501, WINDOWS_NOTE)
     if stopping.is_set():
         raise HTTPException(503, "Studio is shutting down.")
@@ -1072,6 +1073,7 @@ IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Re
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
                 "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast"),
                 "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed")}
+IMAGE_MODELS["sd-turbo"] = ("SD-Turbo", "Windows storyboard draft, 512x512, one step; Stability AI Community License")
 # BFL's file names, the present one first (renamed 2026-10-17, the same files; spark_generate.FLUX3_OLD)
 FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors"),
                "flux3k-full": ("flux3-image-klein-base-bf16.safetensors", "flux3_image_klein_base_bf16.safetensors")}
@@ -1082,7 +1084,7 @@ def image_models() -> list[str]:
     checkpoints on a Mac."""
 
     if WINDOWS:
-        return []
+        return ["sd-turbo"] if windows_storyboard.status()["available"] else []
     found = (["qwen"] if qwen_ready() else []) + (["qwen-full"] if qwen_base_ready() else [])
     for name, unets in FLUX3_FILES.items():
         if SPARK:
@@ -1614,6 +1616,10 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     """(command, environment, output paths) for one job. ``room`` False leaves this machine's memory out of it: the
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
+    if WINDOWS:
+        if kind != "scout":
+            raise HTTPException(501, WINDOWS_NOTE)
+        return windows_storyboard.build(params, HOME, job_id)
     scripts = PACK / "scripts"
     if kind in actions.KINDS:  # a Library action (actions.py): turnaround, upscale, mask, remove
         built = action_build(kind, params, job_id)
@@ -1812,6 +1818,9 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     """Run one script for ``job``, following its progress; False when cancelled."""
 
     managed = SPARK and (LOCAL_GPU_CHILD or hub.local.managed)
+    owned = None
+    deadline = None
+    expired = threading.Event()
     child_env = environment(env)
     job_key = uuid.uuid4().hex if managed else None
     if job_key:
@@ -1819,10 +1828,28 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     with lock:  # cancellation must see either no launch, or the published owned process
         if job["status"] in ("cancelled", "failed", "done") or stopping.is_set():
             return False
-        process = subprocess.Popen(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, start_new_session=True)
+        if WINDOWS and running.get("process") is not None:
+            raise RuntimeError("the previous Windows job did not drain; no new render was started")
+        if WINDOWS:
+            from windows_process import OwnedJob
+            owned = OwnedJob()
+            try:
+                process = owned.spawn(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, text=True, encoding="utf-8")
+            except (OSError, RuntimeError):
+                owned.close()
+                raise
+            def timed_out():
+                expired.set()
+                owned.terminate()
+            deadline = threading.Timer(600, timed_out)
+            deadline.daemon = True
+            deadline.start()
+        else:
+            process = subprocess.Popen(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, start_new_session=True)
         start = local_gpus.process_identity(process.pid) if managed else None
-        running.update(process=process, id=job["id"], start=start, key=job_key)
+        running.update(process=process, id=job["id"], start=start, key=job_key, owned_job=owned)
     try:
         for line in process.stdout:
             job["log"] = (job["log"] + line)[-20000:]
@@ -1839,8 +1866,12 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
                 job["progress"] = {"stage": label + STEP_WORDS[kind], "at": at, "of": total}
         code = process.wait()
     finally:
+        if deadline:
+            deadline.cancel()
         # Successful scripts leave ComfyUI warm; only aborted/failed runner trees are drained here.
-        if managed and (process.poll() != 0 or job["status"] == "cancelled"):
+        if owned:
+            owned.close()
+        elif managed and (process.poll() != 0 or job["status"] == "cancelled"):
             if not local_gpus.stop_job_tree(process.pid, start, key=job_key):
                 hub.local.drain_failed = True
                 raise RuntimeError("Owned job processes did not stop; their GPU lease is retained.")
@@ -1851,9 +1882,11 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             process.wait(10)
         with lock:
             if running["process"] is process:
-                running.update(process=None, id=None, start=None, key=None)
+                running.update(process=None, id=None, start=None, key=None, owned_job=None)
     if job["status"] == "cancelled":
         return False
+    if expired.is_set():
+        raise RuntimeError("the Windows image job exceeded its 600 second deadline")
     if code:
         # The script's own last words explain a refusal better than the runner's exit status.
         said = [line.strip() for line in job["log"].splitlines() if line.strip() and not STEP.search(line)]
@@ -2194,6 +2227,8 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             job["outputs"] = [relative(Path(p)) for p in outputs if Path(p).is_file()]
             if not job["outputs"]:
                 raise RuntimeError("the script finished without writing its output")
+            if WINDOWS and job["kind"] == "scout" and params.get("suite_import"):
+                suite.keep_storyboard(HOME, params["suite_import"], params["suite_shot"], job["outputs"][0])
             if job["kind"] == "video" and params.get("preset") == "sharp" and params.get("qa", True):
                 if not gated(job, Path(outputs[0])):
                     return
@@ -2272,6 +2307,7 @@ def state() -> dict:
             "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
             "platform": machine()[0], "platform_label": machine()[1],
             "ui_only": WINDOWS, "platform_note": WINDOWS_NOTE if WINDOWS else "",
+            "windows_stills": windows_storyboard.status() if WINDOWS else None,
             "gpu_index": os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None,
             "last_frame": True,
             # every clip length the model takes (lengths.py), and the longest this machine renders at each size
@@ -2289,7 +2325,7 @@ def state() -> dict:
             "music": music.state(),
             # NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine (bolt.py): its state, backend and memory
             "bolt": bolt.summary(),
-            "engine": "unavailable (Windows UI-only preview)" if WINDOWS else ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
+            "engine": ("CUDA · SD-Turbo (512x512 only)" if windows_storyboard.status()["available"] else "unavailable (Windows UI-only preview)") if WINDOWS else ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
     if WINDOWS:
         for key in ("ref2va", "ref2va_turbo", "ref_media", "last_frame", "shot_check"):
             out[key] = False
@@ -2433,7 +2469,18 @@ def submit(body: dict) -> dict:
 
 def queue_job(body: dict) -> dict:
     if WINDOWS:
-        raise HTTPException(501, WINDOWS_NOTE)
+        if body.get("kind") != "scout":
+            raise HTTPException(501, WINDOWS_NOTE)
+        if not windows_storyboard.status()["available"]:
+            raise HTTPException(501, windows_storyboard.status()["why"])
+        if body.get("placement") is not None or body.get("sparks") not in (None, 1):
+            raise HTTPException(400, "Windows stills run on this machine only")
+        if body.get("title") is not None and not isinstance(body["title"], str):
+            raise HTTPException(400, "title is text")
+        params = windows_storyboard.parameters(body.get("params") or {})
+        if params.get("suite_import"):
+            suite.storyboard_import(HOME, params["suite_import"], params["suite_shot"])
+        return enqueue("scout", body.get("title") or "Storyboard draft", params)
     kind = body.get("kind")
     if body.get("params") is not None and not isinstance(body.get("params"), dict):
         raise HTTPException(400, "params is an object of the job's settings")
@@ -2546,13 +2593,23 @@ def cancel(job_id: str) -> dict:
         if job is None:
             raise HTTPException(404, "no such job")
         active = job["status"] in ("queued", "running")
-        if active:
-            job["status"] = "cancelled"
         process = running["process"] if active and running["id"] == job_id else None
         start, key = running.get("start"), running.get("key")
+        owned = running.get("owned_job") if process is not None else None
+        if WINDOWS and process is not None and (owned is None or getattr(process, "_studio_job", None) is not owned):
+            raise HTTPException(409, "the Windows job's private ownership handle is missing")
+        if active:
+            job["status"] = "cancelled"
     if active:
         if process is not None:
-            if SPARK and (LOCAL_GPU_CHILD or hub.local.managed or key):
+            if WINDOWS:
+                try:
+                    owned.terminate()
+                except OSError as error:
+                    with lock:
+                        job["status"], job["error"] = "failed", f"owned Windows cancellation failed: {error}"
+                    raise HTTPException(409, job["error"]) from None
+            elif SPARK and (LOCAL_GPU_CHILD or hub.local.managed or key):
                 local_gpus.stop_job_tree(process.pid, start, key=key)
             else:
                 with contextlib.suppress(ProcessLookupError):
@@ -3053,12 +3110,18 @@ bolt.busy = local_running
 def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) -> dict:
     """A job that is not a clip (a voice take) into the queue: it renders on this machine, one at a time with the rest."""
 
+    if WINDOWS and kind == "scout":
+        params = windows_storyboard.parameters(params)
+        try:
+            windows_storyboard.preflight()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            raise HTTPException(400, str(error)) from None
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     job = {"id": job_id, "kind": kind, "status": "queued", "title": title, "params": params, "source": None, "outputs": [],
            "progress": None, "error": None, "log": "", "created": time.time(), "started": None, "finished": None,
            "estimate": estimate, "sparks": {"chosen": 1, "available": 1, "used": 1, "says": ""}}
     with lock:
-        accepting_jobs()
+        accepting_jobs(job)
         waiting = sum(1 for one in jobs.values() if one["status"] in ("queued", "running"))
         if waiting >= QUEUE_MAX:  # a page or a peer cannot fill the machine with jobs
             raise HTTPException(429, f"the queue is full ({QUEUE_MAX} jobs waiting or running): let some finish first")

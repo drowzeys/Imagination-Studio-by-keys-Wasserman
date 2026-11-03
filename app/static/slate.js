@@ -364,7 +364,7 @@ function slPinDone(sheet, slot, keep) { const tf = sheet.tf || {}, job = tf[slot
   return job; }
 function slPictures(kind, sheet) { const cast = kind === "cast", images = sheet.images || [];
   const up = el("input", { type: "file", accept: "image/*", multiple: true, onchange: async () => { for (const one of up.files) { const data = new FormData(); data.append("file", one); const j = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (j.path) (sheet.images = sheet.images || []).push(j.path); else toast(j.error || "upload failed"); } slDraw(); } });
-  const queue = async (slot, kind, title, params) => { try { const j = await api("/api/jobs", { kind, title, params }); sheet.tf = { ...sheet.tf, [slot]: j.id }; await poll(); slDraw(); } catch (e) { toast(e.message); } };
+  const queue = async (slot, kind, title, params) => { try { const j = await api("/api/jobs", { kind, title, params: kind === "scout" ? stillParams(params) : params }); sheet.tf = { ...sheet.tf, [slot]: j.id }; await poll(); slDraw(); } catch (e) { toast(e.message); } };
   const job = cast && sheet.tf && jobs.find(j => j.id === sheet.tf.job), turn = cast ? slPinDone(sheet, "turn", p => /turn_(sheet|view\d)\.png$/.test(p)) : null, plate = cast ? null : slPinDone(sheet, "plate", p => !p.endsWith("sheet.jpg"));
   const going = j => j && ["queued", "running"].includes(j.status);
   return el("div", {}, el("h3", {}, cast ? "Continuity stills" : "Plates"),
@@ -509,9 +509,26 @@ function slShots() { const p = SL.p, scene = slScene(), shot = slShot(); if (sce
       SL.cover.plan !== "custom" ? el("div", { class: "note" }, (SL.data.plans.find(c => c.id === SL.cover.plan) || {}).description || "") : null)));
     if (shot) put(main, el("div", { class: "row", style: "margin-top:6px" }, el("h3", { style: "margin:14px 0 0" }, scene.name + " · " + shot.name), el("span"), el("button", { class: "small fit", disabled: scene.shots.indexOf(shot) === 0, onclick: () => { const i = scene.shots.indexOf(shot); scene.shots.splice(i - 1, 0, scene.shots.splice(i, 1)[0]); slDraw(); } }, "↑ Earlier"),
         el("button", { class: "small fit", onclick: () => { const copy = JSON.parse(JSON.stringify(shot)); Object.assign(copy, { id: slId("shot"), name: shot.name + " (copy)", takes: [], history: [] }); scene.shots.splice(scene.shots.indexOf(shot) + 1, 0, copy); SL.shotId = copy.id; slDraw(); } }, "Duplicate"),
-        el("button", { class: "small fit", onclick: () => { if (confirm("Remove " + shot.name + "?")) { scene.shots.splice(scene.shots.indexOf(shot), 1); SL.shotId = null; slDraw(); } } }, "Remove shot")), slWorkspace(scene, shot));
+        el("button", { class: "small fit", onclick: () => { if (confirm("Remove " + shot.name + "?")) { scene.shots.splice(scene.shots.indexOf(shot), 1); SL.shotId = null; slDraw(); } } }, "Remove shot")),
+        S.windows_stills && S.windows_stills.available ? slStoryboard(shot) : null, slWorkspace(scene, shot));
     else put(main, el("div", { class: "note" }, "This scene has no shots. Add one on the left, or open Coverage above.")); }
   return el("div", { class: "cols" }, nav, main); }
+
+function slStoryboard(shot) { const tf = slTf(shot), job = jobs.find(j => j.id === tf.storyboardJob);
+  if (job && job.status === "done" && tf.storyboardPinned !== job.id) {
+    const path = (job.outputs || []).find(p => p.endsWith(".png"));
+    if (path) { (shot.images = shot.images || []).push(path);
+      if ((tf.image || "") === (tf.storyboardBefore || "")) { tf.image = path; tf.start = "image"; delete SL.plan[shot.id]; }
+      tf.storyboardPinned = job.id; slSave(); }
+  }
+  return el("div", { class: "group" }, el("label", {}, "Storyboard draft · 512 × 512 square"),
+    el("div", { class: "note" }, "SD-Turbo: a planning still, not a promise of matching faces or a rendered clip."),
+    tf.image ? media(tf.image) : null,
+    el("button", { class: "fit", disabled: !(shot.prompt || "").trim() || !!(job && ["queued", "running"].includes(job.status)),
+      onclick: async () => { try { const made = await api("/api/jobs", { kind: "scout", title: "Storyboard: " + shot.name,
+        params: stillParams({ prompt: shot.prompt, count: 1, seed: tf.seed || 1 }) });
+        tf.storyboardJob = made.id; tf.storyboardBefore = tf.image || ""; await poll(); slDraw(); } catch (e) { toast(e.message); } } }, "Make storyboard still"),
+    job && job.status !== "done" ? jobCard(job) : null); }
 // the bible and the dialogue choices: the Bible tab and the Cast & Places room (rooms.js) both show them
 function slBibleChoices() { const film = slFilm(); if (!film.bible) film.bible = "off"; if (!film.dialogue) film.dialogue = slDialogue(); const again = () => { SL.plan = {}; slDraw(); };
   return [el("div", { class: "row" }, field("The bible in shots", slPick(film, "bible", { auto: "Used automatically: the cast's and the place's pictures and LoRAs", off: "Off: only what each shot sets" }, again))),

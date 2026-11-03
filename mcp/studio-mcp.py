@@ -50,7 +50,7 @@ TOOLS = [
                                               "'a dog chasing a kite'. Returns the best matches with a caption and a path to use in other tools.",
      "inputSchema": text_schema({"query": {"type": "string", "description": "what to look for, in plain words"},
                                  "limit": {"type": "integer", "description": "at most this many (default 10)"}}, ("query",))},
-    {"name": "queue_still", "description": "Queue still pictures from a prompt (a scout job: several candidates and a contact sheet).",
+    {"name": "queue_still", "description": "Queue still pictures from a prompt (a scout job: several candidates and a contact sheet). Honor studio_state.windows_stills limits on Windows: SD-Turbo, 512x512, at most six sequential drafts.",
      "inputSchema": text_schema({"prompt": {"type": "string"}, "count": {"type": "integer", "description": "how many pictures, 1 to 12 (default 1); several only when the filmmaker asks for options or a number"},
                                  "preset": {"type": "string", "description": "a preset from studio_state; sets the picture size (default 2k: 1024x576)"},
                                  "width": {"type": "integer", "description": "with height: a size of its own, multiples of 16, 256 to 2048"},
@@ -453,7 +453,7 @@ def project_of(given) -> dict:
 def run(name: str, args: dict):
     if name == "studio_state":
         state = call("GET", "/api/state")
-        return {k: state.get(k) for k in ("presets", "qualities", "lengths", "image_models", "platform", "platform_label", "turbo",
+        return {k: state.get(k) for k in ("presets", "qualities", "lengths", "image_models", "windows_stills", "platform", "platform_label", "turbo",
                                           "engine", "version", "home")}
     if name == "list_library":
         items = [i for i in call("GET", "/api/library") if not args.get("kind") or i.get("kind") == args["kind"]]

@@ -32,6 +32,6 @@ if ($LocalBrain) {
     $env:STUDIO_LOCAL_MODEL = 'Qwen3-4B'
 }
 Write-Host "Windows UI-only preview: http://127.0.0.1:$Port"
-Write-Host 'No local rendering or model downloads. Press Ctrl+C to stop.'
+Write-Host 'Only explicitly qualified Windows storyboard stills can render. Press Ctrl+C to stop.'
 & $Python -X utf8 (Join-Path $Root 'app\server.py')
 if ($LASTEXITCODE -ne 0) { throw "Studio exited with code $LASTEXITCODE." }

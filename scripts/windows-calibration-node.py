@@ -48,6 +48,7 @@ class WindowsCalibrationCheckpointLoader:
         return result[:3]
 
 
+
 class WindowsCalibrationReceipt:
     @classmethod
     def INPUT_TYPES(cls):
@@ -64,7 +65,23 @@ class WindowsCalibrationReceipt:
         return {"ui": {"windows_calibration": [receipt]}, "result": ()}
 
 
+class WindowsCalibrationImageReceipt:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"images": ("IMAGE",)}}
+
+    RETURN_TYPES = ()
+    FUNCTION = "report"
+    OUTPUT_NODE = True
+    CATEGORY = "studio/calibration"
+
+    def report(self, images):
+        torch.cuda.synchronize()
+        return {"ui": {"windows_calibration": [allocation_receipt()]}, "result": ()}
+
+
 NODE_CLASS_MAPPINGS = {
     "WindowsCalibrationReceipt": WindowsCalibrationReceipt,
     "WindowsCalibrationCheckpointLoader": WindowsCalibrationCheckpointLoader,
+    "WindowsCalibrationImageReceipt": WindowsCalibrationImageReceipt,
 }
