@@ -134,7 +134,8 @@ shots, cast, locations and dialogue. A board ZIP brings `prompts.json` plus each
 shots without replacing existing prompts or intent. In **Production**, edit the shot plan, choose **An image**
 and upload your own first frame, or pin pictures to cast/location sheets. Save/reload and download the film's
 project JSON or shot lists (Markdown/CSV). Project JSON keeps media paths; it does not bundle the images for a
-different computer. Export a Final Draft script as Fountain first: direct `.fdx` import is not implemented.
+different computer: use **Prepare portable ZIP (with media)** in the film's **Bible** instead.
+Export a Final Draft script as Fountain first: direct `.fdx` import is not implemented.
 Generated storyboard stills need the optional image setup below; video remains unavailable.
 AI writing can use the optional brain below.
 
@@ -202,6 +203,24 @@ and wait for its job to finish. Choose **Make a Slate film**, then open **Produc
 edit the shots. Reopen the film to check the saved images, or download its project JSON from the **Bible**.
 This tests script breakdown, still generation and saved planning without asking for video. **First AD** writing
 also needs a connected Copilot CLI or the optional local brain below.
+
+**Portable Slate films (CPU-only, shared Slate routes):** in **Production -> Bible**, choose
+**Prepare portable ZIP (with media)**, then **Download prepared ZIP**. Deliver also has
+**Prepare portable ZIP (whole film)**. Preparation saves the current film first; the download is a snapshot,
+so prepare again after edits. A file link downloads the ZIP directly rather than buffering it in the page.
+If an embedded browser does not support downloads, open Studio in Edge or another normal browser.
+
+The ZIP contains `project.json`, referenced images/audio/video, `shots.csv`, `shots.md`, captioned JPEG contact
+sheets (12 shots per page), and the original screenplay when available. Model weights, local brain addresses
+and running-job bindings are not included. Missing referenced media is an error, not a silently incomplete
+export. When no original screenplay file is available, the export says so; the scene/shot text is still kept.
+
+On another Studio, use **Import -> Choose files to bring in** for the ZIP, then **Make a Slate film**.
+Import verifies the file inventory, sizes and SHA-256 values, and rewrites media/script references to that
+Studio's folder. Film, scene, shot, cast and dialogue links are retained; an existing film id is not overwritten.
+Media must be visible files inside the source Studio; absolute/outside/hidden references cannot be bundled.
+The existing suite limits apply: up to 2000 ZIP entries, with an export below the 2 GB upload limit.
+Checksums detect file corruption; they do not prove who authored a ZIP. Nothing inside an import executes.
 
 **Small local writing brain (Windows ARM64, optional):** Qwen3-4B Q4_K_M (Apache-2.0) runs in the pinned native
 llama.cpp CUDA runtime (MIT), outside both Python environments. Setup downloads about 2.5 GB of weights plus

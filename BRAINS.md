@@ -74,7 +74,8 @@ not shell, file or MCP actions. Copilot's own update/install commands stay in yo
 
 The Windows preview supports **local Copilot CLI with This Studio**. Blender, Blockout, other agents and remote
 agent execution remain unvalidated there. Copilot can plan and edit Slate projects through Studio tools, but it
-does not enable an unqualified GPU route or the preview's disabled picture-generation buttons.
+does not bypass Windows memory guards or enable video generation; pictures and sound remain restricted to
+their separately qualified routes.
 Timeout, Stop and normal completion drain the handle-owned Windows process job, including its MCP children.
 Restart Studio after changing Python code or installing the CLI. The npm-installed native Windows executable is
 used directly, not through a command-shell wrapper.

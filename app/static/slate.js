@@ -41,6 +41,16 @@ const slBlankShot = name => { const d = SL.p.defaults; return { id: slId("shot")
 const slKeep = (shot, label) => { if (!shot.prompt.trim()) return; shot.history.unshift({ id: slId("v"), savedAt: slNow(), label, prompt: shot.prompt }); shot.history = shot.history.slice(0, 50); };
 const slSetPrompt = (shot, text, label) => { slKeep(shot, label); shot.prompt = text.trim(); shot.updatedAt = slNow(); slTf(shot).h3Auto = true; };
 const slDown = (name, text, type = "text/plain") => { const a = el("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name }); document.body.append(a); a.click(); a.remove(); };
+async function slPackage() { const project = SL.p; if (!project || SL.packaging) return;
+  SL.packaging = true; slCancel(); render();
+  try { await slPut(project); const result = await api("/api/slate/package", { project: project.id });
+    SL.package = { ...result, project: project.id };
+    toast("Portable ZIP ready: " + result.shots + " shots, " + result.media_files + " media files. " + (result.notes || []).join(" "), 9000);
+  } catch (e) { toast("Portable export: " + e.message); } finally { SL.packaging = false; render(); } }
+const slPackageLink = () => SL.package && SL.p && SL.package.project === SL.p.id ? el("a", {
+  class: "fit tag2", href: file(SL.package.path), download: SL.package.filename,
+  title: "Snapshot of the film when Prepare was clicked. Prepare again after edits. " + (SL.package.notes || []).join(" "),
+}, "Download prepared ZIP") : null;
 const slArea = (obj, key, attrs = {}, after) => bind(obj, key, el("textarea", { style: "min-height:60px", ...attrs }), () => { slSave(); if (after) after(); });
 const slIn = (obj, key, attrs = {}, after) => bind(obj, key, el("input", attrs), () => { slSave(); if (after) after(); });
 const slPick = (obj, key, options, after) => { if (obj[key] == null) obj[key] = ""; const n = select(obj, key, options, () => { if (obj[key] === "") obj[key] = null; slSave(); if (after) after(); }); if (obj[key] === "") obj[key] = null; return n; };
@@ -578,6 +588,7 @@ function slBible() { const p = SL.p, d = p.defaults, film = slFilm(), b = SL.bra
       d.brain === "local" ? field("Server address (empty: auto-detect)", slIn(d, "localEndpoint", { placeholder: "http://localhost:11434/v1" })) : null, d.brain === "local" ? field("Model (empty: the first one loaded)", slIn(d, "localModel", { placeholder: (b.models || [])[0] || "" })) : null,
       el("button", { class: "fit", disabled: !!SL.busy, onclick: async () => { const r = await slBrain("Brain test", "Reply with exactly: SLATE-OK", { tier: "fast", system: "You are a connectivity test. Reply with exactly what is asked." }); SL.test = r ? "The brain answered in " + (r.elapsedMs / 1000).toFixed(1) + " s: " + r.text.slice(0, 80) : "No answer: the reason is in the message at the bottom left."; render(); } }, "Test the brain")), SL.test ? el("div", { class: "note" }, SL.test) : null,
     el("h3", {}, "Project file"), el("div", { class: "row" }, el("button", { class: "fit", onclick: () => slDown(p.name.replace(/[^\w-]+/g, "_") + ".project.json", JSON.stringify(p, null, 1), "application/json") }, "Download project.json (opens in Slate)"),
+      el("button", { class: "fit", disabled: !!SL.packaging, onclick: slPackage }, SL.packaging ? "Packaging..." : "Prepare portable ZIP (with media)"), slPackageLink(),
       el("button", { class: "fit", onclick: async () => { if (!confirm("Remove the film " + p.name + "? It is moved to the studio's trash folder.")) return; slCancel(); await api("/api/slate/projects/" + p.id, undefined, "DELETE"); SL.p = null; SL.metas = null; render(); } }, "Remove this film"), el("span"))); }
 // Deliver: the scene's takes, then a rough cut on the beat (roughcut.js) when that module is loaded
 function slDeliver() { const core = slDeliverCore(); if (!SL.p || !slScene()) return core;
@@ -597,7 +608,8 @@ function slDeliverCore() { const p = SL.p, scene = slScene(); if (!scene) return
         best ? el("video", { src: file(best), controls: true, preload: "metadata", style: "width:100%;max-width:420px;border-radius:8px;margin-top:8px" }) : null,
         best ? slFeedback(scene, s, s.takes.find(t => t.mediaPath === best)) : null); }),
     el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "primary fit", disabled: !p.scenes.some(sc => sc.shots.some(slBest)), onclick: slToEditor }, "Send the film's takes to the Editor"), el("button", { class: "fit", disabled: !!SL.busy || scene.shots.length < 2, onclick: () => slContinuity(scene) }, "✦ Continuity check"),
-      el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".md", slMarkdown(scene), "text/markdown") }, "Shot list (Markdown)"), el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".csv", slCsv(scene), "text/csv") }, "Shot list (CSV)"), el("span")),
+      el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".md", slMarkdown(scene), "text/markdown") }, "Shot list (Markdown)"), el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".csv", slCsv(scene), "text/csv") }, "Shot list (CSV)"),
+      el("button", { class: "fit", disabled: !!SL.packaging, onclick: slPackage }, SL.packaging ? "Packaging..." : "Prepare portable ZIP (whole film)"), slPackageLink(), el("span")),
     issues ? el("div", { class: issues.length ? "tip" : "eg" }, el("b", {}, "Continuity"), issues.length ? issues.map(x => el("div", { style: "margin-top:6px" }, (x.severity === "error" ? "✗ " : "• ") + (x.shots || []).join(", ") + ": " + x.issue, el("div", { class: "note", style: "margin:0" }, "Fix: " + x.fix))) : "Clean: no mismatches found.") : null); }
 function slADView() { const log = SL.p.copilot || [], say = el("textarea", { style: "min-height:64px", placeholder: "A 30 second noir teaser: a detective, a rainy alley, one line of dialogue. Three shots.", onkeydown: e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) go(); } });
   const go = () => { const text = say.value.trim(); if (text && !SL.busy) slAD(text); };

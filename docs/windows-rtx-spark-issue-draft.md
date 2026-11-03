@@ -141,3 +141,70 @@ expectations when measurements justify it, keeping host headroom and safety rese
 
 I'll keep feature claims route- and hardware-specific and retain model licences, credits, access
 controls, existing measurement limits, and explicit unavailable reasons.
+
+---
+
+## Update: 2026-11-03 - measured Windows feature tier
+
+The original posted text above is preserved as the initial assessment. This appended update records later
+findings; it does not edit the posted GitHub issue automatically. The maintained
+[Windows RTX Spark plan](windows-rtx-spark-plan.md) contains the current support tables and detailed measurements.
+
+### New verified results on the 48 GB machine
+
+- The separate native ARM64 CUDA PyTorch environment passes math/vision/audio operations, and the pinned
+  ComfyUI dependency set resolved as native wheels. This does not qualify every optional node/package;
+  the CTranslate2 transcription packaging gap remains.
+- SD-Turbo storyboard drafts: 512x512, one step, up to six sequential different captions with per-shot seeds.
+  Peak GPU tensors were 3.01 GiB; a warm two-caption job took 0.84 s, excluding initial startup.
+- Stable Audio Open: five seconds, 100 passes, CFG 7; exact output 5.01551 s, stereo 44.1 kHz PCM WAV,
+  available in Sound and Library. Peak GPU tensors were 6.53 GiB; private process commitment about
+  11.99 GiB, close to its unchanged 12 GiB cap.
+- Native ARM64 FFmpeg/ffprobe: per-user verified installation, probing/frame extraction, and local trim/join
+  export bounded to 1-12 clips, ten minutes total, and even output sides up to 1920 pixels.
+- Qwen3-4B Q4_K_M: a text-only Slate writing brain with one 4096-token context and 1024-token answer limit.
+- Native Copilot CLI: terminal sign-in, explicit Check, scoped This Studio calls and session continuity.
+  Its requests use the person's plan; Studio never requests or stores a token. The UI now permits Check
+  while sign-in status is unknown, since the CLI has no auth-status command.
+- Real browser checks covered Fountain -> two generated boards -> Slate, scene edit/save/reopen, a decoded
+  sound player, and a decoded 2.0 s, 1344x768 trim/join export from silent and audio sources. A rapid
+  timeline-add race found during the pass was fixed.
+- Warm reuse after 314.37 seconds idle, running/queued cancellation with no published successful take,
+  and real Ctrl+Break shutdown/restart with zero owned descendants were verified. This is not indefinite
+  idle qualification or a listening-quality review.
+- NVIDIA driver 621.01 was installed and the machine rebooted; the initial inventory used 617.42.
+  An earlier monitoring timeout was not reproduced in the bounded post-reboot check, not proven fixed forever.
+
+Approved weights were downloaded outside Git; none are redistributed. Image/sound jobs retain 12/12/16 GiB
+allocator/process/job caps and the 2 GiB GPU reserve. Incompatible image and sound models are drained before
+switching kinds. No native TensorFold family engine build/inference, video generation, foley, or 64/128 GB
+workflow result is claimed.
+
+### Updated support versus projected fit
+
+Only the named 48 GB routes/settings below are verified. The 64 GB machine is still uninventoried/untested,
+and 128 GB hardware remains unavailable; their entries are capacity projections, not measured results.
+
+| Route | 48 GB: current verified scope | 64 GB: projected fit | 128 GB: projected fit |
+|---|---|---|---|
+| Planning, Slate, script imports and manual boards | Verified model-free flows | Expected fit | Expected fit |
+| FFmpeg probing/frame extraction/trim-export | Verified bounded CPU routes | Expected fit at those settings | Expected fit at those settings |
+| SD-Turbo storyboards | Verified 512x512, 1-6 sequential drafts | Expected fit at those settings | Expected fit at those settings |
+| Stable Audio Open sound effects | Verified five seconds / 100 passes / CFG 7 | Expected fit at those settings | Expected fit at those settings |
+| Qwen3-4B Q4_K_M writing | Verified text-only Slate, 4096-token slot | Expected fit at those settings | Expected fit at those settings |
+| Copilot CLI Studio tools | Verified local CLI + This Studio | Expected fit | Expected fit |
+| Motion graphics, foley, larger image/music routes | Still unqualified | Need route-specific validation | Need route-specific validation |
+
+The heavy-model capacity estimates in the original proposal remain projections, not enabled Windows routes.
+
+## Update: 2026-11-03 - portable film handoff
+
+A CPU-only portable Slate ZIP now carries project data, referenced media, an original screenplay when
+available, captioned contact sheets and CSV/Markdown shot lists. It is prepared from Bible or Deliver and
+downloaded as a file, without keeping the archive in browser memory.
+
+A disposable two-scene film was exported, its source Studio folder removed, and its ZIP imported through
+the UI into a clean Studio folder. Both board images loaded there; the included audio/script were retrievable
+and project links were preserved. No GPU jobs were needed. Missing media fails explicitly; the original
+screenplay is optional and its absence is reported. The existing ZIP limits/path checks and manifest
+size/SHA-256 verification apply. This qualifies the named handoff, not broader media/model support.

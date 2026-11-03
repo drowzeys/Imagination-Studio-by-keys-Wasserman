@@ -1,6 +1,6 @@
 # Native Windows RTX Spark: findings and porting plan
 
-Date: 2026-11-02
+Initial assessment: 2026-11-02. Last updated: 2026-11-03.
 
 Scope: native Windows 11 ARM64 on NVIDIA RTX Spark, not WSL and not a Linux container.
 
@@ -17,9 +17,27 @@ The work is therefore a combination of reusing and validating existing upstream 
 engine paths, and integrating Windows into Studio. It is not a clean-sheet Windows port of all four engines.
 See [the source audit](#10-source-level-follow-up-and-revised-confidence) for exact evidence and remaining limits.
 
-**Implementation update, 2026-11-02:** native ARM64 CUDA PyTorch operations now pass on the 48 GB development
-machine, and the pinned ComfyUI requirements resolve as wheels without replacing that PyTorch build.
-This advances the feasibility spike, not rendering support. See [the first implementation results](#11-first-implementation-results).
+**Implementation update, 2026-11-03:** the 48 GB machine now runs a bounded Windows feature tier, not just a
+UI/dependency spike. Script imports/planning, 512x512 SD-Turbo storyboard drafts, five-second Stable Audio Open
+effects, a small Qwen3-4B writing brain, Copilot CLI Studio tools, and CPU FFmpeg media operations have real
+local results. The table below and section 5 describe the current limits. Native TensorFold family engines,
+video generation, foley, larger image routes and the other hardware tiers remain unqualified.
+
+| Enabled route on the 48 GB development machine | Verified scope | Measurement / evidence |
+|---|---|---|
+| Scripts, Slate and manual boards | Fountain import, scene/shot/cast/dialogue links, attachment, save/reopen and shot-list exports | Real browser two-scene flow; project JSON still does not bundle referenced media |
+| Portable Slate films | Project, referenced media, source script when available, captioned contact sheets and CSV/Markdown shot lists | CPU-only; clean-folder import verified after deleting the source folder; no external source paths required |
+| SD-Turbo storyboard drafts | 512x512, one step, 1-6 sequential frames, distinct captions and per-frame seeds | Peak GPU tensors 3.01 GiB; reserved 3.31 GiB; two-caption warm job 0.84 s |
+| Stable Audio Open effects | Five seconds, 100 passes, CFG 7; stereo 44.1 kHz PCM WAV in Sound and Library | Exact output 5.01551 s; peak GPU tensors 6.53 GiB; process commitment 11.99 GiB, close to its cap |
+| Qwen3-4B Q4_K_M writing | One 4096-token slot, at most 1024 answer tokens; text-only Slate assistance | Native ARM64 llama.cpp CUDA; one scene/two-shot First AD answer applied and saved in 5.22 s |
+| Copilot CLI | Terminal sign-in, explicit Check, scoped This Studio tools and session continuity | Native CLI 1.0.105; real read-only `studio_state` turn completed; unknown sign-in status no longer blocks Check |
+| Native ARM64 FFmpeg/ffprobe | Probe, frame extraction and local MP4 trim/join export; 1-12 clips, ten minutes, even sides up to 1920 | Browser decoded a 2.0 s, 1344x768 export combining silent and audio sources |
+| Owned lifecycle | Warm reuse, running/queued cancellation, explicit unload, Ctrl+Break and restart | 314.37 s idle observed; cancelled jobs published no take; shutdown exited zero with no owned descendants |
+
+These are route-specific measurements, not a full-suite result or a general Windows generation guarantee.
+Image/sound jobs retain 12/12/16 GiB allocator/process/job caps and a 2 GiB GPU reserve; kinds never load together.
+Warm timings exclude initial startup unless stated otherwise. Sections 8 onward retain the incremental findings
+at each stage; their older "not yet enabled" statements describe that stage, not the current support table.
 
 There are two separate problems:
 
@@ -47,18 +65,21 @@ RTX Spark remains a prospective larger-model validation target, not currently av
 | Windows usable physical RAM | Approximately 20.8 GiB after hardware reservations |
 | Available Windows RAM | Approximately 7-8 GiB during the probes; varies with other applications |
 | GPU | NVIDIA RTX Spark, 6144-core Blackwell RTX GPU |
-| NVIDIA driver | 617.42 |
+| NVIDIA driver | 621.01 after installation/reboot; initial inventory used 617.42 |
 | CUDA driver API | 13.4; native driver initialization succeeded |
 | CUDA architecture | Compute capability 12.1, integrated GPU |
 | NVIDIA dedicated-memory report | 26 GiB, with about 24 GiB free in the initial inventory |
 | CUDA allocation budget | **35.63 GiB total, 35.44 GiB free** during an isolated driver-context probe |
 | Disk | Approximately 699 GB free during the initial inventory |
-| UI | Native Windows server and browser navigation work |
-| Focused validation | 108 tests passed, 1 POSIX-only test skipped |
+| UI | Native Windows server; real browser script/board, sound and editor flows verified |
+| Focused validation | Route-specific tests and smoke results are recorded below; initial preview run was 108 passed / 1 POSIX skip, not a current full-suite total |
 
-The CUDA probe created and released a driver context. It did **not** load weights, allocate model tensors, run inference, or establish safe sustained memory limits.
+The initial CUDA probe created and released a driver context without loading weights. Later real model runs
+and their measured limits are recorded separately above and in the implementation sections.
 
-The test result covers the Windows preview and selected related regressions, not the entire repository or GPU generation. The browser checks covered Story, Library, Nodes, Machine, and Settings, with no JavaScript errors observed during those checks.
+The initial test result covered the preview and selected regressions, not the entire repository. Later browser
+checks covered the supported script/board, sound and media-export flows; see section 24 for results and the
+timeline race found and fixed. Unsupported features are not counted as passes.
 
 ### Verified upstream availability
 
@@ -74,12 +95,13 @@ Wheel availability is not proof that a complete workflow installs or runs. Depen
 ### Not verified
 
 - The available 64 GB test machine's configuration, Windows/CUDA budgets, or workflow behavior.
-- Any native Windows model render. Tiny PyTorch math/vision/audio operations are now verified separately.
+- Windows generation outside the scoped SD-Turbo and five-second Stable Audio Open routes, or local brain
+  execution beyond the measured Qwen3-4B settings.
 - Native Windows TensorFold compilation or inference on this machine. Existing upstream Windows support and
   contributor hardware reports have now been identified, but not reproduced here.
 - Windows ARM64 compatibility of every ComfyUI node pack and transitive dependency.
 - Memory behavior or performance on a 128 GB RTX Spark.
-- Whether a particular 48 GB workflow fits after host-side staging and safety reserves.
+- Host staging and safe capacity for the other 48 GB workflows; the measured enabled routes do not qualify them.
 - CUDA behavior inside ARM64 WSL on this hardware. WSL is not assumed to be a working shortcut.
 
 ## 2. Unified memory: what the numbers mean
@@ -199,7 +221,9 @@ completion guarantee; maintaining separate environments and test receipts also t
 
 ## 5. What could run after porting?
 
-**This table is a projection, not a support announcement.** Unless stated otherwise, capacity evidence comes from existing Linux/DGX measurements, sometimes from a DGX simulation of a discrete card. It is not a Windows benchmark.
+**This table combines narrowly verified Windows routes with capacity projections; the labels distinguish them.**
+Unless a row explicitly says verified, capacity evidence comes from existing Linux/DGX measurements, sometimes
+from a DGX simulation of a discrete card. Such evidence is not a Windows benchmark.
 
 The tier columns describe **memory suitability after the necessary Windows software work**, not readiness or
 test coverage. For the same workload and comparable configuration, an expected fit carries upward to larger
@@ -207,28 +231,30 @@ memory tiers. A larger machine is not less promising merely because it has not b
 
 Legend:
 
+- **Verified:** only the explicitly stated route/settings were executed on this Windows machine.
 - **Expected fit:** no identified capacity barrier at the stated workload size; still requires validation.
 - **Needs measurement:** loading peaks, settings or host/GPU budgets could determine whether it fits safely.
 - **Beyond current budget:** the current route's measured/estimated demands exceed the present safe envelope,
   not an immutable limit on future implementations.
 - **Route-dependent:** follows the capacity requirements of the underlying model/workflow.
 
-Verification is separate: only the UI preview has been executed locally on 48 GB. No Windows generation result is
-verified at any tier. The 64 GB machine has not yet been inventoried; 128 GB hardware is not available.
+Verification is separate from projected fit: the 48 GB machine has the scoped local results listed below.
+The 64 GB machine has not yet been inventoried or tested; 128 GB hardware is not available.
 Software/dependency blockers are noted in the evidence column and apply regardless of the machine's memory.
 
 | Feature | 48 GB: primary dev box | 64 GB: available test tier | 128 GB: prospective tier | Evidence / qualification |
 |---|---|---|---|---|
-| Planning, Slate, settings, uploads, library | Expected fit; UI verified | Expected fit | Expected fit | No model inference required |
+| Planning, Slate, settings, uploads, library | **Verified: model-free flows** | Expected fit | Expected fit | Fountain-to-Slate/boards, reference attachment, save/reopen and shot-list exports; no direct FDX import |
 | Prompt compilation, graph editing | Expected fit; UI verified | Expected fit | Expected fit | Graph execution remains disabled |
-| FFmpeg inspection, trimming, joining, timeline export | Expected fit | Expected fit | Expected fit | Media dependencies and lifecycle integration required |
+| FFmpeg inspection, trimming, joining, timeline export | **Verified: bounded CPU routes** | Expected fit at those settings | Expected fit at those settings | Native ARM64; 1-12 clips, ten minutes, even output sides up to 1920; silent/audio-source browser export |
+| Portable Slate ZIP export/import | **Verified: CPU-only round trip** | Expected fit within archive limits | Expected fit within archive limits | File inventory, sizes and SHA-256 checked; media/script paths rebased; source folder removed before import |
 | Motion graphics / titles | Expected fit | Expected fit | Expected fit | Node/browser/FFmpeg port; use bounded sizes |
 | Finish / external-editor interchange | Expected fit for interchange | Expected fit for interchange | Expected fit for interchange | Proprietary Tesseract binary availability remains a separate unresolved blocker |
 | Qwen images, scouts, picture edits | Needs measurement | Expected fit at small test sizes | Expected fit at those sizes | Small-test GPU peaks about 22-25 GB; host staging also matters |
 | SD-Turbo storyboard drafts | **Verified: 512x512 stills** | Expected fit at those settings | Expected fit at those settings | Native Windows ComfyUI route; 3.01 GiB peak GPU tensors, scoped 12/12/16 GiB caps |
 | FLUX3-K Fast/Full images and edits | Needs measurement | Needs measurement | Expected fit at test sizes | Checkpoint, upsampler and staging need separate measurements |
 | MOSS-Image | Needs measurement / tight | Needs measurement | Expected fit at test sizes | Small tests about 22-25 GB GPU; model-switch run reached 56.8 GB |
-| Stable Audio Open sound effects | Expected fit | Expected fit | Expected fit | Linux small-run peaks about 5-9 GB; first GPU target |
+| Stable Audio Open sound effects | **Verified: five seconds only** | Expected fit at those settings | Expected fit at those settings | 100 passes / CFG 7; 6.53 GiB peak GPU tensors, 11.99 GiB process commitment; unchanged caps; foley is separate |
 | MMAudio foley | Expected fit for short clips | Expected fit at those sizes | Expected fit at those sizes | Existing Linux peaks about 14-17 GB |
 | YuE2 music, PyTorch route | Needs measurement | Expected fit for short songs | Expected fit at those sizes | Linux bf16 peaks about 12-19 GB; cold loading must fit |
 | MiniMax Music 3 through ComfyUI | Needs measurement / tight | Needs measurement | Expected fit at test sizes | Linux system peaks about 28-29 GB; Windows partition differs |
@@ -241,7 +267,9 @@ Software/dependency blockers are noted in the evidence column and apply regardle
 | Character Swap | **Beyond current safe budget** | Needs measurement with offload | Expected fit at measured sizes | About 49-53 GB GPU; offload about 38-41 GB plus reserves/host constraints |
 | Turnaround, Upscale, Remove a person | **Beyond measured heavy-route budget** | **Beyond measured heavy-route budget** | Expected fit at measured sizes | Simulated-card GPU peaks about 67-72 GB |
 | Nemotron 3.5 Bolt brain | Needs measurement; not initial target | Needs measurement | Expected fit | Current routes ask for about 40-43 GB free; file size is not runtime peak |
-| Smaller local/external brain connections | Expected fit for suitably small models | Expected fit at those sizes | Expected fit at those sizes | A smaller model is a separate choice, not evidence Bolt fits |
+| Qwen3-4B Q4_K_M local writing brain | **Verified: text-only Slate** | Expected fit at those settings | Expected fit at those settings | Native ARM64 llama.cpp CUDA; 4096 context / 1024 answer tokens; not a qualified local MCP agent |
+| Copilot CLI Studio agent | **Verified: local CLI + This Studio** | Expected fit | Expected fit | Uses the person's Copilot plan, not GPU weights; real Check and Studio-tool turn; remote/other tools unqualified |
+| Other smaller local/external brains | Needs route-specific validation | Expected fit for suitably small models | Expected fit at those sizes | Qwen3/Copilot results do not qualify every server or CLI, nor Bolt |
 | Motion Previs basic layers | Expected fit at small sizes | Expected fit at those sizes | Expected fit at those sizes | Pose/depth require the full native dependency stack |
 | Speech transcription / spoken-word QA | Expected fit for modest models | Expected fit at those sizes | Expected fit at those sizes | CTranslate2 packaging gap is independent of RAM size |
 | LoRA application | Route-dependent | Route-dependent | Route-dependent | Existing H3 route/adapter limits still apply |
@@ -253,11 +281,11 @@ Software/dependency blockers are noted in the evidence column and apply regardle
 
 The realistic goal is **a useful partial studio, not a full H3 video workstation**:
 
-1. Planning and media management.
-2. Editing/export and graphics once their executables are available.
-3. Sound effects and short foley.
-4. Selected images and short music, only after measurements.
-5. Optional small brain integrations.
+1. Planning and media management: the model-free flows are enabled.
+2. CPU editing/export: bounded FFmpeg routes are enabled; motion graphics remain separate work.
+3. Sound effects: the five-second route is enabled; short foley remains unqualified.
+4. Images: SD-Turbo drafts are enabled; other image models and short music need separate measurements.
+5. Brains: scoped Qwen3 writing and Copilot Studio tools are enabled; other routes remain separate.
 6. Heavy video/voice through a separately supported worker, if desired.
 
 Images are not promised simply because this machine has "48 GB." Windows currently exposes much less host RAM, and model loading can stage a second copy. Unloading other applications may help availability, but does not change the physical-memory partition.
@@ -284,6 +312,10 @@ actual host/GPU budgets, cold/warm peaks and explicit refusals. Start on 64 GB b
 small workloads before expanding one dimension at a time under an independent watchdog.
 
 ## 6. Proposed implementation plan
+
+The original phase breakdown is retained below. Parts of phases 0-4 have now been implemented for the limited
+tier; use the current route table above for support status, and the later numbered sections for receipts and
+remaining limits. An unfinished item in a broad phase does not negate an independently verified route.
 
 ### Phase 0: establish scope and retain a reproducible baseline
 
@@ -1100,3 +1132,30 @@ The launcher exited with status zero; the handle-owned job reported zero remaini
 Studio and ComfyUI ports closed before any forced cleanup. Restarting that Studio preserved the completed
 sound take, did not publish the interrupted one, and did not inherit an old backend. Its final shutdown
 also drained. The saved demo projects were not edited by these checks.
+
+## 25. Portable Slate films
+
+The film's Bible and Deliver now prepare a portable ZIP and expose a direct file-download link.
+Preparation saves current edits first. The archive is a snapshot, not a link to a changing project, and the
+page does not buffer a potentially large archive in a JavaScript Blob.
+
+The package contains the project, all references in the supported media fields (including cast/location
+stills, shot images/takes and voice-reference audio), the original screenplay when available, whole-film
+CSV/Markdown shot lists and captioned JPEG contact sheets (12 shots per page). Media is named by index so
+duplicate basenames cannot collide; repeated references to one source share one archive entry.
+Prompts, intent, dialogue, seeds and sheet/shot ids are preserved. Machine-local brain addresses, placement
+and running-job bindings are omitted; model/LoRA weights are never bundled.
+
+Import uses the existing suite ZIP limits and path checks, rejects case-colliding entries, verifies the
+manifest's file inventory/sizes/SHA-256, and rewrites included media/script paths into the destination Studio.
+Missing or outside/hidden source files fail explicitly. An absent original screenplay is reported as a
+note instead of fabricated; project scene/shot text still travels. Export stays below the existing 2 GB upload
+limit and 2000-entry limit. Checksums are corruption checks, not author authentication.
+
+Focused package/suite, Windows API and credits checks passed (**59 tests**).
+A real disposable Studio prepared a **201,080-byte ZIP** containing two stills, an audio fixture, a Fountain
+script, project JSON, CSV/Markdown lists, one captioned sheet and the manifest. After that source Studio folder
+was deleted, a fresh Studio accepted the ZIP through its actual import control and opened the film with both
+board images loaded. All four media/script references were retrievable under destination-relative paths,
+and no GPU jobs were queued. The integrated browser did not expose a download event; the prepared link's
+HTTP transfer was verified separately. The saved demo and the user's main Studio folder were not used.
