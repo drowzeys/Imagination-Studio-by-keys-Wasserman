@@ -117,3 +117,40 @@ performance; "power saving" is Windows' Best power efficiency. GPU clock and pow
   cannot hold, so the disk is shared.
 - vcruz305's DSV4.1-Flash-1017 EXL3 recipe holds about 107 GiB of device memory on a GB10 and does not fit the N1X's
   96 GB carve-out.
+
+## TensorFold on the N1X: in WSL and native on Windows
+
+The same model family on [TensorFold](https://github.com/ashhart/TensorFold) 1.2.2's Flash-Next CUDA engine, serving
+[Blackfrost-AI/CYBER-FROST-3.8-FP4-Local](https://huggingface.co/Blackfrost-AI/CYBER-FROST-3.8-FP4-Local) (ModelOpt
+mixed FP4, 72.7 GiB on the GPU, n-gram tables read from the files, MTP drafts), `--context 32768 --parallel 4
+--no-thinking`, measured 2026-11-04 with the same clients and settings as the EXL3 runs above, HP Performance mode:
+
+- **In WSL**: TensorFold's Linux build, rebuilt with one fix. Its integrated-GPU admission reads `/proc/meminfo` on
+  Linux, which under WSL is the ~30 GB of RAM, not the GPU's pool, so it refused the checkpoint; under WSL it now reads
+  the CUDA pool as on native Windows (sent upstream).
+- **Native on Windows**: `tensorfold-native.exe` built from source for `aarch64-windows`, `sm_121` (Zig 0.17, the CUDA
+  13.4 Windows-on-Arm toolkit from NVIDIA's redistributable archives, MSVC ARM64 build tools); its GPU suites pass
+  (`glue`: 1473 of 1473 byte-equal). Natively the WDDM pool is 113 GB (WSL sees 96).
+
+Client end-to-end tokens/s (prefill included; TensorFold's server reports no separate decode rate):
+
+| | DGX Spark, EXL3¹ | N1X EXL3, WSL | N1X EXL3, WSL, power saving | N1X TensorFold, WSL | N1X TensorFold, native Windows |
+|---|---:|---:|---:|---:|---:|
+| Code | 45.8 | 38.6 | 25.6² | 43.8 | **50.4** |
+| DevOps | 44.3 | 34.5 | 21.6² | **42.2** | 40.2 |
+| Prose | 34.4 | 27.8 | 16.4² | 35.7 | **37.3** |
+| First token, short prompt (s) | — | 0.74-0.80 | 1.33-1.44 | **0.21-0.24** | 0.22-0.28³ |
+| First token, ~17,850-token prompt (s) | — | 19.1 | 39.6 | **10.2** | 10.9³ |
+| 1 / 2 / 4 requests at once, total | — | 30.6 / 33.6 / 36.2 | 17.6 / 18.3 / 19.6 | 36.4 / 50.2 / 65.6 | **36.6 / 54.4 / 70.0** |
+| GPU while busy | — | 2166 MHz, 48 W | 1375 MHz, 15 W | 2120 MHz, 49 W | 2139 MHz, 42 W |
+| GPU memory left for streams | — | — | — | 15.4 GiB | **19.0 GiB** |
+
+¹ [vcruz305's recipe](https://github.com/vcruz305/Qwen3.8-Flash-Next-EXL3-DGX-Spark-recipe), its own GB10 figures for
+the Cyber Frost 3.87 bpw pack (server decode, n-gram table on disk, corrected template); not measured here.
+² Server decode rate (the power-saving run's client figure was not kept). ³ Includes ~6 ms of network round trip: the
+clients ran on another machine through an SSH tunnel.
+
+- TensorFold against EXL3 on the same laptop: +13-28% a stream, first token 3.4x sooner, a long prompt in about half
+  the time, and 1.8-1.9x the total at four requests.
+- Native Windows against WSL: within about ±15% (three samples a class), and more memory left for streams.
+- On TensorFold the N1X matches or passes the DGX Spark's EXL3 figures for this model.
