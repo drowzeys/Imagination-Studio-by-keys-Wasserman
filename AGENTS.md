@@ -227,6 +227,19 @@ Rules:
   shuts Ubuntu down soon after its last Windows `wsl.exe` closes, so the Studio lives in the Start launcher's window; a
   Studio started over SSH dies with the session. Stop by `[a]pp/...` patterns (a pkill whose own command line holds the
   path kills its shell). The taskbar pin is Windows 11's taskbar layout policy (append); never claim a pin API.
+- Native Windows CUDA tier (`app/windows_cuda.py`, `spark/windows_scripts.py`, `spark/comfy_win.py`,
+  `scripts/setup-windows-cuda.ps1`, `oneshot-setup-rtx-spark-n1x.ps1 -Native`, docs/rtx-spark-n1x.md *Native Windows*):
+  the Spark path on Windows, chosen only where `cuda-tier.json`, the GPU venv, ComfyUI and `tf_h3.dll` are all present
+  and the measured CUDA pool is at least `MIN_POOL_MB` (`why_not`); anything else on Windows keeps the preview tier
+  unchanged (`WINDOWS` stays the preview's flag, `WIN32` the OS's, `SPARK` is True on the native tier). Never run a
+  Linux script there: `windows_cuda.translate` maps `bash scripts/X.sh` to the Python port and refuses the rest, and a
+  kind without a port is refused when queued with its reason (`NOT_NATIVE`), never sent to WSL. Keep
+  `windows_scripts.py` in step with the bash scripts it ports (same checks, same words). ComfyUI is owned by handle
+  (`comfy_win.py`: a job object, the recorded id and creation time, a stop file), never by name or port, and stands
+  under `windows_memory.pressure`; it leaves the render's job object (breakaway) so it stays warm. Off Windows nothing
+  of it runs (`active()` is False without a read). Drama 3 is wired only where `drama3-generate.exe` and
+  `tensorfold_drama3.dll` exist. The suite runs the preview tier (`STUDIO_WINDOWS_TIER=preview` in conftest);
+  `tests/test_windows_cuda.py` drives the native one.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers

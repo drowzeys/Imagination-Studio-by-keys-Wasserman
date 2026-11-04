@@ -63,7 +63,9 @@ import bolt  # NVIDIA Nemotron 3.5 Bolt as the Studio's own engine: the local br
 
 HOME: Path | None = None
 PACK = Path(__file__).resolve().parent.parent
-WINDOWS = os.name == "nt"
+import windows_cuda  # noqa: E402  (the native Windows CUDA tier: False off Windows without a look)
+WIN32 = os.name == "nt"  # the operating system's own mechanics (npm's folders, .cmd launchers)
+WINDOWS = WIN32 and not windows_cuda.active()  # the preview tier's limits; the native CUDA tier runs the agents as a Spark
 TEST_TIMEOUT = 180
 PROBE_TIMEOUT = 8  # an ssh look at another machine
 PROBE_TTL = 60
@@ -579,8 +581,8 @@ def scp_target(host: str) -> tuple[list[str], str]:
 
 def search_path() -> str:
     # ~/.npm-global/bin: where Connect's install puts an npm CLI when npm's own prefix is not the user's to write
-    extra = [str(Path(os.environ["APPDATA"]) / "npm")] if WINDOWS and os.environ.get("APPDATA") else []
-    if WINDOWS and os.environ.get("LOCALAPPDATA"):
+    extra = [str(Path(os.environ["APPDATA"]) / "npm")] if (WINDOWS or WIN32) and os.environ.get("APPDATA") else []
+    if (WINDOWS or WIN32) and os.environ.get("LOCALAPPDATA"):
         extra.append(str(Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio" / "copilot-cli"))
         extra.append(str(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Links"))
     return os.pathsep.join([os.environ.get("PATH", ""), *slate.CLI_DIRS, str(Path.home() / ".npm-global/bin"), *extra])
@@ -635,7 +637,7 @@ def cli(name: str) -> str | None:
     if name == "hermes" and studio_settings()["hermes_command"]:
         return studio_settings()["hermes_command"]
     found = shutil.which(CLIS[name][1] if name in CLIS else name, path=search_path())
-    if name == "copilot" and WINDOWS and found and Path(found).suffix.lower() in (".cmd", ".bat"):
+    if name == "copilot" and (WINDOWS or WIN32) and found and Path(found).suffix.lower() in (".cmd", ".bat"):
         arch = {"arm64": "arm64", "aarch64": "arm64", "amd64": "x64", "x86_64": "x64"}.get(platform.machine().lower())
         native = Path(found).parent / "node_modules" / "@github" / "copilot" / "node_modules" / "@github" / f"copilot-win32-{arch}" / "copilot.exe"
         return str(native) if arch and native.is_file() else None

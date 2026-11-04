@@ -403,6 +403,21 @@ machine; none of their code ships in this pack.
   **Blender**.
 - The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
 
+## The native Windows CUDA tier (RTX Spark N1X): TensorFold on Windows, NVIDIA, Microsoft, Zig
+
+The native tier runs the DGX Spark's render path on Windows 11 on Arm without WSL. Its engines are **TensorFold
+1.2.2** by **Ash Hart** and the TensorFold contributors (Apache-2.0), whose Windows platform support they build on, at
+the drowzeys/TensorFold branch `studio-1.2.2`: TensorFold's int8 H3 blocks as `tf_h3.dll` (the engine ComfyUI's
+`TensorFoldH3Blocks` node calls) and the Bolt lane, **Mia (MiaAI-Lab)**'s recipe with **ChriZzn**'s speed work, as
+`tensorfold-native.exe` + `bolt.dll` serving **NVIDIA**'s Nemotron 3.5 Bolt and its LiLiCorr drafter. They are built
+from source with **Zig** 0.17 (the Zig Software Foundation and contributors), **NVIDIA**'s **CUDA Toolkit 13.4 for
+Windows on Arm** (its redistributable archives: nvcc, the CUDA runtime, cuBLAS, NVRTC, nvJitLink, CCCL and NVVM, under
+NVIDIA's CUDA EULA, fetched from NVIDIA and never redistributed here) and **Microsoft**'s **Visual Studio 2022 Build
+Tools** (the MSVC ARM64 compiler and the Windows SDK), installed with Microsoft's **winget**. ComfyUI (**Comfy Org**
+and the ComfyUI contributors) runs the graphs on **NVIDIA**'s native Windows ARM64 PyTorch wheels; Microsoft's job
+objects own every process the tier starts, and the memory guard reads Windows' memory signals and **NVIDIA**'s CUDA
+and NVML counters. **Git for Windows** fetches the pinned sources, and **Hugging Face**'s **huggingface_hub** the models.
+
 ## Windows ARM64 CUDA feasibility checks: NVIDIA and the PyTorch contributors
 
 **NVIDIA** publishes the native Windows ARM64 CUDA builds of **PyTorch, TorchVision and TorchAudio**, made by

@@ -219,7 +219,7 @@ def main() -> None:
     last = sg.side("kind").read_text().strip() if sg.side("kind").exists() else ""
     if sg.up() and last.startswith("workflow"):
         print("[tensorfold] restarting ComfyUI: a picture edit after a Library action starts from a server with nothing loaded", flush=True)
-        subprocess.run(["bash", str(sg.HERE / "comfy.sh"), "stop"], check=False)
+        subprocess.run(sg.comfy_control("stop"), check=False)
         for _ in range(60):
             if not sg.up():
                 break

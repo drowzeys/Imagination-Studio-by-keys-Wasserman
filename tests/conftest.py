@@ -33,6 +33,9 @@ os.environ.setdefault("STUDIO_DISCOVER_DELAY", "-1")
 # nor start a model server of this machine's: NVIDIA Nemotron 3.5 Bolt as the Studio's engine (app/bolt.py) is a stand-in
 # in tests/test_bolt.py, and everywhere else the brains' local server is the one a test names
 os.environ.setdefault("BOLT_BACKEND", "external")
+# nor run on this machine's native Windows CUDA install (app/windows_cuda.py, an N1X laptop's cuda-tier.json): the suite
+# tests the Windows preview tier as CI's Windows runner has it; tests/test_windows_cuda.py drives the native tier itself
+os.environ.setdefault("STUDIO_WINDOWS_TIER", "preview")
 # nor ask for the studio's access key (app/access.py): tests/test_access.py turns it on for its own requests
 os.environ.setdefault("STUDIO_ACCESS_KEY", "off")
 

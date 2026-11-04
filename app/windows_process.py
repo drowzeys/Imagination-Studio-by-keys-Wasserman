@@ -13,7 +13,7 @@ from windows_memory import process_memory
 class OwnedJob:
     """Keep cleanup tied to the launched process handle, not a port or reusable PID."""
 
-    def __init__(self, process_commit_mb: int = 0, job_commit_mb: int = 0):
+    def __init__(self, process_commit_mb: int = 0, job_commit_mb: int = 0, breakaway: bool = False):
         if any(type(value) is not int or value < 0 for value in (process_commit_mb, job_commit_mb)):
             raise ValueError("Windows job commit limits must be nonnegative integers")
         self.lock = threading.RLock()
@@ -69,6 +69,10 @@ class OwnedJob:
             raise ctypes.WinError(ctypes.get_last_error())
         limits = Extended()
         limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if breakaway:
+            # JOB_OBJECT_LIMIT_BREAKAWAY_OK: a child started with CREATE_BREAKAWAY_FROM_JOB leaves this job (the native
+            # CUDA tier's ComfyUI, which spark/comfy_win.py keeps warm in a job of its own); nothing else changes
+            limits.basic.flags |= 0x800
         if process_commit_mb:
             limits.basic.flags |= 0x100  # JOB_OBJECT_LIMIT_PROCESS_MEMORY
             limits.process_memory = process_commit_mb << 20

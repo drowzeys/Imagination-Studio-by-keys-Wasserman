@@ -40,8 +40,23 @@ PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-stud
 # On a Mac the same graphs run on a ComfyUI of their own (mac/comfy.sh, scripts/setup-comfy.sh): the Library actions
 # and MOSS-Image, on PyTorch's Metal device. Its port, its model folder and the names of the H3 files differ (MAC_FILES).
 MAC = sys.platform == "darwin"
+# native Windows (the CUDA tier, app/windows_cuda.py): the same graphs on the Windows ComfyUI, which comfy_win.py (the
+# port of comfy.sh) starts and stops; PREFIX and SPARK_MODELS are the Windows install's (the app sets them)
+WINDOWS = sys.platform == "win32"
 ENGINE = "mps" if MAC else "cuda"
 COMFY_SH = HERE.parent / "mac" / "comfy.sh" if MAC else HERE / "comfy.sh"
+
+
+FFMPEG_HOW = "scripts\\setup-windows-ffmpeg.ps1" if WINDOWS else "sudo apt install ffmpeg"
+
+
+def comfy_control(action: str) -> list[str]:
+    """The command that starts, stops or asks after the studio's ComfyUI: comfy.sh, or its Python port on Windows."""
+
+    if WINDOWS:
+        return [sys.executable, "-X", "utf8", str(HERE / "comfy_win.py"), action]
+    return ["bash", str(COMFY_SH), action]
+
 if MAC:
     URL = os.environ.get("MAC_COMFY_URL", "http://127.0.0.1:" + os.environ.get("MAC_COMFY_PORT", "8191"))
     MODELS = Path(os.environ.get("MAC_COMFY_MODELS") or PREFIX / "comfy-models").expanduser()
@@ -59,7 +74,8 @@ def side(ext: str) -> Path:
     return PREFIX / name
 
 
-ENGINE_LIB = PREFIX / "tf-h3" / "libtf_h3.so"
+ENGINE_LIB = (Path(os.environ.get("TF_H3_LIB") or PREFIX / "tf-h3" / "tf_h3.dll") if WINDOWS
+              else PREFIX / "tf-h3" / "libtf_h3.so")
 
 FASTH3 = {"bf16": "fastvideo_fasth3_8step_v2_pruned_bf16.safetensors",
           "int8": "fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors"}
@@ -139,10 +155,14 @@ def ensure_server(kind: str) -> None:
 
     if not up():
         print("[tensorfold] starting ComfyUI (first render after a start loads the models)", flush=True)
-        subprocess.run(["bash", str(COMFY_SH), "start"], check=True)
-        for _ in range(180):
+        subprocess.run(comfy_control("start"), check=True)
+        for tries in range(180):
             if up():
                 break
+            # on Windows the server's guard may have stopped it while it loaded: said at once, not after six minutes
+            if WINDOWS and tries >= 5 and tries % 5 == 0 and "not running" in subprocess.run(
+                    comfy_control("status"), capture_output=True, text=True).stdout:
+                sys.exit(stopped() or f"ComfyUI stopped while it started: see {side('log')}")
             time.sleep(2)
         else:
             sys.exit(f"ComfyUI did not answer at {URL}: see {side('log')}")
@@ -158,7 +178,7 @@ def fresh_server(why: str) -> None:
     """Stop the ComfyUI server and wait until its memory is back: the next render starts with nothing loaded."""
 
     print(f"[tensorfold] restarting ComfyUI: {why}", flush=True)
-    subprocess.run(["bash", str(COMFY_SH), "stop"], check=False)
+    subprocess.run(comfy_control("stop"), check=False)
     for _ in range(60):
         if not up():
             break
@@ -365,7 +385,7 @@ def finish_sound(item, target: Path, frames: int) -> None:
     if shutil.which("ffmpeg") is None:
         # not silently: the track ComfyUI wrote can overshoot full scale (see above)
         print("[tensorfold] sound: left as ComfyUI wrote it, at about 130 kb/s and without the limiter: ffmpeg is not "
-              "installed on this machine (sudo apt install ffmpeg)", flush=True)
+              f"installed on this machine ({FFMPEG_HOW})", flush=True)
         (PREFIX / "ComfyUI" / "output" / sound.get("subfolder", "") / sound["filename"]).unlink(missing_ok=True)
         return
     import numpy as np
@@ -419,7 +439,7 @@ def crop_frames(workflow: dict, crop: str, width: int, height: int) -> bool:
         return True
     if shutil.which("ffmpeg") is None:
         sys.exit(f"the clip is generated at {width}x{height} and cropped to {wide}x{tall}, and this machine can do neither crop: "
-                 "its ComfyUI has no ImageCrop node and ffmpeg is not installed (sudo apt install ffmpeg)")
+                 f"its ComfyUI has no ImageCrop node and ffmpeg is not installed ({FFMPEG_HOW})")
     return False
 
 
@@ -461,7 +481,7 @@ UPLOADED: list[str] = []  # what this run put in ComfyUI's input folder
 def _tool(name: str) -> str:
     path = shutil.which(name)
     if path is None:
-        sys.exit(f"{name} is not on the PATH: reference videos and audio are read with it (sudo apt install ffmpeg)")
+        sys.exit(f"{name} is not on the PATH: reference videos and audio are read with it ({FFMPEG_HOW})")
     return path
 
 
@@ -590,12 +610,32 @@ def hub_loras(specs) -> list[tuple[str, float]]:
         if not source.is_file():
             sys.exit(f"no LoRA at {path}")
         link = MODELS / "loras" / f"hub_{source.name}"
-        if not link.exists() or link.resolve() != source:
+        if WINDOWS:
+            link_lora(source, link)
+        elif not link.exists() or link.resolve() != source:
             link.parent.mkdir(parents=True, exist_ok=True)
             link.unlink(missing_ok=True)
             link.symlink_to(source)
         loras.append((link.name, strength))
     return loras
+
+
+def link_lora(source: Path, link: Path) -> None:
+    """On Windows a LoRA goes into ComfyUI's loras folder as a hard link (a symlink needs a privilege a person may not
+    have), or a copy across drives; one of the same size and time is kept."""
+
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        same = link.stat().st_size == source.stat().st_size and link.stat().st_mtime_ns == source.stat().st_mtime_ns
+    except OSError:
+        same = False
+    if same:
+        return
+    link.unlink(missing_ok=True)
+    try:
+        os.link(source, link)
+    except OSError:
+        shutil.copy2(source, link)
 
 
 def reference(args) -> None:
@@ -999,7 +1039,7 @@ def music_finish(track: Path, target: Path, what: str = "song", channels: int = 
 
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
-        sys.exit(f"a {what} is levelled with ffmpeg, which is not installed on this machine (sudo apt install ffmpeg)")
+        sys.exit(f"a {what} is levelled with ffmpeg, which is not installed on this machine ({FFMPEG_HOW})")
     raw = subprocess.run([ffmpeg, "-v", "error", "-i", str(track), "-ar", str(4 * MUSIC_RATE), "-f", "f32le", "pipe:1"],
                          capture_output=True, timeout=600).stdout
     wave = np.frombuffer(raw, np.float32)

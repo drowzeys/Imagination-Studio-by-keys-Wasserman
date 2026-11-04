@@ -109,6 +109,8 @@ POLL_S, RATE_WINDOW_S, STALL_WINDOW_S, STALL_SHARE = 0.05, 0.25, 2.0, 0.5
 def meminfo(text: str | None = None) -> dict:
     """/proc/meminfo in MB ({} where there is none: a Mac, which this guard does not cover)."""
 
+    if text is None and sys.platform == "win32" and os.environ.get("STUDIO_WINDOWS_CUDA") == "1":
+        return windows_meminfo()  # the native CUDA tier only (app/windows_cuda.py); the preview tier keeps {}
     if text is None:
         try:
             with open("/proc/meminfo") as handle:
@@ -121,6 +123,29 @@ def meminfo(text: str | None = None) -> dict:
         if rest.strip():
             out[name] = int(rest.split()[0]) // 1024
     return out
+
+
+def windows_meminfo() -> dict:
+    """Native Windows (the CUDA tier): the physical memory Windows has and what is available (GlobalMemoryStatusEx),
+    in MB under /proc/meminfo's names, so the checks run there too. On an RTX Spark N1X the GPU's carve-out is the pool
+    (``card_pool``), not this RAM. {} when Windows does not answer."""
+
+    import ctypes
+
+    class Status(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                    *[(name, ctypes.c_ulonglong) for name in
+                      ("total", "available", "page_total", "page_available", "virtual_total", "virtual_available", "extended")]]
+
+    status = Status()
+    status.length = ctypes.sizeof(status)
+    try:
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return {}
+    except (AttributeError, OSError):
+        return {}
+    mb = 1 << 20
+    return {"MemTotal": status.total // mb, "MemAvailable": status.available // mb, "MemFree": status.available // mb}
 
 
 # What the kernel's own counters leave unexplained on an idle Spark (MemTotal less free, cache, process and kernel

@@ -62,11 +62,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 import voice
+import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
 
 router = APIRouter()
 HOME: Path = Path.home() / "ImaginationStudio"
 PACK = Path(__file__).resolve().parent.parent
-SPARK = sys.platform.startswith("linux")
+WINCUDA = windows_cuda.active()  # native Windows with the CUDA tier: the Spark's ComfyUI route, on the Windows ComfyUI
+SPARK = sys.platform.startswith("linux") or WINCUDA
 MAC = sys.platform == "darwin"
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
 
@@ -353,6 +355,8 @@ class Comfy:
     RTF, load_s = 4.4, 30.0
 
     def __init__(self) -> None:
+        if WINCUDA:
+            self.label = "ComfyUI · native Windows (CUDA)"
         self.idle_s = float(os.environ.get("MUSIC3_IDLE_S", 300))
         self.models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")).expanduser() / "MiniMax-Music3-Comfy"
         self.mutex = threading.RLock()
@@ -402,7 +406,7 @@ class Comfy:
         return int((0 if self.loaded() else self.load_s) + seconds * self.RTF + 5)
 
     def command(self, params: dict, caption: Path, lyrics: Path, wav: Path) -> list[str]:
-        return [str(PREFIX / "venv" / "bin" / "python"), str(PACK / "spark" / "spark_generate.py"), "music",
+        return [windows_cuda.python() if WINCUDA else str(PREFIX / "venv" / "bin" / "python"), str(PACK / "spark" / "spark_generate.py"), "music",
                 "--caption-file", str(caption), "--lyrics-file", str(lyrics), "--seconds", f"{float(params['seconds']):g}",
                 "--seed", str(int(params["seed"])), "--steps", str(int(params["steps"])), "--cfg", f"{params['dit_cfg']:g}",
                 "--ar-cfg", f"{params['ar_cfg']:g}", "--top-k", str(int(params["top_k"])), "-o", str(wav)]
@@ -566,6 +570,9 @@ class Cuda(voice.Served):
 
         if not SPARK:
             return "The CUDA route runs on a DGX Spark (Linux, CUDA)."
+        if WINCUDA and not self.bin.with_suffix(".exe").is_file():
+            return ("MiniMax Music 3's TensorFold engine is not built for native Windows in this install: songs run on "
+                    "ComfyUI's MiniMax Music 3 nodes (MUSIC3_CUDA_BIN names a Windows build).")
         self.bin = voice.located("music3-binary", self.bin, lambda p: os.access(p, os.X_OK))
         self.model = voice.located("music3-weights", self.model, has_weights)
         if not os.access(self.bin, os.X_OK):
@@ -612,8 +619,8 @@ class Cuda(voice.Served):
             return ""
 
     def stop_comfy(self) -> None:
-        subprocess.run(["bash", str(PACK / "spark" / "comfy.sh"), "stop"], capture_output=True, text=True, timeout=30,
-                       env={**os.environ, "PREFIX": str(PREFIX)})
+        subprocess.run(windows_cuda.comfy_argv("stop") if WINCUDA else ["bash", str(PACK / "spark" / "comfy.sh"), "stop"],
+                       capture_output=True, text=True, timeout=30, env={**os.environ, "PREFIX": str(PREFIX)})
 
     def estimate(self, seconds: float) -> int:
         return int((0 if self.loaded() else self.load_s) + seconds * self.RTF + 2)
