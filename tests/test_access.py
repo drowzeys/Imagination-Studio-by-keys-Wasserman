@@ -84,7 +84,10 @@ def test_the_key_file_is_made_once_private_and_kept(tmp_path):
             target = str(access.path(tmp_path)).replace("'", "''")
             done = subprocess.run(["powershell", "-NoProfile", "-Command",
                                    f"(Get-Acl -LiteralPath '{target}').Sddl -match 'D:P\\(A;;FA;;;OW\\)'"],
-                                  capture_output=True, text=True, timeout=10, check=True)
+                                  capture_output=True, text=True, timeout=10, check=True,
+                                  # PowerShell 7 (the CI step's shell) leaves its PSModulePath behind, and Windows
+                                  # PowerShell 5.1 then cannot load Get-Acl's module
+                                  env={k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"})
             assert done.stdout.strip() == "True"
         private()
         access.rotate(tmp_path)
