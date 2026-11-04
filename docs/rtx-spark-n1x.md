@@ -68,15 +68,19 @@ the passes ran.
 | N1X, HP **Performance** | **7.0 s** | 72.7 s | ~1957 MHz, ~58 W, up to 75 °C |
 | N1X, HP default (Smart Sense / Balanced) | 9.0 s | 93.8 s | ~1555-1600 MHz, ~35-38 W, ~70 °C |
 | N1X, HP default, Fan Always On (BIOS) | 9.0 s | 94.2 s | ~1555 MHz, ~35 W |
+| N1X, Windows **Best power efficiency** (power saving) | 13.5 s | 138.5 s | ~1507 MHz, ~30 W, up to 67 °C |
 
 **1376x768, 192 frames (8 s), a Studio video job from a first frame, from a cold start (models loaded first):**
 
 | Machine and mode | The whole job | Of it, the render | GPU while rendering |
 |---|---|---|---|
 | DGX Spark (GB10) | 625.6 s | 410.1 s | — |
+| N1X, HP **Performance** | **619.0 s** | 585.1 s | ~1896 MHz, ~51 W, up to 74 °C |
 | N1X, out of Performance (Smart Sense had switched it) | 736.1 s | 658.8 s | ~1400 MHz, ~31 W |
 
-- In HP's Performance mode the N1X is within about 6% of the DGX Spark a pass; in its default mode about 36% slower.
+- In HP's Performance mode the N1X is within about 6% of the DGX Spark a pass at 864x480, and a whole 1376x768 job
+  finished as fast as the DGX Spark's (619 s against 626 s; its render took 585 s against 410 s, its QA gate less);
+  in its default mode a pass is about 36% slower, in Windows' power-saving mode about twice as slow (13.5 s).
 - The limit is the laptop's power budget, not heat or WSL: the GPU is 96% busy, under 75 °C, and nvidia-smi reports
   software power capping; the fan made no difference. The GPU's own power limit is not settable (N/A).
 - HP's Smart Sense can leave Performance by itself: check myHP before a long render, keep it plugged in and the lid
