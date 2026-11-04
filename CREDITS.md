@@ -266,6 +266,7 @@ standard no-charge licence. Both are installed from npm at pinned versions by `s
 ships neither. The browser is a Chromium already on the machine, else HyperFrames' own, and on a DGX Spark **Playwright**'s Chromium for arm64 (Microsoft, Apache-2.0).
 The bounded Windows graphics route reuses the person's installed **Microsoft Edge**, by **Microsoft**;
 it downloads neither Edge nor a separate browser and does not redistribute either.
+Missing Node.js is installed through **Windows Package Manager (winget)**, by **Microsoft** (MIT).
 Its Windows-only HyperFrames compatibility patch uses **Puppeteer**, by **Google and the Puppeteer contributors**
 (Apache-2.0), to check the browser headlessly in a temporary profile instead of opening the person's browser.
 

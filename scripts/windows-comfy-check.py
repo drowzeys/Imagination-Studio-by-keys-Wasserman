@@ -21,7 +21,7 @@ import urllib.request
 COMMIT = "b9b290e43f1eb379946dfeb013faf9bbefa1a618"
 APP = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP))
-from windows_memory import Snapshot, host_floor_mb, pressure, process_memory  # noqa: E402
+from windows_memory import Snapshot, gpu_memory_warning, host_floor_mb, pressure, process_memory  # noqa: E402
 from windows_process import OwnedJob  # noqa: E402
 
 SAMPLE_START_TIMEOUT = 30
@@ -382,7 +382,9 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                         raise RuntimeError("calibration requires a ready memory watchdog")
                     latest = monitor.latest
                     if latest.gpu_dedicated_free_mb < calibration.gpu_limit_mb + 2048:
-                        raise RuntimeError("the calibration cap does not fit dedicated GPU headroom with the reserve")
+                        raise RuntimeError(gpu_memory_warning(
+                            latest.gpu_dedicated_free_mb, calibration.gpu_limit_mb + 2048,
+                            device_index=device_index))
                     limits = job.commitment()
                     if (limits["process_commit_limit_bytes"], limits["job_commit_limit_bytes"]) != (
                         calibration.process_commit_mb << 20, calibration.job_commit_mb << 20,

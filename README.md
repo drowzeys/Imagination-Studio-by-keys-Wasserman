@@ -123,11 +123,16 @@ agents, worker management and other unverified actions are refused explicitly.
 It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
 
-Install Python 3.13 (`py install 3.13` with the Python install manager), then run in PowerShell:
+Install the official Python install manager (`py`), then run in PowerShell. Install mode obtains missing
+Python 3.13 itself (native ARM64 on an ARM64 machine):
 
 ```powershell
 .\scripts\app.ps1 -Install
 ```
+
+For repeatable setup without launching the server, use `.\scripts\app.ps1 -Install -InstallOnly`.
+The [Windows setup and tier-testing runbook](docs/windows-rtx-spark-testing.md) gives the ordered CUDA setup,
+optional model downloads, qualification commands and capacity reports.
 
 Open http://127.0.0.1:7870. Later, run `.\scripts\app.ps1` again; Ctrl+C stops it.
 The isolated environment is under `%LOCALAPPDATA%\ImaginationStudio\ui-venv`; projects and media stay under
@@ -175,7 +180,9 @@ is not prompted to reconnect just for that reason. Check is optional and is neve
 
 **Motion graphics (Windows ARM64, optional):** `.\scripts\setup-windows-graphics.ps1` installs locked
 HyperFrames 0.8.186 and GSAP 3.14.2 dependencies (about 102 MiB installed), reusing a security-patched ARM64
-Node 22+ and the installed Microsoft Edge. Use `-NodePath` or `-BrowserPath` for an existing installation elsewhere.
+Node 22+ and the installed Microsoft Edge. If Node is missing, setup installs the Windows ARM64 LTS through
+`winget` (`OpenJS.NodeJS.LTS`); if that is unavailable, it gives installation instructions.
+Use `-NodePath` or `-BrowserPath` for an existing installation elsewhere.
 There are no model or browser downloads. The setup checks all six supported templates at **1280x720,
 24 fps and ten seconds**, including a lower third retaining its clip's sound, under a **4 GiB process-tree
 commitment cap**. In **Edit → Graphics**, make a title, lower third or short slideshow. Longer source clips

@@ -5,7 +5,10 @@ import ctypes
 from dataclasses import asdict, dataclass
 import json
 import math
+import ntpath
 import os
+import re
+import subprocess
 import sys
 import time
 import uuid
@@ -158,11 +161,188 @@ class DedicatedMemory:
         self.check(self.api.nvmlDeviceGetMemoryInfo_v2(self.handle, ctypes.byref(memory)), "read dedicated memory")
         return memory.total // MIB, memory.free // MIB
 
+    def processes(self) -> dict:
+        """NVML's process memory is unavailable under WDDM; retain that distinction."""
+        class Process(ctypes.Structure):
+            _fields_ = [("pid", ctypes.c_uint), ("used_memory", ctypes.c_ulonglong),
+                        ("gpu_instance", ctypes.c_uint), ("compute_instance", ctypes.c_uint)]
+
+        found, warnings = {}, []
+        for kind in ("Compute", "Graphics"):
+            function = getattr(self.api, f"nvmlDeviceGet{kind}RunningProcesses_v2", None)
+            if function is None:
+                warnings.append(f"{kind.lower()} process query is unsupported by this NVML")
+                continue
+            function.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(Process)]
+            function.restype = ctypes.c_int
+            capacity = 32
+            for _ in range(3):
+                count = ctypes.c_uint(capacity)
+                rows = (Process * capacity)()
+                code = function(self.handle, ctypes.byref(count), rows)
+                if code == 7:  # NVML_ERROR_INSUFFICIENT_SIZE: processes may appear between queries.
+                    capacity = max(capacity * 2, count.value)
+                    if capacity <= 4096:
+                        continue
+                    warnings.append(f"{kind.lower()} process list exceeds the diagnostic limit")
+                    break
+                if code:
+                    warnings.append(f"NVML {kind.lower()} process query failed (error {code})")
+                    break
+                if count.value > capacity:
+                    warnings.append(f"NVML {kind.lower()} process count is invalid")
+                    break
+                for row in rows[:count.value]:
+                    used = None if row.used_memory == (1 << 64) - 1 else row.used_memory / MIB
+                    previous = found.get(row.pid)
+                    if previous is None:
+                        found[row.pid] = {"pid": row.pid, "name": None, "used_mb": used}
+                    elif used is not None:
+                        previous["used_mb"] = max(previous["used_mb"] or 0, used)
+                break
+            else:
+                warnings.append(f"{kind.lower()} process list kept changing; query is incomplete")
+
+        name_query = getattr(self.api, "nvmlSystemGetProcessName", None)
+        if name_query is not None:
+            name_query.argtypes = [ctypes.c_uint, ctypes.c_char_p, ctypes.c_uint]
+            name_query.restype = ctypes.c_int
+        for item in found.values():
+            if name_query is None:
+                item["name_error"] = "process-name query unsupported"
+                continue
+            buffer = ctypes.create_string_buffer(32768)
+            code = name_query(item["pid"], buffer, len(buffer))
+            if code:
+                reason = "access denied" if code == 4 else "process may have exited"
+                item["name_error"] = f"name unavailable (NVML error {code}; {reason})"
+            else:
+                name = ntpath.basename(buffer.value.decode("utf-8", errors="replace"))
+                item["name"] = "".join(character for character in name if character.isprintable()) or None
+        return {"processes": sorted(found.values(), key=lambda item: (
+            item["used_mb"] is None, -(item["used_mb"] or 0), item["pid"])), "warnings": warnings}
+
     def __enter__(self):
         return self
 
     def __exit__(self, *_):
         self.check(self.api.nvmlShutdown(), "shutdown")
+
+
+def windows_gpu_process_memory() -> dict[int, float]:
+    """Dedicated bytes per PID across Windows adapters, using the native PDH counters."""
+    from ctypes import wintypes
+
+    class ValueUnion(ctypes.Union):
+        _fields_ = [("large", ctypes.c_longlong), ("double", ctypes.c_double),
+                    ("long", wintypes.LONG), ("string", ctypes.c_void_p)]
+
+    class Value(ctypes.Structure):
+        _fields_ = [("status", wintypes.DWORD), ("value", ValueUnion)]
+
+    class Item(ctypes.Structure):
+        _fields_ = [("name", wintypes.LPWSTR), ("value", Value)]
+
+    api = ctypes.WinDLL("pdh", use_last_error=True)
+    api.PdhOpenQueryW.argtypes = [wintypes.LPCWSTR, ctypes.c_size_t, ctypes.POINTER(wintypes.HANDLE)]
+    api.PdhAddEnglishCounterW.argtypes = [
+        wintypes.HANDLE, wintypes.LPCWSTR, ctypes.c_size_t, ctypes.POINTER(wintypes.HANDLE)]
+    api.PdhCollectQueryData.argtypes = [wintypes.HANDLE]
+    api.PdhGetFormattedCounterArrayW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    api.PdhCloseQuery.argtypes = [wintypes.HANDLE]
+    for name in ("PdhOpenQueryW", "PdhAddEnglishCounterW", "PdhCollectQueryData",
+                 "PdhGetFormattedCounterArrayW", "PdhCloseQuery"):
+        getattr(api, name).restype = wintypes.DWORD
+
+    def check(code):
+        if code:
+            raise RuntimeError(f"Windows GPU process counters unavailable (PDH error 0x{code:08x})")
+
+    query, counter = wintypes.HANDLE(), wintypes.HANDLE()
+    check(api.PdhOpenQueryW(None, 0, ctypes.byref(query)))
+    try:
+        check(api.PdhAddEnglishCounterW(
+            query, r"\GPU Process Memory(*)\Dedicated Usage", 0, ctypes.byref(counter)))
+        check(api.PdhCollectQueryData(query))
+        size, count = wintypes.DWORD(), wintypes.DWORD()
+        code = api.PdhGetFormattedCounterArrayW(counter, 0x400, ctypes.byref(size), ctypes.byref(count), None)
+        if code != 0x800007D2:  # PDH_MORE_DATA
+            check(code)
+        for _ in range(3):
+            if not 0 < size.value <= 32 << 20:
+                raise RuntimeError("Windows GPU process counter buffer size is invalid")
+            buffer = ctypes.create_string_buffer(size.value)
+            code = api.PdhGetFormattedCounterArrayW(
+                counter, 0x400, ctypes.byref(size), ctypes.byref(count), buffer)
+            if code != 0x800007D2:
+                check(code)
+                break
+        else:
+            raise RuntimeError("Windows GPU process counter list kept changing")
+        if count.value * ctypes.sizeof(Item) > len(buffer):
+            raise RuntimeError("Windows GPU process counter count is invalid")
+        rows = ctypes.cast(buffer, ctypes.POINTER(Item))
+        found = {}
+        for index in range(count.value):
+            item = rows[index]
+            match = re.fullmatch(r"pid_(\d+)_luid_0x[0-9a-f]+_0x[0-9a-f]+_phys_\d+", item.name or "", re.I)
+            if match and item.value.status in (0, 1) and item.value.value.large >= 0:
+                pid = int(match[1])
+                found[pid] = found.get(pid, 0) + item.value.value.large / MIB
+        return found
+    finally:
+        check(api.PdhCloseQuery(query))
+
+
+def gpu_memory_warning(free_mb: int, required_mb: int, device_uuid: str | None = None,
+                       *, device_index: int = 0) -> str:
+    message = (f"Not enough free dedicated GPU memory: {free_mb / 1024:.1f} GiB available; "
+               f"{required_mb / 1024:.1f} GiB required (including the reserve). "
+               "Unload unused models or close other GPU applications, then retry. "
+               "Studio will not stop unrelated processes.")
+    try:
+        if device_uuid is None:
+            device_uuid = subprocess.run(
+                ["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader", f"--id={device_index}"],
+                capture_output=True, text=True, timeout=5, check=True,
+            ).stdout.strip()
+        with DedicatedMemory(device_uuid) as memory:
+            details = memory.processes()
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        return message + f" GPU process details unavailable ({type(error).__name__}). Check Task Manager's Dedicated GPU memory column."
+    processes = details["processes"]
+    windows_usage = {}
+    if any(item["used_mb"] is None for item in processes):
+        try:
+            windows_usage = windows_gpu_process_memory()
+        except (OSError, RuntimeError) as error:
+            details["warnings"].append(f"Windows GPU process counters unavailable ({type(error).__name__})")
+    large = []
+    for item in processes:
+        used = item["used_mb"]
+        source = ""
+        if used is None:
+            used = windows_usage.get(item["pid"])
+            source = ", Windows total across adapters"
+        if used is not None and used >= 1024:
+            large.append({**item, "used_mb": used, "source": source})
+    large.sort(key=lambda item: (-item["used_mb"], item["pid"]))
+    if large:
+        labels = []
+        for item in large:
+            usage = f"{item['used_mb'] / 1024:.2f} GiB{item['source']}"
+            labels.append(f"{item['name'] or item.get('name_error', 'name unavailable')} (PID {item['pid']}, {usage})")
+        message += " Large GPU users (at least 1 GiB, largest first): " + "; ".join(labels) + "."
+    else:
+        message += " No GPU processes with measured usage of at least 1 GiB were identified."
+    message += " Smaller or unknown usage is excluded; this is not a complete attribution of memory."
+    if details["warnings"]:
+        message += " Process query incomplete: " + "; ".join(details["warnings"]) + "."
+    if details["warnings"] or not large:
+        message += " Check Task Manager's Dedicated GPU memory column for Windows memory attribution."
+    return message
 
 
 @dataclass(frozen=True)

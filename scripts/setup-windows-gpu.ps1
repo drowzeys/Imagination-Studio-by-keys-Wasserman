@@ -11,10 +11,8 @@ $Runtime = Join-Path $env:LOCALAPPDATA 'ImaginationStudio\gpu-venv'
 $Python = Join-Path $Runtime 'Scripts\python.exe'
 
 if (-not $Verify) {
-    if (-not (Test-Path $Python)) {
-        & py -V:3.13-arm64 -m venv $Runtime
-        if ($LASTEXITCODE -ne 0) { throw 'Install native ARM64 Python 3.13 first: py install 3.13-arm64' }
-    }
+    . (Join-Path $PSScriptRoot 'windows-python.ps1')
+    Initialize-StudioPython -Runtime $Runtime -Arm64
 }
 if (-not (Test-Path $Python)) {
     throw 'No isolated GPU environment. Run this script without -Verify to install it.'

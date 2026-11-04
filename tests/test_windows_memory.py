@@ -1,5 +1,6 @@
 """Synthetic memory budgets and Windows owned-process tests; no CUDA probes."""
 import importlib.util
+import ctypes
 from dataclasses import asdict
 import json
 import os
@@ -7,12 +8,164 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from windows_memory import Profile, Snapshot, admission, host_floor_mb, pressure
+import windows_memory
+
+
+def test_gpu_process_query_deduplicates_kinds_and_preserves_unknown_usage():
+    def query(rows):
+        def call(_device, count, buffer):
+            ctypes.cast(count, ctypes.POINTER(ctypes.c_uint))[0] = len(rows)
+            for output, (pid, used) in zip(buffer, rows):
+                output.pid, output.used_memory = pid, used
+            return 0
+        return call
+
+    def name(pid, buffer, _size):
+        if pid == 33:
+            return 6
+        value = f"C:\\Tools\\worker-{pid}.exe".encode()
+        ctypes.memmove(buffer, value, len(value) + 1)
+        return 0
+
+    memory = object.__new__(windows_memory.DedicatedMemory)
+    memory.handle = ctypes.c_void_p(1)
+    memory.api = SimpleNamespace(
+        nvmlDeviceGetComputeRunningProcesses_v2=query([(11, 8 << 30), (22, (1 << 64) - 1)]),
+        nvmlDeviceGetGraphicsRunningProcesses_v2=query([(11, 8 << 30), (33, 1 << 30)]),
+        nvmlSystemGetProcessName=name,
+    )
+    result = memory.processes()
+    assert result["warnings"] == []
+    assert [row["pid"] for row in result["processes"]] == [11, 33, 22]
+    assert result["processes"][0] == {"pid": 11, "name": "worker-11.exe", "used_mb": 8192}
+    assert result["processes"][-1]["used_mb"] is None
+    assert result["processes"][1]["name"] is None
+    assert "error 6" in result["processes"][1]["name_error"]
+
+
+@pytest.mark.parametrize("mode", ["grow", "keeps-growing", "too-large", "unsupported"])
+def test_gpu_process_queries_are_bounded_and_partial_failures_explicit(mode):
+    calls = []
+
+    def query(_device, count, rows):
+        calls.append(len(rows))
+        if mode == "unsupported":
+            return 3
+        if mode == "grow" and len(calls) == 2:
+            ctypes.cast(count, ctypes.POINTER(ctypes.c_uint))[0] = 0
+            return 0
+        ctypes.cast(count, ctypes.POINTER(ctypes.c_uint))[0] = 4097 if mode == "too-large" else len(rows) + 1
+        return 7
+
+    memory = object.__new__(windows_memory.DedicatedMemory)
+    memory.handle = ctypes.c_void_p(1)
+    memory.api = SimpleNamespace(nvmlDeviceGetComputeRunningProcesses_v2=query)
+    result = memory.processes()
+    assert result["processes"] == []
+    assert len(calls) <= 3
+    assert any("graphics" in warning and "unsupported" in warning for warning in result["warnings"])
+    if mode == "grow":
+        assert calls == [32, 64] and len(result["warnings"]) == 1
+    else:
+        assert any("compute" in warning for warning in result["warnings"])
+
+
+def test_gpu_warning_reports_numbers_processes_and_windows_attribution_limit(monkeypatch):
+    class Memory:
+        def __init__(self, device):
+            assert device == "selected-device"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def processes(self):
+            return {"processes": [{"pid": 11, "name": "model-host.exe", "used_mb": None},
+                                  {"pid": 22, "name": "renderer.exe", "used_mb": 8192}],
+                    "warnings": ["graphics process query is unsupported by this NVML"]}
+
+    monkeypatch.setattr(windows_memory, "DedicatedMemory", Memory)
+    monkeypatch.setattr(windows_memory, "windows_gpu_process_memory", lambda: {11: 24576})
+    text = windows_memory.gpu_memory_warning(4512, 14336, "selected-device")
+    assert "4.4 GiB available; 14.0 GiB required" in text
+    assert "model-host.exe (PID 11, 24.00 GiB, Windows total across adapters)" in text
+    assert "renderer.exe (PID 22, 8.00 GiB)" in text
+    assert text.index("model-host.exe") < text.index("renderer.exe")
+    assert "not a complete attribution" in text and "Process query incomplete" in text
+    assert "Task Manager" in text and "will not stop unrelated processes" in text
+
+
+def test_process_query_timeout_does_not_replace_memory_refusal(monkeypatch):
+    def timeout(argv, **kwargs):
+        assert argv[-1] == "--id=3" and kwargs["timeout"] == 5
+        raise subprocess.TimeoutExpired(argv, 5)
+
+    monkeypatch.setattr(windows_memory.subprocess, "run", timeout)
+    text = windows_memory.gpu_memory_warning(1024, 6144, device_index=3)
+    assert "1.0 GiB available; 6.0 GiB required" in text
+    assert "details unavailable (TimeoutExpired)" in text and "Task Manager" in text
+
+
+def test_empty_gpu_process_list_is_not_reported_as_unused_memory(monkeypatch):
+    from contextlib import nullcontext
+
+    monkeypatch.setattr(windows_memory, "DedicatedMemory", lambda _: nullcontext(
+        SimpleNamespace(processes=lambda: {"processes": [], "warnings": []})))
+    text = windows_memory.gpu_memory_warning(1024, 6144, "selected-device")
+    assert "No GPU processes with measured usage of at least 1 GiB" in text
+    assert "Task Manager" in text
+
+
+def test_gpu_warning_filters_small_and_unknown_users_and_sorts_measurements(monkeypatch):
+    from contextlib import nullcontext
+
+    processes = [{"pid": pid, "name": f"worker-{pid}.exe", "used_mb": None} for pid in range(1, 35)]
+    monkeypatch.setattr(windows_memory, "DedicatedMemory", lambda _: nullcontext(
+        SimpleNamespace(processes=lambda: {"processes": processes, "warnings": []})))
+    monkeypatch.setattr(windows_memory, "windows_gpu_process_memory",
+                        lambda: {1: 1023, 2: 1024, 33: 24000, 34: 8192, 99: 32000})
+    text = windows_memory.gpu_memory_warning(4512, 14336, "selected-device")
+    assert "worker-1.exe" not in text and "worker-3.exe" not in text
+    assert "PID 99" not in text
+    assert "worker-2.exe (PID 2, 1.00 GiB" in text
+    assert text.index("worker-33.exe") < text.index("worker-34.exe") < text.index("worker-2.exe")
+    assert "usage unavailable" not in text
+
+
+def test_gpu_warning_does_not_list_unknown_users_if_windows_counters_fail(monkeypatch):
+    from contextlib import nullcontext
+
+    def unavailable():
+        raise RuntimeError("PDH query unavailable")
+
+    monkeypatch.setattr(windows_memory, "windows_gpu_process_memory", unavailable)
+    monkeypatch.setattr(windows_memory, "DedicatedMemory", lambda _: nullcontext(SimpleNamespace(
+        processes=lambda: {"processes": [{"pid": 11, "name": "unknown.exe", "used_mb": None},
+                                        {"pid": 12, "name": "small.exe", "used_mb": 1023}], "warnings": []})))
+    text = windows_memory.gpu_memory_warning(1024, 6144, "selected-device")
+    assert "unknown.exe" not in text and "small.exe" not in text
+    assert "Windows GPU process counters unavailable (RuntimeError)" in text
+    assert "No GPU processes with measured usage of at least 1 GiB" in text
+
+
+def test_nvml_failure_keeps_the_actionable_memory_refusal(monkeypatch):
+    def unavailable(_device):
+        raise RuntimeError("NVML could not initialize (error 9)")
+
+    monkeypatch.setattr(windows_memory, "DedicatedMemory", unavailable)
+    text = windows_memory.gpu_memory_warning(1024, 6144, "selected-device")
+    assert "1.0 GiB available; 6.0 GiB required" in text
+    assert "GPU process details unavailable (RuntimeError)" in text
+    assert "Unload unused models" in text
 
 
 def snapshot(**changes):

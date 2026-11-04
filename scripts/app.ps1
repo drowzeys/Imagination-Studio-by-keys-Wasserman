@@ -8,17 +8,17 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($InstallOnly -and -not $Install) { throw '-InstallOnly requires -Install.' }
 $Root = Split-Path $PSScriptRoot -Parent
 $Runtime = Join-Path $env:LOCALAPPDATA 'ImaginationStudio\ui-venv'
 $Python = Join-Path $Runtime 'Scripts\python.exe'
 
 if ($Install) {
-    if (-not (Test-Path $Python)) {
-        & py -V:3.13 -m venv $Runtime
-        if ($LASTEXITCODE -ne 0) { throw 'Install Python 3.13 first: py install 3.13' }
-    }
+    . (Join-Path $PSScriptRoot 'windows-python.ps1')
+    Initialize-StudioPython -Runtime $Runtime
     & $Python -X utf8 -m pip install -r (Join-Path $Root 'app\requirements-windows.txt')
     if ($LASTEXITCODE -ne 0) { throw 'Windows UI dependency installation failed.' }
+    if ($InstallOnly) { return }
 }
 if (-not (Test-Path $Python)) {
     throw 'Run this script with -Install first. Python 3.13 is required.'

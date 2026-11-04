@@ -4,22 +4,16 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
 $Python = Join-Path $env:LOCALAPPDATA 'ImaginationStudio\ui-venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $Python)) { throw 'Run scripts\app.ps1 -Install first.' }
-if (-not $NodePath) {
-    $NodePath = Join-Path $env:LOCALAPPDATA 'ImaginationStudio\node-runtime\node-v22.23.4-win-arm64\node.exe'
-    if (-not (Test-Path -LiteralPath $NodePath)) {
-        $Found = Get-Command node.exe -ErrorAction SilentlyContinue
-        if ($Found) { $NodePath = $Found.Source }
-    }
-}
-if (-not (Test-Path -LiteralPath $NodePath)) { throw 'Install a security-patched native ARM64 Node 22+ with npm, or pass -NodePath.' }
+. (Join-Path $PSScriptRoot 'windows-node.ps1')
+$NodePath = Initialize-StudioNode -NodePath $NodePath
 $NodeInfo = & $NodePath -p 'JSON.stringify({platform:process.platform,arch:process.arch,version:process.versions.node})'
-if ($LASTEXITCODE -ne 0) { throw 'Node did not start.' }
+if ($LASTEXITCODE -ne 0) { throw "Node did not start. $StudioNodeHelp" }
 $NodeInfo = $NodeInfo | ConvertFrom-Json
-if ($NodeInfo.platform -ne 'win32' -or $NodeInfo.arch -ne 'arm64') { throw 'Graphics setup requires native Windows ARM64 Node.' }
+if ($NodeInfo.platform -ne 'win32' -or $NodeInfo.arch -ne 'arm64') { throw "Graphics setup requires native Windows ARM64 Node. $StudioNodeHelp" }
 & $Python -X utf8 -c 'import sys; sys.path.insert(0,sys.argv[1]); import graphics; sys.exit(0 if graphics.node_safe(tuple(map(int,sys.argv[2].split(chr(46))))) else 1)' (Join-Path $Root 'app') $NodeInfo.version
-if ($LASTEXITCODE -ne 0) { throw 'Node needs the security fixes listed in graphics.py; no npm packages were run.' }
+if ($LASTEXITCODE -ne 0) { throw "Node is missing required security fixes; no npm packages were run. $StudioNodeHelp" }
 $Npm = Join-Path (Split-Path $NodePath -Parent) 'node_modules\npm\bin\npm-cli.js'
-if (-not (Test-Path -LiteralPath $Npm)) { throw 'npm is missing beside Node.' }
+if (-not (Test-Path -LiteralPath $Npm)) { throw "npm is missing beside Node. $StudioNodeHelp" }
 if (-not $BrowserPath) {
     foreach ($Candidate in @(
         (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
@@ -29,7 +23,7 @@ if (-not $BrowserPath) {
         if (Test-Path -LiteralPath $Candidate) { $BrowserPath = $Candidate; break }
     }
 }
-if (-not $BrowserPath -or -not (Test-Path -LiteralPath $BrowserPath)) { throw 'No installed Edge found. Pass -BrowserPath to an existing Chromium; no browser is downloaded.' }
+if (-not $BrowserPath -or -not (Test-Path -LiteralPath $BrowserPath)) { throw 'Install Microsoft Edge, then rerun scripts\setup-windows-graphics.ps1, or pass -BrowserPath to an existing Chromium executable. No browser is downloaded by this script.' }
 $Runtime = Join-Path $env:LOCALAPPDATA 'ImaginationStudio\graphics'
 if ($env:GRAPHICS_DIR) { $Runtime = $env:GRAPHICS_DIR }
 New-Item -ItemType Directory -Force $Runtime | Out-Null
@@ -41,7 +35,13 @@ $env:HYPERFRAMES_SKIP_SKILLS = '1'
 Push-Location $Runtime
 try {
     & $NodePath $Npm ci --ignore-scripts --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw 'Locked graphics dependency installation failed.' }
+    if ($LASTEXITCODE -ne 0) {
+        throw @'
+Graphics dependency installation failed; see the npm error above.
+If using a private registry, check authentication and package availability.
+Then rerun .\scripts\setup-windows-graphics.ps1 with the same arguments.
+'@
+    }
 } finally { Pop-Location }
 $Hyperframes = Join-Path $Runtime 'node_modules\hyperframes'
 $BrowserPatch = Join-Path $PSScriptRoot 'windows-graphics\hyperframes-browser.patch'

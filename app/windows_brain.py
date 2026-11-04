@@ -109,7 +109,7 @@ def install(root: Path, download: bool) -> Path:
 
 
 def serve(root: Path, port: int, cpu: bool, check: bool) -> dict:
-    from windows_memory import DedicatedMemory, WindowsSignals, host_memory
+    from windows_memory import DedicatedMemory, WindowsSignals, gpu_memory_warning, host_memory
     from windows_process import OwnedJob
 
     executable = install(root, False)
@@ -138,12 +138,16 @@ def serve(root: Path, port: int, cpu: bool, check: bool) -> dict:
                     raise RuntimeError("Windows reports low physical memory or the configured host reserve was reached")
                 if limit - used < 2048:
                     raise RuntimeError("Windows commit headroom is below 2048 MiB")
-                if dedicated and dedicated.read()[1] < 2048:
-                    raise RuntimeError("dedicated GPU headroom is below 2048 MiB")
+                if dedicated:
+                    free_gpu = dedicated.read()[1]
+                    if free_gpu < 2048:
+                        raise RuntimeError(gpu_memory_warning(free_gpu, 2048, device))
 
             room()
-            if dedicated and dedicated.read()[1] < 6144:
-                raise RuntimeError("this experimental small-brain startup requires 6144 MiB of free dedicated GPU memory")
+            if dedicated:
+                free_gpu = dedicated.read()[1]
+                if free_gpu < 6144:
+                    raise RuntimeError(gpu_memory_warning(free_gpu, 6144, device))
             job = OwnedJob(process_commit_mb=12288, job_commit_mb=12288)
             with log_path.open("w", encoding="utf-8") as log:
                 argv = [

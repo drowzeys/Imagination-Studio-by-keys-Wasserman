@@ -147,7 +147,7 @@ def image_plan(params: dict) -> list[tuple[str, int, str]]:
 
 
 def preflight(qualification: dict | None = None) -> None:
-    from windows_memory import DedicatedMemory, WindowsSignals, host_memory, physical_memory_mb
+    from windows_memory import DedicatedMemory, WindowsSignals, gpu_memory_warning, host_memory, physical_memory_mb
     found = status() if qualification is None else qualification
     if not found["available"]:
         raise RuntimeError(found["why"])
@@ -162,8 +162,9 @@ def preflight(qualification: dict | None = None) -> None:
         used, limit, _, low = signals.read()
     if low or not available or available < int(floor or "0"):
         raise RuntimeError("Windows reports low physical memory or the configured host reserve was reached")
-    backend = _backend
-    credit = backend.accounting() if backend is not None else {"commit_mb": 0, "reserved_mb": 0}
+    with _backend_lock:
+        backend = _backend
+        credit = backend.accounting() if backend is not None else {"commit_mb": 0, "reserved_mb": 0}
     if limit - used < JOB_LIMIT_MB - credit["commit_mb"] + 2048:
         raise RuntimeError("the Windows image job cap does not fit commit headroom with its reserve")
     device = subprocess.run(["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader", "--id=0"],
@@ -173,7 +174,7 @@ def preflight(qualification: dict | None = None) -> None:
     if dedicated != hardware["gpu_dedicated_total_mb"]:
         raise RuntimeError("the dedicated GPU partition changed; repeat storyboard qualification")
     if free < GPU_LIMIT_MB - credit["reserved_mb"] + 2048:
-        raise RuntimeError("the Windows image allocation cap does not fit dedicated GPU headroom with its reserve")
+        raise RuntimeError(gpu_memory_warning(free, GPU_LIMIT_MB - credit["reserved_mb"] + 2048, device))
 
 
 def build(params: dict, home: Path, job_id: str) -> tuple[list[str], dict, list[str]]:
@@ -363,10 +364,11 @@ def release_backend():
 
 def shutdown_backend():
     global _backend, _backend_kind
-    if _backend:
-        _backend.close()
-        _backend = None
-        _backend_kind = None
+    with _backend_lock:
+        if _backend:
+            _backend.close()
+            _backend = None
+            _backend_kind = None
 
 
 atexit.register(shutdown_backend)
