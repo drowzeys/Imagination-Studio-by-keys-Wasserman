@@ -39,6 +39,8 @@ HERE = Path(__file__).resolve().parent
 PACK = HERE.parent
 import windows_media
 os.environ["PATH"] = windows_media.search_path(os.environ.get("PATH", ""))
+import windows_cuda  # noqa: E402  (the native Windows CUDA tier: the Spark's path on Windows, where it is fully installed)
+WINCUDA = windows_cuda.active()  # False off Windows without a look; on Windows it points PREFIX, SPARK_MODELS, ... first
 from studio_home import studio_home  # noqa: E402  (~/ImaginationStudio, an older ~/TensorFoldStudio moved there once)
 HOME = studio_home(move=__name__ == "__main__")  # moved only when the studio starts, never by a script that imports this
 os.environ["STUDIO_HOME"] = str(HOME)  # the scripts and engines it starts keep everything in the same folder
@@ -150,13 +152,21 @@ def lead(first: bool, last: bool, seconds: float = 5, frames: int | None = None)
 
 # On a DGX Spark (Linux, CUDA) the scripts hand over to spark/: FastH3 and Qwen-Image-2.1 through ComfyUI. There is no
 # 2x decoder and no MiniMax H3 Turbo there, so only the native sizes and the FastH3 qualities are offered.
-SPARK = sys.platform.startswith("linux")
-WINDOWS = sys.platform == "win32"
+# On Windows with the full native install (windows_cuda.py) the same Spark path runs natively: SPARK is True there and
+# WINDOWS (the small preview tier) False; WIN32 is the operating system's own mechanics (processes, job objects), used as
+# "WINDOWS or WIN32" so a test that sets WINDOWS on another platform still takes the Windows paths.
+WIN32 = sys.platform == "win32"
+SPARK = sys.platform.startswith("linux") or WINCUDA
+WINDOWS = WIN32 and not WINCUDA
 import windows_storyboard
 import windows_sound
 WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
                 "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics are supported; video generation, foley, in-app model installation, other agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
+WINCUDA_NOTE = ("Native Windows (CUDA): video, pictures, songs, sound effects and the Bolt brain run on this GPU through ComfyUI and "
+                "TensorFold's Windows engines. Not native yet (the WSL install runs them): the model-based Library actions "
+                "(turnaround, upscale, find or remove a person), Character Swap, MMAudio foley, LoRA training, Tesseract Finish and DGX "
+                "Spark workers.")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
     QUALITIES = {k: v for k, v in QUALITIES.items() if k.startswith("fh")}
@@ -164,7 +174,8 @@ if SPARK:
 # scripts on TensorFold's CUDA engine with the 8-bit video decoder at 8 passes: 864x480 in 73 s (a pass 7.1 s, the
 # decode 14 s), 1280x736 in 183 s (18 s, 28 s) and 1344x768 in about 195 s (20.5 s, 29 s). The 4 and 20 pass cells
 # follow from the pass time.
-SPARK_ENGINE_LIB = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")) / "tf-h3" / "libtf_h3.so"
+SPARK_ENGINE_LIB = (Path(os.environ["TF_H3_LIB"]) if WINCUDA else
+                    Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")) / "tf-h3" / "libtf_h3.so")
 SPARK_FASTH3_5S = {"fh4": {"small": 45, "p720": 111, "native": 113},
                    "fh8": {"small": 73, "p720": 183, "native": 195, "sharp": 202},  # sharp: Sam Wasserman's 330 to 380 s at 8 s
                    "fh20": {"small": 158, "p720": 399, "native": 441}}
@@ -205,7 +216,7 @@ def machine() -> tuple[str, str]:
         paired = memory_guard.paired_gpus()
         many = f"{len(paired)}× " if len(paired) > 1 else ""
         return "spark", (f"DGX SPARK · {GPU_NAME[0].upper()} · H3-CUDA" if "GB10" in GPU_NAME[0].upper()
-                         else f"CUDA · {many}{GPU_NAME[0].upper()} · H3-CUDA")
+                         else f"CUDA · {many}{GPU_NAME[0].upper()} · H3-CUDA" + (" · NATIVE WINDOWS" if WINCUDA else ""))
     # no chip name: the same recipe runs from an M1 with 96 GB up (pictures only from 48 GB)
     return "mac", "MAC · APPLE SILICON MX · H3-METAL"
 
@@ -1368,8 +1379,11 @@ def environment(extra: dict) -> dict:
     for key, value in settings.job_env().items():  # Settings → Presets (the delivery sound rate); the environment's own wins
         env.setdefault(key, value)
     env.update({key: str(value) for key, value in extra.items() if value not in (None, "")})
-    if WINDOWS:
+    if WINDOWS or WIN32:
         env["PATH"] = windows_media.search_path(env.get("PATH", ""))
+        if WINCUDA:  # the render scripts print prompts and paths in UTF-8 whatever the console's code page is
+            env.setdefault("PYTHONUTF8", "1")
+            env.setdefault("PYTHONIOENCODING", "utf-8")
     else:
         env["PATH"] = os.pathsep.join(["/opt/homebrew/bin", env.get("PATH", "")])
     return env
@@ -1554,7 +1568,7 @@ def media_tools() -> dict:
     return {name: bool(shutil.which(name, path=path)) for name in ("ffmpeg", "ffprobe")}
 
 
-FFMPEG_HOW = "run scripts\\setup-windows-ffmpeg.ps1 and restart Studio, or add ffmpeg and ffprobe to PATH" if WINDOWS else "sudo apt install ffmpeg" if SPARK else "brew install ffmpeg"
+FFMPEG_HOW = "run scripts\\setup-windows-ffmpeg.ps1 and restart Studio, or add ffmpeg and ffprobe to PATH" if WIN32 else "sudo apt install ffmpeg" if SPARK else "brew install ffmpeg"
 FFMPEG_NOTE = ("ffmpeg is not installed on this machine (" + FFMPEG_HOW + "). Without it: no long videos, no timeline export, "
                "no frame taken from a clip (continue from a clip, end on a clip), no reference videos or audio, no silenced "
                "sound track" + (", and a clip keeps ComfyUI's own sound track instead of the limited 256 kb/s one. Single clips, "
@@ -1852,11 +1866,14 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     with lock:  # cancellation must see either no launch, or the published owned process
         if job["status"] in ("cancelled", "failed", "done") or stopping.is_set():
             return False
-        if WINDOWS and running.get("process") is not None:
+        if (WINDOWS or WIN32) and running.get("process") is not None:
             raise RuntimeError("the previous Windows job did not drain; no new render was started")
-        if WINDOWS:
+        if WINDOWS or WIN32:
             from windows_process import OwnedJob
-            owned = OwnedJob(job_commit_mb=graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0)
+            if WINCUDA:  # bash and the Linux venv's python as the native tier runs them (refused when not ported)
+                command = windows_cuda.translate(command)
+            # the native tier's job tree may let ComfyUI break away (spark/comfy_win.py): it stays warm after the job
+            owned = OwnedJob(job_commit_mb=graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0, breakaway=WINCUDA)
             try:
                 process = owned.spawn(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -1867,16 +1884,17 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             def timed_out():
                 expired.set()
                 owned.terminate()
-            deadline = threading.Timer(600, timed_out)
-            deadline.daemon = True
-            deadline.start()
+            if WINDOWS:  # the preview tier's measured jobs; a native render has its own limits (spark_generate.py)
+                deadline = threading.Timer(600, timed_out)
+                deadline.daemon = True
+                deadline.start()
         else:
             process = subprocess.Popen(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, text=True, start_new_session=True)
         start = local_gpus.process_identity(process.pid) if managed else None
         running.update(process=process, id=job["id"], start=start, key=job_key, owned_job=owned)
     try:
-        if WINDOWS and "prompts" in job["params"]:
+        if (WINDOWS or WIN32) and "prompts" in job["params"]:
             try:
                 with process.stdin as pipe:
                     pipe.write(json.dumps({key: job["params"][key] for key in ("prompts", "seeds")
@@ -2384,7 +2402,7 @@ def state() -> dict:
             # the picture models installed here, in the order the page offers them (IMAGE_MODELS)
             "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
             "platform": machine()[0], "platform_label": machine()[1],
-            "ui_only": WINDOWS, "platform_note": WINDOWS_NOTE if WINDOWS else "",
+            "ui_only": WINDOWS, "platform_note": WINDOWS_NOTE if WINDOWS else WINCUDA_NOTE if WINCUDA else "",
             "windows_stills": windows_storyboard.status() if WINDOWS else None,
             "gpu_index": (",".join(memory_guard.paired_gpus()) if not WINDOWS else "") or (os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None),
             "last_frame": True,
@@ -2394,7 +2412,7 @@ def state() -> dict:
             "ffmpeg": media_tools()["ffmpeg"], "ffmpeg_note": "" if media_tools()["ffmpeg"] else FFMPEG_NOTE,
             "shot_check": True, "negation_reason": negation.REASON,
             # how many DGX Sparks a job may use (sparks.py), this machine counted: a Spark or a Mac at the head
-            "sparks": {"supported": not WINDOWS, "limit": hub.chooser_limit()},
+            "sparks": {"supported": not (WINDOWS or WIN32), "limit": hub.chooser_limit()},
             # Sam Wasserman's QA gate: whether it can run here, and what is missing when it cannot (qa.py)
             "qa": qa.ready(),
             # Voice: Fish Audio Drama 3 text to speech on this machine (voice.py): MLX on a Mac, CUDA on a DGX Spark
@@ -2429,6 +2447,9 @@ def state() -> dict:
             beats={"available": bool(out["ffmpeg"]), "why": out["ffmpeg_note"], "max_seconds": beats.WINDOWS_MAX_SECONDS},
             export={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."},
             frame={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."})
+    if WINCUDA:  # the native tier (windows_cuda.py): what it runs, and the job kinds it refuses with their reason
+        out["windows_cuda"] = windows_cuda.status()
+        out["capabilities"] = {kind: {"available": False, "why": windows_cuda.unsupported(kind)} for kind in windows_cuda.NOT_NATIVE}
     return out
 
 
@@ -2642,6 +2663,8 @@ def queue_job(body: dict) -> dict:
     params = dict(body.get("params") or {})
     if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS + swap.KINDS + sound.KINDS + finish.KINDS + graphics.KINDS:
         raise HTTPException(400, "unknown job kind")
+    if WINCUDA and windows_cuda.unsupported(kind):  # refused when queued, with the reason: never sent to WSL or bash
+        raise HTTPException(501, windows_cuda.unsupported(kind))
     placement = hub.placement(body.get("placement"), kind=kind)
     if kind == "long" and (params.get("last_image") or params.get("last_same") or params.get("last_frame_from")):
         raise HTTPException(400, "a last frame is for single clips: a long video is a chain of clips")
@@ -2749,7 +2772,7 @@ def cancel(job_id: str) -> dict:
         process = running["process"] if active and running["id"] == job_id else None
         start, key = running.get("start"), running.get("key")
         owned = running.get("owned_job") if process is not None else None
-        if WINDOWS and process is not None and (owned is None or getattr(process, "_studio_job", None) is not owned):
+        if (WINDOWS or WIN32) and process is not None and (owned is None or getattr(process, "_studio_job", None) is not owned):
             raise HTTPException(409, "the Windows job's private ownership handle is missing")
         if active:
             job["status"] = "cancelled"
@@ -2760,7 +2783,7 @@ def cancel(job_id: str) -> dict:
             except (OSError, RuntimeError, ValueError) as error:
                 raise HTTPException(409, f"owned ComfyUI cancellation failed: {error}") from None
         if process is not None:
-            if WINDOWS:
+            if WINDOWS or WIN32:
                 try:
                     owned.terminate()
                 except OSError as error:
@@ -3285,6 +3308,8 @@ bolt.busy = local_running
 def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) -> dict:
     """A job that is not a clip (a voice take) into the queue: it renders on this machine, one at a time with the rest."""
 
+    if WINCUDA and windows_cuda.unsupported(kind):
+        raise HTTPException(501, windows_cuda.unsupported(kind))
     if WINDOWS and kind == "graphics":
         graphics_build(params, "check")
     if WINDOWS and kind == "scout":
@@ -3452,7 +3477,7 @@ def clip_time(kind: str, params: dict) -> int | None:
         return None
 
 
-hub = sparks.Hub(HOME, PACK, SPARK, jobs, order, lock, wake, about_this_spark, inside, perform, clip_time, enabled=not WINDOWS)
+hub = sparks.Hub(HOME, PACK, SPARK, jobs, order, lock, wake, about_this_spark, inside, perform, clip_time, enabled=not (WINDOWS or WIN32))
 app.include_router(hub.router())
 import updates  # noqa: E402  (Git source updates after an idle, graceful app shutdown)
 
@@ -3589,6 +3614,15 @@ def stop_session_comfy() -> None:
     quitting it stops that server. PREFIX and SPARK_COMFY_PORT are already this install's, on a Spark and on a card."""
     if WINDOWS:
         return
+    if WINCUDA:  # spark/comfy_win.py, the native tier's port of comfy.sh
+        try:
+            done = subprocess.run(windows_cuda.comfy_argv("stop"), check=False, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            print("[studio] ComfyUI did not stop within 60 s", flush=True)
+            return
+        if "stopped" in done.stdout:
+            print("[studio] ComfyUI stopped", flush=True)
+        return
     if LOCAL_GPU_CHILD:
         local_gpus.stop_child_comfy()
         return
@@ -3609,7 +3643,7 @@ def stop_session_comfy() -> None:
 def register_session_stop() -> None:
     """Only the running app owns engine shutdown; workers may start after app startup."""
     def stop():
-        if WINDOWS or SPARK and (LOCAL_GPU_CHILD or hub.local.managed or getattr(hub.local, "active", False) or local_threads):
+        if WINDOWS or WIN32 or SPARK and (LOCAL_GPU_CHILD or hub.local.managed or getattr(hub.local, "active", False) or local_threads):
             stop_local_jobs()
         else:
             stop_session_comfy()
@@ -3630,11 +3664,11 @@ if __name__ == "__main__":
 
     if os.environ.get("STUDIO_PIDFILE"):  # a worker Spark's app, started by another Spark's Studio: how that one finds it again
         Path(os.environ["STUDIO_PIDFILE"]).write_text(str(os.getpid()))
-    if not WINDOWS:
+    if not (WINDOWS or WIN32):
         hub.start()
     if hub.local.active and not LOCAL_GPU_CHILD:
         os.environ["STUDIO_LOCAL_GPU_KEY"] = hub.local.key  # private model ownership, not the head's browser access key
-    if not LOCAL_GPU_CHILD and not WINDOWS:
+    if not LOCAL_GPU_CHILD and not (WINDOWS or WIN32):
         nightshift.start()  # schedules belong to the head, never to its private workers
         if not os.environ.get("STUDIO_PIDFILE"):
             caption_router.captioner["start"]()

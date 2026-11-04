@@ -42,6 +42,13 @@ Image/sound jobs retain 12/12/16 GiB allocator/process/job caps and a 2 GiB GPU 
 Warm timings exclude initial startup unless stated otherwise. Sections 8 onward retain the incremental findings
 at each stage; their older "not yet enabled" statements describe that stage, not the current support table.
 
+**Update, 2026-11-04 (128 GB RTX Spark N1X):** with the full install (`oneshot-setup-rtx-spark-n1x.ps1 -Native`, a CUDA
+pool of at least 90 GB measured) the Studio now runs a **native Windows CUDA tier**: the DGX Spark's render path on
+Windows, with ComfyUI and TensorFold 1.2.2's Windows engines (`tf_h3.dll`, `tensorfold-native.exe` + `bolt.dll`). It is
+chosen only where all of it is installed (`app/windows_cuda.py`); every other Windows machine, the 48 GB one included,
+keeps this preview tier unchanged. What it runs, what it refuses and its measured times: [docs/rtx-spark-n1x.md,
+*Native Windows*](rtx-spark-n1x.md#native-windows-the-native-cuda-tier).
+
 There are two separate problems:
 
 1. **Platform support:** Windows ARM64 dependencies, process management, installers, memory guards, and native TensorFold engines.
@@ -454,6 +461,9 @@ The branch provides an **experimental, bounded Windows ARM64 tier**, not general
 - Native memory/disk telemetry and browser-compatible media paths.
 - Protected Windows access-key file permissions.
 - Planning, settings, uploads and Motion Previs pack import support.
+
+- The native Windows CUDA tier for a 128 GB N1X (`app/windows_cuda.py`, `spark/windows_scripts.py`,
+  `spark/comfy_win.py`, `scripts/setup-windows-cuda.ps1`): see the 2026-11-04 update above.
 
 The overview table gives actual limits and measurements. H3 video, foley, large models and other hardware
 tiers remain unqualified. The Ubuntu suite is retained; a public-repository-only, model-free Windows ARM64

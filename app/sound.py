@@ -29,13 +29,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
+
 KINDS = ("sfx", "foley")
-WINDOWS = os.name == "nt"
+WINCUDA = windows_cuda.active()  # native Windows with the CUDA tier: the Spark's ComfyUI route (Stable Audio Open)
+WINDOWS = os.name == "nt" and not WINCUDA  # the preview tier
 TITLES = {"sfx": "Sound effect", "foley": "Foley"}
 SFX_SECONDS = (1.0, 47.0)        # Stable Audio Open's window is 47.55 s
 FOLEY_SECONDS = (1.0, 15.0)      # the studio's longest clip; MMAudio was trained on 8 s and keeps going past it
 VIDEO = (".mp4", ".mov", ".m4v", ".webm")
-SPARK_INSTALL = "bash oneshot-setup-spark.sh --sound"
+SPARK_INSTALL = "oneshot-setup-rtx-spark-n1x.ps1 -Native -Sound" if WINCUDA else "bash oneshot-setup-spark.sh --sound"
 # what each kind loads on a Spark, under $SPARK_MODELS/Sound-Comfy (spark_generate.py's SAO_* and MMAUDIO)
 SPARK_FILES = {"sfx": ("checkpoints/stable_audio_open_1.0.safetensors", "text_encoders/stable_audio_open_t5_base.safetensors"),
                "foley": ("mmaudio/mmaudio_large_44k_v2_fp16.safetensors", "mmaudio/mmaudio_vae_44k_fp16.safetensors",

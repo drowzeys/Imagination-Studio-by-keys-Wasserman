@@ -67,8 +67,11 @@ import urllib.request
 from pathlib import Path
 
 import voice  # mem_available_gb, settle, located, found_hint: the same readings Drama 3's engine uses
+import windows_cuda  # the native Windows CUDA tier (False off Windows without a look)
 
-SPARK = sys.platform.startswith("linux")
+# native Windows with the CUDA tier installed runs the same CUDA backend: tensorfold-native.exe with bolt.dll
+WINCUDA = windows_cuda.active()
+SPARK = sys.platform.startswith("linux") or WINCUDA
 MAC = sys.platform == "darwin"
 PACK = Path(__file__).resolve().parent.parent
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
@@ -299,9 +302,16 @@ class Engine:
         self.changed.notify_all()
         began, self.before_gb = time.time(), voice.mem_available_gb()
         try:
-            self.process = subprocess.Popen([sys.executable, "-I", str(Path(__file__).with_name("bolt_leash.py")), "--", *self.argv(self.port)],
-                                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                            bufsize=1, env=self.environment(), start_new_session=True)
+            leash = [sys.executable, "-I", str(Path(__file__).with_name("bolt_leash.py")), "--", *self.argv(self.port)]
+            if sys.platform == "win32":
+                # Windows has no process groups: the leash and the engine run in a job object of their own, ended as one
+                # (kill_group) and when this app's handle to it closes
+                from windows_process import OwnedJob
+                self.process = OwnedJob().spawn(leash, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                                text=True, encoding="utf-8", errors="replace", bufsize=1, env=self.environment())
+            else:
+                self.process = subprocess.Popen(leash, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                                bufsize=1, env=self.environment(), start_new_session=True)
             threading.Thread(target=self.read, args=(self.process,), daemon=True).start()
             threading.Thread(target=self.guard, args=(self.process,), daemon=True).start()
             if self.idler is None:
@@ -351,8 +361,8 @@ class Engine:
         if free < 0 or free >= self.NEED_GB:
             return
         if SPARK and voice.comfy_up() and not busy():
-            subprocess.run(["bash", str(PACK / "spark" / "comfy.sh"), "stop"], capture_output=True, text=True, timeout=30,
-                           env={**os.environ, "PREFIX": str(PREFIX)})
+            subprocess.run(windows_cuda.comfy_argv("stop") if WINCUDA else ["bash", str(PACK / "spark" / "comfy.sh"), "stop"],
+                           capture_output=True, text=True, timeout=30, env={**os.environ, "PREFIX": str(PREFIX)})
             for _ in range(60):
                 if not voice.comfy_up():
                     break
@@ -386,6 +396,10 @@ class Engine:
                             process.wait(timeout=10)
                         except subprocess.TimeoutExpired:
                             pass
+                owned = getattr(process, "_studio_job", None) if sys.platform == "win32" else None
+                if owned is not None:  # Windows: the job object goes with the process (nothing of it outlives the stop)
+                    with contextlib.suppress(OSError, RuntimeError):
+                        owned.close()
                 voice.settle()
                 if was != "unloaded":
                     self.note("unloaded", why=why, available_gb=round(voice.mem_available_gb(), 1))
@@ -486,6 +500,13 @@ def group_rss_gb(group: int) -> float | None:
 
 
 def kill_group(process: subprocess.Popen) -> None:
+    owned = getattr(process, "_studio_job", None) if sys.platform == "win32" else None
+    if owned is not None:  # Windows: the leash's job object, the engine in it
+        try:
+            owned.terminate()
+        except (OSError, RuntimeError):
+            pass
+        return
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except (OSError, ProcessLookupError):
@@ -537,6 +558,9 @@ class Cuda(Engine):
     def __init__(self) -> None:
         super().__init__()
         here = PREFIX / self.folder_name
+        self.windows = WINCUDA and self.folder_name == "bolt"  # tensorfold-native.exe and bolt.dll (TensorFold 1.2.2, studio-1.2.2)
+        if self.windows:
+            self.label = "TensorFold 1.2.2 CUDA · native Windows (Mia's Bolt recipe)"
         self.bin = Path(os.environ.get("BOLT_BIN", here / "native" / "bin" / "tensorfold-native")).expanduser()
         self.lib = Path(os.environ.get("BOLT_LIB", self.bin.parent.parent / "lib")).expanduser()
         self.model = Path(os.environ.get("BOLT_MODEL", MODELS / "Nemotron-3.5-Bolt-24GB")).expanduser()
@@ -546,6 +570,8 @@ class Cuda(Engine):
         self.context = int(os.environ.get("BOLT_CONTEXT", 65536))
         self.prompt_cache = os.environ.get("BOLT_PROMPT_CACHE_GIB", "2")
         self.vision = os.environ.get("BOLT_VISION", "1") != "0"
+        if self.windows:  # the Windows build is not measured with its vision tower (no libturbojpeg): BOLT_VISION=1 asks
+            self.vision = os.environ.get("BOLT_VISION") == "1"
         self.thinking = os.environ.get("BOLT_THINKING", "0") == "1"
         self.drafts = os.environ.get("BOLT_DRAFTS", "1") != "0"
 
@@ -555,7 +581,9 @@ class Cuda(Engine):
         self.bin = voice.located("bolt-binary", self.bin, lambda p: os.access(p, os.X_OK))
         if not os.access(self.bin, os.X_OK):
             return (f"No {NAME} engine at {self.bin} (bash {self.build_hint()}; BOLT_BIN names another)." + voice.found_hint("bolt-binary"))
-        if self.name == "cuda" and not (self.lib / "libbolt.so").is_file():
+        if self.windows and not (self.lib / "bolt.dll").is_file():
+            return f"No bolt.dll in {self.lib} (the same build puts it beside tensorfold-native.exe; BOLT_LIB names another folder)."
+        if self.name == "cuda" and not self.windows and not (self.lib / "libbolt.so").is_file():
             return f"No libbolt.so in {self.lib} (the same build puts it there; BOLT_LIB names another folder)."
         if not has_checkpoint(self.model):
             self.model = snapshot(MODEL_REPO, MODEL_REVISION, has_checkpoint) or voice.located("bolt-checkpoint", self.model, has_checkpoint)
@@ -570,9 +598,13 @@ class Cuda(Engine):
         return ""
 
     def build_hint(self) -> str:
+        if self.windows:
+            return "oneshot-setup-rtx-spark-n1x.ps1 -Native builds TensorFold's studio-1.2.2 engine"
         return "spark/build-bolt.sh, or oneshot-setup-spark.sh --bolt"
 
     def setup_hint(self) -> str:
+        if self.windows:
+            return "oneshot-setup-rtx-spark-n1x.ps1 -Native -Bolt"
         return "bash oneshot-setup-spark.sh --bolt"
 
     def environment(self) -> dict:
@@ -589,6 +621,12 @@ class Cuda(Engine):
             env["BOLT_DRAFT"] = str(self.draft)
         else:
             env.pop("BOLT_DRAFT", None)
+        if self.windows:  # the DLLs are found on PATH (bolt.dll's folder, CUDA's arm64 runtime), not LD_LIBRARY_PATH
+            env.pop("LD_LIBRARY_PATH", None)
+            env.pop("TENSORFOLD_LIBTURBOJPEG", None)
+            env["TENSORFOLD_BOLT_LIB"] = str(self.lib / "bolt.dll")
+            cuda = windows_cuda.paths()["cuda_bin"]
+            env["PATH"] = os.pathsep.join([str(self.lib), *([str(cuda), str(cuda.parent)] if cuda.is_dir() else []), env.get("PATH", "")])
         return env
 
     def argv(self, port: int) -> list[str]:
@@ -729,7 +767,7 @@ def choose() -> tuple[type, str]:
         return BACKENDS[told], ""
     if SPARK:
         why = Cuda().present()
-        if why and platform.machine() not in ("aarch64", "arm64"):  # TensorFold's Bolt engine is built for a DGX Spark only
+        if why and platform.machine().lower() not in ("aarch64", "arm64"):  # TensorFold's Bolt engine is built for a DGX Spark only
             why += " On an x86_64 CUDA workstation BOLT_BACKEND=llamacpp runs it through a CUDA build of llama.cpp (docs/rtx-pro-6000.md)."
         return (External, why) if why else (Cuda, "")
     if MAC:

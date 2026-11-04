@@ -50,11 +50,16 @@ except ImportError:  # pragma: no cover - imported as app.voice from outside the
         from app import discover
     except ImportError:
         discover = None
+try:
+    import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
+except ImportError:  # pragma: no cover - imported as app.voice from outside the app folder
+    from app import windows_cuda
 
 router = APIRouter()
 HOME: Path = Path.home() / "ImaginationStudio"
 qa = None  # app/qa.py, given by attach
-SPARK = sys.platform.startswith("linux")
+WINCUDA = windows_cuda.active()  # native Windows with the CUDA tier: the Spark's CUDA backend, its Windows build
+SPARK = sys.platform.startswith("linux") or WINCUDA
 FRAME_RATE = 21.5  # the Fish codec's frames per second of audio
 SAMPLING = {"temperature": (1.0, 0.1, 2.0), "top_p": (0.9, 0.1, 1.0), "top_k": (30, 1, 200)}  # Fish's defaults, then the range
 TEXT_LIMIT = 6000  # characters in one take (long text is split at sentence ends by the engine)
@@ -77,8 +82,15 @@ def tool(name: str) -> str | None:
 # ---------- backends ----------
 
 def _linux_ram_gb() -> float:
-    """MemAvailable in GB, or -1 when /proc/meminfo cannot be read."""
+    """MemAvailable in GB, or -1 when /proc/meminfo cannot be read (on the native Windows tier: Windows' available
+    physical memory)."""
 
+    if WINCUDA:
+        try:
+            import windows_memory
+            return windows_memory.host_memory()[1] / 1024
+        except (ImportError, OSError):
+            return -1.0
     try:
         with open("/proc/meminfo") as handle:
             for line in handle:
@@ -108,7 +120,22 @@ def mem_available_gb() -> float:
         except (OSError, ValueError, subprocess.TimeoutExpired):
             return -1.0
     ram, card = _linux_ram_gb(), gpu_free_gb()
+    if WINCUDA and card is not None and _n1x():
+        # an RTX Spark N1X natively: the weights live in the GPU's carve-out, not in the ~30 GB Windows keeps for
+        # itself, so the card's free memory is the engine's room (as memory_guard.card_pool counts it)
+        return card
     return ram if card is None or ram < 0 else min(ram, card)
+
+
+def _n1x() -> bool:
+    try:
+        spark = str(Path(__file__).resolve().parent.parent / "spark")
+        if spark not in sys.path:
+            sys.path.insert(0, spark)
+        import memory_guard
+        return memory_guard.n1x()
+    except Exception:  # noqa: BLE001  (a reading, never a reason to fail)
+        return False
 
 
 def gpu_free_gb() -> float | None:
@@ -149,6 +176,8 @@ def has_card_memory() -> bool:
     if card is None:
         return False
     ram = _linux_ram_gb()
+    if WINCUDA and _n1x():
+        return True
     return ram < 0 or card.get("head_free_mb", card["free_mb"]) / 1024 <= ram
 
 
@@ -319,7 +348,12 @@ class Served:
                     self.answers.put(json.loads(line))
                     continue
                 except ValueError:
-                    pass
+                    if getattr(self, "windows", False):  # a Windows path echoed with its backslashes unescaped
+                        try:
+                            self.answers.put(json.loads(line.replace("\\", "\\\\")))
+                            continue
+                        except ValueError:
+                            pass
             self.log = (self.log + [line])[-200:]
             found = re.search(r"weights on the device: ([\d.]+) GB", line)
             if found:
@@ -376,7 +410,8 @@ class Served:
             return
         if SPARK and comfy_up():
             job["progress"] = {"stage": "stopping ComfyUI to free the video models' memory", "at": 0, "of": 1}
-            subprocess.run(["bash", str(Path(__file__).resolve().parent.parent / "spark" / "comfy.sh"), "stop"],
+            subprocess.run(windows_cuda.comfy_argv("stop") if WINCUDA else
+                           ["bash", str(Path(__file__).resolve().parent.parent / "spark" / "comfy.sh"), "stop"],
                            capture_output=True, text=True, timeout=30)
             for _ in range(60):
                 if not comfy_up():
@@ -462,6 +497,11 @@ class Served:
         stopped: a request cannot be taken back). Progress lines (``{"id", "progress"}``, sent when the request asks
         for them) go to ``progress``."""
 
+        if getattr(self, "windows", False):
+            # the Windows engine echoes the paths back unescaped ("wav": "C:\Users\..."), which is not JSON: they go with
+            # forward slashes, which Windows takes as they are
+            request = {k: v.replace("\\", "/") if k in ("wav", "pcm", "ref_audio") and isinstance(v, str) else v
+                       for k, v in request.items()}
         self.process.stdin.write(json.dumps(request) + "\n")
         self.process.stdin.flush()
         began = time.time()
@@ -725,6 +765,11 @@ class Cuda(Served):
         super().__init__()
         prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
         here = prefix / "drama3"
+        # native Windows: drama3-generate.exe and tensorfold_drama3.dll (TensorFold's studio-1.2.2 Windows build), the
+        # paths windows_cuda.activate gives DRAMA3_CUDA_BIN and DRAMA3_CUDA_LIB; used only where both files are there
+        self.windows = WINCUDA
+        if self.windows:
+            self.label = "TensorFold CUDA · native Windows"
         self.bin = Path(os.environ.get("DRAMA3_CUDA_BIN", here / "bin" / "drama3-generate")).expanduser()
         self.lib = Path(os.environ.get("DRAMA3_CUDA_LIB", self.bin.parent.parent / "lib" / "libtensorfold_drama3.so")).expanduser()
         self.model = Path(os.environ.get("DRAMA3_CUDA_MODEL", Path.home() / "models" / "drama-3")).expanduser()
@@ -737,6 +782,10 @@ class Cuda(Served):
 
     def environment(self) -> dict:
         env = dict(os.environ)
+        if self.windows:  # the DLLs are found on PATH: the engine's folder and CUDA's arm64 runtime
+            cuda = windows_cuda.paths()["cuda_bin"]
+            env["PATH"] = os.pathsep.join([str(self.lib.parent), str(self.bin.parent), *([str(cuda)] if cuda.is_dir() else []), env.get("PATH", "")])
+            return env
         env["LD_LIBRARY_PATH"] = str(self.lib.parent) + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
         return env
 
@@ -754,7 +803,13 @@ class Cuda(Served):
         return why
 
     def look(self) -> str:
-        if not sys.platform.startswith("linux"):
+        if self.windows and not (self.bin.is_file() and self.lib.is_file()):
+            # the hook for the native Windows engine: wired only once both of its files are installed
+            return (f"Fish Audio Drama 3's native Windows engine is not installed: no {self.bin.name if not self.bin.is_file() else self.lib.name} "
+                    f"in {self.bin.parent if not self.bin.is_file() else self.lib.parent} (drama3-generate.exe and "
+                    "tensorfold_drama3.dll from TensorFold's studio-1.2.2 Windows build; DRAMA3_CUDA_BIN and DRAMA3_CUDA_LIB "
+                    "name other files). The WSL install runs Drama 3 meanwhile.")
+        if not sys.platform.startswith("linux") and not self.windows:
             return "The CUDA backend runs on a DGX Spark (Linux, CUDA)."
         if managed() and not os.environ.get("SPARK_GOVERNOR"):
             return "DRAMA3_MANAGED_GUARD=1 starts Drama 3 under the machine's workload governor: set SPARK_GOVERNOR to its folder."

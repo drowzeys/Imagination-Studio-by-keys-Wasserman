@@ -86,7 +86,7 @@ def server(action: str) -> None:
     if sg.up() and ((last and not last.startswith("workflow-")) or clash):
         say("restarting ComfyUI: this starts from a server with nothing loaded" if not clash else
             "restarting ComfyUI: the upscaler's and the remover's node packs do not share one server")
-        subprocess.run(["bash", str(sg.COMFY_SH), "stop"], check=False)
+        subprocess.run(sg.comfy_control("stop"), check=False)
         for _ in range(60):
             if not sg.up():
                 break

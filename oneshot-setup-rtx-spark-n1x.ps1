@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  One-shot Imagination Studio install for an NVIDIA RTX Spark N1X laptop (Windows 11 on Arm, the Studio in WSL2 Ubuntu).
+  One-shot Imagination Studio install for an NVIDIA RTX Spark N1X laptop (Windows 11 on Arm): the Studio in WSL2 Ubuntu,
+  or with -Native the same render path natively on Windows (ComfyUI and TensorFold's Windows engines, no WSL).
 
 .DESCRIPTION
   Run once in an administrator PowerShell on the laptop. Then click "Imagination Studio" on the taskbar to use it.
@@ -17,10 +18,20 @@
     6. optionally starts the Studio at sign-in (-StartAtLogon) and opens SSH for another machine (-EnableSsh).
   Running it again updates the Studio (--upgrade) and leaves what is already set as it is.
 
+  -Native (docs/rtx-spark-n1x.md, "Native Windows"): instead of steps 2 and 3, the Studio is cloned on Windows
+  (-StudioDir) and scripts\setup-windows-cuda.ps1 installs the build tools (winget, NVIDIA's CUDA 13.4 for Windows on
+  Arm), the app and GPU environments, the pinned ComfyUI, TensorFold's engines built from source (the studio-1.2.2
+  branch: tf_h3.dll, and tensorfold-native.exe + bolt.dll for the Bolt brain) and the models (-NativeParts); the
+  launchers then start the Studio natively (scripts\app.ps1) on the native CUDA tier.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\oneshot-setup-rtx-spark-n1x.ps1
 .EXAMPLE
   .\oneshot-setup-rtx-spark-n1x.ps1 -Parts "--sound --music" -StartAtLogon -NeverSleepOnBattery
+.EXAMPLE
+  .\oneshot-setup-rtx-spark-n1x.ps1 -Native
+.EXAMPLE
+  .\oneshot-setup-rtx-spark-n1x.ps1 -Native -NativeParts "video,image" -NoBolt -Models D:\studio-models
 .EXAMPLE
   .\oneshot-setup-rtx-spark-n1x.ps1 -EnableSsh -AuthorizedKey "ssh-ed25519 AAAA... you@your-machine"
 #>
@@ -40,7 +51,13 @@ param(
   [switch]$StartAtLogon,
   [switch]$EnableSsh,
   [string]$AuthorizedKey = "",
-  [switch]$Force                     # go on even when the GPU is not an N1X
+  [switch]$Force,                    # go on even when the GPU is not an N1X
+  [switch]$Native,                   # the native Windows CUDA tier instead of WSL (scripts\setup-windows-cuda.ps1)
+  [string]$StudioDir = "$env:USERPROFILE\Imagination-Studio",   # -Native: the Studio's Windows clone
+  [string]$Models = "",              # -Native: the model folder (default %LOCALAPPDATA%\ImaginationStudio\models)
+  [string]$NativeParts = "video,image,music,flux3,sound",        # -Native: what windows-cuda-setup.py downloads
+  [switch]$NoBolt,                   # -Native: no Bolt brain (its engine build and NVIDIA's 25 GB of checkpoints)
+  [switch]$NoVoice                   # -Native: no Fish Audio Drama 3 (its engine build and the 70 GB checkpoint)
 )
 $ErrorActionPreference = "Continue"   # native tools (wsl, powercfg) report through exit codes, checked where it matters
 $ProgressPreference = "SilentlyContinue"
@@ -71,6 +88,7 @@ if ($gpu -match "N1X|RTX Spark") { Ok "GPU: $gpu" } else { Warn "GPU: '$gpu' is 
 $ramGB = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
 Ok "Windows sees $ramGB GB of RAM (the GPU's carve-out is apart from it)"
 
+if (-not $Native) {
 # ---------- 2. WSL2 and Ubuntu ----------
 Say "WSL2 and $Distro"
 & wsl.exe --status *> $null
@@ -163,18 +181,69 @@ if (-not $SkipStudioSetup) {
   else { Ok "the Studio is installed" }
 }
 
+}  # the WSL install
+
+if ($Native) {
+# ---------- 2N. the Studio natively on Windows (the native CUDA tier) ----------
+  Say "The Studio on Windows ($StudioDir)"
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    & winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements --disable-interactivity
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+  }
+  if (Test-Path (Join-Path $StudioDir ".git")) {
+    & git -C $StudioDir fetch -q origin $Branch
+    & git -C $StudioDir checkout -q $Branch 2>$null
+    if ($LASTEXITCODE -ne 0) { & git -C $StudioDir checkout -q -b $Branch FETCH_HEAD }
+    & git -C $StudioDir merge -q --ff-only FETCH_HEAD
+  } else { & git clone -q -b $Branch $Repo $StudioDir }
+  if ($LASTEXITCODE -ne 0) { Die "could not clone or update the Studio at $StudioDir" }
+  Ok "the Studio: $(& git -C $StudioDir log --oneline -1)"
+  # Hugging Face: the token saved where huggingface_hub reads it on Windows (%USERPROFILE%\.cache\huggingface\token)
+  $tokenFile = Join-Path $env:USERPROFILE ".cache\huggingface\token"
+  if (-not (Test-Path $tokenFile) -and -not $NoHfToken) {
+    Say "Hugging Face"
+    if (-not $HfToken) {
+      Write-Host "  FLUX3-K and Stable Audio Open are gated: make a READ token at https://huggingface.co/settings/tokens and accept"
+      Write-Host "  each licence with that account (https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy,"
+      Write-Host "  https://huggingface.co/stabilityai/stable-audio-open-1.0). Paste the token here (Enter to skip them):"
+      $secure = Read-Host "  token" -AsSecureString
+      $HfToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    }
+    if ($HfToken) {
+      $who = ""
+      try { $who = (Invoke-RestMethod -Uri "https://huggingface.co/api/whoami-v2" -Headers @{ Authorization = "Bearer $($HfToken.Trim())" } -TimeoutSec 20).name } catch {}
+      if ($who) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $tokenFile) | Out-Null
+        [IO.File]::WriteAllText($tokenFile, $HfToken.Trim())
+        Ok "Hugging Face: signed in as $who (token saved in $tokenFile)"
+      } else { Warn "Hugging Face did not accept that token: the gated models will be left out (run again to enter another)" }
+      $HfToken = ""
+    } else { Warn "no token: FLUX3-K and Stable Audio Open are left out (run again to add them)" }
+  } elseif (Test-Path $tokenFile) { Ok "Hugging Face token already saved" }
+  if (-not $SkipStudioSetup) {
+    Say "The native CUDA tier (scripts\setup-windows-cuda.ps1): build tools, engines, ComfyUI, models; this can take a while"
+    $setup = @{ Parts = $NativeParts }
+    if ($Models) { $setup.Models = $Models }
+    if (-not $NoBolt) { $setup.Bolt = $true }
+    if (-not $NoVoice) { $setup.Voice = $true }
+    try { & (Join-Path $StudioDir "scripts\setup-windows-cuda.ps1") @setup; Ok "the native CUDA tier is installed" }
+    catch { Warn "the native setup stopped ($_): see its last lines above, then run this again (it resumes)" }
+  }
+}
+
 # ---------- 4. launchers, icon, taskbar ----------
 Say "Launchers"
 $home_ = Join-Path $env:LOCALAPPDATA "ImaginationStudio"
 New-Item -ItemType Directory -Force -Path $home_ | Out-Null
 $icon = Join-Path $home_ "imagination-studio.ico"
-Copy-Item "\\wsl.localhost\$Distro$($repoDir -replace '/', '\')\app\static\brand\app-icon.ico" $icon -Force -ErrorAction SilentlyContinue
+if ($Native) { Copy-Item (Join-Path $StudioDir "app\static\brand\app-icon.ico") $icon -Force -ErrorAction SilentlyContinue }
+else { Copy-Item "\\wsl.localhost\$Distro$($repoDir -replace '/', '\')\app\static\brand\app-icon.ico" $icon -Force -ErrorAction SilentlyContinue }
 $start = Join-Path $home_ "Start-Studio.cmd"
 $stop = Join-Path $home_ "Stop-Studio.cmd"
 @"
 @echo off
 title Imagination Studio (RTX Spark)
-rem Imagination Studio runs in WSL ($Distro) for as long as this window is open: close it, or run Stop, to stop it.
+rem Imagination Studio runs $(if ($Native) { "natively (the CUDA tier)" } else { "in WSL ($Distro)" }) for as long as this window is open: close it, or run Stop, to stop it.
 powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7870/ -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
 if %errorlevel%==0 (
   echo Imagination Studio is already running: opening it.
@@ -184,14 +253,14 @@ if %errorlevel%==0 (
 )
 echo Starting Imagination Studio... the page opens when it is ready. Keep this window open.
 start "" /b powershell -NoProfile -WindowStyle Hidden -Command "for (`$i = 0; `$i -lt 150; `$i++) { try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7870/ -TimeoutSec 2 | Out-Null; Start-Process 'http://127.0.0.1:7870/'; break } catch { Start-Sleep 2 } }"
-wsl.exe -d $Distro -u $WslUser -e bash $repoDir/scripts/n1x-studio.sh
+$(if ($Native) { "powershell -NoProfile -ExecutionPolicy Bypass -File `"$StudioDir\scripts\app.ps1`"" } else { "wsl.exe -d $Distro -u $WslUser -e bash $repoDir/scripts/n1x-studio.sh" })
 echo Imagination Studio stopped.
 timeout /t 5 >nul
 "@ | Set-Content -Path $start -Encoding ascii
 @"
 @echo off
 title Stop Imagination Studio
-wsl.exe -d $Distro -u $WslUser -e bash $repoDir/scripts/n1x-studio.sh stop
+$(if ($Native) { "powershell -NoProfile -ExecutionPolicy Bypass -File `"$StudioDir\scripts\stop-windows-studio.ps1`"" } else { "wsl.exe -d $Distro -u $WslUser -e bash $repoDir/scripts/n1x-studio.sh stop" })
 timeout /t 3 >nul
 "@ | Set-Content -Path $stop -Encoding ascii
 $ws = New-Object -ComObject WScript.Shell

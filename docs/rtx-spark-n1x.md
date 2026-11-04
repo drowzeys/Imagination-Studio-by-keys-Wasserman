@@ -154,3 +154,89 @@ clients ran on another machine through an SSH tunnel.
   the time, and 1.8-1.9x the total at four requests.
 - Native Windows against WSL: within about ±15% (three samples a class), and more memory left for streams.
 - On TensorFold the N1X matches or passes the DGX Spark's EXL3 figures for this model.
+
+## Native Windows: the native CUDA tier
+
+The Studio can also run on the laptop **natively on Windows, without WSL**: the DGX Spark's render path (ComfyUI, the
+Studio's graphs and TensorFold's engines) on Windows' own NVIDIA driver, where the CUDA pool is about 113 GB (WSL sees
+96) and TensorFold's Windows engines run. It is the same Studio, on a tier of its own (`app/windows_cuda.py`):
+
+- it is chosen only where the whole install is there: `%LOCALAPPDATA%\ImaginationStudio\cuda-tier.json` (written by the
+  installer with the CUDA pool it measured, at least 90 GB), the GPU venv, the pinned ComfyUI and `tf_h3.dll`. Any other
+  Windows machine (the 48 GB one of [the Windows plan](windows-rtx-spark-plan.md)) keeps the small preview tier as it is;
+  `scripts\app.ps1 -Preview` asks for the preview tier here too;
+- the Spark's jobs build the same commands; the bash scripts they run are replaced by their Python ports
+  (`spark/windows_scripts.py`: scripts/video.sh, studio.sh, scout.sh, image.sh, edit.sh, with the same checks and words)
+  and spark/comfy.sh by `spark/comfy_win.py`: TensorFold's H3 node copied into ComfyUI with `TF_H3_LIB` at
+  `tf_h3.dll`, a lower priority, the server owned by a job object and its recorded identity (never by name or port), the
+  Windows memory guard beside it (`app/windows_memory.py`: Windows' commit and low-memory signals and the CUDA pool,
+  four times a second; it stops the server and the render says why), and the server left warm after a render;
+- the Bolt brain is TensorFold 1.2.2's `tensorfold-native.exe` with `bolt.dll` (Mia's recipe on the Windows build), run by
+  the Studio as on a DGX Spark (loaded on the first question, unloaded when idle or when a render needs the memory),
+  in a job object that ends with the Studio;
+- what has no native port yet is refused when it is queued, with the reason, and the banner says so: the model-based
+  Library actions (turnaround, upscale, find or remove a person), Character Swap, MMAudio foley, LoRA training,
+  Tesseract Finish and DGX Spark workers. Nothing is sent to WSL;
+- Fish Audio Drama 3 runs on its native Windows engine (`drama3-generate.exe` with `tensorfold_drama3.dll`, TensorFold
+  `studio-1.2.2` `a545f786`), the same server protocol as on a DGX Spark; where those files are missing the Voice tab
+  says so. MiniMax Music 3 runs on ComfyUI's nodes (its TensorFold engine has no Windows build in the install yet).
+
+### Install: one shot, natively
+
+In an administrator PowerShell on the laptop:
+
+```powershell
+irm https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile $env:TEMP\n1x.ps1
+powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1 -Native
+```
+
+`-Native` clones the Studio on Windows (`-StudioDir`, default `%USERPROFILE%\Imagination-Studio`), asks once for the
+Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and runs `scripts\setup-windows-cuda.ps1`:
+
+1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
+   ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
+   the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;
+2. the app's venv, FFmpeg, the GPU venv (NVIDIA's PyTorch 2.14 for CUDA 13.4) and the pinned ComfyUI (PR #200's scripts);
+3. TensorFold's engines **built from source** (no prebuilt release yet): drowzeys/TensorFold `studio-1.2.2` at
+   `a545f786`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`
+   (`tensorfold-native.exe` + `bolt.dll`) and `zig build fish-drama3-generate fish-drama3-lib -Dsm=121`
+   (`drama3-generate.exe` + `tensorfold_drama3.dll`), in an ARM64 developer prompt, into
+   `%LOCALAPPDATA%\ImaginationStudio\tf-h3`, `...\bolt\native\bin` and `...\drama3\bin`;
+4. the models (`scripts\windows-cuda-setup.py models`: the DGX Spark's files from the same repos, `-NativeParts`,
+   default video, image, music, FLUX3-K and sound effects, plus NVIDIA's Bolt checkpoints and Fish Audio's Drama 3;
+   `-NoBolt` and `-NoVoice` leave those out);
+5. ComfyUI's model folders and `cuda-tier.json`.
+
+Run again, it resumes and updates. The Start and Stop launchers then run `scripts\app.ps1` and
+`scripts\stop-windows-studio.ps1`; everything else (taskbar pin, power settings, `-StartAtLogon`, `-EnableSsh`) is as
+for WSL. The WSL install can stay beside it (each has its own models; the native tier needs its own copy, or point
+`-Models` at a folder that has them).
+
+### Measured natively
+
+2026-11-04, the HP OmniBook X 14 (RTX Spark N1X, 128 GB), plugged in, Windows' Balanced plan, the Studio on the native tier, every job queued through the Studio's own API (`/api/jobs`,
+`/api/voice/takes`, `/api/music/takes`, `/api/brains/test`) as the page queues it. Wall time is the job's, queued to done.
+
+| Job | Native Windows | WSL on the same laptop | DGX Spark |
+|---|---:|---:|---:|
+| FastH3, 8 passes, 864x480, 124 frames (5 s), text to video, models loaded | **73.8 s** (a pass 7.03 s) | 72.7 s in HP Performance (7.0 s), 93.8 s in HP's default (9.0 s) | 73 s (6.6-7.1 s) |
+| The same, first job after a start (ComfyUI started, models loaded) | 114.0 s | — | — |
+| The same from a first frame (the still below), models loaded | 92.7 s (a pass 8.54 s) | — | — |
+| Text to picture to video (`studio`, Qwen-Image then FastH3), from a cold server | 131.8 s | — | — |
+| A still, Qwen-Image-2.1-Turbo 8 steps, 864x480, server started for it | 31.0 s (the graph 14.2 s) | — | — |
+| Fish Audio Drama 3, one 7.5-7.8 s sentence, engine loaded for it | 39.1-39.2 s (load 34.0-34.4 s; 4.3-4.7 s to speak it, 1.65-1.74x real time, first sound 223-229 ms) | — | — |
+| MiniMax Music 3 on ComfyUI, a 30 s song, Drama 3 unloaded first | 133.8 s | — | — |
+| Bolt (Studio-managed), load and first reply | 27.0-30.4 s; a 70-token reply 1.4 s | — | — |
+| Bolt, 400 tokens, one stream (prefill included) | prose 58.6-60.8 tok/s, code 115.9-119.2 tok/s | — | — |
+
+- With the GPU to itself a pass is 7.03 s natively and a warm clip 73.8 s: WSL's HP Performance figures (7.0 s, 72.7 s)
+  and within 7% of a GB10's pass. Earlier runs the same day, beside another session's Drama 3 engine in WSL, took 7.56-7.65
+  s a pass (80.7 s warm, 122.7 s cold); the first-frame row is from those. Keep HP's Performance mode (myHP), plugged in.
+- These rows are from engines the installer built from `a545f786` (H3, Bolt, Drama 3 rebuilt in 261 s with the
+  toolchain already there); the first runs used builds of the same branch made by hand.
+- The memory guard watched every job. On WDDM `cudaMemGetInfo` gives a process its own budget (it read 105.7 of
+  113.1 GB free throughout while ComfyUI held 58 GB), so the guard holds NVML's dedicated counter to a floor
+  (`DEDICATED_FLOOR_MB`) beside Windows' commit and low-memory signals. With another engine holding about 40 GB of
+  WSL's RAM, Windows' low-memory signal stopped a video's load (commit 116.6 of 117.6 GB): run one stack at a time.
+  The guard holds commit to a 4 GB floor rather than to `windows_memory.pressure`'s 0.5-second projection, which read
+  a model load's single 21 GB commit as commit falling to nothing and stopped a load with 19 GB to spare.
