@@ -40,6 +40,17 @@ own memory; the Bolt brain runs through llama.cpp there.
 [docs/rtx-pro-6000.md](docs/rtx-pro-6000.md). A 32 GB RTX 5090 can run video too, as an opt-in that keeps the weights in
 RAM: [docs/rtx-5090.md](docs/rtx-5090.md).
 
+### NVIDIA RTX Spark N1X (Windows on Arm laptops)
+
+The N1X is sm_121 like a DGX Spark's GB10, so the Studio runs the DGX Spark recipe inside the laptop's WSL2 Ubuntu:
+`bash oneshot-setup-rtx-spark-n1x.sh` (it sets `STUDIO_N1X=1` and runs `oneshot-setup-spark.sh`). The firmware gives the
+GPU a fixed share of the memory (96 of 128 GB on an HP OmniBook X) and leaves WSL about 30 GB, and WSL's nvidia-smi
+names no process's memory, so the memory guard takes the GPU's carve-out as the pool and **flags** a job its estimate
+says may not fit instead of refusing it (`STUDIO_MEMORY_GUARD=warn`; `strict` refuses as on a DGX Spark). A flagged job
+that really runs out of memory fails with ComfyUI's error. Render plugged in and in the maker's performance mode: on an
+HP OmniBook X 14 an 864x480, 124-frame clip took 7.0 s a pass in HP Performance mode against 9.0 s in Balanced
+(a GB10: 6.6 s), byte for byte the DGX Spark's clip.
+
 `oneshot-setup.sh` on Linux reads the first GPU. Use the command below. Set the four variables for the disk and
 the card. `/data/studio` is an example path. No flag is the core (125 GB). Flags are listed under
 [Install flags](#install-flags).

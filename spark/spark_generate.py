@@ -183,6 +183,8 @@ def fits_or_exit(args, lora: bool = False, references: bool = False, base: bool 
         return
     print(f"[tensorfold] memory: about {found['need_mb'] / 1000:.0f} GB at the peak (give or take {found['error_mb'] / 1000:g}) of "
           f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
+    if found.get("warning"):  # STUDIO_MEMORY_GUARD=warn (an N1X's default): flagged, then tried
+        print("[tensorfold] memory warning: " + found["warning"], flush=True)
     if not found["fits"]:
         sys.exit("refused before anything was loaded: " + found["reason"])
 
@@ -1027,6 +1029,8 @@ def music(args) -> None:
     if found.get("route") is not None:
         print(f"[tensorfold] memory: about {found['need_mb'] / 1000:.0f} GB at the peak (give or take {found['error_mb'] / 1000:g}) of "
               f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
+        if found.get("warning"):  # STUDIO_MEMORY_GUARD=warn (an N1X's default): flagged, then tried
+            print("[tensorfold] memory warning: " + found["warning"], flush=True)
         if not found["fits"]:
             sys.exit("refused before anything was loaded: " + found["reason"])
     last = side("kind").read_text().strip() if side("kind").exists() else ""
@@ -1171,6 +1175,8 @@ def sound(args) -> None:
         if found.get("need_mb"):
             print(f"[tensorfold] memory: about {found['need_mb'] / 1000:.0f} GB at the peak (give or take {found['error_mb'] / 1000:g}) of "
                   f"{found['available_mb'] / 1000:.0f} GB, floor {found['floor_mb'] / 1000:.0f} GB", flush=True)
+        if found.get("warning"):  # STUDIO_MEMORY_GUARD=warn (an N1X's default): flagged, then tried
+            print("[tensorfold] memory warning: " + found["warning"], flush=True)
         if not found["fits"]:
             sys.exit("refused before anything was loaded: " + found["reason"])
     last = side("kind").read_text().strip() if side("kind").exists() else ""

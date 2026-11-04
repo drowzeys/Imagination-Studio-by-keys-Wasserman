@@ -446,6 +446,54 @@ def card_room_applies() -> bool:
     return device_room_mb() is not None and room_budget_mb() is None
 
 
+_N1X: dict = {}
+
+
+def n1x() -> bool:
+    """An NVIDIA RTX Spark N1X (Windows on Arm; the Studio's Linux runs in WSL2): STUDIO_N1X=1, or a GPU whose name says
+    RTX Spark / N1X (STUDIO_N1X=0 says no). Its firmware gives the GPU a fixed share of the machine's memory (96 of
+    128 GB on an HP OmniBook X) and leaves WSL the rest (about 30 GB), and under WSL nvidia-smi names no process's
+    memory. So the card is the pool, the Studio's own models on it count as the job's, and WSL's small RAM is not a
+    limit on what the GPU holds."""
+
+    said = os.environ.get("STUDIO_N1X", "").strip()
+    if said in ("0", "1"):
+        return said == "1"
+    if "name" not in _N1X:
+        rows_ = smi("--query-gpu=name")
+        _N1X["name"] = (rows_[0][0] if rows_ and rows_[0] else "").upper()
+    return "N1X" in _N1X["name"] or "RTX SPARK" in _N1X["name"]
+
+
+def guard_mode() -> str:
+    """STUDIO_MEMORY_GUARD: "strict" refuses a job the estimate says does not fit (a DGX Spark's default: there a job
+    that runs out of memory can take the whole machine down); "warn" flags it and lets it run, and a job that really
+    runs out of memory then fails with ComfyUI's error (an N1X's default: its GPU memory is a fixed carve-out, so a
+    job that overruns it fails on its own without starving the machine)."""
+
+    said = os.environ.get("STUDIO_MEMORY_GUARD", "").strip().lower()
+    if said in ("strict", "warn"):
+        return said
+    return "warn" if n1x() else "strict"
+
+
+def _relaxable(check_fn):
+    """A memory check whose refusal, under STUDIO_MEMORY_GUARD=warn, is a warning instead: ``fits`` True, the reason
+    kept in ``warning`` (and ``refused``), so the job is tried and fails only if the memory really runs out."""
+
+    import functools
+
+    @functools.wraps(check_fn)
+    def checked(*args, **kwargs):
+        out = check_fn(*args, **kwargs)
+        if isinstance(out, dict) and out.get("fits") is False and out.get("reason") and guard_mode() == "warn":
+            out = dict(out, fits=True, refused=out["reason"],
+                       warning=out["reason"].replace(", so it is refused", "").rstrip(".") +
+                       ". It is tried anyway (STUDIO_MEMORY_GUARD=warn) and fails if the memory runs out.")
+        return out
+    return checked
+
+
 def device_room_mb() -> int | None:
     """What the card has for a render with none of the Studio's ComfyUI models counted against it (its server's
     memory counts as the job's, as room_mb counts it on a Spark); None on a Spark."""
@@ -455,6 +503,11 @@ def device_room_mb() -> int | None:
         return None
     pid = server_pid()
     used = processes_mb()
+    if n1x() and not used and not card.get("simulated"):
+        # WSL's nvidia-smi names no process's memory, so what the Studio's own ComfyUI, Bolt or Music hold cannot be
+        # counted back: the card is the Studio's alone, all of it the job's (a chained part 2 no longer refuses
+        # because part 1's models are still loaded)
+        return max(0, card["total_mb"] - VRAM_MARGIN_MB)
     # what the server holds, its own processes too (the second card's rank of a two-GPU pass): all of it is the job's
     held = sum(used.get(one, 0) for one in family(pid)) if pid else 0
     return max(0, card["free_mb"] + held - VRAM_MARGIN_MB)
@@ -580,6 +633,9 @@ def card_pool(card_mb: int, total_mb: int | None = None) -> tuple[int, int, bool
     ``ram_room_mb`` against ``floor_mb``. Whichever runs out first is the pool, and the sentence names that one:
     the GPU, or the machine. A job fits exactly where it fitted under ``min(ram, card + floor)``."""
 
+    if n1x():
+        # the weights live in the GPU's carve-out, not in WSL's small leftover RAM: the card is the pool
+        return card_mb + VRAM_MARGIN_MB, VRAM_MARGIN_MB, True
     ram = ram_room_mb()
     if total_mb is None:
         total_mb = meminfo().get("MemTotal", 0)
@@ -611,6 +667,7 @@ def _pool(available_mb: int | None, total_mb: int, card: bool = False) -> tuple[
     return available_mb, floor_mb(total_mb), False
 
 
+@_relaxable
 def check(width: int, height: int, frames: int, lora: bool = False, references: bool = False, base: bool = False,
           engine: bool = True, pictures: int = 0, reference_frames: int = 0, available_mb: int | None = None,
           total_mb: int | None = None, card: bool = False, adapter: bool = False) -> dict:
@@ -712,6 +769,7 @@ MUSIC_YUE2_MEASURED: dict = {"music-yue2-bf16": ((30, 30.0, 12_193), (60, 60.0, 
                              "music-yue2-blocks": ((30, 30.0, 17_048), (60, 60.0, 19_930), (120, 120.0, 21_035))}
 
 
+@_relaxable
 def music_check(seconds: float, available_mb: int | None = None, total_mb: int | None = None, route: str = "music",
                 card: bool = False) -> dict:
     """Whether a MiniMax Music 3 song of up to ``seconds`` fits this machine, as ``check`` answers for a clip:
@@ -756,6 +814,7 @@ SOUND_LONGEST = {"sfx": 47.0, "foley": 15.0}  # the app's longest of each (app/s
 SOUND_NAMES = {"sfx": "a sound effect (Stable Audio Open 1.0)", "foley": "foley (MMAudio)"}
 
 
+@_relaxable
 def sound_check(kind: str, seconds: float, available_mb: int | None = None, total_mb: int | None = None,
                 card: bool = False) -> dict:
     """Whether a sound effect or a clip's foley of ``seconds`` fits this machine, as ``music_check`` answers for a song;
@@ -823,6 +882,7 @@ def card_name() -> str:
     return found[0][0] if found and found[0] else ""
 
 
+@_relaxable
 def swap_check(quality: int, available_mb: int | None = None, total_mb: int | None = None, card: bool = False,
                weights: str = "int8") -> dict:
     """Whether a Character Swap at ``quality`` (480 or 768) fits this machine, as ``check`` answers for a clip: on a
