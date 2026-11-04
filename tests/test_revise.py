@@ -494,6 +494,7 @@ def test_agents_restyle_extend_and_fix_through_the_studio_tools(monkeypatch):
         reply = mcp.answer({"method": "tools/call", "params": {"name": name, "arguments": args}})
         assert not reply.get("isError"), reply
         assert json.loads(reply["content"][0]["text"])["revise"] == {"id": "c1", "of": 2}
+    sent = [one for one in sent if one[:2] != ("GET", "/api/state")]  # tools/list reads the platform first (Windows lists fewer tools)
     assert sent[0] == ("POST", "/api/revise", {"kind": "restyle", "params": {"video": "renders/a.mp4", "prompt": "anime", "keep_sound": False}})
     assert sent[1][2] == {"kind": "extend", "params": {"video": "renders/a.mp4", "seconds": 20}}
     assert sent[2][2] == {"kind": "fix", "params": {"video": "renders/a.mp4", "instruction": "make it snow"}}

@@ -71,15 +71,15 @@ function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_
   if (win) {
     if (id === "image") { e.line = "SD-Turbo storyboard drafts: 512 × 512, one pass, up to six sequential pictures."; e.marks = [];
       e.cards[0].one = "One 512 × 512 storyboard draft"; e.cards[1].one = "Up to six sequential drafts, with individual seeds"; }
-    if (id === "video") e.line = capWhy("video");
+    if (id === "video") e.line = (typeof capWhy === "function" ? capWhy : () => "")("video");
     if (id === "previs") { e.line = "Copilot CLI can plan with This Studio tools. Motion analysis and Blender automation remain unqualified."; e.marks = [];
       e.cards[1].one = "Copilot CLI with This Studio tools"; }
     if (id === "sound") { e.line = "Five-second Stable Audio Open sound effects on this machine. Voice, music and foley remain unqualified.";
       e.marks = []; e.primary = ["Make a sound effect", () => go("Foley")]; e.cards[2].one = "Five-second sound effects from words"; }
     const kinds = { "act-image-edit": "edit", "act-image-looks": "looks", "act-previs-motion": "motion", "start-voice": "voice", "start-song": "music", "start-sfx": "sfx" };
-    e.cards = e.cards.map((c, i) => ({ ...c, off: capWhy(id === "video" ? "video" : id === "image" && i < 2 ? "scout" : kinds[c.art]) || c.off }));
+    e.cards = e.cards.map((c, i) => ({ ...c, off: (typeof capWhy === "function" ? capWhy : () => "")(id === "video" ? "video" : id === "image" && i < 2 ? "scout" : kinds[c.art]) || c.off }));
   }
-  const why = capWhy(id === "sound" && win ? "sfx" : primary);
+  const why = (typeof capWhy === "function" ? capWhy : () => "")(id === "sound" && win ? "sfx" : primary);
   return el("div", {},
     el("div", { class: "enghead" }, artSlot("engine-" + id, "", id),
       el("div", { class: "stack" }, el("span", { class: "eyebrow engmark" }, el("img", { src: "brand/module-" + id + ".svg", alt: "", width: 22, height: 22 }), "Creative Engine"), el("h1", { class: "display" }, r.name), el("p", { class: "sub", style: "margin:0" }, e.line),

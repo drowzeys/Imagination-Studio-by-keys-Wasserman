@@ -51,8 +51,9 @@ async function spkLoad(draw) { const was = spkSig(SPK.data), room = spkRoom(SPK.
   if (spkRoom(SPK.data) !== room) SPK.plans = {};
   if (spkSig(SPK.data) === was && SPK.n === before) return; SPK.plans = {}; spkQueue();
   if (draw && typeof tab !== "undefined" && !document.activeElement.matches("input,textarea,select")) render(); }
-function spkSet(n) { if (!SPK.data || !SPK.data.supported) return toast(SPK.data && SPK.data.note || "Worker routing is unavailable.");
-  SPK.n = Math.max(1, Math.min(Number(n) || 1, spkLimit())); SPK.plans = {};
+function spkSet(n) { const can = SPK.data && SPK.data.supported;
+  if (!can && SPK.data && SPK.data.note && typeof toast === "function") toast(SPK.data.note);  // Windows: why it stays one
+  SPK.n = can ? Math.max(1, Math.min(Number(n) || 1, spkLimit())) : 1; SPK.plans = {};
   try { localStorage.setItem("sparks", String(SPK.n)); } catch {} api("/api/sparks", { sparks: SPK.n }).catch(() => {}); spkQueue(); render(); }
 // What the number will do for this job, asked of the app (POST /api/sparks/plan) and said under the chooser
 async function spkPlan(node, what) { if (SPK.data && !SPK.data.supported) { node.replaceChildren(SPK.data.note); return; }

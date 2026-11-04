@@ -13,6 +13,7 @@ from test_windows_ui import client, server  # noqa: F401
 import windows_media
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="the server module imported on Windows (WINDOWS at import time); the windows-arm64 CI job runs it")
 def test_job_path_uses_windows_separators_and_keeps_system_path(client):
     env = server.environment({})
     assert "/opt/homebrew/bin:" not in env["PATH"]

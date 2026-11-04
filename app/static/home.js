@@ -58,7 +58,7 @@ const STARTS = () => {
       { id: "graphics", sign: "edit", title: "Motion graphics", one: "Six templates from your own words, clips and audio", run: () => go("Graphics") });
   }
   const kinds = { clip: "video", scout: "video", still: "scout", sharp: "video", long: "video", voice: "voice", song: "music", sfx: "sfx", looks: "looks", previs: "motion", nodes: "nodes", graphics: "graphics" };
-  return cards.map(c => ({ ...c, off: capWhy(kinds[c.id]) }));
+  return cards.map(c => ({ ...c, off: (typeof capWhy === "function" ? capWhy : () => "")(kinds[c.id]) }));
 };
 // 3.0's cards show unless switched off in Settings, even beside a start_cards list saved before they existed
 const START_NEW = ["sfx", "looks", "previs", "nodes", "film", "script", "graphics"];
@@ -85,7 +85,7 @@ const hcHas = id => id === "flux" ? !!hcFluxModel() : id === "yue" ? hcYue() : i
 // Settings says the kind of take; the picture model and song engine it presets choose that kind's chip
 const hcMode = () => {
   if (S && S.platform === "windows") { const mode = HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
-    return capWhy(hcKind(mode)) && mode !== "picture" ? "picture" : mode; }
+    return (typeof capWhy === "function" ? capWhy : () => "")(hcKind(mode)) && mode !== "picture" ? "picture" : mode; }
   if (HC.mode && hcHas(HC.mode)) return HC.mode;
   const p = homePrefs().presets, want = HC_MODES[p.mode] ? p.mode : "clip";
   if (want === "picture" && /^flux/.test(p.image_model || "") && hcHas("flux")) return "flux";
@@ -145,7 +145,7 @@ function hcEstimate() { const r = typeof recipeParams === "function" ? recipePar
   return HC.est[key]; }
 // what Generate sends for each kind of take: the same endpoints and bodies the tabs use
 async function hcRequest(mode, text, seed, retake) {
-  const why = capWhy(hcKind(mode)); if (why) throw new Error(why);
+  const why = (typeof capWhy === "function" ? capWhy : () => "")(hcKind(mode)); if (why) throw new Error(why);
   const p = homePrefs().presets;
   if (mode === "clip") { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" };
     const seconds = hcSeconds(), long = hcLongs()[seconds];
@@ -195,11 +195,11 @@ function homeComposer() {
   const recipes = HC_RECIPES(), ids = Object.keys(recipes), rec = hcRecipe();
   return el("section", { class: "composer", id: "composer" },
     el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).filter(([id]) => hcHas(id)).map(([id, [label, mk, model]]) =>
-      el("button", { type: "button", role: "tab", "data-mode": id, title: capWhy(hcKind(id)), disabled: !!capWhy(hcKind(id)), "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
+      el("button", { type: "button", role: "tab", "data-mode": id, title: (typeof capWhy === "function" ? capWhy : () => "")(hcKind(id)), disabled: !!(typeof capWhy === "function" ? capWhy : () => "")(hcKind(id)), "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
         el("b", {}, label), S && S.platform === "windows" && id === "picture" ? "SD-Turbo" : typeof mark === "function" ? mark(mk, model) : model))),
     area, el("div", { class: "cmp-hint" }, hint),
     el("div", { class: "cmp-bar" },
-      el("button", { type: "button", class: "primary cmp-go", title: capWhy(hcKind(mode)), disabled: HC.busy || !!capWhy(hcKind(mode)), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
+      el("button", { type: "button", class: "primary cmp-go", title: (typeof capWhy === "function" ? capWhy : () => "")(hcKind(mode)), disabled: HC.busy || !!(typeof capWhy === "function" ? capWhy : () => "")(hcKind(mode)), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
       mode === "clip" ? el("button", { type: "button", class: "small cmp-recipe", title: "The render recipe: click for the next one (Settings → Presets sets the default)",
         onclick: () => { HC.recipe = ids[(ids.indexOf(rec) + 1) % ids.length]; render(); } }, el("span", { class: "eyebrow" }, "Recipe"), recipes[rec]) : null,
       mode === "clip" ? hcLength() : null,

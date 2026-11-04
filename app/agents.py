@@ -1743,7 +1743,7 @@ def mcp_servers(task: dict, harness_host: str, config: dict) -> dict:
         tool = tool_of(tool_id)
         argv, env = remote_launch(tool, harness_host, config) if harness_host else launch_of(tool, config)
         servers[tool_id] = {"command": argv[0], "args": argv[1:], **({"env": env} if env else {})}
-        if task["backend"] == "copilot":
+        if task.get("backend") == "copilot":
             servers[tool_id].update(type="local", tools=["*"])
     return servers
 
@@ -1771,7 +1771,7 @@ def copilot_version(tool: str, host: str = "") -> None:
 def harness_args(task: dict, tool: str, config_path: str, servers: dict, system: str, session: str | None = None) -> list[str]:
     """The harness's command line; `session` is the id of the thread's session to continue, None for a first turn."""
 
-    if task["backend"] == "copilot":
+    if task.get("backend") == "copilot":
         copilot_version(tool, task.get("_host") or "")
         args = [tool, "--output-format", "json", "--disable-builtin-mcps", "--no-custom-instructions",
                 "--additional-mcp-config", "@" + config_path, "--available-tools", *servers]
@@ -2007,7 +2007,7 @@ def stream(task: dict, argv: list[str], cwd: str | None, text: str, log) -> int:
         with open(here / "stderr.txt", "w") as errors:  # the child holds its own copy of the handle
             kwargs = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": errors,
                       "text": True, "cwd": cwd, "env": child_env()}
-            if task["backend"] == "copilot":
+            if task.get("backend") == "copilot":
                 kwargs["encoding"] = "utf-8"
             if os.name == "nt":
                 from windows_process import OwnedJob

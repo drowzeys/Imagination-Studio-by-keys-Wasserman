@@ -748,8 +748,11 @@ def answer(message: dict):
     if method == "ping":
         return {}
     if method == "tools/list":
-        state = call("GET", "/api/state")
-        if state.get("platform") != "windows":
+        try:
+            state = call("GET", "/api/state")
+        except Exception:  # noqa: BLE001  (the Studio not running yet, or an older one): every tool, as before
+            state = {}
+        if not isinstance(state, dict) or state.get("platform") != "windows":
             return {"tools": TOOLS}
         allowed = {"studio_state", "list_library", "search_library", "cancel_job", "list_projects", "add_to_timeline",
                    "job_status", "wait_for_jobs", "list_jobs", "slate_films", "slate_film", "slate_new_film",
