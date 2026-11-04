@@ -78,7 +78,7 @@ def test_the_spark_commands_become_their_native_ports(monkeypatch):
     for script, command in (("studio.sh", "studio"), ("scout.sh", "scout"), ("image.sh", "image"), ("edit.sh", "edit")):
         assert windows_cuda.translate(["bash", str(ROOT / "scripts" / script), "x"])[-2] == command
     assert windows_cuda.translate(["python3", "app/hlg.py", "run"]) == [r"C:\venv\python.exe", "app/hlg.py", "run"]
-    assert windows_cuda.translate(["/home/x/.local/opt/tensorfold-studio/venv/bin/python", "s.py"])[0] == r"C:\venv\python.exe"
+    assert windows_cuda.translate(["/home/spark/.local/opt/tensorfold-studio/venv/bin/python", "s.py"])[0] == r"C:\venv\python.exe"
     assert windows_cuda.translate([r"C:\ffmpeg.exe", "-i"]) == [r"C:\ffmpeg.exe", "-i"]
     with pytest.raises(RuntimeError, match="turnaround.sh has no native Windows port"):
         windows_cuda.translate(["bash", str(ROOT / "scripts/turnaround.sh"), "a.png"])
