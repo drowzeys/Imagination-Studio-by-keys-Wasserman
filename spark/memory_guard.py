@@ -1046,6 +1046,8 @@ def release_cache(paths: list[str]) -> int:
     pages not yet written stay). Returns how many files were done."""
 
     done = 0
+    if not hasattr(os, "posix_fadvise"):  # Windows and macOS: no per-file release; nothing is done
+        return 0
     for path in paths:
         try:
             handle = os.open(path, os.O_RDONLY)

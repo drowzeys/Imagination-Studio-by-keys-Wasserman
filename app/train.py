@@ -33,7 +33,11 @@ from fastapi import APIRouter, HTTPException
 
 KINDS = ("train",)
 MUSUBI_COMMIT = "f8a1b03794a49239a3539015075f5123d6c07d66"  # kohya-ss/musubi-tuner, 2026-09-27, version 0.3.6
-SETUP = "bash oneshot-setup-spark.sh --train"
+import windows_cuda  # noqa: E402  (the native Windows CUDA tier, beside this file)
+
+WINDOWS = sys.platform == "win32"
+# natively on Windows (the CUDA tier): scripts\setup-windows-cuda.ps1's train part (musubi-tuner's venv and the files)
+SETUP = windows_cuda.setup_hint("train") if WINDOWS else "bash oneshot-setup-spark.sh --train"
 # the sizes a run trains at: width, height, frames a window, seconds a step (measured at standard on a DGX Spark; the
 # small one is that time scaled by its pixels, not measured)
 SIZES = {"standard": {"width": 928, "height": 512, "frames": 124, "per_step": 110, "label": "928x512, 124 frames (measured)"},
@@ -64,7 +68,9 @@ ADAPTER = "Train-H3/adapters/ostris_dd_adapter_v2.safetensors"   # ostris/minima
 
 
 def spark() -> bool:
-    return sys.platform.startswith("linux")
+    """Whether training runs here: a DGX Spark (Linux), or Windows with the native CUDA tier (an RTX Spark N1X)."""
+
+    return sys.platform.startswith("linux") or windows_cuda.active()
 
 
 def prefix() -> Path:
@@ -83,8 +89,10 @@ def tools() -> dict:
         optimizer = (root / "optimizer").read_text().strip() or "adamw8bit"
     except OSError:
         optimizer = "adamw8bit"
-    return {"root": root, "musubi": root / "musubi-tuner", "python": root / "venv/bin/python",
-            "accelerate": root / "venv/bin/accelerate", "optimizer": optimizer if optimizer in ("adamw8bit", "adamw") else "adamw8bit"}
+    bin_ = root / ("venv/Scripts" if WINDOWS else "venv/bin")
+    exe = ".exe" if WINDOWS else ""
+    return {"root": root, "musubi": root / "musubi-tuner", "python": bin_ / f"python{exe}",
+            "accelerate": bin_ / f"accelerate{exe}", "optimizer": optimizer if optimizer in ("adamw8bit", "adamw") else "adamw8bit"}
 
 
 def files() -> dict:
@@ -113,7 +121,8 @@ def ready() -> dict:
     """Whether this machine can train: {"ready", "missing": [what is not there], "setup", "optimizer", "spark"}."""
 
     if not spark():
-        return {"ready": False, "spark": False, "missing": ["a DGX Spark: training runs on one"], "setup": SETUP, "optimizer": None}
+        return {"ready": False, "spark": False, "missing": ["a DGX Spark (or an RTX Spark N1X with the native CUDA tier): training runs on one"],
+                "setup": SETUP, "optimizer": None}
     have, missing = tools(), []
     if installed_commit(have["musubi"]) != MUSUBI_COMMIT:
         missing.append(f"musubi-tuner at {MUSUBI_COMMIT[:7]} in {have['musubi']}")
@@ -395,7 +404,8 @@ def stop_comfy(pack: Path) -> str:
     line for the job's log."""
 
     try:
-        said = subprocess.run(["bash", str(pack / "spark/comfy.sh"), "stop"], capture_output=True, text=True, timeout=90)
+        said = subprocess.run(windows_cuda.comfy_argv("stop") if WINDOWS else ["bash", str(pack / "spark/comfy.sh"), "stop"],
+                              capture_output=True, text=True, timeout=90)
         return f"[tensorfold] ComfyUI: {(said.stdout or said.stderr).strip() or 'stopped'} (a LoRA run needs its memory)\n"
     except (OSError, subprocess.TimeoutExpired) as error:
         return f"[tensorfold] ComfyUI was not stopped: {error}\n"

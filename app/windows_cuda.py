@@ -13,8 +13,10 @@ at least ``MIN_POOL_MB`` measured by the installer. Anything else on Windows kee
 (``windows_storyboard`` and friends) unchanged; ``STUDIO_WINDOWS_TIER=preview`` forces it. Nothing here runs on Linux or
 macOS: ``active()`` is False there without reading a file.
 
-What does not run natively yet is refused when it is queued, with the reason (``unsupported``), never sent to WSL or
-to a Linux script.
+Every job kind runs natively: the Library's actions on the authors' node packs, Character Swap, MMAudio foley, LoRA
+training (musubi-tuner in a venv of its own) and Tesseract Finish (its windows-x86_64 build, through Windows' x64
+emulation). A kind without a port would be refused when it is queued, with the reason (``unsupported``), never sent to
+WSL or to a Linux script.
 """
 from __future__ import annotations
 
@@ -27,19 +29,14 @@ PACK = Path(__file__).resolve().parent.parent
 MIN_POOL_MB = 90_000  # FastH3 at 864x480 on the int8 engine peaks near 58 GB; a 48 GB box keeps the preview tier
 # job kinds the native tier runs (the rest are refused with NOT_NATIVE's reason): the Spark's video, picture, song,
 # sound and voice routes, and what the preview tier already runs (exports, graphics, beats)
-NATIVE = {"video", "studio", "long", "scout", "edit", "export", "soundtrack", "voice", "music", "sfx", "graphics", "hlg"}
-NOT_NATIVE = {
-    "turnaround": "the turnaround's ComfyUI graph and node packs are not installed by the native Windows setup yet",
-    "upscale": "SeedVR2's node pack is not installed by the native Windows setup yet",
-    "mask": "Find a person (SAM 3) is not installed by the native Windows setup yet",
-    "remove": "Remove a person's node pack is not installed by the native Windows setup yet",
-    "swap": "Character Swap's pipeline (spark/spark_swap.py) has not been ported to native Windows",
-    "train": "LoRA training (musubi-tuner) has not been ported to native Windows",
-    "finish": "the final cut (Tesseract) has not been ported to native Windows",
-    "foley": "MMAudio foley's node pack (kijai's ComfyUI-MMAudio) is not installed by the native Windows setup yet",
-}
+NATIVE = {"video", "studio", "long", "scout", "edit", "export", "soundtrack", "voice", "music", "sfx", "graphics", "hlg",
+          "turnaround", "upscale", "mask", "remove", "swap", "foley", "finish", "train"}
+# none left: every job kind of the Spark path has a native port. A kind added to the Spark later and not ported is
+# refused (unsupported) with the reason written here, never sent to WSL or to a Linux script.
+NOT_NATIVE: dict[str, str] = {}
 # the scripts the server and its modules run with bash on a Spark, and their native ports' commands
-PORTED = {"video.sh": "video", "studio.sh": "studio", "scout.sh": "scout", "image.sh": "image", "edit.sh": "edit"}
+PORTED = {"video.sh": "video", "studio.sh": "studio", "scout.sh": "scout", "image.sh": "image", "edit.sh": "edit",
+          "turnaround.sh": "turnaround"}
 _STATE: dict = {}
 
 
@@ -68,11 +65,13 @@ def paths(data: dict | None = None) -> dict[str, Path]:
     base = root()
     bolt = _path(data, "bolt_bin", base / "bolt" / "native" / "bin" / "tensorfold-native.exe")
     drama = _path(data, "drama3_bin", base / "drama3" / "bin" / "drama3-generate.exe")
+    music = _path(data, "music3_bin", base / "music3" / "bin" / "music3-generate.exe")
     return {"prefix": base, "python": _path(data, "python", base / "gpu-venv" / "Scripts" / "python.exe"),
             "comfy": base / "ComfyUI", "models": _path(data, "models", base / "models"),
             "tf_h3": _path(data, "tf_h3", base / "tf-h3" / "tf_h3.dll"),
             "bolt_bin": bolt, "bolt_lib": _path(data, "bolt_lib", bolt.parent),
             "drama3_bin": drama, "drama3_lib": _path(data, "drama3_lib", drama.parent / "tensorfold_drama3.dll"),
+            "music3_bin": music, "train_python": _path(data, "train_python", base / "train" / "venv" / "Scripts" / "python.exe"),
             "cuda_bin": _path(data, "cuda_bin", Path("C:/cuda-13.4/bin/arm64"))}
 
 
@@ -123,7 +122,8 @@ def activate() -> None:
     defaults = {"PREFIX": found["prefix"], "SPARK_MODELS": found["models"], "TF_H3_LIB": found["tf_h3"],
                 "SOUND_PYTHON": found["python"], "STUDIO_WINDOWS_CUDA": "1",
                 "BOLT_BIN": found["bolt_bin"], "BOLT_LIB": found["bolt_lib"],
-                "DRAMA3_CUDA_BIN": found["drama3_bin"], "DRAMA3_CUDA_LIB": found["drama3_lib"]}
+                "DRAMA3_CUDA_BIN": found["drama3_bin"], "DRAMA3_CUDA_LIB": found["drama3_lib"],
+                "MUSIC3_CUDA_BIN": found["music3_bin"]}
     for key, name in (("bolt_model", "BOLT_MODEL"), ("bolt_draft", "BOLT_DRAFT_MODEL"), ("drama3_model", "DRAMA3_CUDA_MODEL"),
                       ("drama3_codec", "DRAMA3_CUDA_CODEC"), ("music3_model", "MUSIC3_MODEL")):
         if data.get(key):
@@ -158,6 +158,8 @@ def translate(argv: list[str]) -> list[str]:
     if not argv:
         return argv
     head = str(argv[0]).replace("\\", "/")
+    if head.endswith("/train/venv/bin/python"):  # musubi-tuner's own venv (spark/setup-train.sh; train\venv here)
+        return [str(paths()["train_python"]), *argv[1:]]
     if head == "bash":
         script = Path(str(argv[1])) if len(argv) > 1 else Path("")
         if script.parent.name == "scripts" and script.name in PORTED:
@@ -166,6 +168,42 @@ def translate(argv: list[str]) -> list[str]:
     if head == "python3" or head.endswith("/venv/bin/python"):
         return [python(), *argv[1:]]
     return argv
+
+
+def setup_hint(parts: str) -> str:
+    """The command that installs these parts natively (scripts/setup-windows-cuda.ps1 resumes: what is there stays)."""
+
+    return f"powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-cuda.ps1 -SkipToolchain -Parts {parts}"
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether process ``pid`` runs. ``os.kill(pid, 0)`` asks that on POSIX; on Windows signal 0 is CTRL_C_EVENT, which
+    os.kill sends to a console process group (or fails with WinError 11), so Windows is asked with OpenProcess."""
+
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    import ctypes
+    from ctypes import wintypes
+
+    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    api.OpenProcess.restype = wintypes.HANDLE
+    api.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    api.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = api.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: a process is there, another user's
+    try:
+        code = wintypes.DWORD()
+        return bool(api.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        api.CloseHandle(handle)
 
 
 def comfy_argv(action: str) -> list[str]:
@@ -182,5 +220,5 @@ def status() -> dict:
     return {"active": on, "why": _STATE.get("why", why_not()) if not on else "",
             "pool_mb": config().get("cuda_pool_mb") if on else None,
             "engines": {"tf_h3": found["tf_h3"].is_file(), "bolt": found["bolt_bin"].is_file(),
-                        "drama3": found["drama3_bin"].is_file()} if on else {},
+                        "drama3": found["drama3_bin"].is_file(), "music3": found["music3_bin"].is_file()} if on else {},
             "not_native": sorted(NOT_NATIVE) if on else []}

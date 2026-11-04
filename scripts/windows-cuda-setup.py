@@ -3,6 +3,13 @@ python by scripts/setup-windows-cuda.ps1):
 
     python scripts/windows-cuda-setup.py models --models C:\\Studio\\models --parts video,image,music
     python scripts/windows-cuda-setup.py config --models C:\\Studio\\models [--bolt-model DIR --bolt-draft DIR]
+    python scripts/windows-cuda-setup.py nodes --parts workflows,foley
+    python scripts/windows-cuda-setup.py train
+
+``nodes`` puts the authors' ComfyUI node packs the Library's actions and foley run (spark/setup-workflows.sh and
+oneshot-setup-cuda.sh --sound) into ComfyUI's custom_nodes at the same pinned commits, and installs a pack's
+requirements only where they ADD packages to the GPU venv (every installed package is held at its version, as
+oneshot-setup-cuda.sh does it).
 
 ``models`` downloads what oneshot-setup-cuda.sh's ``fetch`` lines download, the same files from the same repos into the
 same folders under the model folder (a file already there, not empty, is kept). Gated repos (FLUX3-K, Stable Audio Open)
@@ -22,7 +29,7 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ImaginationStudio"
 TENSORFOLD = {"repo": "https://github.com/drowzeys/TensorFold.git", "branch": "studio-1.2.2",
-              "commit": "a545f7867cd82feab630a2d015086da602f53347"}
+              "commit": "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2"}
 # (repo, folder under the model folder, files): oneshot-setup-cuda.sh's fetch lines, part by part
 PARTS = {
     "video": [("FastVideo/FastVideo-FastH3-Comfy", "FastH3-Comfy",
@@ -49,6 +56,56 @@ PARTS = {
                 "text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors", "vae/minimax_music3_dav.safetensors"])],
     "sound": [("stabilityai/stable-audio-open-1.0", "Sound-Comfy/stable-audio-open-1.0",
                ["model.safetensors", "text_encoder/model.safetensors", "LICENSE.md"])],
+}
+# files checked against a SHA-256 (spark/setup-workflows.sh, spark/setup-swap.sh, spark/setup-train.sh: the same pins;
+# tests/test_windows_cuda.py holds the two lists in step): (repo, revision, file in it, folder under the model folder,
+# name there, sha256 or "")
+CHECKED = {
+    "workflows": [
+        ("Comfy-Org/sam3.1", "7bb8374780a725b4353ed31f3a9395c9742b5621", "checkpoints/sam3.1_multiplex_fp16.safetensors",
+         "Workflows-Comfy/checkpoints", "sam3.1_multiplex_fp16.safetensors",
+         "9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03"),
+        ("LBH-123-AI/Minimax_h3_latent_Upscaler", "main",
+         "minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
+         "Workflows-Comfy/latent_upscale_models", "minimax_h3_latent_upscaler_3d_bf16.safetensors",
+         "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6")],
+    # Character Swap on Ref2VA's int8 weights (what its memory was measured on), its LoRA, LightX2V's Turbo and SAM 3.1
+    "swap": [
+        ("Comfy-Org/MiniMax-H3", "main", "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+         "MiniMax-H3-Comfy/diffusion_models", "minimax_h3_ref2va_pruned_int8_convrot.safetensors", ""),
+        ("akatz-ai/MiniMax-H3-Character-Swap-LoRA", "d06323b7c8e70e97cdab48b78a1e05f786c8cba9", "h3_character_swap_v1.5.safetensors",
+         "MiniMax-H3-Comfy/loras", "h3_character_swap_v1.5.safetensors",
+         "8f2c3c3eba161df8d0c6099598b4730f641f5ce01e04cd16d2427cff8a35218f"),
+        ("lightx2v/Minimax-h3-Turbo", "3ec17a324ced54151364f24f8b5fb6bf7e26414f",
+         "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors", "MiniMax-H3-Comfy/loras",
+         "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+         "08cfe946033af7d27719b964b6e0a0e50c32138daabbd6ce4137e23df6bf9980"),
+        ("Comfy-Org/sam3.1", "7bb8374780a725b4353ed31f3a9395c9742b5621", "checkpoints/sam3.1_multiplex_fp16.safetensors",
+         "Workflows-Comfy/checkpoints", "sam3.1_multiplex_fp16.safetensors",
+         "9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03")],
+    # foley: kijai's MMAudio safetensors and NVIDIA's BigVGAN v2, which the 44 kHz decoder loads by folder name
+    "foley": [("Kijai/MMAudio_safetensors", "main", name, "Sound-Comfy/mmaudio", name, "") for name in (
+        "mmaudio_large_44k_v2_fp16.safetensors", "mmaudio_vae_44k_fp16.safetensors", "mmaudio_synchformer_fp16.safetensors",
+        "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors")] + [
+        ("nvidia/bigvgan_v2_44khz_128band_512x", "main", name, "Sound-Comfy/mmaudio/nvidia/bigvgan_v2_44khz_128band_512x", name, "")
+        for name in ("bigvgan_generator.pt", "config.json")],
+    # Looks -> Train a LoRA: MiniMax H3's video encoder in fp16, ostris's de-distillation adapter, the FL2VA transformer
+    "train": [
+        ("Comfy-Org/MiniMax-H3", "e5eb578a89295337b8ff433a035929ce0279e0b6", "vae/minimax_h3_video_vae_fp16.safetensors",
+         "Train-H3/vae", "minimax_h3_video_vae_fp16.safetensors",
+         "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522"),
+        ("ostris/minimax_h3_training_adapter", "a7203c31a0016c73d1e8f8df7cc119a880015621",
+         "minimax_h3_training_adapter_v2.safetensors", "Train-H3/adapters", "ostris_dd_adapter_v2.safetensors",
+         "5646c07bada64c87478d2b89b7f564bf723b2c8330d608a16c9dcbaad8d3cb58"),
+        ("Comfy-Org/MiniMax-H3", "e5eb578a89295337b8ff433a035929ce0279e0b6", "diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors",
+         "MiniMax-H3-Comfy/diffusion_models", "minimax_h3_fl2va_pruned_bf16.safetensors", "")],
+}
+# the authors' ComfyUI node packs, at the commits spark/setup-workflows.sh and oneshot-setup-cuda.sh pin
+NODE_PACKS = {
+    "workflows": [("ComfyUI-H3-ContactSheet", "https://github.com/matlowai/ComfyUI-H3-ContactSheet", "3c8c8c66e69362e5abf9cf4c4e693baddab90ca3"),
+                  ("ComfyUI-H3-Video-Upsampler", "https://github.com/dntpi/ComfyUI-H3-Video-Upsampler", "36cb612ec3df30094eeb4fec66f1528925ebba73"),
+                  ("h3-relay", "https://github.com/akatz-ai/h3-relay", "cf489b7f2472fdf33866fae36de49aea03ef464f")],
+    "foley": [("ComfyUI-MMAudio", "https://github.com/kijai/ComfyUI-MMAudio", "8eaeb72edc3aaf2059b57f2d96a1f6f689f19ae2")],
 }
 # NVIDIA's checkpoints for the Bolt brain, at the revisions app/bolt.py names (whole repos)
 BOLT = {"Nemotron-3.5-Bolt-24GB": ("nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB", "a326822af111290f2af5ac59ef4b5040347dabc4"),
@@ -106,12 +163,58 @@ def link(source: Path, target: Path) -> None:
         shutil.copy2(source, target)
 
 
+def sha256(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(16 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def checked(base: Path, rows: list) -> int:
+    """CHECKED's files into the model folder: a file already there (not empty) is kept, a new one is checked against
+    its SHA-256 before it takes its name. Returns how many did not arrive."""
+
+    from huggingface_hub import hf_hub_download
+
+    failed = 0
+    for repo, revision, name, folder, as_name, digest in rows:
+        target = base / folder / as_name
+        if target.is_file() and target.stat().st_size:
+            say(f"ok {folder}/{as_name}")
+            continue
+        say(f"downloading {repo} {name} -> {target}")
+        scratch = base / folder / ".download"
+        try:
+            got = Path(hf_hub_download(repo, name, revision=revision, local_dir=scratch))
+        except Exception as error:  # noqa: BLE001 - said, the rest goes on
+            failed += 1
+            print(f"  ! {repo} {name} did not download: {str(error).splitlines()[0][:300]}", file=sys.stderr)
+            continue
+        if digest and sha256(got) != digest:
+            got.unlink(missing_ok=True)
+            failed += 1
+            print(f"  ! {as_name}: checksum mismatch, not kept", file=sys.stderr)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(got, target)
+        shutil.rmtree(scratch, ignore_errors=True)
+    return failed
+
+
 def models(args) -> int:
     from huggingface_hub import hf_hub_download, snapshot_download
 
     base = Path(args.models)
     failed = 0
     for part in [p.strip() for p in args.parts.split(",") if p.strip()]:
+        if part in CHECKED:
+            failed += checked(base, CHECKED[part])
+            continue
+        if part == "finish":  # Tesseract is a program, not a model: scripts\\setup-windows-finish.ps1
+            continue
         if part == "bolt":
             for folder, (repo, revision) in BOLT.items():
                 target = base / folder
@@ -132,7 +235,7 @@ def models(args) -> int:
                                 str(target), str(target / "codec-v1.safetensors")], check=False)
             continue
         if part not in PARTS:
-            print(f"unknown part {part}: one of {', '.join([*PARTS, 'bolt'])}", file=sys.stderr)
+            print(f"unknown part {part}: one of {', '.join([*PARTS, *CHECKED, 'bolt', 'voice'])}", file=sys.stderr)
             return 2
         for repo, folder, files in PARTS[part]:
             for name in files:
@@ -152,6 +255,107 @@ def models(args) -> int:
                 link(sao / "model.safetensors", base / "Sound-Comfy" / "checkpoints" / "stable_audio_open_1.0.safetensors")
                 link(sao / "text_encoder" / "model.safetensors", base / "Sound-Comfy" / "text_encoders" / "stable_audio_open_t5_base.safetensors")
     return 1 if failed else 0
+
+
+def nodes(args) -> int:
+    """NODE_PACKS into ComfyUI's custom_nodes at their commits, and a pack's requirements where they only add packages."""
+
+    import subprocess
+    import tempfile
+    from importlib import metadata
+
+    custom = ROOT / "ComfyUI" / "custom_nodes"
+    changed = False
+    if not custom.is_dir():
+        print(f"no ComfyUI at {custom.parent}: run scripts\\setup-windows-comfy.ps1 first", file=sys.stderr)
+        return 1
+    for part in [p.strip() for p in args.parts.split(",") if p.strip()]:
+        if part not in NODE_PACKS:
+            print(f"unknown part {part}: one of {', '.join(NODE_PACKS)}", file=sys.stderr)
+            return 2
+        for folder, repo, commit in NODE_PACKS[part]:
+            target = custom / folder
+            head = subprocess.run(["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+            if head != commit:
+                if not (target / ".git").is_dir():
+                    subprocess.run(["git", "clone", "-q", repo, str(target)], check=True)
+                if subprocess.run(["git", "-C", str(target), "fetch", "-q", "origin", commit]).returncode:
+                    subprocess.run(["git", "-C", str(target), "fetch", "-q", "origin"], check=True)
+                subprocess.run(["git", "-C", str(target), "-c", "advice.detachedHead=false", "checkout", "-q", commit], check=True)
+                changed = True
+            say(f"ok {folder} @ {commit[:8]}")
+            wanted = target / "requirements.txt"
+            if not wanted.is_file():
+                continue
+            # every package already in the GPU venv held at its version: a pack only adds what it lacks
+            held = sorted({f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions() if d.metadata["Name"]})
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as hold:
+                hold.write("\n".join(held) + "\n")
+            try:
+                done = subprocess.run([sys.executable, "-X", "utf8", "-m", "pip", "install", "-q", "-r", str(wanted),
+                                       "--constraint", hold.name])
+            finally:
+                os.unlink(hold.name)
+            if done.returncode:
+                print(f"  ! {folder} needs a package at a version other than the one installed: not changed", file=sys.stderr)
+                return 1
+            say(f"ok {folder}'s requirements (only added, nothing moved)")
+    if changed:  # a running ComfyUI read its nodes when it started: stopped, the next render starts it with them
+        subprocess.run([sys.executable, "-X", "utf8", str(Path(__file__).resolve().parents[1] / "spark" / "comfy_win.py"), "stop"],
+                       check=False)
+    return 0
+
+
+def train_env(args) -> int:
+    """Looks -> Train a LoRA natively: kohya-ss's musubi-tuner at the commit app/train.py pins, in a venv of its own
+    (train\\venv: Python 3.13 ARM64, NVIDIA's PyTorch for CUDA 13.4 as the GPU venv has it, musubi-tuner's pinned
+    requirements; its pyproject leaves opencv out on Windows on Arm and uses its own Pillow fallback), and the optimizer
+    that runs here: bitsandbytes' 8-bit AdamW when it runs a step on this GPU, else the plain AdamW (spark/setup-train.sh's
+    test)."""
+
+    import subprocess
+
+    import re
+    from types import SimpleNamespace
+
+    pack = Path(__file__).resolve().parents[1]
+    # app/train.py's pin, read from the file (it imports the app's web framework, which this venv does not have)
+    pinned = re.search(r'^MUSUBI_COMMIT = "([0-9a-f]{40})"', (pack / "app" / "train.py").read_text(encoding="utf-8"), re.M)
+    train = SimpleNamespace(MUSUBI_COMMIT=pinned.group(1))
+
+    root = ROOT / "train"
+    musubi, venv = root / "musubi-tuner", root / "venv"
+    python = venv / "Scripts" / "python.exe"
+    root.mkdir(parents=True, exist_ok=True)
+    head = subprocess.run(["git", "-C", str(musubi), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if head != train.MUSUBI_COMMIT:
+        if not (musubi / ".git").is_dir():
+            subprocess.run(["git", "clone", "-q", "https://github.com/kohya-ss/musubi-tuner", str(musubi)], check=True)
+        if subprocess.run(["git", "-C", str(musubi), "fetch", "-q", "origin", train.MUSUBI_COMMIT]).returncode:
+            subprocess.run(["git", "-C", str(musubi), "fetch", "-q", "origin"], check=True)
+        subprocess.run(["git", "-C", str(musubi), "-c", "advice.detachedHead=false", "checkout", "-q", train.MUSUBI_COMMIT], check=True)
+    say(f"ok musubi-tuner @ {train.MUSUBI_COMMIT[:7]} (Apache License 2.0)")
+    if not python.is_file():
+        subprocess.run(["py", "-V:3.13-arm64", "-m", "venv", str(venv)], check=True)
+    pip = [str(python), "-X", "utf8", "-m", "pip", "install", "-q"]
+    done = subprocess.run([str(python), "-c", "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)"], capture_output=True)
+    if done.returncode:
+        subprocess.run(pip + ["-r", str(pack / "app" / "requirements-windows-gpu.txt")], check=True)
+    subprocess.run(pip + ["-e", str(musubi)], check=True)
+    subprocess.run([str(python), "-c", "import musubi_tuner, accelerate, diffusers, transformers, av"], check=True)
+    if not (venv / "Scripts" / "accelerate.exe").is_file():
+        print(f"  ! no accelerate.exe in {venv}", file=sys.stderr)
+        return 1
+    test = ("import torch, bitsandbytes as bnb\n"
+            "p = torch.nn.Parameter(torch.ones(4096, device='cuda'))\n"
+            "opt = bnb.optim.AdamW8bit([p], lr=1e-3)\n"
+            "p.grad = torch.ones_like(p)\n"
+            "opt.step(); torch.cuda.synchronize()\n"
+            "assert torch.isfinite(p).all()\n")
+    optimizer = "adamw8bit" if subprocess.run([str(python), "-c", test], capture_output=True).returncode == 0 else "adamw"
+    (root / "optimizer").write_text(optimizer + "\n", encoding="utf-8")
+    say(f"ok optimizer: {optimizer}" + ("" if optimizer == "adamw8bit" else " (bitsandbytes does not run a step on this GPU)"))
+    return 0
 
 
 def pool_mb() -> tuple[int, str]:
@@ -178,6 +382,7 @@ def config(args) -> int:
               "python": sys.executable, "tf_h3": str(ROOT / "tf-h3" / "tf_h3.dll"),
               "bolt_bin": str(ROOT / "bolt" / "native" / "bin" / "tensorfold-native.exe"),
               "drama3_bin": str(ROOT / "drama3" / "bin" / "drama3-generate.exe"),
+              "music3_bin": str(ROOT / "music3" / "bin" / "music3-generate.exe"),
               "cuda_bin": str(Path(args.cuda) / "bin" / "arm64"), "tensorfold": TENSORFOLD}
     for key in ("bolt_model", "bolt_draft"):
         value = getattr(args, key)
@@ -211,6 +416,11 @@ def main(argv: list[str] | None = None) -> int:
     two.add_argument("--bolt-draft", dest="bolt_draft", default="")
     two.add_argument("--drama-model", dest="drama_model", default="")
     two.set_defaults(run=config)
+    three = sub.add_parser("nodes")
+    three.add_argument("--parts", default="workflows")
+    three.set_defaults(run=nodes)
+    four = sub.add_parser("train")
+    four.set_defaults(run=train_env)
     args = parser.parse_args(argv)
     return args.run(args)
 

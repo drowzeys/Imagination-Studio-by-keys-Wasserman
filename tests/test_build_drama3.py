@@ -16,7 +16,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "spark" / "build-drama3.sh"
-COMMIT = "81173e6c612739a3427844fd8131cf4905e0a9c4"
+COMMIT = "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2"  # studio-1.2.2: the fish_drama3 family
+SAME = "81173e6c612739a3427844fd8131cf4905e0a9c4"    # the drama3-cuda build the family came from: the same engine
 
 
 def stub(folder: Path, name: str, body: str) -> None:
@@ -99,28 +100,39 @@ def test_the_build_target_follows_the_gpu(box):
     assert "sm_${SM//,/, sm_}" in echo and "sm_121" not in echo
 
 
-def test_the_carrier_engine_is_taken_when_its_commit_and_checksums_match(box):
-    carrier(box)
+@pytest.mark.parametrize("commit, said", [(COMMIT, "studio-1.2.2 fish_drama3 1c8bdbfd (prebuilt"),
+                                          (SAME, "drama3-cuda 81173e6c (prebuilt")])
+def test_the_carrier_engine_is_taken_when_its_commit_and_checksums_match(box, commit, said):
+    """The pinned commit's engine, or the drama3-cuda build the family came from (the same engine: kept, not rebuilt)."""
+
+    carrier(box, commit=commit)
     done = run(box)
     assert done.returncode == 0, done.stderr
     out = box["prefix"] / "drama3"
     assert "checksums verified" in done.stdout
     assert (out / "bin/drama3-generate").read_bytes() == b"\x7fELF engine" and os.access(out / "bin/drama3-generate", os.X_OK)
     assert (out / "lib/libtensorfold_drama3.so").read_bytes() == b"\x7fELF library"
-    assert (out / "commit").read_text().strip() == COMMIT and "drama3-cuda 81173e6c (prebuilt" in (out / "BUILD").read_text()
+    assert (out / "commit").read_text().strip() == commit and said in (out / "BUILD").read_text()
     assert not (box["prefix"] / "drama3.fetch").exists()
     # a second run finds it installed and asks Docker nothing
     log = box["tmp"] / "docker.log"
     log.unlink()
     again = run(box)
-    assert again.returncode == 0 and "already built at 81173e6c" in again.stdout and not log.exists()
+    assert again.returncode == 0 and f"already built at {commit[:8]}" in again.stdout and not log.exists()
+
+
+def test_a_source_build_is_the_fish_drama3_family_of_studio_1_2_2():
+    script = SCRIPT.read_text()
+    assert "build fish-drama3-generate fish-drama3-lib" in script and "build drama3-generate drama3-lib" not in script
+    assert "zig-out/fish-drama3/bin/drama3-generate" in script and "zig-out/fish-drama3/lib/libtensorfold_drama3.so" in script
+    assert f'DRAMA3_COMMIT="${{DRAMA3_COMMIT:-{COMMIT}}}"' in script
 
 
 @pytest.mark.parametrize("bad", ["tampered", "another commit"])
 def test_a_carrier_engine_that_is_not_the_pinned_one_is_not_used(box, bad):
     carrier(box, commit="0" * 40 if bad == "another commit" else COMMIT, tamper=bad == "tampered")
     done = run(box)  # then the source build, which needs nvcc: none here
-    assert done.returncode == 1 and "holds no drama3 engine at 81173e6c" in done.stdout and "no nvcc" in done.stderr
+    assert done.returncode == 1 and "holds no drama3 engine at 1c8bdbfd" in done.stdout and "no nvcc" in done.stderr
     assert not (box["prefix"] / "drama3/bin/drama3-generate").exists()
     assert not (box["prefix"] / "drama3.fetch").exists()
 
@@ -141,7 +153,7 @@ def test_an_engine_built_by_hand_at_the_commit_is_kept(box):
     (out / "BUILD").write_text("TensorFold drama3-cuda 81173e6c (built 2026-10-15 15:38:26 from ~/zig-port/tf-drama3)\n")
     done = run(box)
     assert done.returncode == 0 and "already built" in done.stdout
-    assert (out / "commit").read_text().strip() == COMMIT
+    assert (out / "commit").read_text().strip() == SAME
     # one at another commit is not
     (out / "commit").unlink()
     (out / "BUILD").write_text("TensorFold drama3-cuda 12345678\n")

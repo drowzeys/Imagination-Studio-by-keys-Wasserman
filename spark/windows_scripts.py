@@ -1,5 +1,5 @@
 """The Studio's render scripts on native Windows (the CUDA tier, app/windows_cuda.py): scripts/video.sh, studio.sh,
-scout.sh, image.sh and edit.sh as a DGX Spark runs them (their spark/ branches), in Python, with the same arguments
+scout.sh, image.sh, edit.sh and turnaround.sh as a DGX Spark runs them (their spark/ branches), in Python, with the same arguments
 and environment, so the app's jobs build the same commands on both:
 
     python spark/windows_scripts.py video "a prompt" out.mp4          # scripts/video.sh -> spark/video.sh
@@ -7,6 +7,7 @@ and environment, so the app's jobs build the same commands on both:
     python spark/windows_scripts.py scout "the picture" 4 scouts/x
     python spark/windows_scripts.py image "a prompt" out.png           # scripts/image.sh -> spark/image.sh
     python spark/windows_scripts.py edit photo.png "make it night" out.png
+    python spark/windows_scripts.py turnaround subject.png folder/turn    # scripts/turnaround.sh (its Linux branch)
 
 Each one checks what its script checks, then runs spark_generate.py (or spark_edit.py) with this same python (the GPU
 venv's), which starts the studio's ComfyUI through spark/comfy_win.py. Keep the checks and the words in step with the
@@ -300,12 +301,39 @@ def edit(argv: list[str]) -> None:
     generate("spark_edit.py", args)
 
 
-COMMANDS = {"video": video, "studio": studio, "scout": scout, "image": image, "edit": edit}
+TURN_PROMPT = ("the camera orbits horizontally around the subject of <Picture 1> at eye level, ninety degrees clockwise, the "
+               "subject stays upright on the ground")
+
+
+def turnaround(argv: list[str]) -> None:
+    """scripts/turnaround.sh's Linux branch: five views of one picture's subject with the Turnaround LoRA on MiniMax H3
+    Ref2VA, through MATLOWAI's contact-sheet nodes (spark_workflows.py turnaround)."""
+
+    ref = argv[0] if argv else ""
+    out = argv[1] if len(argv) > 1 else "outputs/turn"
+    if not ref or not Path(ref).is_file() or not Path(ref).stat().st_size:
+        fail(f"usage: turnaround.sh PICTURE OUT_PREFIX (no picture at '{ref}')")
+    size, strength, steps = env("SIZE", "1024"), env("STRENGTH", "1.0"), env("STEPS", "28")
+    prompt = env("PROMPT", TURN_PROMPT)
+    if size not in ("512", "1024", "2048"):
+        fail(f"SIZE is 512, 1024 or 2048, got {size}")
+    if "<Picture 1>" not in prompt:
+        fail("the prompt names the picture as <Picture 1>")
+    home = env("STUDIO_HOME") or subprocess.run([sys.executable, str(APP / "studio_home.py")], capture_output=True,
+                                                text=True).stdout.strip()
+    lora = env("TURNAROUND_LORA", str(Path(home) / "loras" / "turnaround.safetensors"))
+    if not Path(lora).is_file() or not Path(lora).stat().st_size:
+        fail(f"no Turnaround LoRA at {lora}: install it in the LoRA hub")
+    generate("spark_workflows.py", ["turnaround", "--ref", ref, "--lora", f"{lora}:{strength}", "--size", size,
+                                    "--seed", env("SEED", "0"), "--steps", steps, "--prompt", prompt, "-o", out])
+
+
+COMMANDS = {"video": video, "studio": studio, "scout": scout, "image": image, "edit": edit, "turnaround": turnaround}
 
 
 def main(argv: list[str]) -> int:
     if not argv or argv[0] not in COMMANDS:
-        print("usage: windows_scripts.py video|studio|scout|image|edit ARGS...", file=sys.stderr)
+        print("usage: windows_scripts.py video|studio|scout|image|edit|turnaround ARGS...", file=sys.stderr)
         return 2
     if not Path(sys.executable).is_file() or not (PREFIX / "ComfyUI" / "main.py").is_file():
         print(f"run oneshot-setup-rtx-spark-n1x.ps1 -Native first: no environment at {PREFIX}", file=sys.stderr)

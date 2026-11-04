@@ -65,6 +65,34 @@ else:
     MODELS = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
 
 
+def comfy_pid() -> str:
+    """Which ComfyUI process serves now ("" for none): a server an action's node pack patched is told apart from a new
+    one by it. On Windows spark/comfy_win.py records the process that owns the server; elsewhere pgrep finds it."""
+
+    port = URL.rsplit(":", 1)[-1]
+    if WINDOWS:
+        stem = "comfy" if port == "8190" else f"comfy-{port}"
+        try:
+            return str(json.loads((PREFIX / f"{stem}-win.json").read_text(encoding="utf-8"))["pid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return ""
+    return subprocess.run(["pgrep", "-f", f"[m]ain.py --listen 127.0.0.1 --port {port}"], capture_output=True, text=True).stdout.split("\n")[0].strip()
+
+
+def link_file(source: Path, link: Path) -> None:
+    """``link`` names ``source``: a symlink, on Windows a hard link (a symlink needs a privilege a person may not have)
+    or a copy across drives. Read right away by the caller: a hard link keeps the file as it is now."""
+
+    link.unlink(missing_ok=True)
+    if WINDOWS:
+        try:
+            os.link(source, link)
+        except OSError:
+            shutil.copyfile(source, link)
+    else:
+        link.symlink_to(source)
+
+
 def side(ext: str) -> Path:
     """This process's ComfyUI log or loaded-model mark. Port 8190 keeps comfy.log and comfy.kind.
     Read when used: a test can point PREFIX at another folder after this module is imported."""

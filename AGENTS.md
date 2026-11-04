@@ -238,7 +238,10 @@ Rules:
   (`comfy_win.py`: a job object, the recorded id and creation time, a stop file), never by name or port, and stands
   under `windows_memory.pressure`; it leaves the render's job object (breakaway) so it stays warm. Off Windows nothing
   of it runs (`active()` is False without a read). Drama 3 is wired only where `drama3-generate.exe` and
-  `tensorfold_drama3.dll` exist. The suite runs the preview tier (`STUDIO_WINDOWS_TIER=preview` in conftest);
+  `tensorfold_drama3.dll` exist, MiniMax Music 3's engine where `music3-generate.exe` does. Every Spark job kind has a
+  port (`NOT_NATIVE` is empty); the installer's parts (`windows-cuda-setup.py`: `CHECKED`, `NODE_PACKS`) carry the
+  Spark scripts' own pins and SHA-256s, which `tests/test_windows_cuda.py` holds in step. Never `os.kill(pid, 0)` on
+  Windows (signal 0 is CTRL_C_EVENT there): `windows_cuda.pid_alive`. The suite runs the preview tier (`STUDIO_WINDOWS_TIER=preview` in conftest);
   `tests/test_windows_cuda.py` drives the native one.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard

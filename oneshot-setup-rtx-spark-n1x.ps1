@@ -21,7 +21,9 @@
   -Native (docs/rtx-spark-n1x.md, "Native Windows"): instead of steps 2 and 3, the Studio is cloned on Windows
   (-StudioDir) and scripts\setup-windows-cuda.ps1 installs the build tools (winget, NVIDIA's CUDA 13.4 for Windows on
   Arm), the app and GPU environments, the pinned ComfyUI, TensorFold's engines built from source (the studio-1.2.2
-  branch: tf_h3.dll, and tensorfold-native.exe + bolt.dll for the Bolt brain) and the models (-NativeParts); the
+  branch: tf_h3.dll, tensorfold-native.exe + bolt.dll for the Bolt brain, drama3-generate.exe for Fish Audio Drama 3 and
+  music3-generate.exe for MiniMax Music 3), the models and what each part needs (-NativeParts: the Library's actions'
+  and foley's node packs, Character Swap's files, Tesseract for Finish; add train for musubi-tuner and its 46 GB); the
   launchers then start the Studio natively (scripts\app.ps1) on the native CUDA tier.
 
 .EXAMPLE
@@ -55,7 +57,7 @@ param(
   [switch]$Native,                   # the native Windows CUDA tier instead of WSL (scripts\setup-windows-cuda.ps1)
   [string]$StudioDir = "$env:USERPROFILE\Imagination-Studio",   # -Native: the Studio's Windows clone
   [string]$Models = "",              # -Native: the model folder (default %LOCALAPPDATA%\ImaginationStudio\models)
-  [string]$NativeParts = "video,image,music,flux3,sound",        # -Native: what windows-cuda-setup.py downloads
+  [string]$NativeParts = "video,image,music,flux3,sound,swap,workflows,foley,finish",  # -Native: the parts (add train for Looks -> Train a LoRA, 46 GB)
   [switch]$NoBolt,                   # -Native: no Bolt brain (its engine build and NVIDIA's 25 GB of checkpoints)
   [switch]$NoVoice                   # -Native: no Fish Audio Drama 3 (its engine build and the 70 GB checkpoint)
 )

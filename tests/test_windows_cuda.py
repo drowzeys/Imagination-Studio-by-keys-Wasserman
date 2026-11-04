@@ -80,16 +80,40 @@ def test_the_spark_commands_become_their_native_ports(monkeypatch):
     assert windows_cuda.translate(["python3", "app/hlg.py", "run"]) == [r"C:\venv\python.exe", "app/hlg.py", "run"]
     assert windows_cuda.translate(["/home/spark/.local/opt/tensorfold-studio/venv/bin/python", "s.py"])[0] == r"C:\venv\python.exe"
     assert windows_cuda.translate([r"C:\ffmpeg.exe", "-i"]) == [r"C:\ffmpeg.exe", "-i"]
-    with pytest.raises(RuntimeError, match="turnaround.sh has no native Windows port"):
-        windows_cuda.translate(["bash", str(ROOT / "scripts/turnaround.sh"), "a.png"])
+    out = windows_cuda.translate(["bash", str(ROOT / "scripts/turnaround.sh"), "a.png", "folder/turn"])
+    assert out[-4:] == [str(ROOT / "spark/windows_scripts.py"), "turnaround", "a.png", "folder/turn"]
+    with pytest.raises(RuntimeError, match="fast.sh has no native Windows port"):
+        windows_cuda.translate(["bash", str(ROOT / "scripts/fast.sh"), "a.png"])
+    # musubi-tuner's own venv (spark/train_lora.py's commands) is the tier's train\venv
+    trained = windows_cuda.translate(["/home/spark/.local/opt/tensorfold-studio/train/venv/bin/python", "x.py"])
+    assert trained[0].replace("\\", "/").endswith("train/venv/Scripts/python.exe") and trained[1:] == ["x.py"]
 
 
-def test_what_is_not_native_is_refused_with_its_reason():
-    for kind in ("video", "studio", "long", "scout", "edit", "music", "sfx", "voice", "export", "graphics"):
-        assert windows_cuda.unsupported(kind) == ""
-    for kind in ("turnaround", "upscale", "mask", "remove", "swap", "train", "finish", "foley"):
-        said = windows_cuda.unsupported(kind)
-        assert said.startswith("Not available on native Windows yet") and "WSL" in said
+def test_every_spark_job_kind_runs_natively_and_an_unported_one_is_refused():
+    for kind in ("video", "studio", "long", "scout", "edit", "music", "sfx", "voice", "export", "graphics",
+                 "turnaround", "upscale", "mask", "remove", "swap", "train", "finish", "foley"):
+        assert windows_cuda.unsupported(kind) == "", kind
+    said = windows_cuda.unsupported("something-new")
+    assert said.startswith("Not available on native Windows yet") and "WSL" in said
+    assert windows_cuda.NOT_NATIVE == {}
+
+
+def test_turnaround_keeps_turnaround_shs_arguments(ran, monkeypatch, tmp_path):
+    picture, lora = tmp_path / "subject.png", tmp_path / "turnaround.safetensors"
+    picture.write_bytes(b"png")
+    lora.write_bytes(b"lora")
+    for name, value in (("SIZE", "512"), ("STRENGTH", "0.7"), ("SEED", "3"), ("TURNAROUND_LORA", str(lora))):
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("PROMPT", raising=False)
+    windows_scripts.turnaround([str(picture), "out/turn"])
+    script, args, _ = ran[0]
+    assert script == "spark_workflows.py" and args[:3] == ["turnaround", "--ref", str(picture)]
+    assert args[args.index("--lora") + 1] == f"{lora}:0.7" and args[args.index("--size") + 1] == "512"
+    assert args[args.index("--steps") + 1] == "28" and args[-2:] == ["-o", "out/turn"]
+    assert "<Picture 1>" in args[args.index("--prompt") + 1]
+    monkeypatch.setenv("SIZE", "640")
+    with pytest.raises(SystemExit):
+        windows_scripts.turnaround([str(picture), "out/turn"])
 
 
 @pytest.fixture
@@ -179,13 +203,55 @@ def test_the_memory_guard_reads_windows_memory_only_on_the_native_tier(monkeypat
 
 def test_the_installer_builds_from_the_pinned_branch_and_records_the_tier():
     text = (ROOT / "scripts/setup-windows-cuda.ps1").read_text()
-    for words in ("zig build tf-h3-int8", "zig build native bolt", "a545f7867cd82feab630a2d015086da602f53347", "fish-drama3-generate", "windows-arm64",
-                  "sha256", "vcvarsall", "setup-windows-comfy.ps1", "setup-windows-gpu.ps1", "windows-cuda-setup.py"):
+    for words in ("zig build tf-h3-int8", "zig build native bolt", "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2", "fish-drama3-generate",
+                  "zig build music3-generate", "windows-arm64", "sha256", "vcvarsall", "setup-windows-comfy.ps1",
+                  "setup-windows-gpu.ps1", "windows-cuda-setup.py", "setup-windows-finish.ps1"):
         assert words in text, words
     one = (ROOT / "oneshot-setup-rtx-spark-n1x.ps1").read_text()
     assert "-Native" in one and "setup-windows-cuda.ps1" in one
     helper = (ROOT / "scripts/windows-cuda-setup.py").read_text()
     assert "cuda_pool_mb" in helper and "extra_model_paths.yaml" in helper
+    assert "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2" in helper
+
+
+def _setup_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("windows_cuda_setup", ROOT / "scripts/windows-cuda-setup.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_native_installer_pins_what_the_spark_scripts_pin():
+    """windows-cuda-setup.py's node packs, files and checksums are the Spark's (setup-workflows.sh, setup-swap.sh,
+    setup-train.sh, oneshot-setup-cuda.sh --sound): the same commits and the same SHA-256s, never a second opinion."""
+
+    setup = _setup_module()
+    shell = "".join((ROOT / one).read_text() for one in ("spark/setup-workflows.sh", "spark/setup-swap.sh", "spark/setup-train.sh",
+                                                          "oneshot-setup-cuda.sh"))
+    for packs in setup.NODE_PACKS.values():
+        for folder, repo, commit in packs:
+            assert repo in shell and commit in shell, folder
+    for rows in setup.CHECKED.values():
+        for repo, revision, name, folder, as_name, digest in rows:
+            assert repo in shell and name.rsplit("/", 1)[-1] in shell, name
+            assert not digest or digest in shell, name
+            assert revision == "main" or revision in shell, name
+    train = (ROOT / "app/train.py").read_text()
+    assert all(one in train for one in ("Train-H3/vae/minimax_h3_video_vae_fp16.safetensors", "Train-H3/adapters/ostris_dd_adapter_v2.safetensors"))
+
+
+def test_the_finish_setup_pins_the_releases_finish_py_names():
+    text = (ROOT / "scripts/setup-windows-finish.ps1").read_text()
+    sys.path.insert(0, str(ROOT / "app"))
+    import finish
+
+    assert f'$TsrctVersion = "{finish.TSRCT_VERSION}"' in text and f'$ConvVersion = "{finish.CONVERTER_VERSION}"' in text
+    assert "windows-x86_64" in text and "CHECKSUMS.sha256" in text and "manifest.json" in text
+    linux = (ROOT / "scripts/setup-finish.sh").read_text()
+    for digest in ("498efd461f6ddfcb7a111bf9a565709d2085d48201d501ead960d93e84ffbb88", "73894e0448cae90a92b6c2f8732b7bb9acb7b94c418bff559dad4a18e1de9659"):
+        assert digest in text and digest in linux
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the job object's flags are Windows'")

@@ -69,9 +69,13 @@ PATCHED = sg.PREFIX / "comfy.patched"
 PACK = {"upscale": "upsampler", "remove": "relay"}
 
 
+# what installs the actions' node packs and models: spark/setup-workflows.sh, natively on Windows the CUDA tier's setup
+SETUP = ("powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-cuda.ps1 -SkipToolchain -Parts workflows"
+         if sg.WINDOWS else "bash spark/setup-workflows.sh")
+
+
 def comfy_pid() -> str:
-    port = sg.URL.rsplit(":", 1)[-1]
-    return subprocess.run(["pgrep", "-f", f"[m]ain.py --listen 127.0.0.1 --port {port}"], capture_output=True, text=True).stdout.split("\n")[0].strip()
+    return sg.comfy_pid()
 
 
 def server(action: str) -> None:
@@ -92,7 +96,7 @@ def server(action: str) -> None:
                 break
             time.sleep(1)
         time.sleep(5)
-    if not sg.MAC:
+    if not sg.MAC and not sg.WINDOWS:  # Windows has no per-file page-cache release (posix_fadvise)
         # the actions load 64 to 75 GB at once (MiniMax H3's Ref2VA transformer and text encoder): the model files' page
         # cache is given back first, so the load lands in free memory instead of the kernel reclaiming cache while it
         # streams in. That reclaim, on a head with 57 GB of cache and Bolt's weights read once, made the memory floor
@@ -103,10 +107,10 @@ def server(action: str) -> None:
     have = sg.call("/object_info")
     missing = [n for n in NODES[action] if n not in have]
     if missing:
-        sys.exit(f"ComfyUI has no node {', '.join(missing)}: run `bash {'scripts/setup-comfy.sh' if sg.MAC else 'spark/setup-workflows.sh'}`, "
-                 f"then `bash {'mac' if sg.MAC else 'spark'}/comfy.sh stop`")
-    if ref2va() is None:
-        sys.exit("MiniMax H3 Ref2VA is not installed: bash oneshot-setup-spark.sh --ref2va")
+        sys.exit(f"ComfyUI has no node {', '.join(missing)}: run `{'bash scripts/setup-comfy.sh' if sg.MAC else SETUP}`, "
+                 f"then `{'bash mac/comfy.sh stop' if sg.MAC else 'python spark/comfy_win.py stop' if sg.WINDOWS else 'bash spark/comfy.sh stop'}`")
+    if action != "mask" and ref2va() is None:  # finding a person is SAM 3.1's alone
+        sys.exit("MiniMax H3 Ref2VA is not installed: " + (SETUP.replace("workflows", "swap") if sg.WINDOWS else "bash oneshot-setup-spark.sh --ref2va"))
     if action in PACK:
         PATCHED.write_text(f"{PACK[action]} {comfy_pid()}")
 
@@ -125,7 +129,9 @@ def lora_name(spec: str) -> tuple[str, float]:
     if not source.is_file():
         sys.exit(f"no LoRA at {path}")
     link = sg.MODELS / "loras" / f"hub_{source.name}"
-    if not link.exists() or link.resolve() != source:
+    if sg.WINDOWS:  # a hard link (or a copy): a symlink needs a privilege a person may not have
+        sg.link_lora(source, link)
+    elif not link.exists() or link.resolve() != source:
         link.parent.mkdir(parents=True, exist_ok=True)
         link.unlink(missing_ok=True)
         link.symlink_to(source)
@@ -283,7 +289,7 @@ def upscale(args) -> None:
         sys.exit("--megapixels is between 0.1 and 8")
     server("upscale")
     if UPSCALER not in listed("H3VideoUpsampler", "upscale_model"):
-        sys.exit(f"{UPSCALER} is not installed: bash spark/setup-workflows.sh")
+        sys.exit(f"{UPSCALER} is not installed: {SETUP}")
     name, strength = lora_name(args.lora)
     w = {}
     loaders(w)
@@ -692,7 +698,7 @@ def find_person(args, scratch: Path) -> tuple[str, dict, Path, Path]:
 def mask(args) -> None:
     server("mask")
     if SAM not in listed("CheckpointLoaderSimple", "ckpt_name"):
-        sys.exit(f"{SAM} is not installed: bash spark/setup-workflows.sh")
+        sys.exit(f"{SAM} is not installed: {SETUP}")
     base = Path(args.output)
     base.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -730,7 +736,7 @@ def remove(args) -> None:
         sys.exit("--window is 22, 39, 56, ... (17n + 5)")
     server("remove")
     if SAM not in listed("CheckpointLoaderSimple", "ckpt_name"):
-        sys.exit(f"{SAM} is not installed: bash spark/setup-workflows.sh")
+        sys.exit(f"{SAM} is not installed: {SETUP}")
     lora = lora_name(args.lora)
     target = Path(args.output)
     target.parent.mkdir(parents=True, exist_ok=True)

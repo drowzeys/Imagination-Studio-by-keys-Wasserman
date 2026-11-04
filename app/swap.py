@@ -24,6 +24,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+import windows_cuda  # noqa: E402  (the native Windows CUDA tier, beside this file)
+
 # the windows a part is made in: spark/swap_plan.py, shared with the script that renders it
 _spec = importlib.util.spec_from_file_location("swap_plan", Path(__file__).resolve().parent.parent / "spark" / "swap_plan.py")
 plan = importlib.util.module_from_spec(_spec)
@@ -125,7 +127,9 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds,
 
         if not spark:
             return "Character Swap runs on an NVIDIA GPU (a DGX Spark, an RTX Pro 6000) with MiniMax H3 Ref2VA, not on a Mac."
-        install = INSTALL_CARD if on_card() else INSTALL  # the command this machine's installer takes
+        native = windows_cuda.active()
+        # the command this machine's installer takes
+        install = windows_cuda.setup_hint("swap") if native else INSTALL_CARD if on_card() else INSTALL
         if not any((models() / one).is_file() for one in REF2VA):
             return f"MiniMax H3 Ref2VA is not installed: run `{install}`."
         if not (models() / SAM).is_file():
@@ -134,7 +138,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds,
             return f"LightX2V's 8-step Turbo LoRA is not installed: run `{install}`."
         if swap_lora() is None:
             return f"Akatz Labs' Character Swap LoRA (version 1.5) is not installed: run `{install}`."
-        if not (prefix / "venv/bin/python").exists() or not (prefix / "ComfyUI/main.py").is_file():
+        engine = Path(windows_cuda.python()) if native else prefix / "venv/bin/python"
+        if not engine.exists() or not (prefix / "ComfyUI/main.py").is_file():
             return f"The studio's engine is not installed here: run `{install.rsplit(' ', 1)[0]}`."
         return ""
 
