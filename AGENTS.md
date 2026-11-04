@@ -223,6 +223,10 @@ Rules:
   nvidia-smi names no process, so `device_room_mb` is the whole card; `card_pool` is not held to WSL's ~30 GB RAM) and
   `guard_mode()` is "warn": `_relaxable` turns a check's refusal into `warning` (job tried, fails on a real OOM). A DGX
   Spark stays "strict" (an OOM there can take the machine down); never make warn the default where RAM is the pool.
+- RTX Spark N1X launcher (`oneshot-setup-rtx-spark-n1x.ps1`, `scripts/n1x-studio.sh`, `docs/rtx-spark-n1x.md`): WSL
+  shuts Ubuntu down soon after its last Windows `wsl.exe` closes, so the Studio lives in the Start launcher's window; a
+  Studio started over SSH dies with the session. Stop by `[a]pp/...` patterns (a pkill whose own command line holds the
+  path kills its shell). The taskbar pin is Windows 11's taskbar layout policy (append); never claim a pin API.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers

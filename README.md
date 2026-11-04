@@ -42,14 +42,21 @@ RAM: [docs/rtx-5090.md](docs/rtx-5090.md).
 
 ### NVIDIA RTX Spark N1X (Windows on Arm laptops)
 
-The N1X is sm_121 like a DGX Spark's GB10, so the Studio runs the DGX Spark recipe inside the laptop's WSL2 Ubuntu:
-`bash oneshot-setup-rtx-spark-n1x.sh` (it sets `STUDIO_N1X=1` and runs `oneshot-setup-spark.sh`). The firmware gives the
-GPU a fixed share of the memory (96 of 128 GB on an HP OmniBook X) and leaves WSL about 30 GB, and WSL's nvidia-smi
-names no process's memory, so the memory guard takes the GPU's carve-out as the pool and **flags** a job its estimate
-says may not fit instead of refusing it (`STUDIO_MEMORY_GUARD=warn`; `strict` refuses as on a DGX Spark). A flagged job
-that really runs out of memory fails with ComfyUI's error. Render plugged in and in the maker's performance mode: on an
-HP OmniBook X 14 an 864x480, 124-frame clip took 7.0 s a pass in HP Performance mode against 9.0 s in Balanced
-(a GB10: 6.6 s), byte for byte the DGX Spark's clip.
+The N1X is sm_121 like a DGX Spark's GB10, so the **whole Studio** runs the DGX Spark recipe inside the laptop's WSL2
+Ubuntu, and its clips are byte for byte the DGX Spark's. One shot, in an administrator PowerShell on the laptop:
+
+```powershell
+irm https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile $env:TEMP\n1x.ps1
+powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1
+```
+
+It sets up WSL2 and Ubuntu, installs every part (`oneshot-setup-rtx-spark-n1x.sh --all`, which sets `STUDIO_N1X=1`),
+makes an **Imagination Studio** launcher with its icon **pinned to the taskbar** (click to start; close its window or
+run Stop to stop), and keeps the laptop awake for renders (`-StartAtLogon`, `-EnableSsh` optional). The GPU's fixed
+carve-out (96 of 128 GB on an HP OmniBook X) is the memory pool, and a job the estimate says may not fit is **flagged**
+and tried rather than refused (`STUDIO_MEMORY_GUARD=warn`; `strict` refuses as on a DGX Spark). In the maker's
+performance mode, plugged in, a pass takes 7.0 s against a GB10's 6.6 s (9.0 s in the default mode):
+[docs/rtx-spark-n1x.md](docs/rtx-spark-n1x.md), with the measurements.
 
 `oneshot-setup.sh` on Linux reads the first GPU. Use the command below. Set the four variables for the disk and
 the card. `/data/studio` is an example path. No flag is the core (125 GB). Flags are listed under
