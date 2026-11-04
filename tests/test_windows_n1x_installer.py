@@ -26,8 +26,9 @@ def test_the_wsl_side_starts_with_the_n1x_guard_and_stops_without_killing_itself
     text = (ROOT / "scripts/n1x-studio.sh").read_text()
     assert "export STUDIO_N1X=1" in text and "scripts/app.sh" in text and "comfy.sh\" stop" in text
     assert '"[a]pp/server.py"' in text and '"[a]pp/launcher.py"' in text  # its own command line never matches
-    done = subprocess.run(["bash", "-n", str(ROOT / "scripts/n1x-studio.sh")], capture_output=True, text=True)
-    assert done.returncode == 0, done.stderr
+    if sys.platform != "win32":  # on Windows "bash" is WSL's launcher, not a shell this test can use
+        done = subprocess.run(["bash", "-n", str(ROOT / "scripts/n1x-studio.sh")], capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
 
 
 @pytest.mark.skipif(sys.platform != "win32" or not shutil.which("powershell"), reason="PowerShell's parser is on Windows")
