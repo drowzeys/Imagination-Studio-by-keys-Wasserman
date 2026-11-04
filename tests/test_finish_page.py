@@ -82,3 +82,23 @@ def test_not_ready_says_the_setup_command_and_the_library_finishes_ticked_clips(
     assert "Runs on this computer" in out["lib"] and "need Tesseract Converter" in out["lib"] and "2 picked clips" in out["lib"]
     assert "keeps usage counts by default" in out["lib"] and "tsrct telemetry disable" in out["lib"] and "never changes" in out["lib"]
     assert out["sent"]["params"]["clips"] == [{"path": "renders/b.mp4"}, {"path": "renders/a.mp4"}] and out["sent"]["params"]["song"] is None
+
+
+def test_qualified_windows_panel_only_offers_its_measured_settings():
+    out = run("""answers["/api/finish"] = { ok: true, where: "here", version: "0.4.0", converter: { ok: false },
+      sizes: ["720p"], rates: [24], max_seconds: 10 };
+      FIN.o.size = "4k"; FIN.o.fps = "60"; FIN.o.captions = true;
+      await finLoad();
+      const target = { clips: ["renders/a.mp4"] }, panel = finishPanel(target);
+      out.text = text(panel); out.params = finParams(target); out.choices = [];
+      find(panel, n => { if (n.tag === "button" && n.attrs.role === "radio") out.choices.push(text(n)); return false; });
+      out.captionsDisabled = find(panel, n => n.tag === "input" && n.attrs.type === "checkbox").attrs.disabled;
+      out.qualificationCollapsed = !find(panel, n => n.tag === "details" && text(n).includes("Qualified settings")).attrs.open;
+      out.readyNote = text(finReadyNote());
+      const made = finMade({ id: "j1", outputs: ["exports/j1.mp4"] }, target);
+      out.conversionDisabled = button(made, "Premiere").attrs.disabled && button(made, "After Effects").attrs.disabled;""")
+    assert out["params"]["size"] == "720p" and out["params"]["fps"] == 24 and not out["params"]["captions"]
+    assert out["choices"] == ["720p", "24"]
+    assert out["captionsDisabled"] and out["conversionDisabled"]
+    assert out["qualificationCollapsed"] and "setup-finish" not in out["readyNote"]
+    assert "ten seconds" in out["text"] and "not qualified" in out["text"]

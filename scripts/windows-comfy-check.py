@@ -93,7 +93,7 @@ class MemoryWatchdog:
 
     def supervise(self):
         previous = None
-        while not self.stopping.is_set() and not self.backend_stopping.is_set() and not self.failed.is_set():
+        while not self.stopping.is_set() and not self.failed.is_set():
             try:
                 line = self.messages.get(timeout=SAMPLE_START_TIMEOUT if previous is None else SAMPLE_FRESHNESS)
             except queue.Empty:

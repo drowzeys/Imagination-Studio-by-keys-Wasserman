@@ -48,12 +48,15 @@ def test_live_checks_refuse_stale_host_samples():
     assert reasons == ["memory sampler stopped answering"]
 
 
-def test_fresh_sample_after_scheduler_gap_does_not_use_expired_trend(monkeypatch):
+@pytest.mark.parametrize("backend_shutdown", [False, True])
+def test_fresh_sample_after_scheduler_gap_does_not_use_expired_trend(monkeypatch, backend_shutdown):
     from windows_memory import Snapshot
     from dataclasses import asdict
     monitor = check.MemoryWatchdog.__new__(check.MemoryWatchdog)
     for name in ("stopping", "failed", "ready", "backend_stopping"):
         setattr(monitor, name, threading.Event())
+    if backend_shutdown:
+        monitor.begin_backend_shutdown()
     monitor.state_lock = threading.Lock()
     monitor.latest = monitor.initial = None
     monitor.configured_floor = ""

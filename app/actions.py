@@ -126,6 +126,9 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         out = {}
         for kind in KINDS:
             why = f"{TITLES[kind]} is not qualified in this Windows preview." if windows else missing(kind)
+            if windows and kind == "hlg":
+                import windows_features
+                why = windows_features.status(kind)["why"] or missing(kind)
             card = recipe(LORA[kind] or "person-remover") if kind != "hlg" else {}
             out[kind] = {"title": TITLES[kind], "ready": not why, "why": why, "lora": LORA[kind],
                          "lora_name": card.get("name"), "author": card.get("author")}
@@ -158,6 +161,14 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             raise HTTPException(400, why)
         if kind == "hlg":
             clip = media(params, "video", (".mp4", ".mov"))
+            if windows:
+                import graphics
+                import windows_features
+                try:
+                    windows_features.preflight(kind)
+                    windows_features.check_media(graphics.probe(clip))
+                except (OSError, RuntimeError, ValueError) as error:
+                    raise HTTPException(400, str(error)) from None
             strength = number(params, "strength", 1.0)
             if not 0.1 <= strength <= 1:
                 raise HTTPException(400, "the strength is between 0.1 and 1")

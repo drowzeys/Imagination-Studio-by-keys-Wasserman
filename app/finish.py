@@ -72,6 +72,8 @@ seen_lock = threading.Lock()
 
 
 def prefix() -> Path:
+    if sys.platform == "win32" and not os.environ.get("PREFIX"):
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "ImaginationStudio"
     return Path(os.environ.get("PREFIX") or Path.home() / ".local/opt/tensorfold-studio").expanduser()
 
 
@@ -175,11 +177,11 @@ def probe_remote(host: str) -> dict:
     return out
 
 
-def ready(fresh: bool = False) -> dict:
+def ready(fresh: bool = False, local_only: bool = False) -> dict:
     """Where the cut is finished, asked at most once a minute: {ok, where ("here" or "ssh:<host>"), version, why, path,
     machine, converter: {ok, version, path}, setup, pinned}."""
 
-    host = remote_host()
+    host = "" if local_only else remote_host()
     key = (host, str(prefix()))
     with seen_lock:
         last = seen.get(key)
@@ -346,14 +348,20 @@ def plan_of(params: dict) -> dict:
             "size": size, "fps": fps, "canvas": canvas}
 
 
-def build(params: dict, job_id: str) -> tuple[list[str], dict, list[str]]:
+def build(params: dict, job_id: str, local_only: bool = False) -> tuple[list[str], dict, list[str]]:
     """(command, environment, output paths) of a finish job: the plan is written beside the job's other files and this
     file runs it. Refused (400) when Tesseract is not ready here or on the remote computer."""
 
-    state = ready()
+    state = ready(local_only=True) if local_only else ready()
     if not state["ok"]:
         raise bad(state["why"])
     plan = plan_of(params)
+    if local_only:
+        import windows_features
+        try:
+            windows_features.check_finish(plan)
+        except ValueError as error:
+            raise bad(str(error)) from None
     exports = HOME / "exports"
     work = exports / ".finish" / job_id
     host = state["where"][4:] if state["where"].startswith("ssh:") else ""
@@ -979,7 +987,7 @@ def readme(label: str, notes: list[str]) -> str:
 
 # ---------- the routes ----------
 
-def attach(home: Path, pack: Path, within, short):
+def attach(home: Path, pack: Path, within, short, windows=False):
     """The routes, with the server's path helpers. ``build`` is called by server.build for kind "finish"."""
 
     global HOME, PACK, inside, relative, Request  # Request: the routes' annotations are read from this module's names
@@ -992,9 +1000,18 @@ def attach(home: Path, pack: Path, within, short):
 
     @router.get("/api/finish")
     def state(request: Request, fresh: bool = False) -> dict:
-        if remote_host():  # the probe runs ssh with the user's keys: this computer or its Tailscale address, as the brains
+        limited = bool(windows and windows())
+        if not limited and remote_host():  # the probe runs ssh with the user's keys: this computer or its Tailscale address, as the brains
             agents.local(request)
-        out = ready(fresh)
+        out = ready(fresh, local_only=True) if limited else ready(fresh)
+        if limited:
+            import windows_features
+            qualified = windows_features.status("finish")
+            out = {**out, "ok": qualified["available"], "why": qualified["why"],
+                   "converter": {**out["converter"], "ok": False,
+                                 "why": "Editor conversion is not qualified in this Windows profile."}}
+            return {**out, "fonts": {role: bool(path) for role, path in font_files().items()}, "mixes": list(MIXES),
+                    "sizes": ["720p"], "rates": [windows_features.FPS], "max_seconds": windows_features.MAX_SECONDS}
         return {**out, "fonts": {role: bool(path) for role, path in font_files().items()}, "mixes": list(MIXES),
                 "sizes": list(SIZES), "rates": list(RATES)}
 

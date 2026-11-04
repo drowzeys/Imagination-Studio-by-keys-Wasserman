@@ -61,10 +61,11 @@ function viewFoley() {
     el("div", { class: "sfx-cards", role: "radiogroup", "aria-label": "What to make" }, Object.entries(SFX_MODES).map(([id, [name, one]]) => {
       const ready = SFX.state.kinds[id].ready;
       return el("button", { type: "button", class: "sfx-card" + (m === id ? " on" : ""), role: "radio", "aria-checked": m === id ? "true" : "false", onclick: () => { SFX.mode = id; render(); } },
-        el("b", {}, name), el("span", { class: "sfx-state" }, el("span", { class: "dotl" + (ready ? (m === id ? " t" : "") : " o") }), ready ? "Ready" : "Not installed"),
+        el("b", {}, name), el("span", { class: "sfx-state" }, el("span", { class: "dotl" + (ready ? (m === id ? " t" : "") : " o") }), ready ? "Ready" : SFX.state.windows && id === "foley" ? "Not qualified" : "Not installed"),
         el("span", { class: "sfx-one" }, SFX.state.windows && id === "sfx" ? "Five-second stereo sound effects, 100 passes, CFG 7. Made locally." : one)); })),
     el("section", { class: "panel stack", style: "margin-top:14px" },
       !k.ready ? el("div", { class: "note vt-bad" }, k.why) : null,
+      SFX.state.windows && m === "foley" && typeof featureBadge === "function" ? featureBadge("foley") : null,
       // the install command where installing is what is missing (on a Spark a kind may also wait for its memory measurement)
       !k.ready && !SFX.state.windows && (!SFX.state.spark || /--sound/.test(k.why || "")) ? (() => {
         const cmd = SFX.state.spark ? "bash oneshot-setup-spark.sh --sound" : "bash scripts/setup-sound.sh";

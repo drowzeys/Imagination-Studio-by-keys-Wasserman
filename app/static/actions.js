@@ -16,7 +16,10 @@ function actOpen(kind, path) { ACT.open = { kind, path }; if (kind === "remove")
   setTimeout(() => { const n = document.querySelector("#actpanel"); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }
 // the buttons a Library tile gets for its kind of file
 function actButtons(m) { const gfx = typeof gfxButtons === "function" ? gfxButtons(m) : [];  // Add a title, Caption this clip (graphics.js)
-  if ((typeof capWhy === "function" ? capWhy : () => "")("image_actions")) return [el("button", { class: "small", disabled: true, title: (typeof capWhy === "function" ? capWhy : () => "")("image_actions") }, "Model actions unavailable"), ...gfx];
+  if ((typeof capWhy === "function" ? capWhy : () => "")("image_actions")) return [
+    el("button", { class: "small", disabled: true, title: capWhy("image_actions") }, "Model actions unavailable"),
+    m.kind === "video" ? el("button", { class: "small", disabled: !!capWhy("hlg"), title: capWhy("hlg") || "Grade this clip as HLG with an SDR copy",
+      onclick: () => actOpen("hlg", m.path) }, "keys-HDR LORA") : null, ...gfx].filter(Boolean);
   if (!ACT.state) return gfx;
   const one = (kind, label, title) => el("button", { class: "small", title: actOf(kind).ready ? title : actOf(kind).why, onclick: () => actOpen(kind, m.path) }, label);
   return (m.kind === "video" ? [one("upscale", "Upscale", "Make this clip larger and sharper: a latent upscale, then one light re-draw guided by the clip itself"),
@@ -41,7 +44,9 @@ function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KI
   if (o.kind === "swap" && typeof swapPanel === "function") return swapPanel(o);  // swap.js
   const a = actOf(o.kind), f = ACT[ACT_KEY[o.kind]], redraw = () => render();
   const box = el("div", { class: "seg", id: "actpanel", style: "margin-top:12px" },
-    el("div", { class: "seghead" }, el("b", {}, a.title || o.kind), el("span", { class: "note", style: "margin:0" }, o.path.split("/").pop()), el("span", { style: "flex:1" }),
+    el("div", { class: "seghead" }, el("b", {}, a.title || o.kind),
+      o.kind === "hlg" && typeof featureBadge === "function" ? featureBadge("hlg") : null,
+      el("span", { class: "note", style: "margin:0" }, o.path.split("/").pop()), el("span", { style: "flex:1" }),
       el("button", { class: "small", onclick: () => { ACT.open = null; render(); } }, "Close")));
   if (!a.ready) { put(box, el("div", { class: "note", style: "color:var(--warn)" }, a.why || "Not available on this machine.")); return box; }
   const by = el("div", { class: "note" }, "With " + a.lora_name + " by " + a.author + ".");

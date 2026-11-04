@@ -85,7 +85,10 @@ const APPS = () => [
 
   { id: "voice", cat: "sound", title: "Voices & cloning", one: "Fish Audio Drama 3: cast a voice or clone your own", art: "start-voice", sign: "sound", run: () => go("Voice") },
   { id: "song", cat: "sound", title: "Songs & score", one: "YuE2 or MiniMax-Music3: lyrics and a style to a song", art: "start-song", sign: "sound", run: () => go("Music") },
-  { id: "foley", cat: "sound", title: "Sound effects & foley", one: "Foley for a clip, or any sound from words", art: "start-sfx", sign: "sound", run: () => go("Foley") },
+  ...(S && S.ui_only ? [
+    { id: "sfx", cat: "sound", title: "Sound effects", one: "A five-second sound effect from words", art: "start-sfx", sign: "sound", off: () => capWhy("sfx"), run: () => { SFX.mode = "sfx"; go("Foley"); } },
+    { id: "foley", cat: "sound", title: "MMAudio foley", one: "Sound made for a clip's picture", art: "start-sfx", sign: "sound", off: () => capWhy("foley"), run: () => { SFX.mode = "foley"; go("Foley"); } },
+  ] : [{ id: "foley", cat: "sound", title: "Sound effects & foley", one: "Foley for a clip, or any sound from words", art: "start-sfx", sign: "sound", run: () => go("Foley") }]),
 
   { id: "upscale", cat: "finish", title: "Upscale", one: "A clip twice the size and sharper", art: "look-video-upscaler", sign: "video",
     off: () => apActReady("upscale"), run: apAct("upscale", "video", "Upscale") },
@@ -94,7 +97,7 @@ const APPS = () => [
   { id: "captions", cat: "finish", title: "Captions", one: "A clip's speech burned in, word by word", art: apArt("app-captions", ""), sign: "graphics", run: () => apPick("video", "Captions", path => gfxOpen("captions", path)) },
   { id: "titles", cat: "finish", title: "Titles & motion graphics", one: "Lower thirds, title cards, slideshows and music videos", art: apArt("app-titles", ""), sign: "graphics", run: () => go("Motion graphics") },
   { id: "timeline", cat: "finish", title: "Timeline editor", one: "Cut your takes together, with sound", art: "act-edit-timeline", sign: "edit", run: () => go("Editor") },
-  { id: "finish", cat: "finish", title: "Finish & export", one: "The final cut and mix, out to Resolve, Premiere or After Effects", art: "act-edit-resolve", sign: "edit", run: () => go("Finish") },
+  { id: "finish", cat: "finish", title: "Finish & export", one: "The final cut and mix, out to Resolve, Premiere or After Effects", art: "act-edit-resolve", sign: "edit", off: () => S && S.ui_only ? capWhy("finish") : "", run: () => go("Finish") },
 
   { id: "night", cat: "studio", title: "Night shift", one: "Queue a batch tonight, wake up to dailies on your phone", art: "engine-night", sign: "night", run: () => go("Night shift") },
   { id: "nodes", cat: "studio", title: "Nodes", one: "Words to pictures to clips, wired in order", art: "vault-nodes", sign: "nodes", off: () => typeof viewNodes === "function" ? "" : "The node canvas is not in this install", run: () => go("Nodes") },
@@ -123,7 +126,8 @@ function apCard(a) { const st = apState(a);
   const card = pcard({ art: a.art, src: a.src, sign: a.sign, title: a.title, one: a.one, k: (AP_CATS.find(c => c.id === a.cat) || {}).name.toUpperCase(), off: st.off, run: st.run, data: { "data-app": a.id } });
   if (a.icon) card.classList.add("ap-icon");  // an app's square icon, whole, on the card's ground
   if (st.need) card.append(el("span", { class: "ap-need" }, st.need));
-  return card; }
+  const badge = typeof featureBadge === "function" && ["hlg", "finish", "foley"].includes(a.id) ? featureBadge(a.id) : null;
+  return badge ? el("div", { class: "feature-app", "data-feature-app": a.id }, card, badge) : card; }
 const apHit = (a, words) => !words || [a.title, a.one, a.words, (AP_CATS.find(c => c.id === a.cat) || {}).name].join(" ").toLowerCase().includes(words);
 
 // the take a Library action works on: the newest of the kind it needs

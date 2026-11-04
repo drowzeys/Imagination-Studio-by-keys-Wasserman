@@ -41,6 +41,8 @@ import windows_media
 os.environ["PATH"] = windows_media.search_path(os.environ.get("PATH", ""))
 import windows_cuda  # noqa: E402  (the native Windows CUDA tier: the Spark's path on Windows, where it is fully installed)
 WINCUDA = windows_cuda.active()  # False off Windows without a look; on Windows it points PREFIX, SPARK_MODELS, ... first
+if sys.platform == "win32":
+    os.environ.setdefault("PREFIX", str(windows_cuda.root()))
 from studio_home import studio_home  # noqa: E402  (~/ImaginationStudio, an older ~/TensorFoldStudio moved there once)
 HOME = studio_home(move=__name__ == "__main__")  # moved only when the studio starts, never by a script that imports this
 os.environ["STUDIO_HOME"] = str(HOME)  # the scripts and engines it starts keep everything in the same folder
@@ -160,8 +162,11 @@ SPARK = sys.platform.startswith("linux") or WINCUDA
 WINDOWS = WIN32 and not WINCUDA
 import windows_storyboard
 import windows_sound
+import windows_features
+import windows_checks
 WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
                 "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics are supported; video generation, foley, in-app model installation, other agents and worker management are not supported yet. "
+                "HDR grading and local Tesseract Finish are independently enabled after this machine passes their bounded qualification. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 WINCUDA_NOTE = ("Native Windows (CUDA): video, pictures, songs, voice, sound effects and foley, the Library's actions, Character "
                 "Swap, LoRA training, Tesseract Finish and the Bolt brain run on this machine through ComfyUI and TensorFold's "
@@ -616,7 +621,7 @@ WINDOWS_WRITES = re.compile(
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"threads(?:/[A-Za-z0-9_-]+(?:/(?:messages|cancel))?)?)|"
-    r"music/beats|windows/stills/unload|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
+    r"music/beats|windows/stills/unload|windows/features/check|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
 )
 
 
@@ -626,6 +631,8 @@ def accepting_jobs(job: dict | None = None):
                (job.get("kind") == "scout" and windows_storyboard.status()["available"]
                 or job.get("kind") == "sfx" and windows_sound.status()["available"]
                 or job.get("kind") == "graphics" and graphics.ready()["ok"]
+                or job.get("kind") in windows_features.KINDS and windows_features.status(job["kind"])["available"]
+                or job.get("kind") == "qualification"
                 or job.get("kind") == "export" and all(media_tools().values())))
     if WINDOWS and not allowed:
         raise HTTPException(501, WINDOWS_NOTE)
@@ -1644,8 +1651,16 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
     if WINDOWS:
+        if kind == "qualification":
+            return windows_checks.build(HOME, params, job_id)
         if kind == "graphics":
             return graphics_build(params, job_id)
+        if kind in windows_features.KINDS:
+            try:
+                windows_features.preflight(kind)
+            except (OSError, RuntimeError, ValueError) as error:
+                raise HTTPException(400, str(error)) from None
+            return finish.build(params, job_id, local_only=True) if kind == "finish" else action_build(kind, params, job_id)
         if kind != "scout":
             raise HTTPException(501, WINDOWS_NOTE)
         return windows_storyboard.build(params, HOME, job_id)
@@ -1872,7 +1887,9 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             if WINCUDA:  # bash and the Linux venv's python as the native tier runs them (refused when not ported)
                 command = windows_cuda.translate(command)
             # the native tier's job tree may let ComfyUI break away (spark/comfy_win.py): it stays warm after the job
-            owned = OwnedJob(job_commit_mb=graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0, breakaway=WINCUDA)
+            commit = (windows_features.COMMIT_MB if WINDOWS and job["kind"] in (*windows_features.KINDS, "qualification") else
+                      graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0)
+            owned = OwnedJob(job_commit_mb=commit, breakaway=WINCUDA)
             try:
                 process = owned.spawn(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -1902,20 +1919,22 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
                 if job["status"] == "cancelled":
                     return False
                 raise RuntimeError("the Windows renderer could not read its batched prompts") from error
-        for line in process.stdout:
-            job["log"] = (job["log"] + line)[-20000:]
-            engine = RAN_ON.search(line)
-            if engine:
-                job["engine"] = engine.group(1)
-            staged = STAGE.search(line.rstrip())
-            if staged:
-                label = staged.group(3).strip() + " · "
-                job["progress"] = {"stage": staged.group(3).strip(), "at": int(staged.group(1)), "of": int(staged.group(2))}
-            found = STEP.search(line)
-            if found:
-                kind, at, total = found.group(1), int(found.group(2)), int(found.group(3))
-                job["progress"] = {"stage": label + STEP_WORDS[kind], "at": at, "of": total}
-        code = process.wait()
+        guard = windows_features.watch(owned) if WINDOWS and job["kind"] in windows_features.KINDS else contextlib.nullcontext()
+        with guard:
+            for line in process.stdout:
+                job["log"] = (job["log"] + line)[-20000:]
+                engine = RAN_ON.search(line)
+                if engine:
+                    job["engine"] = engine.group(1)
+                staged = STAGE.search(line.rstrip())
+                if staged:
+                    label = staged.group(3).strip() + " · "
+                    job["progress"] = {"stage": staged.group(3).strip(), "at": int(staged.group(1)), "of": int(staged.group(2))}
+                found = STEP.search(line)
+                if found:
+                    kind, at, total = found.group(1), int(found.group(2)), int(found.group(3))
+                    job["progress"] = {"stage": label + STEP_WORDS[kind], "at": at, "of": total}
+            code = process.wait()
     finally:
         if deadline:
             deadline.cancel()
@@ -2353,6 +2372,14 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
     finally:
         if job["status"] != "queued":
             job["finished"] = time.time()
+            if WINDOWS and job["kind"] == "qualification" and job["status"] in ("failed", "cancelled"):
+                try:
+                    windows_features.save_attempt(job["params"]["feature"],
+                                                  {"ok": False, "state": job["status"],
+                                                   "finished": job["finished"],
+                                                   "error": job.get("error") or "The check was cancelled."})
+                except (OSError, ValueError) as error:
+                    job["log"] += f"\n[studio] Could not save the qualification attempt: {error}\n"
             if job["kind"] in swap.KINDS:  # a cancelled or failed swap's frames do not stay behind
                 swap.tidy(HOME, job["id"])
 
@@ -2446,6 +2473,7 @@ def state() -> dict:
             beats={"available": bool(out["ffmpeg"]), "why": out["ffmpeg_note"], "max_seconds": beats.WINDOWS_MAX_SECONDS},
             export={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."},
             frame={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."})
+        out["capabilities"].update({kind: windows_features.status(kind) for kind in windows_features.KINDS})
     if WINCUDA:  # the native tier (windows_cuda.py): what it runs, and the job kinds it refuses with their reason
         out["windows_cuda"] = windows_cuda.status()
         out["capabilities"] = {kind: {"available": False, "why": windows_cuda.unsupported(kind)} for kind in windows_cuda.NOT_NATIVE}
@@ -2619,6 +2647,21 @@ def windows_export(body: dict) -> dict:
 
 def queue_job(body: dict) -> dict:
     if WINDOWS:
+        if body.get("kind") in windows_features.KINDS:
+            kind = body["kind"]
+            found = windows_features.status(kind)
+            if not found["available"]:
+                raise HTTPException(501, found["why"])
+            if body.get("placement") is not None or body.get("sparks") not in (None, 1):
+                raise HTTPException(400, "This Windows feature runs on this machine only.")
+            params = body.get("params") or {}
+            if not isinstance(params, dict):
+                raise HTTPException(400, "params is an object")
+            build(kind, params, "check")
+            title = body.get("title") or ("Finish" if kind == "finish" else action_title(kind, params))
+            if not isinstance(title, str):
+                raise HTTPException(400, "title is text")
+            return enqueue(kind, title, params)
         if body.get("kind") == "export":
             return windows_export(body)
         if body.get("kind") == "graphics":
@@ -2797,6 +2840,13 @@ def cancel(job_id: str) -> dict:
             if SPARK and job["kind"] not in NOT_ON_COMFY:
                 stop_comfy(job)
         hub.kick.set()  # a worker's render loop sees the cancelled job and interrupts its own prompt
+        if WINDOWS and job["kind"] == "qualification":
+            try:
+                windows_features.save_attempt(job["params"]["feature"],
+                                              {"ok": False, "state": "cancelled", "finished": time.time(),
+                                               "error": "The check was cancelled."})
+            except (OSError, ValueError) as error:
+                job["log"] += f"\n[studio] Could not save the qualification cancellation: {error}\n"
     return public(job)
 
 
@@ -3309,8 +3359,15 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
 
     if WINCUDA and windows_cuda.unsupported(kind):
         raise HTTPException(501, windows_cuda.unsupported(kind))
+    if WINDOWS and kind == "qualification":
+        params = windows_checks.parameters(params)
+        windows_checks.build(HOME, params, "check")
     if WINDOWS and kind == "graphics":
         graphics_build(params, "check")
+    if WINDOWS and kind in windows_features.KINDS:
+        if not windows_features.status(kind)["available"]:
+            raise HTTPException(501, windows_features.status(kind)["why"])
+        build(kind, params, "check")
     if WINDOWS and kind == "scout":
         params = windows_storyboard.parameters(params)
         try:
@@ -3329,6 +3386,9 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
            "estimate": estimate, "sparks": {"chosen": 1, "available": 1, "used": 1, "says": ""}}
     with lock:
         accepting_jobs(job)
+        if kind == "qualification" and any(one["kind"] == kind and one["params"] == params
+                                           and one["status"] in ("queued", "running") for one in jobs.values()):
+            raise HTTPException(409, "This feature check is already queued or running.")
         waiting = sum(1 for one in jobs.values() if one["status"] in ("queued", "running"))
         if waiting >= QUEUE_MAX:  # a page or a peer cannot fill the machine with jobs
             raise HTTPException(429, f"the queue is full ({QUEUE_MAX} jobs waiting or running): let some finish first")
@@ -3425,7 +3485,8 @@ import train  # noqa: E402  (a LoRA trained from the Library's clips and stills 
 train_router, train_build, train_free = train.attach(HOME, PACK, SPARK, inside, media_seconds, enqueue, jobs, lock)
 app.include_router(train_router)
 import finish  # noqa: E402  (Finish: the final cut and mix through Tesseract, to Resolve, Premiere or After Effects, beside this file)
-app.include_router(finish.attach(HOME, PACK, inside, relative))
+app.include_router(finish.attach(HOME, PACK, inside, relative, windows=lambda: WINDOWS))
+app.include_router(windows_checks.attach(sys.modules[__name__]))
 import graphics  # noqa: E402  (motion graphics: titles, captions, slideshows, music videos, rendered with HyperFrames, beside this file)
 graphics_router, graphics_build, graphics_title = graphics.attach(HOME, PACK, SPARK, inside, relative)
 app.include_router(graphics_router)

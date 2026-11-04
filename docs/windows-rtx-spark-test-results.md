@@ -41,6 +41,24 @@ Observed budgets: 31.70 GiB Windows-visible RAM, 30.50 GiB dedicated GPU and 45.
 | Browser sweep | Official read-only checker passed all 33 tabs: no page errors, broken images/media, remaining failed requests or phone overflow; injected write refusals and confirmed downloads classified separately |
 | Focused regressions | 56 tests passed across storyboard, sound, UI-checker and API-answer tests; JavaScript syntax check passed |
 
+## 2026-11-04: independent features after the native Windows merge
+
+Same 64 GB machine; native H3 tier remained off and its 90,000 MB CUDA-pool gate was unchanged.
+These results do not qualify either new route on the 48 GB machine.
+
+| Check | Result / useful measurement |
+|---|---|
+| HDR grading | Two ten-second 1280x720/24 fps sound/silent cases: 66.34 / 68.55 s; peak owned-job commitment 2,116.9 / 2,116.0 MiB under the 4 GiB cap. HLG 10-bit BT.2020 metadata, SDR companion, complete decode and unchanged source audio packets verified |
+| Local Tesseract Finish | Three 9.5-second mixes with title/subtitle, 12 mixed sound/silent cuts, song and narration: 14.46-15.05 s; peak 946.3-947.7 MiB. Silent ten-second cut: 8.95 s / 817.8 MiB. MP4, editable project, FCPXML and EDL outputs verified |
+| Actual app and browser | Both independently ready without H3; invalid settings and already-HDR input refused. Queued/running cancellation, actual Finish button, 720p/24 fps controls, playback/download and disabled transcription/conversion passed; no page errors; graceful shutdown left zero owned descendants |
+| Progressive check UI | Machine cards displayed unknown minimum RAM, conservative headroom/cap and saved evidence. Opening the page submitted no tests; an actual Finish Check/Rerun completed through the normal queue, persisted its live pass and downloaded the saved report with no page errors |
+| Finish reliability caveat | One repeated app check failed inside Tesseract 0.4.0 at `project apply`: `source .tsrct file changed after it was opened`. It did not reproduce in subsequent completed runs. The job reports the failure; no automatic retry or success fallback was added |
+| Existing baseline refreshed | Six headless graphics templates passed with no visible browser windows. SD-Turbo and five-second Stable Audio Open requalified after the merge; sound request-to-file 12.88 s, 5.015510 s stereo 44.1 kHz. A watchdog shutdown queue-overflow race was fixed without changing guard limits |
+| Foley preparation | Official pinned ComfyUI-MMAudio checkout obtained. Dependency setup stopped at `soxr`: no Windows ARM64 wheel or installed native C++ toolchain. No foley weights downloaded and no inference attempted; dependency-blocked, not memory-refused |
+
+CPU feature receipts are hardware/runtime/code-bound, with a 4 GiB job cap and OS low-memory supervision.
+The ten-second limits are measured qualification boundaries, not claims about the models or all CPU workflows.
+
 ## Interpretation limits
 
 - Image/sound retained 12/12/16 GiB allocator/process/job caps and a 2 GiB GPU reserve; graphics retained
@@ -48,7 +66,8 @@ Observed budgets: 31.70 GiB Windows-visible RAM, 30.50 GiB dedicated GPU and 45.
 - Sound's private commitment is close to its cap. No longer effect, larger image or other model is
   qualified by these results. Format/level checks are not a listening-quality review.
 - Timings exclude startup where stated. Writing checks differ in scope and are not direct speed comparisons.
-- The 64 GB API checks/read-only sweep do not prove interactive First AD apply/save or browser playback/download.
+- The baseline API checks/read-only sweep do not prove interactive First AD apply/save or baseline media
+  playback/download. The later independent-feature check did verify actual Finish playback/download.
   An actual Windows Resolve import remains unverified. These local runs did not use 128 GB hardware;
   upstream's separate native-tier measurements are in the [N1X notes](rtx-spark-n1x.md#native-windows-the-native-cuda-tier).
 - Official calibration reports are generated under Studio's `renders\calibration`; capture each new

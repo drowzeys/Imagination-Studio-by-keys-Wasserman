@@ -243,6 +243,10 @@ Rules:
   Spark scripts' own pins and SHA-256s, which `tests/test_windows_cuda.py` holds in step. Never `os.kill(pid, 0)` on
   Windows (signal 0 is CTRL_C_EVENT there): `windows_cuda.pid_alive`. The suite runs the preview tier (`STUDIO_WINDOWS_TIER=preview` in conftest);
   `tests/test_windows_cuda.py` drives the native one.
+- Independent Windows CPU features (`app/windows_features.py`, `scripts/check-windows-features.ps1`): HDR grading
+  and local Tesseract Finish can qualify without H3 or a native CUDA-tier record. Keep their local receipts tied to
+  hardware/runtime/code, ten-second 720p/24 fps scopes, 4 GiB owned-job cap, low-memory supervision and API/UI/queue
+  agreement. A stale receipt, installed files alone or more advertised RAM never qualifies another route.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers

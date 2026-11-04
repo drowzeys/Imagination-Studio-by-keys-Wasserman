@@ -117,9 +117,11 @@ This preview supports script imports, project/Slate planning, manual storyboards
 uploads, Motion Previs pack imports and browsing saved media.
 Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
 An optional small local brain supports text-only Slate writing assistance.
-Only separately qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics can render;
-video generation, foley, in-app model installation, other
-agents, worker management and other unverified actions are refused explicitly.
+Separately qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics can render.
+HDR grading and local Tesseract Finish can also be independently qualified without H3:
+see [their setup and measured limits](docs/windows-rtx-spark-testing.md#independent-hdr-and-finish-qualification).
+Other routes including video generation, foley, in-app model installation, other agents, worker management
+and other unverified actions are refused explicitly.
 It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
 
