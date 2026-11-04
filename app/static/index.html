@@ -16,7 +16,8 @@
 <script>
 // Settings → Appearance, kept in this browser by settings.js: applied before the first paint
 try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = document.documentElement.classList;
-  if (a) { if (a.type_size === "large" || a.type_size === "largest") c.add("type-" + a.type_size); if (a.glow === false) c.add("no-glow"); if (a.poster === false) c.add("no-poster");
+  if (a) { if (a.theme === "oled") c.add("theme-oled");
+    if (a.type_size === "large" || a.type_size === "largest") c.add("type-" + a.type_size); if (a.glow === false) c.add("no-glow"); if (a.poster === false) c.add("no-poster");
     if (a.accent === "cobalt") c.add("accent-cobalt"); if (a.motion === "reduce") c.add("motion-reduce"); } } catch (e) {}
 </script>
 </head>
