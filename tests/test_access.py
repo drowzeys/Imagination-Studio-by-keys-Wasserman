@@ -81,14 +81,23 @@ def test_the_key_file_is_made_once_private_and_kept(tmp_path):
     assert len(made) >= 30 and access.read(tmp_path) == made == access.ensure(tmp_path)
     if os.name == "nt":
         def private():
-            target = str(access.path(tmp_path)).replace("'", "''")
-            done = subprocess.run(["powershell", "-NoProfile", "-Command",
-                                   f"(Get-Acl -LiteralPath '{target}').Sddl -match 'D:P\\(A;;FA;;;OW\\)'"],
-                                  capture_output=True, text=True, timeout=10, check=True,
-                                  # PowerShell 7 (the CI step's shell) leaves its PSModulePath behind, and Windows
-                                  # PowerShell 5.1 then cannot load Get-Acl's module
-                                  env={k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"})
-            assert done.stdout.strip() == "True"
+            # the file's DACL read back in-process (no PowerShell: its cold start outlasts a CI runner's patience)
+            import ctypes
+            from ctypes import wintypes
+            api = ctypes.WinDLL("advapi32", use_last_error=True)
+            api.GetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.DWORD)]
+            api.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+                ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.LPWSTR), ctypes.POINTER(wintypes.ULONG)]
+            target, need = str(access.path(tmp_path)), wintypes.DWORD()
+            api.GetFileSecurityW(target, 4, None, 0, ctypes.byref(need))  # 4: the DACL
+            buffer = ctypes.create_string_buffer(need.value)
+            assert api.GetFileSecurityW(target, 4, buffer, need, ctypes.byref(need)), ctypes.get_last_error()
+            said = wintypes.LPWSTR()
+            assert api.ConvertSecurityDescriptorToStringSecurityDescriptorW(buffer, 1, 4, ctypes.byref(said), None)
+            text = said.value
+            ctypes.WinDLL("kernel32").LocalFree(ctypes.cast(said, ctypes.c_void_p))
+            assert text == "D:P(A;;FA;;;OW)", text  # protected, only the owner, full access
         private()
         access.rotate(tmp_path)
         private()
