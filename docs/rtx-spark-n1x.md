@@ -20,7 +20,9 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1
    Linux user, then run the script again), turns systemd on, and sets `.wslconfig` so WSL can use the RAM Windows has;
 2. clones the Studio into Ubuntu (`~/src/Imagination-Studio-by-keys-Wasserman`) and runs `oneshot-setup-rtx-spark-n1x.sh
    --yes --all` there: the DGX Spark recipe with `STUDIO_N1X=1`. Run again, it updates (`--upgrade`). `-Parts "--sound"`
-   installs less. Gated models (FLUX3-K, Stable Audio Open) need `hf auth login` inside Ubuntu first;
+   installs less. It first asks once for a **Hugging Face read token** (https://huggingface.co/settings/tokens;
+   accept the FLUX3-K and Stable Audio Open licences with that account) and saves it in Ubuntu, so the gated models
+   download in the same run (`-HfToken hf_...` passes it, `-NoHfToken` skips them);
 3. makes **Imagination Studio** (start) and **Stop Imagination Studio** with the Studio's icon, on the Desktop and in Start,
    and **pins Imagination Studio to the taskbar** (Windows 11's taskbar layout, appended to your own pins; it shows after
    Explorer restarts, or at the next sign-in);
