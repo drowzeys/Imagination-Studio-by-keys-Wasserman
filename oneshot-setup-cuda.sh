@@ -190,11 +190,18 @@ if [ -n "$VRAM_GB" ] && [[ "${STUDIO_GPUS:-}" =~ ^[0-9]+(,[0-9]+)+$ ]] && [ "${S
   fi
 fi
 case "$GPU" in *GB10*) ;; *) if [ -z "$VRAM_GB" ]; then echo "  ! measured only on a DGX Spark (GB10, 128 GB unified memory) and an RTX Pro 6000; other GPUs are untested"; fi;; esac
+# NVIDIA RTX Spark N1X (oneshot-setup-rtx-spark-n1x.sh sets STUDIO_N1X=1): sm_121 like a GB10, under WSL2 on Windows,
+# with the GPU's fixed carve-out of the memory (96 of 128 GB on an HP OmniBook X) and the rest (about 30 GB) for WSL.
+# The models live in the carve-out, so WSL's small RAM is not held against video. A GB10 install does not set it.
+if [ "${STUDIO_N1X:-0}" = 1 ]; then
+  STUDIO_ALLOW_SMALL_VRAM=1
+  echo "  ! RTX Spark N1X: the GPU's ${VRAM_GB:-?} GB carve-out holds the models; this Linux has ${MEM_GB} GB beside it"
+fi
 if [ -n "$VRAM_GB" ]; then
   [ "$VRAM_GB" -ge 90 ] || [ "$IMAGE_ONLY" = 1 ] || [ "${STUDIO_ALLOW_SMALL_VRAM:-0}" = 1 ] || die "video needs a card of about 96 GB (an RTX Pro 6000 Blackwell); this one has ${VRAM_GB} GB. --image-only fits on 48 GB. STUDIO_ALLOW_SMALL_VRAM=1 installs video anyway: ComfyUI then holds the weights in RAM and streams blocks to the card (docs/rtx-5090.md)."
-  [ "$MEM_GB" -ge 64 ] || die "the machine needs 64 GB of RAM or more beside the card (the models are read through it); this one has ${MEM_GB} GB"
+  [ "$MEM_GB" -ge 64 ] || [ "${STUDIO_N1X:-0}" = 1 ] || die "the machine needs 64 GB of RAM or more beside the card (the models are read through it); this one has ${MEM_GB} GB"
 else
-  [ "$MEM_GB" -ge 100 ] || [ "$IMAGE_ONLY" = 1 ] || die "video needs about 90 GB of memory at 1344x768 (128 GB machine); this one has ${MEM_GB} GB. --image-only fits."
+  [ "$MEM_GB" -ge 100 ] || [ "$IMAGE_ONLY" = 1 ] || [ "${STUDIO_N1X:-0}" = 1 ] || die "video needs about 90 GB of memory at 1344x768 (128 GB machine); this one has ${MEM_GB} GB. --image-only fits."
 fi
 for tool in git ffmpeg ffprobe; do command -v "$tool" >/dev/null || die "install $tool first (sudo apt install $([ "$tool" = ffprobe ] && echo ffmpeg || echo "$tool"))"; done
 if ! command -v uv >/dev/null; then

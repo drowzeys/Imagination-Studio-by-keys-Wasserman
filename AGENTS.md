@@ -219,6 +219,10 @@ Rules:
   there, ended with the Mac's ssh or its heartbeat). Never add the Mac's key to a worker for it, and never open the
   relay to a network.
 - keys-HDR LORA, the HDR finish (`app/hlg.py`, the Library action `hlg`): processor and ffmpeg only, never under the GPU lock, numpy only (no OpenCV in the Studio's venv). It is a grade of an 8-bit SDR clip into BT.2020 / HLG: do not describe it as recovered detail or as what the model made. `TARGET` and `BANDS` are one look chosen by eye, not a standard. One curve for the whole clip: fit per frame or per shot, it flickers or jumps at cuts. A clip already HLG or PQ is refused.
+- RTX Spark N1X (`memory_guard.n1x()`: STUDIO_N1X=1 or the GPU name): the GPU's carve-out is the pool (WSL's
+  nvidia-smi names no process, so `device_room_mb` is the whole card; `card_pool` is not held to WSL's ~30 GB RAM) and
+  `guard_mode()` is "warn": `_relaxable` turns a check's refusal into `warning` (job tried, fails on a real OOM). A DGX
+  Spark stays "strict" (an OOM there can take the machine down); never make warn the default where RAM is the pool.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers
