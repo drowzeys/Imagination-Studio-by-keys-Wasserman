@@ -348,12 +348,7 @@ class Served:
                     self.answers.put(json.loads(line))
                     continue
                 except ValueError:
-                    if getattr(self, "windows", False):  # a Windows path echoed with its backslashes unescaped
-                        try:
-                            self.answers.put(json.loads(line.replace("\\", "\\\\")))
-                            continue
-                        except ValueError:
-                            pass
+                    pass
             self.log = (self.log + [line])[-200:]
             found = re.search(r"weights on the device: ([\d.]+) GB", line)
             if found:
@@ -497,11 +492,6 @@ class Served:
         stopped: a request cannot be taken back). Progress lines (``{"id", "progress"}``, sent when the request asks
         for them) go to ``progress``."""
 
-        if getattr(self, "windows", False):
-            # the Windows engine echoes the paths back unescaped ("wav": "C:\Users\..."), which is not JSON: they go with
-            # forward slashes, which Windows takes as they are
-            request = {k: v.replace("\\", "/") if k in ("wav", "pcm", "ref_audio") and isinstance(v, str) else v
-                       for k, v in request.items()}
         self.process.stdin.write(json.dumps(request) + "\n")
         self.process.stdin.flush()
         began = time.time()
@@ -1150,14 +1140,8 @@ def stale() -> bool:
 
     owner = lock_owner()
     pid = owner.split()[-1] if owner else ""
-    if pid.isdigit():
-        try:
-            os.kill(int(pid), 0)
-        except ProcessLookupError:
-            return True
-        except PermissionError:
-            return False
-        return False
+    if pid.isdigit():  # windows_cuda.pid_alive: os.kill(pid, 0) would send a CTRL_C_EVENT on Windows
+        return not windows_cuda.pid_alive(int(pid))
     try:
         return not owner and time.time() - LOCK.stat().st_mtime > 60
     except OSError:

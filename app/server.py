@@ -163,10 +163,9 @@ import windows_sound
 WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
                 "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics are supported; video generation, foley, in-app model installation, other agents and worker management are not supported yet. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
-WINCUDA_NOTE = ("Native Windows (CUDA): video, pictures, songs, sound effects and the Bolt brain run on this GPU through ComfyUI and "
-                "TensorFold's Windows engines. Not native yet (the WSL install runs them): the model-based Library actions "
-                "(turnaround, upscale, find or remove a person), Character Swap, MMAudio foley, LoRA training, Tesseract Finish and DGX "
-                "Spark workers.")
+WINCUDA_NOTE = ("Native Windows (CUDA): video, pictures, songs, voice, sound effects and foley, the Library's actions, Character "
+                "Swap, LoRA training, Tesseract Finish and the Bolt brain run on this machine through ComfyUI and TensorFold's "
+                "Windows engines, each once its part is installed. Not native: DGX Spark workers (this machine renders alone).")
 if SPARK:
     PRESETS = {k: v for k, v in PRESETS.items() if "X2" not in v[2] and k not in ("2k", "qhd")}
     QUALITIES = {k: v for k, v in QUALITIES.items() if k.startswith("fh")}

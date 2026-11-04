@@ -6,27 +6,33 @@
 #   bash spark/build-drama3.sh            # skips the build when the pinned commit is already installed
 # With Docker it first tries the prebuilt engine in the carrier image (GB10, aarch64; ENGINE_FROM_SOURCE=1 skips that).
 # A build needs the CUDA toolkit's nvcc (12.9 or newer; a Spark has 13 at /usr/local/cuda) and fetches Zig 0.17.0 and the
-# engine's source (drowzeys/TensorFold at DRAMA3_COMMIT, branch drama3-cuda) under $PREFIX. Its zig build compiles the
-# kernel fatbins of TensorFold's whole CUDA engine with nvcc (the runtime embeds them all), for the GPU's own target (sm_121 on a GB10, sm_120 on an RTX Pro 6000): about two minutes
-# on a GB10 (1 min 43 s measured, 43 fatbins).
+# engine's source (drowzeys/TensorFold at DRAMA3_COMMIT, branch studio-1.2.2: the fish_drama3 family, the same engine
+# the native Windows install builds) under $PREFIX. Its zig build (`fish-drama3-generate fish-drama3-lib`) compiles the
+# kernel fatbins with nvcc for the GPU's own target (sm_121 on a GB10, sm_120 on an RTX Pro 6000). Before studio-1.2.2
+# the engine was the drama3-cuda branch's (`drama3-generate drama3-lib`, 81173e6c); the family is that engine moved onto
+# TensorFold 1.2.2 (byte-identical WAVs and frames, its commit says), so an engine built from 81173e6c, here or in the
+# carrier image, is kept as it is.
 # Measured on a GB10 only: on another GPU it refuses unless DRAMA3_ANY_GPU=1.
 # It installs no weights and no codec: Fish's checkpoint and the converted codec are scripts/setup-voice.sh's.
 # Environment: PREFIX, NVCC, DRAMA3_COMMIT, DRAMA3_SOURCE (an existing checkout to build instead of fetching one),
 # DRAMA3_BUILD_JOBS (parallel compile jobs, default 4: an nvcc job takes a few GB), IMAGE (the carrier).
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
-DRAMA3_COMMIT="${DRAMA3_COMMIT:-81173e6c612739a3427844fd8131cf4905e0a9c4}"
+DRAMA3_COMMIT="${DRAMA3_COMMIT:-1c8bdbfd7ea58fdb110870c3ff17d065522b65d2}"
+# the drama3-cuda build the family came from: the same engine (see above), so one already here is not built again
+SAME_ENGINE="81173e6c612739a3427844fd8131cf4905e0a9c4"
+same() { [ "$1" = "$DRAMA3_COMMIT" ] || { [ -z "${DRAMA3_SOURCE:-}" ] && [ "$1" = "$SAME_ENGINE" ]; }; }
 ZIG_VERSION=0.17.0
 OUT="$PREFIX/drama3"
 installed() {
   [ -x "$OUT/bin/drama3-generate" ] && [ -s "$OUT/lib/libtensorfold_drama3.so" ] || return 1
-  [ "$(cat "$OUT/commit" 2>/dev/null)" = "$DRAMA3_COMMIT" ] && return 0
+  same "$(cat "$OUT/commit" 2>/dev/null)" && return 0
   # an engine built by hand before this script (the README's earlier steps) left only BUILD: "TensorFold drama3-cuda <commit>"
-  if [ ! -f "$OUT/commit" ] && grep -q "drama3-cuda ${DRAMA3_COMMIT:0:8}" "$OUT/BUILD" 2>/dev/null; then echo "$DRAMA3_COMMIT" > "$OUT/commit"; return 0; fi
+  if [ ! -f "$OUT/commit" ] && grep -q "drama3-cuda ${SAME_ENGINE:0:8}" "$OUT/BUILD" 2>/dev/null; then echo "$SAME_ENGINE" > "$OUT/commit"; return 0; fi
   return 1
 }
 if installed && [ -z "${DRAMA3_SOURCE:-}" ]; then
-  echo "[tensorfold] drama3 engine already built at ${DRAMA3_COMMIT:0:8}"; exit 0
+  echo "[tensorfold] drama3 engine already built at $(cut -c1-8 "$OUT/commit")"; exit 0
 fi
 # shellcheck disable=SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gpu.sh"
@@ -53,7 +59,7 @@ place() {
   mv -f "$OUT/bin/drama3-generate.part" "$OUT/bin/drama3-generate"
   mv -f "$OUT/lib/libtensorfold_drama3.so.part" "$OUT/lib/libtensorfold_drama3.so"
   echo "$commit" > "$OUT/commit"
-  echo "TensorFold drama3-cuda ${commit:0:8} ($how, $(date '+%Y-%m-%d %H:%M:%S'))" > "$OUT/BUILD"
+  echo "TensorFold $([ "$commit" = "$SAME_ENGINE" ] && echo drama3-cuda || echo studio-1.2.2 fish_drama3) ${commit:0:8} ($how, $(date '+%Y-%m-%d %H:%M:%S'))" > "$OUT/BUILD"
 }
 
 # the prebuilt engine from the carrier image (one already here, else pulled), when Docker is here and the image holds
@@ -65,9 +71,9 @@ if [ -z "${DRAMA3_SOURCE:-}" ] && [ "${ENGINE_FROM_SOURCE:-0}" != 1 ] && [ "$(un
   rm -rf "$TMP" 2>/dev/null || true
   mkdir -p "$TMP"
   docker run --rm -v "$TMP":/out "$IMAGE" sh -c 'cp /payload/spark-drama3/* /out/ 2>/dev/null; chmod a+rw /out/*' || true
-  if [ "$(cat "$TMP/commit" 2>/dev/null)" = "$DRAMA3_COMMIT" ] && ( cd "$TMP" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) \
+  if same "$(cat "$TMP/commit" 2>/dev/null)" && ( cd "$TMP" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) \
      && grep -q ' drama3-generate$' "$TMP/SHA256SUMS" && grep -q ' libtensorfold_drama3.so$' "$TMP/SHA256SUMS"; then
-    place "$TMP" "$DRAMA3_COMMIT" "prebuilt, from $IMAGE"
+    place "$TMP" "$(cat "$TMP/commit")" "prebuilt, from $IMAGE"
     rm -rf "$TMP" 2>/dev/null || true
     echo "[tensorfold] drama3 engine from $IMAGE (checksums verified) -> $OUT"; exit 0
   fi
@@ -87,7 +93,7 @@ case "$(uname -m)" in aarch64) arch=aarch64;; x86_64) arch=x86_64;; *) echo "no 
 # Zig, checked against the SHA-256 ziglang.org publishes (spark/zig.sh)
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/zig.sh"
 ZIG="$(studio_zig "$PREFIX")" || exit 1
-SRC="${DRAMA3_SOURCE:-$PREFIX/drama3-cuda-src}"
+SRC="${DRAMA3_SOURCE:-$PREFIX/drama3-src}"
 if [ -z "${DRAMA3_SOURCE:-}" ]; then
   [ -d "$SRC/.git" ] || git init -q "$SRC"
   # a checkout already at the commit (an earlier run, or one copied here for a machine without network) is used as it is
@@ -98,11 +104,11 @@ if [ -z "${DRAMA3_SOURCE:-}" ]; then
 fi
 echo "[tensorfold] building the drama3 engine with $NVCC (every CUDA kernel fatbin for sm_${SM//,/, sm_}, then the engine)"
 # stripped: no build machine paths in the binaries (they may go into the carrier image)
-(cd "$SRC" && nice -n 19 "$ZIG" build drama3-generate drama3-lib -j"${DRAMA3_BUILD_JOBS:-4}" -Doptimize=ReleaseFast \
+(cd "$SRC" && nice -n 19 "$ZIG" build fish-drama3-generate fish-drama3-lib -j"${DRAMA3_BUILD_JOBS:-4}" -Doptimize=ReleaseFast \
   -Dnvcc="$NVCC" -Dsm="$SM" -Dstrip=true --prefix "$SRC/zig-out")
 STAGE="$SRC/zig-out/stage"
 rm -rf "$STAGE" && mkdir -p "$STAGE"
-cp "$SRC/zig-out/bin/drama3-generate" "$SRC/zig-out/lib/libtensorfold_drama3.so" "$STAGE/"
+cp "$SRC/zig-out/fish-drama3/bin/drama3-generate" "$SRC/zig-out/fish-drama3/lib/libtensorfold_drama3.so" "$STAGE/"
 if [ -n "${DRAMA3_SOURCE:-}" ] && git -C "$SRC" rev-parse HEAD >/dev/null 2>&1; then commit="$(git -C "$SRC" rev-parse HEAD)"
 else commit="$DRAMA3_COMMIT"; fi
 place "$STAGE" "$commit" "built here with $("$NVCC" --version | sed -n 's/.*release \([0-9.]*\).*/CUDA \1/p')"

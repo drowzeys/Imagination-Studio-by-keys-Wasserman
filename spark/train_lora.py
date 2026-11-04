@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One LoRA run on a DGX Spark, as a job of the Studio's queue (kind `train`, app/train.py): the dataset's latents and
+"""One LoRA run on a DGX Spark (or natively on Windows with the CUDA tier, an RTX Spark N1X), as a job of the Studio's queue (kind `train`, app/train.py): the dataset's latents and
 text cached, the LoRA trained with kohya-ss's musubi-tuner, and the result written into the Studio's LoRA hub.
 
     python3 spark/train_lora.py --home ~/ImaginationStudio --dataset ~/ImaginationStudio/train/<id> --lora <id> \
@@ -46,6 +46,7 @@ import train  # noqa: E402
 TQDM = re.compile(rb"steps:\s*\d+%\|[^|\r\n]*\|\s*(\d+)/(\d+)")
 NEED_GB = float(os.environ.get("TRAIN_NEED_GB") or train.NEED_GB)
 LOCK = Path(os.environ.get("STUDIO_GPU_LOCK", Path.home() / "studio-gpu.lock.d"))
+WINDOWS = sys.platform == "win32"  # natively on Windows (the CUDA tier): job objects and Windows' memory signals
 CURRENT: dict = {"process": None, "stop": False}
 
 
@@ -123,6 +124,8 @@ class Guard(threading.Thread):
         self.process, self.telemetry, self.why = process, telemetry, ""
 
     def run(self) -> None:
+        if WINDOWS:
+            return self.run_windows()
         if not Path("/proc/meminfo").exists():
             return
         import memory_guard
@@ -144,10 +147,50 @@ class Guard(threading.Thread):
             time.sleep(0.25)
 
 
+    def run_windows(self) -> None:
+        """The native tier's guard (spark/comfy_win.py's, Windows' commit and low-memory signals and the GPU's
+        dedicated memory), its sampler in the step's own job object; the job is ended when it names a reason."""
+
+        import comfy_win
+        import windows_cuda
+
+        job = getattr(self.process, "_studio_job", None)
+        if job is None:
+            return
+        try:
+            guard = comfy_win.Guard(job, os.environ.get("SPARK_MEMORY_FLOOR_MB", ""), python=windows_cuda.python())
+        except (OSError, RuntimeError) as error:
+            say(f"[tensorfold] memory guard: the sampler could not start ({error}): the run goes on without it")
+            return
+        previous = None
+        while self.process.poll() is None:
+            if guard.latest is not None:
+                why = guard.reason(previous)
+                previous = guard.latest
+                if not why and self.telemetry is not None and self.telemetry.failure:
+                    why = "; ".join(self.telemetry.failure)
+                if why:
+                    self.why = why
+                    say(f"[tensorfold] memory floor: {why}: stopping the training")
+                    kill(self.process)
+                    return
+            time.sleep(0.25)
+
+
 def admit(paths: list[Path]) -> None:
     """The run starts only when the machine has about NEED_GB above the memory floor; the page cache of the model
     files is given back once first if that is what is in the way."""
 
+    if WINDOWS:  # an RTX Spark N1X: the GPU's own pool (nvidia-smi's free memory) is what a run holds
+        import memory_guard
+
+        card = memory_guard.device(fresh=True)
+        if card and card.get("free_mb"):
+            if card["free_mb"] < NEED_GB * 1024:
+                raise SystemExit(f"not enough GPU memory to train: {card['free_mb'] / 1024:.0f} GB free, a run holds about "
+                                 f"{NEED_GB:g} GB. Stop what else runs on this GPU and resume")
+            say(f"[tensorfold] memory: {card['free_mb'] / 1024:.0f} GB of the GPU free, the run holds about {NEED_GB:g} GB")
+        return
     if not Path("/proc/meminfo").exists():
         return
     import memory_guard
@@ -181,12 +224,7 @@ def take_lock(lora: str) -> str:
             pid = owner.split()[-1] if owner else ""
             gone = False
             if pid.isdigit():
-                try:
-                    os.kill(int(pid), 0)
-                except ProcessLookupError:
-                    gone = True
-                except PermissionError:
-                    pass
+                gone = not alive(int(pid))
             elif time.time() - LOCK.stat().st_mtime > 60:
                 gone = True
             if gone:
@@ -197,6 +235,14 @@ def take_lock(lora: str) -> str:
                 said = time.monotonic()
         time.sleep(2)
     raise SystemExit("cancelled while waiting for the GPU lock")
+
+
+def alive(pid: int) -> bool:
+    """Whether process ``pid`` runs (app/windows_cuda.py's pid_alive: os.kill(pid, 0) is a CTRL_C_EVENT on Windows)."""
+
+    import windows_cuda
+
+    return windows_cuda.pid_alive(pid)
 
 
 def drop_lock(mine: str) -> None:
@@ -210,6 +256,13 @@ def drop_lock(mine: str) -> None:
 # ---------- one step ----------
 
 def kill(process: subprocess.Popen, how=signal.SIGTERM) -> None:
+    if WINDOWS:  # the step's whole tree, by its job object (app/windows_process.py)
+        job = getattr(process, "_studio_job", None)
+        try:
+            job.terminate() if job is not None else process.kill()
+        except OSError:
+            pass
+        return
     try:
         os.killpg(process.pid, how)
     except (ProcessLookupError, PermissionError):
@@ -232,7 +285,13 @@ def execute(command: list[str], cwd: Path, offset: int = 0, total: int = 0, tele
     """Run one step of the run in a session of its own, its output into the job's log (the training's progress bar as
     `[tensorfold] train n/m`), with the memory guard beside it. Raises SystemExit when it fails."""
 
-    process = subprocess.Popen(command, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    if WINDOWS:  # in a job object of its own: the step and everything it starts end together
+        from windows_process import OwnedJob
+
+        process = OwnedJob().spawn(command, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   creationflags=0x200)  # CREATE_NEW_PROCESS_GROUP
+    else:
+        process = subprocess.Popen(command, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
     CURRENT["process"] = process
     guard = Guard(process, telemetry)
     guard.start()
@@ -251,6 +310,8 @@ def execute(command: list[str], cwd: Path, offset: int = 0, total: int = 0, tele
     code = process.wait()
     CURRENT["process"] = None
     guard.join(timeout=2)
+    if WINDOWS:
+        process._studio_job.close()
     if CURRENT["stop"]:
         raise SystemExit("cancelled")
     if guard.why:
@@ -331,9 +392,10 @@ def main(argv: list[str]) -> int:
     missing = [str(path) for path in models.values() if not path.is_file()]
     if missing:
         raise SystemExit(f"training is not set up here (missing {missing[0]}): {train.SETUP}")
-    if subprocess.run(["bash", str(HERE / "comfy.sh"), "status"], capture_output=True, text=True).stdout.startswith("running"):
+    comfy = [sys.executable, "-X", "utf8", str(HERE / "comfy_win.py")] if WINDOWS else ["bash", str(HERE / "comfy.sh")]
+    if subprocess.run(comfy + ["status"], capture_output=True, text=True).stdout.startswith("running"):
         say("[tensorfold] ComfyUI is running: stopping it, the run needs its memory")
-        subprocess.run(["bash", str(HERE / "comfy.sh"), "stop"], capture_output=True, text=True, timeout=90)
+        subprocess.run(comfy + ["stop"], capture_output=True, text=True, timeout=90)
     mine = take_lock(args.lora)
     try:
         admit([models["dit"], models["text_encoder"]])

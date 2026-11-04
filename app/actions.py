@@ -25,6 +25,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 import hlg
+import windows_cuda  # noqa: E402  (the native Windows CUDA tier, beside this file)
 
 KINDS = ("turnaround", "upscale", "mask", "remove", "hlg")
 PRESETS = Path(__file__).with_name("lora-presets.json")
@@ -106,11 +107,16 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         files = {"upscale": ["latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors"],
                  "remove": ["checkpoints/sam3.1_multiplex_fp16.safetensors"],
                  "mask": ["checkpoints/sam3.1_multiplex_fp16.safetensors"]}.get(kind, [])
+        native = windows_cuda.active()
         if any(not (nodes / n).is_dir() for n in need) or any(not (models / "Workflows-Comfy" / f).is_file() for f in files):
+            if native:
+                return (f"Not installed yet: run `{windows_cuda.setup_hint('workflows')}` in the Studio's folder (three node "
+                        "packs and 2.5 GB of models); the next render restarts ComfyUI with them.")
             return "Not installed yet: run `bash spark/setup-workflows.sh` in the pack's folder (three node packs and 2.5 GB of models), then restart ComfyUI."
-        if not any((models / "MiniMax-H3-Comfy/diffusion_models" / f"minimax_h3_ref2va_pruned_{one}.safetensors").is_file()
-                   for one in ("bf16", "int8_convrot")):  # either: Character Swap's install brings only the int8 file
-            return "MiniMax H3 Ref2VA is not installed: run `bash oneshot-setup-spark.sh --ref2va`."
+        if kind != "mask" and not any((models / "MiniMax-H3-Comfy/diffusion_models" / f"minimax_h3_ref2va_pruned_{one}.safetensors").is_file()
+                   for one in ("bf16", "int8_convrot")):  # either: Character Swap's install brings only the int8 file; finding a person is SAM's alone
+            return ("MiniMax H3 Ref2VA is not installed: run `" + (windows_cuda.setup_hint("swap") if native else
+                    "bash oneshot-setup-spark.sh --ref2va") + "`.")
         if LORA[kind] and lora_file(LORA[kind]) is None:
             return f"Install {recipe(LORA[kind]).get('name', LORA[kind])} in the LoRA hub first."
         return ""

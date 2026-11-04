@@ -418,6 +418,15 @@ and the ComfyUI contributors) runs the graphs on **NVIDIA**'s native Windows ARM
 objects own every process the tier starts, and the memory guard reads Windows' memory signals and **NVIDIA**'s CUDA
 and NVML counters. **Git for Windows** fetches the pinned sources, and **Hugging Face**'s **huggingface_hub** the models.
 
+On the same branch the tier builds TensorFold's **Fish Audio Drama 3** engine (`drama3-generate.exe` +
+`tensorfold_drama3.dll`, the fish_drama3 family) and its **MiniMax Music 3** engine (`music3-generate.exe`, the music3
+family) for Windows. The Library's actions, Character Swap and foley run their authors' own ComfyUI node packs there as
+on a DGX Spark (**MATLOWAI**'s H3 Contact Sheet, **dntpi / Sandpies**' H3 Video Upsampler, **Akatz Labs**' H3 Relay,
+**kijai**'s ComfyUI-MMAudio, with **Meta**'s SAM 3.1), and Looks -> Train a LoRA runs **kohya-ss**'s **musubi-tuner**
+in a venv of its own on Windows on Arm (its own Pillow fallback where opencv-python has no ARM64 wheel; **PyAV**,
+**bitsandbytes** and NVIDIA's PyTorch for Windows on Arm beside it). Finish runs **Mirage**'s **Tesseract** and
+**Tesseract Converter** from their windows-x86_64 releases through **Microsoft**'s x64 emulation in Windows 11 on Arm.
+
 ## Windows ARM64 CUDA feasibility checks: NVIDIA and the PyTorch contributors
 
 **NVIDIA** publishes the native Windows ARM64 CUDA builds of **PyTorch, TorchVision and TorchAudio**, made by

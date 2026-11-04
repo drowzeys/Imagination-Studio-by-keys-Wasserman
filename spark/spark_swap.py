@@ -47,6 +47,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import swap_plan as plan  # noqa: E402
+# what installs Ref2VA's int8 weights, the two LoRAs and SAM 3.1: natively on Windows the CUDA tier's setup
+SETUP = ("powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-cuda.ps1 -SkipToolchain -Parts swap"
+         if sys.platform == "win32" else "bash oneshot-setup-spark.sh --swap")
 
 PROMPT = ("Replace the selected person in <Video 1> with the character in <Picture 1>. "
           "Preserve source performance, scene and audio timing.")
@@ -479,7 +482,7 @@ def weights() -> str:
     for one in order:
         if sg.REF2VA.get(one) in have:
             return sg.REF2VA[one]
-    sys.exit("MiniMax H3 Ref2VA is not installed: bash oneshot-setup-spark.sh --ref2va")
+    sys.exit("MiniMax H3 Ref2VA is not installed: " + SETUP)
 
 
 def window_inputs(one: dict, part: dict, masks: list, made: list[Path], work: Path, anchored: Path | None) -> dict:
@@ -499,9 +502,7 @@ def window_inputs(one: dict, part: dict, masks: list, made: list[Path], work: Pa
         own = part["frames"][source]
         held = made[source] if i < one["held"] else None
         for f, path in ((pixels, held or own), (refs, own)):
-            link = f / f"{i + 1:05d}.png"
-            link.unlink(missing_ok=True)
-            link.symlink_to(path)
+            sg.link_file(Path(path), f / f"{i + 1:05d}.png")
     lossless(str(pixels / "%05d.png"), folder / "pixels.mp4")
     scale = 0.5 if REF_SIDE == "half" else min(1.0, int(REF_SIDE) / min(part["width"], part["height"])) if int(REF_SIDE or 0) else 1.0
     same = one["held"] == 0 and scale == 1.0
@@ -637,9 +638,7 @@ def assemble(made: list[Path], part: dict, target: Path, work: Path) -> None:
     folder = work / "final"
     folder.mkdir(exist_ok=True)
     for index, frame in enumerate(made):
-        link = folder / f"{index + 1:05d}.png"
-        link.unlink(missing_ok=True)
-        link.symlink_to(frame)
+        sg.link_file(Path(frame), folder / f"{index + 1:05d}.png")
     seconds = f"{part['count'] / plan.FPS:.6f}"
     sound = ["-i", str(part["sound"]), "-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "256k", "-ar", str(SOUND_RATE)] if part["sound"] else []
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -658,9 +657,7 @@ def server(kind: str) -> None:
     patched = sg.PREFIX / "comfy.patched"
     if sg.up() and patched.exists():
         other = patched.read_text().split()
-        port = sg.URL.rsplit(":", 1)[-1]
-        pid = subprocess.run(["pgrep", "-f", f"[m]ain.py --listen 127.0.0.1 --port {port}"], capture_output=True, text=True).stdout.split("\n")[0].strip()
-        if len(other) == 2 and other[1] == pid:
+        if len(other) == 2 and other[1] == sg.comfy_pid():
             sg.fresh_server("an action's node pack changed this server's H3 layout")
     sg.ensure_server(kind)
 
@@ -724,7 +721,7 @@ def main() -> None:
         need(("SAM3_Detect", "SAM3_VideoTrack", "SAM3_TrackToMask", "PreviewAny", "MiniMaxH3ReferenceToVideo", "MiniMaxH3AddGuide",
               "LTXVConcatAVLatent", "LTXVSeparateAVLatent", "SetLatentNoiseMask"))
         if SAM not in sg.call("/object_info/CheckpointLoaderSimple")["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]:
-            sys.exit("SAM 3.1 is not installed: bash oneshot-setup-spark.sh --swap")
+            sys.exit("SAM 3.1 is not installed: " + SETUP)
         chosen = find_person(part, work)
 
         stages.next("following the person through the part")

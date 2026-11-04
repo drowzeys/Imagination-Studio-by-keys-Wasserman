@@ -174,12 +174,27 @@ Studio's graphs and TensorFold's engines) on Windows' own NVIDIA driver, where t
 - the Bolt brain is TensorFold 1.2.2's `tensorfold-native.exe` with `bolt.dll` (Mia's recipe on the Windows build), run by
   the Studio as on a DGX Spark (loaded on the first question, unloaded when idle or when a render needs the memory),
   in a job object that ends with the Studio;
-- what has no native port yet is refused when it is queued, with the reason, and the banner says so: the model-based
-  Library actions (turnaround, upscale, find or remove a person), Character Swap, MMAudio foley, LoRA training,
-  Tesseract Finish and DGX Spark workers. Nothing is sent to WSL;
-- Fish Audio Drama 3 runs on its native Windows engine (`drama3-generate.exe` with `tensorfold_drama3.dll`, TensorFold
-  `studio-1.2.2` `a545f786`), the same server protocol as on a DGX Spark; where those files are missing the Voice tab
-  says so. MiniMax Music 3 runs on ComfyUI's nodes (its TensorFold engine has no Windows build in the install yet).
+- every job kind of the DGX Spark runs natively once its part is installed; a part that is not installed says which
+  command installs it (`scripts\setup-windows-cuda.ps1 -SkipToolchain -Parts <part>`), and nothing is sent to WSL. Only
+  DGX Spark workers (handing clips to other Sparks) are not offered: this machine renders alone;
+- the Library's actions (turnaround sheet, upscale, find a person, remove a person) run their authors' own ComfyUI node
+  packs at the Spark's pinned commits (MATLOWAI's H3 Contact Sheet, dntpi's H3 Video Upsampler, Akatz Labs' H3 Relay,
+  SAM 3.1 on ComfyUI's nodes) through `spark/spark_workflows.py`, and `scripts/turnaround.sh` has its port
+  (`windows_scripts.py turnaround`); Character Swap runs `spark/spark_swap.py` as on a Spark. Their frames and LoRAs are
+  hard links where a Spark makes symlinks (a symlink needs a privilege a person may not have), and which ComfyUI serves
+  is read from `comfy_win.py`'s record instead of `pgrep`;
+- MMAudio foley runs kijai's ComfyUI-MMAudio with the Studio's sampler node, as on a Spark; the installer adds the pack's
+  requirements only where they add packages (librosa, numba and the rest have Windows ARM64 wheels);
+- Looks -> Train a LoRA runs kohya-ss's musubi-tuner in a venv of its own (`%LOCALAPPDATA%\ImaginationStudio\train`,
+  NVIDIA's PyTorch for CUDA 13.4, musubi-tuner's own Pillow fallback where opencv has no ARM64 wheel; bitsandbytes'
+  8-bit AdamW runs a step on the N1X), each step in a job object with the Windows memory guard beside it;
+- Finish runs Tesseract and Tesseract Converter from their windows-x86_64 releases (the only Windows builds Mirage
+  publishes) through the x64 emulation of Windows 11 on Arm (`scripts\setup-windows-finish.ps1`: pinned SHA-256s, the
+  bundles' own checksum lists; Tesseract's own install.ps1 refuses an ARM64 processor, so it is not used);
+- Fish Audio Drama 3 runs on its native Windows engine (`drama3-generate.exe` with `tensorfold_drama3.dll`) and MiniMax
+  Music 3 on its own (`music3-generate.exe`, in place of ComfyUI's nodes), both TensorFold `studio-1.2.2` `1c8bdbfd`, the
+  same server protocol as on a DGX Spark; where their files are missing the Voice and Music tabs say so (songs then run on
+  ComfyUI's MiniMax Music 3 nodes).
 
 ### Install: one shot, natively
 
@@ -198,16 +213,23 @@ Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and
    the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;
 2. the app's venv, FFmpeg, the GPU venv (NVIDIA's PyTorch 2.14 for CUDA 13.4) and the pinned ComfyUI (PR #200's scripts);
 3. TensorFold's engines **built from source** (no prebuilt release yet): drowzeys/TensorFold `studio-1.2.2` at
-   `a545f786`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`
-   (`tensorfold-native.exe` + `bolt.dll`) and `zig build fish-drama3-generate fish-drama3-lib -Dsm=121`
-   (`drama3-generate.exe` + `tensorfold_drama3.dll`), in an ARM64 developer prompt, into
-   `%LOCALAPPDATA%\ImaginationStudio\tf-h3`, `...\bolt\native\bin` and `...\drama3\bin`;
-4. the models (`scripts\windows-cuda-setup.py models`: the DGX Spark's files from the same repos, `-NativeParts`,
-   default video, image, music, FLUX3-K and sound effects, plus NVIDIA's Bolt checkpoints and Fish Audio's Drama 3;
-   `-NoBolt` and `-NoVoice` leave those out);
+   `1c8bdbfd`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`
+   (`tensorfold-native.exe` + `bolt.dll`), `zig build fish-drama3-generate fish-drama3-lib -Dsm=121`
+   (`drama3-generate.exe` + `tensorfold_drama3.dll`) and, with the music part, `zig build music3-generate -Dsm=121
+   -Doptimize=ReleaseFast` (`music3-generate.exe`), in an ARM64 developer prompt, into
+   `%LOCALAPPDATA%\ImaginationStudio\tf-h3`, `...\bolt\native\bin`, `...\drama3\bin` and `...\music3\bin`, each with
+   the commit it was built from (a run at the same commit keeps them);
+4. the models (`scripts\windows-cuda-setup.py models`: the DGX Spark's files from the same repos, with the Spark
+   scripts' own SHA-256s where they pin one; `-NativeParts`, default video, image, music, FLUX3-K, sound effects, swap
+   (Ref2VA int8, the Character Swap and Turbo LoRAs, SAM 3.1: 25 GB), workflows (the Library's actions: three node packs,
+   SAM 3.1 and the latent upscaler), foley (kijai's ComfyUI-MMAudio and MMAudio's 5.6 GB) and finish (Tesseract), plus
+   NVIDIA's Bolt checkpoints and Fish Audio's Drama 3; `-NoBolt` and `-NoVoice` leave those out; `train` adds
+   musubi-tuner's venv and its 46 GB of files: MiniMax H3's FL2VA transformer in bf16, its fp16 video encoder and ostris's
+   adapter);
 5. ComfyUI's model folders and `cuda-tier.json`.
 
-Run again, it resumes and updates. The Start and Stop launchers then run `scripts\app.ps1` and
+Run again, it resumes and updates. `-ToolchainOnly` installs step 1 alone; `-SkipToolchain -Parts <part>` adds one part
+to an install. The Start and Stop launchers then run `scripts\app.ps1` and
 `scripts\stop-windows-studio.ps1`; everything else (taskbar pin, power settings, `-StartAtLogon`, `-EnableSsh`) is as
 for WSL. The WSL install can stay beside it (each has its own models; the native tier needs its own copy, or point
 `-Models` at a folder that has them).
@@ -240,3 +262,46 @@ for WSL. The WSL install can stay beside it (each has its own models; the native
   WSL's RAM, Windows' low-memory signal stopped a video's load (commit 116.6 of 117.6 GB): run one stack at a time.
   The guard holds commit to a 4 GB floor rather than to `windows_memory.pressure`'s 0.5-second projection, which read
   a model load's single 21 GB commit as commit falling to nothing and stopped a load with 19 GB to spare.
+
+### Every feature natively: what was run (2026-11-04, later the same day)
+
+The same laptop and Studio (`windows-native-features`), the engines rebuilt by the installer from TensorFold
+`studio-1.2.2` `1c8bdbfd`, every job queued through the Studio's own API (`/api/jobs`, `/api/voice/takes`,
+`/api/music/takes`, `/api/finish/{id}/convert`, `/api/loras/{id}/install`). Wall time is the job's, queued to done. The
+clip used by the actions is a FastH3 render of a generated scene (a man in a red jacket crossing a town square, 864x480,
+124 frames: 113.9 s from a cold server at 4 passes).
+
+| Job | Native Windows | DGX Spark |
+|---|---:|---:|
+| Find a person (SAM 3.1 on ComfyUI's nodes, Akatz Labs' green mask), the 5 s clip, ComfyUI restarted for it | **65.7 s** (finding and following him 41.9 s, the clean plate 0.1 s) | 36-40 s for the mask (README) |
+| Foley (MMAudio large_44k_v2, 25 passes, kijai's nodes), the 5.17 s clip, ComfyUI restarted for it | **48.7 s** (the graph 31.4 s) | — |
+| Finish (Tesseract 0.4.0, x64 emulation), two clips, a title card and a song under them, 11.7 s at 1080p 24 fps | **12.4 s** | — (a Spark finishes on a Mac) |
+| Finish, two cuts, 6 s at 720p | 7.6 s | — |
+| Finish -> After Effects project (Tesseract Converter 0.3.0) | done, a few seconds | — |
+| MiniMax Music 3 on its TensorFold engine, a 30 s song, Drama 3 unloaded first | **80.9 s** (load 20.9 s; the song 57.9 s: words 32.6 s, sound 23.4 s, decode 1.9 s; 1.93x real time; 16.5 GB at the peak) | 60.3 s for the song, load ~16 s |
+| The same song on ComfyUI's nodes (before this change) | 133.8 s | — |
+| Fish Audio Drama 3 on the rebuilt engine, a 5.3 s sentence, engine loaded for it from a cold disk | 94.4 s (load 90.6 s; 3.45 s to speak it, 1.55x real time, first sound 204 ms) | 29-31 frames/s |
+| LoRA hub: Turnaround (matlod, 63 MB) installed | done | — |
+
+- Find a person and foley restart ComfyUI before they load (a server that rendered a clip starts again empty, as on a
+  Spark). The node packs of all four actions and foley load in the Windows ComfyUI (its import report lists no failure).
+- The Drama 3 load above is from a cold disk (the engines and their page cache had just been rebuilt); a warm load is
+  34 s, as in the table before. The Studio no longer rewrites Windows paths for Drama 3: `1c8bdbfd` JSON-escapes the
+  path it echoes (`88415e41`), and an engine from `a545f786` would now time out on its first take: rebuild it (the
+  installer does, by its commit).
+- MiniMax Music 3's own engine is 1.65x faster than ComfyUI's nodes on this laptop, and its song as fast as on a GB10;
+  its load is slower (20.9 s against about 16 s).
+- Not run here, for want of disk (the laptop's C: had 19.7 GB free, other models fill the rest): the turnaround sheet,
+  upscale, remove a person and Character Swap need MiniMax H3 Ref2VA (21 GB in int8) and LoRA training needs 46 GB of
+  files (FL2VA in bf16, the fp16 video encoder, ostris's adapter). Their code paths ran as far as the weights: the node
+  packs load, SAM 3.1 finds and follows the person, the hub installs their LoRAs, the training venv installs
+  (`windows-cuda-setup.py train`, 180 s) and bitsandbytes' 8-bit AdamW runs a step on the GPU; the Studio then refuses
+  each with the command that installs the missing part. Measured on a DGX Spark they hold 28-53 GB (remove, swap) and
+  about 55 GB (a LoRA run), inside the native pool's 113 GB.
+- Tesseract Converter 0.3.0's Windows build makes the After Effects project but refuses the Premiere Pro one ("AEP
+  artifact is not a bounded portable local path", with relative paths too): a limit of that build, not of the Studio.
+  Resolve's FCPXML and EDL, written by the Studio itself, come with every finish.
+- The installer, end to end: `-ToolchainOnly` into an empty folder fetched and checked NVIDIA's eight CUDA 13.4.1
+  archives (0.79 GB) in 62.9 s, and that toolchain built `tf_h3.dll` and `music3-generate.exe` from an empty cache in
+  78.5 s; a full run with the toolchain present (every part above, the models already there) took 284 s, the four
+  engines rebuilt at the new commit; `setup-windows-finish.ps1` took 15.3 s.

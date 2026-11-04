@@ -216,14 +216,15 @@ def say(line: str) -> None:
 class Guard:
     """windows_memory's sampler beside the server, its readings judged by windows_memory.pressure."""
 
-    def __init__(self, job, floor: str):
+    def __init__(self, job, floor: str, python: str | None = None):
         import windows_memory
         self.memory = windows_memory
         self.floor = floor
         self.latest = None
         self.at = 0.0
         self.error = ""
-        self.process = job.spawn([sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", "0"],
+        # the sampler opens a CUDA context through torch: the GPU venv's python (this one, for the server)
+        self.process = job.spawn([python or sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", "0"],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
                                  encoding="utf-8", creationflags=NEW_GROUP)
         threading.Thread(target=self.read, daemon=True).start()

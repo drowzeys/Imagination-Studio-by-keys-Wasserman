@@ -542,9 +542,15 @@ class Cuda(voice.Served):
         self.weights = weights if weights in self.RTF_OF else "int8"
         self.RTF, self.NEED_GB = self.RTF_OF[self.weights], self.NEED_OF[self.weights]
         self.guard_route = "music-cuda-" + self.weights
+        if WINCUDA:
+            self.label = "TensorFold CUDA · native Windows"
 
     def environment(self) -> dict:
         env = dict(os.environ)
+        if WINCUDA:  # music3-generate.exe opens cublas64_13.dll itself: CUDA's arm64 runtime folder on PATH
+            cuda = windows_cuda.paths()["cuda_bin"]
+            env["PATH"] = os.pathsep.join([str(self.bin.parent), *([str(cuda)] if cuda.is_dir() else []), env.get("PATH", "")])
+            return env
         # the engine opens cuBLAS 13 itself (dlopen): the toolkit's folder, where the loader may not look
         cuda = [one for one in ("/usr/local/cuda/lib64", "/usr/local/cuda/targets/sbsa-linux/lib") if Path(one).is_dir()]
         if cuda:
@@ -570,9 +576,11 @@ class Cuda(voice.Served):
 
         if not SPARK:
             return "The CUDA route runs on a DGX Spark (Linux, CUDA)."
-        if WINCUDA and not self.bin.with_suffix(".exe").is_file():
-            return ("MiniMax Music 3's TensorFold engine is not built for native Windows in this install: songs run on "
-                    "ComfyUI's MiniMax Music 3 nodes (MUSIC3_CUDA_BIN names a Windows build).")
+        if WINCUDA:  # music3-generate.exe (TensorFold studio-1.2.2's Windows build, setup-windows-cuda.ps1 -Music)
+            self.bin = self.bin.with_suffix(".exe")
+            if not self.bin.is_file():
+                return ("MiniMax Music 3's TensorFold engine is not built in this install: songs run on ComfyUI's "
+                        f"MiniMax Music 3 nodes ({windows_cuda.setup_hint('music')} builds it).")
         self.bin = voice.located("music3-binary", self.bin, lambda p: os.access(p, os.X_OK))
         self.model = voice.located("music3-weights", self.model, has_weights)
         if not os.access(self.bin, os.X_OK):

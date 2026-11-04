@@ -12,9 +12,14 @@
   3. TensorFold's engines from source, the Studio's fork branch studio-1.2.2 at a pinned commit: `zig build tf-h3-int8`
      (tf_h3.dll, the int8 H3 blocks ComfyUI's TensorFoldH3Blocks node calls) and, with -Bolt, `zig build native bolt`
      (tensorfold-native.exe + bolt.dll, the Bolt brain) and, with -Voice, `zig build fish-drama3-generate fish-drama3-lib`
-     (drama3-generate.exe + tensorfold_drama3.dll, Fish Audio Drama 3), in an ARM64 developer environment; the files go to
-     %LOCALAPPDATA%\ImaginationStudio\tf-h3 and ...\bolt\native\bin. No prebuilt release is published yet;
-  4. the models (scripts\windows-cuda-setup.py models: the DGX Spark's files, from the same repos);
+     (drama3-generate.exe + tensorfold_drama3.dll, Fish Audio Drama 3) and, with the music part, `zig build music3-generate`
+     (music3-generate.exe, MiniMax Music 3's own engine), in an ARM64 developer environment; the files go to
+     %LOCALAPPDATA%\ImaginationStudio\tf-h3, ...\bolt\native\bin, ...\drama3\bin and ...\music3\bin, with the commit
+     they were built from (a run at the same commit keeps them). No prebuilt release is published yet;
+  4. the models (scripts\windows-cuda-setup.py models: the DGX Spark's files, from the same repos) and, for the parts that
+     need them, the authors' ComfyUI node packs at their pinned commits (scripts\windows-cuda-setup.py nodes: workflows
+     for the Library's actions, foley for MMAudio), musubi-tuner's environment (train: scripts\windows-cuda-setup.py
+     train) and Tesseract (finish: scripts\setup-windows-finish.ps1);
   5. ComfyUI's model folders and cuda-tier.json, with the CUDA pool measured (scripts\windows-cuda-setup.py config):
      the Studio runs the native tier only when that record and its files are there.
 
@@ -24,7 +29,8 @@
 [CmdletBinding()]
 param(
   [string]$Models = "",                  # the model folder (default %LOCALAPPDATA%\ImaginationStudio\models)
-  [string]$Parts = "video,image",         # windows-cuda-setup.py's parts: video, image, image-edit, ref2va, flux3, moss, music, sound
+  [string]$Parts = "video,image",         # windows-cuda-setup.py's parts: video, image, image-edit, ref2va, flux3, moss, music, sound,
+                                          # workflows (the Library's actions), swap (Character Swap), foley, train, finish
   [switch]$Bolt,                          # the Bolt brain: build tensorfold-native.exe + bolt.dll and fetch NVIDIA's checkpoints
   [switch]$Music,
   [switch]$Flux3,
@@ -32,12 +38,13 @@ param(
   [switch]$Voice,                         # Fish Audio Drama 3: build drama3-generate.exe + tensorfold_drama3.dll, fetch fishaudio/drama-3
   [switch]$NoDownload,                    # no model downloads (the files are already in -Models)
   [switch]$SkipToolchain,
+  [switch]$ToolchainOnly,                 # step 1 alone: the build tools and the CUDA toolkit, nothing else
   [switch]$SkipBuild,                     # keep the engines already in place
   [string]$EngineFrom = "",               # a folder holding tf_h3.dll (and tensorfold-native.exe, bolt.dll): copied, not built
   [string]$CudaRoot = "C:\cuda-13.4",
   [string]$CudaRelease = "13.4.1",
   [string]$TensorFoldRepo = "https://github.com/drowzeys/TensorFold.git",
-  [string]$TensorFoldCommit = "a545f7867cd82feab630a2d015086da602f53347",  # branch studio-1.2.2
+  [string]$TensorFoldCommit = "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2",  # branch studio-1.2.2
   [string]$BoltModel = "",                # an existing Bolt checkpoint folder instead of downloading one
   [string]$BoltDraft = ""
 )
@@ -103,10 +110,15 @@ if (-not $SkipToolchain) {
       Expand-Archive $zip -DestinationPath $out
       $top = Get-ChildItem $out -Directory | Select-Object -First 1
       Copy-Item (Join-Path $top.FullName "*") $CudaRoot -Recurse -Force
+      Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
       Ok "CUDA $CudaRelease $name"
     }
+    # the archives and their expanded copies (about 3.5 GB) are not kept: a run that finds nvcc never fetches them again
+    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
   } else { Ok "CUDA toolkit at $CudaRoot" }
 }
+
+if ($ToolchainOnly) { Ok "build tools ready (-ToolchainOnly: nothing else installed)"; exit 0 }
 
 # ---------- 2. the app, FFmpeg, the GPU venv and ComfyUI ----------
 Say "The Studio's environments"
@@ -126,12 +138,15 @@ Ok "app venv, FFmpeg, GPU venv (PyTorch, CUDA 13.4), ComfyUI"
 $TfH3 = Join-Path $Home_ "tf-h3"
 $BoltBin = Join-Path $Home_ "bolt\native\bin"
 $DramaBin = Join-Path $Home_ "drama3\bin"
-New-Item -ItemType Directory -Force -Path $TfH3, $BoltBin, $DramaBin | Out-Null
+$MusicBin = Join-Path $Home_ "music3\bin"
+$MusicEngine = ($Parts -split "," | ForEach-Object { $_.Trim() }) -contains "music"
+New-Item -ItemType Directory -Force -Path $TfH3, $BoltBin, $DramaBin, $MusicBin | Out-Null
 if ($EngineFrom) {
   Say "TensorFold's engines from $EngineFrom"
   Copy-Item (Join-Path $EngineFrom "tf_h3.dll") $TfH3 -Force
   foreach ($one in @("tensorfold-native.exe", "bolt.dll")) { if (Test-Path (Join-Path $EngineFrom $one)) { Copy-Item (Join-Path $EngineFrom $one) $BoltBin -Force } }
   foreach ($one in @("drama3-generate.exe", "tensorfold_drama3.dll")) { if (Test-Path (Join-Path $EngineFrom $one)) { Copy-Item (Join-Path $EngineFrom $one) $DramaBin -Force } }
+  if (Test-Path (Join-Path $EngineFrom "music3-generate.exe")) { Copy-Item (Join-Path $EngineFrom "music3-generate.exe") $MusicBin -Force }
 } elseif (-not $SkipBuild -or -not (Test-Path (Join-Path $TfH3 "tf_h3.dll"))) {
   Say "TensorFold's engines from source ($TensorFoldRepo @ $($TensorFoldCommit.Substring(0, 8)))"
   $src = Join-Path $Home_ "src\TensorFold"
@@ -144,9 +159,15 @@ if ($EngineFrom) {
   $vc = VcVars
   if (-not $vc) { throw "no Visual Studio ARM64 compiler (vcvarsall.bat): run without -SkipToolchain" }
   $nvcc = Join-Path $CudaRoot "bin\nvcc.exe"
-  $steps = @("zig build tf-h3-int8 -Dsm=121 -Dnvcc=`"$nvcc`"")
-  if ($Voice) { $steps += "zig build fish-drama3-generate fish-drama3-lib -Dsm=121 -Dnvcc=`"$nvcc`"" }
-  if ($Bolt) { $steps += "zig build native bolt -Dsm=121 -Doptimize=ReleaseFast -Dstrip=true -Dnvcc=`"$nvcc`" -Dbolt-src=`"$src\zig\bolt-cuda`"" }
+  # an engine already built from this commit is kept (its folder's commit file says which)
+  function Built([string]$folder, [string]$file) {
+    (Test-Path (Join-Path $folder $file)) -and ((Get-Content (Join-Path $folder "commit") -ErrorAction SilentlyContinue) -eq $TensorFoldCommit)
+  }
+  $steps = @()
+  if (-not (Built $TfH3 "tf_h3.dll")) { $steps += "zig build tf-h3-int8 -Dsm=121 -Dnvcc=`"$nvcc`"" }
+  if ($Voice -and -not (Built $DramaBin "drama3-generate.exe")) { $steps += "zig build fish-drama3-generate fish-drama3-lib -Dsm=121 -Dnvcc=`"$nvcc`"" }
+  if ($Bolt -and -not (Built $BoltBin "tensorfold-native.exe")) { $steps += "zig build native bolt -Dsm=121 -Doptimize=ReleaseFast -Dstrip=true -Dnvcc=`"$nvcc`" -Dbolt-src=`"$src\zig\bolt-cuda`"" }
+  if ($MusicEngine -and -not (Built $MusicBin "music3-generate.exe")) { $steps += "zig build music3-generate -Dsm=121 -Doptimize=ReleaseFast -Dstrip=true -Dnvcc=`"$nvcc`"" }
   # each build in a .cmd file of its own (cmd /c strips the quotes of a one-line command that starts with one, and the
   # ARM64 developer environment then never loads)
   $bat = Join-Path $env:TEMP "studio-tensorfold-build.cmd"
@@ -156,20 +177,41 @@ if ($EngineFrom) {
     & cmd.exe /d /c $bat
     Native $step
   }
-  Copy-Item (Join-Path $src "zig-out\h3-int8\tf_h3.dll") $TfH3 -Force
-  if ($Bolt) { Copy-Item (Join-Path $src "zig-out\native\bin\*") $BoltBin -Force }
-  if ($Voice) { Copy-Item (Join-Path $src "zig-out\fish-drama3\bin\*") $DramaBin -Force }
+  foreach ($one in @(@("zig build tf-h3", "zig-out\h3-int8\tf_h3.dll", $TfH3), @("zig build fish-drama3", "zig-out\fish-drama3\bin\*", $DramaBin),
+                     @("zig build native bolt", "zig-out\native\bin\*", $BoltBin), @("zig build music3", "zig-out\bin\music3-generate.exe", $MusicBin))) {
+    if ($steps | Where-Object { $_.StartsWith($one[0]) }) {
+      Copy-Item (Join-Path $src $one[1]) $one[2] -Force
+      Set-Content -Path (Join-Path $one[2] "commit") -Value $TensorFoldCommit -Encoding ascii
+    }
+  }
 }
 if (-not (Test-Path (Join-Path $TfH3 "tf_h3.dll"))) { throw "no tf_h3.dll in $TfH3" }
 Ok "H3 int8 blocks: $TfH3\tf_h3.dll"
 if (Test-Path (Join-Path $BoltBin "tensorfold-native.exe")) { Ok "Bolt: $BoltBin\tensorfold-native.exe + bolt.dll" }
 if (Test-Path (Join-Path $DramaBin "drama3-generate.exe")) { Ok "Drama 3: $DramaBin\drama3-generate.exe + tensorfold_drama3.dll" }
+if (Test-Path (Join-Path $MusicBin "music3-generate.exe")) { Ok "MiniMax Music 3: $MusicBin\music3-generate.exe" }
 
 # ---------- 4. the models ----------
 if (-not $NoDownload) {
   Say "Models -> $Models ($Parts)"
   & $Gpu -X utf8 (Join-Path $Root "scripts\windows-cuda-setup.py") models --models $Models --parts $Parts
   if ($LASTEXITCODE -ne 0) { Warn "some files did not download (above): run again to resume; a gated model needs its licence accepted with your Hugging Face account" }
+}
+
+$Want = $Parts -split "," | ForEach-Object { $_.Trim() }
+$Nodes = @($Want | Where-Object { $_ -in @("workflows", "foley") })
+if ($Nodes) {
+  Say "The authors' ComfyUI node packs ($($Nodes -join ', '))"
+  & $Gpu -X utf8 (Join-Path $Root "scripts\windows-cuda-setup.py") nodes --parts ($Nodes -join ",")
+  Native "the node packs"
+}
+if ($Want -contains "train") {
+  Say "musubi-tuner's environment (Looks -> Train a LoRA)"
+  & $Gpu -X utf8 (Join-Path $Root "scripts\windows-cuda-setup.py") train
+  Native "the training environment"
+}
+if ($Want -contains "finish") {
+  & (Join-Path $PSScriptRoot "setup-windows-finish.ps1")
 }
 
 # ---------- 5. ComfyUI's model folders and the tier's record ----------
