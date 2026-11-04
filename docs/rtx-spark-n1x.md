@@ -86,3 +86,34 @@ the passes ran.
 - HP's Smart Sense can leave Performance by itself: check myHP before a long render, keep it plugged in and the lid
   open (many laptops cut power with the lid shut).
 - The whole-job times include loading the models and the QA gate's look at the take, which differ between runs.
+
+## An LLM on the N1X: Performance against power saving
+
+Not the Studio's own workload, measured the same way for anyone serving a language model on the laptop beside it.
+Measured 2026-11-04 on the same HP OmniBook X 14, plugged in, in WSL2 Ubuntu: vcruz305's
+[Qwen3.8-Flash-Next EXL3 recipe](https://github.com/vcruz305/Qwen3.8-Flash-Next-EXL3-DGX-Spark-recipe) (exllamav3
+`bccada04` and TabbyAPI `880e6b8`, built for sm_121 with the CUDA 13.4 toolkit) serving
+[CYBER-FROST-3.8-EXL3-SAGE-3.87bpw](https://huggingface.co/vcruz305/CYBER-FROST-3.8-EXL3-SAGE-3.87bpw) with MTP drafts and
+the 39 GB n-gram table streamed from disk (WSL has ~29 GB of RAM to cache it), about 69 GB of the GPU's 96. The
+recipe's own clients: `bench_v1.py` (one warmup, three 400-token replies a class) and `concurrency.py` (3,000-token
+prompts, 400 tokens, three rounds, totals include prefill). "Performance" is HP Performance with Windows on Best
+performance; "power saving" is Windows' Best power efficiency. GPU clock and power: nvidia-smi every 2 s while busy.
+
+| | Performance | Power saving | DGX Spark (the recipe's own) |
+|---|---:|---:|---:|
+| Decode, code (tok/s) | **41.0** | 25.6 | 45.8 |
+| Decode, DevOps (tok/s) | **36.3** | 21.6 | 44.3 |
+| Decode, prose (tok/s) | **29.0** | 16.4 | 34.4 |
+| First token, short prompt (s) | 0.74-0.80 | 1.33-1.44 | — |
+| 17,841-token prompt: prefill (tok/s) | **950** | 460 | — |
+| 17,841-token prompt: first token (s) | 19.1 | 39.6 | — |
+| Decode after that prompt (tok/s) | 29.3 | 18.3 | — |
+| 1 / 2 / 4 requests at once, total (tok/s) | 30.6 / 33.6 / 36.2 | 17.6 / 18.3 / 19.6 | — |
+| GPU while busy | 2166 MHz, 48 W, up to 72 °C | 1375 MHz, 15 W, up to 62 °C | — |
+
+- Power saving roughly halves everything (decode 0.56-0.62x, prefill 0.48x) at under a third of the GPU's power.
+- In Performance the laptop decodes at 82-90% of the DGX Spark's figures (the recipe's, on a GB10).
+- More requests at once add little (+18% total at four): every token reads the n-gram table, which WSL's small RAM
+  cannot hold, so the disk is shared.
+- vcruz305's DSV4.1-Flash-1017 EXL3 recipe holds about 107 GiB of device memory on a GB10 and does not fit the N1X's
+  96 GB carve-out.
