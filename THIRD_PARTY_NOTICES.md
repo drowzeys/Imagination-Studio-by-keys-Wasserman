@@ -376,6 +376,11 @@ installer downloads its pieces from the author's own page, at the version named 
   `npx playwright install chromium-headless-shell` to fetch the Chromium headless shell that HyperFrames renders in.
   Chromium (The Chromium Authors) is BSD-3-Clause, with third-party components under their own licences listed in the
   browser's `about:credits`. It runs as a separate program; none of it is bundled here.
+- Windows graphics reuses an existing **Microsoft Edge** installation (Microsoft, under its own terms).
+  It is not downloaded or redistributed by Studio.
+- Its Windows-only compatibility patch to HyperFrames uses **Puppeteer**, by Google and the Puppeteer
+  contributors (Apache-2.0), for a headless browser-version check in a temporary profile. The patch is
+  applied locally to the pinned installation; it does not change the Linux/Mac browser probe.
 
 ## Node.js (OpenJS Foundation)
 

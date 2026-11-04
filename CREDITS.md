@@ -57,6 +57,10 @@ H3's prompt form, the queue, and takes with their clips. Slate does much more th
 takes, punch-ups, the tone dial, reference and audio analysis, the stills library, per-model compiles for a dozen
 generators, and its MCP server. (Apache-2.0.)
 
+The Studio's portable Slate ZIP carries that project shape and its referenced media, original screenplay and
+shot lists. Its captioned contact sheets use **Pillow** and follow the Studio's scout/contact-sheet workflow by
+**Keys (drowzeys)**; it is not an export format claimed to be shipped by the original Slate app.
+
 The **Wasserman Sharp Spec** button and the QA gate behind it are his too: the locked recipe (1376x768, FastH3 at 8
 passes, seed 42, one pass with no upscale) and the two gates, a transcript of the spoken line and a three-frame
 contact sheet checked by a vision model, with one retake at the next seed. `app/qa.py` is this pack's writing of them.
@@ -129,6 +133,16 @@ stick-figure preview, Send to Blockout, an MCP control server, session restore. 
 move in words and the hand-off of one layer as a motion reference for MiniMax H3.
 
 ## The image model: the Qwen team
+
+**Stability AI** made **SD-Turbo** and its Adversarial Diffusion Distillation method, used for the optional
+512x512 Windows storyboard drafts (Stability AI Community License). **comfyanonymous, Comfy Org and the ComfyUI
+contributors** supply the checkpoint, conditioning, sampler, decoder and image-saving nodes. The contact-sheet
+layout follows the Studio's existing scout script by Keys (drowzeys).
+Stability AI's **SDXL-Turbo** was also evaluated; it is not a qualified Windows render route.
+
+The **Qwen team at Alibaba** also made **Qwen3-4B**, the optional small Windows writing brain (Apache-2.0).
+Its official Q4_K_M GGUF runs in **llama.cpp**, by **Georgi Gerganov and the ggml contributors** (MIT), using their
+pinned native Windows ARM64 CUDA release. The Studio downloads neither model nor runtime into the repository.
 
 The **Qwen team at Alibaba** released **Qwen-Image-2.1**: the 7B single-stream transformer with its causal text
 prefix, the 64-channel VAE and the Qwen3-VL text encoder, with code in diffusers. The image half of this pack is
@@ -250,6 +264,10 @@ titles, captions, slideshows and music videos: a web page seeked frame by frame 
 with FFmpeg. The motion in each template is written with **GSAP** by GreenSock (now part of Webflow), under its
 standard no-charge licence. Both are installed from npm at pinned versions by `scripts/setup-graphics.sh`; the pack
 ships neither. The browser is a Chromium already on the machine, else HyperFrames' own, and on a DGX Spark **Playwright**'s Chromium for arm64 (Microsoft, Apache-2.0).
+The bounded Windows graphics route reuses the person's installed **Microsoft Edge**, by **Microsoft**;
+it downloads neither Edge nor a separate browser and does not redistribute either.
+Its Windows-only HyperFrames compatibility patch uses **Puppeteer**, by **Google and the Puppeteer contributors**
+(Apache-2.0), to check the browser headlessly in a temporary profile instead of opening the person's browser.
 
 ## Training your own LoRA: kohya-ss's musubi-tuner and ostris
 
@@ -375,6 +393,7 @@ machine; none of their code ships in this pack.
 
 - **Anthropic** — **Claude Code**.
 - **OpenAI** — **Codex** (the CLI, and the copy the ChatGPT desktop app carries).
+- **GitHub** — **GitHub Copilot CLI**.
 - **Google** — **Gemini CLI**.
 - **xAI** — **Grok CLI**.
 - **Nous Research** — **Hermes Agent**.
@@ -383,6 +402,18 @@ machine; none of their code ships in this pack.
 - **Siddharth Ahuja** — **blender-mcp**, the Blender bridge an agent works through; the **Blender Foundation** —
   **Blender**.
 - The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
+
+## Windows ARM64 CUDA feasibility checks: NVIDIA and the PyTorch contributors
+
+**NVIDIA** publishes the native Windows ARM64 CUDA builds of **PyTorch, TorchVision and TorchAudio**, made by
+the **PyTorch contributors**. The experimental Windows GPU setup uses those wheels in an isolated environment;
+the small verification operations do not download models or qualify Studio rendering support.
+**Microsoft** provides the Win32 memory-pressure, commitment and job-object APIs used by the Windows diagnostic;
+**NVIDIA** provides NVML's dedicated-memory counters and CUDA's context-budget queries.
+**aio-libs**' **aiohttp** supplies the local progress WebSocket and targeted cancellation client.
+The explicit sound calibration uses **Stability AI**'s Stable Audio Open 1.0 and **Comfy Org / ComfyUI contributors**'
+checkpoint-loading helpers and existing audio nodes. Its GPU-first loader and peak receipt are calibration-only
+Studio additions, not changes to the downloaded ComfyUI source.
 
 ## The RTX Pro 6000 build, run on the card: August Sturm
 
@@ -426,7 +457,8 @@ built from the file's header, that the studio now makes itself.
 - **Qwen team (Alibaba)** — Qwen3-VL.
 - **Kijai**, **DeepBeepMeep**, **ddalcu** — the ComfyUI conversions, pruned checkpoints and MLX quants that the
   wider H3 ecosystem (and Phosphene's install) relies on.
-- **FFmpeg**.
+- **FFmpeg**; **BtbN and the FFmpeg-Builds contributors**, whose pinned native Windows ARM64 GPL build supplies
+  FFmpeg and ffprobe for the Windows preview. **VideoLAN and the x264 contributors** supply its H.264 encoder.
 - **OpenAI** — **Whisper**, and **SYSTRAN** — **faster-whisper**: the QA gate's and Voice's check of the spoken words.
 - **yt-dlp** contributors — Motion Previs reading a shot from a link.
 - **PyTorch**; **Hugging Face** — **diffusers**, **transformers** and **huggingface_hub**; **Patrick Kidger** and

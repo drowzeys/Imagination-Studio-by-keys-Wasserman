@@ -40,11 +40,39 @@ def read(home: Path) -> str:
         return ""
 
 
+def windows_private(target: Path) -> None:
+    """Protected Windows DACL: only the file's owner has access, before a secret is written."""
+    import ctypes
+    from ctypes import wintypes
+
+    api = ctypes.WinDLL("advapi32", use_last_error=True)
+    convert = api.ConvertStringSecurityDescriptorToSecurityDescriptorW
+    convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.ULONG)]
+    convert.restype = wintypes.BOOL
+    protect = api.SetFileSecurityW
+    protect.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+    protect.restype = wintypes.BOOL
+    free = ctypes.WinDLL("kernel32", use_last_error=True).LocalFree
+    free.argtypes = [ctypes.c_void_p]
+    free.restype = ctypes.c_void_p
+    descriptor = ctypes.c_void_p()
+    if not convert("D:P(A;;FA;;;OW)", 1, ctypes.byref(descriptor), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not protect(str(target), 0x80000004, descriptor):  # protected DACL, without inherited grants
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        free(descriptor)
+
+
 def ensure(home: Path) -> str:
     """The folder's key, made now when there is none: 0600 from the start, written whole or not at all."""
 
     known = read(home)
     if known:
+        if os.name == "nt":
+            windows_private(path(home))
+            return known
         try:
             if path(home).stat().st_mode & 0o077:
                 path(home).chmod(0o600)  # a copy that came with looser rights
@@ -56,6 +84,8 @@ def ensure(home: Path) -> str:
     part = path(home).with_name(f"{FILE}.{os.getpid()}.part")
     descriptor = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as out:
+        if os.name == "nt":
+            windows_private(part)
         out.write(made + "\n")
     try:
         os.link(part, path(home))  # the first of two starting apps wins; the other reads its key
@@ -73,6 +103,8 @@ def rotate(home: Path) -> str:
     part = path(home).with_name(f"{FILE}.{os.getpid()}.part")
     descriptor = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as out:
+        if os.name == "nt":
+            windows_private(part)
         out.write(made + "\n")
     os.replace(part, path(home))
     return made

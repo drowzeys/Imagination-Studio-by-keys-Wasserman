@@ -57,12 +57,27 @@ def refused(name, **args) -> str:
     return reply["content"][0]["text"]
 
 
-def test_every_tool_is_listed_with_its_required_arguments():
+def test_every_tool_is_listed_with_its_required_arguments(studio):
     listed = {t["name"]: t for t in mcp.answer({"method": "tools/list"})["tools"]}
     for name, required in (("queue_edit", ["image", "prompt"]), ("queue_long", ["prompt", "total_seconds"]), ("queue_sound", ["kind"]),
                            ("queue_soundtrack", ["song", "video"]), ("check_clip", ["path"]), ("motion_previs", ["clip"]), ("cancel_job", ["id"])):
         assert listed[name]["inputSchema"]["required"] == required
     assert "references" in listed["queue_clip"]["inputSchema"]["properties"]
+
+
+def test_windows_tools_advertise_only_qualified_routes_and_limits(monkeypatch):
+    monkeypatch.setattr(mcp, "call", lambda *args: {"platform": "windows", "capabilities": {
+        "scout": {"available": True}, "sfx": {"available": True}, "graphics": {"available": True,
+            "templates": ["title", "lower-third", "kinetic", "slideshow", "music-video", "explainer"]},
+        "beats": {"available": True},
+        "export": {"available": False}}})
+    tools = {t["name"]: t for t in mcp.answer({"method": "tools/list"})["tools"]}
+    assert {"studio_state", "slate_add_shot", "queue_still", "queue_sound", "make_graphics", "music_beats"} <= tools.keys()
+    assert not {"queue_clip", "queue_voice", "queue_song", "queue_edit", "check_clip", "train_lora", "export_timeline"} & tools.keys()
+    assert tools["queue_sound"]["inputSchema"]["properties"]["seconds"]["const"] == 5
+    assert tools["queue_sound"]["inputSchema"]["properties"]["kind"]["enum"] == ["sfx"]
+    assert tools["make_graphics"]["inputSchema"]["properties"]["template"]["enum"] == ["title", "lower-third", "kinetic", "slideshow", "music-video", "explainer"]
+    assert next(t for t in mcp.TOOLS if t["name"] == "queue_sound")["inputSchema"]["properties"]["kind"]["enum"] == ["sfx", "foley"]
 
 
 def test_edits_long_takes_and_references_go_to_the_queue(studio):
@@ -135,7 +150,12 @@ def test_upload_file_publishes_only_a_file_of_the_studio_folder(tmp_path, monkey
     private = tmp_path / "id_ed25519"
     private.write_bytes(b"a key outside it")
     sneaky = home / "sneaky.png"
-    sneaky.symlink_to(private)  # a path inside the folder that resolves out of it
+    try:
+        sneaky.symlink_to(private)  # a path inside the folder that resolves out of it
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("File symlinks require a Windows privilege not enabled on this machine")
+        raise
     monkeypatch.setenv("STUDIO_HOME", str(home))
     assert tool("upload_file", path=str(home / "agent" / "thread1" / "blend.png"))["kind"] == "job"  # the ordinary case
     assert "not a file of the studio folder" in refused("upload_file", path=str(private))

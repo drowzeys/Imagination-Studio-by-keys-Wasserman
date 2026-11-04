@@ -267,7 +267,7 @@ def import_take(body: dict) -> dict:
     rating = body.get("rating") if body.get("rating") in ("circled", "good", "no-good") else "good"
     take = {"id": f"take-{int(time.time() * 1000):x}-{uuid.uuid4().hex[:5]}", "loggedAt": now(), "model": "minimax-h3",
             "prompt": prompt or (shot.get("tf") or {}).get("h3") or "", "rating": rating, "notes": str(body.get("notes") or ""),
-            "mediaPath": str(target.resolve().relative_to(HOME.resolve())), "jobId": None, "seed": seed, "settings": settings,
+            "mediaPath": target.resolve().relative_to(HOME.resolve()).as_posix(), "jobId": None, "seed": seed, "settings": settings,
             "source": source, "imported": True}
     for key in ("qa", "shot"):  # what that app's checks said of the clip, kept beside it
         if theirs.get(key):
@@ -336,7 +336,7 @@ def voice_from_take(body: dict) -> dict:
         voices.append(sheet)
     words = " ".join((line.get("text") or "").strip() for line in (shot.get("tf") or {}).get("lines") or []
                      if line.get("characterId") == who.get("id") and (line.get("text") or "").strip())
-    path = str(wav.relative_to(HOME))
+    path = wav.relative_to(HOME).as_posix()
     record = {"id": take_id, "path": path, "title": f"Kept from a take: {who.get('name') or 'voice'}"[:80], "text": words, "seed": take.get("seed"),
               "backend": "take", "created": time.time(), "duration": round(seconds, 3), "origin": "take",
               "source": {"take": take.get("id"), "clip": take["mediaPath"], "shot": shot.get("id"), "scene": scene.get("id")},

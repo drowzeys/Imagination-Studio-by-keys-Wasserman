@@ -1,0 +1,26 @@
+# HyperFrames by HeyGen, Apache-2.0. Windows browser-probe compatibility fix.
+# An unisolated Windows browser --version invocation can open a user's New Tab.
+diff --git a/dist/chunk-GTMBII7X.js b/dist/chunk-GTMBII7X.js
+--- a/dist/chunk-GTMBII7X.js
++++ b/dist/chunk-GTMBII7X.js
+@@ -213,6 +213,20 @@
+   const libraries = await chromeSharedLibOutcome(executablePath, found, signal);
+   if (!libraries.ok) return libraries;
+   try {
++    if (platform() === "win32") {
++      const { default: puppeteer } = await import("puppeteer-core");
++      const browser = await puppeteer.launch({
++        executablePath,
++        headless: true,
++        timeout: FIRST_LAUNCH_TIMEOUT_MS,
++        args: ["--no-first-run", "--no-default-browser-check"]
++      });
++      try {
++        return { ...found, versionMajor: extractMajorVersion(await browser.version()) };
++      } finally {
++        await browser.close();
++      }
++    }
+     const { stdout } = await runCancellableProcess(executablePath, ["--version"], {
+       signal,
+       timeoutMs: FIRST_LAUNCH_TIMEOUT_MS,

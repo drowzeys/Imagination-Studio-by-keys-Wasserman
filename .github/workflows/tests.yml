@@ -4,6 +4,7 @@ name: tests
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -60,3 +61,41 @@ jobs:
         run: |
           export STUDIO_HOME="$RUNNER_TEMP/ImaginationStudio"
           python -m pytest -q tests
+
+  windows-arm64:
+    # Standard public-repository runner only; never opt private forks into billed Windows minutes.
+    if: github.event.repository.private == false
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: arm64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.4"
+          architecture: arm64
+      - name: Lightweight test dependencies (no CUDA or models)
+        run: |
+          python -m pip install --only-binary=:all: -r app\requirements-windows.txt httpx==0.28.1 pytest
+      - name: Native Windows ARM64 model-free tests
+        env:
+          STUDIO_TESTS_NEED_NODE: "1"
+          STUDIO_TEST_HARDWARE: "0"
+        shell: pwsh
+        run: |
+          python -c "import platform,sys; assert sys.platform == 'win32' and platform.machine().lower() in ('arm64','aarch64')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node -e "if (process.platform !== 'win32' || process.arch !== 'arm64') process.exit(1)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:STUDIO_HOME = Join-Path $env:RUNNER_TEMP 'ImaginationStudio'
+          $tests = @(Get-ChildItem -Path tests -Filter 'test_windows_*.py' | ForEach-Object { $_.FullName })
+          $tests += @(
+            'tests\test_slate_package.py', 'tests\test_shell_page.py', 'tests\test_studio_mcp_tools.py',
+            'tests\test_agents_copilot.py', 'tests\test_graphics_page.py', 'tests\test_nodes_page.py',
+            'tests\test_local_gpus_page.py', 'tests\test_access.py', 'tests\test_settings.py',
+            'tests\test_slate_compile.py', 'tests\test_suite.py', 'tests\test_suite_links.py'
+          )
+          python -m pytest -q @tests

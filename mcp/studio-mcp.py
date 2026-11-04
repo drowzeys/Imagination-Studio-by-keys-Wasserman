@@ -7,6 +7,7 @@ Newline-delimited JSON-RPC 2.0 on stdin and stdout (MCP protocol 2024-11-05). Ev
 own HTTP API, so the Studio must be running; paths are relative to the Studio's folder, as its Library shows them.
 """
 import json
+import copy
 import mimetypes
 import os
 import re
@@ -50,7 +51,7 @@ TOOLS = [
                                               "'a dog chasing a kite'. Returns the best matches with a caption and a path to use in other tools.",
      "inputSchema": text_schema({"query": {"type": "string", "description": "what to look for, in plain words"},
                                  "limit": {"type": "integer", "description": "at most this many (default 10)"}}, ("query",))},
-    {"name": "queue_still", "description": "Queue still pictures from a prompt (a scout job: several candidates and a contact sheet).",
+    {"name": "queue_still", "description": "Queue still pictures from a prompt (a scout job: several candidates and a contact sheet). Honor studio_state.windows_stills limits on Windows: SD-Turbo, 512x512, at most six sequential drafts.",
      "inputSchema": text_schema({"prompt": {"type": "string"}, "count": {"type": "integer", "description": "how many pictures, 1 to 12 (default 1); several only when the filmmaker asks for options or a number"},
                                  "preset": {"type": "string", "description": "a preset from studio_state; sets the picture size (default 2k: 1024x576)"},
                                  "width": {"type": "integer", "description": "with height: a size of its own, multiples of 16, 256 to 2048"},
@@ -453,7 +454,7 @@ def project_of(given) -> dict:
 def run(name: str, args: dict):
     if name == "studio_state":
         state = call("GET", "/api/state")
-        return {k: state.get(k) for k in ("presets", "qualities", "lengths", "image_models", "platform", "platform_label", "turbo",
+        return {k: state.get(k) for k in ("presets", "qualities", "lengths", "image_models", "windows_stills", "capabilities", "platform", "platform_label", "turbo",
                                           "engine", "version", "home")}
     if name == "list_library":
         items = [i for i in call("GET", "/api/library") if not args.get("kind") or i.get("kind") == args["kind"]]
@@ -747,7 +748,36 @@ def answer(message: dict):
     if method == "ping":
         return {}
     if method == "tools/list":
-        return {"tools": TOOLS}
+        state = call("GET", "/api/state")
+        if state.get("platform") != "windows":
+            return {"tools": TOOLS}
+        allowed = {"studio_state", "list_library", "search_library", "cancel_job", "list_projects", "add_to_timeline",
+                   "job_status", "wait_for_jobs", "list_jobs", "slate_films", "slate_film", "slate_new_film",
+                   "slate_add_scene", "slate_add_shot", "suite_imports", "suite_attach", "upload_file"}
+        for name, kind in {"queue_still": "scout", "queue_sound": "sfx", "make_graphics": "graphics", "export_timeline": "export", "music_beats": "beats"}.items():
+            if (state.get("capabilities", {}).get(kind) or {}).get("available"):
+                allowed.add(name)
+        tools = copy.deepcopy([tool for tool in TOOLS if tool["name"] in allowed])
+        for tool in tools:
+            props = tool["inputSchema"]["properties"]
+            if tool["name"] == "queue_sound":
+                tool["description"] = "Queue a five-second Stable Audio Open sound effect on this Windows Studio."
+                props["kind"]["enum"] = ["sfx"]
+                props["seconds"] = {"type": "number", "const": 5, "description": "Windows: five seconds only (the default)."}
+            elif tool["name"] == "make_graphics":
+                templates = state["capabilities"]["graphics"]["templates"]
+                tool["description"] = "Queue a checked Windows graphic (" + ", ".join(templates) + "); at most 1280x720, 24 fps and ten seconds. No transcription."
+                props["template"]["enum"] = templates
+                props["size"]["enum"] = ["720p", "match"]
+            elif tool["name"] == "music_beats":
+                tool["description"] = "Measure tempo, beats and bars of existing local audio with NumPy/FFmpeg; Windows accepts up to ten minutes. No generation model."
+            elif tool["name"] == "queue_still":
+                props.pop("preset", None)
+                props["width"] = {"type": "integer", "const": 512}
+                props["height"] = {"type": "integer", "const": 512}
+                props["image_model"] = {"type": "string", "const": "sd-turbo"}
+                props["count"].update(minimum=1, maximum=6)
+        return {"tools": tools}
     if method == "tools/call":
         try:
             out = run(params.get("name"), params.get("arguments") or {})

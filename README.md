@@ -103,6 +103,326 @@ PREFIX=/data/studio STUDIO_GPU=1 bash spark/comfy.sh stop
 
 Untested. The CUDA engines are built and measured for the GB10.
 
+### Windows (limited preview)
+
+Native Windows, including ARM64, can run the web UI without WSL, CUDA, or model downloads.
+This preview supports script imports, project/Slate planning, manual storyboards, prompt compilation, settings,
+uploads, Motion Previs pack imports and browsing saved media.
+Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
+An optional small local brain supports text-only Slate writing assistance.
+Only separately qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics can render;
+video generation, foley, in-app model installation, other
+agents, worker management and other unverified actions are refused explicitly.
+It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
+the Linux/Mac memory guards and hardware requirements have not been relaxed.
+
+Install Python 3.13 (`py install 3.13` with the Python install manager), then run in PowerShell:
+
+```powershell
+.\scripts\app.ps1 -Install
+```
+
+Open http://127.0.0.1:7870. Later, run `.\scripts\app.ps1` again; Ctrl+C stops it.
+The isolated environment is under `%LOCALAPPDATA%\ImaginationStudio\ui-venv`; projects and media stay under
+`%USERPROFILE%\ImaginationStudio` (or `STUDIO_HOME`). The launcher binds to loopback only and keeps the existing
+access-key checks. If PowerShell blocks scripts, use a process-only policy:
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\app.ps1 -Install`.
+FFmpeg is optional: `.\scripts\setup-windows-ffmpeg.ps1` installs native ARM64 FFmpeg/ffprobe per-user
+(about 135 MB, BtbN's GPL build), with SHA-256 verification and no system PATH changes. Restart Studio afterward.
+`-Verify` checks the pinned archive, executable architecture and version without downloading.
+An existing pair on PATH also works. Missing tools are reported.
+The existing model licences still apply; this install downloads none of their weights.
+
+**Verify an existing installation without downloading or rendering:**
+
+```powershell
+.\scripts\check-windows-install.ps1                    # UI dependencies only
+.\scripts\check-windows-install.ps1 -All               # every optional component must already be installed
+.\scripts\check-windows-install.ps1 -Components ui,media,graphics
+```
+
+This read-only audit checks installed package pins and `pip check`, the clean ComfyUI source pin, cached
+model/runtime SHA-256 values, native FFmpeg/ffprobe and the existing graphics qualification.
+It does not import PyTorch, probe CUDA, launch Edge, contact Copilot, download files or change qualifications.
+Missing or corrupt selected components fail explicitly; uninstalled optional features are not reported as passes.
+Model-file integrity and the existing render qualification are reported separately: this does not establish
+new memory limits, requalify a changed renderer, or replace a first-install render check.
+
+The test workflow keeps Ubuntu's existing suite and adds a model-free **`windows-11-arm`** job for public
+repositories only. GitHub lists that standard ARM64 Windows runner as
+[free for public repositories](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories).
+It checks native Windows ARM64 Python/Node, owned processes, API/page behavior and portable projects;
+it has no RTX/CUDA qualification and downloads no model weights or browser. Private forks skip this job.
+After pushing a branch, **Actions → tests → Run workflow** can check it before opening a PR; Actions must be
+enabled in the repository. Hosted results are separate from local tests.
+
+**Copilot CLI (optional, no local model weights):** install version 1.0.105 or newer in your terminal with
+`winget install GitHub.Copilot` or `npm install -g @github/copilot`, run `copilot login` yourself, and restart Studio.
+In **Settings → Connections**, choose **GitHub Copilot CLI** and **Check**, then select it in **Agent** with
+**This Studio**. It uses your Copilot plan and consumes Copilot requests; Studio never asks for a token.
+The Windows preview does not automate the installer or browser sign-in. If the CLI is outside PATH, use its
+installed executable for login. [BRAINS.md](BRAINS.md#github-copilot-cli) explains the permissions and limitations.
+The saved brain/agent selections survive a server restart. Copilot's live verification does not: **Not checked**
+means Studio has not checked this session, not that the CLI lost its terminal login. A selected, installed Copilot
+is not prompted to reconnect just for that reason. Check is optional and is never run automatically on reload.
+
+**Motion graphics (Windows ARM64, optional):** `.\scripts\setup-windows-graphics.ps1` installs locked
+HyperFrames 0.8.186 and GSAP 3.14.2 dependencies (about 102 MiB installed), reusing a security-patched ARM64
+Node 22+ and the installed Microsoft Edge. Use `-NodePath` or `-BrowserPath` for an existing installation elsewhere.
+There are no model or browser downloads. The setup checks all six supported templates at **1280x720,
+24 fps and ten seconds**, including a lower third retaining its clip's sound, under a **4 GiB process-tree
+commitment cap**. In **Edit → Graphics**, make a title, lower third or short slideshow. Longer source clips
+must be trimmed in the Editor first. Kinetic type, music-video edits and explainers also use the existing renderer
+and your uploaded media; audio pickers accept imported recordings/songs, without a voice/music generator.
+For an explainer without voice-over, choose seconds per section so the whole output stays within ten seconds.
+Captions and transcription remain disabled.
+Changing the runtime, Edge or renderer/templates requires repeating the check; `python scripts\windows-graphics-check.py`
+checks installed dependencies without reinstalling them. Normal renders retain the queue's owned cancellation and
+ten-minute deadline. This is not H3/video-model generation.
+Setup also applies a checked Windows-only compatibility patch to the pinned HyperFrames build: its browser-version
+probe uses a headless temporary profile rather than launching `msedge.exe --version`, which can open a New Tab
+in the person's normal Edge session. Unpatched/changed installs are refused. Qualification also fails if new visible
+browser windows appear during the render check; existing browser windows are never closed.
+
+**Find beats (no model):** choose local audio in the kinetic-type or music-video Graphics panel and press
+**Find the beats**. The existing NumPy/FFmpeg algorithm measures tempo, beats and bars; Windows accepts up to
+ten minutes of audio and explicitly rejects longer sources rather than returning a truncated analysis.
+Cached analyses obey the same limit and must contain a valid duration.
+The same capability is available to the Studio agent as `music_beats`. This does not enable music generation,
+automatic rough-cut jobs, soundtrack mixing or foley.
+
+**Editor handoff:** the existing timeline FCPXML, EDL and media-ZIP downloads need no model. Windows drive
+file URLs and ZIP media names are handled for spaces/special characters and case-colliding basenames.
+These exports have route/file-structure tests; an actual import into DaVinci Resolve on Windows is not yet verified.
+
+**Scripts and manual storyboards (no model required):** in **Import**, upload a Fountain screenplay, ScriptBreak
+project/prompt pack, or a Storyboard Reference ZIP, then choose **Make a Slate film**. The film preserves scenes,
+shots, cast, locations and dialogue. A board ZIP brings `prompts.json` plus each frame's `NN_label/still.png`;
+`prompts.json` alone brings descriptions, not pictures. **Send into a film** attaches boards to existing or new
+shots without replacing existing prompts or intent. In **Production**, edit the shot plan, choose **An image**
+and upload your own first frame, or pin pictures to cast/location sheets. Save/reload and download the film's
+project JSON or shot lists (Markdown/CSV). Project JSON keeps media paths; it does not bundle the images for a
+different computer: use **Prepare portable ZIP (with media)** in the film's **Bible** instead.
+Export a Final Draft script as Fountain first: direct `.fdx` import is not implemented.
+Generated storyboard stills need the optional image setup below; video remains unavailable.
+AI writing can use the optional brain below.
+
+**Generated storyboard drafts (Windows ARM64, optional):** the official SD-Turbo FP16 components total about
+2.6 GB, under the Stability AI Community License. Hobby use is permitted; commercial use requires registration
+and has the license's $1M annual-revenue threshold. Weights stay outside Git.
+
+```powershell
+.\scripts\setup-windows-storyboard.ps1
+.\scripts\check-windows-storyboard.ps1
+.\scripts\app.ps1
+```
+
+Setup checks SHA-256; Check renders a bounded draft and writes a qualification matching the render code and
+memory partition. Only after a successful Check does **Import → Fill missing storyboard stills** become
+available. Existing manual pictures are kept. Finished stills are saved with the import's links: reload the
+import, then **Make a Slate film**, or **Send into a film** to attach them to an existing film.
+For a First AD-created film, **Production → Shots → Make storyboard still** saves a candidate and pins it
+unless you changed the first frame while its job ran. Home/Create stills and the Copilot `queue_still` tool
+use the same queue and restrictions.
+Missing import stills and **Production -> Shots -> Fill missing scene storyboards** are grouped into batches
+of at most six different captions. Each result stays with its own shot; per-shot seeds and manual pictures
+are preserved.
+
+These are **512x512 square drafts**, not video frames, final artwork or a guarantee of matching faces.
+A job takes 1-6 images sequentially, one step each, in the pinned ComfyUI server using its own Diffusers loader.
+The route keeps the existing 12 GiB native allocator cap, 12 GiB process / 16 GiB owned-job commitment caps,
+Windows low-memory/commit checks and 2 GiB GPU reserve. Normal jobs share one privately owned ComfyUI backend,
+kept warm between jobs. Stop targets the active prompt and stops the rest of that batch; it does not normally
+unload the models. **Settings -> Connections -> Unload ComfyUI** explicitly frees the idle backend, and closing
+Studio drains it. Memory pressure or lost monitoring can still stop it. An unhealthy backend needs explicit
+unloading before retry; it is never quietly restarted.
+Queued jobs remain one-at-a-time. Larger canvases, edits and
+video remain refused. A changed memory partition or render code requires a fresh Check.
+
+**Windows CPU media:** with FFmpeg installed, uploaded clips can be inspected, have frames extracted, and be
+trimmed/joined in **Edit/Editor**. The first Windows MP4 export route accepts 1-12 local clips, up to ten minutes
+total, with even output sides up to 1920 pixels. It keeps existing audio and supplies silence for sources with
+no audio. Export runs in a privately owned cancellable process job with a ten-minute execution deadline.
+Adding a soundtrack during export, long-video generation and all unsupported GPU routes stay disabled.
+
+**Windows sound effects:** the existing Stable Audio Open files can now be qualified for the normal queue:
+
+```powershell
+.\scripts\setup-windows-sfx.ps1 -Verify
+.\scripts\check-windows-sound.ps1
+.\scripts\app.ps1
+```
+
+In **Sound -> Sound effects**, choose **A sound effect**, describe it and click **Make the sound**.
+The initial Windows recipe is fixed at **5 seconds, 100 passes, CFG 7** (the exact decoded duration is about
+5.0155 s). Seed and positive/negative sound descriptions are editable. A successful take is a lossless stereo
+44.1 kHz PCM WAV, listed on the sound tab and in the Library. Stability AI's Community License still applies.
+No new weights are downloaded by Check, and foley is not enabled.
+
+Images and sound share one guarded ComfyUI slot: consecutive jobs of the same kind stay warm, but changing
+kind drains the old owned backend before starting the other model. Both models never stay loaded together.
+The existing 12/12/16 GiB allocator/process/job caps and memory reserves are unchanged. The sound load runs
+close to its process-commit cap; this is not support for longer effects or a relaxed memory requirement.
+Stop targets that job's prompt, and a cancelled/failed job never publishes a successful sound take.
+The older `check-windows-sfx.ps1 -Calibrate` remains an isolated diagnostic, not the normal queue's qualification.
+
+For a short self-test, import a two-scene Fountain script in **Import**, choose **Fill missing storyboard stills**,
+and wait for its job to finish. Choose **Make a Slate film**, then open **Production -> Shots** to inspect and
+edit the shots. Reopen the film to check the saved images, or download its project JSON from the **Bible**.
+This tests script breakdown, still generation and saved planning without asking for video. **First AD** writing
+also needs a connected Copilot CLI or the optional local brain below.
+
+**Portable Slate films (CPU-only, shared Slate routes):** in **Production -> Bible**, choose
+**Prepare portable ZIP (with media)**, then **Download prepared ZIP**. Deliver also has
+**Prepare portable ZIP (whole film)**. Preparation saves the current film first; the download is a snapshot,
+so prepare again after edits. A file link downloads the ZIP directly rather than buffering it in the page.
+If an embedded browser does not support downloads, open Studio in Edge or another normal browser.
+
+The ZIP contains `project.json`, referenced images/audio/video, `shots.csv`, `shots.md`, captioned JPEG contact
+sheets (12 shots per page), and the original screenplay when available. Model weights, local brain addresses
+and running-job bindings are not included. Missing referenced media is an error, not a silently incomplete
+export. When no original screenplay file is available, the export says so; the scene/shot text is still kept.
+
+On another Studio, use **Import -> Choose files to bring in** for the ZIP, then **Make a Slate film**.
+Import verifies the file inventory, sizes and SHA-256 values, and rewrites media/script references to that
+Studio's folder. Film, scene, shot, cast and dialogue links are retained; an existing film id is not overwritten.
+Media must be visible files inside the source Studio; absolute/outside/hidden references cannot be bundled.
+The existing suite limits apply: up to 2000 ZIP entries, with an export below the 2 GB upload limit.
+Checksums detect file corruption; they do not prove who authored a ZIP. Nothing inside an import executes.
+
+**Small local writing brain (Windows ARM64, optional):** Qwen3-4B Q4_K_M (Apache-2.0) runs in the pinned native
+llama.cpp CUDA runtime (MIT), outside both Python environments. Setup downloads about 2.5 GB of weights plus
+310 MB of runtime archives, verifies SHA-256, and stores them under
+`%LOCALAPPDATA%\ImaginationStudio\llama-cpp\b12063`.
+
+```powershell
+.\scripts\setup-windows-brain.ps1
+.\scripts\brain.ps1
+# In another terminal:
+.\scripts\app.ps1 -LocalBrain
+```
+
+Choose **Local model** in the film's **Bible** to use prompt transforms, beat sheets and First AD writing.
+Existing saved connection settings take precedence over the launcher's defaults: in that case set the local
+endpoint to `http://127.0.0.1:8080/v1` in **Settings → Connections** and click **Check**.
+This initial route is text-only, not image understanding or a qualified local MCP agent; Copilot still drives
+Studio tools. A lighter image model remains separate work.
+
+The brain binds only to loopback, has one 4096-token context and at most 1024 answer tokens. Oversized prompts
+fail explicitly instead of silently dropping script context. Its supervisor owns the process tree, imposes
+a 12 GiB process/job commitment cap, and checks Windows low-memory signals, commit headroom, any explicitly
+configured host reserve and dedicated GPU headroom. The startup's 6 GiB GPU allowance is a conservative
+experimental bound, not a measured capacity claim. The live GPU reserve is 2 GiB; Linux/Mac guards are unchanged.
+`-Cpu` explicitly selects CPU execution; it is not a silent fallback. `-Check` starts, checks readiness and stops
+the owned server; `setup-windows-brain.ps1 -Verify` checks files only. Ctrl+C stops the foreground brain; closing
+Studio alone does not stop this separate terminal. Its log is the runtime folder's `server.log`.
+
+#### Windows ARM64 CUDA feasibility check
+
+The optional GPU spike uses a **separate** `%LOCALAPPDATA%\ImaginationStudio\gpu-venv`, not the working UI
+environment. It installs NVIDIA's native Windows ARM64 PyTorch, TorchVision and TorchAudio wheels (the PyTorch
+wheel alone is about 1.85 GB; allow additional space for dependencies and installation). No model weights are
+downloaded. Python 3.13 ARM64 is required.
+
+```powershell
+.\scripts\setup-windows-gpu.ps1
+.\scripts\setup-windows-gpu.ps1 -Verify
+```
+
+`-Verify` checks the existing environment without installing packages. `-DeviceIndex N` selects a CUDA device
+(default 0). The check emits JSON and exits nonzero on missing CUDA, dependency errors or incorrect results.
+It tests tiny fp32/fp16/bf16 addition, matrix products and attention, TorchVision's CUDA NMS and TorchAudio
+resampling. A successful check is not a model render, capacity qualification, or admission-policy validation.
+It does **not** enable rendering in the Studio or change the memory guards.
+
+To preflight the existing pinned ComfyUI revision without installing it or changing the GPU environment:
+
+```powershell
+& "$env:LOCALAPPDATA\ImaginationStudio\gpu-venv\Scripts\python.exe" -m pip install --dry-run --only-binary=:all: -r .\app\requirements-windows-comfy.txt
+```
+
+This resolves dependencies only; it does not start ComfyUI or establish node/model compatibility. The version
+constraints record the dependency set used for the no-model lifecycle check; they are not a model qualification.
+
+After the GPU setup succeeds, install the pinned ComfyUI dependencies/source and run a bounded no-model check:
+
+```powershell
+.\scripts\setup-windows-comfy.ps1
+.\scripts\setup-windows-comfy.ps1 -Verify
+```
+
+The source checkout lives under `%LOCALAPPDATA%\ImaginationStudio\ComfyUI`. Existing checkouts must be clean and
+at the pinned revision; the script will not reset them. `-Verify` installs nothing. The check starts its own
+loopback instance with temporary empty model/state folders, custom/API nodes disabled, dynamic VRAM disabled
+and PyTorch attention. It checks CUDA device reporting, core node registration and an empty queue, then stops
+and drains its own Windows job (including child processes). It never submits a workflow. `-StartupTimeout`
+sets the startup deadline (1-300 seconds, default 120); `-DeviceIndex` selects the CUDA device.
+This is diagnostic tooling, not a persistent backend or a production render watchdog.
+
+The optional guarded diagnostic adds a separate memory sampler and an owned-process watchdog:
+
+```powershell
+.\scripts\setup-windows-comfy.ps1 -Verify -Guarded
+.\scripts\setup-windows-comfy.ps1 -Verify -Guarded -HoldSeconds 30
+```
+
+Windows low-memory notifications, commit headroom and live budgets govern this diagnostic; it does not impose
+the Linux guard's fixed 8,000 MiB host cutoff. Windows may reclaim/cache/compress/page ordinary CPU memory.
+An explicitly configured positive `SPARK_MEMORY_FLOOR_MB` is still honored. The CUDA margin remains 2,048 MiB.
+Pressure, fast falling headroom, invalid readings or lost monitoring stop only the diagnostic's owned job.
+The running Studio UI and other applications are not stopped. Linux/Mac guards are unchanged.
+
+The separate sampler reads OS memory and UUID-matched NVML dedicated GPU counters. Its CUDA free-memory query
+is context-scoped and cannot stand in for another process's allocations, so ComfyUI's own reported budget is
+monitored independently once the server is ready. Dedicated GPU memory, shared allocations and OS memory are
+not added as separate physical capacities. Commit/pagefile headroom is not extra GPU memory.
+
+`-HoldSeconds` keeps an empty-queue server under monitoring for 0-300 seconds (default 0); a positive hold requires
+`-Guarded`. JSON results include measured duration, OS/dedicated-budget minima and separate backend-budget samples.
+
+The admission foundation still requires a measured Windows profile matching the actual host/dedicated split.
+Resident staging, CPU/shared commitment and the target backend's CUDA needs are distinct requirements.
+Ordinary pageable demand is not refused just because it exceeds currently available physical RAM, but must
+fit commit headroom; resident requirements must fit usable host capacity. Runtime pressure can still stop a job.
+The no-model diagnostic does not qualify a render route. The separate storyboard and sound Checks above
+qualify only their measured settings; this is not a guarantee of other allocation or loading paths.
+
+#### Explicit Windows sound-effect calibration
+
+Stable Audio Open 1.0 is gated under the Stability AI Community License. Accept its terms on Hugging Face and
+sign in locally with `hf auth login`; never put credentials in the repo or calibration parameters. Setup downloads
+only the checkpoint, T5 encoder and license at a fixed revision (about 5.3 GB of weights) outside the checkout,
+then verifies the published weight hashes.
+
+```powershell
+.\scripts\setup-windows-sfx.ps1
+.\scripts\setup-windows-sfx.ps1 -Verify
+.\scripts\check-windows-sfx.ps1 -Calibrate
+.\scripts\check-windows-sfx.ps1 -Calibrate -CancelDuringSampling
+```
+
+`-Calibrate` is required: this is a one-job experiment, not an enabled Studio sound route. It uses the existing
+five-second, seed-7 sound workflow (100 passes, CFG 7), with a calibration-only GPU-first checkpoint loader using
+ComfyUI's load helpers and a non-inference peak-counter receipt node. The pinned ComfyUI checkout is not modified.
+The original CPU-first loading attempt hit Windows' actual low-memory signal; the GPU-first case completed.
+
+The test enforces a 12 GiB native PyTorch allocation cap, 12 GiB per-process Windows job commit cap and 16 GiB
+aggregate job commit cap, alongside OS/backend monitoring. These are experimental bounds, not minimum hardware
+requirements or total physical-memory estimates. Driver/library allocations still require monitoring.
+
+Validated FLAC audio and a `.calibration.json` receipt are saved under the Studio's `renders\calibration` folder.
+The receipt includes allocator peaks, budget minima and tool-content hashes; it contains no access key, model
+download token, server URL or GPU UUID. Output filenames are unique and existing files are not overwritten.
+No normal render route is qualified automatically, and no failed run increases its limits automatically.
+
+`-CancelDuringSampling` waits for a completed KSampler step, requests cancellation of that exact prompt through
+ComfyUI's targeted job API, and requires an interrupted KSampler history entry and an empty queue. It saves a
+cancellation receipt, not audio. HTTP acceptance alone is not treated as successful cancellation.
+
+Receipts distinguish the actual backend's in-process working set/private commitment from the small virtualenv
+launcher. Working set includes mapped/shared resident pages; commitment is not physical RAM. Peak GPU counters
+come from the backend itself. The readonly metrics endpoint exists only in the isolated calibration node pack.
+
 ### Apple silicon
 
 macOS 26 or later, for Metal 4. What runs depends on the memory: **96 GB or more** for video, voice, music and the
@@ -653,7 +973,7 @@ It runs on this computer and needs no account.
   and *Add to Home Screen* opens it full screen like an app. See [Using it on your phone](#using-it-on-your-phone).
 
 **Agents and your own sign-ins**
-- **The Agent room**: pick Claude Code, Codex, Hermes, Gemini, Grok or a local model and talk it through; it keeps
+- **The Agent room**: pick Claude Code, Codex, GitHub Copilot CLI, Hermes, Gemini, Grok or a local model and talk it through; it keeps
   its own session, asks when a choice matters and drives the studio's tools (stills, clips, voice, songs, the
   timeline), Blender and Blockout.
 - **One-click Connect** for every agent, from any page that needs one: finds it or installs it, runs its own
@@ -779,7 +1099,7 @@ The same credits the studio shows in Settings → About; [CREDITS.md](CREDITS.md
   contributors** · **felix-ab** — flux3-mlx.
 - **Comfy Org** — ComfyUI · **Apple** — MLX · **NVIDIA Research** · **FastVideo** · **LightX2V** · **Viggle** ·
   **speach1sdef178** · **rookiestar28** · **ddalcu**.
-- **The agents you connect** — Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes
+- **The agents you connect** — Claude Code (Anthropic), Codex (OpenAI), GitHub Copilot CLI (GitHub), Gemini CLI (Google), Grok CLI (xAI), Hermes
   Agent (Nous Research); Ollama, LM Studio, vLLM, llama.cpp; Blender and blender-mcp.
 - OpenAI **Whisper** and **faster-whisper**, **yt-dlp**, **FFmpeg**, **PyTorch**, Hugging Face **diffusers** and
   **transformers**, **FastAPI**, **Geist** and **Instrument Serif**.

@@ -11,6 +11,7 @@
     GET  /api/export/timeline/{project}.fcpxml | .edl   a Production timeline for DaVinci Resolve or any editor
     GET  /api/export/dailies.zip?jobs=a,b  finished clips with their settings, for Circle Take's ingest
     GET  /api/export/callsheet-entry       the line Call Sheet's data/apps.json needs to list the Studio
+    POST /api/slate/package               portable film ZIP: project, media, screenplay, contact sheets and shot lists
 
 Every format read here is the one that app writes (its README and its export code); nothing in an import runs, and
 a ZIP is taken apart by hand: no absolute paths, no "..", no links, and a cap on its files and their size.
@@ -19,6 +20,8 @@ a ZIP is taken apart by hand: no absolute paths, no "..", no links, and a cap on
 from __future__ import annotations
 
 import json
+import ntpath
+import os
 import re
 import shutil
 import subprocess
@@ -37,7 +40,7 @@ from fastapi.responses import FileResponse, Response
 UPLOAD_LIMIT = 2 * 1024 ** 3      # one uploaded file
 ZIP_FILES, ZIP_BYTES = 2000, 4 * 1024 ** 3   # what one ZIP may hold, unpacked
 FPS = 24
-MEDIA = (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".wav", ".mp3", ".m4a", ".aac", ".flac")
+MEDIA = (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".m4v", ".webm", ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
 TEXT = (".json", ".txt", ".md", ".fountain", ".scriptbreak", ".csv", ".srt", ".fdx")
 STILLS = (".png", ".jpg", ".jpeg", ".webp")
 CLIPS = (".mp4", ".mov", ".m4v", ".webm")
@@ -86,6 +89,8 @@ def safe_name(name: str) -> str | None:
     parts = [part for part in name.split("/") if part not in ("", ".")]
     if not parts or any(part == ".." for part in parts):
         return None
+    if os.name == "nt" and any(ntpath.isreserved(part) for part in parts):
+        return None
     return "/".join(parts)
 
 
@@ -101,9 +106,14 @@ def unpack(archive: Path, folder: Path) -> dict[str, Path]:
         entries = [item for item in bundle.infolist() if not item.is_dir()]
         if len(entries) > ZIP_FILES or sum(item.file_size for item in entries) > ZIP_BYTES:
             raise HTTPException(400, f"this ZIP holds more than {ZIP_FILES} files or {ZIP_BYTES // 1024 ** 3} GB")
+        seen = set()
         for item in entries:
-            if safe_name(item.filename) is None or (item.external_attr >> 16) & 0o170000 == 0o120000:
-                raise HTTPException(400, f"this ZIP has a file that would land outside its folder: {item.filename[:120]}")
+            name = safe_name(item.filename)
+            if name is None or (item.external_attr >> 16) & 0o170000 == 0o120000:
+                raise HTTPException(400, f"this ZIP has a file outside its folder or with an invalid name: {item.filename[:120]}")
+            if name.casefold() in seen:
+                raise HTTPException(400, "this ZIP has duplicate filenames: " + name[:120])
+            seen.add(name.casefold())
         out, root = {}, folder.resolve()
         for item in entries:
             name = safe_name(item.filename)
@@ -245,7 +255,7 @@ APPS = [
     {"id": "motion-previs-studio", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Motion Previs Studio", "what": "Pose, depth and camera move read from a clip, as a production pack.",
      "imports": ["production pack (.zip)"], "exports": []},
     {"id": "slate", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Slate", "what": "The prompt studio for AI filmmaking: scenes and shots with sectioned prompts.",
-     "imports": ["project.json"], "exports": ["a Slate film from any import"]},
+     "imports": ["project.json", "Studio portable Slate ZIP"], "exports": ["a Slate film from any import", "portable Slate ZIP with media, script, contact sheets and shot lists"]},
     {"id": "fountain", "name": "Fountain screenplay", "what": "Any screenplay saved as Fountain.", "imports": [".fountain"], "exports": []},
     {"id": "circle-take", "by": SUITE_BY, "licence": "Apache-2.0", "name": "Circle Take", "what": "AI dailies: takes bound to shots, quality checks, circled takes.",
      "imports": [], "exports": ["dailies package (.zip): clips named by shot with a provenance sidecar each"]},
@@ -436,8 +446,9 @@ def blockout(exports: list[tuple[Path, dict]], files: dict, home: Path) -> dict:
     for base, meta in exports:
         info = meta.get("shot") or {}
         name = str(info.get("name") or "")
-        inside = {key[len(str(base)) + 1:] if str(base) != "." else key: path for key, path in files.items()
-                  if str(base) == "." or key.startswith(str(base) + "/")}
+        prefix = base.as_posix()
+        inside = {key[len(prefix) + 1:] if prefix != "." else key: path for key, path in files.items()
+                  if prefix == "." or key.startswith(prefix + "/")}
         find = lambda *names: next((inside[n] for n in names if n in inside), None)
         reference = find(f"{name}_reference.mp4", "reference.mp4")
         depth = find(f"{name}_depth.mp4", "depth.mp4")
@@ -490,8 +501,11 @@ def slate_project(data: dict) -> dict:
             spec = one.get("spec") or {}
             camera = ", ".join(bit for bit in (spec.get("size"), spec.get("angle"), spec.get("movement"), spec.get("lens")) if bit)
             shots.append(shot(len(shots) + 1, title=one.get("name") or "", scene=scene.get("name") or "", action=one.get("prompt") or "",
-                              camera=camera, seconds=spec.get("durationSec"), notes=one.get("intent") or ""))
-    cast = [{"name": one.get("name") or "Unnamed", "description": one.get("notes") or "", "image": None} for one in data.get("characters") or []]
+                              camera=camera, seconds=spec.get("durationSec"), notes=one.get("intent") or "",
+                              image=(one.get("tf") or {}).get("image") or next(iter(one.get("images") or []), None),
+                              reference_video=(one.get("tf") or {}).get("reference_video")))
+    cast = [{"name": one.get("name") or "Unnamed", "description": one.get("notes") or "",
+             "image": next(iter(one.get("images") or []), None)} for one in data.get("characters") or []]
     places = [{"name": one.get("name") or "Unnamed", "description": one.get("description") or ""} for one in data.get("locations") or []]
     return {"app": "slate", "title": data.get("name") or "", "logline": data.get("logline") or "", "shots": shots, "cast": cast,
             "locations": places, "warnings": []}
@@ -516,7 +530,7 @@ def relative_to(path: Path | None, home: Path) -> str | None:
     if not path:
         return None
     try:
-        return str(Path(path).resolve().relative_to(home.resolve()))
+        return Path(path).resolve().relative_to(home.resolve()).as_posix()
     except ValueError:
         return None
 
@@ -548,7 +562,7 @@ def read_upload(upload: Path, name: str, hint: str, folder: Path, home: Path) ->
 
     suffix = upload.suffix.lower()
     if suffix == ".fountain" or (suffix == ".txt" and hint in ("fountain", "")):
-        return fountain(read_text(upload))
+        return {**fountain(read_text(upload)), "source_script": relative_to(upload, home)}
     if suffix == ".md":
         return scriptbreak_pack(read_text(upload))
     if suffix in (".json", ".scriptbreak"):
@@ -561,6 +575,8 @@ def read_upload(upload: Path, name: str, hint: str, folder: Path, home: Path) ->
         if kind == "master-canvas":
             return master_canvas(data)
         if kind == "slate":
+            if data.get("portablePackage"):
+                raise HTTPException(400, "import the whole portable Slate ZIP, not its project.json alone")
             shutil.copyfile(upload, folder / "project.json")
             return slate_project(data)
         if kind == "master-canvas-handoff":
@@ -572,9 +588,35 @@ def read_upload(upload: Path, name: str, hint: str, folder: Path, home: Path) ->
         if kind == "blockout":
             return blockout([(Path("."), data)], {}, home)
         raise HTTPException(400, "this JSON file is not a project of ScriptBreak, Cork Board, Master Canvas, Slate, Storyboard Reference or Blockout")
-    files = unpack(upload, folder / "files")
+    try:
+        files = unpack(upload, folder / "files")
+    except zipfile.BadZipFile as error:
+        raise HTTPException(400, "the ZIP contents failed their checksum") from error
     by_name = {key: path for key, path in files.items()}
     jsons = {key: path for key, path in files.items() if key.endswith(".json") and path.stat().st_size < 20 * 1024 ** 2}
+    import slate_package
+    for key, path in jsons.items():
+        if Path(key).name != "manifest.json":
+            continue
+        manifest = read_json(path)
+        schema = manifest.get("schema") if isinstance(manifest, dict) else None
+        if isinstance(schema, str) and schema.startswith("imagination-studio-slate-package-"):
+            if schema != slate_package.SCHEMA:
+                raise HTTPException(400, "unsupported portable Slate package schema")
+            parent = Path(key).parent.as_posix()
+            project = slate_package.unpacked_project(manifest, by_name, "" if parent == "." else parent, home)
+            prefix = "" if parent == "." else parent + "/"
+            expected = {prefix + name for name in manifest["files"]} | {key}
+            with zipfile.ZipFile(upload) as archive:
+                actual = {safe_name(item.filename) for item in archive.infolist() if not item.is_dir()}
+            if actual != expected:
+                raise HTTPException(400, "portable ZIP files do not match its manifest")
+            (folder / "project.json").write_text(json.dumps(project, ensure_ascii=False, indent=1), encoding="utf-8")
+            found = slate_project(project)
+            found["warnings"] = manifest.get("notes") or []
+            return found
+    if name.lower().endswith(".slate.zip"):
+        raise HTTPException(400, "the portable Slate ZIP has no supported manifest.json")
     kinds = {}
     for key, path in jsons.items():
         try:
@@ -608,6 +650,8 @@ def read_upload(upload: Path, name: str, hint: str, folder: Path, home: Path) ->
         if kind == "scriptbreak":
             return scriptbreak(data)
         if kind == "slate":
+            if data.get("portablePackage"):
+                raise HTTPException(400, "the portable Slate project has no supported manifest.json")
             shutil.copyfile(by_name[found[0]], folder / "project.json")
             return slate_project(data)
         if kind == "cork-board":
@@ -618,7 +662,7 @@ def read_upload(upload: Path, name: str, hint: str, folder: Path, home: Path) ->
         return scriptbreak(json.loads(read_text(files[named[0]])))
     named = [key for key in files if key.endswith(".fountain")]
     if named:
-        return fountain(read_text(files[named[0]]))
+        return {**fountain(read_text(files[named[0]])), "source_script": relative_to(files[named[0]], home)}
     raise HTTPException(400, "nothing in this ZIP is a file of the suite's apps: no prompts.json, metadata.json, project_manifest.json, "
                              "bundle_manifest.json, project.json or .scriptbreak")
 
@@ -802,6 +846,8 @@ def as_slate(found: dict, home: Path, blank) -> dict:
                    "cue": "", "seed": 1, "image": image, "h3": "", "h3Auto": True}})
     project.update(characters=characters, locations=locations, scenes=scenes)
     project["importedFrom"] = {"app": found.get("app"), "import": found.get("id")}
+    if found.get("source_script"):
+        project["sourceScript"] = found["source_script"]
     return project
 
 
@@ -811,6 +857,55 @@ def prompt_of(one: dict) -> str:
     said = " ".join(f"{line['character']}: \u201c{line['line']}\u201d" if line.get("character") else f"\u201c{line['line']}\u201d" for line in one.get("dialogue") or [])
     parts = [str(one.get("action") or one.get("title") or "").strip(), f"Camera: {one['camera'].strip()}." if one.get("camera") else "", said]
     return "\n\n".join(bit for bit in parts if bit)
+
+
+def storyboard_import(home: Path, import_id: str, shot_id: str) -> tuple[Path, dict, dict]:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", import_id):
+        raise HTTPException(400, "bad import id")
+    folder = home / "uploads" / "suite" / import_id
+    if not (folder / "import.json").is_file():
+        raise HTTPException(404, "no such import")
+    found = json.loads((folder / "import.json").read_text(encoding="utf-8"))
+    shot = next((one for one in found.get("shots") or [] if one.get("id") == shot_id), None)
+    if shot is None:
+        raise HTTPException(400, "no such shot in this import")
+    return folder, found, shot
+
+
+def with_storyboards(folder: Path, found: dict, home: Path) -> dict:
+    manifest = folder / "storyboards.json"
+    if not manifest.exists():
+        return found
+    generated = json.loads(manifest.read_text(encoding="utf-8"))
+    for shot in found.get("shots") or []:
+        image = generated.get(shot.get("id"))
+        if image and not shot.get("image"):
+            path = (home / image).resolve()
+            if path.is_relative_to(home.resolve()) and path.is_file():
+                shot["image"] = image
+    return found
+
+
+def keep_storyboard(home: Path, import_id: str, shot_id: str, image: str) -> None:
+    keep_storyboards(home, import_id, [(shot_id, image)])
+
+
+def keep_storyboards(home: Path, import_id: str, images: list[tuple[str, str]]) -> None:
+    updates = {}
+    for shot_id, image in images:
+        folder, _, _ = storyboard_import(home, import_id, shot_id)
+        path = (home / image).resolve()
+        if not path.is_relative_to(home.resolve()) or not path.is_file() or path.suffix.lower() != ".png":
+            raise RuntimeError("a storyboard must be a PNG inside this Studio")
+        updates[shot_id] = path.relative_to(home.resolve()).as_posix()
+    if not updates:
+        raise ValueError("a storyboard update needs images")
+    manifest = folder / "storyboards.json"
+    saved = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+    saved.update(updates)
+    temporary = manifest.with_suffix(".json.part")
+    temporary.write_text(json.dumps(saved, indent=1), encoding="utf-8")
+    temporary.replace(manifest)
 
 
 def prompts_of(found: dict, home: Path) -> list[dict]:
@@ -827,7 +922,7 @@ def bring_file(home: Path, path, target: Path, name: str) -> str | None:
     target.mkdir(parents=True, exist_ok=True)
     out = target / name
     shutil.copyfile(home / path, out)
-    return str(out.resolve().relative_to(home.resolve()))
+    return out.resolve().relative_to(home.resolve()).as_posix()
 
 
 def attach_shots(film: dict, found: dict, mapping: list, home: Path, pack: str | None = None) -> int:
@@ -1026,7 +1121,7 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
         found = {"id": import_id, "app": found["app"], "title": found.get("title") or Path(name).stem, "file": name,
                  "created": time.time(), "shots": found.get("shots") or [], "cast": found.get("cast") or [],
                  "locations": found.get("locations") or [], "warnings": found.get("warnings") or [],
-                 **{key: found[key] for key in ("logline", "motion") if found.get(key)}}
+                 **{key: found[key] for key in ("logline", "motion", "source_script") if found.get(key)}}
         (folder / "import.json").write_text(json.dumps(found, indent=1))
         return found
 
@@ -1045,14 +1140,15 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
 
     @router.get("/api/suite/imports/{import_id}")
     def one_import(import_id: str) -> dict:
-        return json.loads((import_folder(import_id) / "import.json").read_text())
+        folder = import_folder(import_id)
+        return with_storyboards(folder, json.loads((folder / "import.json").read_text()), home)
 
     @router.post("/api/suite/imports/{import_id}/slate")
     def to_slate(import_id: str, request: Request) -> dict:
         local(request, json_body=True)
         import slate  # the Studio's Slate (app/slate.py): its project shape and its folder
         folder = import_folder(import_id)
-        found = json.loads((folder / "import.json").read_text())
+        found = with_storyboards(folder, json.loads((folder / "import.json").read_text()), home)
         if found.get("app") == "slate" and (folder / "project.json").is_file():
             given = json.loads((folder / "project.json").read_text())  # a Slate film comes in as it is
             project = {**slate.blank(given.get("name") or "Imported film"), **given}
@@ -1085,14 +1181,15 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
 
     @router.get("/api/suite/imports/{import_id}/prompts")
     def import_prompts(import_id: str) -> list[dict]:
-        return prompts_of(json.loads((import_folder(import_id) / "import.json").read_text()), home)
+        folder = import_folder(import_id)
+        return prompts_of(with_storyboards(folder, json.loads((folder / "import.json").read_text()), home), home)
 
     @router.post("/api/suite/imports/{import_id}/attach")
     def attach_to_film(import_id: str, request: Request, body: dict) -> dict:  # sync: its file work runs in the thread pool
         local(request, json_body=True)
         import slate
         folder = import_folder(import_id)
-        found = json.loads((folder / "import.json").read_text())
+        found = with_storyboards(folder, json.loads((folder / "import.json").read_text()), home)
         mapping = [row for row in body.get("mapping") or [] if isinstance(row, dict) and row.get("shot")]
         if not mapping:
             raise HTTPException(400, "pick at least one shot to send")
@@ -1106,6 +1203,17 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
         attach_shots(film, found, mapping, home, pack if found.get("app") == "motion-previs-studio" else None)
         slate.write(film)
         return film
+
+    @router.post("/api/slate/package")
+    def portable_slate(request: Request, body: dict) -> dict:
+        local(request, json_body=True)
+        import slate
+        import slate_package
+        project = slate.get_project(str(body.get("project") or ""))
+        try:
+            return slate_package.package(project, home)
+        except OSError as error:
+            raise HTTPException(400, "the portable ZIP could not be written: " + str(error)) from error
 
     @router.get("/api/export/timeline/{name}")
     def timeline(name: str, root: str = ""):
@@ -1161,18 +1269,18 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
                 continue
             stem, suffix, n = Path(path).stem, Path(path).suffix, 1
             name = stem + suffix
-            while name in used:
+            while name.casefold() in used:
                 n += 1
                 name = f"{stem}-{n}{suffix}"
-            used.add(name)
+            used.add(name.casefold())
             names[key] = name
         base = root.rstrip("/\\") + "/" + project_id if root else ""
         def where(path):
             name = names[str(Path(path))]
             if not base:
-                return "media/" + name
+                return "media/" + quote(name)
             if re.match(r"[A-Za-z]:", base):  # a Windows folder
-                return "file:///" + quote(base.replace("\\", "/") + "/media/" + name)
+                return "file:///" + quote(base.replace("\\", "/") + "/media/" + name, safe="/:")
             return "file://" + quote(base + "/media/" + name)
         exports = home / "exports"
         exports.mkdir(parents=True, exist_ok=True)

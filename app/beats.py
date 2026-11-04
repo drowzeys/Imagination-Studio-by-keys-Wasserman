@@ -14,10 +14,12 @@ first beat is the one of the four phases where the low end hits hardest.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -28,6 +30,8 @@ BANDS = 40
 LOW_HZ = 200.0  # the bands under this are the kick and the bass, which mark the bar
 AUDIO = (".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".aif", ".aiff", ".mp4", ".mov")
 VERSION = 1
+WINDOWS = sys.platform == "win32"
+WINDOWS_MAX_SECONDS = 600
 
 router = APIRouter()
 HOME: Path = Path.home() / "ImaginationStudio"
@@ -39,6 +43,15 @@ def ffmpeg() -> str | None:
                                            if Path(p).is_file()), None)
 
 
+def check_windows_duration(seconds) -> None:
+    if not WINDOWS:
+        return
+    if type(seconds) not in (int, float) or seconds < 0 or (type(seconds) is float and not math.isfinite(seconds)):
+        raise RuntimeError("The beat analysis duration must be a finite, nonnegative number")
+    if seconds > WINDOWS_MAX_SECONDS:
+        raise RuntimeError("Windows beat detection takes at most ten minutes of audio; trim the source first")
+
+
 def decode(path: Path, rate: int = RATE):
     """The file's sound as mono float32 at ``rate``, through ffmpeg (with a time limit)."""
 
@@ -47,10 +60,12 @@ def decode(path: Path, rate: int = RATE):
     tool = ffmpeg()
     if not tool:
         raise RuntimeError("finding the beats needs ffmpeg, which is not installed on this machine")
-    done = subprocess.run([tool, "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", str(rate), "-f", "f32le", "pipe:1"],
+    limit = ["-t", str(WINDOWS_MAX_SECONDS + 1)] if WINDOWS else []
+    done = subprocess.run([tool, "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", str(rate), *limit, "-f", "f32le", "pipe:1"],
                           capture_output=True, timeout=300)
     if done.returncode:
         raise RuntimeError("ffmpeg could not read the sound of " + Path(path).name + ": " + done.stderr.decode(errors="replace").strip()[-200:])
+    check_windows_duration(len(done.stdout) / (rate * 4))
     return np.frombuffer(done.stdout, np.float32).copy()
 
 
@@ -243,6 +258,7 @@ def cached(path: Path) -> dict:
     try:
         said = json.loads(keep.read_text())
         if said.get("source") == stamp:
+            check_windows_duration(said.get("duration"))
             return {k: v for k, v in said.items() if k != "source"}
     except (OSError, ValueError, AttributeError):
         pass
@@ -290,7 +306,7 @@ def beats_route(body: dict) -> dict:
         raise HTTPException(503, "finding the beats needs numpy, which is not installed in the app's Python")
     except (RuntimeError, subprocess.TimeoutExpired) as error:
         raise HTTPException(400, str(error)[-300:])
-    return {**found, "path": str(target.resolve().relative_to(HOME.resolve()))}
+    return {**found, "path": target.resolve().relative_to(HOME.resolve()).as_posix()}
 
 
 def attach(home: Path, within) -> APIRouter:

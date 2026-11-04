@@ -234,10 +234,19 @@ def disk_of(path: Path) -> dict:
     """The disk holding ``path`` as `df -h` shows it: Use% is used / (used + available to the user), the blocks kept
     for root counted as neither, and "free" is what this user can still write (statvfs f_bavail)."""
 
-    st = os.statvfs(Path(path).resolve())
-    total, used, avail = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_bavail * st.f_frsize
+    if sys.platform == "win32":
+        total, used, avail = shutil.disk_usage(path)
+    else:
+        st = os.statvfs(Path(path).resolve())
+        total, used, avail = st.f_blocks * st.f_frsize, (st.f_blocks - st.f_bfree) * st.f_frsize, st.f_bavail * st.f_frsize
     return {"total_gb": round(total / 1e9, 1), "free_gb": round(avail / 1e9, 1),
             "used_pct": round(100 * used / (used + avail), 1) if used + avail else None}
+
+
+def windows_memory() -> tuple[int, int]:
+    from windows_memory import host_memory
+
+    return host_memory()
 
 
 def compact(snap: dict) -> dict:
@@ -301,6 +310,8 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         total = available = None
         if info.get("MemTotal"):
             total, available = info["MemTotal"], info.get("MemAvailable")
+        elif sys.platform == "win32":
+            total, available = windows_memory()
         elif sys.platform == "darwin":
             try:
                 total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") // 2 ** 20
@@ -403,7 +414,7 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
             drive = {"path": str(home), "total_gb": None, "free_gb": None, "used_pct": None}
         try:
             load = round(os.getloadavg()[0], 2)
-        except OSError:
+        except (OSError, AttributeError):
             load = None
         ruled = cached("governor", governor, 5.0) if GOVERNOR.is_dir() else None
         warnings = []

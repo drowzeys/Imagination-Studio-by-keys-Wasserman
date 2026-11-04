@@ -46,7 +46,7 @@ MAC_OPTION = {"upscale": "--upscale", "remove": "--remove", "mask": "--remove"}
 MAC_H3 = ("Ref2VA/transformer", "FL2VA/text_encoder", "FL2VA/video_vae")
 
 
-def attach(home: Path, pack: Path, spark: bool, inside, relative):
+def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool = False):
     router = APIRouter()
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
     models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
@@ -119,7 +119,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
     def state() -> dict:
         out = {}
         for kind in KINDS:
-            why, card = missing(kind), recipe(LORA[kind] or "person-remover") if kind != "hlg" else {}
+            why = f"{TITLES[kind]} is not qualified in this Windows preview." if windows else missing(kind)
+            card = recipe(LORA[kind] or "person-remover") if kind != "hlg" else {}
             out[kind] = {"title": TITLES[kind], "ready": not why, "why": why, "lora": LORA[kind],
                          "lora_name": card.get("name"), "author": card.get("author")}
         out["turnaround"].update(sizes=SIZES, size=1024)

@@ -281,7 +281,10 @@ function changed() { sync(); C.prompt = ""; render(); }
 // where oneshot-setup --flux3 put them, MOSS-Image on a DGX Spark with --moss. Only installed ones are offered; a choice
 // that is not installed falls back to Qwen.
 const imageModels = () => (S.image_models && S.image_models.length ? S.image_models : [{ id: "qwen", label: "Qwen 2.1 Turbo", note: "" }]);
-const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : "qwen");
+const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : imageModels()[0].id);
+const stillParams = params => { if (!(S.windows_stills && S.windows_stills.available)) return params;
+  const { preset, ...rest } = params;
+  return { ...rest, width: S.windows_stills.width, height: S.windows_stills.height, image_model: S.windows_stills.model }; };
 const imageModelName = () => imageModels().find(m => m.id === imageModel()).label;
 const imageModelPick = after => imageModels().length < 2 ? null : el("div", {}, el("label", {}, "Picture model"),
   choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), after || render, true));
@@ -624,13 +627,16 @@ function viewCreate() {
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
+    if (S.windows_stills && S.windows_stills.available) C.imageSize = "512x512";
     const [w, h] = C.imageSize.split("x").map(Number);
     put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
-      el("label", {}, "Size"), choice(C, "imageSize", { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
+      el("label", {}, "Size"), choice(C, "imageSize", S.windows_stills && S.windows_stills.available ? { "512x512": ["Storyboard draft", "512 × 512 square"] }
+        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
       el("div", { class: "row" },
-        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
+        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: S.windows_stills && S.windows_stills.available ? S.windows_stills.max_count : 12 }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
-      el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
+      el("div", { class: "note" }, (imageModel() === "sd-turbo" ? "SD-Turbo makes square storyboard drafts, one step and one image at a time; it does not guarantee matching faces across shots"
+        : imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
         : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
@@ -832,8 +838,23 @@ function viewProduction() {
 }
 
 /* ---------- Editor ---------- */
-async function addToTimeline(path, from = 0, to = 0) { await ensureProject(); try { project = await api("/api/projects/" + project.id); } catch {} let duration = 5; try { duration = (await api("/api/probe?path=" + encodeURIComponent(path))).duration || 5; } catch {}
-  project.timeline.push({ path, in: from, out: to, duration }); await saveProject(); toast("Added to the timeline of " + project.name + (to > from ? ", trimmed to " + from.toFixed(2) + " to " + to.toFixed(2) + " s" : "")); if (tab === "Editor") render(); }
+let timelineAdd = Promise.resolve();
+async function addToTimeline(path, from = 0, to = 0) {
+  const id = (await ensureProject()).id, previous = timelineAdd; let release;
+  timelineAdd = new Promise(resolve => { release = resolve; });
+  await previous;
+  try { const target = await api("/api/projects/" + id); let duration;
+    try { duration = (await api("/api/probe?path=" + encodeURIComponent(path))).duration;
+      if (!Number.isFinite(duration) || duration <= 0) throw new Error("The clip has no readable duration.");
+    } catch (e) { if (S.ffmpeg) throw e; duration = 5; toast("Clip duration unavailable; using 5 s until media tools are installed: " + e.message); }
+    target.timeline.push({ path, in: from, out: to, duration });
+    const saved = await api("/api/projects/" + id, target, "PUT");
+    if (project && project.id === id) project = saved;
+    toast("Added to the timeline of " + saved.name + (to > from ? ", trimmed to " + from.toFixed(2) + " to " + to.toFixed(2) + " s" : ""));
+    if (tab === "Editor") render();
+  } catch (e) { toast("Could not add the clip: " + e.message); throw e; }
+  finally { release(); }
+}
 function viewEditor() {
   const box = el("section", { class: "card" }, el("h2", {}, "Clip editor"));
   ensureProject().then(async () => {
@@ -882,7 +903,7 @@ function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB
     el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
     el("div", { class: "cap" }, el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
     el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
-      el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
+      el("button", { class: "small", disabled: !!capWhy("video"), title: capWhy("video") || "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
       room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null)); }
 function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
   const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
@@ -912,9 +933,9 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
       m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
       // the buttons on a row of their own: a long file name no longer pushes them out of the tile
       el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" }, actButtons(m), capButton(m),
-      m.kind === "video" ? el("button", { class: "small", title: "Start a new clip on this clip's last frame", onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); C.image = r.path; C.prompt = ""; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } catch (e) { toast(e.message); } } }, "continue") : el("button", { class: "small", title: "End a new clip on this picture", onclick: () => { C.lastImage = m.path; C.prompt = ""; C.goes = "video"; if (C.start === "refs") C.start = "text"; C.step = 1; tab = "Create"; render(); } }, "last frame"),
-      m.kind === "video" ? el("button", { class: "small", onclick: () => addToTimeline(m.path) }, "+ timeline") : el("button", { class: "small", onclick: () => { C.image = m.path; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } }, "use"),
-      m.kind === "video" ? null : el("button", { class: "small", title: "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
+      m.kind === "video" ? el("button", { class: "small", disabled: !!capWhy("frame"), title: capWhy("frame") || (S.platform === "windows" ? "Extract the last frame into the Library" : "Start a new clip on this clip's last frame"), onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); if (S.platform === "windows") { toast("Last frame extracted"); render(); return; } C.image = r.path; C.prompt = ""; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } catch (e) { toast(e.message); } } }, S.platform === "windows" ? "Extract last frame" : "continue") : el("button", { class: "small", disabled: !!capWhy("video"), title: capWhy("video") || "End a new clip on this picture", onclick: () => { C.lastImage = m.path; C.prompt = ""; C.goes = "video"; if (C.start === "refs") C.start = "text"; C.step = 1; tab = "Create"; render(); } }, "last frame"),
+      m.kind === "video" ? el("button", { class: "small", onclick: () => addToTimeline(m.path) }, "+ timeline") : el("button", { class: "small", disabled: !!capWhy("video"), title: capWhy("video"), onclick: () => { C.image = m.path; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } }, "use"),
+      m.kind === "video" ? null : el("button", { class: "small", disabled: !!capWhy("edit"), title: capWhy("edit") || "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
       m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),
       // out of the library: the server moves the file to the studio's trash folder
       el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))));
@@ -1246,7 +1267,8 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
 function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [...document.querySelectorAll("[data-keep-scroll]")].map(n => [n.dataset.keepScroll, n.scrollLeft, n.scrollTop]);
   return () => { for (const [key, left, top] of strips) { const n = document.querySelector(`[data-keep-scroll="${key}"]`); if (n) { n.scrollLeft = left; n.scrollTop = top; } } window.scrollTo(...at); }; }
 function render() { const back = keepScroll(); renderShell(); releaseMedia($("#view"));
-  $("#view").replaceChildren({ Home: viewHome, Apps: typeof viewApps === "function" ? viewApps : () => el("div", { class: "note" }, "Apps is not in this build."), Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Graphics: viewGraphics, Finish: viewFinish, "Cast & Places": viewCast, Director: viewDirector, "Motion graphics": viewGraphics, "Night shift": viewNight, Library: viewLibrary,
+  const unavailable = capWhy(({ Voice: "voice", Music: "music", "Motion Previs": "motion", Finish: "finish", Director: "video", "Night shift": "video", Looks: "looks", Models: "models", Updates: "updates", Sparks: "workers" })[tab]);
+  $("#view").replaceChildren(unavailable ? el("div", {}, pageHead("Windows preview", tab, unavailable), el("button", { class: "primary", onclick: () => go("Home") }, "Back to supported tools")) : { Home: viewHome, Apps: typeof viewApps === "function" ? viewApps : () => el("div", { class: "note" }, "Apps is not in this build."), Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Graphics: viewGraphics, Finish: viewFinish, "Cast & Places": viewCast, Director: viewDirector, "Motion graphics": viewGraphics, "Night shift": viewNight, Library: viewLibrary,
     Machine: viewMachine, Models: () => typeof viewDiscover === "function" ? viewDiscover() : el("div", { class: "note" }, "Models & weights is not in this build."), Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial, Settings: viewSettings,
     // Nodes is its own module (nodes.js): a page without it says so quietly
     Nodes: typeof viewNodes === "function" ? viewNodes : () => el("div", { class: "panel" }, el("h2", {}, "Nodes"), el("div", { class: "note m-flat" }, "The node canvas is not part of this install yet.")) }[tab]()); coach(); bayUpdate();

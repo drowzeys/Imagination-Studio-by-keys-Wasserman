@@ -72,7 +72,7 @@ def inside(path: str | Path) -> Path:
 
 
 def relative(path: Path) -> str:
-    return str(Path(path).resolve().relative_to(HOME.resolve()))
+    return Path(path).resolve().relative_to(HOME.resolve()).as_posix()
 
 
 def pack_folder(pack: str | Path) -> Path:

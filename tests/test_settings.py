@@ -47,7 +47,9 @@ def test_a_partial_change_is_merged_kept_and_read_back(fresh):
     assert now["appearance"]["type_size"] == "largest" and now["appearance"]["glow"] is False and now["appearance"]["poster"] is True
     assert now["presets"]["audio_rate"] == "48000" and now["presets"]["seconds"] == 8 and now["presets"]["recipe"] == "quick"
     on_disk = json.loads(fresh.read_text())
-    assert on_disk == now and oct(fresh.stat().st_mode & 0o777) == "0o600"
+    assert on_disk == now
+    if os.name != "nt":
+        assert oct(fresh.stat().st_mode & 0o777) == "0o600"
     assert client.get("/api/settings").json()["settings"] == now
     client.post("/api/settings", json={"layout": {"hidden": ["looks", "looks", "learn"], "order": ["sound", "story"]}})
     assert settings.load()["layout"] == {"hidden": ["looks", "learn"], "order": ["sound", "story"]}
@@ -82,6 +84,7 @@ def a_program(tmp_path, mode=0o755) -> str:
     return str(program)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX CLI executable paths; Windows CLI discovery has separate tests")
 def test_the_hermes_keys_are_the_ones_agents_reads(fresh, tmp_path):
     command = a_program(tmp_path)
     reply = client.post("/api/settings", json={"hermes_profile": "studio", "hermes_command": command})

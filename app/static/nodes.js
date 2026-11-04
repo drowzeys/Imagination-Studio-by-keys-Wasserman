@@ -141,6 +141,7 @@ const ndMemoryReason = est => est.memory.reason || "the selected worker's availa
 // Run is held off from the first click until the server has answered (a double click starts one run; the server
 // answers 409 to a second all the same)
 async function ndRun() {
+  if (S && S.platform === "windows") return toast(capWhy("nodes"));
   if (ndPhone() || ndBusy()) return;
   if (!ND.graph.nodes.some(n => n.type !== "note")) return toast("Add a card first: right-click the canvas");
   ND.starting = true; ndPaintBar();
@@ -299,7 +300,7 @@ function ndBar() {
     ro ? null : el("button", { class: "small", title: "Save (⌘S)", onclick: ndSave }, "Save"),
     ro ? null : ND.starting ? el("button", { class: "primary", disabled: true, "aria-busy": "true", title: "Checking the graph and starting its run" }, "Starting…")
       : busy ? el("button", { class: "small", title: "Stop the job that renders and the cards after it (Esc stops a link, not the run)", onclick: ndCancel }, "Cancel run")
-      : el("button", { class: "primary", title: "Run (⌘Enter): the cards' jobs go into the queue one after another", onclick: ndRun }, "Run")]; }
+      : el("button", { class: "primary", disabled: !!(S && S.platform === "windows"), title: S && S.platform === "windows" ? capWhy("nodes") : "Run (⌘Enter): the cards' jobs go into the queue one after another", onclick: ndRun }, "Run")]; }
 function ndEmpty() {
   if (ND.graph.nodes.length) return null;
   return el("div", { class: "nd-empty" }, el("b", {}, "An empty canvas"), el("p", {}, ndPhone() ? "Open a saved graph above." : "Right-click or double-click to add a card, or start from one of these:"),

@@ -112,8 +112,9 @@ def test_imports_come_from_this_computer_and_the_studio_page():
     assert send("reel.fountain", FOUNTAIN.encode(), **{"Sec-Fetch-Site": "cross-site"}).status_code == 403
     found = send("reel.fountain", FOUNTAIN.encode()).json()
     assert client.post(f"/api/suite/imports/{found['id']}/slate", content="{}", headers={"Content-Type": "text/plain"}).status_code == 415
-    assert client.post("/api/suite/imports/..%2F..%2Fetc/slate", json={}).status_code in (400, 404, 405)
-    assert client.post("/api/suite/imports/bad.id/slate", json={}).status_code == 400
+    refused = (501,) if server.WINDOWS else (400, 404, 405)
+    assert client.post("/api/suite/imports/..%2F..%2Fetc/slate", json={}).status_code in refused
+    assert client.post("/api/suite/imports/bad.id/slate", json={}).status_code == (501 if server.WINDOWS else 400)
 
 
 def make_timeline() -> str:

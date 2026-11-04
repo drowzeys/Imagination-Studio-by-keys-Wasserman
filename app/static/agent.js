@@ -12,8 +12,8 @@ const AG_SUGGEST = [
   ["A teaser", "Make a 10-second teaser for a quiet horror film: one still to set the place, a clip from it with sound, and a short sung sting under it. Ask me anything you need first."],
 ];
 // the agents the room offers, in this order; what each is comes from /api/brains (agents.detect)
-const AG_AGENTS = [["claude", "Claude Code"], ["codex", "Codex"], ["hermes", "Hermes"], ["gemini", "Gemini CLI"], ["grok", "Grok CLI"], ["local", "Local model"]];
-const AG_HARNESS = ["claude", "codex"];
+const AG_AGENTS = [["claude", "Claude Code"], ["codex", "Codex"], ["hermes", "Hermes"], ["gemini", "Gemini CLI"], ["grok", "Grok CLI"], ["local", "Local model"], ["copilot", "GitHub Copilot CLI"]];
+const AG_HARNESS = ["claude", "codex", "copilot"];
 // a local model whose server takes tool calls is a harness too: the Studio runs its loop with the Studio's tools
 const agIsHarness = id => AG_HARNESS.includes(id) || !!((BR.data && BR.data.backends) || []).find(b => b.id === id && b.harness);
 const AG_LIVE = ["queued", "running"];
@@ -57,7 +57,8 @@ const agBadge = id => agMark(id) || el("span", { class: "agr-mono", "aria-hidden
 // reached, and not known to be signed out (the CLI's own word, as Settings → Connections shows it: BR.status, machine.js)
 const AG_NOT_SIGNED = { signed_out: "Not signed in", broken: "Cannot start", missing: "Not found" };
 const agSignState = b => { const st = b && typeof BR !== "undefined" && BR.status ? BR.status[b.id] : null; return st && AG_NOT_SIGNED[st.state] ? st : null; };
-const agReady = b => !!b && !b.error && (!!b.found || /^ssh:./.test(b.where || "")) && !agSignState(b);
+const agUnsupported = b => S && S.ui_only && b && b.id !== "copilot" ? "Windows agents use Copilot CLI only; the local brain supports Slate writing." : "";
+const agReady = b => !!b && !agUnsupported(b) && !b.error && (!!b.found || /^ssh:./.test(b.where || "")) && !agSignState(b);
 // each found CLI's sign-in, asked once (kept with Settings' own answers) and the room redrawn when it comes
 function agAskSignins(found) { if (typeof brainStatus !== "function") return;
   for (const b of found) if (b.kind === "cli" && b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(() => { if (tab === "Agent") agRender(); }).catch(() => {}); }
@@ -79,7 +80,7 @@ function taskCard(t) {
   const pics = outs.filter(p => /\.(png|jpe?g|webp|mp4|mov)$/i.test(p)), others = outs.filter(p => !pics.includes(p));
   return el("div", { class: "task" },
     el("div", { class: "seghead" }, el("span", { class: "pill " + t.status }, t.status), el("b", { class: "ag-prompt" }, t.prompt),
-      el("span", { class: "tag2" }, agMark(t.backend), ({ claude: "Claude Code", codex: "Codex" })[t.backend] || t.backend), (t.tools || []).map(x => el("span", { class: "tag2" }, x)),
+      el("span", { class: "tag2" }, agMark(t.backend), ({ claude: "Claude Code", codex: "Codex", copilot: "GitHub Copilot CLI" })[t.backend] || t.backend), (t.tools || []).map(x => el("span", { class: "tag2" }, x)),
       AG_LIVE.includes(t.status) ? el("button", { class: "small", onclick: async () => { try { await api("/api/agent/tasks/" + t.id + "/cancel", {}); await agentLoad(); render(); } catch (e) { toast(e.message); } } }, "Stop") : null,
       el("button", { class: "small", onclick: async () => { AG.open[t.id] = !open; if (!open) { const full = await api("/api/agent/tasks/" + t.id).catch(() => null); if (full) Object.assign(t, full); } render(); } }, open ? "Hide log" : "Log")),
     t.reply ? el("div", { class: "ag-reply" }, t.reply) : null,
@@ -289,7 +290,7 @@ function agChooser(found) {
     // an agent that is not ready is one click from ready: its card opens the Connect checklist over the room
     const fix = id !== "local" && !id.startsWith("local:") && typeof connectOpen === "function";
     return el("button", { class: "agr-card" + (on ? " on" : "") + (ready ? "" : " off"), role: "radio", "aria-checked": on ? "true" : "false", disabled: !ready && !fix, "aria-disabled": ready ? false : "true",
-      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : ((b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it")) +
+      title: ready ? (b.label || name) + (b && b.path ? " · " + relHome(b.path) : "") : (agUnsupported(b) || (b && b.error) || (st && [st.detail, st.hint].filter(Boolean).join(" ")) || (b && b.signin) || (name + " is not found on this machine and no other computer is set up for it")) +
         (fix ? " · Click to connect it: the studio installs it if needed, signs you in and checks it answers." : ""),
       onclick: () => { if (!ready) { if (fix) connectOpen(id); else if (typeof goSettings === "function") goSettings("connections"); return; } AG.backend = id; render(); } },
       el("span", { class: "agr-top" }, agBadge(id), (b && b.label && (!["codex", "local"].includes(id) || b.named) ? b.label : name)),
@@ -362,6 +363,7 @@ function viewAgent() {
   }
   const missing = harnesses.filter(b => !agReady(b));
   const toolList = BR.tools ? (BR.tools.tools || BR.tools) : [{ id: "blender", label: "Blender" }, { id: "blockout", label: "Blockout" }, { id: "studio", label: "Studio" }];
+  for (const t of toolList) if (t.enabled === false) AG.tools.delete(t.id);
   const harness = agIsHarness(AG.backend), chosen = agChosen();
   // a tool that runs on this computer cannot be started by an agent on another one until that one can reach back here
   const far = !!(chosen && /^ssh:./.test(chosen.where || "")), unreach = (BR.tools && BR.tools.unreachable) || {};
@@ -383,7 +385,7 @@ function viewAgent() {
     el("div", { class: "sectionhead" }, el("h2", {}, "Choose your agent"), agSetup()),
     agChooser(found),
     el("div", { class: "agr-under" },
-      harness ? [el("span", {}, "It may use"), el("div", { class: "chips" }, toolList.map(t => { const why = far && unreach[t.id], on = AG.tools.has(t.id) && !why;
+      harness ? [el("span", {}, "It may use"), el("div", { class: "chips" }, toolList.map(t => { const why = t.enabled === false ? t.unsupported || "This tool is turned off." : far && unreach[t.id], on = AG.tools.has(t.id) && !why;
         return el("button", { class: "toggle" + (on ? " on" : "") + (why ? " off" : ""), "aria-pressed": on ? "true" : "false", "aria-disabled": why ? "true" : false, title: why || "",
           onclick: () => { if (why) return toast(why, 7000); AG.tools.has(t.id) ? AG.tools.delete(t.id) : AG.tools.add(t.id); render(); } },
         el("span", { class: "dotl" + (on ? "" : " o") }), t.label || t.id); })),

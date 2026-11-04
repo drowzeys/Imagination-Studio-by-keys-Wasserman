@@ -448,10 +448,11 @@ class Hub:
     the studio folder; ``work(job, worker)`` runs a claimed job to its end (the server's own job routine);
     ``timing(kind, params)`` is one clip's measured time on one Spark, or None."""
 
-    def __init__(self, home: Path, pack: Path, spark: bool, jobs: dict, order: list, lock, wake, info, inside, work, timing=None):
+    def __init__(self, home: Path, pack: Path, spark: bool, jobs: dict, order: list, lock, wake, info, inside, work, timing=None, enabled=True):
         # ``spark``: this app is on a DGX Spark; False on a Mac, which leads workers the same way (capable says what
         # of a Mac's settings a Spark cannot render, and a worker it cannot reach is reached through its ``via``)
         self.home, self.pack, self.spark = home, pack, spark
+        self.enabled = enabled
         self.word = machine_word(spark)
         self.jobs, self.order, self.lock, self.wake = jobs, order, lock, wake
         self.info, self.inside, self.work, self.timing = info, inside, work, timing or (lambda kind, params: None)
@@ -728,6 +729,10 @@ class Hub:
                 "can": {key: bool(info.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(info.get("loras") or [])} if info else None}
 
     def overview(self) -> dict:
+        if not self.enabled:
+            return {"supported": False, "limit": 1, "available": 1, "listed": 1, "default": 1,
+                    "workers": [], "names": {}, "local_gpus": {"supported": False, "devices": []},
+                    "note": "Worker routing is not qualified in this Windows preview; jobs stay on this machine."}
         found = self.config()
         rows = [self.shown(worker) for worker in found["workers"]]
         mine = self.info()

@@ -205,7 +205,8 @@ def ready(fresh: bool = False) -> dict:
         if not conv and found.get("conv"):
             out["converter"] = {"ok": True, "version": found.get("convversion") or None, "path": found["conv"], "where": "ssh:" + host}
     if not out["ok"] and not out["why"]:
-        out["why"] = (f"Tesseract is not installed: run `{SETUP}`." if runs_here() else
+        out["why"] = ("Tesseract Finish is not qualified on Windows ARM64; use the Editor's FFmpeg export instead." if sys.platform == "win32" else
+                      f"Tesseract is not installed: run `{SETUP}`." if runs_here() else
                       "Tesseract does not run on this computer (Linux on ARM). Install it on your Mac "
                       f"(`{SETUP}` there) and set the Mac as the remote computer in Settings > Connections (Brains & tools).")
     if out["ok"] and out["version"] != TSRCT_VERSION:
