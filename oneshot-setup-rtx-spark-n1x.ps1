@@ -7,7 +7,8 @@
   It:
     1. checks the machine (ARM64, an N1X GPU) and WSL2 with an Ubuntu distribution, systemd on;
     2. sets .wslconfig so WSL may use the memory Windows has (the GPU keeps its own fixed carve-out);
-    3. clones or updates the Studio inside Ubuntu and runs the DGX Spark recipe there (oneshot-setup-rtx-spark-n1x.sh:
+    3. asks once for a Hugging Face read token (saved in Ubuntu, so gated models such as FLUX3-K download), then
+       clones or updates the Studio inside Ubuntu and runs the DGX Spark recipe there (oneshot-setup-rtx-spark-n1x.sh:
        STUDIO_N1X=1, the GPU carve-out as the memory pool, memory checks that flag rather than refuse);
        every part is installed by default (--all), so the whole Studio runs on the laptop;
     4. makes a Start and a Stop launcher with the Studio's icon (Desktop, Start menu) and pins Start to the taskbar;
@@ -31,6 +32,8 @@ param(
   [string]$Branch = "main",
   [string]$Parts = "--all",          # what oneshot-setup-spark.sh installs; "" for the core only
   [switch]$SkipStudioSetup,          # only the Windows side (launchers, pin, power, startup)
+  [string]$HfToken = "",             # a Hugging Face read token (asked for when none is saved in Ubuntu yet)
+  [switch]$NoHfToken,                # do not ask: gated models (FLUX3-K, Stable Audio Open) are then left out
   [switch]$NoPin,
   [switch]$NoPower,
   [switch]$NeverSleepOnBattery,
@@ -120,12 +123,38 @@ if ($changed) {
   Ok ".wslconfig set (backup .wslconfig.bak-imagination)"
 } else { Ok ".wslconfig already set" }
 
+# ---------- Hugging Face: one token, asked once, so the gated models download in the same run ----------
+$hasToken = ((& wsl.exe -d $Distro -u $WslUser -e sh -c "test -s ~/.cache/huggingface/token && echo yes") -join "").Trim() -eq "yes"
+if (-not $hasToken -and -not $NoHfToken) {
+  Say "Hugging Face"
+  if (-not $HfToken) {
+    Write-Host "  FLUX3-K and Stable Audio Open are gated: make a READ token at https://huggingface.co/settings/tokens and accept"
+    Write-Host "  each licence with that account (https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy,"
+    Write-Host "  https://huggingface.co/stabilityai/stable-audio-open-1.0). Paste the token here (Enter to skip them):"
+    $secure = Read-Host "  token" -AsSecureString
+    $HfToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+  }
+  if ($HfToken) {
+    # handed over through the environment (WSLENV), never on a command line
+    $env:HF_TOKEN_IN = $HfToken.Trim(); $env:WSLENV = "HF_TOKEN_IN/u" + $(if ($env:WSLENV) { ":$env:WSLENV" } else { "" })
+    & wsl.exe -d $Distro -u $WslUser -e sh -c 'umask 077; mkdir -p ~/.cache/huggingface && printf %s $HF_TOKEN_IN > ~/.cache/huggingface/token'
+    Remove-Item Env:HF_TOKEN_IN; $HfToken = ""
+    $who = ""
+    try { $who = (Invoke-RestMethod -Uri "https://huggingface.co/api/whoami-v2" -Headers @{ Authorization = "Bearer $((& wsl.exe -d $Distro -u $WslUser -e cat /home/$WslUser/.cache/huggingface/token) -join '')" } -TimeoutSec 20).name } catch {}
+    if ($who) { Ok "Hugging Face: signed in as $who (token saved in Ubuntu, ~/.cache/huggingface/token)" }
+    else {
+      & wsl.exe -d $Distro -u $WslUser -e sh -c "rm -f ~/.cache/huggingface/token"  # not kept: the next run asks again
+      Warn "Hugging Face did not accept that token: the gated models will be left out (run again to enter another)"
+    }
+  } else { Warn "no token: FLUX3-K and Stable Audio Open are left out (run again to add them)" }
+} elseif ($hasToken) { Ok "Hugging Face token already saved in Ubuntu" }
+
 # ---------- 3. the Studio inside Ubuntu ----------
 $repoDir = "/home/$WslUser/src/Imagination-Studio-by-keys-Wasserman"
 if (-not $SkipStudioSetup) {
   Say "The Studio in $Distro ($repoDir)"
   InWsl "command -v git >/dev/null && command -v ffmpeg >/dev/null && command -v curl >/dev/null || (apt-get update -q && apt-get install -y -q git ffmpeg curl)" "root"
-  InWsl "mkdir -p ~/src && if [ -d '$repoDir/.git' ]; then cd '$repoDir' && git fetch -q origin && git checkout -q '$Branch' && git pull -q --ff-only; else git clone -q -b '$Branch' '$Repo' '$repoDir'; fi && git -C '$repoDir' log --oneline -1"
+  InWsl "mkdir -p ~/src && if [ -d '$repoDir/.git' ]; then cd '$repoDir' && git fetch -q origin '$Branch' && (git checkout -q '$Branch' 2>/dev/null || git checkout -q -b '$Branch' FETCH_HEAD) && git merge -q --ff-only FETCH_HEAD; else git clone -q -b '$Branch' '$Repo' '$repoDir'; fi && git -C '$repoDir' log --oneline -1"
   $installed = (& wsl.exe -d $Distro -u $WslUser -e sh -c "test -x ~/.local/opt/tensorfold-studio/venv/bin/python && echo yes").Trim()
   $how = if ($installed -eq "yes") { "--upgrade" } else { "--yes $Parts" }
   Say "Installing (oneshot-setup-rtx-spark-n1x.sh $how): models are large, this can take a while"
