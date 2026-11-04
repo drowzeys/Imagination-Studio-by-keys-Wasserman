@@ -84,6 +84,8 @@ jobs:
         env:
           STUDIO_TESTS_NEED_NODE: "1"
           STUDIO_TEST_HARDWARE: "0"
+          PYTHONUTF8: "1"          # the pages and their tests are UTF-8; Windows' default code page is not
+          PYTHONIOENCODING: "utf-8"
         shell: pwsh
         run: |
           python -c "import platform,sys; assert sys.platform == 'win32' and platform.machine().lower() in ('arm64','aarch64')"
