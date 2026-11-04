@@ -3,6 +3,7 @@ loads without it and asks; /?key= and the page's prompt keep it as this app's co
 Run: STUDIO_HOME=$(mktemp -d) python3 -m pytest tests/test_access.py"""
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -78,9 +79,34 @@ def test_off_when_asked(monkeypatch):
 def test_the_key_file_is_made_once_private_and_kept(tmp_path):
     made = access.ensure(tmp_path)
     assert len(made) >= 30 and access.read(tmp_path) == made == access.ensure(tmp_path)
-    assert stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
-    access.path(tmp_path).chmod(0o644)
-    assert access.ensure(tmp_path) == made and stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
+    if os.name == "nt":
+        def private():
+            # the file's DACL read back in-process (no PowerShell: its cold start outlasts a CI runner's patience)
+            import ctypes
+            from ctypes import wintypes
+            api = ctypes.WinDLL("advapi32", use_last_error=True)
+            api.GetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+                                             ctypes.POINTER(wintypes.DWORD)]
+            api.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+                ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.LPWSTR), ctypes.POINTER(wintypes.ULONG)]
+            target, need = str(access.path(tmp_path)), wintypes.DWORD()
+            api.GetFileSecurityW(target, 4, None, 0, ctypes.byref(need))  # 4: the DACL
+            buffer = ctypes.create_string_buffer(need.value)
+            assert api.GetFileSecurityW(target, 4, buffer, need, ctypes.byref(need)), ctypes.get_last_error()
+            said = wintypes.LPWSTR()
+            assert api.ConvertSecurityDescriptorToStringSecurityDescriptorW(buffer, 1, 4, ctypes.byref(said), None)
+            text = said.value
+            ctypes.WinDLL("kernel32").LocalFree(ctypes.cast(said, ctypes.c_void_p))
+            assert text == "D:P(A;;FA;;;OW)", text  # protected, only the owner, full access
+        private()
+        access.rotate(tmp_path)
+        private()
+        made = access.read(tmp_path)
+        assert access.ensure(tmp_path) == made
+    else:
+        assert stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
+        access.path(tmp_path).chmod(0o644)
+        assert access.ensure(tmp_path) == made and stat.S_IMODE(access.path(tmp_path).stat().st_mode) == 0o600
     assert access.headers_for(tmp_path) == {"X-Studio-Key": made} and access.headers_for(tmp_path / "none") == {}
     assert not access.matches("", "") and not access.matches(made, "")
 

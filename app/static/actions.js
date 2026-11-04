@@ -16,6 +16,7 @@ function actOpen(kind, path) { ACT.open = { kind, path }; if (kind === "remove")
   setTimeout(() => { const n = document.querySelector("#actpanel"); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }
 // the buttons a Library tile gets for its kind of file
 function actButtons(m) { const gfx = typeof gfxButtons === "function" ? gfxButtons(m) : [];  // Add a title, Caption this clip (graphics.js)
+  if ((typeof capWhy === "function" ? capWhy : () => "")("image_actions")) return [el("button", { class: "small", disabled: true, title: (typeof capWhy === "function" ? capWhy : () => "")("image_actions") }, "Model actions unavailable"), ...gfx];
   if (!ACT.state) return gfx;
   const one = (kind, label, title) => el("button", { class: "small", title: actOf(kind).ready ? title : actOf(kind).why, onclick: () => actOpen(kind, m.path) }, label);
   return (m.kind === "video" ? [one("upscale", "Upscale", "Make this clip larger and sharper: a latent upscale, then one light re-draw guided by the clip itself"),

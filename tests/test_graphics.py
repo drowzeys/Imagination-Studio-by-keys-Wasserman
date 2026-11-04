@@ -48,6 +48,9 @@ def fake_install(root: Path) -> None:
 
 @pytest.fixture
 def installed(tmp_path, monkeypatch):
+    monkeypatch.setattr(graphics, "WINDOWS", False)
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(graphics, "node_version", lambda binary: (22, 23, 4))
     fake_install(tmp_path / "graphics")
     monkeypatch.setenv("GRAPHICS_DIR", str(tmp_path / "graphics"))
     monkeypatch.delenv("HYPERFRAMES_BROWSER_PATH", raising=False)
@@ -177,7 +180,7 @@ def test_the_runner_fills_the_words_then_says_the_renders_progress(installed, tm
     monkeypatch.setattr(graphics, "transcribe", lambda clip: [{"word": "Hi", "start": 0.0, "end": 0.3}])
     lines = []
     monkeypatch.setattr("builtins.print", lambda *a, **k: lines.append(" ".join(map(str, a))))
-    code = graphics.main(["run", str(folder), "--words", str(tmp_path / "clip.mp4"), "--", sys.executable, str(render)])
+    code = graphics.main(["run", str(folder), "--words", str(tmp_path / "clip.mp4"), "--", sys.executable, "-X", "utf8", str(render)])
     assert code == 0
     assert json.loads((folder / "data.json").read_text())["words"] == [{"word": "Hi", "start": 0.0, "end": 0.3}]
     assert "window.STUDIO_DATA" in (folder / "data.js").read_text()
@@ -187,6 +190,9 @@ def test_the_runner_fills_the_words_then_says_the_renders_progress(installed, tm
 
 
 def test_the_readiness_report_says_what_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(graphics, "WINDOWS", False)
+    monkeypatch.setattr(graphics, "node_version", lambda binary: (20, 11, 1) if Path(binary).parent == tmp_path / "bin" else (22, 23, 4))
+    monkeypatch.setattr(graphics.shutil, "which", lambda name, path=None: str(tmp_path / "bin" / name) if (tmp_path / "bin" / name).is_file() else None)
     monkeypatch.setenv("GRAPHICS_DIR", str(tmp_path / "none"))
     monkeypatch.delenv("HYPERFRAMES_BROWSER_PATH", raising=False)
     old = tmp_path / "bin"
@@ -255,7 +261,8 @@ def test_without_an_install_the_job_is_refused_with_the_command(monkeypatch, tmp
     monkeypatch.setattr(server, "graphics_build", build)
     monkeypatch.setattr(graphics, "node_bin", lambda: ("/usr/bin/node", "22.0.0"))
     said = client.post("/api/jobs", json={"kind": "graphics", "params": {"template": "title", "title": "A"}})
-    assert said.status_code == 400 and "HyperFrames is not installed" in said.json()["error"] and "setup-graphics.sh" in said.json()["error"]
+    assert said.status_code == 400 and "HyperFrames is not installed" in said.json()["error"]
+    assert ("setup-windows-graphics.ps1" if graphics.WINDOWS else "setup-graphics.sh") in said.json()["error"]
 
 
 def test_each_template_is_a_composition_hyperframes_reads():

@@ -1,0 +1,5 @@
+fastapi==0.142.2
+uvicorn==0.54.0
+python-multipart==0.0.32
+numpy==2.4.6
+pillow==12.3.0

@@ -30,6 +30,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 KINDS = ("sfx", "foley")
+WINDOWS = os.name == "nt"
 TITLES = {"sfx": "Sound effect", "foley": "Foley"}
 SFX_SECONDS = (1.0, 47.0)        # Stable Audio Open's window is 47.55 s
 FOLEY_SECONDS = (1.0, 15.0)      # the studio's longest clip; MMAudio was trained on 8 s and keeps going past it
@@ -90,6 +91,14 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
     def missing(kind: str) -> str:
         """Why this kind cannot run here ("" when it can)."""
 
+        if WINDOWS:
+            if kind != "sfx":
+                return "MMAudio foley is not qualified on Windows; sound effects support the measured five-second recipe only."
+            import windows_sound
+            found = windows_sound.status()
+            if not found["available"]:
+                return found["why"]
+            return "" if shutil.which("ffmpeg") else "Run scripts\\setup-windows-ffmpeg.ps1 and restart Studio."
         if spark:
             return spark_missing(kind)
         if not python().is_file():
@@ -190,7 +199,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
     @router.get("/api/sound/state")
     def state() -> dict:
         return {"kinds": {kind: {"ready": not missing(kind), "why": missing(kind) or None, "licence": LICENCES[kind]} for kind in KINDS},
-                "seconds": {"sfx": SFX_SECONDS, "foley": FOLEY_SECONDS}, "spark": spark}
+                "seconds": {"sfx": (5, 5) if WINDOWS else SFX_SECONDS, "foley": FOLEY_SECONDS},
+                "spark": spark, "windows": WINDOWS}
 
     @router.get("/api/sound/takes")
     def takes() -> list[dict]:
@@ -198,7 +208,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
 
         out = []
         for kind in KINDS:
-            for file in (home / "sound" / kind).glob("*.take.json"):
+            for file in (home / "sound" / kind).rglob("*.take.json"):
                 try:
                     take = json.loads(file.read_text())
                 except (OSError, ValueError):

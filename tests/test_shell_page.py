@@ -32,6 +32,7 @@ globalThis.sharpOn = () => false; globalThis.sharpCreate = () => { C.res = "shar
 globalThis.lorasOf = () => []; globalThis.refCount = () => 0; globalThis.framesOf = () => 124; globalThis.exact = f => f + " frames"; globalThis.showEstimate = () => {};
 globalThis.mmss = s => Math.round(s) + " s"; globalThis.count = (n, w) => n + " " + w + (n === 1 ? "" : "s"); globalThis.file = p => "/files/" + p;
 globalThis.media = p => el("img", { src: p }); globalThis.addToTimeline = () => {}; globalThis.ensureProject = async () => project; globalThis.imageModel = () => "qwen";
+globalThis.stillParams = params => params;
 globalThis.bayOpenCalls = 0;
 const text = node => node == null || node === false ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join(" ") : [node.attrs && node.attrs.placeholder, node.attrs && node.attrs.title, text(node.kids)].filter(Boolean).join(" ");
 globalThis.text = text;
@@ -551,6 +552,49 @@ def test_connect_ticks_find_signin_verify_and_default_by_itself():
     assert out["s2"] == {"find": "done", "signin": "done", "verify": "done", "default": "done"} and "Answered “ok” in 2.1 s" in out["done"] and "is ready" in out["done"]
 
 
+def test_copilot_terminal_login_can_be_checked_while_auth_status_is_unknown():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "unknown" }, default_ready: true });
+      await connectStart(b); await settle();
+      out.word = brainWord(b)[0]; out.initial = steps("copilot"); out.instructions = text(panel("copilot"));
+      out.automaticChecks = calls.filter(c => c[0] === "/api/brains/copilot/verify").length;
+      answers["/api/brains/copilot/verify"] = { ok: true, text: "ok", elapsedMs: 120 };
+      await button(panel("copilot"), "Check").attrs.onclick();
+      out.checked = CN.data.copilot.verify.ok;
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "signed_in" },
+        verify: CN.data.copilot.verify, default_ready: true });
+      await cnLoad("copilot");
+      out.finished = steps("copilot"); out.readyWord = brainWord(b)[0];
+      out.signinRequests = calls.filter(c => c[0] === "/api/brains/copilot/signin").length;
+    """)
+    assert out["word"] == "Not checked" and out["initial"]["verify"] == "wait"
+    assert "If you already signed in, press Check" in out["instructions"]
+    assert out["automaticChecks"] == 0 and out["signinRequests"] == 0
+    assert out["checked"] and out["readyWord"] == "Ready"
+    assert out["finished"]["signin"] == out["finished"]["verify"] == "done"
+
+
+def test_copilot_failed_login_offers_check_after_terminal_login_not_an_app_signin():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      CN.open = "copilot"; CN.data.copilot = base("copilot", { signin: { state: "unknown" },
+        verify: { ok: false, error: "Run copilot login, then Check again.", fix: { action: "signin", label: "Sign in again" } } });
+      answers["/api/brains/copilot/verify"] = { ok: false, error: "Still not signed in." };
+      await button(panel("copilot"), "Check again after copilot login").attrs.onclick();
+      out.verify = calls.some(c => c[0] === "/api/brains/copilot/verify");
+      out.signin = calls.some(c => c[0] === "/api/brains/copilot/signin");
+      CN.data.copilot = base("copilot", { find: { found: false }, signin: { state: "unknown" } });
+      out.missingCheck = !!button(panel("copilot"), "Check");
+    """)
+    assert out["verify"] and not out["signin"]
+    assert not out["missingCheck"]
+
+
 def test_connect_installs_a_missing_cli_shows_a_device_code_and_the_fix_for_a_failed_answer():
     out = run(CONNECT + """
       const b = { id: "codex", label: "Codex", kind: "cli", found: false, where: "ssh:mac", signin_flow: "pty" };
@@ -637,6 +681,71 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
     assert "Connect your agent" in out["home"] and out["primary"].endswith("Connect Codex")  # the one that is installed first
     assert out["went"][:3] == ["Home", "codex", "codex"] and out["went"][3] == 1  # Connect opens over the page: nothing to go and find
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
+
+
+def test_selected_copilot_is_not_asked_to_reconnect_after_server_restart():
+    out = run(CONNECT + """
+      const copilot = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here", signin_flow: "terminal" };
+      BR.data = { default: "copilot", settings: { agent: "copilot" }, backends: [copilot] };
+      BR.status = { copilot: { state: "unknown" } };
+      out.home = connectNudge("home"); out.agent = connectNudge("agent");
+      out.verifications = calls.filter(c => /\\/verify$/.test(c[0])).length;
+      out.word = brainWord(copilot)[0];
+      BR.data.default = "claude"; BR.data.settings.agent = "claude";
+      const card = connectNudge("home");
+      out.unselected = text(card); out.primary = text(find(card, n => n.tag === "button" && n.attrs.class === "primary"));
+      BR.data.default = "copilot"; BR.data.settings.agent = "copilot";
+      BR.status.copilot = { state: "signed_out" };
+      out.signedOut = text(connectNudge("home"));
+      BR.status.copilot = { state: "broken" };
+      out.broken = !!connectNudge("home");""")
+    assert out["home"] is None and out["agent"] is None
+    assert out["verifications"] == 0 and out["word"] == "Not checked"
+    assert "Check your agent" in out["unselected"] and "terminal sign-in separately" in out["unselected"]
+    assert out["primary"].endswith("Check GitHub Copilot CLI")
+    assert "Connect your agent" in out["signedOut"] and out["broken"]
+
+
+def test_windows_home_and_engine_cards_honor_the_qualified_capabilities():
+    out = run("""
+      S.platform = "windows"; S.capabilities = { scout: { available: true }, sfx: { available: true }, graphics: { available: true },
+        video: { available: false, why: "Video not qualified on Windows" }, edit: { available: false, why: "Picture edits not qualified" } };
+      HC.mode = "clip"; out.mode = hcMode(); out.cards = STARTS().map(c => [c.id, !!c.off]);
+      out.blocked = 0; try { await hcRequest("clip", "A test", 0); } catch (e) { out.blocked = e.message; }
+      out.sent = calls.length;
+      out.video = text(viewVideo()); out.videoButton = !!find(viewVideo(), n => n.tag === "button" && n.attrs.class === "primary").attrs.disabled;
+      out.image = text(viewImage()); out.sound = text(viewSound());
+      const description = capButton({ path: "uploads/test.png", kind: "image" });
+      CAP.map = {}; out.descriptionDisabled = !!capButton({ path: "uploads/test.png", kind: "image" }).attrs.disabled;
+      S.platform = "mac"; HC.mode = "clip"; out.mac = hcMode(); out.macImage = text(viewImage());""")
+    assert out["mode"] == "picture" and out["blocked"] == "Video not qualified on Windows" and out["sent"] == 0
+    cards = dict(out["cards"])
+    assert cards["clip"] and cards["voice"] and cards["song"]
+    assert not any(cards[c] for c in ("still", "sfx", "graphics", "film", "script", "agent"))
+    assert out["videoButton"] and "Video not qualified" in out["video"]
+    assert "512" in out["image"] and "Qwen 2.1 or" not in out["image"]
+    assert "five-second" in out["sound"].lower() and out["descriptionDisabled"]
+    assert out["mac"] == "clip" and "Qwen 2.1" in out["macImage"]
+
+
+def test_upstream_flux_and_yue_chips_cannot_bypass_windows_limits():
+    out = run("""
+      S.platform = "windows";
+      S.image_models = [{ id: "sd-turbo", label: "SD-Turbo" }];
+      S.capabilities = { scout: { available: true }, flux: { available: false, why: "FLUX is unqualified" },
+        music: { available: false, why: "Music is unqualified" } };
+      S.music = { available: false, engine: "yue2", engines: { yue2: { installed: true, available: true }, music3: { available: false } } };
+      HC.mode = "yue"; out.mode = hcMode(); out.model = hcPictureModel();
+      const chips = homeComposer().kids[0].kids;
+      out.fluxHidden = !chips.some(n => n.attrs["data-mode"] === "flux");
+      out.yueDisabled = chips.find(n => n.attrs["data-mode"] === "yue").attrs.disabled;
+      out.errors = [];
+      for (const mode of ["flux", "yue"]) { try { await hcRequest(mode, "A test", 0); } catch (e) { out.errors.push(e.message); } }
+      out.requests = calls.length;
+    """)
+    assert out["mode"] == "picture" and out["model"] == "sd-turbo"
+    assert out["fluxHidden"] and out["yueDisabled"]
+    assert out["errors"] == ["FLUX is unqualified", "Music is unqualified"] and out["requests"] == 0
 
 
 def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account():

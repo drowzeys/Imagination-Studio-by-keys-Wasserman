@@ -353,7 +353,8 @@ def test_dialogue_by_the_video_model_takes_no_voice_reference_and_by_drama_3_doe
     with_ref2va(test)
 
 
-def test_a_takes_sound_becomes_a_characters_voice():
+def test_a_takes_sound_becomes_a_characters_voice(monkeypatch):
+    monkeypatch.setattr(server, "WINDOWS", False)  # exercise the mocked renderer, not Windows's UI-only policy
     import shutil as sh
     import subprocess as sp
     import wave

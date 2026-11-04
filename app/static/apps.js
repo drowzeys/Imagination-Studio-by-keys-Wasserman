@@ -27,7 +27,8 @@ async function apLibrary() { try { AP.lib = await api("/api/library"); if (typeo
 const apAct = (kind, need, title) => () => apPick(need, title, path => actOpen(kind, path));
 const apArt = (slot, fallback) => typeof ART !== "undefined" && ART.ready.has(slot) ? slot : fallback;  // an app still of its own, once it is made
 const apCreate = (set, step = 0) => () => startCreate(set, step);
-const apActReady = kind => { if (typeof ACT === "undefined" || !ACT.state) return ""; const a = ACT.state[kind]; return a && !a.ready ? a.why || "Not ready on this machine yet" : ""; };
+const apActReady = kind => { const why = (typeof capWhy === "function" ? capWhy : () => "")(kind === "hlg" ? "hlg" : "image_actions"); if (why) return why;
+  if (typeof ACT === "undefined" || !ACT.state) return ""; const a = ACT.state[kind]; return a && !a.ready ? a.why || "Not ready on this machine yet" : ""; };
 const apSwapReady = () => { if (typeof SWAP === "undefined") return "Character Swap is not in this build";
   if (!SWAP.state) { SWAP.state = { ready: false, why: "" }; swapLoad().then(() => { if (tab === "Apps") render(); }); return ""; }
   return SWAP.state.ready || !SWAP.state.why ? "" : SWAP.state.why; };

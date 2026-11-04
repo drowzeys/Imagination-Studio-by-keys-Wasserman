@@ -18,7 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 MEDIA = (".mp4", ".mov", ".png", ".jpg", ".jpeg", ".webp", ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
-FOLDERS = {"renders": MEDIA, "exports": MEDIA, "scouts": MEDIA, "uploads": MEDIA, "qa": MEDIA,
+FOLDERS = {"renders": MEDIA, "exports": MEDIA, "scouts": MEDIA, "uploads": MEDIA, "qa": MEDIA, "sound": MEDIA,
            "voice": MEDIA, "music": (".wav",), "projects": (".mp4",), "slate": (".mp4",)}  # in a film's folder only its clips, never its project file
 # a YuE2 song's own folder beside it (music/<job>.yue2: its score and what it was made from), which goes with the song
 SONG_FOLDER = (".abc", ".npy", ".json", ".txt", ".mid", ".wav")
@@ -53,7 +53,7 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         return target
 
     def rel(path: Path) -> str:
-        return str(path.resolve().relative_to(root))
+        return path.resolve().relative_to(root).as_posix()
 
     def named(params: dict) -> set[str]:
         """The studio files a job's settings name: its first frame and its references."""

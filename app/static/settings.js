@@ -117,6 +117,8 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
 const LOCAL_PRESETS = [["Studio engine · Bolt", "studio:bolt"], ["Ollama", "http://127.0.0.1:11434/v1"], ["LM Studio", "http://127.0.0.1:1234/v1"], ["vLLM", "http://127.0.0.1:8000/v1"], ["llama.cpp", "http://127.0.0.1:8080/v1"], ["Hermes proxy", ""]];
 // the Local models card: on Settings → Connections and at the top of Machine → Brains & tools
 function localModelsCard() {
+  const windows = S && S.ui_only;
+  const comfy = windows && S.windows_stills && S.windows_stills.backend;
   const b = (typeof BR !== "undefined" && BR.data && BR.data.backends || []).find(x => x.id === "local"), set = typeof BR !== "undefined" && BR.data && BR.data.settings || {};
   const L = SET.local; if (L.endpoint === null) L.endpoint = set.local_endpoint || "";
   const found = L.found || (b ? { found: b.found, endpoint: b.endpoint, models: b.models || [] } : null);
@@ -130,8 +132,9 @@ function localModelsCard() {
     el("div", { class: "st-lh" }, el("span", { class: "logo" }, icon("machine")), el("div", { class: "m-min" }, el("h2", {}, "Local models welcome"),
       el("p", { class: "st-line" }, "Any local model works here — nothing leaves your machine.")),
       el("span", { class: "tag2 " + (found && found.found ? "ok" : "") }, found ? (found.found ? "answering" : "not answering") : "not looked yet")),
-    el("div", { class: "note m-flat" }, "An OpenAI-compatible server on this computer or your network can be the brain for Slate, the QA look and the Agent room's conversation. Pick one to fill its usual address, or type your own."),
-    el("div", { class: "chips" }, LOCAL_PRESETS.map(([name, url]) => el("button", { type: "button", class: "toggle" + (url && L.endpoint === url ? " on" : ""),
+    el("div", { class: "note m-flat" }, windows ? "A small loopback server supports text-only Slate writing. Start scripts\\brain.ps1 in a separate terminal, save its address here and test it. Copilot remains the Studio-tool agent; local vision and rendering are not enabled."
+      : "An OpenAI-compatible server on this computer or your network can be the brain for Slate, the QA look and the Agent room's conversation. Pick one to fill its usual address, or type your own."),
+    el("div", { class: "chips" }, (windows ? [["Qwen3-4B · llama.cpp", "http://127.0.0.1:8080/v1"]] : LOCAL_PRESETS).map(([name, url]) => el("button", { type: "button", class: "toggle" + (url && L.endpoint === url ? " on" : ""),
       title: url || "Run `hermes proxy start` in a terminal; `hermes proxy status` shows the address to type here",
       onclick: () => { if (!url) { toast("Run `hermes proxy start`, then type the address `hermes proxy status` shows", 6000); return; } L.endpoint = url; L.found = null; render(); } }, name))),
     el("div", { class: "st-lrow" }, field1, el("button", { type: "button", class: "small", disabled: L.finding, onclick: find1 }, L.finding ? "Looking…" : "Find"),
@@ -143,7 +146,12 @@ function localModelsCard() {
     // a name set here that the server no longer runs: the studio asks for, and shows, the model it does run
     b && b.set_missing && b.endpoint === (found && found.endpoint) ? el("div", { class: "note m-flat" }, "Set to " + b.set_model + ", which this server no longer runs: the studio uses " + b.model + ". ",
       el("button", { type: "button", class: "small", onclick: () => save1({ local_model: "" }) }, "Follow what the server runs")) : null,
-    L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null); }
+    L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null,
+    comfy ? el("div", { class: "group" }, el("h3", {}, "Image and sound backend · ComfyUI"),
+      el("div", { class: "note" }, comfy.why || (comfy.loaded ? "Models kept warm between jobs, under the memory guard." : comfy.running ? "ComfyUI is running." : "ComfyUI starts with the first image job.")),
+      el("button", { class: "small", disabled: comfy.busy || !(comfy.running || comfy.why), onclick: async () => {
+        try { S.windows_stills.backend = await api("/api/windows/stills/unload", {}); toast("ComfyUI unloaded"); render(); } catch (e) { toast(e.message); }
+      } }, "Unload ComfyUI")) : null); }
 // More local agents: every other model server (a GLM, a DeepSeek, an Ollama) as a brain of its own, beside Bolt
 function localAgentsCard() {
   const d = typeof BR !== "undefined" && BR.data || {}, A = SET.agents, mine = (d.backends || []).filter(b => b.local_agent);
@@ -280,19 +288,19 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "David Low (davidlowjw): two GPUs in one machine, one render split over both cards, and his TensorFold fork studio-two-gpus (Apache-2.0) for the exchange",
       "BTankut: bug reports from a film made in Slate, with causes and fixes (export trims and size, the shot check button, Regenerate); the NVIDIA driver's memory pools on a DGX Spark",
       "drgw5b7gzv-ship-it and gsp-agent: the Qwen-Image-2.1-Turbo text encoder on a fresh Mac install, reported, diagnosed and worked around",
-      "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Multimodal Art Projection (m-a-p) and the YuE2 authors: YuE2 (songs), with the Qwen team's qwen.tiktoken read by OpenAI's tiktoken", "Built with Fish Audio: Fish Audio Drama 3",
+      "Qwen team: Qwen-Image-2.1 and Qwen3-4B (optional Windows writing brain)", "Stability AI: SD-Turbo (optional Windows storyboard drafts); SDXL-Turbo (evaluated, not qualified on Windows)", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Multimodal Art Projection (m-a-p) and the YuE2 authors: YuE2 (songs), with the Qwen team's qwen.tiktoken read by OpenAI's tiktoken", "Built with Fish Audio: Fish Audio Drama 3",
       "Stability AI: Stable Audio Open · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio (sound effects and foley)",
       "Ash Hart and the TensorFold contributors: TensorFold (the music engines and both Bolt engines on the 1.1.8 release)",
-      "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine) · MiaAI-Lab (with ChriZzn): the Bolt TensorFold recipe for the DGX Spark, its libbolt and LiLiCorr drafter runtime",
+      "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine); native Windows ARM64 CUDA wheels for PyTorch, TorchVision and TorchAudio (PyTorch contributors) · MiaAI-Lab (with ChriZzn): the Bolt TensorFold recipe for the DGX Spark, its libbolt and LiLiCorr drafter runtime",
       "antirez: h3.c · RobZombAI: H3MLX · mrbizarro: minimax-h3-mlx (Phosphene) · Filip Strand and the mflux contributors · felix-ab: flux3-mlx",
-      "comfyanonymous, Comfy Org and the ComfyUI contributors: ComfyUI, and Comfy Org's MOSS-Image and MiniMax-Music-3 files · Apple: MLX · mlx-vlm · Qwen team: Qwen3-VL · VisualInference",
+      "comfyanonymous, Comfy Org and the ComfyUI contributors: ComfyUI, its audio nodes and checkpoint helpers used by the Windows calibration, and Comfy Org's MOSS-Image and MiniMax-Music-3 files · Apple: MLX · mlx-vlm · Qwen team: Qwen3-VL · VisualInference",
       "NVIDIA Research: Sol · FastVideo (Hao AI Lab): FastH3 · LightX2V (ModelTC) · larryvrh · TaoLiveAIGC · Viggle · speach1sdef178 · rookiestar28 · ddalcu · Kijai · DeepBeepMeep",
       "The Library's actions: MulticoreWare: x265 (keys-HDR LORA, the HDR finish) · hi_personality (the clip the HDR finish's look was measured from) · MATLOWAI (H3 Contact Sheet) · dntpi / Sandpies (H3 Video Upsampler) · LBH-123-AI · bbaudio-2025 · Alissonerdx · Akatz Labs (H3 Relay, Person Remover, Character Swap LoRA and workflow) · Meta: SAM 3.1 · Comfy Org: Openjutsu (the idea of Character Swap)",
-      "Motion Previs: Sam Wasserman's Motion Previs Studio · Google: MediaPipe · Lihe Yang et al.: Depth Anything (Xenova's ONNX conversion) · OpenCV · Microsoft: ONNX Runtime",
+      "Motion Previs: Sam Wasserman's Motion Previs Studio · Google: MediaPipe · Lihe Yang et al.: Depth Anything (Xenova's ONNX conversion) · OpenCV · Microsoft: ONNX Runtime and Win32 memory-pressure/job-object APIs · NVIDIA: NVML/CUDA budget queries",
       "MMAudio's models: Apple DFN5B CLIP · Synchformer (Iashin et al.) · NVIDIA BigVGAN v2 · Google: T5 · the SGLang-Omni team and Descript: Fish's codec on a Spark",
-      "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, SGLang (the SGLang team and LMSYS), llama.cpp (Georgi Gerganov and the ggml contributors); Blender (Blender Foundation) and blender-mcp (Siddharth Ahuja)",
-      "OpenAI Whisper, faster-whisper (SYSTRAN, Mobius Labs), yt-dlp, FFmpeg, PyTorch, Hugging Face diffusers, transformers and huggingface_hub, torchsde, FastAPI, Starlette and Uvicorn (Encode), xgrammar (MLC-AI), Zig, BusyBox, uv, NumPy, Pillow, PyAV",
-      "Motion graphics, training and finishing: HeyGen (HyperFrames) · GreenSock (GSAP) · Microsoft (Playwright) · Node.js · kohya-ss (musubi-tuner) · ostris · bitsandbytes (Tim Dettmers) · Mirage (Tesseract, Tesseract Converter) · DejaVu fonts",
+      "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), GitHub Copilot CLI (GitHub), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, SGLang (the SGLang team and LMSYS), llama.cpp (Georgi Gerganov and the ggml contributors); Blender (Blender Foundation) and blender-mcp (Siddharth Ahuja)",
+      "OpenAI Whisper, faster-whisper (SYSTRAN, Mobius Labs), yt-dlp, FFmpeg; BtbN and the FFmpeg-Builds contributors (native Windows ARM64 build); VideoLAN and the x264 contributors; PyTorch, Hugging Face diffusers, transformers and huggingface_hub, torchsde, FastAPI, Starlette and Uvicorn (Encode), aiohttp (aio-libs), xgrammar (MLC-AI), Zig, BusyBox, uv, NumPy, Pillow, PyAV",
+      "Motion graphics, training and finishing: HeyGen (HyperFrames) · GreenSock (GSAP) · Microsoft (Playwright, installed Edge on Windows) · Google and Puppeteer contributors (Puppeteer) · Node.js · kohya-ss (musubi-tuner) · ostris · bitsandbytes (Tim Dettmers) · Mirage (Tesseract, Tesseract Converter) · DejaVu fonts",
       "Geist and Instrument Serif · LobeHub and Simple Icons: the agents' marks · @itxabdullaa: the Black Mirror test prompt",
       "The community LoRA authors, by name on each card in Looks and in CREDITS.md · every one of them, with what was used and its licence, under Every credit below"].map(t => el("li", {}, t)))),
   setFullCredits(),

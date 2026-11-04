@@ -33,7 +33,7 @@ const ENGINE_PAGES = {
       { art: "act-story-board", sign: "story", title: "Film board", one: "Segments in order, one prompt each", run: () => slateMode("board") },
       { art: "act-story-slate", sign: "story", title: "Wasserman Slate", one: "Bible, studios and shots for a whole film", run: () => slateMode("slate") },
       { art: "act-story-firstad", sign: "story", title: "First AD", one: "Say what you are making; it lays out scenes and shots", run: () => slateMode("slate", "ad") },
-      { art: "act-story-import", sign: "suite", title: "Bring in a script", one: "ScriptBreak, Fountain or Final Draft", run: () => go("Import") }] }),
+      { art: "act-story-import", sign: "suite", title: "Bring in a script", one: "Fountain or suite exports; convert Final Draft to Fountain first", run: () => go("Import") }] }),
   image: () => ({ line: "Stills, scouts and picture edits on Qwen 2.1 or FLUX3-K, at any size the models take.", marks: [mark("qwen", "Qwen 2.1"), mark("flux")],
     primary: ["Make a still", () => startCreate({ goes: "image" })], cards: [
       { art: "start-still", sign: "image", title: "A still", one: "One picture or several, any size", run: () => startCreate({ goes: "image" }) },
@@ -67,11 +67,24 @@ const ENGINE_PAGES = {
       { art: "act-edit-library", sign: "library", title: "Library", one: "Every take on this machine", run: () => go("Library") }] }),
 };
 function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_PAGES[id]();
+  const win = S && S.platform === "windows", primary = { image: "scout", video: "video" }[id];
+  if (win) {
+    if (id === "image") { e.line = "SD-Turbo storyboard drafts: 512 × 512, one pass, up to six sequential pictures."; e.marks = [];
+      e.cards[0].one = "One 512 × 512 storyboard draft"; e.cards[1].one = "Up to six sequential drafts, with individual seeds"; }
+    if (id === "video") e.line = (typeof capWhy === "function" ? capWhy : () => "")("video");
+    if (id === "previs") { e.line = "Copilot CLI can plan with This Studio tools. Motion analysis and Blender automation remain unqualified."; e.marks = [];
+      e.cards[1].one = "Copilot CLI with This Studio tools"; }
+    if (id === "sound") { e.line = "Five-second Stable Audio Open sound effects on this machine. Voice, music and foley remain unqualified.";
+      e.marks = []; e.primary = ["Make a sound effect", () => go("Foley")]; e.cards[2].one = "Five-second sound effects from words"; }
+    const kinds = { "act-image-edit": "edit", "act-image-looks": "looks", "act-previs-motion": "motion", "start-voice": "voice", "start-song": "music", "start-sfx": "sfx" };
+    e.cards = e.cards.map((c, i) => ({ ...c, off: (typeof capWhy === "function" ? capWhy : () => "")(id === "video" ? "video" : id === "image" && i < 2 ? "scout" : kinds[c.art]) || c.off }));
+  }
+  const why = (typeof capWhy === "function" ? capWhy : () => "")(id === "sound" && win ? "sfx" : primary);
   return el("div", {},
     el("div", { class: "enghead" }, artSlot("engine-" + id, "", id),
       el("div", { class: "stack" }, el("span", { class: "eyebrow engmark" }, el("img", { src: "brand/module-" + id + ".svg", alt: "", width: 22, height: 22 }), "Creative Engine"), el("h1", { class: "display" }, r.name), el("p", { class: "sub", style: "margin:0" }, e.line),
         e.marks.filter(Boolean).length ? el("div", { class: "marks" }, e.marks) : null,
-        el("div", { class: "acts" }, el("button", { class: "primary", onclick: e.primary[1] }, e.primary[0])))),
+        el("div", { class: "acts" }, el("button", { class: "primary", title: why, disabled: !!why, onclick: e.primary[1] }, e.primary[0])))),
     el("div", { class: "cards" + (e.cards.length >= 4 ? " c4" : e.cards.length === 3 ? " c3" : "") }, e.cards.map(pcard))); }
 const viewStory = () => engineLanding("story"), viewImage = () => engineLanding("image"), viewVideo = () => engineLanding("video"),
   viewPrevis = () => engineLanding("previs"), viewSound = () => engineLanding("sound"), viewEditHub = () => engineLanding("edit");

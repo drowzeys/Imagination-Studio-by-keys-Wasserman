@@ -1,0 +1,3 @@
+-r requirements-windows-gpu.txt
+-c requirements-windows-comfy-constraints.txt
+-r https://raw.githubusercontent.com/comfyanonymous/ComfyUI/b9b290e43f1eb379946dfeb013faf9bbefa1a618/requirements.txt

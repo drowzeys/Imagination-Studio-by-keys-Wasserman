@@ -10,19 +10,21 @@ const GFX = { state: null, lib: null, template: "title", size: "1080p", busy: fa
   captions: { video: "", per_line: 5, position: "bottom" },
   slideshow: { pictures: [], seconds_each: 4, voice: "", song: "", title: "" },
   "music-video": { clips: [], song: "", bpm: 120, every: 2, seconds: 30, transition: "mixed", beats: null, title: "" },
-  explainer: { title: "", voice: "", song: "", sections: [{ heading: "", text: "", picture: "" }] } };
+  explainer: { title: "", voice: "", song: "", seconds_each: 5, sections: [{ heading: "", text: "", picture: "" }] } };
 const GFX_CLIP = ["lower-third", "captions"];  // made over a clip: the size can match it
-async function gfxLoad() { try { GFX.state = await api("/api/graphics"); } catch (e) { GFX.state = { error: e.message }; }
+async function gfxLoad() { const first = !GFX.state;
+  try { GFX.state = await api("/api/graphics"); if (first && GFX.state.windows) GFX["music-video"].seconds = 10; } catch (e) { GFX.state = { error: e.message }; }
   try { GFX.lib = await api("/api/library"); } catch { GFX.lib = []; }
   if (tab === "Graphics") render(); }
-const gfxOf = kind => (GFX.lib || []).filter(m => kind === "voice" || kind === "music" ? m.kind === "audio" && m.sound === kind : m.kind === kind);
+const gfxOf = kind => (GFX.lib || []).filter(m => kind === "voice" || kind === "music"
+  ? m.kind === "audio" && (S && S.platform === "windows" || m.sound === kind) : m.kind === kind);
 const gfxName = p => (p || "").split("/").slice(-2).join("/");
 // open the panel on a clip from the Library: "Add a title" (a lower third over it) or "Caption this clip"
 function gfxOpen(template, path) { GFX.template = template; if (GFX[template] && "video" in GFX[template]) GFX[template].video = path;
-  if (GFX_CLIP.includes(template)) GFX.size = "match"; GFX.job = null; go("Graphics"); }
+  if (GFX_CLIP.includes(template)) GFX.size = S && S.platform === "windows" ? "720p" : "match"; GFX.job = null; go("Graphics"); }
 function gfxButtons(m) { if (m.kind !== "video") return [];
-  return [el("button", { class: "small", title: "A name and a role over this clip, or a title", onclick: () => gfxOpen("lower-third", m.path) }, "Add a title"),
-    el("button", { class: "small", title: "Burn this clip's speech in as captions, word by word", onclick: () => gfxOpen("captions", m.path) }, "Caption this clip")]; }
+  return [el("button", { class: "small", title: capWhy("graphics") || "A name and a role over this clip, or a title", disabled: !!capWhy("graphics"), onclick: () => gfxOpen("lower-third", m.path) }, "Add a title"),
+    el("button", { class: "small", title: capWhy("captions") || "Burn this clip's speech in as captions, word by word", disabled: !!capWhy("captions"), onclick: () => gfxOpen("captions", m.path) }, "Caption this clip")]; }
 // one Library file from a list: a dropdown of its kind (as Sound effects picks its clip)
 function gfxPick(obj, key, kind, label, empty) { const list = gfxOf(kind);
   return field(label, el("select", { "aria-label": label, onchange: e => { obj[key] = e.target.value; render(); } },
@@ -37,7 +39,8 @@ function gfxMany(obj, key, kind, label) { const list = gfxOf(kind), chosen = obj
           el("div", { class: "cap" }, el("input", { type: "checkbox", checked: at >= 0, style: "width:auto;flex:none", "aria-label": "Use " + m.path,
             onchange: e => { const i = chosen.indexOf(m.path); if (e.target.checked && i < 0) chosen.push(m.path); if (!e.target.checked && i >= 0) chosen.splice(i, 1); render(); } }),
             el("span", { class: "note m-flat", style: "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, at >= 0 ? (at + 1) + ". " + gfxName(m.path) : gfxName(m.path)))); }))); }
-const gfxNum = (obj, key, attrs) => bind(obj, key, el("input", { type: "number", style: "max-width:120px", ...attrs }));
+const gfxNum = (obj, key, attrs) => bind(obj, key, el("input", { type: "number", style: "max-width:120px", ...attrs,
+  ...(S && S.platform === "windows" && ["seconds", "seconds_each"].includes(key) ? { max: Math.min(Number(attrs.max) || 10, 10) } : {}) }));
 const gfxText = (obj, key, placeholder, rows) => bind(obj, key, rows ? el("textarea", { rows, placeholder, "aria-label": placeholder }) : el("input", { placeholder, "aria-label": placeholder }));
 // a song's beats from the Music tab's beat finder when this Studio has one; otherwise the tempo makes an even grid
 async function gfxBeats(f) { if (!f.song) return toast("Choose the song first");
@@ -48,7 +51,7 @@ async function gfxBeats(f) { if (!f.song) return toast("Choose the song first");
   GFX.beatsBusy = false; render(); }
 function gfxTempo(f) { return el("div", { class: "row" }, field("Tempo (beats a minute)", gfxNum(f, "bpm", { min: 40, max: 240 })),
   field("Beats per " + (GFX.template === "kinetic" ? "word" : "cut"), select(f, "every", { 1: "1", 2: "2", 4: "4", 8: "8" })),
-  el("div", {}, el("label", {}, "The song's own beats"), el("div", { class: "row" }, el("button", { type: "button", class: "small", disabled: GFX.beatsBusy || !f.song, onclick: () => gfxBeats(f) }, GFX.beatsBusy ? "Listening…" : "Find the beats"),
+  el("div", {}, el("label", {}, "The song's own beats"), el("div", { class: "row" }, el("button", { type: "button", class: "small", title: capWhy("beats"), disabled: GFX.beatsBusy || !f.song || !!capWhy("beats"), onclick: () => gfxBeats(f) }, GFX.beatsBusy ? "Listening…" : "Find the beats"),
     f.beats ? el("span", { class: "note m-flat" }, f.beats.length + " beats · ", el("button", { type: "button", class: "small ghost", onclick: () => { f.beats = null; render(); } }, "use the tempo")) : el("span", { class: "note m-flat" }, "or the tempo sets an even grid")))); }
 function gfxForm(t) { const f = GFX[t];
   if (t === "title") return [el("div", { class: "row" }, field("Title", gfxText(f, "title", "The Long Night")), field("Subtitle (optional)", gfxText(f, "subtitle", "A film in three parts"))),
@@ -63,6 +66,7 @@ function gfxForm(t) { const f = GFX[t];
   if (t === "music-video") return [gfxPick(f, "song", "music", "The song"), gfxMany(f, "clips", "video", "Clips, cut in turn"), gfxTempo(f),
     el("div", { class: "row" }, field("Longest (seconds)", gfxNum(f, "seconds", { min: 2, max: 600 })), field("Cuts", select(f, "transition", { mixed: "Flash, whip and straight cuts", flash: "Flash", whip: "Whip", cut: "Straight cuts" })), field("Title (optional)", gfxText(f, "title", "Night Drive")))];
   return [el("div", { class: "row" }, field("Title (optional)", gfxText(f, "title", "How the shot was made")), gfxPick(f, "voice", "voice", "The voice-over (its length sets the explainer's)", "No voice-over")),
+    S && S.platform === "windows" ? field("Seconds per section (without a voice-over)", gfxNum(f, "seconds_each", { min: 2, max: 10, step: 0.5 })) : null,
     ...f.sections.map((s, i) => el("div", { class: "seg" }, el("div", { class: "seghead" }, el("b", {}, "Section " + (i + 1)), el("span", { style: "flex:1" }),
       f.sections.length > 1 ? el("button", { type: "button", class: "small", onclick: () => { f.sections.splice(i, 1); render(); } }, "Remove") : null),
       field("Heading", gfxText(s, "heading", "The idea")), field("Words", gfxText(s, "text", "What the voice says about it, in short", 2)), gfxPick(s, "picture", "image", "A picture (optional)", "No picture"))),
@@ -78,8 +82,10 @@ function gfxParams() { const t = GFX.template, f = GFX[t], p = { template: t, si
   else if (t === "music-video") { need(f.song, "Choose the song"); need(f.clips.length, "Tick the clips to cut"); Object.assign(p, { song: f.song, clips: f.clips, bpm: Number(f.bpm) || 120, every: Number(f.every) || 2, seconds: Number(f.seconds) || 30, transition: f.transition, title: f.title }); if (f.beats) p.beats = f.beats; }
   else { const sections = f.sections.filter(s => s.heading.trim() || s.text.trim()); need(sections.length, "Write at least one section");
     need(sections.every(s => s.heading.trim()), "Give every section a heading");
-    Object.assign(p, { title: f.title, sections: sections.map(s => ({ heading: s.heading, text: s.text, ...(s.picture ? { picture: s.picture } : {}) })) }); if (f.voice) p.voice = f.voice; if (f.song) p.song = f.song; }
-  if (p.size === "match" && !GFX_CLIP.includes(t) && !(t === "title" && p.video)) p.size = "1080p";
+    Object.assign(p, { title: f.title, sections: sections.map(s => ({ heading: s.heading, text: s.text, ...(s.picture ? { picture: s.picture } : {}) })) });
+    if (S && S.platform === "windows") p.seconds_each = Number(f.seconds_each) || 5;
+    if (f.voice) p.voice = f.voice; if (f.song) p.song = f.song; }
+  if (p.size === "match" && !GFX_CLIP.includes(t) && !(t === "title" && p.video)) p.size = S && S.platform === "windows" ? "720p" : "1080p";
   return p; }
 async function gfxMake() { let params; try { params = gfxParams(); } catch (e) { return toast(e.message); }
   GFX.busy = true; render();
@@ -93,18 +99,21 @@ function gfxResult(job) { if (job.status !== "done" || !(job.outputs || [])[0]) 
 function graphicsPanel() {
   if (!GFX.state) { gfxLoad(); return el("div", { class: "note" }, "Looking…"); }
   if (GFX.state.error) return el("div", { class: "note" }, GFX.state.error);
-  const r = GFX.state.ready || {}, t = GFX.template, redraw = () => render();
+  const r = GFX.state.ready || {}, redraw = () => render();
   const cards = Object.fromEntries((GFX.state.templates || []).map(x => [x.id, [x.title, x.one]]));
-  const sizes = { ...(GFX_CLIP.includes(t) || (t === "title" && GFX.title.video) ? { match: ["Match the clip", "its own size"] } : {}),
+  if (!cards[GFX.template]) GFX.template = Object.keys(cards)[0] || "title";
+  const t = GFX.template;
+  const sizes = GFX.state.windows ? { "720p": ["720p", "1280 × 720, at most 10 seconds"] } : { ...(GFX_CLIP.includes(t) || (t === "title" && GFX.title.video) ? { match: ["Match the clip", "its own size"] } : {}),
     "1080p": ["1080p", "1920 × 1080"], "720p": ["720p", "1280 × 720, quicker"], vertical: ["Vertical", "1080 × 1920"], square: ["Square", "1080 × 1080"] };
-  if (!sizes[GFX.size]) GFX.size = "1080p";
+  if (!sizes[GFX.size]) GFX.size = GFX.state.windows ? "720p" : "1080p";
   const mine = (typeof jobs !== "undefined" ? jobs : []).filter(j => j.kind === "graphics");
   const current = mine.find(j => j.id === GFX.job);
   return el("div", { class: "stack gfx" },
     el("section", { class: "panel stack" },
       !r.ok ? el("div", { class: "note vt-bad" }, r.why || "Motion graphics are not installed on this machine.") : null,
-      !r.ok ? (() => { const cmd = GFX.state.spark ? "bash oneshot-setup-spark.sh --graphics" : "bash scripts/setup-graphics.sh";
+      !r.ok ? (() => { const cmd = GFX.state.windows ? "powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-graphics.ps1" : GFX.state.spark ? "bash oneshot-setup-spark.sh --graphics" : "bash scripts/setup-graphics.sh";
         return el("div", { class: "signin-cmd" }, el("code", {}, cmd), el("button", { type: "button", class: "small", onclick: () => copyText(cmd, "Command") }, "Copy")); })() : null,
+      GFX.state.windows ? el("div", { class: "note m-flat" }, "Audio pickers also accept your uploaded recordings and songs from the Library; no voice or music model is needed.") : null,
       field("What to make", choice(GFX, "template", cards, () => { GFX.job = null;  // over a clip: the clip's size first
         GFX.size = GFX_CLIP.includes(GFX.template) ? "match" : GFX.size === "match" ? "1080p" : GFX.size; redraw(); })),
       ...gfxForm(t),
@@ -118,5 +127,5 @@ function graphicsPanel() {
         el("button", { class: "small", onclick: () => addToTimeline(j.outputs[0]) }, "+ timeline"))))));
 }
 function viewGraphics() {
-  return el("div", {}, pageHead("Edit", "Motion graphics", "Titles, lower thirds, captions, slideshows and music videos, made from your takes and rendered on this machine."),
+  return el("div", {}, pageHead("Edit", "Motion graphics", S && S.platform === "windows" ? "Six templates from your own words, clips and audio: up to 720p and ten seconds, without model downloads. Captions remain unavailable." : "Titles, lower thirds, captions, slideshows and music videos, made from your takes and rendered on this machine."),
     graphicsPanel()); }

@@ -9,10 +9,12 @@ from test_shell_page import need_node
 ROOT = Path(__file__).resolve().parent.parent
 HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
+globalThis.vm = vm; globalThis.fs = fs;
 globalThis.S = { qualities: { fh8: "FastH3" }, durations: { 5: 124, 8: 192, 10: 243, 15: 362 }, lengths: { fps: 24, step: 17, shortest: 22, longest: 362 } };
 globalThis.render = () => {}; globalThis.toast = text => (globalThis.toasts = globalThis.toasts || []).push(text);
 globalThis.calls = []; globalThis.answers = {};
 globalThis.api = async (path, body) => { calls.push([path, body]); return answers[path] || {}; };
+globalThis.stillParams = params => params;
 globalThis.jobs = []; globalThis.LORAS = [{ id: "camera-motion", installed: true, name: "Camera Motion" }, { id: "gone", installed: false }];
 globalThis.lorasOf = obj => (obj.loras || []).filter(p => LORAS.some(r => r.id === p.id && r.installed));
 globalThis.poll = async () => {};

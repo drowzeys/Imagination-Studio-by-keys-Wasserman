@@ -97,6 +97,9 @@ function goBack() { const h = SHELL.history; while (h.length && (h[h.length - 1]
   h.pop(); go(prev, { back: true }); }
 function goHome() { if (tab !== "Home") go("Home"); }
 function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
+function capWhy(kind) { if (!kind || !S || S.platform !== "windows") return "";
+  const c = (S.capabilities || {})[kind];
+  return c && c.available ? "" : c && c.why || "This action is not qualified in the Windows preview."; }
 
 const shown = list => typeof roomsShown === "function" ? roomsShown(list) : list;
 const aboutOn = () => tab === "Settings" && typeof SET !== "undefined" && SET.section === "about";
@@ -333,6 +336,11 @@ function palClose() { const p = $("#palette"); if (p) { p.remove(); releaseMedia
 // ⌥1 to ⌥9 and ⌥0: the rooms that carry a key, in the sidebar's order
 const roomForKey = d => ROOMS.find(r => r.key === d) || null;
 function shellStart() {
+  if (S && S.platform_note) {
+    const warning = $("#warnbar");
+    warning.textContent = [S.platform_note, S.ffmpeg_note].filter(Boolean).join(" ");
+    warning.classList.remove("hide");
+  }
   const up = $("#studio-updates-open"); up.replaceChildren(icon("update", "ic"), el("span", { class: "t" }, "Updates")); up.onclick = () => go("Updates");
   $("#helpbtn").innerHTML = ICON.learn; $("#baychev").innerHTML = ICON.chev;
   $("#helpbtn").onclick = () => go("Tutorial");

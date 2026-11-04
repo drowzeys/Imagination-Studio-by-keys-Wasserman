@@ -188,6 +188,62 @@ def test_the_composer_has_a_from_the_suite_chip_that_fills_the_box():
     assert out["job"]["image"] == "uploads/suite/i1/2B.png" and out["compose"] is True and out["cleared"] is None
 
 
+def test_windows_import_page_keeps_planning_but_disables_generated_stills():
+    out = run(IMPORTS + """
+      S.ui_only = true;
+      const page = importView(imp);
+      out.planning = button(page, "Make a Slate film").attrs.disabled;
+      out.stills = button(page, "Fill missing storyboard stills").attrs.disabled;
+      out.reason = button(page, "Fill missing storyboard stills").attrs.title;
+      out.attach = text(page).includes("Send into a film");
+      S.windows_stills = { available: false, why: "Qualification changed; repeat the check." };
+      out.stale = button(importView(imp), "Fill missing storyboard stills").attrs.title;
+      S.windows_stills = { available: true };
+      out.qualified = button(importView(imp), "Fill missing storyboard stills").attrs.disabled;
+      S.ui_only = false;
+      out.original = button(importView(imp), "A still for every shot").attrs.disabled;""")
+    assert out["planning"] is False and out["stills"] is True and out["attach"]
+    assert "import or upload storyboard stills" in out["reason"]
+    assert out["stale"] == "Qualification changed; repeat the check."
+    assert out["qualified"] is False and out["original"] is False
+
+
+def test_model_free_project_and_shot_list_downloads_preserve_the_plan():
+    from test_slate_page import run as slate_run
+
+    out = slate_run("""
+      S.ui_only = true; S.qualities = { fh8: "8 passes" }; S.durations = { 5: 124 };
+      const pickButton = (root, words) => {
+        const walk = node => !node || typeof node !== "object" ? null
+          : Array.isArray(node) ? node.map(walk).find(Boolean)
+          : node.tag === "button" && text(node).includes(words) ? node : walk(node.kids);
+        return walk(root);
+      };
+      SL.mode = "slate"; SL.p = { id: "p-export", name: "Manual board",
+        defaults: { aspectRatio: "16:9", fps: 24, durationSec: 5, brain: "local" },
+        scenes: [], characters: [], locations: [], artDept: [], lookbook: [], music: [], voices: [], copilot: [] };
+      const shot = slBlankShot("Wide, then close"); shot.prompt = '# Subject\\nA hand on the "door".';
+      shot.intent = "Establish the place"; shot.tf = { start: "image", image: "uploads/board.png", cast: [], lines: [], h3: "" };
+      const scene = { id: "sc-export", name: "Hall", synopsis: "A quiet arrival.", shots: [shot] };
+      SL.p.scenes = [scene]; SL.sceneId = scene.id;
+      const downloads = [], blobs = [];
+      globalThis.Blob = class { constructor(parts, options) { this.parts = parts; this.type = options.type; } };
+      globalThis.URL = { createObjectURL(blob) { blobs.push(blob); return "blob:test"; } };
+      globalThis.document = { body: { append(node) { node.click = () => downloads.push(node.attrs.download); node.remove = () => {}; } } };
+      pickButton(slBible(), "Download project.json").attrs.onclick();
+      pickButton(slDeliverCore(), "Shot list (Markdown)").attrs.onclick();
+      pickButton(slDeliverCore(), "Shot list (CSV)").attrs.onclick();
+      out.downloads = downloads; out.bodies = blobs.map(b => b.parts.join(""));
+      out.network = calls;""")
+    assert out["downloads"] == ["Manual_board.project.json", "Hall.md", "Hall.csv"]
+    project = json.loads(out["bodies"][0])
+    assert project["scenes"][0]["shots"][0]["tf"]["image"] == "uploads/board.png"
+    assert project["scenes"][0]["shots"][0]["intent"] == "Establish the place"
+    assert "A hand on the" in out["bodies"][1] and "Establish the place" in out["bodies"][1]
+    assert '"Wide, then close"' in out["bodies"][2] and '""door""' in out["bodies"][2]
+    assert out["network"] == []
+
+
 # ---- the agents' tools ----
 from test_studio_mcp_slate import studio, tool  # noqa: E402,F401
 

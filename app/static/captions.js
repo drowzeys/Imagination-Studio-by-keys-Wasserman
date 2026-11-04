@@ -7,7 +7,7 @@ function capLoad() { if (CAP.map || CAP.loading) return Promise.resolve(); CAP.l
 const capText = path => (CAP.map && CAP.map[path] && CAP.map[path].caption) || null;
 // a tile that has no description yet offers to make one
 function capButton(m) { if (m.kind !== "video" && m.kind !== "image") return null; if (!CAP.map || capText(m.path)) return null;
-  return el("button", { class: "small", title: "Look at this " + (m.kind === "video" ? "clip" : "picture") + " with the local model so the Library can search by what is in it", disabled: CAP.busy.has(m.path),
+  return el("button", { class: "small", title: (typeof capWhy === "function" ? capWhy : () => "")("captions") || "Look at this " + (m.kind === "video" ? "clip" : "picture") + " with the local model so the Library can search by what is in it", disabled: CAP.busy.has(m.path) || !!(typeof capWhy === "function" ? capWhy : () => "")("captions"),
     onclick: async () => { CAP.busy.add(m.path); render(); try { const r = await api("/api/library/captions/run", { paths: [m.path] });
         if (r.busy) toast("The local model is busy with a render. Try again when it is done."); else if (r.failed && r.failed.length) toast("The model could not describe this one."); } catch (e) { toast(e.message); }
       CAP.busy.delete(m.path); CAP.map = null; render(); } }, CAP.busy.has(m.path) ? "Describing…" : "Describe now"); }
