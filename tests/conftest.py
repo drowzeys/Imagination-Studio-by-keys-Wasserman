@@ -12,6 +12,7 @@ os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp(prefix="studio-te
 os.environ.setdefault("PREFIX", tempfile.mkdtemp(prefix="studio-test-runtime-"))
 os.environ.setdefault("STUDIO_WINDOWS_IMAGE_DIR", tempfile.mkdtemp(prefix="studio-test-images-"))
 os.environ.setdefault("STUDIO_WINDOWS_SOUND_DIR", tempfile.mkdtemp(prefix="studio-test-sounds-"))
+os.environ.setdefault("STUDIO_WINDOWS_FOLEY_DIR", tempfile.mkdtemp(prefix="studio-test-foley-"))
 os.environ.setdefault("STUDIO_WINDOWS_FEATURE_DIR", tempfile.mkdtemp(prefix="studio-test-features-"))
 os.environ.setdefault("GRAPHICS_DIR", tempfile.mkdtemp(prefix="studio-test-graphics-"))
 # Import-time managers and per-test managers must never share the user's leases or RAM ledger.

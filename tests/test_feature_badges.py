@@ -13,14 +13,21 @@ def test_positive_and_negative_badges_route_to_the_feature_card():
     script = r"""
 const vm = require("node:vm"), fs = require("node:fs");
 globalThis.el = (tag, attrs, ...kids) => ({tag, attrs, kids});
-globalThis.S = {ui_only: true, capabilities: {finish: {available: true}, foley: {available: false}}};
+globalThis.setTimeout = () => 0;
+globalThis.S = {feature_checks:{supported:true, url:"/api/feature-checks", features:{finish:"Finish",foley:"MMAudio foley"}},
+  capabilities: {finish: {available: true}, foley: {available: false}}};
 globalThis.go = tab => { globalThis.destination = tab; };
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
 const good = featureBadge("finish"), blocked = featureBadge("foley");
+const initial = featureChecksPanel();
 blocked.attrs.onclick();
 const out = {good: good.kids.join(""), blocked: blocked.kids.join(""), className: blocked.attrs.class,
-  disabled: !!blocked.attrs.disabled, destination, focus: WFC.focus};
-S.ui_only = false; out.offWindows = featureBadge("finish");
+  disabled: !!blocked.attrs.disabled, destination, focus: WFC.focus,
+  sectionTag:initial.tag, initiallyOpen:initial.attrs.open, expandedByBadge:featureChecksPanel().attrs.open};
+S.platform = "mac"; S.ui_only = false; out.otherPlatform = featureBadge("finish").kids.join("");
+S.feature_checks.supported = false; out.unsupported = featureBadge("finish");
+out.unsupportedSection = featureChecksSection();
+delete S.feature_checks; out.oldServerSection = featureChecksSection();
 console.log(JSON.stringify(out));
 """
     done = subprocess.run(["node", "-e", script, str(ROOT / "app" / "static" / "machine.js")],
@@ -31,7 +38,10 @@ console.log(JSON.stringify(out));
     assert result["blocked"] == "Not qualified →" and not result["disabled"]
     assert "warn" in result["className"]
     assert result["destination"] == "Machine" and result["focus"] == "foley"
-    assert result["offWindows"] is None
+    assert result["sectionTag"] == "details" and not result["initiallyOpen"] and result["expandedByBadge"]
+    assert result["otherPlatform"] == "Qualified" and result["unsupported"] is None
+    assert result["unsupportedSection"] is None
+    assert result["oldServerSection"]["tag"] == "details"
 
 
 def test_qualified_card_separates_historical_refusal_from_current_memory():
@@ -47,6 +57,10 @@ const history = wfcHistory(card), text = n => !n ? "" : typeof n === "string" ? 
 const available = wfcAdmission(card, {host_free_mb:8000, commit_free_mb:20000, low_memory:false});
 const busy = wfcAdmission(card, {host_free_mb:2000, commit_free_mb:20000, low_memory:false});
 const out = {history, text:text(history), available:text(available), busy:text(busy), qualified:card.qualified};
+out.unified = text(wfcAdmission({qualified:true, check_available:true, requirements:[{pool:"unified",required_mb:16000,reserve_mb:2000}]},
+  {pools:{unified:{available_mb:32000}}}));
+out.unifiedBusy = text(wfcAdmission({qualified:true, check_available:true, requirements:[{pool:"unified",required_mb:16000,reserve_mb:2000}]},
+  {pools:{unified:{available_mb:17000}}}));
 card.job = {status:"failed", error:"A newer check failed.", finished:2000000000};
 out.latest = wfcAttempt(card).message;
 globalThis.S = null; out.loading = text(viewMachine());
@@ -63,3 +77,20 @@ console.log(JSON.stringify(out));
     assert "currently busy" in result["busy"] and "qualification is unchanged" in result["busy"]
     assert result["qualified"] and result["latest"] == "A newer check failed."
     assert "Loading machine status" in result["loading"]
+    assert "headroom is available now" in result["unified"] and "currently busy" in result["unifiedBusy"]
+
+
+def test_feature_groups_follow_the_actual_room_order_and_preserve_feature_ids():
+    need_node()
+    script = r"""
+const vm = require("node:vm"), fs = require("node:fs");
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"));
+console.log(JSON.stringify(featureCheckGroups([{id:"finish",group:"edit"},{id:"foley",group:"sound"},{id:"hlg",group:"edit"}],
+  [{id:"video",name:"Video"},{id:"image",name:"Image"},{id:"sound",name:"Sound"},{id:"edit",name:"Edit"}])));
+"""
+    done = subprocess.run(["node", "-e", script, str(ROOT / "app" / "static" / "machine.js")],
+                          capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    groups = json.loads(done.stdout)
+    assert [g["title"] for g in groups] == ["Sound", "Edit"]
+    assert [[c["id"] for c in g["cards"]] for g in groups] == [["foley"], ["finish", "hlg"]]

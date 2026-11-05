@@ -345,6 +345,10 @@ dialog::backdrop { background:rgba(5,6,9,.7); }
 .feature-link { align-self:flex-start; cursor:pointer; padding:5px 10px; background:var(--panel); }
 .feature-link:hover, .feature-link:focus-visible { border-color:currentColor; outline:2px solid currentColor; outline-offset:2px; }
 .feature-target { border-color:var(--amber); outline:2px solid var(--amber); outline-offset:3px; }
+.feature-check-group { margin-top:16px; padding-left:12px; border-left:2px solid var(--line2); }
+.feature-check-group > summary { cursor:pointer; padding:8px 0; }
+.feature-check-group > summary svg { width:20px; height:20px; vertical-align:middle; margin-right:8px; }
+.feature-check-group > summary .note { margin-left:10px; }
 .sectionhead { display:flex; align-items:end; justify-content:space-between; gap:12px; margin:44px 0 16px; }
 .sectionhead h2 { margin:0; font:600 24px/1.2 var(--sans); letter-spacing:-.01em; }
 .sectionhead .note { margin:0; }

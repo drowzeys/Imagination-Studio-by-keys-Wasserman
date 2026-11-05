@@ -223,6 +223,77 @@ def _setup_module():
     return module
 
 
+@pytest.mark.parametrize("isolated", [False, True])
+def test_node_restore_uses_the_gpu_wheel_manifest_and_preserves_installed_versions(tmp_path, monkeypatch, isolated):
+    from importlib import metadata
+    from types import SimpleNamespace
+    import subprocess
+
+    setup = _setup_module()
+    monkeypatch.setattr(setup, "ROOT", tmp_path)
+    node = tmp_path / "ComfyUI" / "custom_nodes" / "ComfyUI-MMAudio"
+    node.mkdir(parents=True)
+    (node / "requirements.txt").write_text("torchdiffeq>=0.2.3\n")
+    installed = SimpleNamespace(metadata={"Name": "torch"}, version="2.14.0+cu134")
+    monkeypatch.setattr(metadata, "distributions", lambda: [installed])
+
+    def missing(name):
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "version", missing)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "rev-parse" in command:
+            return SimpleNamespace(stdout=setup.NODE_PACKS["foley"][0][2], returncode=0)
+        if "install" in command:
+            constraint = Path(command[command.index("--constraint") + 1])
+            assert constraint.read_text().strip() == "torch==2.14.0+cu134"
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    destination = str(tmp_path / "isolated") if isolated else ""
+    assert setup.nodes(SimpleNamespace(parts="foley", target=destination, pip_python="authenticated-python")) == 0
+    command = next(command for command in calls if "install" in command)
+    assert command[0] == "authenticated-python"
+    manifests = [command[i + 1] for i, value in enumerate(command) if value == "-r"]
+    assert str(ROOT / "app" / "requirements-windows-gpu.txt") in manifests
+    assert "-q" not in command
+    assert ("--target" in command) == isolated
+    assert any("check" in command for command in calls) == isolated
+
+
+@pytest.mark.parametrize("repaired", [True, False])
+def test_reused_isolated_node_environment_repairs_and_rechecks_missing_dependencies(tmp_path, monkeypatch, repaired):
+    from importlib import metadata
+    from types import SimpleNamespace
+    import subprocess
+
+    setup = _setup_module()
+    monkeypatch.setattr(setup, "ROOT", tmp_path)
+    node = tmp_path / "ComfyUI" / "custom_nodes" / "ComfyUI-MMAudio"
+    node.mkdir(parents=True)
+    (node / "requirements.txt").write_text("torchdiffeq>=0.2.3\n")
+    monkeypatch.setattr(metadata, "version", lambda name: "0.2.5")
+    monkeypatch.setattr(metadata, "distributions", lambda: [])
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "rev-parse" in command:
+            return SimpleNamespace(stdout=setup.NODE_PACKS["foley"][0][2], returncode=0)
+        if "install" in command:
+            return SimpleNamespace(returncode=0)
+        assert command[-2:] == ["pip", "check"]
+        return SimpleNamespace(returncode=0 if repaired and any("install" in call for call in calls) else 1)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert setup.nodes(SimpleNamespace(parts="foley", target=str(tmp_path / "isolated"))) == (0 if repaired else 1)
+    assert sum("install" in command for command in calls) == 1
+    assert sum(command[-2:] == ["pip", "check"] for command in calls) == 2
+
+
 def test_the_native_installer_pins_what_the_spark_scripts_pin():
     """windows-cuda-setup.py's node packs, files and checksums are the Spark's (setup-workflows.sh, setup-swap.sh,
     setup-train.sh, oneshot-setup-cuda.sh --sound): the same commits and the same SHA-256s, never a second opinion."""

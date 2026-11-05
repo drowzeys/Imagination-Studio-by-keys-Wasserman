@@ -257,6 +257,10 @@ safetensors copies of MMAudio's weights. The studio clones it at a pinned commit
 (`spark/studio_mmaudio`) calls kijai's loaders' models and generate. On a Spark a sound effect runs on **ComfyUI**'s
 own Stable Audio nodes.
 
+**KEUM Myungchul** provides **python-soxr** (LGPL-2.1-or-later), the native resampler used by librosa.
+The Windows ARM64 foley setup builds it when a compatible wheel is unavailable, using the Microsoft
+compiler/SDK credited below; it does not replace the installed CUDA packages.
+
 ## Motion graphics: HeyGen's HyperFrames and GreenSock's GSAP
 
 **HeyGen** and the HyperFrames contributors made **HyperFrames** (Apache-2.0), which renders the Graphics tab's

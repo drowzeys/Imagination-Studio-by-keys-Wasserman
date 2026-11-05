@@ -202,10 +202,14 @@ def test_progressive_status_and_report_never_run_a_test(check_ui, monkeypatch):
     assert [card["id"] for card in cards] == ["hlg", "finish", "foley"]
     assert all(not card["qualified"] and card["memory"]["minimum_installed_ram_mb"] is None for card in cards)
     assert all(card["memory"]["required_headroom_mb"] == 4096 for card in cards[:2])
-    assert cards[2]["memory"]["required_headroom_mb"] is None and not cards[2]["check_available"]
+    assert cards[2]["memory"]["required_headroom_mb"] == 9216 and cards[2]["check_available"]
+    assert not cards[2]["installed"]
     report = check_ui.get("/api/windows/features/report")
     assert report.status_code == 200 and "attachment" in report.headers["content-disposition"]
     assert report.json()["features"] == cards
+    generic = check_ui.get("/api/feature-checks")
+    assert generic.status_code == 200 and generic.json()["features"] == cards
+    assert cards[0]["requirements"][0]["pool"] == "host"
 
 
 def test_progressive_check_is_explicit_queue_work_with_duplicate_refusal(check_ui, monkeypatch):

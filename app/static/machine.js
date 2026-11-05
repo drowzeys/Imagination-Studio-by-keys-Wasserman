@@ -21,18 +21,27 @@ function sparkline(id, tone) { return el("div", { class: "stack m-sparkbox" }, s
   svg("path", { d: "", class: "area" }), svg("path", { d: "", class: "line", "vector-effect": "non-scaling-stroke" }))); }
 function sparkSet(id, values, max) { const s = document.querySelector('[data-spark="' + id + '"]'); if (!s) return; const [line, area] = sparkPath(values, 600, 64, max); const p = s.querySelectorAll("path"); p[0].setAttribute("d", area); p[1].setAttribute("d", line); }
 const M = { storage: null, loading: false, history: null };
-const WFC = { data: null, error: "", timer: null, loading: false, focus: null, selected: null };
-function openFeatureCheck(kind) { WFC.focus = kind; WFC.selected = kind; go("Machine"); }
+const WFC = { data: null, error: "", timer: null, loading: false, focus: null, selected: null, open: false, groups: {} };
+function openFeatureCheck(kind) { WFC.focus = kind; WFC.selected = kind; WFC.open = true; go("Machine"); }
 function featureBadge(kind) {
   const c = S && S.capabilities && S.capabilities[kind];
-  if (!S || !S.ui_only || !c) return null;
+  const checks = S && S.feature_checks;
+  if (!checks || !checks.supported || !checks.features[kind] || !c) return null;
   const ready = c.available, label = ready ? "Qualified" : c.installed === false && kind !== "foley" ? "Setup required" : "Not qualified";
   return el("button", { type: "button", class: "tag2 feature-link " + (ready ? "ok" : "warn"),
-    "aria-label": label + ": " + (kind === "hlg" ? "HDR grading" : kind === "finish" ? "Finish" : "MMAudio foley"),
+    "aria-label": label + ": " + checks.features[kind],
     title: ready ? "Enabled on this machine. View saved qualification evidence and limits." : "Open this feature's checks and setup",
     onclick: () => openFeatureCheck(kind) }, label, ready ? "" : " →");
 }
 const wfcGB = mb => mb == null ? "unknown" : (mb / 1024).toFixed(1) + " GiB";
+const featureCheckApi = tail => (S && S.feature_checks && S.feature_checks.url || "/api/feature-checks") + (tail || "");
+function featureCheckGroups(cards, rooms = typeof ROOMS !== "undefined" ? ROOMS : []) {
+  const keys = [...new Set(cards.map(card => card.group || "other"))];
+  const rank = key => { const at = rooms.findIndex(room => room.id === key); return at < 0 ? rooms.length : at; };
+  keys.sort((a, b) => rank(a) - rank(b));
+  return keys.map(key => ({ id: key, title: rooms.find(room => room.id === key)?.name || (key === "other" ? "Other features" : key),
+    cards: cards.filter(card => (card.group || "other") === key) }));
+}
 const wfcBusy = card => card.job && ["queued", "running"].includes(card.job.status);
 const wfcTime = value => { const time = typeof value === "number" ? value * 1000 : Date.parse(value || ""); return Number.isFinite(time) ? time : 0; };
 function wfcAttempt(card) {
@@ -61,6 +70,15 @@ function wfcHistory(card) {
 }
 function wfcAdmission(card, memory) {
   if (!card.qualified || !card.check_available) return null;
+  if (card.requirements) {
+    const pools = memory.pools || {};
+    if (memory.error || !card.requirements.length || card.requirements.some(r => r.required_mb == null || pools[r.pool]?.available_mb == null))
+      return el("div", { class: "note" }, "Current memory availability could not be established. Admission is checked when you run a job.");
+    const busy = memory.low_memory || card.requirements.some(r => pools[r.pool].available_mb < r.required_mb + r.reserve_mb);
+    return el("div", { class: "note" + (busy ? " warn" : "") }, busy
+      ? "Memory is currently busy: a new job may be refused until enough memory is free. Your saved qualification is unchanged."
+      : "Memory headroom is available now; admission is checked again when you run a job.");
+  }
   if (memory.error || memory.host_free_mb == null || memory.commit_free_mb == null)
     return el("div", { class: "note" }, "Current memory availability could not be established. Admission is checked when you run a job.");
   const busy = memory.low_memory || memory.host_free_mb < (memory.required_host_mb || card.memory.required_headroom_mb)
@@ -74,7 +92,7 @@ async function wfcLoad() {
   WFC.loading = true;
   const wasBusy = WFC.data && WFC.data.features.some(wfcBusy);
   try {
-    WFC.data = await api("/api/windows/features"); WFC.error = "";
+    WFC.data = await api(featureCheckApi()); WFC.error = "";
     if (wasBusy && !WFC.data.features.some(wfcBusy)) {
       S = await api("/api/state");
       if (typeof ACT !== "undefined") ACT.state = null;
@@ -84,47 +102,60 @@ async function wfcLoad() {
   WFC.loading = false;
   wfcDraw();
   clearTimeout(WFC.timer);
-  if (document.querySelector("#windows-feature-checks") && WFC.data && WFC.data.features.some(wfcBusy))
+  if (document.querySelector("#feature-check-section")?.open && WFC.data && WFC.data.features.some(wfcBusy))
     WFC.timer = setTimeout(wfcLoad, 2000);
 }
 async function wfcCheck(card) {
-  try { await api("/api/windows/features/check", { feature: card.id }); toast("Queued: check " + card.title); }
+  try { await api(featureCheckApi("/check"), { feature: card.id }); toast("Queued: check " + card.title); }
   catch (e) { toast(e.message, 7000); }
   await wfcLoad();
 }
 function wfcDraw() {
-  const box = document.querySelector("#windows-feature-checks"); if (!box) return;
+  const box = document.querySelector("#feature-checks"); if (!box) return;
+  const requestedFocus = WFC.focus;
+  const focusedCard = requestedFocus || box.querySelector("[data-feature-check]:focus")?.dataset.featureCheck;
   const data = WFC.data, memory = data && data.memory || {};
-  const head = el("div", { class: "row" }, el("h2", {}, "Feature checks"),
+  const head = el("div", { class: "row" },
     el("button", { class: "small", disabled: WFC.loading, onclick: wfcLoad }, "Refresh status"),
     data ? el("button", { class: "small", onclick: async () => {
-      try { const report = await api("/api/windows/features/report");
+      try { const report = await api(featureCheckApi("/report"));
         const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
-        const a = document.createElement("a"); a.href = url; a.download = "windows-feature-report.json"; a.click();
+        const a = document.createElement("a"); a.href = url; a.download = "feature-check-report.json"; a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       } catch (e) { toast(e.message); }
     } }, "Download saved report") : null);
   box.replaceChildren(...[head,
     el("div", { class: "note m-flat" }, "Optional, one feature at a time. Base workflows stay available. Saved passes are reused; opening this page never runs a test."),
     WFC.error ? el("div", { class: "note vt-bad" }, WFC.error) : null,
-    data ? el("div", { class: "note" }, memory.error || "Current host RAM free: " + wfcGB(memory.host_free_mb)
-      + " · commit headroom: " + wfcGB(memory.commit_free_mb) + ". These overlap; do not add them. HDR and Finish checks need no GPU; foley does.") : el("div", { class: "note" }, "Reading saved results…")].filter(Boolean));
+    data ? el("div", { class: "note" }, memory.error || Object.values(memory.pools || {}).map(pool => pool.label + " available: " + wfcGB(pool.available_mb)).join(" · ")
+      + ". Memory pools may overlap; do not add them.") : el("div", { class: "note" }, "Reading saved results…")].filter(Boolean));
   if (!data) return;
-  for (const card of data.features) {
+  for (const group of featureCheckGroups(data.features)) {
+    if (requestedFocus && group.cards.some(card => card.id === requestedFocus)) WFC.groups[group.id] = true;
+    const groupBody = el("div", { class: "stack", style: "margin-top:12px" });
+    const groupBox = el("details", { class: "feature-check-group", "data-check-group": group.id, open: !!WFC.groups[group.id],
+      ontoggle: e => { if (e.currentTarget.isConnected) WFC.groups[group.id] = e.currentTarget.open; } },
+      el("summary", {}, typeof icon === "function" && group.id !== "other" ? icon(group.id) : null,
+        el("b", {}, group.title), el("span", { class: "note m-flat" }, group.cards.length + " feature" + (group.cards.length === 1 ? "" : "s"))),
+      groupBody);
+    put(box, groupBox);
+    for (const card of group.cards) {
     const active = wfcBusy(card), evidence = card.evidence || {}, results = evidence.results || [];
+    const budgets = card.memory || {};
+    const required = (card.requirements || []).map(r => wfcGB(r.required_mb) + " " + r.pool + " (" + r.basis
+      + (r.reserve_mb ? ", reserve " + wfcGB(r.reserve_mb) : "") + ")").join(" · ");
     const peak = results.length ? Math.max(...results.map(r => r.peak_job_commit_mb || 0)) : null;
     const job = card.job;
-    put(box, el("section", { class: "panel stack" + (WFC.selected === card.id ? " feature-target" : ""),
+    put(groupBody, el("section", { class: "panel stack" + (WFC.selected === card.id ? " feature-target" : ""),
       tabindex: -1, "data-feature-check": card.id },
       el("div", { class: "row" }, el("h3", {}, card.title),
         el("span", { class: "tag2 " + (card.qualified ? "ok" : "") },
           active ? "Check " + job.status : card.qualified ? "Qualified" : card.state.replaceAll("_", " "))),
-      el("div", { class: "note m-flat" }, card.scope || "Scope: up to ten seconds, 1280×720, 24 fps"
-        + (card.id === "finish" ? "; at most 12 cuts including a title, no transcription or editor conversion." : "; HLG grade and SDR copy, not recovered detail.")),
-      el("div", { class: "note m-flat" }, card.memory.minimum_label + ". Lowest tested machine: "
-        + wfcGB(card.memory.lowest_tested_ram_mb) + ". Required host/commit headroom: "
-        + wfcGB(card.check_available ? memory.required_host_mb || card.memory.required_headroom_mb : null) + " host / "
-        + wfcGB(card.memory.required_headroom_mb) + " commit. " + card.memory.basis + ". Job cap: " + wfcGB(card.memory.job_commit_cap_mb) + "."),
+      el("div", { class: "note m-flat" }, card.scope || "Use the settings qualified by this check."),
+      el("div", { class: "note m-flat" }, (budgets.minimum_label || "Minimum installed RAM not established")
+        + ". Lowest tested machine: " + wfcGB(budgets.lowest_tested_ram_mb) + ". Required headroom: "
+        + (required || "unknown") + (budgets.basis ? ". " + budgets.basis : "")
+        + (budgets.job_commit_cap_mb != null ? ". Job cap: " + wfcGB(budgets.job_commit_cap_mb) : "") + "."),
       el("div", { class: "note m-flat" }, evidence.checked_at ? "Saved live check: " + new Date(evidence.checked_at).toLocaleString()
         + " · peak job commitment " + wfcGB(peak) + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware; rerun required.")
         : "No saved live pass on this machine."),
@@ -136,23 +167,41 @@ function wfcDraw() {
         el("button", { class: "small", disabled: !card.installed || active || !card.check_available, onclick: () => wfcCheck(card) },
           !card.check_available ? "Check not available yet" : active ? "Check " + job.status : evidence.checked_at ? "Rerun check" : "Check this feature"),
         card.available ? el("button", { class: "small", onclick: () => {
-          if (card.id === "hlg") { AP.cat = "finish"; AP.q = "keys-HDR"; go("Apps"); }
-          else go("Finish");
+          if (card.open_query && typeof AP !== "undefined") { AP.cat = card.open_category || "all"; AP.q = card.open_query; }
+          go(card.open_tab);
         } }, card.open_label) : null,
         active ? el("button", { class: "small", onclick: async () => {
           try { await api("/api/jobs/" + job.id + "/cancel", {}); await wfcLoad(); } catch (e) { toast(e.message); }
         } }, "Cancel check") : null,
         !card.installed && card.setup ? el("button", { class: "small", onclick: () => copyText(card.setup, "Setup command") }, "Copy setup command") : null)));
+    }
   }
-  if (WFC.focus) {
-    const target = box.querySelector('[data-feature-check="' + WFC.focus + '"]');
-    if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); target.focus({ preventScroll: true }); WFC.focus = null; }
+  if (focusedCard) {
+    const target = box.querySelector('[data-feature-check="' + focusedCard + '"]');
+    if (target) {
+      if (requestedFocus) target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.focus({ preventScroll: true }); WFC.focus = null;
+    }
   }
 }
-function windowsFeaturePanel() {
-  const box = el("div", { id: "windows-feature-checks", class: "panel stack m-gap" });
-  setTimeout(() => { wfcDraw(); wfcLoad(); }, 0);
-  return box;
+function featureChecksPanel() {
+  const body = el("div", { id: "feature-checks", class: "stack", style: "margin-top:14px" });
+  const section = el("details", { id: "feature-check-section", class: "panel m-gap", open: WFC.open,
+    ontoggle: e => {
+      if (!e.currentTarget.isConnected) return;
+      WFC.open = e.currentTarget.open;
+      if (WFC.open) { wfcDraw(); wfcLoad(); }
+      else { clearTimeout(WFC.timer); WFC.timer = null; }
+    } },
+    el("summary", {}, el("b", {}, "Feature checks"), el("span", { class: "note m-flat" }, " · optional checks and saved results")), body);
+  setTimeout(() => { wfcDraw(); if (section.open) wfcLoad(); }, 0);
+  return section;
+}
+function featureChecksSection() {
+  if (!S.feature_checks) return el("details", { class: "panel m-gap" },
+    el("summary", {}, el("b", {}, "Feature checks")),
+    el("div", { class: "note" }, "Studio is still running older code. Restart it to load Feature checks; your saved results are unchanged."));
+  return S.feature_checks.supported ? featureChecksPanel() : null;
 }
 function machineLive(t) {
   if (!t) return; const g = t.gpu || {}, mem = t.memory || {}, card = typeof cardMem === "function" ? cardMem(t) : null;
@@ -216,7 +265,7 @@ function viewMachine() {
       el("div", { class: "gauge" }, ring("mem", "Memory", "var(--blue)"), el("div", { class: "foot", "data-foot": "mem" }, "–")),
       el("div", { class: "gauge" }, ring("temp", "Temp", "var(--green)"), el("div", { class: "foot", "data-foot": "temp" }, "–")),
       el("div", { class: "gauge" }, ring("power", "Power", "var(--blue)"), el("div", { class: "foot", "data-foot": "power" }, "–"))),
-    S.platform === "windows" && S.ui_only ? windowsFeaturePanel() : null,
+    featureChecksSection(),
     typeof spkMachinesPanel === "function" ? el("div", { class: "panel m-gap" }, spkMachinesPanel()) : null,
     el("div", { class: "split m-gap" },
       el("div", { class: "stack" },

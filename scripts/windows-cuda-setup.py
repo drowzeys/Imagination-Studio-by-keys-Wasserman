@@ -287,19 +287,49 @@ def nodes(args) -> int:
             wanted = target / "requirements.txt"
             if not wanted.is_file():
                 continue
+            destination = getattr(args, "target", "")
+            if destination:
+                from packaging.requirements import Requirement
+                satisfied = True
+                for line in wanted.read_text(encoding="utf-8").splitlines():
+                    if not line.strip() or line.lstrip().startswith("#"):
+                        continue
+                    requirement = Requirement(line)
+                    if requirement.marker and not requirement.marker.evaluate():
+                        continue
+                    try:
+                        version = metadata.version(requirement.name)
+                    except metadata.PackageNotFoundError:
+                        satisfied = False
+                        break
+                    if version not in requirement.specifier:
+                        satisfied = False
+                        break
+                if satisfied and subprocess.run([sys.executable, "-X", "utf8", "-m", "pip", "check"]).returncode == 0:
+                    say(f"ok {folder}'s requirements (isolated runtime reused)")
+                    continue
             # every package already in the GPU venv held at its version: a pack only adds what it lacks
             held = sorted({f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions() if d.metadata["Name"]})
             with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as hold:
                 hold.write("\n".join(held) + "\n")
             try:
-                done = subprocess.run([sys.executable, "-X", "utf8", "-m", "pip", "install", "-q", "-r", str(wanted),
-                                       "--constraint", hold.name])
+                command = [getattr(args, "pip_python", "") or sys.executable, "-X", "utf8", "-m", "pip", "install",
+                           "-r", str(wanted),
+                           "-r", str(Path(__file__).resolve().parents[1] / "app" / "requirements-windows-gpu.txt"),
+                           "--constraint", hold.name]
+                if destination:
+                    command += ["--target", destination, "--ignore-installed", "--upgrade"]
+                done = subprocess.run(command)
             finally:
                 os.unlink(hold.name)
             if done.returncode:
-                print(f"  ! {folder} needs a package at a version other than the one installed: not changed", file=sys.stderr)
+                print(f"  ! {folder}'s dependency installation failed; see pip's error above", file=sys.stderr)
                 return 1
             say(f"ok {folder}'s requirements (only added, nothing moved)")
+    if getattr(args, "target", ""):
+        if subprocess.run([sys.executable, "-X", "utf8", "-m", "pip", "check"]).returncode:
+            print("  ! The isolated node environment has inconsistent dependencies; setup did not pass", file=sys.stderr)
+            return 1
     if changed:  # a running ComfyUI read its nodes when it started: stopped, the next render starts it with them
         subprocess.run([sys.executable, "-X", "utf8", str(Path(__file__).resolve().parents[1] / "spark" / "comfy_win.py"), "stop"],
                        check=False)
@@ -418,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
     two.set_defaults(run=config)
     three = sub.add_parser("nodes")
     three.add_argument("--parts", default="workflows")
+    three.add_argument("--pip-python", default="")
+    three.add_argument("--target", default="")
     three.set_defaults(run=nodes)
     four = sub.add_parser("train")
     four.set_defaults(run=train_env)

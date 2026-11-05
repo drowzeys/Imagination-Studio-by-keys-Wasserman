@@ -33,6 +33,19 @@ def kijai():
     return sys.modules[sampler.__module__]
 
 
+def offload_models(model, features, device, memory):
+    if sys.platform == "win32":
+        memory.soft_empty_cache()
+    model.to(device)
+    if sys.platform == "win32":
+        memory.soft_empty_cache()
+        for child in features.children():
+            child.to(device)
+            memory.soft_empty_cache()
+    features.to(device)
+    memory.soft_empty_cache()
+
+
 class StudioMMAudioSampler:
     @classmethod
     def INPUT_TYPES(cls):
@@ -79,15 +92,19 @@ class StudioMMAudioSampler:
         feature_utils.to(device)
         mmaudio_model.to(device)
         try:
+            if sys.platform == "win32":
+                print("[tensorfold] stage 1/2 Synthesizing foley", flush=True)
             with torch.inference_mode():
                 audios = module.generate(clip.unsqueeze(0).to(device), sync.unsqueeze(0).to(device), [prompt],
                                          negative_text=[negative_prompt], feature_utils=feature_utils, net=mmaudio_model,
                                          fm=module.FlowMatching(min_sigma=0, inference_mode="euler", num_steps=steps),
                                          rng=rng, cfg_strength=cfg)
+            if sys.platform == "win32":
+                print("[tensorfold] foley waveform generated", flush=True)
         finally:
-            mmaudio_model.to(offload)
-            feature_utils.to(offload)
-            mm.soft_empty_cache()
+            if sys.platform == "win32":
+                print("[tensorfold] stage 2/2 Releasing foley models", flush=True)
+            offload_models(mmaudio_model, feature_utils, offload, mm)
         return ({"waveform": audios.float().cpu(), "sample_rate": seq_cfg.sampling_rate},)
 
 

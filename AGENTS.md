@@ -247,6 +247,14 @@ Rules:
   and local Tesseract Finish can qualify without H3 or a native CUDA-tier record. Keep their local receipts tied to
   hardware/runtime/code, ten-second 720p/24 fps scopes, 4 GiB owned-job cap, low-memory supervision and API/UI/queue
   agreement. A stale receipt, installed files alone or more advertised RAM never qualifies another route.
+- Independent Windows Foley (`app/windows_foley.py`, `scripts/setup-windows-foley.ps1`): pinned MMAudio in
+  `foley-gpu-venv`, source/weights shared but baseline GPU/UI packages isolated. Both restore stages use the GPU
+  manifest and its wheel source; repeat setup and read-only verification must work without manual pip repair.
+  Qualification is local 1-5 s / 24 fps, 25 passes / CFG 4.5, 360-row analysis (width at most 660), original video
+  copied. Keep 12/12/16 GiB tensor/process/job caps, two-second freshness, OS signals and 2 GiB dedicated reserve.
+  Bounded warm image/sound and cold Foley use UUID/LUID-bound WDDM adapter usage plus identity-validated owned
+  handles, not busy-model HTTP/NVML polling or another process's CUDA allocator budget. Missing/invalid/stale
+  counters refuse; never sum dedicated, shared and host pools or relax guards to qualify a recipe.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers

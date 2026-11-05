@@ -78,23 +78,23 @@ def verify_weights(root: Path):
     windows_sfx.verify(root)
 
 
-def validate_audio(path: Path) -> dict:
+def validate_audio(path: Path, *, channels: int = 2, expected_samples: int | None = None) -> dict:
     probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                             "stream=codec_type,sample_rate,channels", "-of", "json", str(path)],
                            capture_output=True, text=True, timeout=30, check=True)
     streams = json.loads(probe.stdout).get("streams", [])
-    if len(streams) != 1 or streams[0].get("sample_rate") != "44100" or streams[0].get("channels") != 2:
-        raise RuntimeError("sound must be one 44.1 kHz stereo stream")
+    if len(streams) != 1 or streams[0].get("sample_rate") != "44100" or streams[0].get("channels") != channels:
+        raise RuntimeError(f"sound must be one 44.1 kHz stream with {channels} channels")
     decoded = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-acodec", "pcm_f32le", "-"],
                              capture_output=True, timeout=30, check=True)
-    if len(decoded.stdout) % 8:
-        raise RuntimeError("the sound has an incomplete stereo sample")
+    if len(decoded.stdout) % (4 * channels):
+        raise RuntimeError("the sound has an incomplete audio sample")
     values = array("f")
     values.frombytes(decoded.stdout)
     if sys.byteorder != "little":
         values.byteswap()
-    samples = len(values) // 2
-    expected = round((SECONDS * 44100 / 2048) / 2) * 2 * 2048
+    samples = len(values) // channels
+    expected = expected_samples if expected_samples is not None else round((SECONDS * 44100 / 2048) / 2) * 2 * 2048
     if not values or abs(samples - expected) > 2048 or any(not math.isfinite(value) for value in values):
         raise RuntimeError("sound has invalid samples or the wrong five-second latent window")
     peak = max(abs(value) for value in values)
@@ -102,7 +102,7 @@ def validate_audio(path: Path) -> dict:
     if rms < 1e-6 or peak > 10 ** (-1 / 20):
         raise RuntimeError("sound is silent or exceeds -1 dBFS")
     return {"samples_per_channel": samples, "seconds": samples / 44100, "sample_rate": 44100,
-            "channels": 2, "peak_dbfs": 20 * math.log10(peak), "rms": rms}
+            "channels": channels, "peak_dbfs": 20 * math.log10(peak), "rms": rms}
 
 
 def render_case(output: Path, params: dict, cancelled=lambda: False, submit=None, completed=None, progress=None):
@@ -180,7 +180,8 @@ def render_case(output: Path, params: dict, cancelled=lambda: False, submit=None
             progress(1, 1)
         return {"model": "Stable Audio Open 1.0", "audio": audio, "allocator_receipts": [receipt],
                 "request_to_files_seconds": time.monotonic() - started}
-    return check.CalibrationCase(prepare, exercise)
+    from windows_memory import single_gpu_uuid
+    return check.CalibrationCase(prepare, exercise, wddm_device_uuid=single_gpu_uuid())
 
 
 def save_take(job: dict, home: Path, target: Path, seconds: float):
@@ -206,7 +207,6 @@ def main() -> int:
             raise RuntimeError("this check requires Windows and FFmpeg; run setup-windows-ffmpeg.ps1 first")
         root = folder()
         windows_sfx.verify(root)
-        (root / "qualification.json").unlink(missing_ok=True)
         params = parameters({"prompt": "Soft steady rain falling on a metal roof.", "seed": 7})
         case = render_case(args.output, params)
         source = Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio" / "ComfyUI"

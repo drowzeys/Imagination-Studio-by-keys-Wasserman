@@ -1199,14 +1199,16 @@ def foley_workflow(video: str, prompt: str, negative: str, seconds: float, seed:
     }
 
 
-def prepared_clip(path, seconds: float, folder: Path) -> Path:
+def prepared_clip(path, seconds: float, folder: Path, rows: int = FOLEY_ROWS) -> Path:
     """The clip as ComfyUI is to decode it for foley: FOLEY_ROWS rows, its own frame rate, at most ``seconds``, no
     sound, stored without loss. ComfyUI holds every decoded frame in memory as floats: at the clip's own size a 15 s
     clip at 1376x768 would be 4.6 GB of them, at 384 rows 1.1 GB."""
 
+    if type(rows) is not int or rows <= 0:
+        raise ValueError("the foley analysis height must be a positive integer")
     target = folder / f"foley_{uuid.uuid4().hex[:8]}.mp4"
     done = subprocess.run([_tool("ffmpeg"), "-v", "error", "-y", "-i", str(path), "-map", "0:v:0", "-an", "-t", f"{seconds:.3f}",
-                           "-vf", f"scale=-2:{FOLEY_ROWS}:flags=lanczos,setsar=1", "-c:v", "libx264rgb", "-qp", "0",
+                           "-vf", f"scale=-2:{rows}:flags=lanczos,setsar=1", "-c:v", "libx264rgb", "-qp", "0",
                            "-preset", "veryfast", "-pix_fmt", "rgb24", str(target)], capture_output=True, text=True)
     if done.returncode or not target.is_file():
         sys.exit(f"cannot read frames from {path}: {done.stderr.strip()[-300:]}")

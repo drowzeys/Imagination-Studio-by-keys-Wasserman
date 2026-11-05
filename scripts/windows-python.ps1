@@ -9,6 +9,7 @@ function Initialize-StudioPython {
     if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
         throw 'Install the official Python install manager, then rerun setup. The py command is required: https://www.python.org/downloads/windows/'
     }
+
     $Version = '3.13'
     if ($Arm64 -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
         $Version = '3.13-arm64'

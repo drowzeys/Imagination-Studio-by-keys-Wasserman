@@ -69,7 +69,6 @@ def audio_packets(path: Path) -> list:
 
 
 def check(kind: str) -> dict:
-    marker = features.folder() / f"{kind}.json"
     if why := features.prerequisites(kind):
         raise RuntimeError(why)
     features.headroom(kind)
@@ -131,10 +130,7 @@ def check(kind: str) -> dict:
         raise RuntimeError("The runtime changed during qualification; repeat the check.")
     receipt = {"ok": True, "feature": kind, "checked_at": datetime.now(timezone.utc).isoformat(),
                "fingerprint": before, "results": results}
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    pending = marker.with_suffix(".tmp")
-    pending.write_text(json.dumps(receipt), encoding="utf-8")
-    pending.replace(marker)
+    features.save_pass(kind, receipt)
     return {"ok": True, "feature": kind, "results": results, "scope": before["scope"]}
 
 

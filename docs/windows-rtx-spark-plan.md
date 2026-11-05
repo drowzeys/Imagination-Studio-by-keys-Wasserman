@@ -5,8 +5,8 @@ Last updated: 2026-11-04.
 Scope: native Windows 11 ARM64 on NVIDIA RTX Spark, not WSL or a Linux container.
 This is a best-effort hobby project, with reviewed changes and route-specific validation.
 
-**A bounded Windows preview tier runs on both the 48 GB development machine and the 64 GB test machine.
-Full Mac/DGX feature parity is not established.** This tier uses guarded PyTorch/ComfyUI,
+**Native Windows runs bounded, individually qualified features on the 48 GB development machine and
+the 64 GB test machine. Full Mac/DGX feature parity is not established.** It uses guarded PyTorch/ComfyUI,
 a small local writing brain, native media tools and Copilot CLI integration.
 
 Upstream also reports a separate **native Windows CUDA tier on a 128 GB RTX Spark N1X**: ComfyUI and
@@ -15,11 +15,13 @@ foley and Finish results.
 Its installation, restrictions and measurements are in
 [N1X: Native Windows](rtx-spark-n1x.md#native-windows-the-native-cuda-tier). It is selected only with the
 complete install and a measured CUDA pool of at least 90 GB (`app/windows_cuda.py`); the smaller machines
-retain the preview tier. `scripts\app.ps1 -Preview` explicitly selects that tier.
+retain the bounded feature path. `scripts\app.ps1 -Preview` is its legacy compatibility switch, not a
+different product. Availability depends on installed and qualified recipes, not a 128 GB label.
 The H3 gate is unchanged. Independent, locally qualified CPU routes now enable HDR grading and
 Tesseract Finish without H3, a CUDA-tier record or 128 GB hardware.
+MMAudio foley is also independently qualified on the 64 GB machine within the limits below.
 
-Use the [preview setup/testing runbook](windows-rtx-spark-testing.md) for its installation and checks.
+Use the [native Windows setup/testing runbook](windows-rtx-spark-testing.md) for installation and checks.
 This document records current support and remaining work, not troubleshooting history.
 
 ## Hardware handoff at a glance
@@ -27,7 +29,7 @@ This document records current support and remaining work, not troubleshooting hi
 | Machine | Established result | What remains |
 |---|---|---|
 | 48 GB | Bounded preview planning, stills, sound, writing, media, graphics and lifecycle checks passed; exact scopes below | Live qualification of the new HDR/Finish scopes; other generators remain unqualified |
-| 64 GB | Baseline plus independently qualified HDR/Finish; API and browser evidence distinguished below | Full interactive First AD apply/save and remaining baseline playback/download checks; Finish playback/download now passed |
+| 64 GB | Baseline plus independently qualified HDR/Finish and bounded MMAudio foley; API and browser evidence distinguished below | Full interactive First AD apply/save and remaining baseline playback/download checks; Finish playback/download now passed |
 | 128 GB | Upstream native CUDA measurements, including mask/foley/Finish, are published in the N1X notes; not reproduced on our smaller machines | Reproduce named scopes; qualify unrendered actions/training separately, not reimplement their existing ports |
 
 **The bounded baseline is complete, not the whole Windows port.** Untested software routes must not be
@@ -43,14 +45,14 @@ upstream's named native-tier scope, not verification on this 64 GB machine or pr
 |---|---|---|
 | FastH3, Qwen-Image, Drama 3 and Bolt | Native engines/ComfyUI routes and published Windows runs | Smaller-tier availability and settings require independent admission/qualification |
 | MiniMax Music 3 | Native TensorFold engine rendered a 30-second song; ComfyUI route also measured | No local 48/64 GB qualification |
-| Find a person and MMAudio foley | Native ComfyUI graphs rendered upstream | Foley has a local dependency blocker; neither route has a local smaller-tier inference pass |
+| Find a person and MMAudio foley | Native ComfyUI graphs rendered upstream | Bounded foley now also passes on 64 GB; person masking still needs local qualification |
 | Finish and editor conversion | Native Tesseract rendered; After Effects conversion passed upstream; FCPXML/EDL emitted | Our bounded local Finish passes are below; upstream Premiere conversion remains blocked by its converter |
 | Turnaround, upscale, remove a person and Character Swap | Native ports/node packs exist; upstream reached missing-weight checks, not completed renders | Install missing parts and verify real outputs/capacity; these are not known to require 128 GB |
 | LoRA training | Native environment installed and an 8-bit AdamW step passed upstream | No completed native Windows LoRA training run was established |
 
 ## Current support
 
-The table below describes the **48/64 GB preview tier**. Each result applies only to the route and settings
+The table below describes the **bounded native Windows features on 48/64 GB**. Each result applies only to the route and settings
 shown. API and browser checks are identified separately; more installed RAM does not enable another route.
 
 | Feature | Supported scope | 48 GB development machine | 64 GB test machine |
@@ -59,6 +61,7 @@ shown. API and browser checks are identified separately; more installed RAM does
 | Portable Slate films | Project, referenced media, original screenplay when available, captioned sheets and CSV/Markdown shot lists | Clean-folder browser import verified | Manifest hashes and API round trip verified with original board unavailable |
 | SD-Turbo storyboard drafts | 512x512, one step, 1-6 sequential images, distinct captions and seeds | Output and browser workflow verified | One- and six-image outputs verified |
 | Stable Audio Open effects | Five seconds, 100 passes, CFG 7; stereo 44.1 kHz PCM WAV | Output, normal queue and browser playback readiness verified | Output and normal queue verified |
+| MMAudio foley | Local 1-5 s, 24 fps clips, up to 1920x1080 within the analysis aspect limit; 360-row analysis, 25 passes, CFG 4.5; original picture copied | Not qualified | 1/5 s qualification, 720p normal queue, fractional-length replacement, mixing and queued/synthesis cancellation verified |
 | Qwen3-4B Q4_K_M writing | Text-only Slate assistance; one 4096-token slot, up to 1024 answer tokens | CUDA First AD response applied and saved | CUDA startup, title/logline and three-shot First AD response verified; interactive apply/save pending |
 | Copilot CLI | Local Connection Check, This Studio tools and session continuity | Verified | Read-only `studio_state` turn and same-thread follow-up verified |
 | FFmpeg media operations | Probe, frame extraction, trim/join export; 1-12 clips, ten minutes, even output sides up to 1920 | Mixed silent/audio browser export verified | Real API exports and full decode verified |
@@ -69,7 +72,7 @@ shown. API and browser checks are identified separately; more installed RAM does
 | Tesseract Finish | Local 720p/24 fps cut, up to 12 clips and ten seconds including title; three mixes, optional music/narration; no transcription or editor conversion | Not yet qualified | Guarded renders, four output files, real browser submission/playback/download and shutdown verified; reliability caveat below |
 | Owned lifecycle | Warm reuse, model exclusivity, queued/running cancellation, unload and shutdown | Browser and process checks passed | Scoped checks passed, including submission during model switching |
 
-Preview image and sound models run one at a time. Unsupported routes remain unavailable across the UI,
+Bounded image and sound models run one at a time. Unsupported routes remain unavailable across the UI,
 API and Studio tools; downloading their weights does not qualify them.
 
 ### Independent feature qualification
@@ -90,18 +93,24 @@ subsequent runs passed. It remains an explicit failed-job/reliability caveat, wi
 
 ### Progressive qualification UI
 
-The first slice is available under **Machine > Feature checks** for HDR grading and local Finish.
+The first slice is available under **Machine > Feature checks** for HDR grading, local Finish and MMAudio foley.
 Cards show current headroom, the conservative 4 GiB admission requirement/cap, the lowest tested hardware
 and saved live evidence. The actual minimum installed RAM is explicitly unknown, not inferred from that cap.
 Check/Rerun submits an ordinary cancellable queue job; opening the page only reads status. Success and
 latest-attempt records persist separately, and **Download saved report** exports existing results without
 starting tests. Setup is currently a copyable command, not an in-app installer.
 Apps and the HDR/Finish panels use compact qualification badges; an unqualified badge opens and focuses
-the feature's Machine card. Foley is shown as a genuinely blocked third feature, with no runnable check
-or claimed memory minimum. Qualified HDR/Finish cards also link directly to their working UI.
+the feature's Machine card. Foley has its own setup/check and separate host/device/commit guidance;
+its actual minimum installed RAM remains unknown. Qualified cards link directly to their working UI.
+The outer section and each room group are independently collapsible and closed by default.
 
 The API/queue/browser path for Finish has passed a real check-button run and saved-report download.
 Other model check cards and automatic validated-profile matching are not implemented yet.
+The first planned set is six checks: storyboard drafts, sound effects, foley, motion graphics, HDR
+grading and Finish. The existing image/sound/graphics checks still need adapter cards; the current UI
+lists the registered features only. Groups follow the Studio's top-level rooms and their sidebar order
+(Image, Sound, Motion graphics, Edit, with Video/Story and others added as checks exist). A check covers
+a named feature/model recipe, not every button in that room. Badge links still focus the exact feature.
 
 ### Remaining progressive qualification design
 
@@ -123,6 +132,20 @@ overlapping pools. If a minimum is unknown, say so rather than inventing a numbe
 hardware separately from a claimed minimum, and an enforced allocation cap separately from measured usage.
 The same information belongs in individual check results and the optional full report. Per-job admission
 and runtime guards remain mandatory even for features enabled by a validated profile.
+
+### Shared architecture; Windows adapter only for now
+
+`app/feature_checks.py` defines platform-neutral check descriptions, distinct host/device/unified/commit
+memory requirements and owner-scoped pass/attempt storage. It assumes no RAM tier, default install path,
+platform probe or renderer. `app/windows_checks.py` supplies the current Windows recipes, probes, setup
+commands and queue runners. `/api/feature-checks` is the shared UI contract; the older Windows URLs remain
+aliases. The UI discovers supported checks through `/api/state`, rather than treating a Windows mode or
+128 GB label as eligibility.
+
+Mac and DGX Spark adapters/check implementations are not part of this change. They can provide the same
+contract with their own measured recipes, memory pools and fingerprints; existing platform guards stay
+authoritative. Smaller DGX Spark configurations and variable-memory Macs must be measured, not assigned
+the largest model set from a platform name.
 
 ## Measured hardware
 
@@ -167,7 +190,14 @@ in the N1X notes and `spark/comfy_win.py`.
 - Use Windows low-memory notifications and commitment signals; honor an explicit positive
   `SPARK_MEMORY_FLOOR_MB`. There is no inherited automatic 8 GB Linux host floor on Windows.
 - Monitor the selected GPU's dedicated memory and the actual backend's CUDA headroom independently.
-  Another process's CUDA free-memory reading is not the backend's budget.
+  Bounded image/sound jobs use UUID/LUID-bound WDDM adapter-wide dedicated usage, separate OS signals,
+  a 2 GiB dedicated reserve and the unchanged hard allocator/process/job caps. This is not a reading of
+  the backend's CUDA allocator budget. No model-load HTTP or NVML polling is needed; the static dedicated
+  capacity is read before loading. Missing/invalid counters or samples older than two seconds refuse the job.
+  The separate no-model diagnostic still checks the backend's own CUDA budget.
+- Foley dependencies live in `foley-gpu-venv`, never the baseline GPU or UI environments; source and weights
+  are shared. Its cold owned backend drains before another model starts. Setup/repeat/verify use the same
+  GPU manifest and configured package feeds; `soxr` is built natively only when an ARM64 wheel is unavailable.
 - Credit only current private commitment and reserved tensors from the identity-validated owned backend,
   never file cache, unrelated processes or historical peaks.
 - Launch and drain private process trees through retained handles and Windows job objects. Preserve
@@ -191,7 +221,7 @@ hardware handoff; do not describe already merged native ports as missing impleme
 |---|---|---|
 | Extend progressive qualification UI and profiles | HDR/Finish Check/Rerun, memory/evidence cards, saved attempts and report download now work; other feature cards, in-app installation, validated-profile matching and a broader optional sweep remain | Reuse shared checks and consistent API/UI/tools decisions; no mandatory full sweep, estimated passes or blanket RAM unlock |
 | Complete independent CPU feature qualification | Run HDR/Finish on 48 GB; investigate the intermittent Tesseract project-write failure; refresh receipts after relevant code changes | Preserve measured bounds and make reliability limits explicit; cached evidence is not a fresh run |
-| Foley dependency blocker on 64 GB | Pinned ComfyUI-MMAudio checkout installed; dependency installation failed before any model download/inference | Build `soxr` for Windows ARM64 using a supported native compiler; no compatible wheel or compiler was found. Then qualify the shared graph under unchanged guards; this is not a memory refusal |
+| Broaden Foley evidence | Isolated setup and bounded shared-graph qualification/normal jobs now pass on 64 GB, including mixing, replacement and cancellation | Qualify other machines and any larger recipe separately; no 48 GB pass or listening-quality claim |
 | Additional 48/64 GB routes | Person masking, picture generation/edits, music, transcription and pose/depth analysis | Reuse existing Windows routes where present; establish dependencies, guarded output and measured envelopes one recipe at a time. Expected fit is not a pass |
 | Close remaining baseline workflow gaps | Interactive First AD apply/save and remaining baseline media playback/download on 64 GB; actual Resolve import on either tested tier | Real actions preserve projects/media and outputs work in the destination application; Finish playback/download already passed |
 | Reproduce 128 GB native results | Published FastH3, Qwen-Image, Drama 3, Music 3, Bolt, mask, foley, Finish and After Effects scopes | Full native install and actual budgets, then output/lifecycle checks at published settings; do not infer other routes or sizes pass |

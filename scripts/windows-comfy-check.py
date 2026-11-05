@@ -26,12 +26,14 @@ from windows_process import OwnedJob  # noqa: E402
 
 SAMPLE_START_TIMEOUT = 30
 SAMPLE_FRESHNESS = 2
+NORMAL_PRIORITY = 0x20
+BELOW_NORMAL_PRIORITY = 0x4000
 
 
 class MemoryWatchdog:
     """Sample in a separate process so a stalled CUDA query cannot block the supervisor."""
 
-    def __init__(self, job: OwnedJob, device_index: int, log, python: str | None = None):
+    def __init__(self, job: OwnedJob, device_index: int, log, python: str | None = None, wddm_device_uuid: str | None = None):
         self.job = job
         self.stopping = threading.Event()
         self.failed = threading.Event()
@@ -50,11 +52,17 @@ class MemoryWatchdog:
         self.backend_samples = 0
         self.backend_min_free_mb = None
         self.backend_budget = None
+        self.backend_handle = None
+        self.wddm_device_uuid = wddm_device_uuid
+        self.budget_basis = "owned ComfyUI CUDA context over HTTP"
         self.configured_floor = os.environ.get("SPARK_MEMORY_FLOOR_MB", "").strip()
+        command = [python or sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", str(device_index)]
+        if wddm_device_uuid:
+            command += ["--wddm-only", "--device-uuid", wddm_device_uuid]
         self.process = job.spawn(
-            [python or sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", str(device_index)],
+            command,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True, encoding="utf-8",
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | (NORMAL_PRIORITY if wddm_device_uuid else 0),
         )
         self.reader = threading.Thread(target=self.read, daemon=True)
         self.supervisor = threading.Thread(target=self.supervise, daemon=True)
@@ -69,6 +77,14 @@ class MemoryWatchdog:
             self.failed.set()
             self.ready.set()
         print(f"[comfy-check] memory watchdog: {reason}; stopping the owned job", file=sys.stderr)
+        if hasattr(self, "process"):
+            latest = self.latest
+            print("[comfy-check] sampler diagnostics: " + json.dumps({
+                "samples": self.samples, "age_s": time.monotonic() - latest.at if latest else None,
+                "queued": self.messages.qsize(), "sampler_exit": self.process.poll(),
+                "reader_alive": self.reader.is_alive(), "supervisor_alive": self.supervisor.is_alive(),
+                "wddm_only": bool(self.wddm_device_uuid),
+            }), file=sys.stderr)
         try:
             self.job.terminate()
         except OSError as error:
@@ -200,6 +216,59 @@ class MemoryWatchdog:
             self.fail("backend memory reporting did not answer within its deadline")
         self.check()
 
+    def start_backend_handle(self, process, identity: dict):
+        """Use fresh dedicated counters and the owned process cap without blocking its busy CUDA context."""
+        if self.backend_thread is not None:
+            raise RuntimeError("backend budget monitoring is already running")
+        limit = self.job.commitment()["process_commit_limit_bytes"]
+        if not limit:
+            raise RuntimeError("the handle monitor requires an applied process commit cap")
+        from windows_backend_handle import open_owned
+        self.backend_handle = open_owned(self.job, identity)
+        self.budget_basis = "fresh UUID/LUID-bound WDDM dedicated usage and owned private-commit cap; not a CUDA allocator budget"
+
+        def observe():
+            previous = None
+            while not self.stopping.is_set() and not self.backend_stopping.is_set() and not self.failed.is_set():
+                try:
+                    if process.poll() is not None:
+                        raise RuntimeError("the owned backend exited")
+                    counters = self.backend_handle.read()
+                    private = counters["private_commit_bytes"]
+                    if type(private) is not int or private < 0:
+                        raise RuntimeError("the owned backend returned invalid private commitment")
+                    if private >= limit:
+                        raise RuntimeError("the owned backend reached its process commit cap")
+                    with self.state_lock:
+                        latest = self.latest
+                    if latest is None or time.monotonic() - latest.at > SAMPLE_FRESHNESS:
+                        raise RuntimeError("host/WDDM memory samples are stale")
+                    current = replace(latest, at=time.monotonic())
+                    reason = pressure(current, self.configured_floor, previous)
+                    if reason:
+                        raise RuntimeError(reason)
+                except (OSError, RuntimeError, ValueError) as error:
+                    if self.stopping.is_set() or self.backend_stopping.is_set():
+                        return
+                    self.fail(f"owned handle budget monitoring failed: {error}")
+                    self.backend_ready.set()
+                    return
+                previous = current
+                with self.state_lock:
+                    self.backend_samples += 1
+                    self.backend_budget = {"total_mb": current.gpu_dedicated_total_mb, "free_mb": current.gpu_dedicated_free_mb,
+                                           "private_commit_mb": private // (1 << 20)}
+                    self.backend_min_free_mb = current.gpu_dedicated_free_mb if self.backend_min_free_mb is None else min(
+                        self.backend_min_free_mb, current.gpu_dedicated_free_mb)
+                self.backend_ready.set()
+                self.stopping.wait(.25)
+
+        self.backend_thread = threading.Thread(target=observe, daemon=True)
+        self.backend_thread.start()
+        if not self.backend_ready.wait(2):
+            self.fail("owned handle memory reporting did not answer within its deadline")
+        self.check()
+
     def finish(self):
         self.process.wait(timeout=10)
         self.reader.join(timeout=3)
@@ -209,6 +278,11 @@ class MemoryWatchdog:
         if self.reader.is_alive() or self.supervisor.is_alive() or (self.backend_thread and self.backend_thread.is_alive()):
             raise RuntimeError("memory watchdog threads did not stop within their deadlines")
         self.process.stdout.close()
+        if self.backend_handle:
+            try:
+                self.backend_handle.wait()
+            finally:
+                self.backend_handle.close()
         self.check()
 
     def begin_backend_shutdown(self):
@@ -221,7 +295,8 @@ class MemoryWatchdog:
             return {"samples": self.samples, "minima": dict(self.minima),
                     "max_host_commit_used_mb": self.max_commit_used_mb,
                     "initial": asdict(self.initial), "final": asdict(self.latest),
-                    "sampler_cuda_scope": "sampler process context, not backend headroom",
+                    "sampler_cuda_scope": "WDDM dedicated-memory budget, no sampler CUDA context" if self.wddm_device_uuid else "sampler process context, not backend headroom",
+                    "backend_budget_basis": self.budget_basis,
                     "backend_budget": self.backend_budget, "backend_budget_samples": self.backend_samples,
                     "backend_min_free_mb": self.backend_min_free_mb,
                     "host_policy": "Windows low-memory signal and commit headroom",
@@ -305,9 +380,15 @@ class CalibrationCase:
     process_commit_mb = 12 * 1024
     job_commit_mb = 16 * 1024
 
-    def __init__(self, prepare, exercise):
+    def __init__(self, prepare, exercise, custom_nodes: tuple[str, ...] = (), wddm_device_uuid: str | None = None):
+        if any(name not in ("ComfyUI-MMAudio", "studio_mmaudio") for name in custom_nodes):
+            raise ValueError("the calibration only permits the explicitly supported extra node packs")
         self.prepare = prepare
         self.exercise = exercise
+        self.custom_nodes = custom_nodes
+        if wddm_device_uuid and custom_nodes and set(custom_nodes) != {"ComfyUI-MMAudio", "studio_mmaudio"}:
+            raise ValueError("the dedicated-counter monitor requires the bounded built-in or MMAudio node set")
+        self.wddm_device_uuid = wddm_device_uuid
 
 
 def run_check(source: Path, timeout: float, device_index: int, guarded: bool = False, hold_seconds: int = 0,
@@ -335,7 +416,8 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
             calibration.prepare(Path(directory))
             command = [sys.executable, "-X", "utf8", str(APP.parent / "scripts" / "windows-comfy-calibration-launcher.py"),
                        "--comfy", str(source / "main.py"), "--gpu-limit-mb", str(calibration.gpu_limit_mb), "--",
-                       *command[4:], "--disable-cuda-malloc", "--whitelist-custom-nodes", "windows_calibration"]
+                       *command[4:], "--disable-cuda-malloc", "--whitelist-custom-nodes", "windows_calibration",
+                       *calibration.custom_nodes]
             job = OwnedJob(calibration.process_commit_mb, calibration.job_commit_mb)
         else:
             job = OwnedJob()
@@ -345,12 +427,15 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
         try:
             with log.open("wb") as output:
                 if guarded:
-                    monitor = MemoryWatchdog(job, device_index, output)
+                    if calibration and calibration.wddm_device_uuid:
+                        monitor = MemoryWatchdog(job, device_index, output, wddm_device_uuid=calibration.wddm_device_uuid)
+                    else:
+                        monitor = MemoryWatchdog(job, device_index, output)
                     monitor.wait_ready()
                 process = job.spawn(
                     command, cwd=source, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                     env={**os.environ, "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1"},
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | (BELOW_NORMAL_PRIORITY if calibration and calibration.wddm_device_uuid else 0),
                 )
                 base, deadline = f"http://127.0.0.1:{port}", time.monotonic() + timeout
                 last_error = "server has not answered"
@@ -373,7 +458,15 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                 validate_ready(read_json(base, "/queue"), nodes)
                 if monitor:
                     monitor.check()
-                    monitor.start_backend(base, directory)
+                    if calibration and calibration.wddm_device_uuid:
+                        owner = read_json(base, "/windows_calibration/metrics")["process_identity"]
+                        monitor.start_backend_handle(process, owner)
+                    else:
+                        if calibration:
+                            from windows_backend_handle import open_owned
+                            owner = read_json(base, "/windows_calibration/metrics")["process_identity"]
+                            monitor.backend_handle = open_owned(job, owner)
+                        monitor.start_backend(base, directory)
                 calibration_result = None
                 memory_before = None
                 launcher_before = None
@@ -430,6 +523,8 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                 except (OSError, subprocess.TimeoutExpired) as error:
                     print(f"[comfy-check] console stop did not complete; draining the owned job: {error}", file=sys.stderr)
         except (OSError, RuntimeError, ValueError):
+            if calibration:
+                print("[comfy-check] failed calibration commitment: " + json.dumps(job.commitment()), file=sys.stderr)
             if log.exists():
                 print("\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-35:]), file=sys.stderr)
             raise

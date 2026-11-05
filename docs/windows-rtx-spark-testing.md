@@ -1,7 +1,7 @@
-# Windows RTX Spark: preview setup and tier testing
+# Windows RTX Spark: native setup and feature testing
 
 Use a checkout containing the Windows port, native Windows ARM64 PowerShell, and the same model/runtime
-pins on each machine. Sections 1-4 cover the bounded 48/64 GB preview; the separate
+pins on each machine. Sections 1-4 cover bounded features on 48/64 GB; the existing full
 [128 GB native CUDA tier](rtx-spark-n1x.md#native-windows-the-native-cuda-tier) has its own installer and
 measurements. This is not the Mac/DGX installer; do not use WSL as an installation workaround.
 The [living plan](windows-rtx-spark-plan.md#current-support) records tested 48/64 GB scopes and a separate
@@ -71,6 +71,7 @@ unavailable, unload unused models in their own applications, then retry. Studio 
 |---|---|---|---|
 | SD-Turbo draft images | `.\scripts\setup-windows-storyboard.ps1` | `.\scripts\check-windows-storyboard.ps1 -Count 1`, then `-Count 6` | About 2.6 GB FP16 components; Stability AI Community License; 512x512, one step, sequential stills only |
 | Stable Audio Open | `.\scripts\setup-windows-sfx.ps1` | `.\scripts\check-windows-sound.ps1` | About 5.3 GB gated weights; Stability AI Community License; normal queue qualification is five seconds / 100 passes / CFG 7, not foley |
+| MMAudio foley | `.\scripts\setup-windows-foley.ps1` | **Machine > Feature checks > Sound > MMAudio foley > Check** | About 5.2 GiB weights, CC-BY-NC 4.0; isolated runtime; bounded 1-5 s / 24 fps clips, 25 passes / CFG 4.5 |
 | Qwen3-4B writing | `.\scripts\setup-windows-brain.ps1` | `.\scripts\brain.ps1 -Check` | About 2.5 GB weights + 310 MB runtime archives; Qwen3 Apache-2.0, llama.cpp MIT; one 4096-token slot |
 | FFmpeg/ffprobe | `.\scripts\setup-windows-ffmpeg.ps1` | `.\scripts\setup-windows-ffmpeg.ps1 -Verify` | Pinned ARM64 binaries, no model weights; verify actual media through the app afterwards |
 | Motion graphics | `.\scripts\setup-windows-graphics.ps1` | Setup runs the six-template qualification | Locked HyperFrames/GSAP packages; uses installed browser, downloads no browser/model; requires Node first |
@@ -100,7 +101,7 @@ The older isolated SFX diagnostic is distinct from normal queue qualification:
 .\scripts\check-windows-sfx.ps1 -Calibrate -CancelDuringSampling
 ```
 
-In the preview, do not enable Qwen Image, FLUX3-K, MOSS, music, foley, H3, Drama 3 or Bolt just by downloading their weights
+Do not enable Qwen Image, FLUX3-K, MOSS, music, foley, H3, Drama 3 or Bolt just by downloading their weights
 through Linux scripts. Their current Windows routes/backends and guards require separate implementation
 or qualification. Download size is not runtime memory. Existing model licences still apply.
 
@@ -117,13 +118,14 @@ Setup verifies pinned archives and leaves its usage-count setting unchanged.
 ```
 
 Open **Machine > Feature checks** to run either check individually, cancel it, review saved evidence
-or download the saved report. The page never starts checks automatically. The CLI's `-Feature all`
+or download the saved report. This is a separate, collapsible section, closed by default; qualification
+badges expand it and focus the relevant card. The page never starts checks automatically. The CLI's `-Feature all`
 remains an optional way to run both; the UI's report download only reads saved results.
 In **Apps**, a qualification badge opens the exact Machine card without starting a test.
 Qualified HDR is available as **keys-HDR LORA** in Apps or under a Library video; Finish is in
 **Edit > Finish**, the Timeline's Finish panel, or **Library > Finish these** for selected clips.
 Finish's header badge replaces the long qualification paragraph; expand **Qualified settings** for limits.
-The **MMAudio foley** app is a disabled example whose **Not qualified** badge explains the blocked setup/check path.
+The **MMAudio foley** app has its own Sound check and opens Foley when its local evidence matches.
 
 Qualification runs real outputs under a 4 GiB owned-job cap and a host-memory watchdog, and drains its own
 processes. Receipts live in `%LOCALAPPDATA%\ImaginationStudio\qualification`, not the repository; do not copy
@@ -140,6 +142,26 @@ transcription, remote Finish and Premiere/After Effects conversion remain disabl
 Check actual Library/Timeline submission, playback/download, oversized-input refusal, cancellation and shutdown.
 The [dated results](windows-rtx-spark-test-results.md#2026-11-04-independent-features-after-the-native-windows-merge)
 include a remaining Tesseract reliability caveat; do not silently retry that error.
+
+### Independent Foley qualification
+
+Run `.\scripts\setup-windows-foley.ps1`, then Check on its Machine card. Setup uses
+`%LOCALAPPDATA%\ImaginationStudio\foley-gpu-venv`, sharing the pinned ComfyUI source and weights but not the
+baseline GPU environment's packages. `-DependenciesOnly` installs/checks packages without weights or inference;
+`-Verify -DependenciesOnly` is read-only. Repeating setup reuses completed core/node dependencies.
+Both dependency stages reuse the GPU manifest's NVIDIA wheel source and existing configured feed authentication.
+If `soxr` needs a source build, setup detects/reuses the ARM64 compiler or installs the supported Build Tools;
+that build does not mean a feed-authentication failure.
+
+The check renders five seconds with source sound retained and one second with replacement. It checks mono
+44.1 kHz audio, duration, levels, full MP4 decode and unchanged decoded picture frames. Normal Foley accepts
+1-5 s local 24 fps clips up to 1920x1080 whose 360-row analysis width is at most 660; it copies the original
+video stream and bounds/pads the generated track to the source duration. Analysis is not an output upscale.
+The recipe stays at 25 passes / CFG 4.5 under the unchanged 12/12/16 GiB tensor/process/job caps.
+WDDM counters are bound to the selected CUDA UUID/LUID, with OS signals, two-second freshness and the
+2 GiB dedicated reserve. They are not another CUDA context's budget. No stale-data success fallback is allowed.
+Check queued/running cancellation and that cancelled jobs publish no take. Format/level checks do not
+establish listening quality or support for larger/longer inputs.
 
 ## 4. Capture each machine separately
 

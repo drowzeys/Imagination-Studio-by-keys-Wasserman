@@ -5,7 +5,7 @@ const SFX = { state: null, takes: null, mode: "foley", clips: null, video: "", p
 const SFX_MODES = { foley: ["Foley for a clip", "MMAudio watches the clip and makes its sound: steps on the footfalls, the door when it shuts."],
   sfx: ["A sound effect", "Stable Audio Open makes a sound from words: up to 47 seconds, 44.1 kHz stereo."] };
 async function sfxLoad() { try { SFX.state = await api("/api/sound/state"); } catch (e) { SFX.state = { error: e.message }; }
-  if (SFX.state.windows && !SFX.windowsDefaults) { SFX.mode = "sfx"; SFX.seconds = 5; SFX.windowsDefaults = true; }
+  if (SFX.state.windows && !SFX.windowsDefaults) { if (!SFX.state.kinds.foley.ready) SFX.mode = "sfx"; SFX.seconds = 5; SFX.windowsDefaults = true; }
   try { SFX.takes = await api("/api/sound/takes"); } catch { SFX.takes = []; }
   if (SFX.clips === null) { try { SFX.clips = (await api("/api/library")).filter(m => m.kind === "video"); } catch { SFX.clips = []; } }
   if (tab === "Foley") render(); }
@@ -66,6 +66,7 @@ function viewFoley() {
     el("section", { class: "panel stack", style: "margin-top:14px" },
       !k.ready ? el("div", { class: "note vt-bad" }, k.why) : null,
       SFX.state.windows && m === "foley" && typeof featureBadge === "function" ? featureBadge("foley") : null,
+      SFX.state.windows && m === "foley" ? el("div", { class: "note" }, "Qualified recipe: clips of 1-5 seconds at 24 fps, 25 passes, CFG 4.5. Runs alone in an owned ComfyUI; other Studio image/sound models are unloaded first.") : null,
       // the install command where installing is what is missing (on a Spark a kind may also wait for its memory measurement)
       !k.ready && !SFX.state.windows && (!SFX.state.spark || /--sound/.test(k.why || "")) ? (() => {
         const cmd = SFX.state.spark ? "bash oneshot-setup-spark.sh --sound" : "bash scripts/setup-sound.sh";

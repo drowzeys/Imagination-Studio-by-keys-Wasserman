@@ -229,8 +229,7 @@ class DedicatedMemory:
         self.check(self.api.nvmlShutdown(), "shutdown")
 
 
-def windows_gpu_process_memory() -> dict[int, float]:
-    """Dedicated bytes per PID across Windows adapters, using the native PDH counters."""
+def _windows_gpu_counter(path: str) -> list[tuple[str, int, int]]:
     from ctypes import wintypes
 
     class ValueUnion(ctypes.Union):
@@ -263,8 +262,7 @@ def windows_gpu_process_memory() -> dict[int, float]:
     query, counter = wintypes.HANDLE(), wintypes.HANDLE()
     check(api.PdhOpenQueryW(None, 0, ctypes.byref(query)))
     try:
-        check(api.PdhAddEnglishCounterW(
-            query, r"\GPU Process Memory(*)\Dedicated Usage", 0, ctypes.byref(counter)))
+        check(api.PdhAddEnglishCounterW(query, path, 0, ctypes.byref(counter)))
         check(api.PdhCollectQueryData(query))
         size, count = wintypes.DWORD(), wintypes.DWORD()
         code = api.PdhGetFormattedCounterArrayW(counter, 0x400, ctypes.byref(size), ctypes.byref(count), None)
@@ -284,16 +282,98 @@ def windows_gpu_process_memory() -> dict[int, float]:
         if count.value * ctypes.sizeof(Item) > len(buffer):
             raise RuntimeError("Windows GPU process counter count is invalid")
         rows = ctypes.cast(buffer, ctypes.POINTER(Item))
-        found = {}
+        found = []
         for index in range(count.value):
             item = rows[index]
-            match = re.fullmatch(r"pid_(\d+)_luid_0x[0-9a-f]+_0x[0-9a-f]+_phys_\d+", item.name or "", re.I)
-            if match and item.value.status in (0, 1) and item.value.value.large >= 0:
-                pid = int(match[1])
-                found[pid] = found.get(pid, 0) + item.value.value.large / MIB
+            found.append((item.name or "", item.value.status, item.value.value.large))
         return found
     finally:
         check(api.PdhCloseQuery(query))
+
+
+def windows_gpu_process_memory() -> dict[int, float]:
+    """Dedicated bytes per PID across Windows adapters, using the native PDH counters."""
+    found = {}
+    for name, status, value in _windows_gpu_counter(r"\GPU Process Memory(*)\Dedicated Usage"):
+        match = re.fullmatch(r"pid_(\d+)_luid_0x[0-9a-f]+_0x[0-9a-f]+_phys_\d+", name, re.I)
+        if match and status in (0, 1) and value >= 0:
+            pid = int(match[1])
+            found[pid] = found.get(pid, 0) + value / MIB
+    return found
+
+
+def single_gpu_uuid() -> str:
+    result = subprocess.run(["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"],
+                            capture_output=True, text=True, check=True, timeout=5)
+    # The N1X's DLA row is not a CUDA GPU.
+    devices = [line.strip() for line in result.stdout.splitlines() if line.strip().startswith("GPU-")]
+    if len(devices) != 1:
+        raise RuntimeError("This bounded Windows profile requires one physical GPU.")
+    return "GPU-" + str(uuid.UUID(devices[0].removeprefix("GPU-")))
+
+
+def cuda_adapter_luid(device_uuid: str) -> tuple[int, int]:
+    """Identify a WDDM node without creating a CUDA context."""
+    expected = uuid.UUID(str(device_uuid).removeprefix("GPU-"))
+    api = ctypes.WinDLL("nvcuda.dll", winmode=0x800)
+    api.cuInit.argtypes = [ctypes.c_uint]
+    api.cuDeviceGetCount.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    api.cuDeviceGet.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+    identifier = getattr(api, "cuDeviceGetUuid_v2", None) or api.cuDeviceGetUuid
+    identifier.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    api.cuDeviceGetLuid.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint), ctypes.c_int]
+    for function in (api.cuInit, api.cuDeviceGetCount, api.cuDeviceGet, identifier, api.cuDeviceGetLuid):
+        function.restype = ctypes.c_int
+
+    def check(code):
+        if code:
+            raise RuntimeError(f"CUDA could not identify the WDDM adapter (error {code})")
+
+    check(api.cuInit(0))
+    count = ctypes.c_int()
+    check(api.cuDeviceGetCount(ctypes.byref(count)))
+    matches = []
+    for index in range(count.value):
+        device = ctypes.c_int()
+        check(api.cuDeviceGet(ctypes.byref(device), index))
+        value = (ctypes.c_ubyte * 16)()
+        check(identifier(value, device))
+        if uuid.UUID(bytes=bytes(value)) == expected:
+            luid, mask = (ctypes.c_uint32 * 2)(), ctypes.c_uint()
+            check(api.cuDeviceGetLuid(luid, ctypes.byref(mask), device))
+            if mask.value != 1:
+                raise RuntimeError("The bounded WDDM check requires one physical node on its adapter.")
+            matches.append((luid[1], luid[0]))
+    if len(matches) != 1:
+        raise RuntimeError("The selected CUDA UUID does not identify exactly one WDDM adapter.")
+    return matches[0]
+
+
+class WddmMemory:
+    """Fresh adapter-wide resident usage, not CUDA allocator or per-process commitment."""
+
+    def __init__(self, device_uuid: str):
+        self.luid = cuda_adapter_luid(device_uuid)
+        # Capacity is static. Do not query NVML while the model is loading.
+        with DedicatedMemory(device_uuid) as dedicated:
+            self.total, _ = dedicated.read()
+        if type(self.total) is not int or self.total <= 0:
+            raise RuntimeError("The selected adapter has no valid dedicated capacity.")
+
+    def read(self) -> tuple[int, int]:
+        matches = []
+        for name, status, used in _windows_gpu_counter(r"\GPU Adapter Memory(*)\Dedicated Usage"):
+            match = re.fullmatch(r"luid_0x([0-9a-f]+)_0x([0-9a-f]+)_phys_(\d+)", name, re.I)
+            if match and (int(match[1], 16), int(match[2], 16)) == self.luid:
+                if int(match[3]) != 0 or status not in (0, 1) or used < 0:
+                    raise RuntimeError("The selected WDDM adapter returned invalid memory counters.")
+                matches.append(used)
+        if len(matches) != 1:
+            raise RuntimeError("The selected WDDM adapter memory counter is missing or ambiguous.")
+        used_mb = (matches[0] + MIB - 1) // MIB
+        if used_mb > self.total:
+            raise RuntimeError("WDDM dedicated usage exceeds the selected adapter's capacity.")
+        return self.total, self.total - used_mb
 
 
 def gpu_memory_warning(free_mb: int, required_mb: int, device_uuid: str | None = None,
@@ -492,15 +572,60 @@ def watch(device_index: int) -> int:
             time.sleep(0.25)
 
 
+def dedicated_snapshot(physical: int, signals, dedicated) -> Snapshot:
+    host_total, host_free = host_memory()
+    commit_used, commit_limit, nonpaged, low_memory = signals.read()
+    total, free = dedicated.read()
+    value = Snapshot(physical, host_total, host_free, total, free, time.monotonic(),
+                     commit_used, commit_limit, nonpaged, low_memory, total, free)
+    value.validate()
+    return value
+
+
+def watch_nvml(device_uuid: str) -> int:
+    if sys.platform != "win32":
+        raise RuntimeError("The NVML sampler requires native Windows.")
+    physical = physical_memory_mb()
+    with WindowsSignals() as signals, DedicatedMemory(device_uuid) as dedicated:
+        while True:
+            if os.environ.get("STUDIO_MEMORY_DEBUG") == "1":
+                import faulthandler
+                faulthandler.dump_traceback_later(1.5, file=sys.stderr)
+            try:
+                print(json.dumps(asdict(dedicated_snapshot(physical, signals, dedicated))), flush=True)
+            finally:
+                if os.environ.get("STUDIO_MEMORY_DEBUG") == "1":
+                    faulthandler.cancel_dump_traceback_later()
+            time.sleep(.25)
+
+
+def watch_wddm(device_uuid: str) -> int:
+    if sys.platform != "win32":
+        raise RuntimeError("The WDDM sampler requires native Windows.")
+    physical = physical_memory_mb()
+    dedicated = WddmMemory(device_uuid)
+    with WindowsSignals() as signals:
+        while True:
+            print(json.dumps(asdict(dedicated_snapshot(physical, signals, dedicated))), flush=True)
+            time.sleep(.25)
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch", action="store_true", required=True)
     parser.add_argument("--device-index", type=int, default=0)
+    provider = parser.add_mutually_exclusive_group()
+    provider.add_argument("--nvml-only", action="store_true")
+    provider.add_argument("--wddm-only", action="store_true")
+    parser.add_argument("--device-uuid")
     args = parser.parse_args()
     try:
-        raise SystemExit(watch(args.device_index))
+        if (args.nvml_only or args.wddm_only) and not args.device_uuid:
+            raise ValueError("The dedicated-memory sampler requires the selected device UUID.")
+        raise SystemExit(watch_wddm(args.device_uuid) if args.wddm_only else
+                         watch_nvml(args.device_uuid) if args.nvml_only else watch(args.device_index))
     except (ImportError, OSError, RuntimeError, ValueError) as error:
         print(json.dumps({"error": str(error)}), flush=True)
         raise SystemExit(1)

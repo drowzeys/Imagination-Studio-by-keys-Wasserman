@@ -310,7 +310,8 @@ def render_case(output: Path, params: dict, cancelled=lambda: False, submit=None
         return {"model": MODEL, "count": count, "width": SIDE, "height": SIDE,
                 "request_to_files_seconds": time.monotonic() - started, "allocator_receipts": receipts}
 
-    return check.CalibrationCase(prepare, exercise)
+    from windows_memory import single_gpu_uuid
+    return check.CalibrationCase(prepare, exercise, wddm_device_uuid=single_gpu_uuid())
 
 
 def render(output: Path, params: dict, qualify: bool) -> dict:

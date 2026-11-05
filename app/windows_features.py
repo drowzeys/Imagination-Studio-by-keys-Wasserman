@@ -14,6 +14,7 @@ import shutil
 import sys
 import threading
 
+from feature_checks import EvidenceStore
 import windows_media
 from windows_memory import WindowsSignals, host_memory, physical_memory_mb
 
@@ -33,21 +34,17 @@ FEATURE_OPERATIONS = ("headroom", "watch", "check_media", "check_finish")
 
 
 def saved(kind: str, suffix: str) -> dict:
-    try:
-        value = json.loads((folder() / f"{kind}{suffix}.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError(f"the saved {kind} result is not an object")
-    return value
+    if suffix not in ("", "-attempt"):
+        raise ValueError("invalid qualification record")
+    return EvidenceStore(folder()).read(kind, "attempt" if suffix else "pass")
 
 
 def save_attempt(kind: str, attempt: dict) -> None:
-    target = folder() / f"{kind}-attempt.json"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    pending = target.with_suffix(".tmp")
-    pending.write_text(json.dumps(attempt), encoding="utf-8")
-    pending.replace(target)
+    EvidenceStore(folder()).write(kind, attempt, "attempt")
+
+
+def save_pass(kind: str, receipt: dict) -> None:
+    EvidenceStore(folder()).write(kind, receipt)
 
 
 def folder() -> Path:

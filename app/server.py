@@ -164,8 +164,9 @@ import windows_storyboard
 import windows_sound
 import windows_features
 import windows_checks
-WINDOWS_NOTE = ("Windows preview: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
-                "Local Copilot CLI agents can use Studio tools. Qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics are supported; video generation, foley, in-app model installation, other agents and worker management are not supported yet. "
+import windows_foley
+WINDOWS_NOTE = ("Native Windows: script imports, project planning, manual storyboards, local-brain writing, saved settings, uploads and media browsing. "
+                "Local Copilot CLI agents can use Studio tools. Qualified stills, sound effects, foley, CPU media exports and motion graphics are available at their measured settings; video generation, other agents and worker management remain unavailable on this configuration. "
                 "HDR grading and local Tesseract Finish are independently enabled after this machine passes their bounded qualification. "
                 "Shared GPU memory is not a verified render budget; memory guards have not been lowered.")
 WINCUDA_NOTE = ("Native Windows (CUDA): video, pictures, songs, voice, sound effects and foley, the Library's actions, Character "
@@ -207,7 +208,7 @@ def machine() -> tuple[str, str]:
     answering. A page that polls the state then holds one of the server's threads per call."""
 
     if WINDOWS:
-        return "windows", "WINDOWS · STORYBOARD PREVIEW" if windows_storyboard.status()["available"] else "WINDOWS · UI-ONLY PREVIEW"
+        return "windows", "WINDOWS · LOCAL FEATURES" if windows_storyboard.status()["available"] else "WINDOWS · LOCAL WORKFLOWS"
     if SPARK:
         if not GPU_NAME:
             try:
@@ -621,7 +622,7 @@ WINDOWS_WRITES = re.compile(
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"threads(?:/[A-Za-z0-9_-]+(?:/(?:messages|cancel))?)?)|"
-    r"music/beats|windows/stills/unload|windows/features/check|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
+    r"music/beats|windows/stills/unload|windows/features/check|feature-checks/check|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
 )
 
 
@@ -632,6 +633,7 @@ def accepting_jobs(job: dict | None = None):
                 or job.get("kind") == "sfx" and windows_sound.status()["available"]
                 or job.get("kind") == "graphics" and graphics.ready()["ok"]
                 or job.get("kind") in windows_features.KINDS and windows_features.status(job["kind"])["available"]
+                or job.get("kind") == "foley" and windows_foley.status()["available"]
                 or job.get("kind") == "qualification"
                 or job.get("kind") == "export" and all(media_tools().values())))
     if WINDOWS and not allowed:
@@ -1653,6 +1655,12 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     if WINDOWS:
         if kind == "qualification":
             return windows_checks.build(HOME, params, job_id)
+        if kind == "foley":
+            try:
+                windows_foley.preflight()
+                return windows_foley.build(params, HOME, job_id, inside)
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+                raise HTTPException(400, str(error)) from None
         if kind == "graphics":
             return graphics_build(params, job_id)
         if kind in windows_features.KINDS:
@@ -1887,7 +1895,9 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             if WINCUDA:  # bash and the Linux venv's python as the native tier runs them (refused when not ported)
                 command = windows_cuda.translate(command)
             # the native tier's job tree may let ComfyUI break away (spark/comfy_win.py): it stays warm after the job
-            commit = (windows_features.COMMIT_MB if WINDOWS and job["kind"] in (*windows_features.KINDS, "qualification") else
+            gpu_check = WINDOWS and (job["kind"] == "foley" or job["kind"] == "qualification" and job["params"].get("feature") == "foley")
+            commit = (windows_storyboard.JOB_LIMIT_MB if gpu_check else
+                      windows_features.COMMIT_MB if WINDOWS and job["kind"] in (*windows_features.KINDS, "qualification") else
                       graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0)
             owned = OwnedJob(job_commit_mb=commit, breakaway=WINCUDA)
             try:
@@ -2283,6 +2293,8 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
     params = job["params"]
     asked = dict(params)
     try:
+        if WINDOWS and (job["kind"] == "foley" or job["kind"] == "qualification" and params.get("feature") == "foley"):
+            windows_storyboard.release_backend()
         # a Drama 3 server kept loaded after a voice take (voice.py) never stands beside a render here, nor MiniMax Music 3
         # kept loaded after a song (music.py): each is unloaded before any other job of this machine's queue
         if job["kind"] not in ("voice", "export", "soundtrack", "finish", "graphics", "hlg") and worker is None and not job.get("remote"):
@@ -2362,6 +2374,8 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             if job["status"] != "cancelled":
                 if WINDOWS and job["kind"] == "sfx":
                     windows_sound.save_take(job, HOME, HOME / job["outputs"][0], job["_sound_seconds"])
+                if WINDOWS and job["kind"] == "foley":
+                    windows_foley.save_take(job, HOME, HOME / "sound/foley" / job["id"])
                 job["status"] = "done"
     except sparks.Moved:  # the Spark it was on refused it, failed it or stopped answering: it is in the queue again
         params.clear()  # as it was queued: a retake's seed and the frames cut for it are made again
@@ -2429,6 +2443,7 @@ def state() -> dict:
             "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
             "platform": machine()[0], "platform_label": machine()[1],
             "ui_only": WINDOWS, "platform_note": WINDOWS_NOTE if WINDOWS else WINCUDA_NOTE if WINCUDA else "",
+            "feature_checks": windows_checks.discovery(WINDOWS),
             "windows_stills": windows_storyboard.status() if WINDOWS else None,
             "gpu_index": (",".join(memory_guard.paired_gpus()) if not WINDOWS else "") or (os.environ["STUDIO_GPU"] if os.environ.get("STUDIO_GPU", "").isdigit() else None),
             "last_frame": True,
@@ -2474,6 +2489,7 @@ def state() -> dict:
             export={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."},
             frame={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."})
         out["capabilities"].update({kind: windows_features.status(kind) for kind in windows_features.KINDS})
+        out["capabilities"]["foley"] = windows_foley.status()
     if WINCUDA:  # the native tier (windows_cuda.py): what it runs, and the job kinds it refuses with their reason
         out["windows_cuda"] = windows_cuda.status()
         out["capabilities"] = {kind: {"available": False, "why": windows_cuda.unsupported(kind)} for kind in windows_cuda.NOT_NATIVE}
@@ -2647,6 +2663,21 @@ def windows_export(body: dict) -> dict:
 
 def queue_job(body: dict) -> dict:
     if WINDOWS:
+        if body.get("kind") == "foley":
+            found = windows_foley.status()
+            if not found["available"]:
+                raise HTTPException(501, found["why"])
+            if body.get("placement") is not None or body.get("sparks") not in (None, 1):
+                raise HTTPException(400, "Foley runs on this machine only.")
+            try:
+                params = windows_foley.parameters(body.get("params") or {})
+                build("foley", params, "check")
+            except (ValueError, RuntimeError) as error:
+                raise HTTPException(400, str(error)) from None
+            title = body.get("title") or sound_title("foley", params)
+            if not isinstance(title, str):
+                raise HTTPException(400, "title is text")
+            return enqueue("foley", title, params)
         if body.get("kind") in windows_features.KINDS:
             kind = body["kind"]
             found = windows_features.status(kind)
@@ -3362,6 +3393,11 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
     if WINDOWS and kind == "qualification":
         params = windows_checks.parameters(params)
         windows_checks.build(HOME, params, "check")
+    if WINDOWS and kind == "foley":
+        if not windows_foley.status()["available"]:
+            raise HTTPException(501, windows_foley.status()["why"])
+        params = windows_foley.parameters(params)
+        build(kind, params, "check")
     if WINDOWS and kind == "graphics":
         graphics_build(params, "check")
     if WINDOWS and kind in windows_features.KINDS:

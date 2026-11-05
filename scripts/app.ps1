@@ -40,10 +40,10 @@ if ($LocalBrain) {
     $env:STUDIO_LOCAL_MODEL = 'Qwen3-4B'
 }
 if ($Native) {
-    Write-Host "Imagination Studio, native Windows CUDA tier: http://127.0.0.1:$Port"
+    Write-Host "Native Windows Studio: http://127.0.0.1:$Port"
     Write-Host 'Video, pictures, songs and the Bolt brain on this GPU (ComfyUI and TensorFold). Press Ctrl+C to stop.'
 } else {
-    Write-Host "Windows limited preview: http://127.0.0.1:$Port"
+    Write-Host "Native Windows Studio: http://127.0.0.1:$Port"
     Write-Host 'Qualified stills, five-second sound effects, CPU media exports and bounded motion graphics. Press Ctrl+C to stop.'
 }
 & $Python -X utf8 (Join-Path $Root 'app\server.py')

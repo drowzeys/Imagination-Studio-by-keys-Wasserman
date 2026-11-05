@@ -73,13 +73,9 @@ function Winget([string]$id, [string[]]$more = @()) {
   if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { throw "winget could not install $id (exit $LASTEXITCODE)" }  # 0x8A15002B: already installed
 }
 function VcVars {
-  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-  if (-not (Test-Path $vswhere)) { return "" }
-  $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
-  if (-not $vs) { return "" }
-  $bat = Join-Path $vs "VC\Auxiliary\Build\vcvarsall.bat"
-  if (Test-Path $bat) { return $bat } else { return "" }
+  Find-StudioArm64Compiler
 }
+. (Join-Path $PSScriptRoot "windows-msvc.ps1")
 if (-not $SkipToolchain) {
   Say "Build tools"
   & py -V:3.13-arm64 -c "1" 2>$null
@@ -87,9 +83,8 @@ if (-not $SkipToolchain) {
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Winget "Git.Git" } else { Ok "Git" }
   $zig = (& zig version 2>$null)
   if ($zig -notmatch "^0\.17") { Winget "zig.zig" @("--version", "0.17.0") } else { Ok "Zig $zig" }
-  if (-not (VcVars)) {
-    Winget "Microsoft.VisualStudio.2022.BuildTools" @("--override", "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --includeRecommended")
-  } else { Ok "Visual Studio Build Tools (ARM64 compiler)" }
+  $null = Initialize-StudioArm64Compiler
+  Ok "Visual Studio Build Tools (ARM64 compiler)"
   # NVIDIA's CUDA toolkit for Windows on Arm, from its redistributable archives: the compiler and the libraries the
   # engines build and run against, each archive checked against NVIDIA's own manifest
   if (-not (Test-Path (Join-Path $CudaRoot "bin\nvcc.exe"))) {

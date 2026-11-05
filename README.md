@@ -110,17 +110,18 @@ PREFIX=/data/studio STUDIO_GPU=1 bash spark/comfy.sh stop
 
 Untested. The CUDA engines are built and measured for the GB10.
 
-### Windows (limited preview)
+### Native Windows
 
 Native Windows, including ARM64, can run the web UI without WSL, CUDA, or model downloads.
-This preview supports script imports, project/Slate planning, manual storyboards, prompt compilation, settings,
+The baseline supports script imports, project/Slate planning, manual storyboards, prompt compilation, settings,
 uploads, Motion Previs pack imports and browsing saved media.
 Optional local Copilot CLI agents can plan and edit Slate projects through **This Studio** MCP tools.
 An optional small local brain supports text-only Slate writing assistance.
 Separately qualified 512x512 SD-Turbo stills, five-second sound effects, CPU media exports and bounded motion graphics can render.
 HDR grading and local Tesseract Finish can also be independently qualified without H3:
 see [their setup and measured limits](docs/windows-rtx-spark-testing.md#independent-hdr-and-finish-qualification).
-Other routes including video generation, foley, in-app model installation, other agents, worker management
+Bounded MMAudio foley can also qualify independently; see [Foley setup and limits](docs/windows-rtx-spark-testing.md#independent-foley-qualification).
+Other routes including video generation, in-app model installation, other agents, worker management
 and other unverified actions are refused explicitly.
 It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
@@ -273,11 +274,23 @@ In **Sound -> Sound effects**, choose **A sound effect**, describe it and click 
 The initial Windows recipe is fixed at **5 seconds, 100 passes, CFG 7** (the exact decoded duration is about
 5.0155 s). Seed and positive/negative sound descriptions are editable. A successful take is a lossless stereo
 44.1 kHz PCM WAV, listed on the sound tab and in the Library. Stability AI's Community License still applies.
-No new weights are downloaded by Check, and foley is not enabled.
+No new weights are downloaded by Check. Foley has its own independent setup and qualification.
+
+**Windows foley:** run `.\scripts\setup-windows-foley.ps1`, then
+**Machine > Feature checks > Sound > MMAudio foley > Check**. The isolated Foley environment shares source/weights,
+not baseline GPU packages. Repeating setup resumes completed parts; `-Verify -DependenciesOnly` checks packages
+without changing them. The qualified recipe is 1-5 s / 24 fps clips, 25 passes / CFG 4.5, 360-row analysis;
+source video up to 1920x1080 is copied unchanged within the documented aspect limit.
+Source sound is retained unless replacement is chosen. Weights are about 5.2 GiB and non-commercial
+(CC-BY-NC 4.0). A matching pass enables **Sound > Foley**; more RAM or installed weights alone do not.
 
 Images and sound share one guarded ComfyUI slot: consecutive jobs of the same kind stay warm, but changing
 kind drains the old owned backend before starting the other model. Both models never stay loaded together.
-The existing 12/12/16 GiB allocator/process/job caps and memory reserves are unchanged. The sound load runs
+The existing 12/12/16 GiB allocator/process/job caps and memory reserves are unchanged. Bounded image/sound
+jobs use fresh UUID/LUID-bound Windows dedicated-memory counters and owned process handles rather than polling
+a busy model's HTTP/CUDA context. OS pressure, the 2 GiB dedicated reserve and two-second sample freshness
+remain enforced; these counters are not a CUDA allocator budget. Foley uses a cold owned backend, drained
+before another model runs. The sound load runs
 close to its process-commit cap; this is not support for longer effects or a relaxed memory requirement.
 Stop targets that job's prompt, and a cancelled/failed job never publishes a successful sound take.
 The older `check-windows-sfx.ps1 -Calibrate` remains an isolated diagnostic, not the normal queue's qualification.

@@ -95,8 +95,9 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
         """Why this kind cannot run here ("" when it can)."""
 
         if WINDOWS:
-            if kind != "sfx":
-                return "MMAudio foley is not qualified on Windows; sound effects support the measured five-second recipe only."
+            if kind == "foley":
+                import windows_foley
+                return windows_foley.status()["why"]
             import windows_sound
             found = windows_sound.status()
             if not found["available"]:
@@ -202,7 +203,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
     @router.get("/api/sound/state")
     def state() -> dict:
         return {"kinds": {kind: {"ready": not missing(kind), "why": missing(kind) or None, "licence": LICENCES[kind]} for kind in KINDS},
-                "seconds": {"sfx": (5, 5) if WINDOWS else SFX_SECONDS, "foley": FOLEY_SECONDS},
+                "seconds": {"sfx": (5, 5) if WINDOWS else SFX_SECONDS, "foley": (1, 5) if WINDOWS else FOLEY_SECONDS},
                 "spark": spark, "windows": WINDOWS}
 
     @router.get("/api/sound/takes")
