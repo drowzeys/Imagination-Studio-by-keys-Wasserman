@@ -265,6 +265,11 @@ can be selected individually. Groups cover **Studio & scouting**, **Image preset
 Groups skip valid passes, run sequentially and save each completed recipe independently.
 Completed groups and individual recipes show a checkmark. Group actions are separate from the expandable
 individual recipe list; each passed recipe's measurements and the runtime/memory policy are expandable details.
+Partially passed groups show a yellow progress mark and passed/total count. A failed unchecked recipe gives
+its group a red cross, including when other recipes passed; existing passes still count.
+Feature-check category and overall headings give each feature one point, divided equally among its recipes.
+Missing features remain in the total and are counted separately as not on this machine. A complete category
+shows a checkmark and All features qualified; installation text is omitted when nothing is missing.
 Recipe attempts retain their own Failed or Cancelled status and error details; Not checked means no result
 has been recorded. An existing valid pass remains Passed after an unsuccessful retry.
 Ordinary output failures allow the next recipe to run; memory, backend, timeout or cleanup failures stop the

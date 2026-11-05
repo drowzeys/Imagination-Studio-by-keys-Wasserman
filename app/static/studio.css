@@ -361,6 +361,7 @@ dialog::backdrop { background:rgba(5,6,9,.7); }
 .qualification-mark { color:var(--faint); font:600 17px var(--sans); }
 .qualification-mark.passed { color:var(--green); }
 .qualification-mark.failed { color:var(--red); }
+.qualification-mark.partial { color:var(--warn); }
 .qualification-details, .qualification-individuals { margin-top:0; }
 .qualification-recipes { display:grid; gap:10px; }
 .qualification-recipe-list { display:grid; gap:6px; }
@@ -369,6 +370,11 @@ dialog::backdrop { background:rgba(5,6,9,.7); }
 .qualification-result summary { color:var(--dim); cursor:pointer; font-size:12px; }
 .qualification-result[open] { grid-column:1/-1; max-width:none; padding:0 12px 10px; }
 .qualification-selection { font-size:12px; }
+.qualification-summary { display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; margin-left:10px; }
+#feature-check-summary { margin-left:10px; }
+#feature-check-summary .qualification-summary { margin-left:0; }
+.dsc-state { font:600 11px/1 var(--sans); padding:3px 7px; border-radius:999px; border:1px solid var(--line2); color:var(--dim); }
+.dsc-state.missing { color:var(--red); border-color:var(--red); }
 .picture-models { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-bottom:8px; }
 .picture-model-option { display:flex; position:relative; min-width:0; }
 .picture-model-card { display:flex; flex-direction:column; align-items:flex-start; gap:6px; flex:1; width:100%; min-width:0; text-align:left; padding:12px; background:var(--bg2); border:1px solid var(--line2); border-radius:var(--r1); }
