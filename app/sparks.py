@@ -1386,16 +1386,27 @@ class Hub:
         """One take of ``job``'s clip rendered on ``worker`` and fetched to ``target``. False when the job was
         cancelled meanwhile; Moved when the worker refused the clip, failed it, or stopped answering."""
 
+        # Already cancelled, or cancelled while the tunnel opens, the worker's memory guard is asked, or references
+        # upload: do not create its job. A job already accepted is cancelled from the poll below.
+        if job["status"] != "running":
+            return False
         address, name = worker["address"], worker.get("name") or worker["address"]
         say = lambda text: job.update(log=(job["log"] + f"[sparks] {self.said(text)}\n")[-20000:])
         try:
             base = self.connect(address)
+            if job["status"] != "running":
+                return False
             # the worker's own memory guard, asked before anything is sent (its app asks it again when the job is queued)
             room = (call(base, "/api/estimate", estimate_params(params)) or {}).get("memory") or {}
+            if job["status"] != "running":
+                return False
             if room.get("fits") is False:
                 raise Refused(400, room.get("reason") or "its memory guard refused the clip")
+            params_there = self.outbound(base, params)
+            if job["status"] != "running":
+                return False
             made = call(base, "/api/jobs", {"kind": job["kind"], "title": f"{job['title']} · for {self.name}",
-                                          "placement": {"worker": "head", "policy": "require"}, "params": self.outbound(base, params)}, timeout=60)
+                                          "placement": {"worker": "head", "policy": "require"}, "params": params_there}, timeout=60)
         except Refused as error:
             self.move(job, worker, f"it refused the clip: {error.said}", down=False)
             return False

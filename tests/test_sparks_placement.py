@@ -457,3 +457,82 @@ def test_inventory_refreshes_ordinal_names_without_check_or_runtime_writes(hub, 
     monkeypatch.setattr(local_gpus, "inventory", lambda **kw: {"supported": True, "devices": devices})
     monkeypatch.setattr(local_gpus, "runtime_dir", lambda: pytest.fail("inactive overview touched runtime"))
     assert next(row for row in hub.overview()["workers"] if row["address"] == address)["name"].startswith("GPU 2 ·")
+
+
+def test_cancelled_clip_is_not_submitted_to_its_worker(hub, monkeypatch, tmp_path):
+    """Cancel after a worker has claimed a clip, before that worker's own job exists: nothing is submitted."""
+    worker = hub.workers()[0]
+    address = worker["address"]
+
+    def claimed():
+        clip = job(hub, {"worker": address, "policy": "require"})
+        assert hub.claim(address) is clip
+        return clip
+
+    def dispatched(clip, filename):
+        found = {}
+
+        def work(job, row):
+            found["done"] = hub.render(job, row, dict(job["params"]), tmp_path / filename)
+
+        hub.work = work
+        hub.run(clip, worker)
+        return found.get("done")
+
+    def stayed_cancelled(clip):
+        assert clip["status"] == "cancelled"
+        assert clip.get("their_job") is None
+        assert "back in the queue" not in clip["log"]
+        assert hub.state(address)["job"] is None and hub.state(address)["state"] == "ready"
+
+    clip = claimed()
+    clip["status"] = "cancelled"
+    monkeypatch.setattr(hub, "connect", lambda *a, **k: pytest.fail("cancelled clip opened a worker connection"))
+    monkeypatch.setattr(sparks, "call", lambda *a, **k: pytest.fail("cancelled clip was submitted"))
+    assert dispatched(clip, "before.mp4") is False
+    stayed_cancelled(clip)
+
+    clip = claimed()
+
+    def cancel_as_the_tunnel_opens(addr):
+        clip["status"] = "cancelled"
+        return "http://127.0.0.1:9"
+
+    monkeypatch.setattr(hub, "connect", cancel_as_the_tunnel_opens)
+    assert dispatched(clip, "tunnel.mp4") is False
+    stayed_cancelled(clip)
+
+    clip = claimed()
+    posts = []
+
+    def cancel_during_estimate(base, path, body=None, method=None, timeout=10):
+        if path == "/api/estimate":
+            clip["status"] = "cancelled"
+            return {"memory": {"fits": True, "need_mb": 1000, "available_mb": 80000}}
+        posts.append(path)
+        pytest.fail("cancelled clip was submitted to " + path)
+
+    monkeypatch.setattr(hub, "connect", lambda *a, **k: "http://127.0.0.1:9")
+    monkeypatch.setattr(sparks, "call", cancel_during_estimate)
+    assert dispatched(clip, "estimate.mp4") is False
+    assert posts == []
+    stayed_cancelled(clip)
+
+    clip = claimed()
+
+    def cancel_during_upload(base, params):
+        clip["status"] = "cancelled"
+        return {"preset": "small", "quality": "fh8"}
+
+    def refuse_submit(base, path, body=None, method=None, timeout=10):
+        if path == "/api/estimate":
+            return {"memory": {"fits": True, "need_mb": 1000, "available_mb": 80000}}
+        posts.append(path)
+        pytest.fail("cancelled clip was submitted to " + path)
+
+    posts.clear()
+    monkeypatch.setattr(hub, "outbound", cancel_during_upload)
+    monkeypatch.setattr(sparks, "call", refuse_submit)
+    assert dispatched(clip, "upload.mp4") is False
+    assert posts == []
+    stayed_cancelled(clip)
