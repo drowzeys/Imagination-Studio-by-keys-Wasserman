@@ -241,6 +241,19 @@ def test_installed_model_reports_mixed_local_recipe_evidence():
     assert "20.0–28.0+ GiB" in out["text"] and "Stopped by commit backing" in out["text"]
 
 
+def test_component_installation_is_not_workflow_readiness():
+    out = run("""
+      const card=dscRow(null,{id:"windows-workflows",label:"Library workflows",state:"expected",
+        installed_label:"Components installed",
+        requirements_note:"Find uses SAM, not H3. Other actions also need H3 models and action dependencies."});
+      out.text=text(card);
+    """)
+    assert "Components installed" in out["text"]
+    assert "Find uses SAM, not H3" in out["text"]
+    assert "Other actions also need H3" in out["text"]
+    assert "in place" not in out["text"]
+
+
 def test_collapsible_sections_summarize_installation_and_remember_open_state():
     state = {"inventory_only": True, "scanning": False, "needs": [
         {"id": "qwen", "label": "Qwen", "engine": "Picture models", "state": "expected"},
@@ -252,6 +265,15 @@ def test_collapsible_sections_summarize_installation_and_remember_open_state():
       const groups=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group");
       out.titles=groups.map(n=>text(n.kids[0]));
       out.initial=groups[0].attrs.open;
+      button(box,"Expand all").attrs.onclick();
+      out.expanded=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group").every(n=>n.attrs.open);
+      dscDraw(box);
+      out.retained=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group").every(n=>n.attrs.open);
+      button(box,"Collapse all").attrs.onclick();
+      out.collapsed=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group").every(n=>!n.attrs.open);
+      groups[0].attrs.ontoggle({{currentTarget:{{isConnected:true,open:true}}}});
+      dscDraw(box);
+      out.individual=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group")[0].attrs.open;
       groups[0].attrs.ontoggle({{currentTarget:{{isConnected:true,open:false}}}});
       dscDraw(box);
       out.closed=!all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group")[0].attrs.open;
@@ -264,6 +286,7 @@ def test_collapsible_sections_summarize_installation_and_remember_open_state():
     """)
     assert "1 installed · 1 need installation" in out["titles"][0]
     assert "✓ All installed (1)" in out["titles"][1]
-    assert out["initial"] and out["closed"]
+    assert not out["initial"] and out["closed"]
+    assert out["expanded"] and out["retained"] and out["collapsed"] and out["individual"]
     assert out["copyText"] == "powershell -File uninstall.ps1 -Model qwen"
     assert all(call[0] == "/api/discover" for call in out["calls"])

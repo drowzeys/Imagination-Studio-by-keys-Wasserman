@@ -1,167 +1,360 @@
-"""Portable, allowlisted observations. Shared evidence never becomes a local qualification."""
+"""Platform-neutral, privacy-allowlisted observations. References never qualify a machine."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import json
 import math
 from pathlib import Path
 import re
 
-import windows_features as evidence
-
 PATH = Path(__file__).with_name("model_measurements.json")
 HEX = re.compile(r"[0-9a-f]{64}")
-HARDWARE = ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb", "recorded_cuda_pool_mb")
-METRICS = ("elapsed_s", "peak_job_commit_mb", "peak_process_commit_mb")
-POOLS = ("host_available_mb", "host_commit_headroom_mb", "dedicated_gpu_free_mb")
+TOKEN = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+HARDWARE = ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb", "recorded_cuda_pool_mb",
+            "unified_total_mb")
+POOLS = ("host_available_mb", "host_commit_headroom_mb", "dedicated_gpu_free_mb", "unified_available_mb")
+METRICS = ("elapsed_s", "peak_job_commit_mb", "peak_process_commit_mb", "gpu_pool_mb", "commit_limit_mb",
+           "host_pool_mb", "unified_pool_mb")
 RECIPE = ("width", "height", "count", "workflow_sha256", "fps", "seconds", "frames", "view_size", "strength",
           "steps", "quality", "anchor", "denoise", "megapixels", "window", "silent", "clean_frame",
           "max_words", "max_characters", "max_seconds", "reference", "live", "asr", "engine", "backend",
           "weights", "sampling")
+OUTCOMES = ("passed", "commit_reserve", "memory_refusal", "provenance_changed", "cancelled", "execution_failed")
 
 
 def number(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def recipes():
-    import windows_image_checks as images
-    import windows_audio_checks as audio
-    import windows_library_checks as library
-    for model in images.KINDS:
-        for scope in images.SCOPES:
-            yield model, scope, images, images.receipt_key(model, scope)
-    for module in (audio, library):
-        for model in module.KINDS:
-            yield model, "basic", module, model
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def portable_identity(fingerprint: dict, hashes: dict) -> dict:
-    """Hashes include execution recipe/contract, but not device identity or host-specific paths."""
-    model_rows = []
-    for name, row in fingerprint.get("models", {}).items():
-        digest = hashes.get(name)
-        if not isinstance(digest, str) or not HEX.fullmatch(digest):
-            continue
-        # Names are not exported: an external filename may itself contain personal information.
-        model_rows.append({"sha256": digest, "bytes": row["size"]})
-    recipe = {key: value for key, value in fingerprint.get("recipe", {}).items() if key in RECIPE}
-    # Avoid arbitrary string values from local recipe implementations.
-    recipe = {key: value for key, value in recipe.items()
-              if type(value) in (bool, int, float) or key == "workflow_sha256" and isinstance(value, str) and HEX.fullmatch(value)
-              or key == "sampling" and isinstance(value, dict)}
-    if "sampling" in recipe:
-        recipe["sampling"] = {key: value for key, value in recipe["sampling"].items()
-                              if key in ("temperature", "top_p", "top_k", "steps", "dit_cfg", "ar_cfg") and number(value)}
-    contracts = {key: fingerprint[key] for key in ("contract", "abi", "python_abi", "runner_contract")
-                 if key in fingerprint}
+def recipe_descriptor(raw):
+    if not isinstance(raw, dict):
+        return {}
+    found = {key: value for key, value in raw.items() if key in RECIPE and
+             (type(value) is bool or number(value) or
+              key == "workflow_sha256" and isinstance(value, str) and HEX.fullmatch(value))}
+    if isinstance(raw.get("sampling"), dict):
+        found["sampling"] = {key: value for key, value in raw["sampling"].items()
+                             if key in ("temperature", "top_p", "top_k", "steps", "dit_cfg", "ar_cfg") and number(value)}
+    return found
+
+
+def portable_identity(fingerprint, hashes):
+    models = fingerprint.get("models", {})
+    weights = [{"sha256": hashes[name], "bytes": row["size"]} for name, row in models.items()
+               if isinstance(hashes.get(name), str) and HEX.fullmatch(hashes[name])
+               and type(row.get("size")) is int and row["size"] >= 0]
+    contracts = {}
+    for key in ("contract", "runner_contract"):
+        if type(fingerprint.get(key)) is int and fingerprint[key] >= 0:
+            contracts[key] = fingerprint[key]
+    abi = fingerprint.get("abi", {})
+    if isinstance(abi, dict):
+        contracts["abi"] = {key: value for key, value in abi.items()
+                            if key in ("contract", "torch_major", "numpy_major", "cuda_major") and type(value) is int and value >= 0
+                            or key == "python_abi" and isinstance(value, str) and re.fullmatch(r"\d+\.\d+", value)}
+    if isinstance(fingerprint.get("python_abi"), str) and re.fullmatch(r"\d+\.\d+", fingerprint["python_abi"]):
+        contracts["python_abi"] = fingerprint["python_abi"]
     for key in ("recipe", "fixtures", "guard", "image_options"):
         if key in fingerprint:
-            contracts[key + "_sha256"] = hashlib.sha256(
-                json.dumps(fingerprint[key], sort_keys=True).encode()).hexdigest()
+            contracts[key + "_sha256"] = digest(fingerprint[key])
     engine = fingerprint.get("engine", {})
     if engine:
         contracts["engine_sha256"] = sorted(value for value in engine.values()
                                             if isinstance(value, str) and HEX.fullmatch(value))
     backend = fingerprint.get("backend", {})
-    # Commit to backend configuration without exposing values (paths/options may be private).
     if backend:
-        portable_backend = {key: value for key, value in backend.items() if key != "python"}
-        contracts["backend_sha256"] = hashlib.sha256(json.dumps(portable_backend, sort_keys=True).encode()).hexdigest()
-    value = {"model": fingerprint.get("model", fingerprint.get("kind")), "recipe": recipe, "contracts": contracts,
-             "weights": sorted(model_rows, key=lambda row: (row["sha256"], row["bytes"]))}
-    value["sha256"] = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+        contracts["backend_sha256"] = digest({key: value for key, value in backend.items() if key != "python"})
+    feature = fingerprint.get("model", fingerprint.get("kind"))
+    value = {"feature": feature if isinstance(feature, str) and TOKEN.fullmatch(feature) else "unknown",
+             "recipe": recipe_descriptor(fingerprint.get("recipe", {})), "contracts": contracts,
+             "weights": sorted(weights, key=lambda row: (row["sha256"], row["bytes"])),
+             "weights_expected": len(models), "weights_complete": bool(models) and len(weights) == len(models),
+             "engine_expected": len(engine)}
+    value["sha256"] = digest(value)
     return value
 
 
-def observation(raw: dict) -> dict:
-    found = {key: raw[key] for key in METRICS if number(raw.get(key))}
-    found["rendered"] = raw.get("rendered") is True
-    measured = raw.get("measurements", {})
-    found["samples"] = measured.get("samples", 0) if type(measured.get("samples", 0)) is int else 0
-    found["minimum_free_mb"] = {key: value for key, value in measured.get("minima", {}).items()
-                               if key in POOLS and number(value)}
-    start = measured.get("initial", {})
-    if number(start.get("gpu_dedicated_total_mb")):
-        found["gpu_pool_mb"] = start["gpu_dedicated_total_mb"]
-    if number(start.get("host_commit_limit_mb")):
-        found["commit_limit_mb"] = start["host_commit_limit_mb"]
-    return found
+def execution_profile(platform, backend, engine):
+    return {"platform": platform, "backend": backend, "engine": engine, "architecture": "unknown",
+            "topology": {"memory": "unknown", "devices": None, "device_family": "unknown", "device_model": "unknown"}}
 
 
-def failure_kind(attempt: dict) -> str:
-    error = str(attempt.get("error", "")).lower()
-    if "commit memory" in error or "commit headroom" in error:
-        return "commit_reserve"
-    if "memory" in error or "memavailable" in error:
-        return "memory_refusal"
-    if "changed during" in error:
-        return "provenance_changed"
-    if attempt.get("state") == "cancelled":
-        return "cancelled"
-    return "execution_failed"
+def validate_execution(value):
+    if not isinstance(value, dict) or set(value) != {"platform", "backend", "engine", "architecture", "topology"}:
+        raise ValueError("Invalid execution profile.")
+    if value["platform"] not in ("windows", "macos", "linux", "unknown"):
+        raise ValueError("Invalid platform.")
+    allowed = {"backend": ("torch-cuda", "torch-metal", "mlx", "native-cuda", "native-metal", "cpu", "unknown"),
+               "engine": ("comfyui", "tensorfold", "mlx", "diffusers", "mmaudio", "ffmpeg", "tesseract", "unknown"),
+               "architecture": ("x86-64", "arm64", "unknown")}
+    if any(value[key] not in choices for key, choices in allowed.items()):
+        raise ValueError("Invalid execution backend/architecture.")
+    topology = value["topology"]
+    if not isinstance(topology, dict) or set(topology) != {"memory", "devices", "device_family", "device_model"}:
+        raise ValueError("Invalid memory topology.")
+    if topology["memory"] not in ("unified", "discrete", "host", "unknown"):
+        raise ValueError("Invalid memory pool.")
+    if topology["devices"] is not None and (type(topology["devices"]) is not int or not 1 <= topology["devices"] <= 8):
+        raise ValueError("Invalid device count.")
+    if topology["device_family"] not in ("unknown", "apple-m1", "apple-m2", "apple-m3", "apple-m4", "apple-m5",
+                                         "nvidia-blackwell", "nvidia-hopper", "nvidia-ada", "nvidia-ampere",
+                                         "nvidia-gb10", "nvidia-n1x"):
+        raise ValueError("Invalid public device family.")
+    if topology["device_model"] not in (
+        "unknown", "nvidia-dgx-spark-gb10", "nvidia-rtx-spark-n1x", "nvidia-rtx-pro-6000-blackwell",
+        "nvidia-rtx-5090", "nvidia-rtx-4090", "nvidia-rtx-3090", "nvidia-h100", "nvidia-a100",
+        *(f"apple-m{generation}{suffix}" for generation in range(1, 6) for suffix in ("", "-pro", "-max", "-ultra"))):
+        raise ValueError("Invalid public device model.")
 
 
-def export() -> dict:
-    profiles = []
-    for model, scope, module, key in recipes():
-        receipt = evidence.saved(key, "")
-        attempt = evidence.saved(model + "-" + scope if key == model and module.__name__ == "windows_image_checks" else key, "-attempt")
-        # Audio/Library keep their current attempt under the feature id.
-        if not attempt and scope == "basic":
-            attempt = evidence.saved(model, "-attempt")
-        recorded = receipt.get("fingerprint", {})
-        identity = portable_identity(recorded, receipt.get("model_sha256", {})) if recorded else None
-        hardware = {name: recorded["hardware"][name] for name in HARDWARE
-                    if number(recorded.get("hardware", {}).get(name))}
-        if receipt.get("ok") is True:
-            profiles.append(make_profile(model, scope, "passed", receipt, identity, hardware))
-        if attempt.get("ok") is False and attempt.get("error"):
-            # Failed attempts may predate fingerprint persistence. Never fill gaps from another run.
-            failed_fp = attempt.get("fingerprint", {})
-            failed_identity = portable_identity(failed_fp, attempt.get("model_sha256", {})) if failed_fp else None
-            profiles.append(make_profile(model, scope, failure_kind(attempt), attempt, failed_identity, {}))
-    return {"schema": 1, "generated_at": datetime.now(timezone.utc).isoformat(),
-            "purpose": "Shared observations, not local passes, minimum RAM requirements or guaranteed fit.",
-            "profiles": profiles}
+def compatible(left, right):
+    """Unknown historical hardware is never proof of same-device compatibility."""
+    for value in (left, right):
+        validate_execution(value)
+        if any(value[key] == "unknown" for key in ("platform", "backend", "engine", "architecture")):
+            return False
+        if any(item in ("unknown", None) for item in value["topology"].values()):
+            return False
+    return left == right
 
 
-def make_profile(model, scope, outcome, receipt, identity, hardware):
-    rows = receipt.get("results", []) if outcome == "passed" else [receipt.get("observations", {})]
-    readings = [observation(row) for row in rows if isinstance(row, dict)]
-    if not hardware:
-        for row in rows:
-            initial = row.get("measurements", {}).get("initial", {})
-            hardware.update({key: initial[key] for key in HARDWARE if number(initial.get(key))})
-    runtime = receipt.get("fingerprint", {}).get("runtime", {})
-    versions = {key: value for key, value in runtime.get("versions", {}).items()
-                if key in ("torch", "numpy", "comfy-kitchen") and isinstance(value, str)
-                and re.fullmatch(r"[0-9A-Za-z.+_-]{1,80}", value)}
-    checked = receipt.get("checked_at")
+def complete_identity(identity):
+    return bool(identity and identity["weights_complete"] and identity["engine_expected"] is not None
+                and identity["engine_expected"] == len(identity["contracts"].get("engine_sha256", []))
+                and "recipe_sha256" in identity["contracts"] and "contract" in identity["contracts"]
+                and ("abi" in identity["contracts"] or "python_abi" in identity["contracts"]))
+
+
+def _keys(value, required, optional=()):
+    if not isinstance(value, dict) or not set(required) <= value.keys() or value.keys() - set(required) - set(optional):
+        raise ValueError("Invalid shared measurement fields.")
+
+
+def _hash(value):
+    if not isinstance(value, str) or not HEX.fullmatch(value):
+        raise ValueError("Invalid content hash.")
+
+
+def _token(value):
+    if not isinstance(value, str) or not TOKEN.fullmatch(value):
+        raise ValueError("Invalid public identifier.")
+
+
+def _timestamp(value):
+    from datetime import datetime
     try:
-        checked = datetime.fromisoformat(checked).isoformat()
-    except (TypeError, ValueError):
-        checked = None
-    value = {"model": model, "scope": scope, "outcome": outcome, "checked_at": checked,
-             "identity": identity, "hardware": hardware, "runtime_versions": versions,
-             "observations": readings, "interrupted": outcome != "passed" and any(not row["rendered"] for row in readings),
-             "provenance_complete": bool(identity and identity["weights"])}
-    value["id"] = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
-    return value
+        datetime.fromisoformat(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid measurement timestamp.") from error
 
 
-def load(path: Path = PATH) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema") != 1 or not isinstance(data.get("profiles"), list):
+def validate_case(value):
+    if value is None:
+        return
+    if isinstance(value, dict) and value == recipe_descriptor(value):
+        return
+    if isinstance(value, str) and (
+        re.fullmatch(r"[1-5]s-(under|replace)", value)
+        or re.fullmatch(r"[1-9]\d? 512x512 storyboard drafts", value)
+        or re.fullmatch(r"(Qwen-Image 2\.1 (Turbo|Full)|FLUX3-K (Fast|Full)|MOSS-Image): [1-9]\d? image\(s\), \d{2,4}x\d{2,4}", value)
+        or value in ("Short local Voice", "MiniMax-Music3: 10-second instrumental", "Five-second sound effect",
+                     "Turnaround sheet on bundled baker fixture", "Upscale on bundled baker fixture",
+                     "Find a person on bundled baker fixture", "Remove a person on bundled baker fixture",
+                     "Character Swap on bundled baker fixture")):
+        return
+    raise ValueError("Invalid observation case.")
+
+
+def validate(data):
+    _keys(data, ("schema", "generated_at", "purpose", "profiles"))
+    if data["schema"] != 1 or not isinstance(data["profiles"], list):
         raise ValueError("Invalid shared measurement schema.")
+    _timestamp(data["generated_at"])
+    if data["purpose"] != "Shared observations, not local passes, minimum RAM requirements or guaranteed fit.":
+        raise ValueError("Invalid measurement purpose.")
+    seen = set()
+    import model_catalog
+    models = set(model_catalog.catalogue()["models"]) | {"sd-turbo"}
+    features = models | {"scout", "sfx", "turnaround", "upscale", "remove", "mask"}
+    for row in data["profiles"]:
+        _keys(row, ("id", "model", "feature", "scope", "outcome", "checked_at", "identity", "hardware",
+                    "execution", "runtime_versions", "observations", "interrupted", "provenance_complete", "provenance"))
+        _hash(row["id"])
+        if row["id"] in seen:
+            raise ValueError("Duplicate observation profile.")
+        seen.add(row["id"])
+        for key in ("model", "feature", "scope"):
+            _token(row[key])
+        if row["model"] not in models or row["feature"] not in features:
+            raise ValueError("Unknown canonical model or feature.")
+        spec = model_catalog.model(row["model"]) if row["model"] != "sd-turbo" else {"feature": "scout"}
+        linked = spec.get("features") or [spec.get("feature", row["model"])]
+        if row["feature"] not in linked:
+            raise ValueError("The feature does not use this canonical model.")
+        if row["outcome"] not in OUTCOMES or type(row["interrupted"]) is not bool or type(row["provenance_complete"]) is not bool:
+            raise ValueError("Invalid observation outcome.")
+        if row["checked_at"] is not None:
+            _timestamp(row["checked_at"])
+        validate_execution(row["execution"])
+        _keys(row["hardware"], (), HARDWARE)
+        if not all(number(value) for value in row["hardware"].values()):
+            raise ValueError("Invalid hardware capacity.")
+        _keys(row["runtime_versions"], (), ("torch", "numpy", "comfy-kitchen"))
+        if any(not isinstance(value, str) or not re.fullmatch(r"[0-9][0-9A-Za-z.+_-]{0,79}", value)
+               for value in row["runtime_versions"].values()):
+            raise ValueError("Invalid runtime version.")
+        provenance = row["provenance"]
+        _keys(provenance, (), ("source_profile_id", "source_model", "source_identity_sha256", "source_provenance_complete"))
+        for key in ("source_profile_id", "source_identity_sha256"):
+            if key in provenance:
+                _hash(provenance[key])
+        if "source_model" in provenance:
+            _token(provenance["source_model"])
+            if provenance["source_model"] not in features:
+                raise ValueError("Unknown historical feature.")
+        if "source_provenance_complete" in provenance and type(provenance["source_provenance_complete"]) is not bool:
+            raise ValueError("Invalid historical provenance.")
+        identity = row["identity"]
+        if identity is not None:
+            _keys(identity, ("feature", "recipe", "contracts", "weights", "sha256", "weights_expected", "weights_complete",
+                             "engine_expected"))
+            _token(identity["feature"])
+            if identity["feature"] != row["feature"]:
+                raise ValueError("The identity names a different feature.")
+            if identity["recipe"] != recipe_descriptor(identity["recipe"]):
+                raise ValueError("Invalid recipe descriptor.")
+            contracts = identity["contracts"]
+            _keys(contracts, (), ("contract", "runner_contract", "abi", "python_abi", "recipe_sha256", "fixtures_sha256",
+                                 "guard_sha256", "image_options_sha256", "engine_sha256", "backend_sha256"))
+            for key, value in contracts.items():
+                if key == "engine_sha256":
+                    if not isinstance(value, list):
+                        raise ValueError("Invalid engine hashes.")
+                    for item in value:
+                        _hash(item)
+                elif key.endswith("_sha256"):
+                    _hash(value)
+                elif key == "abi":
+                    _keys(value, (), ("contract", "python_abi", "torch_major", "numpy_major", "cuda_major"))
+                    for name, item in value.items():
+                        if name == "python_abi":
+                            if not isinstance(item, str) or not re.fullmatch(r"\d+\.\d+", item):
+                                raise ValueError("Invalid Python ABI.")
+                        elif type(item) is not int or item < 0:
+                            raise ValueError("Invalid ABI.")
+                elif key == "python_abi":
+                    if not isinstance(value, str) or not re.fullmatch(r"\d+\.\d+", value):
+                        raise ValueError("Invalid Python ABI.")
+                elif type(value) is not int or value < 0:
+                    raise ValueError("Invalid contract.")
+            if not isinstance(identity["weights"], list):
+                raise ValueError("Invalid weight identities.")
+            for weight in identity["weights"]:
+                _keys(weight, ("sha256", "bytes"))
+                _hash(weight["sha256"])
+                if type(weight["bytes"]) is not int or weight["bytes"] < 0:
+                    raise ValueError("Invalid weight byte size.")
+            expected = identity["weights_expected"]
+            if expected is not None and (type(expected) is not int or expected < len(identity["weights"])):
+                raise ValueError("Invalid expected weight count.")
+            complete = expected is not None and expected > 0 and expected == len(identity["weights"])
+            if type(identity["weights_complete"]) is not bool or identity["weights_complete"] != complete:
+                raise ValueError("Incomplete weight provenance.")
+            engine_expected = identity["engine_expected"]
+            if engine_expected is not None and (type(engine_expected) is not int or
+                                               engine_expected < len(contracts.get("engine_sha256", []))):
+                raise ValueError("Invalid expected engine count.")
+            _hash(identity["sha256"])
+            if identity["sha256"] != digest({key: value for key, value in identity.items() if key != "sha256"}):
+                raise ValueError("Invalid identity digest.")
+        if row["provenance_complete"] != complete_identity(identity):
+            raise ValueError("Invalid provenance completeness.")
+        if not isinstance(row["observations"], list):
+            raise ValueError("Invalid observations.")
+        for reading in row["observations"]:
+            _keys(reading, ("rendered", "samples", "minimum_free_mb", "case"), METRICS)
+            if type(reading["rendered"]) is not bool or type(reading["samples"]) is not int or reading["samples"] < 0:
+                raise ValueError("Invalid sample outcome.")
+            validate_case(reading["case"])
+            if any(not number(reading[key]) for key in METRICS if key in reading):
+                raise ValueError("Invalid numeric reading.")
+            _keys(reading["minimum_free_mb"], (), POOLS)
+            if not all(number(value) for value in reading["minimum_free_mb"].values()):
+                raise ValueError("Invalid memory reading.")
+        if row["id"] != digest({key: value for key, value in row.items() if key != "id"}):
+            raise ValueError("Invalid profile digest.")
     return data
 
 
-def references(model: str, data=None) -> dict:
-    rows = [row for row in (data or load())["profiles"] if row["model"] == model]
-    passed = {row["scope"] for row in rows if row["outcome"] == "passed"}
-    failed = {row["scope"] for row in rows if row["outcome"] != "passed"}
+def load(path=PATH):
+    return validate(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def references(model, data=None, *, platform, backend=None, engine=None, feature=None):
+    rows = [row for row in (data if data is not None else load())["profiles"]
+            if row["model"] == model and row["execution"]["platform"] == platform
+            and (backend is None or row["execution"]["backend"] == backend)
+            and (engine is None or row["execution"]["engine"] == engine)
+            and (feature is None or row["feature"] == feature)]
+    passed = {(row["feature"], row["scope"]) for row in rows if row["outcome"] == "passed"}
+    failed = {(row["feature"], row["scope"]) for row in rows if row["outcome"] != "passed"}
     return {"passed_recipes": len(passed), "failed_recipes": len(failed),
             "summary": f"Shared tests: {len(passed)} recipes passed, {len(failed)} had unsuccessful attempts on recorded hardware."
                        " Reference only; local fit is not inferred."} if rows else {}
+
+
+def memory_summary(observations):
+    """Keep distinct, overlapping pools separate; adapter usage is not owned allocation."""
+    values = {key: [] for key in ("gpu_usage", "job_commitment", "host_usage", "unified_usage")}
+    for row in observations:
+        partial = row.get("interrupted", False) and not row["rendered"]
+        for pool, free, key in (("gpu_pool_mb", "dedicated_gpu_free_mb", "gpu_usage"),
+                                ("host_pool_mb", "host_available_mb", "host_usage"),
+                                ("unified_pool_mb", "unified_available_mb", "unified_usage")):
+            total, remaining = row.get(pool), row.get("minimum_free_mb", {}).get(free)
+            if number(total) and total > 0 and number(remaining) and remaining <= total:
+                values[key].append((total - remaining, partial))
+        if number(row.get("peak_job_commit_mb")):
+            values["job_commitment"].append((row["peak_job_commit_mb"], partial))
+    ranges = {key: ({"min_mb": min(value for value, _ in rows), "max_mb": max(value for value, _ in rows),
+                     "incomplete": any(partial for _, partial in rows)} if rows else None)
+              for key, rows in values.items()}
+    labels = []
+    for key, label in (("gpu_usage", "GPU usage (adapter-wide)"), ("job_commitment", "owned job commitment"),
+                       ("host_usage", "host RAM usage (system-wide)"), ("unified_usage", "unified memory usage (system-wide)")):
+        value = ranges[key]
+        if value:
+            labels.append(f"{label}: {value['min_mb'] / 1024:.1f}–{value['max_mb'] / 1024:.1f}"
+                          f"{'+' if value['incomplete'] else ''} GiB")
+    if not labels:
+        return {}
+    return {"memory_ranges": ranges, "memory_summary": "Observed " + " · ".join(labels) + ".",
+            "memory_note": "Ranges are observed recipe peaks, not minimum requirements. "
+                           "GPU usage includes other apps. + means a memory-limited run ended before completion; "
+                           "the full-run peak may be higher. GPU, host, unified and commitment pools overlap; do not add them."}
+
+
+def fit_summary(levels):
+    """A local qualification summary, separate from historical shared references."""
+    if not levels:
+        return None
+    passed = sum(bool(level.get("qualified")) for level in levels)
+    failed = sum(not level.get("qualified") and level.get("outcome") == "failed" for level in levels)
+    unchecked = len(levels) - passed - failed
+    if not passed and not failed:
+        return None
+    if passed == len(levels):
+        text = f"All {passed} recipes verified on this machine."
+    elif passed:
+        text = f"{passed}/{len(levels)} recipes verified here"
+        text += f"; {failed} failed — some recipes run, not all have passed." if failed else "."
+    else:
+        text = f"{failed}/{len(levels)} recipes failed here; none verified."
+    if unchecked:
+        text += f" {unchecked} not verified."
+    readings = [row for level in levels for row in level.get("observations", [])]
+    return {"passed": passed, "failed": failed, "total": len(levels), "summary": text, **memory_summary(readings)}

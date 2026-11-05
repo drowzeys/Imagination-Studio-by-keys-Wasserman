@@ -15,6 +15,21 @@ import windows_foley as foley
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_qualification_retains_each_render_memory_observation(tmp_path, monkeypatch):
+    initial = {"physical_total_mb": 65536, "host_total_mb": 32000, "gpu_dedicated_total_mb": 30000}
+    measured = {"initial": initial, "minima": {"dedicated_gpu_free_mb": 22000}}
+    result = {"memory_guard": measured, "calibration": {"request_to_file_seconds": 2, "audio": {}},
+              "job_commitment": {"peak_job_commit_bytes": 4 << 20, "peak_process_commit_bytes": 3 << 20}}
+    monkeypatch.setattr(foley, "check_room", lambda: None)
+    monkeypatch.setattr(foley, "fingerprint", lambda: {})
+    monkeypatch.setattr(foley, "fixture", lambda *args: None)
+    monkeypatch.setattr(foley, "render", lambda *args, **kwargs: result)
+    monkeypatch.setattr(foley.windows_features, "folder", lambda: tmp_path / "receipts")
+    receipt = foley.qualify(tmp_path)
+    assert len(receipt["results"]) == 2
+    assert all(row["measurements"] == measured and row["rendered"] for row in receipt["results"])
+
+
 def checker():
     spec = importlib.util.spec_from_file_location("foley_comfy_check", ROOT / "scripts" / "windows-comfy-check.py")
     module = importlib.util.module_from_spec(spec)

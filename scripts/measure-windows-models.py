@@ -32,9 +32,10 @@ def call(path, body=None):
 
 def selection(models, scopes, force, reference):
     import shared_measurements as shared
+    import windows_measurements as windows
     from windows_audio_checks import digest
     results = []
-    for model, scope, module, key in shared.recipes():
+    for model, scope, module, key in windows.recipes():
         if models and model not in models or scopes and scope not in scopes:
             continue
         why = module.prerequisites(model)
@@ -42,7 +43,7 @@ def selection(models, scopes, force, reference):
             results.append({"model": model, "scope": scope, "state": "not_installed"})
             continue
         fp = module.fingerprint(model, scope) if module.__name__ == "windows_image_checks" else module.fingerprint(model)
-        receipt = shared.evidence.saved(key, "")
+        receipt = windows.evidence.saved(key, "")
         previous = receipt.get("fingerprint", {})
         hashes = {}
         for name, row in fp.get("models", {}).items():
@@ -57,12 +58,17 @@ def selection(models, scopes, force, reference):
                     path = windows_runtime.model_root() / path
                 hashes[name] = digest(path, row["size"], row["mtime_ns"])
         identity = shared.portable_identity(fp, hashes)
-        hardware = {key: fp["hardware"][key] for key in shared.HARDWARE if shared.number(fp.get("hardware", {}).get(key))}
-        same = any(row["model"] == model and row["scope"] == scope and row.get("identity", {}).get("sha256") == identity["sha256"]
+        hardware = windows.hardware(fp)
+        execution = windows.execution_profile(model, fp)
+        same = shared.complete_identity(identity) and any(
+                   row["model"] == windows.model_id(model) and row["feature"] == model and row["scope"] == scope
+                   and row["provenance_complete"] and row.get("identity", {}).get("sha256") == identity["sha256"]
                    and row.get("hardware") == hardware
+                   and shared.compatible(row["execution"], execution)
                    for row in reference["profiles"] if row.get("identity") and row["outcome"] == "passed")
         identity_key = hashlib.sha256((model + "/" + scope + identity["sha256"]
-                                      + json.dumps(hardware, sort_keys=True)).encode()).hexdigest()
+                                      + json.dumps(hardware, sort_keys=True)
+                                      + json.dumps(execution, sort_keys=True)).encode()).hexdigest()
         results.append({"model": model, "scope": scope, "identity": identity_key,
                         "state": "run" if force or not same else "unchanged"})
     return results
@@ -86,18 +92,19 @@ def main(argv=None):
     import windows_media
     os.environ["PATH"] = windows_media.search_path(os.environ.get("PATH", ""))
     import shared_measurements as shared
+    import windows_measurements as windows
     if args.export_only:
-        save(args.output, shared.export())
+        save(args.output, windows.export())
         print("Exported saved observations; no inference or hardware probes.")
         return 0
-    known = list(shared.recipes())
+    known = list(windows.recipes())
     models = set(args.models.split(",")) if args.models else set()
     scopes = set(args.scopes.split(",")) if args.scopes else set()
     if models - {row[0] for row in known} or scopes - {row[1] for row in known}:
         parser.error("Unknown model/feature or recipe scope.")
     reference = shared.load(args.reference) if args.reference else shared.load()
     plan = selection(models, scopes, args.force_all, reference)
-    save(args.output, {**shared.export(), "plan": plan})
+    save(args.output, windows.export())
     for row in plan:
         print(row["model"] + "/" + row["scope"] + ": " + row["state"])
     if not args.run:
@@ -133,10 +140,10 @@ def main(argv=None):
                     break
                 if time.monotonic() >= campaign_deadline or time.time() >= active["deadline"]:
                     call("/api/jobs/" + active["job"] + "/cancel", {})
-                    save(args.output, {**shared.export(), "plan": plan})
+                    save(args.output, windows.export())
                     raise RuntimeError("Sweep deadline reached; owned job cancellation requested. Inspect Feature checks before resuming.")
                 time.sleep(2)
-            save(args.output, {**shared.export(), "plan": plan})
+            save(args.output, windows.export())
             resume["active"] = None
             if job["status"] == "done":
                 resume["completed"].append(row["identity"])
@@ -146,7 +153,7 @@ def main(argv=None):
     except KeyboardInterrupt:
         if resume.get("active"):
             call("/api/jobs/" + resume["active"]["job"] + "/cancel", {})
-        save(args.output, {**shared.export(), "plan": plan})
+        save(args.output, windows.export())
         raise
     print("Sweep completed. Review the portable export before checking it in; local qualification remains separate.")
     return 0
