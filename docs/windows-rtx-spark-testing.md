@@ -129,8 +129,9 @@ The **MMAudio foley** app has its own Sound check and opens Foley when its local
 
 Qualification runs real outputs under a 4 GiB owned-job cap and a host-memory watchdog, and drains its own
 processes. Receipts live in `%LOCALAPPDATA%\ImaginationStudio\qualification`, not the repository; do not copy
-them between machines or edit them. A changed runtime/hardware/recipe disables the route until checked again.
-UI text, badge/layout changes and report formatting do not invalidate a pass. Unsuccessful reruns retain
+them between machines or edit them. Model/recipe changes, hardware-profile changes, core ABI-family changes
+and explicit compatibility-contract changes need requalification. Routine updates retain the original dated
+evidence, with a runtime-update note; no render runs automatically. Unsuccessful reruns retain
 the last successful evidence and save the new attempt separately; no test is automatically repeated.
 `/api/state`, `/api/actions` and `/api/finish` report the applicable readiness. Current headroom is checked
 at submission and execution; a qualified feature can still refuse a job while memory is busy.
@@ -162,6 +163,23 @@ WDDM counters are bound to the selected CUDA UUID/LUID, with OS signals, two-sec
 2 GiB dedicated reserve. They are not another CUDA context's budget. No stale-data success fallback is allowed.
 Check queued/running cancellation and that cancelled jobs publish no take. Format/level checks do not
 establish listening quality or support for larger/longer inputs.
+
+### Baseline cards and update policy
+
+The Image, Sound and Motion graphics groups also expose the existing **SD-Turbo storyboard drafts**,
+**Stable Audio Open effects**, and **Motion graphics** checks. Their saved receipts are reused, including
+legacy receipts whose update time is labelled as the evidence-file time rather than a newly performed check.
+Rerun queues six sequential image drafts, the fixed five-second effect, or all six graphics templates.
+Setup commands install dependencies only when requested. An unsuccessful/cancelled rerun does not delete a pass.
+GPU checks drain Studio's warm image/sound backend before admission; models started outside Studio are not stopped.
+
+Balanced update matching is the default. File hashes, timestamps and dependency versions record the tested
+runtime; ordinary changes do not by themselves revoke qualification. GPU Python ABI, Torch/NumPy/CUDA major
+families, model identity, recipe, hardware profile and explicit execution-contract boundaries are still checked.
+Changed model-file metadata is checksum-verified rather than treated as proof of different weights.
+For opt-in diagnostic strictness, set `$env:STUDIO_QUALIFICATION_STRICT = '1'` before launching Studio.
+Strict mode requires exact matching and may require a new check, including for older receipts without full
+runtime provenance. Remove that variable and restart to return to balanced matching; no saved pass is erased.
 
 ## 4. Capture each machine separately
 

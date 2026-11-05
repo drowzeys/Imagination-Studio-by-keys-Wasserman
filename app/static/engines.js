@@ -12,10 +12,15 @@ function artSlot(name, cls = "", sign = "image") { const box = el("div", { class
   if (ART.ready.has(name)) box.append(el("img", { src: "art/" + name + ".webp", alt: "", loading: "lazy", decoding: "async" }));
   return box; }
 // a picture card: the picture, one label, one line, a chevron
-function pcard({ art, sign, title, one, run, k, off, src, data }) {  // data: the card's data-* attributes
+function withFeatureBadge(card, feature, attrs = {}) {
+  const badge = feature && typeof featureBadge === "function" ? featureBadge(feature) : null;
+  return badge ? el("div", { class: "feature-app", "data-feature-card": feature, ...attrs }, card, badge) : card;
+}
+function pcard({ art, sign, title, one, run, k, off, src, data, feature }) {  // data: the card's data-* attributes
   const pic = src ? el("div", { class: "art" }, el("img", { src, alt: "", loading: "lazy" })) : artSlot(art, "", sign);
-  return el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "", ...(data || {}) }, pic, k ? el("span", { class: "k" }, k) : null,
-    el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, off || one) : null), icon("go", "go"))); }
+  const card = el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "", ...(data || {}) }, pic, k ? el("span", { class: "k" }, k) : null,
+    el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, off || one) : null), icon("go", "go")));
+  return withFeatureBadge(card, feature); }
 // a vault page's head with its cover, like an engine's; without a ready cover it is the plain head
 function vaultHead(id, title, line, right) {
   if (!ART.ready.has("vault-" + id)) return pageHead("Studio Vault", title, line, right);
@@ -74,10 +79,14 @@ function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_
     if (id === "video") e.line = (typeof capWhy === "function" ? capWhy : () => "")("video");
     if (id === "previs") { e.line = "Copilot CLI can plan with This Studio tools. Motion analysis and Blender automation remain unqualified."; e.marks = [];
       e.cards[1].one = "Copilot CLI with This Studio tools"; }
-    if (id === "sound") { e.line = "Five-second Stable Audio Open sound effects on this machine. Voice, music and foley remain unqualified.";
-      e.marks = []; e.primary = ["Make a sound effect", () => go("Foley")]; e.cards[2].one = "Five-second sound effects from words"; }
+    if (id === "sound") { e.line = "Five-second Stable Audio Open sound effects. Other sound models have their own installation and qualification.";
+      const effect = () => { SFX.mode = "sfx"; go("Foley"); };
+      e.marks = []; e.primary = ["Make a sound effect", effect]; e.cards[2].one = "Five-second sound effects from words"; e.cards[2].run = effect; }
     const kinds = { "act-image-edit": "edit", "act-image-looks": "looks", "act-previs-motion": "motion", "start-voice": "voice", "start-song": "music", "start-sfx": "sfx" };
-    e.cards = e.cards.map((c, i) => ({ ...c, off: (typeof capWhy === "function" ? capWhy : () => "")(id === "video" ? "video" : id === "image" && i < 2 ? "scout" : kinds[c.art]) || c.off }));
+    e.cards = e.cards.map((c, i) => {
+      const feature = id === "video" ? "video" : id === "image" && i < 2 ? "scout" : kinds[c.art];
+      return { ...c, feature, off: (typeof capWhy === "function" ? capWhy : () => "")(feature) || c.off };
+    });
   }
   const why = (typeof capWhy === "function" ? capWhy : () => "")(id === "sound" && win ? "sfx" : primary);
   return el("div", {},

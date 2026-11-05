@@ -630,7 +630,9 @@ function viewCreate() {
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
     if (S.windows_stills && S.windows_stills.available) C.imageSize = "512x512";
     const [w, h] = C.imageSize.split("x").map(Number);
-    put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
+    const qualification = typeof featureBadge === "function" ? featureBadge("scout") : null;
+    const title = el("h2", {}, "The picture");
+    put(body, qualification ? el("div", { class: "row" }, title, qualification) : title, goes, picture, imageModelPick(),
       el("label", {}, "Size"), choice(C, "imageSize", S.windows_stills && S.windows_stills.available ? { "512x512": ["Storyboard draft", "512 × 512 square"] }
         : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
       el("div", { class: "row" },

@@ -58,6 +58,8 @@ These results do not qualify either new route on the 48 GB machine.
 | Foley qualification | Five-second mix / one-second replacement: 20.58 / 17.50 s; peak owned-job commitment 12,307.1 / 11,902.4 MiB under the unchanged 16 GiB cap. Mono 44.1 kHz, duration/levels, full decode and unchanged source frames passed |
 | Foley normal app route | Owned isolated app rendered a 720p five-second mix and 3.5-second replacement. Invalid settings refused; queued/synthesis cancellation, no cancelled-take publication, backend drain and graceful shutdown passed |
 | Sound telemetry refresh | UUID/LUID-bound native WDDM usage removed model-load HTTP/NVML stalls without extending two-second freshness or raising caps. Stable Audio Open requalified; process peak 12,872,540,160 bytes remained below its 12 GiB cap |
+| Six progressive checks | Image drafts, sound effects and six-template motion graphics now join Foley/HDR/Finish in room-grouped cards. All six existing passes were retained byte-for-byte under balanced matching, with zero requalification renders. Read-only browser checks passed group collapse, saved badges and exact card focus |
+| Update policy and card layout | Balanced reuse and opt-in strictness, ABI/recipe/model compatibility boundaries, prior-pass retention and unload-before-check ordering passed model-free regressions. Compact in-card badges preserved row alignment and independent clickability at desktop and mobile widths; no browser check started a render |
 
 CPU feature receipts are hardware/runtime/code-bound, with a 4 GiB job cap and OS low-memory supervision.
 The ten-second limits are measured qualification boundaries, not claims about the models or all CPU workflows.

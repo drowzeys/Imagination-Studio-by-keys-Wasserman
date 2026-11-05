@@ -3,10 +3,23 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
 from typing import Literal
+
+
+def strict_matching() -> bool:
+    value = os.environ.get("STUDIO_QUALIFICATION_STRICT", "").strip().lower()
+    if value not in ("", "0", "false", "no", "1", "true", "yes"):
+        raise ValueError("STUDIO_QUALIFICATION_STRICT must be a boolean")
+    return value in ("1", "true", "yes")
+
+
+def matches_qualification(recorded: object, current: object, recorded_contract: dict, current_contract: dict) -> bool:
+    """Provenance stays exact; only explicit compatibility boundaries invalidate balanced evidence."""
+    return recorded_contract == current_contract and (not strict_matching() or recorded == current)
 
 
 @dataclass(frozen=True)

@@ -52,13 +52,14 @@ const STARTS = () => {
     cards.find(c => c.id === "still").one = "SD-Turbo: 512 × 512 storyboard drafts";
     cards.find(c => c.id === "sfx").title = "Sound effects";
     cards.find(c => c.id === "sfx").one = "Stable Audio Open: five seconds";
+    cards.find(c => c.id === "sfx").run = () => { SFX.mode = "sfx"; go("Foley"); };
     cards.find(c => c.id === "agent").one = "Copilot CLI with This Studio tools";
     cards.push({ id: "film", sign: "story", title: "Plan a film", one: "Slate, the Bible and portable project handoff", run: () => go("Production") },
       { id: "script", sign: "suite", title: "Bring in a script", one: "Fountain or suite exports; no model required", run: () => go("Import") },
       { id: "graphics", sign: "edit", title: "Motion graphics", one: "Six templates from your own words, clips and audio", run: () => go("Graphics") });
   }
   const kinds = { clip: "video", scout: "video", still: "scout", sharp: "video", long: "video", voice: "voice", song: "music", sfx: "sfx", looks: "looks", previs: "motion", nodes: "nodes", graphics: "graphics" };
-  return cards.map(c => ({ ...c, off: (typeof capWhy === "function" ? capWhy : () => "")(kinds[c.id]) }));
+  return cards.map(c => ({ ...c, feature: kinds[c.id], off: (typeof capWhy === "function" ? capWhy : () => "")(kinds[c.id]) }));
 };
 // 3.0's cards show unless switched off in Settings, even beside a start_cards list saved before they existed
 const START_NEW = ["sfx", "looks", "previs", "nodes", "film", "script", "graphics"];

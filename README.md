@@ -126,6 +126,12 @@ and other unverified actions are refused explicitly.
 It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
 the Linux/Mac memory guards and hardware requirements have not been relaxed.
 
+**Machine > Feature checks** groups the six bounded checks by room and reuses their saved evidence.
+Balanced matching is the default: routine updates keep a pass with an update note, rather than demanding
+another render. Model/recipe, hardware-profile, core ABI and explicit compatibility breaks still require a check.
+Exact runtime matching is opt-in with `STUDIO_QUALIFICATION_STRICT=1`; see the
+[update policy](docs/windows-rtx-spark-testing.md#baseline-cards-and-update-policy).
+
 Install the official Python install manager (`py`), then run in PowerShell. Install mode obtains missing
 Python 3.13 itself (native ARM64 on an ARM64 machine):
 

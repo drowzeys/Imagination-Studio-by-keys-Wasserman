@@ -15,6 +15,8 @@ import uuid
 
 import windows_sfx
 import windows_storyboard as renderer
+from feature_checks import matches_qualification
+from windows_qualification import LEGACY_GPU_COMPATIBILITY, baseline_gpu_compatibility, baseline_gpu_runtime, hardware_matches, verify_model_updates
 
 SECONDS, STEPS, CFG = 5, 100, 7.0
 RECIPE = {"seconds": SECONDS, "steps": STEPS, "cfg": CFG}
@@ -29,22 +31,32 @@ def status() -> dict:
     root = folder()
     try:
         receipt = json.loads((root / "qualification.json").read_text(encoding="utf-8"))
+        current_files = {name: {"size": size, "sha256": digest, "mtime_ns": (root / name).stat().st_mtime_ns}
+                         for name, (size, digest) in windows_sfx.FILES.items()}
+        previous_files = receipt.get("files", {})
+        current_tools = renderer.tool_hashes()
+        provenance = {"tools": receipt.get("tool_sha256"), "files": previous_files, "runtime": receipt.get("runtime")}
+        current = {"tools": current_tools, "files": current_files, "runtime": baseline_gpu_runtime()}
         valid = (receipt.get("revision") == windows_sfx.REVISION and receipt.get("recipe") == RECIPE
-                 and receipt.get("tool_sha256") == renderer.tool_hashes()
-                 and receipt.get("files") == {name: {"size": size, "sha256": digest, "mtime_ns": (root / name).stat().st_mtime_ns}
-                                              for name, (size, digest) in windows_sfx.FILES.items()}
+                 and {name: (value["size"], value["sha256"]) for name, value in previous_files.items()}
+                     == {name: (size, digest) for name, (size, digest) in windows_sfx.FILES.items()}
+                 and matches_qualification(provenance, current, receipt.get("compatibility", LEGACY_GPU_COMPATIBILITY),
+                                           baseline_gpu_compatibility())
                  and all((root / name).stat().st_size == info[0] for name, info in windows_sfx.FILES.items())
                  and (root / "LICENSE.md").is_file() and receipt.get("result", {}).get("ok") is True
                  and isinstance(receipt.get("hardware"), dict)
                  and all(type(receipt["hardware"].get(key)) is int and receipt["hardware"][key] > 0
-                         for key in ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb")))
+                         for key in ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb"))
+                 and hardware_matches(receipt["hardware"]))
     except FileNotFoundError:
         return {"available": False, "why": "Run setup-windows-sfx.ps1, then check-windows-sound.ps1 to qualify the five-second route."}
-    except (OSError, ValueError, TypeError, AttributeError) as error:
+        if valid:
+            verify_model_updates(root, windows_sfx.FILES, {name: value["mtime_ns"] for name, value in previous_files.items()})
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError) as error:
         return {"available": False, "why": f"The Windows sound qualification is unreadable: {type(error).__name__}."}
     if not valid:
         return {"available": False, "why": "The sound files or render code changed; repeat check-windows-sound.ps1."}
-    return {"available": True, "why": "", "hardware": receipt["hardware"], **RECIPE}
+    return {"available": True, "why": "", "hardware": receipt["hardware"], "runtime_updated": provenance != current, **RECIPE}
 
 
 def parameters(params: dict) -> dict:
@@ -213,6 +225,8 @@ def main() -> int:
         result = renderer.tools().checker().run_check(source, 120, 0, guarded=True, calibration=case)
         initial = result["memory_guard"]["initial"]
         receipt = {"revision": windows_sfx.REVISION, "recipe": RECIPE, "tool_sha256": renderer.tool_hashes(),
+                   "compatibility": baseline_gpu_compatibility(),
+                   "runtime": baseline_gpu_runtime(),
                    "files": {name: {"size": size, "sha256": digest, "mtime_ns": (root / name).stat().st_mtime_ns}
                              for name, (size, digest) in windows_sfx.FILES.items()},
                    "hardware": {key: initial[key] for key in

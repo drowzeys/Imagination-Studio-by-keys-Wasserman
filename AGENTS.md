@@ -247,6 +247,14 @@ Rules:
   and local Tesseract Finish can qualify without H3 or a native CUDA-tier record. Keep their local receipts tied to
   hardware/runtime/code, ten-second 720p/24 fps scopes, 4 GiB owned-job cap, low-memory supervision and API/UI/queue
   agreement. A stale receipt, installed files alone or more advertised RAM never qualifies another route.
+- Qualification update policy (`app/feature_checks.py`, `app/windows_qualification.py`): balanced by default;
+  routine runtime/source/tool updates retain dated evidence with `runtime_updated`, never pretend it is a new test.
+  `STUDIO_QUALIFICATION_STRICT=1` opts into exact provenance matching. Requalify model/recipe/hardware-profile,
+  core Python ABI/Torch/NumPy/CUDA-family or explicit execution-contract breaks. Bump `RUNNER_CONTRACT`,
+  `GPU_CONTRACT` or `WINDOWS_QUALIFICATION_CONTRACT` for incompatible execution/safety changes, not UI/bookkeeping.
+  A model timestamp change calls for cached checksum verification, not another render. Baseline progressive cards
+  (`app/windows_baseline_checks.py`, `scripts/windows-baseline-check.py`) reuse native receipts/checkers; failed or
+  cancelled reruns must not remove them. GPU qualification drains the warm owned backend before execution.
 - Independent Windows Foley (`app/windows_foley.py`, `scripts/setup-windows-foley.ps1`): pinned MMAudio in
   `foley-gpu-venv`, source/weights shared but baseline GPU/UI packages isolated. Both restore stages use the GPU
   manifest and its wheel source; repeat setup and read-only verification must work without manual pip repair.

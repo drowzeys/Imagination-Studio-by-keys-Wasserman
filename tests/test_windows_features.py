@@ -199,7 +199,7 @@ def test_progressive_status_and_report_never_run_a_test(check_ui, monkeypatch):
     response = check_ui.get("/api/windows/features")
     assert response.status_code == 200, response.text
     cards = response.json()["features"]
-    assert [card["id"] for card in cards] == ["hlg", "finish", "foley"]
+    assert [card["id"] for card in cards] == ["hlg", "finish", "foley", "scout", "sfx", "graphics"]
     assert all(not card["qualified"] and card["memory"]["minimum_installed_ram_mb"] is None for card in cards)
     assert all(card["memory"]["required_headroom_mb"] == 4096 for card in cards[:2])
     assert cards[2]["memory"]["required_headroom_mb"] == 9216 and cards[2]["check_available"]

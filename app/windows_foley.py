@@ -60,6 +60,7 @@ def device_uuid() -> str:
 
 
 def fingerprint() -> dict:
+    from windows_qualification import GPU_CONTRACT, gpu_compatibility
     needed = {"torch", "torchvision", "numpy", "pillow", "soxr", "librosa", "numba", "llvmlite", "torchdiffeq",
               "einops", "timm", "omegaconf", "open_clip_torch", "accelerate", "ftfy", "safetensors", "av"}
     site = gpu_python().parent.parent / "Lib/site-packages"
@@ -81,9 +82,10 @@ def fingerprint() -> dict:
     for path in node_folder().rglob("*"):
         if path.suffix in (".py", ".json", ".yaml") and ".git" not in path.parts:
             sources["nodes/" + path.relative_to(node_folder()).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-    with DedicatedMemory(device_uuid()) as memory:
-        dedicated, _ = memory.read()
+    from windows_memory import dedicated_capacity
+    dedicated = dedicated_capacity(device_uuid())
     python = gpu_python().stat()
+    limits = renderer.tools().checker().CalibrationCase
     media = {}
     for name in ("ffmpeg", "ffprobe"):
         executable = shutil.which(name, path=windows_media.search_path(os.environ.get("PATH", "")))
@@ -91,14 +93,31 @@ def fingerprint() -> dict:
             raise RuntimeError("Install the native FFmpeg/ffprobe tools before qualifying foley.")
         stat = Path(executable).stat()
         media[name] = [hashlib.sha256(str(Path(executable).resolve()).encode()).hexdigest(), stat.st_size, stat.st_mtime_ns]
-    return {"schema": 1, "recipe": RECIPE, "max_width": MAX_WIDTH, "host_required_mb": HOST_REQUIRED_MB,
+    return {"schema": 1, "runner_contract": GPU_CONTRACT,
+            "limits_mb": [limits.gpu_limit_mb, limits.process_commit_mb, limits.job_commit_mb],
+            "python_abi": gpu_compatibility(gpu_python().parent.parent)["python_abi"],
+            "recipe": RECIPE, "max_width": MAX_WIDTH, "host_required_mb": HOST_REQUIRED_MB,
             "sources": sources, "versions": {name: versions[name] for name in sorted(needed)},
             "python": [python.st_size, python.st_mtime_ns], "media": media, "physical_mb": physical_memory_mb(),
             "host_mb": host_memory()[0], "dedicated_mb": dedicated,
             "weights": {name: [size, digest, (folder() / name).stat().st_mtime_ns] for name, (size, digest) in FILES.items()}}
 
 
+def compatibility(value: dict) -> dict:
+    from windows_qualification import gpu_version_contract
+    keys = ("schema", "recipe", "max_width", "host_required_mb", "physical_mb", "host_mb", "dedicated_mb", "weights", "versions")
+    if not all(key in value for key in keys):
+        return value
+    runtime = gpu_version_contract(value.get("python_abi", "3.13"), value["versions"])
+    runtime["contract"] = value.get("runner_contract", 1)
+    return {**{key: value[key] for key in keys if key not in ("weights", "versions")},
+            "limits_mb": value.get("limits_mb", [12288, 12288, 16384]),
+            "runtime": runtime, "weights": {name: metadata[:2] for name, metadata in value["weights"].items()}}
+
+
 def status() -> dict:
+    from feature_checks import matches_qualification
+    from windows_qualification import verify_model_updates
     base = {"available": False, "qualified": False, "installed": False, "state": "not_installed"}
     try:
         if not gpu_python().is_file() or not (node_folder() / "nodes.py").is_file():
@@ -108,14 +127,18 @@ def status() -> dict:
         current = fingerprint()
         base.update(installed=True, state="needs_qualification")
         receipt = EvidenceStore(windows_features.folder()).read("foley")
-        if receipt.get("ok") is not True or receipt.get("fingerprint") != current:
+        previous = receipt.get("fingerprint")
+        if receipt.get("ok") is not True or not isinstance(previous, dict) or not matches_qualification(
+                previous, current, compatibility(previous), compatibility(current)):
             attempt = EvidenceStore(windows_features.folder()).read("foley", "attempt")
             failure = str(attempt.get("error") or "")
             if any(reason in failure for reason in ("sampler stopped answering", "samples are stale", "budget monitoring failed")):
                 return {**base, "state": "check_refused",
                         "why": "The last foley check was refused because memory telemetry did not stay fresh. This profile remains unqualified; no guard was bypassed."}
             return {**base, "why": "Run the foley check in Machine > Feature checks; saved evidence must match this runtime and recipe."}
-        return {**base, "available": True, "qualified": True, "state": "ready", "why": "",
+        if "weights" in previous:
+            verify_model_updates(folder(), FILES, {name: data[2] for name, data in previous["weights"].items()})
+        return {**base, "available": True, "qualified": True, "state": "ready", "why": "", "runtime_updated": previous != current,
                 "hardware": receipt["hardware"], "max_seconds": 5, "fps": 24, "max_prepared_width": MAX_WIDTH}
     except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
         return {**base, "state": "setup_error", "why": str(error)}

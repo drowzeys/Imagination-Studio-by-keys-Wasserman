@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 import json
 import math
 import ntpath
@@ -349,16 +350,22 @@ def cuda_adapter_luid(device_uuid: str) -> tuple[int, int]:
     return matches[0]
 
 
+@lru_cache(maxsize=8)
+def dedicated_capacity(device_uuid: str) -> int:
+    with DedicatedMemory(device_uuid) as dedicated:
+        total, _ = dedicated.read()
+    if type(total) is not int or total <= 0:
+        raise RuntimeError("The selected adapter has no valid dedicated capacity.")
+    return total
+
+
 class WddmMemory:
     """Fresh adapter-wide resident usage, not CUDA allocator or per-process commitment."""
 
     def __init__(self, device_uuid: str):
         self.luid = cuda_adapter_luid(device_uuid)
         # Capacity is static. Do not query NVML while the model is loading.
-        with DedicatedMemory(device_uuid) as dedicated:
-            self.total, _ = dedicated.read()
-        if type(self.total) is not int or self.total <= 0:
-            raise RuntimeError("The selected adapter has no valid dedicated capacity.")
+        self.total = dedicated_capacity(device_uuid)
 
     def read(self) -> tuple[int, int]:
         matches = []

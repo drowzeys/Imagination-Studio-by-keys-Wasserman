@@ -340,9 +340,12 @@ dialog::backdrop { background:rgba(5,6,9,.7); }
 .tag2 { display:inline-flex; align-items:center; gap:6px; font:500 12px var(--mono); letter-spacing:.04em; padding:2px 9px; border-radius:999px; border:1px solid var(--line2); color:var(--dim); white-space:nowrap; }
 .tag2.ok { color:var(--green); border-color:rgba(99,255,54,.3); } .tag2.bad { color:var(--red); border-color:rgba(255,90,106,.35); } .tag2.warn { color:var(--warn); border-color:rgba(240,198,116,.35); }
 .tag2.t { color:var(--amber); border-color:rgba(184,121,66,.6); }
-.feature-app { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.feature-app { position:relative; display:flex; flex-direction:column; min-width:0; }
 .feature-app > .pcard { width:100%; flex:1; }
 .feature-link { align-self:flex-start; cursor:pointer; padding:5px 10px; background:var(--panel); }
+.feature-app > .feature-link { position:absolute; top:12px; right:12px; z-index:2; padding:3px 7px;
+  font:500 10px/1.2 var(--mono); letter-spacing:.02em; background:rgba(8,13,22,.88); }
+@media (max-width:720px) { .feature-app > .feature-link { top:40px; right:8px; } }
 .feature-link:hover, .feature-link:focus-visible { border-color:currentColor; outline:2px solid currentColor; outline-offset:2px; }
 .feature-target { border-color:var(--amber); outline:2px solid var(--amber); outline-offset:3px; }
 .feature-check-group { margin-top:16px; padding-left:12px; border-left:2px solid var(--line2); }

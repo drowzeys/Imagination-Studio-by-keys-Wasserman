@@ -143,6 +143,7 @@ def browser() -> str | None:
 def ready() -> dict:
     """Whether a graphic can be rendered here: {ok, node, hyperframes, browser, gsap, ffmpeg, why}."""
 
+    runtime_updated = False
     node, node_said = node_bin()
     version = installed_version() if cli().is_file() else None
     found = browser()
@@ -158,24 +159,53 @@ def ready() -> dict:
     if not why and WINDOWS:
         why = windows_probe_error()
     if not why and WINDOWS:
+        compatible = False
         try:
             receipt = json.loads((install_dir() / "windows-checked.json").read_text(encoding="utf-8"))
             if not isinstance(receipt, dict):
                 raise ValueError("the graphics check is not an object")
             if receipt.get("visible_windows_added") != 0:
                 why = "The Windows browser-isolation check has not passed"
-            elif receipt.get("fingerprint") != windows_fingerprint():
+            elif (not isinstance(receipt.get("fingerprint"), list) or not receipt["fingerprint"]
+                  or receipt.get("size") != [1280, 720] or receipt.get("fps") != 24
+                  or not isinstance(receipt.get("results"), list)
+                  or sorted(row["template"] for row in receipt["results"]) != sorted(legacy_windows_compatibility()["templates"])):
+                why = "The saved Windows graphics check is incomplete"
+            else:
+                from feature_checks import matches_qualification
+                current = windows_fingerprint()
+                runtime_updated = receipt.get("fingerprint") != current
+                compatible = matches_qualification(receipt.get("fingerprint"), current,
+                                                    receipt.get("compatibility", legacy_windows_compatibility()),
+                                                    windows_compatibility())
+            if not why and not compatible:
                 why = "The graphics runtime, browser or templates changed; repeat the Windows graphics check"
         except FileNotFoundError:
             why = "The bounded Windows graphics render check has not passed"
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, KeyError, TypeError) as error:
             why = f"The Windows graphics check is unreadable: {type(error).__name__}"
     if why and WINDOWS:
         why += ": run `powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-graphics.ps1`."
     elif why:
         why += ": run `bash scripts/setup-graphics.sh` (or oneshot-setup" + ("-spark" if sys.platform.startswith("linux") else "") + ".sh --graphics)."
     return {"ok": not why, "node": node, "node_version": node_said if node else None, "hyperframes": version,
-            "pinned": HYPERFRAMES, "browser": found, "gsap": gsap_file().is_file(), "ffmpeg": ffmpeg, "why": why or None}
+            "pinned": HYPERFRAMES, "browser": found, "gsap": gsap_file().is_file(), "ffmpeg": ffmpeg, "why": why or None,
+            "runtime_updated": runtime_updated}
+
+
+WINDOWS_QUALIFICATION_CONTRACT = 1
+
+
+def legacy_windows_compatibility() -> dict:
+    return {"contract": 1, "job_commit_mb": 4096, "size": [1280, 720], "fps": 24, "seconds": 10, "hyperframes_family": "0.8",
+            "templates": ["title", "lower-third", "kinetic", "slideshow", "music-video", "explainer"]}
+
+
+def windows_compatibility() -> dict:
+    from windows_qualification import version_family
+    return {"contract": WINDOWS_QUALIFICATION_CONTRACT, "job_commit_mb": WINDOWS_COMMIT_MB,
+            "size": [1280, 720], "fps": FPS, "seconds": WINDOWS_SECONDS,
+            "hyperframes_family": version_family(HYPERFRAMES, 2), "templates": list(WINDOWS_TEMPLATES)}
 
 
 def windows_probe_file() -> Path:

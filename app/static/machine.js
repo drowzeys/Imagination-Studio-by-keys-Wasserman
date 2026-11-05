@@ -28,7 +28,7 @@ function featureBadge(kind) {
   const checks = S && S.feature_checks;
   if (!checks || !checks.supported || !checks.features[kind] || !c) return null;
   const ready = c.available, label = ready ? "Qualified" : c.installed === false && kind !== "foley" ? "Setup required" : "Not qualified";
-  return el("button", { type: "button", class: "tag2 feature-link " + (ready ? "ok" : "warn"),
+  return el("button", { type: "button", class: "tag2 feature-link fit " + (ready ? "ok" : "warn"),
     "aria-label": label + ": " + checks.features[kind],
     title: ready ? "Enabled on this machine. View saved qualification evidence and limits." : "Open this feature's checks and setup",
     onclick: () => openFeatureCheck(kind) }, label, ready ? "" : " →");
@@ -72,11 +72,13 @@ function wfcAdmission(card, memory) {
   if (!card.qualified || !card.check_available) return null;
   if (card.requirements) {
     const pools = memory.pools || {};
-    if (memory.error || !card.requirements.length || card.requirements.some(r => r.required_mb == null || pools[r.pool]?.available_mb == null))
+    if (memory.error || !card.requirements.length || card.requirements.some(r => pools[r.pool]?.available_mb == null))
       return el("div", { class: "note" }, "Current memory availability could not be established. Admission is checked when you run a job.");
-    const busy = memory.low_memory || card.requirements.some(r => pools[r.pool].available_mb < r.required_mb + r.reserve_mb);
+    const unknown = card.requirements.some(r => r.required_mb == null);
+    const busy = memory.low_memory || card.requirements.some(r => r.required_mb != null && pools[r.pool].available_mb < r.required_mb + r.reserve_mb);
     return el("div", { class: "note" + (busy ? " warn" : "") }, busy
       ? "Memory is currently busy: a new job may be refused until enough memory is free. Your saved qualification is unchanged."
+      : unknown ? "Some expected memory requirements remain unknown. Check-time admission runs after other Studio models are unloaded."
       : "Memory headroom is available now; admission is checked again when you run a job.");
   }
   if (memory.error || memory.host_free_mb == null || memory.commit_free_mb == null)
@@ -127,6 +129,9 @@ function wfcDraw() {
   box.replaceChildren(...[head,
     el("div", { class: "note m-flat" }, "Optional, one feature at a time. Base workflows stay available. Saved passes are reused; opening this page never runs a test."),
     WFC.error ? el("div", { class: "note vt-bad" }, WFC.error) : null,
+    data ? el("div", { class: "note m-flat" }, data.policy === "strict"
+      ? "Strict update matching is enabled: runtime changes can require a new check."
+      : "Balanced updates: routine changes retain your saved qualification; compatibility breaks require a new check.") : null,
     data ? el("div", { class: "note" }, memory.error || Object.values(memory.pools || {}).map(pool => pool.label + " available: " + wfcGB(pool.available_mb)).join(" · ")
       + ". Memory pools may overlap; do not add them.") : el("div", { class: "note" }, "Reading saved results…")].filter(Boolean));
   if (!data) return;
@@ -152,11 +157,13 @@ function wfcDraw() {
         el("span", { class: "tag2 " + (card.qualified ? "ok" : "") },
           active ? "Check " + job.status : card.qualified ? "Qualified" : card.state.replaceAll("_", " "))),
       el("div", { class: "note m-flat" }, card.scope || "Use the settings qualified by this check."),
+      card.qualified && card.runtime_updated ? el("div", { class: "note m-flat" },
+        "Runtime changed since this check. Earlier evidence is retained; rerunning is optional unless compatibility changes.") : null,
       el("div", { class: "note m-flat" }, (budgets.minimum_label || "Minimum installed RAM not established")
         + ". Lowest tested machine: " + wfcGB(budgets.lowest_tested_ram_mb) + ". Required headroom: "
         + (required || "unknown") + (budgets.basis ? ". " + budgets.basis : "")
         + (budgets.job_commit_cap_mb != null ? ". Job cap: " + wfcGB(budgets.job_commit_cap_mb) : "") + "."),
-      el("div", { class: "note m-flat" }, evidence.checked_at ? "Saved live check: " + new Date(evidence.checked_at).toLocaleString()
+      el("div", { class: "note m-flat" }, evidence.checked_at ? (evidence.time_basis === "receipt_mtime" ? "Saved evidence updated: " : "Saved live check: ") + new Date(evidence.checked_at).toLocaleString()
         + " · peak job commitment " + wfcGB(peak) + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware; rerun required.")
         : "No saved live pass on this machine."),
       card.why ? el("div", { class: "note" }, card.why) : null,
@@ -168,6 +175,7 @@ function wfcDraw() {
           !card.check_available ? "Check not available yet" : active ? "Check " + job.status : evidence.checked_at ? "Rerun check" : "Check this feature"),
         card.available ? el("button", { class: "small", onclick: () => {
           if (card.open_query && typeof AP !== "undefined") { AP.cat = card.open_category || "all"; AP.q = card.open_query; }
+          if (card.open_mode && typeof SFX !== "undefined") SFX.mode = card.open_mode;
           go(card.open_tab);
         } }, card.open_label) : null,
         active ? el("button", { class: "small", onclick: async () => {

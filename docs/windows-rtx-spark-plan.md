@@ -80,8 +80,12 @@ API and Studio tools; downloading their weights does not qualify them.
 `app/windows_features.py` separates installed prerequisites, local qualification and current admission.
 The UI, API and internal queue use the same qualification; settings and memory headroom are checked again
 before execution. A successful local check writes a receipt bound to hardware, runtime and rendering code;
-changed rendering inputs require requalification. Fingerprints exclude UI wording, API presentation,
-report formatting and checker bookkeeping. A failed, cancelled or temporarily refused rerun keeps the
+compatibility breaks require requalification. Balanced matching is the default: routine tool, dependency
+or source updates keep the dated pass and show an update note, not another compulsory render. Fingerprints
+remain provenance; they are not rewritten to imply a fresh test. Recipe/model changes, hardware-profile changes,
+core ABI-family changes and explicit compatibility-contract bumps still require a check. Model metadata changes
+can require a checksum comparison, not another render. `STUDIO_QUALIFICATION_STRICT=1` opts into exact matching.
+A failed, cancelled or temporarily refused rerun keeps the
 last successful evidence; only a completed pass replaces it. Current admission remains a separate decision.
 HDR/Finish retain a 4 GiB owned-job commitment cap, OS low-memory/commit supervision, explicit host floors,
 bounded deadlines and targeted cancellation. The full native tier and its model guards are not relaxed.
@@ -93,7 +97,8 @@ subsequent runs passed. It remains an explicit failed-job/reliability caveat, wi
 
 ### Progressive qualification UI
 
-The first slice is available under **Machine > Feature checks** for HDR grading, local Finish and MMAudio foley.
+All six checks are available under **Machine > Feature checks**: storyboard drafts, Stable Audio Open effects,
+MMAudio foley, the six motion-graphics templates, HDR grading and local Finish.
 Cards show current headroom, the conservative 4 GiB admission requirement/cap, the lowest tested hardware
 and saved live evidence. The actual minimum installed RAM is explicitly unknown, not inferred from that cap.
 Check/Rerun submits an ordinary cancellable queue job; opening the page only reads status. Success and
@@ -106,9 +111,8 @@ The outer section and each room group are independently collapsible and closed b
 
 The API/queue/browser path for Finish has passed a real check-button run and saved-report download.
 Other model check cards and automatic validated-profile matching are not implemented yet.
-The first planned set is six checks: storyboard drafts, sound effects, foley, motion graphics, HDR
-grading and Finish. The existing image/sound/graphics checks still need adapter cards; the current UI
-lists the registered features only. Groups follow the Studio's top-level rooms and their sidebar order
+The image/sound/graphics adapters reuse native readiness and saved receipts, and rerun the existing real checks
+through ordinary queue jobs. The current UI lists the registered features only. Groups follow the Studio's top-level rooms and their sidebar order
 (Image, Sound, Motion graphics, Edit, with Video/Story and others added as checks exist). A check covers
 a named feature/model recipe, not every button in that room. Badge links still focus the exact feature.
 

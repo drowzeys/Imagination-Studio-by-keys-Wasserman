@@ -14,7 +14,8 @@ import shutil
 import sys
 import threading
 
-from feature_checks import EvidenceStore
+from feature_checks import EvidenceStore, matches_qualification
+from windows_qualification import version_family
 import windows_media
 from windows_memory import WindowsSignals, host_memory, physical_memory_mb
 
@@ -185,12 +186,23 @@ def status(kind: str) -> dict:
         if not marker.is_file():
             return {**base, "why": "Check this feature in Machine > Feature checks to enable it on this machine."}
         receipt = json.loads(marker.read_text(encoding="utf-8"))
-        if receipt.get("ok") is not True or receipt.get("fingerprint") != fingerprint(kind):
+        previous, current = receipt.get("fingerprint"), fingerprint(kind)
+        if receipt.get("ok") is not True or not isinstance(previous, dict) or not matches_qualification(
+                previous, current, compatibility(previous), compatibility(current)):
             return {**base, "why": "The runtime, hardware or recipe changed. Rerun its check in Machine > Feature checks."}
-        return {**base, "available": True, "qualified": True, "state": "ready", "why": ""}
+        return {**base, "available": True, "qualified": True, "state": "ready", "why": "",
+                "runtime_updated": previous != current}
     except (OSError, ValueError, TypeError, AttributeError, SyntaxError) as error:
         return {**base, "state": "qualification_error",
                 "why": f"Windows {kind} qualification could not be checked: {type(error).__name__}: {error}"}
+
+
+def compatibility(value: dict) -> dict:
+    keys = ("runner_contract", "machine", "physical_mb", "host_mb", "scope", "python", "numpy")
+    if not all(key in value for key in keys):
+        return value
+    return {**{key: value[key] for key in keys if key not in ("python", "numpy")},
+            "python_abi": version_family(value["python"], 2), "numpy_major": version_family(value["numpy"])}
 
 
 def preflight(kind: str) -> None:

@@ -1895,7 +1895,7 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             if WINCUDA:  # bash and the Linux venv's python as the native tier runs them (refused when not ported)
                 command = windows_cuda.translate(command)
             # the native tier's job tree may let ComfyUI break away (spark/comfy_win.py): it stays warm after the job
-            gpu_check = WINDOWS and (job["kind"] == "foley" or job["kind"] == "qualification" and job["params"].get("feature") == "foley")
+            gpu_check = WINDOWS and windows_checks.gpu_check(job)
             commit = (windows_storyboard.JOB_LIMIT_MB if gpu_check else
                       windows_features.COMMIT_MB if WINDOWS and job["kind"] in (*windows_features.KINDS, "qualification") else
                       graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0)
@@ -2293,7 +2293,7 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
     params = job["params"]
     asked = dict(params)
     try:
-        if WINDOWS and (job["kind"] == "foley" or job["kind"] == "qualification" and params.get("feature") == "foley"):
+        if WINDOWS and (job["kind"] == "qualification" or windows_checks.gpu_check(job)):
             windows_storyboard.release_backend()
         # a Drama 3 server kept loaded after a voice take (voice.py) never stands beside a render here, nor MiniMax Music 3
         # kept loaded after a song (music.py): each is unloaded before any other job of this machine's queue
@@ -2482,9 +2482,10 @@ def state() -> dict:
         sound_ready = windows_sound.status()
         gfx_ready = graphics.ready()
         out["capabilities"].update(
-            scout={k: out["windows_stills"][k] for k in ("available", "why")},
-            sfx={k: sound_ready[k] for k in ("available", "why")},
-            graphics={"available": gfx_ready["ok"], "why": gfx_ready["why"], "templates": list(graphics.WINDOWS_TEMPLATES)},
+            scout={k: out["windows_stills"].get(k) for k in ("available", "why", "runtime_updated")},
+            sfx={k: sound_ready.get(k) for k in ("available", "why", "runtime_updated")},
+            graphics={"available": gfx_ready["ok"], "why": gfx_ready["why"], "templates": list(graphics.WINDOWS_TEMPLATES),
+                      "runtime_updated": gfx_ready.get("runtime_updated", False)},
             beats={"available": bool(out["ffmpeg"]), "why": out["ffmpeg_note"], "max_seconds": beats.WINDOWS_MAX_SECONDS},
             export={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."},
             frame={"available": all(media_tools().values()), "why": out["ffmpeg_note"] or "Install the native FFmpeg/ffprobe pair."})
