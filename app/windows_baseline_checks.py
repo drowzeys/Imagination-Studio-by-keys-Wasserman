@@ -15,7 +15,7 @@ import windows_storyboard
 
 KINDS = ("scout", "sfx", "graphics")
 GPU_KINDS = ("scout", "sfx")
-SETUP = {"scout": "setup-windows-storyboard.ps1", "sfx": "setup-windows-sfx.ps1",
+SETUP = {"scout": "setup-windows-images.ps1 -Model auto", "sfx": "setup-windows-sfx.ps1",
          "graphics": "setup-windows-graphics.ps1"}
 
 

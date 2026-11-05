@@ -49,7 +49,8 @@ def test_live_checks_refuse_stale_host_samples():
 
 
 @pytest.mark.parametrize("backend_shutdown", [False, True])
-def test_fresh_sample_after_scheduler_gap_does_not_use_expired_trend(monkeypatch, backend_shutdown):
+@pytest.mark.parametrize("native_policy", [False, True])
+def test_fresh_sample_after_scheduler_gap_does_not_use_expired_trend(monkeypatch, backend_shutdown, native_policy):
     from windows_memory import Snapshot
     from dataclasses import asdict
     monitor = check.MemoryWatchdog.__new__(check.MemoryWatchdog)
@@ -60,6 +61,10 @@ def test_fresh_sample_after_scheduler_gap_does_not_use_expired_trend(monkeypatch
     monitor.state_lock = threading.Lock()
     monitor.latest = monitor.initial = None
     monitor.configured_floor = ""
+    def policy(snapshot, previous):
+        assert previous is None
+        return ""
+    monitor.pressure_policy = policy if native_policy else None
     monitor.minima = {}
     monitor.max_commit_used_mb = monitor.samples = 0
     now = [0.0]

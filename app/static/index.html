@@ -298,6 +298,14 @@ const defaultImageModel = () => {
 };
 const imageModel = () => C.imageModel || defaultImageModel();
 const imageIsDraft = (id = imageModel()) => id === "sd-turbo";
+const imageCheckedRecipe = (id = imageModel()) => {
+  const model = imageModels().find(m => m.id === id);
+  return model?.qualification_required && model?.qualified ? model.verified_recipe || null : null;
+};
+const imageCheckedScopes = (id = imageModel()) => {
+  const model = imageModels().find(m => m.id === id), checked = imageCheckedRecipe(id);
+  return checked ? model.verified_scopes?.length ? model.verified_scopes : [checked] : [];
+};
 const imageFeature = (id = imageModel()) => S.platform === "windows" && !imageIsDraft(id)
   ? imageModels().find(m => m.id === id)?.feature || id : "scout";
 const imageModelWhy = (id = imageModel()) => {
@@ -313,6 +321,14 @@ const stillParams = params => {
   const legacyDraft = !hasCatalog && S.windows_stills?.available;
   const id = params.image_model || (legacyDraft ? S.windows_stills.model || "sd-turbo"
     : typeof imageModel === "function" ? imageModel() : null);
+  const checked = typeof imageCheckedRecipe === "function" ? imageCheckedRecipe(id) : null;
+  if (checked) {
+    const scopes = imageCheckedScopes(id), count = Number(params.count ?? 1);
+    if (params.width && params.height && !scopes.some(scope => scope.width === Number(params.width)
+      && scope.height === Number(params.height) && count >= 1 && count <= scope.count))
+      throw new Error("That size/count has not been verified. Choose a checked recipe or check the next level in Machine.");
+    return { ...params, image_model: id };
+  }
   if (id !== "sd-turbo") return id ? { ...params, image_model: id } : params;
   const { preset, ...rest } = params;
   return { ...rest, width: 512, height: 512,
@@ -328,6 +344,8 @@ const imageModelPick = after => {
           m.backend ? m.backend + " backend" : "", m.why || m.note].filter(Boolean).join(" · ")]])),
       () => { C.imageModel = selected.imageModel; (after || render)(); }, true),
     imageModelWhy() ? el("div", { class: "note warn" }, imageModelWhy()) : null,
+    imageCheckedRecipe() ? el("div", { class: "note" }, "Verified: " + imageCheckedScopes().map(scope =>
+      scope.width + " × " + scope.height + ", " + scope.count + " image(s)").join("; ") + ". Other settings have not been checked.") : null,
     S.platform === "windows" && typeof openFeatureCheck === "function" ? el("button", { type: "button", class: "small",
       onclick: () => openFeatureCheck(imageFeature()) }, "Feature checks and model requirements") : null);
 };
@@ -670,16 +688,26 @@ function viewCreate() {
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
-    const draft = imageIsDraft(), size = draft ? "512x512" : C.imageSize === "512x512" ? "1344x768" : C.imageSize;
+    const checked = imageCheckedRecipe(), scopes = imageCheckedScopes(), draft = imageIsDraft();
+    if (checked && C.verifiedImageModel !== imageModel()) {
+      C.count = 1; C.verifiedImageModel = imageModel();
+    }
+    const allowedSizes = Object.fromEntries(scopes.map(scope => [scope.width + "x" + scope.height,
+      [scope.title || "Verified size", scope.width + " × " + scope.height]]));
+    const size = draft ? "512x512" : checked ? allowedSizes[C.imageSize] ? C.imageSize : Object.keys(allowedSizes).at(-1)
+      : C.imageSize === "512x512" ? "1344x768" : C.imageSize;
+    if (checked) C.imageSize = size;
     if (draft && Number(C.count) > 6) C.count = 6;
     const [w, h] = size.split("x").map(Number);
+    const maxCount = checked ? Math.max(...scopes.filter(scope => scope.width === w && scope.height === h).map(scope => scope.count)) : draft ? 6 : 12;
     const qualification = typeof featureBadge === "function" ? featureBadge(imageFeature()) : null;
     const title = el("h2", {}, "The picture");
     put(body, qualification ? el("div", { class: "row" }, title, qualification) : title, goes, picture, imageModelPick(),
-      el("label", {}, "Size"), choice(draft ? { imageSize: size } : C, "imageSize", draft ? { "512x512": ["Storyboard draft", "512 × 512 square"] }
-        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
+      el("label", {}, "Size"), choice(draft ? { imageSize: size } : C, "imageSize", draft ? { "512x512": ["Storyboard draft", "512 × 512 square"] } : checked ? allowedSizes
+        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] },
+        () => { if (checked) C.count = 1; render(); }, true),
       el("div", { class: "row" },
-        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: draft ? 6 : 12 }))),
+        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: maxCount }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
       el("div", { class: "note" }, (imageModel() === "sd-turbo" ? "SD-Turbo makes square storyboard drafts, one step and one image at a time; it does not guarantee matching faces across shots"
         : /^qwen/.test(imageModel()) ? "Qwen makes the picture at the selected size after the model loads"

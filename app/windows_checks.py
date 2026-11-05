@@ -17,8 +17,11 @@ import windows_foley
 import windows_baseline_checks as baseline
 import windows_runtime
 import windows_cuda
+import windows_image_checks as images
 
 CHECKS = {
+    "qwen": FeatureCheck("qwen", "Qwen-Image 2.1 Turbo", "One 512x512 image, using the native production Turbo workflow.",
+                         tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="image"),
     "hlg": FeatureCheck("hlg", "HDR grading", "SDR-to-HLG grade and SDR copy; up to ten seconds, 1280x720, 24 fps.",
                         (MemoryRequirement("host", features.COMMIT_MB, "policy"), MemoryRequirement("commit", features.COMMIT_MB, "policy")), group="edit"),
     "finish": FeatureCheck("finish", "Tesseract Finish", "720p, 24 fps; up to 12 cuts and ten seconds including a title; no transcription or editor conversion.",
@@ -40,7 +43,33 @@ CHECKS = {
 
 
 def gpu_check(job: dict) -> bool:
-    return job["kind"] == "foley" or job["kind"] == "qualification" and job["params"].get("feature") in ("foley", *baseline.GPU_KINDS)
+    return (native_image_check(job) or job["kind"] == "foley"
+            or job["kind"] == "qualification" and job["params"].get("feature") in ("foley", *baseline.GPU_KINDS))
+
+
+def native_image_check(job: dict) -> bool:
+    return job["kind"] == "qualification" and job["params"].get("feature") in images.KINDS
+
+
+def timeout_seconds(job: dict) -> int:
+    if native_image_check(job) and job["params"].get("group") in images.GROUPS:
+        return len(images.GROUPS[job["params"]["group"]][1]) * (images.TIMEOUT_S + 120)
+    return 600
+
+
+def save_outcome(job: dict) -> None:
+    kind = job["params"]["feature"]
+    previous = features.saved(kind, "-attempt")
+    same_job = previous.get("job_id") == job["id"]
+    saved = previous if same_job else {}
+    error = saved.get("error") if job["status"] == "failed" else None
+    if error:
+        job["error"] = error
+    features.save_attempt(kind, {**saved, "job_id": job["id"], "ok": False, "state": job["status"],
+                                 "finished": job["finished"], "error": error or job.get("error") or "The check was cancelled."})
+    scope = saved.get("scope") or job["params"].get("scope")
+    if kind in images.KINDS and scope in images.SCOPES:
+        features.save_attempt(f"{kind}-{scope}", features.saved(kind, "-attempt"))
 
 
 def discovery(supported: bool) -> dict:
@@ -52,13 +81,37 @@ def discovery(supported: bool) -> dict:
 
 
 def parameters(params: dict) -> dict:
-    if not isinstance(params, dict) or set(params) != {"feature"} or params["feature"] not in CHECKS:
+    if not isinstance(params, dict) or "feature" not in params or params["feature"] not in CHECKS:
+        raise HTTPException(400, "choose a registered feature for this qualification check")
+    if params["feature"] in images.KINDS:
+        if set(params) - {"feature", "scope", "group"} or "scope" in params and "group" in params:
+            raise HTTPException(400, "Choose a registered image qualification level.")
+        if "group" in params:
+            if not isinstance(params["group"], str) or params["group"] not in images.GROUPS:
+                raise HTTPException(400, "Choose a registered image qualification group.")
+            return {"feature": params["feature"], "group": params["group"]}
+        try:
+            scope = images.scope_settings(params.get("scope", "basic"))["id"]
+        except (ValueError, TypeError):
+            raise HTTPException(400, "Choose a registered image qualification level.") from None
+        return {"feature": params["feature"], "scope": scope}
+    if set(params) != {"feature"}:
         raise HTTPException(400, "choose a registered feature for this qualification check")
     return {"feature": params["feature"]}
 
 
 def build(home, params, job_id):
-    kind = parameters(params)["feature"]
+    params = parameters(params)
+    kind = params["feature"]
+    if kind in images.KINDS:
+        if why := images.prerequisites(kind):
+            raise HTTPException(400, why)
+        target = home / "exports" / f"{job_id}-qualification.json"
+        return [sys.executable, "-X", "utf8", str(features.PACK / "scripts" / "windows-native-image-check.py"),
+                "--model", kind, *(("--group", params["group"]) if "group" in params else ("--scope", params["scope"])),
+                "--job-id", job_id,
+                "--output", str(home / "renders" / "calibration" / job_id),
+                "--report", str(target)], {}, [str(target)]
     if kind in baseline.KINDS:
         if why := baseline.prerequisites(kind):
             raise HTTPException(400, why)
@@ -105,7 +158,7 @@ def attach(server):
             memory = {"error": str(error)}
         if "pools" in memory:
             device_pool = {"label": "Dedicated GPU", "available_mb": None}
-            if foley.get("installed") or any(baseline.status(kind)["installed"] for kind in baseline.GPU_KINDS):
+            if windows_cuda.active() or foley.get("installed") or any(baseline.status(kind)["installed"] for kind in baseline.GPU_KINDS):
                 try:
                     from windows_memory import WddmMemory, single_gpu_uuid
                     _, device_pool["available_mb"] = WddmMemory(single_gpu_uuid()).read()
@@ -117,6 +170,8 @@ def attach(server):
             current = [server.public(job) for job in server.jobs.values()
                        if job["kind"] == "qualification"]
         for kind in CHECKS:
+            if kind in images.KINDS:
+                continue
             found = foley if kind == "foley" else windows_runtime.usage_status(kind, selected_mode=selected_mode)
             try:
                 attempt = features.saved(kind, "-attempt")
@@ -154,12 +209,25 @@ def attach(server):
         for choice in windows_runtime.image_options(selected_mode):
             if choice["id"] == "sd-turbo":
                 continue
-            cards.append({**choice, "group": "image", "check_available": False,
-                          "open_tab": "Image", "open_model": choice["id"], "open_label": "Open " + choice["title"],
+            implemented = choice["id"] in images.KINDS
+            jobs = [job for job in current if job["params"].get("feature") == choice["id"]]
+            try:
+                receipts = [level["evidence"] for level in choice.get("qualification_levels", []) if level["qualified"]]
+                receipt = {"results": [result for saved in receipts for result in saved.get("results", [])],
+                           "checked_at": max((saved["checked_at"] for saved in receipts), default=None)}
+                attempt = features.saved(choice["id"], "-attempt") if implemented else {}
+            except (OSError, ValueError, TypeError) as error:
+                receipt, attempt = {}, {"error": str(error)}
+            cards.append({**choice, "group": "image", "check_available": implemented,
+                          "open_tab": "Create", "open_model": choice["id"], "open_label": "Open " + choice["title"],
                           "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Windows memory requirement not established",
-                                     "lowest_tested_ram_mb": None, "required_headroom_mb": None, "job_commit_cap_mb": None,
+                                     "lowest_tested_ram_mb": choice.get("hardware", {}).get("physical_total_mb"),
+                                     "required_headroom_mb": None, "job_commit_cap_mb": None,
                                      "gpu_required": True, "basis": choice["measurement_source"]},
-                          "evidence": {"matches": False, "results": []}, "attempt": {}, "job": None})
+                          "evidence": {"matches": choice["qualified"], "results": receipt.get("results", []),
+                                       "checked_at": receipt.get("checked_at")},
+                          "attempt": attempt,
+                          "job": max(jobs, key=lambda job: job["created"], default=None)})
         video = windows_runtime.native_status("video", selected_mode)
         cards.append({"id": "video", "title": "H3 / FastH3 video", "group": "video", **video,
                       "scope": f"The existing H3 policy requires a measured CUDA allocation pool of at least {windows_cuda.MIN_POOL_MB} MiB. This is not a minimum installed-RAM claim.",
@@ -222,7 +290,8 @@ def attach(server):
         kind = params["feature"]
         with server.lock:
             for job in server.jobs.values():
-                if job["kind"] == "qualification" and job["params"] == params and job["status"] in ("queued", "running"):
+                if (job["kind"] == "qualification" and job["params"].get("feature") == kind
+                        and job["status"] in ("queued", "running")):
                     raise HTTPException(409, "This feature check is already queued or running.")
         return server.enqueue("qualification", "Check " + CHECKS[kind].title, params)
 

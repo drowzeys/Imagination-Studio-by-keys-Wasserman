@@ -16,6 +16,41 @@ import windows_runtime as runtime
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("feature,hidden", [("qwen", True), ("hlg", False)])
+def test_native_image_checker_outer_process_does_not_open_a_console(monkeypatch, feature, hidden):
+    import windows_process
+
+    calls = []
+    process = SimpleNamespace(stdout=[], pid=123, wait=lambda *args: 0)
+
+    class Owned:
+        def __init__(self, **kwargs):
+            calls.append(("ownership", kwargs))
+
+        def spawn(self, command, **kwargs):
+            calls.append(("spawn", kwargs))
+            return process
+
+        def close(self):
+            calls.append(("closed", {}))
+
+    monkeypatch.setattr(windows_process, "OwnedJob", Owned)
+    monkeypatch.setattr(server, "SPARK", False)
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", True)
+    monkeypatch.setattr(server, "WINCUDA", True)
+    monkeypatch.setattr(server, "environment", lambda env: env)
+    monkeypatch.setattr(server, "running", {"process": None})
+    job = {"id": "test-console", "kind": "qualification", "params": {"feature": feature},
+           "status": "running", "log": ""}
+    assert server.run(job, ["python", "checker.py"], {})
+    launch = next(kwargs for label, kwargs in calls if label == "spawn")
+    assert bool(launch["creationflags"] & 0x08000000) is hidden
+    assert launch["stdout"] == subprocess.PIPE and launch["stderr"] == subprocess.STDOUT
+    assert ("closed", {}) in calls
+    assert server.running["process"] is None
+
+
 @pytest.fixture
 def install(tmp_path, monkeypatch):
     root = tmp_path / "runtime"
@@ -79,7 +114,7 @@ def test_image_candidates_are_not_blocked_by_h3_or_its_pool(install, monkeypatch
     assert qwen["state"] == "needs_verification" and "verification" in qwen["why"]
     assert "H3" not in qwen["why"] and "90000" not in qwen["why"]
     assert all(requirement["required_mb"] is None for requirement in qwen["requirements"])
-    assert "not measured" in qwen["scope"]
+    assert qwen["check_available"] and "512x512, one image" in qwen["scope"]
     monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
     qwen = next(row for row in runtime.image_options() if row["id"] == "qwen")
     assert qwen["available"] and not qwen["qualified"] and not qwen["qualification_required"]
@@ -164,6 +199,29 @@ def test_native_image_build_does_not_require_h3(client, install, monkeypatch):
     assert command[0] == "bash" and Path(command[1]).name == "scout.sh"
     assert env["IMAGE_MODEL"] == "qwen" and len(outputs) == 2
     assert not (install / "tf-h3" / "tf_h3.dll").exists()
+
+
+def test_native_qualification_only_unlocks_its_checked_canvas_and_count(client, install, monkeypatch):
+    import windows_image_checks
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", True)
+    monkeypatch.setattr(server, "WINCUDA", True)
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 65536)
+    monkeypatch.setattr(windows_image_checks, "status", lambda _: {
+        "installed": True, "available": True, "qualified": True, "check_available": True, "why": "",
+        "verified_recipe": {"width": 512, "height": 512, "count": 1},
+        "verified_scopes": [{"id": "basic", "width": 512, "height": 512, "count": 1}]})
+    params = {"image_model": "qwen", "prompt": "A hall.", "count": 1, "width": 512, "height": 512}
+    _, env, _ = server.build("scout", params, "native-image")
+    assert env["WIDTH"] == env["HEIGHT"] == 512
+    for changed in ({"width": 1024}, {"count": 2}):
+        with pytest.raises(HTTPException, match="not a verified recipe"):
+            server.build("scout", {**params, **changed}, "native-image")
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
+    _, env, _ = server.build("scout", {**params, "width": 1024}, "native-image")
+    assert env["WIDTH"] == 1024
 
 
 def test_native_comfy_ownership_rejects_other_session_before_opening_pid(monkeypatch):

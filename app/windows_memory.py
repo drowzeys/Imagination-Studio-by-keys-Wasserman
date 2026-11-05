@@ -305,7 +305,8 @@ def windows_gpu_process_memory() -> dict[int, float]:
 
 def single_gpu_uuid() -> str:
     result = subprocess.run(["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"],
-                            capture_output=True, text=True, check=True, timeout=5)
+                            capture_output=True, text=True, check=True, timeout=5,
+                            creationflags=0x08000000 if sys.platform == "win32" else 0)
     # The N1X's DLA row is not a CUDA GPU.
     devices = [line.strip() for line in result.stdout.splitlines() if line.strip().startswith("GPU-")]
     if len(devices) != 1:
@@ -394,6 +395,7 @@ def gpu_memory_warning(free_mb: int, required_mb: int, device_uuid: str | None =
             device_uuid = subprocess.run(
                 ["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader", f"--id={device_index}"],
                 capture_output=True, text=True, timeout=5, check=True,
+                creationflags=0x08000000 if sys.platform == "win32" else 0,
             ).stdout.strip()
         with DedicatedMemory(device_uuid) as memory:
             details = memory.processes()

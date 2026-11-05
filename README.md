@@ -238,7 +238,7 @@ AI writing can use the optional brain below.
 and has the license's $1M annual-revenue threshold. Weights stay outside Git.
 
 ```powershell
-.\scripts\setup-windows-storyboard.ps1
+.\scripts\setup-windows-images.ps1 -Model auto
 .\scripts\check-windows-storyboard.ps1
 .\scripts\app.ps1
 ```
@@ -250,6 +250,36 @@ import, then **Make a Slate film**, or **Send into a film** to attach them to an
 For a First AD-created film, **Production → Shots → Make storyboard still** saves a candidate and pins it
 unless you changed the first frame while its job ran. Home/Create stills and the Copilot `queue_still` tool
 use the same queue and restrictions.
+
+The image setup entry point reuses healthy prerequisites and installs missing ones. `-Model auto` currently
+chooses SD-Turbo conservatively; automatic matching to measured native-model profiles is not implemented yet.
+It is not a claim that larger machines need the fallback. An explicit choice, for example `-Model qwen`,
+never silently becomes SD-Turbo. Missing native image weights require `-AllowUnverifiedImageModel` before download
+(also accepted by the native one-shot installer); installed complete files and `-NoDownload` do not require it.
+Download size is not a runtime RAM requirement. `-PlanOnly` performs no hardware probes or downloads.
+After Qwen Turbo setup completes, **Machine → Feature checks** offers explicit native qualification levels:
+512×512 basic, 1024×576 studio, 1280×736 scout, 1344×768 landscape, 1024×1024 square, 768×1344 portrait,
+1664×928 large landscape (one image each), and four sequential 1024×576 candidates. The next unpassed level
+can be selected individually. Groups cover **Studio & scouting**, **Image presets**, **Large image**, or
+**All unchecked**; **Check selected recipes** starts the selected group or individual recipe.
+Groups skip valid passes, run sequentially and save each completed recipe independently.
+Completed groups and individual recipes show a checkmark. Group actions are separate from the expandable
+individual recipe list; each passed recipe's measurements and the runtime/memory policy are expandable details.
+Recipe attempts retain their own Failed or Cancelled status and error details; Not checked means no result
+has been recorded. An existing valid pass remains Passed after an unsuccessful retry.
+Ordinary output failures allow the next recipe to run; memory, backend, timeout or cleanup failures stop the
+group. Cancel retains completed passes; run the group again to check only what remains.
+Each recipe keeps the same bounded render deadline; the group's overall deadline accounts for its members.
+Existing model files and verified checksums
+are reused. Each level keeps its own dated pass, elapsed time and memory observations; a failed larger level
+never removes smaller passes. Existing basic receipts remain valid under the balanced update policy.
+When qualification gating is on, Image and the job API allow only exactly checked canvases and their tested
+counts (or fewer); another orientation or smaller canvas is not inferred from pixel area. Unchecked requests
+are refused, not silently resized. Editing and other models need their own qualifications.
+These checks do not establish minimum RAM requirements. Qualification-off mode retains the existing canvas
+limits and all live memory guards.
+Guard refusals retain available readings as failed-attempt observations, not qualifications. The native check
+uses the native guard's actual memory floors; a short model-staging spike is not extrapolated into a new floor.
 Missing import stills and **Production -> Shots -> Fill missing scene storyboards** are grouped into batches
 of at most six different captions. Each result stays with its own shot; per-shot seeds and manual pictures
 are preserved.

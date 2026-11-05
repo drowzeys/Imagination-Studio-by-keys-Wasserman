@@ -3,6 +3,8 @@
   Native Windows feature components (an NVIDIA RTX Spark N1X, Windows 11 on Arm), without WSL.
   Run by oneshot-setup-rtx-spark-n1x.ps1 -Native; it can be run again (it resumes).
   Image-only setup needs no H3 engine/toolchain; -PlanOnly reports dependencies without installing or probing.
+  Missing native image weights require -AllowUnverifiedImageModel: memory fit is unknown, not inferred from RAM.
+  For safe automatic stills setup, use scripts\setup-windows-images.ps1 -Model auto (SD-Turbo).
 
 .DESCRIPTION
   1. the build tools, when missing: Python 3.13 (ARM64), Git, Zig 0.17, the Visual Studio 2022 Build Tools with the
@@ -38,6 +40,7 @@ param(
   [switch]$Sound,
   [switch]$Voice,                         # Fish Audio Drama 3: build drama3-generate.exe + tensorfold_drama3.dll, fetch fishaudio/drama-3
   [switch]$NoDownload,                    # no model downloads (the files are already in -Models)
+  [switch]$AllowUnverifiedImageModel,     # explicitly accept unknown native image fit before downloading missing weights
   [switch]$SkipToolchain,
   [switch]$ToolchainOnly,                 # step 1 alone: the build tools and the CUDA toolkit, nothing else
   [switch]$SkipBuild,                     # keep the engines already in place
@@ -71,7 +74,11 @@ $NeedGpuRuntime = $Bolt -or $Voice -or @($Want | Where-Object { $_ -ne "finish" 
 if ($PlanOnly) {
   @{ parts=$Want; h3_engine=$H3Engine; music_engine=$MusicEngine; bolt_engine=[bool]$Bolt;
      voice_engine=[bool]$Voice; native_toolchain=$NeedToolchain; gpu_runtime=$NeedGpuRuntime;
-     foley_isolated=($Want -contains "foley") } |
+     foley_isolated=($Want -contains "foley");
+     image_fit='unknown; the N1X 128 GB Turbo measurement is a reference, not a minimum or a qualification for other variants';
+     image_download_guard=(@($Want | Where-Object { $_ -in @("image", "image-edit", "flux3", "moss") }).Count -gt 0 -and
+                          -not $NoDownload -and -not $AllowUnverifiedImageModel);
+     safe_image_setup='scripts\setup-windows-images.ps1 -Model auto' } |
     ConvertTo-Json -Compress
   exit 0
 }
@@ -80,8 +87,23 @@ if ($env:OS -ne "Windows_NT" -or $env:PROCESSOR_ARCHITECTURE -ne "ARM64") { thro
 $Root = Split-Path $PSScriptRoot -Parent
 $Home_ = Join-Path $env:LOCALAPPDATA "ImaginationStudio"
 if (-not $Models) { $Models = Join-Path $Home_ "models" }
-New-Item -ItemType Directory -Force -Path $Home_, $Models | Out-Null
 $Gpu = Join-Path $Home_ "gpu-venv\Scripts\python.exe"
+$ImageParts = @($Want | Where-Object { $_ -in @("image", "image-edit", "flux3", "moss") })
+if ($ImageParts.Count -gt 0 -and -not $NoDownload -and -not $ToolchainOnly) {
+  $Guard = @("-X", "utf8", (Join-Path $Root "app\windows_image_setup.py"),
+             "--guard-parts", ($ImageParts -join ","), "--models", $Models)
+  if ($AllowUnverifiedImageModel) { $Guard += "--allow-unverified" }
+  if (Test-Path -LiteralPath $Gpu) {
+    & $Gpu @Guard
+  } else {
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+      throw "Python 3.13 is needed for the pre-download image guard. Use scripts\setup-windows-images.ps1 -Model auto; no model bytes were downloaded."
+    }
+    & py -V:3.13 @Guard
+  }
+  if ($LASTEXITCODE -ne 0) { throw "Native image setup refused before model downloads. Use scripts\setup-windows-images.ps1 -Model auto, or deliberately opt in with -AllowUnverifiedImageModel." }
+}
+New-Item -ItemType Directory -Force -Path $Home_, $Models | Out-Null
 
 # ---------- 1. build tools ----------
 function Winget([string]$id, [string[]]$more = @()) {
@@ -207,6 +229,13 @@ if (Test-Path (Join-Path $MusicBin "music3-generate.exe")) { Ok "MiniMax Music 3
 
 # ---------- 4. the models ----------
 if (-not $NoDownload -and $NeedGpuRuntime) {
+  if ($ImageParts.Count -gt 0) {
+    $Access = @("-X", "utf8", (Join-Path $Root "app\windows_image_setup.py"), "--check-access",
+                "--guard-parts", ($ImageParts -join ","), "--models", $Models)
+    if ($AllowUnverifiedImageModel) { $Access += "--allow-unverified" }
+    & $Gpu @Access
+    Native "image repository access preflight"
+  }
   Say "Models -> $Models ($Parts)"
   & $Gpu -X utf8 (Join-Path $Root "scripts\windows-cuda-setup.py") models --models $Models --parts $Parts
   if ($LASTEXITCODE -ne 0) { Warn "some files did not download (above): run again to resume; a gated model needs its licence accepted with your Hugging Face account" }
