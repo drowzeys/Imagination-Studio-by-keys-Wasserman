@@ -42,6 +42,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+import model_catalog
 
 try:
     import discover  # Models & weights: what was found elsewhere on this machine and linked
@@ -447,7 +448,8 @@ class Served:
             self.answers, self.log, self.killed, self.device_gb = queue.Queue(), [], "", None
             began, self.before_gb = time.time(), mem_available_gb()
             self.process = subprocess.Popen(self.argv(), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                            stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
+                                            stderr=subprocess.PIPE, text=True, bufsize=1, env=env,
+                                            creationflags=0x08000000 if WINCUDA else 0)
             threading.Thread(target=self.read, args=(self.process,), daemon=True).start()
             threading.Thread(target=self.guard, args=(self.process,), daemon=True).start()
             if self.idler is None:
@@ -747,7 +749,7 @@ class Cuda(Served):
 
     name, label = "cuda", "TensorFold CUDA · DGX Spark"
     fps, load_s = 30.0, 18.0  # measured on a GB10: 29 to 31 frames a second sampled, 17 to 18 s to load from NFS
-    NEED_GB = 50.0  # free memory wanted before it loads: 41.6 GB at the peak, and the guard's 8 GB beside it
+    NEED_GB = model_catalog.required_free_gib("voice")
     CHUNK_WORDS = 60  # a request's text at most (about 27 s of speech, ~600 frames, well inside max_ctx 4096)
     GAP_S = 0.15  # the silence put between two parts of a long take
 

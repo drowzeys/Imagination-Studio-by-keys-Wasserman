@@ -67,6 +67,7 @@ import urllib.request
 from pathlib import Path
 
 import voice  # mem_available_gb, settle, located, found_hint: the same readings Drama 3's engine uses
+import model_catalog
 import windows_cuda  # the native Windows CUDA tier (False off Windows without a look)
 
 # native Windows with the CUDA tier installed runs the same CUDA backend: tensorfold-native.exe with bolt.dll
@@ -551,7 +552,7 @@ class Cuda(Engine):
     load_s = 40.0
     # free memory wanted before it loads: Mia's start check for these settings (weights 23, vision 3, recurrent state
     # 2, attention 1, TensorFold's reserve 10, 2, prompt cache 2 GiB)
-    NEED_GB = 43.0
+    NEED_GB = model_catalog.required_free_gib("bolt")
     RESIDENT_GB = 31.0  # 30.7 GB held, measured on a GB10 with the settings below (3.3.3; 28 with the 1.0.12 engine)
     folder_name = "bolt"
 

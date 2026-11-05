@@ -306,7 +306,7 @@ def observe_native(command: list[str], output: Path, validate, result: dict, tim
             if process.returncode:
                 log.flush()
                 log.seek(max(0, log.tell() - 4000))
-                raise SafetyRefusal(f"The native image backend failed ({process.returncode}); the group cannot safely continue: " + log.read())
+                raise SafetyRefusal(f"The native generation backend failed ({process.returncode}); the check cannot safely continue: " + log.read())
             validate()
             result["rendered"] = True
             return result

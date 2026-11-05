@@ -41,6 +41,8 @@ param(
   [switch]$Voice,                         # Fish Audio Drama 3: build drama3-generate.exe + tensorfold_drama3.dll, fetch fishaudio/drama-3
   [switch]$NoDownload,                    # no model downloads (the files are already in -Models)
   [switch]$AllowUnverifiedImageModel,     # explicitly accept unknown native image fit before downloading missing weights
+  [switch]$AutomaticModelSelection,      # broad/automatic setup skips components whose runtime pool is known too small
+  [switch]$AllowInsufficientModel,        # explicit download despite a known capacity mismatch; never relaxes runtime guards
   [switch]$SkipToolchain,
   [switch]$ToolchainOnly,                 # step 1 alone: the build tools and the CUDA toolkit, nothing else
   [switch]$SkipBuild,                     # keep the engines already in place
@@ -75,6 +77,8 @@ if ($PlanOnly) {
   @{ parts=$Want; h3_engine=$H3Engine; music_engine=$MusicEngine; bolt_engine=[bool]$Bolt;
      voice_engine=[bool]$Voice; native_toolchain=$NeedToolchain; gpu_runtime=$NeedGpuRuntime;
      foley_isolated=($Want -contains "foley");
+     runtime_fit='Not probed in PlanOnly. Before downloads: known insufficient automatic choices are skipped; explicit mismatches require -AllowInsufficientModel. Unknown fit is not a pass.';
+     automatic_model_selection=[bool]$AutomaticModelSelection;
      image_fit='unknown; the N1X 128 GB Turbo measurement is a reference, not a minimum or a qualification for other variants';
      image_download_guard=(@($Want | Where-Object { $_ -in @("image", "image-edit", "flux3", "moss") }).Count -gt 0 -and
                           -not $NoDownload -and -not $AllowUnverifiedImageModel);
@@ -88,6 +92,34 @@ $Root = Split-Path $PSScriptRoot -Parent
 $Home_ = Join-Path $env:LOCALAPPDATA "ImaginationStudio"
 if (-not $Models) { $Models = Join-Path $Home_ "models" }
 $Gpu = Join-Path $Home_ "gpu-venv\Scripts\python.exe"
+if (-not $NoDownload -and -not $ToolchainOnly -and @($Want | Where-Object { $_ -ne 'finish' }).Count -gt 0) {
+  $FitArgs = @('-X','utf8',(Join-Path $Root 'app\windows_setup_fit.py'),
+               '--parts',($Want -join ','),'--models',$Models)
+  if ($AutomaticModelSelection) { $FitArgs += '--automatic' }
+  if ($AllowInsufficientModel) { $FitArgs += '--allow-insufficient' }
+  if (Test-Path -LiteralPath $Gpu) { $FitText = & $Gpu @FitArgs }
+  else {
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+      throw 'Python 3.13 is needed for pre-download runtime-fit planning. No models were downloaded.'
+    }
+    $FitText = & py -V:3.13 @FitArgs
+  }
+  if ($LASTEXITCODE -ne 0) { throw 'Pre-download runtime-fit planning failed; no install or download was started.' }
+  $Fit = ($FitText | Out-String) | ConvertFrom-Json
+  if ($Fit.blocked) {
+    throw 'A requested model exceeds a known runtime pool. Review the requirement above; explicitly add -AllowInsufficientModel to download anyway. Runtime guards remain unchanged.'
+  }
+  $Want = @($Want | Where-Object { $_ -notin $Fit.skip_parts })
+  if ('voice' -in $Fit.skip_parts) { $Voice = $false }
+  if ('music' -in $Fit.skip_parts) { $Music = $false }
+  if ('bolt' -in $Fit.skip_parts) { $Bolt = $false }
+  $Parts = $Want -join ','
+  $H3Engine = @($Want | Where-Object { $_ -in @('video','ref2va') }).Count -gt 0
+  $MusicEngine = $Want -contains 'music'
+  $NeedEngines = $H3Engine -or $MusicEngine -or $Bolt -or $Voice
+  $NeedToolchain = $NeedEngines -or ($Want -contains 'train')
+  $NeedGpuRuntime = $Bolt -or $Voice -or @($Want | Where-Object { $_ -ne 'finish' }).Count -gt 0
+}
 $ImageParts = @($Want | Where-Object { $_ -in @("image", "image-edit", "flux3", "moss") })
 if ($ImageParts.Count -gt 0 -and -not $NoDownload -and -not $ToolchainOnly) {
   $Guard = @("-X", "utf8", (Join-Path $Root "app\windows_image_setup.py"),

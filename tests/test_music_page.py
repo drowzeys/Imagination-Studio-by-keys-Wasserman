@@ -70,6 +70,21 @@ def test_the_tab_shows_the_credit_the_tags_and_the_helper():
     assert "Not available here." in got["off"] and "No MiniMax Music 3 weights" in got["off"]
 
 
+def test_qualified_instrumental_form_uses_only_the_tested_audio_scope():
+    got = run("""
+      S.music={...S.music,route:"cuda",qualified:true,qualification_required:true,
+        verified_recipe:{seconds:10},seconds:[10,10],stream:false};
+      MU.takes=[]; MU.caption="Warm piano"; MU.lyrics=""; MU.seconds=60;
+      out.page=text(viewMusic()); out.seconds=MU.seconds;
+      await muRender(); out.params=calls.find(([path])=>path==="/api/music/takes")[1];
+      S.music.qualification_required=false; MU.seconds=60; MU.asr=true;
+      await muRender(); out.unrestricted=calls.filter(([path])=>path==="/api/music/takes").at(-1)[1];
+    """)
+    assert got["seconds"] == got["params"]["seconds"] == 10
+    assert got["params"]["asr"] is False and got["params"]["live"] is False
+    assert "Verified: 10-second" in got["page"] and "Pop example" not in got["page"]
+    assert got["unrestricted"]["seconds"] == 60 and got["unrestricted"]["asr"] is True
+
 def test_generate_queues_a_song_and_a_take_can_go_under_a_video():
     got = run("""
       Object.assign(MU, { caption: "", lyrics: "" }); await muRender(); out.refused = toasts.slice(-1)[0]; out.calls_before = calls.length;

@@ -298,6 +298,72 @@ Compatible source changes follow the balanced
 policy during checks too; model files, recipe, hardware or execution-contract changes still prevent a new pass.
 Guard refusals retain available readings as failed-attempt observations, not qualifications. The native check
 uses the native guard's actual memory floors; a short model-staging spike is not extrapolated into a new floor.
+
+**Native Voice and Music checks:** Machine → Feature checks offers separate explicit checks for Fish Audio
+Drama 3's native CUDA engine and MiniMax-Music3's native CUDA int8 engine. Voice generates a short stock sentence
+without a reference; its initial qualified scope is plain single-speaker text up to 20 words / 120 characters,
+with default sampling, no streaming, cloning or transcription. Music checks a ten-second instrumental
+at its production default sampling settings, without streaming or lyric transcription. These passes do not
+qualify longer speech, references, directions, songs with lyrics, other song engines or longer durations.
+Both checks use the production take writers, an isolated calibration media folder and an owned subprocess tree,
+validate a finite, non-silent 44.1 kHz WAV, record memory observations and drain the engine before saving a pass.
+Voice output is mono and must be 0.5–15 seconds; Music is stereo and must be 0.5–10.5 seconds (the engine may end
+early). These are generation/runtime checks, not a word-accuracy or artistic-quality certification.
+Existing engine admission/kill guards and Windows commit/dedicated/host reserves remain unchanged; installed
+weights do not guarantee that a run fits. In particular, Voice's existing free-memory requirement can refuse a
+64 GiB N1X configuration. No model is downloaded and no inference is started merely by opening Feature checks.
+Native setup now plans runtime fit **before build-tool setup and model downloads**. The planner reads the
+engines' own admission policies (currently Drama 3: 50 GiB free, MiniMax-Music3 int8: 30 GiB / bf16: 38 GiB,
+Bolt: 43 GiB), not model-download sizes. A single physical NVIDIA GPU is selected by UUID/index when specified;
+NPU rows are excluded. On an N1X the GPU carve-out is the pool; on discrete cards both host RAM and the GPU
+must meet the existing requirement. Pools are never added together. Installed RAM alone, including 96 GiB,
+does not establish fit, and a free-memory requirement is not a measured minimum-RAM claim.
+
+The default broad native one-shot setup uses automatic selection: a missing model whose required pool exceeds
+total capacity is skipped, including its requested engine build. `setup-windows-cuda.ps1 -AutomaticModelSelection`
+does the same for its parts. An explicitly requested incompatible download stops with the requirement and pool
+size before installing anything; `-AllowInsufficientModel` deliberately permits it (also on the one-shot installer),
+without qualifying it or weakening runtime guards. Complete cached model components are reused rather than
+removed or blocked; `-NoDownload` bypasses download planning, and `-PlanOnly` still performs no probes.
+Temporary contention never becomes a permanent unsupported-machine result. Unknown requirements are labelled
+unknown and never marked as a fit or an incompatibility; native image downloads retain their separate
+`-AllowUnverifiedImageModel` acknowledgment. Video, image, SFX and Foley envelopes are not invented from their
+weight sizes or extrapolated from a single pass. The planner does not reuse an old failed attempt as a permanent
+capacity limit: it re-reads current hardware and the applicable policy on each install.
+
+**Declarative model metadata:** `app/model_catalog.json` is the shared source for native model labels,
+installer parts, component files/repositories, checkpoint revisions, existing SHA-256 pins, published byte sizes
+and runtime admission policies. `app/model_catalog.py` is its standard-library reader; setup no longer parses
+Voice, Music or Bolt source to find requirements. Those CUDA engines read the same values directly from the
+catalog, so setup and admission cannot silently disagree. The values and existing engine safeguards are unchanged.
+`required_free_gib` describes runtime policy, never download size or minimum installed RAM; `null` explicitly
+means unknown. Local qualification receipts remain separate machine/recipe evidence, not catalog claims.
+
+For another model using an existing supported backend/layout, add a model descriptor and download manifest
+to the catalog. Generic component rows, setup-fit messages and size display use it automatically; image
+descriptors also feed the existing model picker. A genuinely new renderer, file layout or engine still needs its
+implementation and qualification contract, not just a JSON entry. Catalog tests demonstrate a new component
+getting fit/size information without planner code changes. Optional component checksums remain at their
+existing Spark pins.
+
+Download sizes are summed from the actual selected component files, including shared text encoders/decoders,
+or the complete checkpoint snapshot for snapshot downloads. `python scripts/refresh-model-sizes.py` refreshes
+the checked-in sizes from public Hugging Face repository metadata only (no weights, token or inference);
+UI requests read the catalog offline and never contact Hugging Face. Unknown/incomplete metadata stays unknown.
+The displayed GB total is model payload, not a promise about remaining transfer, dependency downloads, disk
+staging or runtime RAM. The page shows one download total in GB; a tooltip gives exact bytes and the equivalent
+GiB conversion, rather than presenting them as two different sizes.
+
+Models & weights and Feature checks show this size and the applicable capacity warning.
+The row-header Feature checks link opens the exact recipe card, including Voice, Music, SFX and Foley components.
+These links sit at the right of each model heading. For missing models
+known not to fit, the setup command is withheld and its copy action disabled until **download anyway** is
+explicitly acknowledged; the copied command includes `-AllowInsufficientModel`. This does not mark the model
+qualified, alter guards or start a download. The Windows UI caches static pool capacity; actual setup/admission
+still checks the current runtime independently. Busy memory is not converted into a permanent capacity failure.
+Compatible updates preserve dated evidence; failed/cancelled attempts retain the last successful pass.
+With qualification gating off, existing supported routes remain available under their own live guards.
+
 Missing import stills and **Production -> Shots -> Fill missing scene storyboards** are grouped into batches
 of at most six different captions. Each result stays with its own shot; per-shot seeds and manual pictures
 are preserved.

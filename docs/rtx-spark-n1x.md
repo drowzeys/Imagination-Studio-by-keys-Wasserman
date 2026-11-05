@@ -237,6 +237,16 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1 -Native
 `-Native` clones the Studio on Windows (`-StudioDir`, default `%USERPROFILE%\Imagination-Studio`), asks once for the
 Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and runs `scripts\setup-windows-cuda.ps1`:
 
+Before any component install/download, native setup prints a runtime-fit plan. The default broad selection
+skips missing models whose existing runtime admission requirement exceeds this machine's GPU pool (and host
+pool where applicable), not merely its current free memory. For example, Drama 3 needs 50 GiB free under its
+current policy, so a fresh install with a 30.5 GiB N1X GPU pool skips Voice automatically. A machine with 96 GiB
+installed RAM still needs a suitable GPU carve-out and live headroom; it is not automatically qualified.
+Passing `-NativeParts` selects an explicit set instead. An explicit capacity mismatch requires
+`-AllowInsufficientModel` to download anyway. Cached files remain untouched; temporary contention and unknown
+requirements are not labelled permanently incompatible. `-PlanOnly` is still probe-free. See the README's
+native audio checks for policy sources, limitations, and the separate unknown-fit image acknowledgment.
+
 1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
    ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
    the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;

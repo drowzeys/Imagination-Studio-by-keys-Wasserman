@@ -10,18 +10,13 @@ import subprocess
 import uuid
 
 import windows_cuda
+import model_catalog
 from windows_memory import physical_memory_mb
 
 OPTIONAL_QUALIFICATION_MB = 128 * 1024
 _SESSION_KEY = uuid.uuid4().hex
 BOUNDED = ("scout", "sfx", "foley", "hlg", "finish", "graphics")
-IMAGE_SPECS = {
-    "qwen": ("Qwen-Image 2.1 Turbo", "Qwen-Image-2.1-Comfy", "qwen_image_2.1_turbo_bf16.safetensors", "image"),
-    "qwen-full": ("Qwen-Image 2.1 Full", "Qwen-Image-2.1-Comfy", "qwen_image_2.1_bf16.safetensors", "image-edit"),
-    "flux3k-fast": ("FLUX3-K Fast", "FLUX3-K-Comfy", "flux3-image-klein-bf16.safetensors", "flux3"),
-    "flux3k-full": ("FLUX3-K Full", "FLUX3-K-Comfy", "flux3-image-klein-base-bf16.safetensors", "flux3"),
-    "moss-image": ("MOSS-Image", "MOSS-Image-Comfy", "moss_image_sft_bf16.safetensors", "moss"),
-}
+IMAGE_SPECS = model_catalog.image_specs()
 
 
 class RouteUnavailable(ValueError):
@@ -43,7 +38,7 @@ def release_native() -> bool:
     if identity.get("session") != hashlib.sha256(_SESSION_KEY.encode()).hexdigest() or not comfy_win.running():
         return False
     done = subprocess.run(windows_cuda.comfy_argv("stop"), env={**os.environ, **session_env()},
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, timeout=60, creationflags=0x08000000 if windows_cuda.native_os() else 0)
     if done.returncode:
         raise RuntimeError("The owned native ComfyUI backend did not stop: " + done.stderr[-500:])
     return True
@@ -303,6 +298,15 @@ def video_missing(params: dict | None = None) -> list[str]:
 
 
 def require_native(kind: str, params: dict) -> None:
+    if kind in ("voice", "music") and mode()["enabled"]:
+        import windows_audio_checks as audio
+        found = audio.status(kind)
+        if not found["qualified"]:
+            raise RouteUnavailable(found["why"])
+        audio.require_scope(kind, params)
+        if not found["installed"]:
+            raise RouteUnavailable(found["why"])
+        return
     if kind == "scout":
         model = params.get("image_model") or default_image()
         found = next((row for row in image_options() if row["id"] == model), None)
@@ -339,6 +343,27 @@ def require_native(kind: str, params: dict) -> None:
 
 def gate_native_state(kind: str, state: dict, selected_mode: dict | None = None) -> dict:
     selected_mode = mode() if selected_mode is None else selected_mode
+    audio_kind = "music" if kind == "music (music3)" else kind
+    if (audio_kind in ("voice", "music") and (audio_kind != "music" or state.get("engine", "music3") == "music3")
+            and (selected_mode["enabled"] or state.get("backend", state.get("route", "cuda")) == "cuda")):
+        import windows_audio_checks as audio
+        checked = audio.status(audio_kind)
+        available = checked["installed"] and (checked["qualified"] or not selected_mode["enabled"])
+        why = checked["why"]
+        raw_blocked = not state.get("available") and state.get("state") not in ("needs_verification", "qualified")
+        if checked["installed"] and raw_blocked and state.get("why"):
+            available, why = False, state["why"]
+        result = {**state, **checked, "available": available, "why": why,
+                  "qualification_required": selected_mode["enabled"]}
+        if selected_mode["enabled"] and checked["qualified"]:
+            result.update(live=False, stream=False)
+            if audio_kind == "voice":
+                result.update(text_limit=120, reference_seconds=None)
+            else:
+                result["seconds"] = [10, 10]
+        if available:
+            result.update(why="", state="qualified" if checked["qualified"] else "available_unverified")
+        return result
     installed = state.get("installed", state.get("available", False))
     result = {**state, "installed": installed, "qualified": False,
               "qualification_required": selected_mode["enabled"], "backend": state.get("backend", "native"),

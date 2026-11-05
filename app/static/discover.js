@@ -15,6 +15,7 @@
 .dsc-row{border:1px solid var(--line);border-radius:var(--r2);background:var(--panel);padding:8px 10px;margin:6px 0}
 .dsc-row .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .dsc-row .top b{font-weight:600;color:var(--text)}
+.dsc-row .top .dsc-check-link{margin-left:auto;flex-shrink:0}
 .dsc-path{font:12px/1.4 var(--mono);color:var(--dim);word-break:break-all}
 .dsc-cand{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px}
 .dsc-state.expected{color:var(--green);border-color:var(--green)}
@@ -27,7 +28,7 @@
   document.head.appendChild(style);
 })();
 
-const DSC = { data: null, all: false, busy: "", timer: null };
+const DSC = { data: null, all: false, busy: "", timer: null, acknowledged: new Set() };
 const DSC_WORDS = { expected: "in place", found: "found elsewhere", "needs-conversion": "needs converting", missing: "not on this machine", scanning: "scanning…" };
 const dscWhen = t => { if (!t) return "never"; const d = new Date(t * 1000); return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); };
 
@@ -59,25 +60,50 @@ function dscRow(node, n) {
   return el("div", { class: "dsc-row", "data-need": n.id },
     el("div", { class: "top" }, el("b", {}, n.label), el("span", { class: "dsc-state " + state }, said),
       n.link ? el("button", { class: "small", disabled: !!DSC.busy, title: "Remove the link the studio made (the file itself stays where it is)",
-        onclick: () => dscDo(node, "/api/discover/unlink", { need: n.id }, n.id) }, "Unlink") : null),
+        onclick: () => dscDo(node, "/api/discover/unlink", { need: n.id }, n.id) }, "Unlink") : null,
+      n.feature && typeof openFeatureCheck === "function" ? el("button", { class: "small dsc-check-link",
+        onclick: () => openFeatureCheck(n.feature) }, "Feature checks") : null),
     n.expected ? el("div", { class: "dsc-path" }, (n.unlisted ? "would be linked at " : "expected at ") + relHome(n.expected) + (n.env ? " (" + n.env + ")" : "")) : null,
     n.link ? el("div", { class: "dsc-path" }, "linked to " + n.link.shown + (n.link.how === "record" ? " (recorded: that folder cannot be written, the studio reads the link itself)" : "")) : null,
     !n.link && n.state !== "expected" ? (n.candidates || []).map(c => el("div", { class: "dsc-cand" }, el("span", { class: "dsc-path" }, "found at " + c.shown),
       el("span", { class: "note" }, c.verified ? "proved by " + c.proof : c.proof), c.copies && c.copies.length ? el("span", { class: "note" }, "identical copies: " + c.copies.length) : null, use(c))) : null,
     !n.link && n.state !== "expected" ? (n.conversions || []).map(c => el("div", {}, el("div", { class: "dsc-path" }, "found " + c.shown + ", in another layout: " + (c.note || "")),
       c.convert ? el("div", { class: "dsc-cmd" }, c.convert) : null)) : null,
+    dscModelInfo(n),
     n.why ? el("div", { class: "note" }, n.why) : null,
-    n.feature && typeof openFeatureCheck === "function" ? el("button", { class: "small",
-      onclick: () => openFeatureCheck(n.feature) }, "Feature checks") : null,
     n.state === "missing" ? dscInstall(node, n) : null);
+}
+function dscModelInfo(n) {
+  const size = n.download_size, fit = n.runtime_fit;
+  if (!size && !fit) return null;
+  const bytes = size?.bytes;
+  return el("div", { class: "stack" },
+    size ? el("div", { class: "note",
+      title: bytes != null ? bytes.toLocaleString() + " bytes (" + (bytes / 2 ** 30).toFixed(1)
+        + " GiB). GB uses decimal units; GiB uses binary units. Both describe the same download." : "" },
+      bytes != null ? "Download size: " + (bytes / 1e9).toFixed(1) + " GB" : "Download size: unknown") : null,
+    fit ? el("div", { class: "note" + (fit.state === "insufficient_capacity" ? " vt-bad" : "") },
+      el("b", {}, fit.state === "insufficient_capacity" ? "Not expected to run on this configuration. "
+        : fit.state === "temporarily_busy" ? "Memory currently busy. " : fit.required_mb == null ? "Runtime fit unknown. " : ""),
+      fit.why) : null);
 }
 
 // what Install does for a need that is not on this machine: the engine's own installer, the LoRA hub, or nothing to run
 const dscRunning = () => DSC.data && DSC.data.installing && DSC.data.installing.state === "running";
-function dscInstall(node, n) { const p = n.install || {}, job = DSC.data.installing || {}, mine = job.need === n.id;
-  if (p.how === "command") return el("div", { class: "dsc-cand" },
-    el("code", { class: "dsc-cmd" }, p.shown),
-    el("button", { class: "small", onclick: () => copyText(p.shown, "Setup command") }, "Copy setup command"));
+function dscInstall(node, n) { const p = n.install || {}, job = DSC.data?.installing || {}, mine = job.need === n.id;
+  if (p.how === "command") {
+    const mismatch = n.runtime_fit?.state === "insufficient_capacity", accepted = DSC.acknowledged.has(n.id);
+    const command = mismatch ? p.override_shown || p.shown + " -AllowInsufficientModel" : p.shown;
+    return el("div", { class: "stack" },
+      mismatch ? el("label", { class: "note" }, el("input", { type: "checkbox", checked: accepted,
+        onchange: e => { if (e.target.checked) DSC.acknowledged.add(n.id); else DSC.acknowledged.delete(n.id);
+          if (node) dscDraw(node); else if (typeof wfcDraw === "function") wfcDraw(); } }),
+        "I understand this model is not expected to run here; download anyway.") : null,
+      el("div", { class: "dsc-cand" },
+        !mismatch || accepted ? el("code", { class: "dsc-cmd" }, command) : null,
+        el("button", { class: "small", disabled: mismatch && !accepted,
+          onclick: () => { if (!mismatch || DSC.acknowledged.has(n.id)) copyText(command, "Setup command"); } }, "Copy setup command")));
+  }
   if (p.how === "first_use") return el("div", { class: "note" }, "Comes by itself the first time it is used.");
   if (!p.how) return n.download ? el("div", { class: "note" }, "Download: " + n.download) : null;  // a server without Install
   if (p.how === "manual") return n.download ? el("div", { class: "note" }, "Installed by hand: " + n.download) : null;
