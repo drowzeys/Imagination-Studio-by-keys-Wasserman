@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 from dataclasses import asdict, replace
 import json
 import os
@@ -403,7 +404,21 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
     with socket.socket() as reserve:
         reserve.bind(("127.0.0.1", 0))
         port = reserve.getsockname()[1]
-    with tempfile.TemporaryDirectory(prefix="studio-comfy-check-") as directory:
+    with contextlib.ExitStack() as cleanup:
+        workspace = tempfile.TemporaryDirectory(prefix="studio-comfy-check-")
+
+        def cleanup_workspace(_kind, original_error, _traceback):
+            try:
+                workspace.cleanup()
+            except OSError as error:
+                message = f"workspace cleanup failed: {error}; retained at {workspace.name}"
+                print(f"[comfy-check] {message}", file=sys.stderr)
+                if original_error is None:
+                    raise
+                original_error.add_note(message)
+
+        cleanup.push(cleanup_workspace)
+        directory = workspace.name
         log = Path(directory) / "startup.log"
         command = [
             sys.executable, "-X", "utf8", str(source / "main.py"),
@@ -522,7 +537,8 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                     console_exit_code = process.returncode
                 except (OSError, subprocess.TimeoutExpired) as error:
                     print(f"[comfy-check] console stop did not complete; draining the owned job: {error}", file=sys.stderr)
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"[comfy-check] check failed: {error}", file=sys.stderr)
             if calibration:
                 print("[comfy-check] failed calibration commitment: " + json.dumps(job.commitment()), file=sys.stderr)
             if log.exists():

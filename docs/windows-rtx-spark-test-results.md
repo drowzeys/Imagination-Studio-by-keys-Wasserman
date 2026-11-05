@@ -64,6 +64,26 @@ These results do not qualify either new route on the 48 GB machine.
 CPU feature receipts are hardware/runtime/code-bound, with a 4 GiB job cap and OS low-memory supervision.
 The ten-second limits are measured qualification boundaries, not claims about the models or all CPU workflows.
 
+## 2026-11-04: 48 GB expanded qualifications and checker diagnostics
+
+Native Windows ARM64 on the 48 GB N1X: 20.79 GiB Windows-visible RAM, 26 GiB dedicated GPU memory
+and 35.63 GiB CUDA allocation budget. Official expanded checks from `25dc13a`, with a local checker
+diagnostic fix; no allocator/process/job cap, reserve, freshness window or startup deadline changed.
+
+| Check | Result / useful measurement |
+|---|---|
+| Checker diagnostics | Cleanup failure preserves the original check error and reports the retained workspace; cleanup-only failure still fails. 190 focused regressions passed, including active-caller exception handling and the expanded qualification contracts |
+| Balanced reuse | Earlier HDR/Finish passes retained their dates and readiness. Existing image/SFX/graphics evidence stayed qualified with a runtime-update note until explicitly rerun; opening Machine submitted no checks |
+| Foley qualification | Official Machine-card check passed five-second mix / one-second replacement: 21.13 / 36.65 s after startup; peak job commitment 12,308.4 / 11,901.9 MiB under the unchanged 16 GiB cap. Mono 44.1 kHz, duration/levels, full decode and unchanged decoded source frames verified |
+| Expanded image/SFX checks | Both official Machine-card reruns passed. Six 512x512 drafts: 5.91 s after startup, peak job 7,816.0 MiB. Five-second SFX: 11.15 s, peak process 12,275.9 MiB and job 12,332.3 MiB; process commitment remains close to its unchanged 12 GiB cap |
+| Expanded graphics check | Official Machine-card rerun passed all six ten-second 1280x720/24 fps templates, with peak job commitment 932.7 MiB and no added visible browser windows |
+| Actual Foley UI | A separate five-second 660x360 take from the official check's source fixture completed through Make the foley, published MP4/WAV and appeared under Made here. Its video played in the actual page at the expected size/duration, with advancing playback and no media error |
+| Read-only browser sweep | Seven affected tabs matched their requested routes: no page/console/HTTP errors, failed requests or broken media; 19 writes blocked and zero phone overflow. All six qualification cards were qualified afterwards; native H3 video remained unavailable |
+
+The earlier Foley attempt failed before backend readiness and its cleanup error masked the original cause.
+The explicit rerun above passed; it does not establish that the earlier cold-start cause was fixed or that
+the failed attempt ran out of memory. These are bounded 48 GB results, not larger-model qualification.
+
 ## Interpretation limits
 
 - Image/sound retained 12/12/16 GiB allocator/process/job caps and a 2 GiB GPU reserve; graphics retained
