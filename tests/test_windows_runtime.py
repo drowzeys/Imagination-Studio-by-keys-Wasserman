@@ -201,7 +201,54 @@ def test_native_image_build_does_not_require_h3(client, install, monkeypatch):
     assert not (install / "tf-h3" / "tf_h3.dll").exists()
 
 
-def test_native_qualification_only_unlocks_its_checked_canvas_and_count(client, install, monkeypatch):
+def test_native_discovery_uses_runtime_image_inventory_and_powershell(install, monkeypatch):
+    import discover
+    monkeypatch.setattr(discover, "SPARK", False)
+    monkeypatch.setattr(discover, "MAC", False)
+    monkeypatch.setattr(discover.sys, "platform", "win32")
+    monkeypatch.setattr(discover, "all_needs", lambda: pytest.fail("Native inventory must not read the Mac catalogue"))
+    monkeypatch.setattr(discover, "load", lambda: pytest.fail("Native inventory must not trust a stale scan"))
+    found = discover.state()
+    assert found["inventory_only"] and not found["scanning"]
+    rows = {row["id"]: row for row in found["needs"]}
+    assert rows["qwen"]["state"] == "expected" and rows["qwen"]["feature"] == "qwen"
+    assert "Qwen-Image-2.1-Comfy" in rows["qwen"]["expected"]
+    assert rows["qwen-full"]["state"] == "missing"
+    for row in rows.values():
+        assert row["install"]["how"] == "command"
+        assert row["install"]["shown"].startswith("powershell ")
+        assert "bash " not in row["install"]["shown"] and ".sh " not in row["install"]["shown"]
+    assert rows["qwen-full"]["install"]["shown"].endswith("-Model qwen-full")
+    path = runtime.image_files("qwen")[0]
+    path.unlink()
+    rows = {row["id"]: row for row in discover.state()["needs"]}
+    assert rows["qwen"]["state"] == "missing" and path.name in rows["qwen"]["why"]
+
+
+def test_native_discovery_never_starts_posix_scan_or_installer(client, install, monkeypatch):
+    import discover
+    monkeypatch.setattr(discover, "SPARK", False)
+    monkeypatch.setattr(discover, "MAC", False)
+    monkeypatch.setattr(discover.sys, "platform", "win32")
+    monkeypatch.setenv("STUDIO_DISCOVER_DELAY", "0")
+    monkeypatch.setattr(discover, "start_scan", lambda: pytest.fail("Windows refresh must not scan disks"))
+    monkeypatch.setattr(discover, "apply_links", lambda: pytest.fail("Windows must not apply Mac links"))
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    app = FastAPI()
+    app.include_router(discover.attach(install, install))
+    with TestClient(app) as local:
+        assert local.get("/api/discover").json()["inventory_only"]
+        response = local.post("/api/discover/scan", json={})
+        assert response.status_code == 200 and not response.json()["started"]
+        for action in ("install", "use", "unlink", "link-all"):
+            response = local.post("/api/discover/" + action, json={"need": "qwen"})
+            assert response.status_code == 400
+            assert "PowerShell" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("model", tuple(runtime.IMAGE_SPECS))
+def test_native_qualification_only_unlocks_its_checked_canvas_and_count(client, install, monkeypatch, model):
     import windows_image_checks
     from fastapi import HTTPException
 
@@ -213,9 +260,10 @@ def test_native_qualification_only_unlocks_its_checked_canvas_and_count(client, 
         "installed": True, "available": True, "qualified": True, "check_available": True, "why": "",
         "verified_recipe": {"width": 512, "height": 512, "count": 1},
         "verified_scopes": [{"id": "basic", "width": 512, "height": 512, "count": 1}]})
-    params = {"image_model": "qwen", "prompt": "A hall.", "count": 1, "width": 512, "height": 512}
+    params = {"image_model": model, "prompt": "A hall.", "count": 1, "width": 512, "height": 512}
     _, env, _ = server.build("scout", params, "native-image")
     assert env["WIDTH"] == env["HEIGHT"] == 512
+    assert env["IMAGE_MODEL"] == model
     for changed in ({"width": 1024}, {"count": 2}):
         with pytest.raises(HTTPException, match="not a verified recipe"):
             server.build("scout", {**params, **changed}, "native-image")

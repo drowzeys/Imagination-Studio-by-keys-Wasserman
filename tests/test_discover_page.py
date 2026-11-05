@@ -123,3 +123,30 @@ def test_install_and_use_everything_found_are_one_click_each():
     assert out["sent"] == ["/api/discover/install", {"need": "flux3k-full"}]
     assert "installing…" in out["running"] and "Cancel" in out["running"] and "✓ environment" in out["running"]
     assert out["all"]
+
+
+def test_windows_inventory_refreshes_paths_and_copies_native_commands_without_install():
+    state = {"inventory_only": True, "platform": "windows", "scanning": False,
+             "note": "Current native Windows installation inventory.", "needs": [
+                 {"id": "qwen", "label": "Qwen Turbo", "engine": "Picture models", "state": "expected",
+                  "expected": "C:\\models\\Qwen-Image-2.1-Comfy", "feature": "qwen"},
+                 {"id": "qwen-full", "label": "Qwen Full", "engine": "Picture models", "state": "missing",
+                  "expected": "C:\\models\\Qwen-Image-2.1-Comfy",
+                  "install": {"how": "command", "shown": "powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-images.ps1 -Model qwen-full"}}]}
+    out = run(f"""
+      globalThis.copyText=(value)=>out.copied=value;
+      globalThis.openFeatureCheck=(feature)=>out.feature=feature;
+      answers["/api/discover"]={json.dumps(state)};
+      const box=viewDiscover(); await tick(); await tick();
+      out.text=text(box);
+      button(box,"Copy setup command").attrs.onclick();
+      button(box,"Feature checks").attrs.onclick();
+      button(box,"Refresh inventory").attrs.onclick(); await tick();
+      out.calls=calls;
+      out.installButtons=all(box,n=>n.tag==="button" && text(n)==="Install").length;
+    """)
+    assert "Qwen Turbo" in out["text"] and "in place" in out["text"]
+    assert "Last scan" not in out["text"] and "Not scanned yet" not in out["text"]
+    assert "bash" not in out["text"] and "powershell" in out["copied"]
+    assert out["feature"] == "qwen" and out["installButtons"] == 0
+    assert ["/api/discover/scan", {}] in out["calls"]

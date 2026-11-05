@@ -68,12 +68,18 @@ function dscRow(node, n) {
       el("span", { class: "note" }, c.verified ? "proved by " + c.proof : c.proof), c.copies && c.copies.length ? el("span", { class: "note" }, "identical copies: " + c.copies.length) : null, use(c))) : null,
     !n.link && n.state !== "expected" ? (n.conversions || []).map(c => el("div", {}, el("div", { class: "dsc-path" }, "found " + c.shown + ", in another layout: " + (c.note || "")),
       c.convert ? el("div", { class: "dsc-cmd" }, c.convert) : null)) : null,
+    n.why ? el("div", { class: "note" }, n.why) : null,
+    n.feature && typeof openFeatureCheck === "function" ? el("button", { class: "small",
+      onclick: () => openFeatureCheck(n.feature) }, "Feature checks") : null,
     n.state === "missing" ? dscInstall(node, n) : null);
 }
 
 // what Install does for a need that is not on this machine: the engine's own installer, the LoRA hub, or nothing to run
 const dscRunning = () => DSC.data && DSC.data.installing && DSC.data.installing.state === "running";
 function dscInstall(node, n) { const p = n.install || {}, job = DSC.data.installing || {}, mine = job.need === n.id;
+  if (p.how === "command") return el("div", { class: "dsc-cand" },
+    el("code", { class: "dsc-cmd" }, p.shown),
+    el("button", { class: "small", onclick: () => copyText(p.shown, "Setup command") }, "Copy setup command"));
   if (p.how === "first_use") return el("div", { class: "note" }, "Comes by itself the first time it is used.");
   if (!p.how) return n.download ? el("div", { class: "note" }, "Download: " + n.download) : null;  // a server without Install
   if (p.how === "manual") return n.download ? el("div", { class: "note" }, "Installed by hand: " + n.download) : null;
@@ -109,8 +115,9 @@ function dscDraw(node) {
   const count = s => needs.filter(n => n.state === s && !(n.optional && s === "missing")).length;
   rows.push(el("div", { class: "dsc-head" }, el("h2", { class: "m-flat" }, "Models & weights"), el("span", { class: "grow" }),
     el("button", { class: "small", disabled: d.scanning || !!DSC.busy, title: "Search this machine again for everything the studio needs", onclick: () => dscDo(node, "/api/discover/scan", {}, "scan") },
-      d.scanning ? "Scanning…" : "Scan again")));
-  rows.push(el("div", { class: "note" }, d.scanning ? "Scanning this machine" + (d.progress && d.progress.dirs ? ": " + d.progress.dirs + " folders so far" : "") + "…"
+      d.scanning ? "Scanning…" : d.inventory_only ? "Refresh inventory" : "Scan again")));
+  rows.push(el("div", { class: "note" }, d.inventory_only ? "Reading the native Windows runtime's configured model folders."
+    : d.scanning ? "Scanning this machine" + (d.progress && d.progress.dirs ? ": " + d.progress.dirs + " folders so far" : "") + "…"
     : scan ? "Last scan " + dscWhen(scan.at) + ", " + scan.dirs + " folders in " + scan.seconds + " s" + (scan.complete ? "." : " (stopped at its time limit).") : "Not scanned yet: a scan runs shortly after the Studio starts."));
   rows.push(el("div", { class: "note" }, d.note || "Nothing is moved or downloaded."));
   rows.push(el("div", { class: "note" }, count("expected") + " in place · " + count("found") + " found elsewhere · " + count("needs-conversion") + " to convert · " + count("missing") + " not on this machine"));

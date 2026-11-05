@@ -257,7 +257,7 @@ It is not a claim that larger machines need the fallback. An explicit choice, fo
 never silently becomes SD-Turbo. Missing native image weights require `-AllowUnverifiedImageModel` before download
 (also accepted by the native one-shot installer); installed complete files and `-NoDownload` do not require it.
 Download size is not a runtime RAM requirement. `-PlanOnly` performs no hardware probes or downloads.
-After Qwen Turbo setup completes, **Machine → Feature checks** offers explicit native qualification levels:
+For Qwen Turbo, Qwen Full, FLUX3-K Fast/Full and MOSS-Image, **Machine → Feature checks** offers explicit native qualification levels:
 512×512 basic, 1024×576 studio, 1280×736 scout, 1344×768 landscape, 1024×1024 square, 768×1344 portrait,
 1664×928 large landscape (one image each), and four sequential 1024×576 candidates. The next unpassed level
 can be selected individually. Groups cover **Studio & scouting**, **Image presets**, **Large image**, or
@@ -272,12 +272,25 @@ group. Cancel retains completed passes; run the group again to check only what r
 Each recipe keeps the same bounded render deadline; the group's overall deadline accounts for its members.
 Existing model files and verified checksums
 are reused. Each level keeps its own dated pass, elapsed time and memory observations; a failed larger level
-never removes smaller passes. Existing basic receipts remain valid under the balanced update policy.
+never removes smaller passes. Existing basic receipts remain valid under the balanced update policy. Each model keeps independent evidence;
+qualifying Turbo does not qualify Qwen Full, FLUX3-K or MOSS-Image. All checks use their production ComfyUI
+graphs: Qwen Full at 40 steps / CFG 4, FLUX3-K Fast at 16 steps / CFG 1, Full at 50 steps / CFG 3.5 with
+the caption upsampler, and MOSS-Image at 25 er_sde steps / CFG 2.5 with its template negative.
+Qwen Turbo keeps its fixed production sigmas. Non-Turbo checks have a bounded 30-minute deadline per
+sequential image, rather than borrowing Turbo's eight-minute recipe deadline; memory floors are unchanged.
 When qualification gating is on, Image and the job API allow only exactly checked canvases and their tested
 counts (or fewer); another orientation or smaller canvas is not inferred from pixel area. Unchecked requests
 are refused, not silently resized. Editing and other models need their own qualifications.
 These checks do not establish minimum RAM requirements. Qualification-off mode retains the existing canvas
 limits and all live memory guards.
+Picture-model cards use concise descriptions and aligned, independently clickable Qualified, Unverified or
+Setup required badges inside the cards; installation and verification diagnostics remain in Feature checks.
+On native Windows, Settings → Models & weights reads configured Windows model folders rather than the
+Mac/MLX catalogue or an old disk scan. Refresh inventory is read-only; missing components show copyable
+PowerShell setup commands. File discovery/linking and in-page installer execution are not offered on Windows.
+Installed files are not qualification evidence; use Feature checks for recipe-specific results.
+Compatible source changes follow the balanced
+policy during checks too; model files, recipe, hardware or execution-contract changes still prevent a new pass.
 Guard refusals retain available readings as failed-attempt observations, not qualifications. The native check
 uses the native guard's actual memory floors; a short model-staging spike is not extrapolated into a new floor.
 Missing import stills and **Production -> Shots -> Fill missing scene storyboards** are grouped into batches

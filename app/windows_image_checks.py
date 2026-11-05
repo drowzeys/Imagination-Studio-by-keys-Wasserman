@@ -18,7 +18,7 @@ import windows_features as features
 import windows_runtime
 from windows_qualification import gpu_runtime, gpu_version_contract, hardware_profile, verify_model_updates
 
-KINDS = ("qwen",)
+KINDS = tuple(windows_runtime.IMAGE_SPECS)
 SIDE = 512
 COUNT = 1
 CONTRACT = 1
@@ -58,12 +58,35 @@ def receipt_key(model: str, scope: str) -> str:
     return model if scope == "basic" else f"{model}-{scope}"
 
 
-def recipe(scope: str = "basic") -> dict:
+def title(model: str) -> str:
+    return windows_runtime.IMAGE_SPECS[model][0]
+
+
+def render_args(model: str) -> list[str]:
+    if model not in KINDS:
+        raise ValueError("Choose a registered image model.")
+    if model == "qwen-full":
+        return ["--model", "qwen", "--base", "--steps", "40", "--cfg", "4"]
+    return ["--model", model]
+
+
+def timeout_seconds(model: str, scope: str = "basic") -> int:
+    return TIMEOUT_S if model == "qwen" else 1800 * scope_settings(scope)["count"]
+
+
+def recipe(scope: str = "basic", model: str = "qwen") -> dict:
     import spark_generate
     settings = scope_settings(scope)
-    args = SimpleNamespace(base=False, width=settings["width"], height=settings["height"],
+    args = SimpleNamespace(model=model, base=model == "qwen-full", width=settings["width"], height=settings["height"],
                            negative=os.environ.get("NEGATIVE", ""), steps=None, cfg=4.0)
-    graph = spark_generate.qwen_image_workflow(args, PROMPT, 7)
+    if model.startswith("qwen"):
+        graph = spark_generate.qwen_image_workflow(args, PROMPT, 7)
+    elif model in spark_generate.FLUX3:
+        graph = spark_generate.flux3_workflow(args, PROMPT, 7)
+    elif model in spark_generate.MOSS:
+        graph = spark_generate.moss_workflow(args, PROMPT, 7)
+    else:
+        raise ValueError("Choose a registered image model.")
     graph["16"]["inputs"]["filename_prefix"] = "qualification"
     return {"width": args.width, "height": args.height, "count": settings["count"],
             "workflow_sha256": hashlib.sha256(json.dumps(graph, sort_keys=True).encode()).hexdigest()}
@@ -75,6 +98,13 @@ def prerequisites(model: str) -> str:
     if why := windows_cuda.why_not():
         return why
     missing = [path.name for path in windows_runtime.image_files(model) if not path.is_file() or path.stat().st_size == 0]
+    if not missing and model.startswith("flux3k"):
+        prompts = windows_runtime.model_root() / windows_runtime.IMAGE_SPECS[model][1] / "system_prompts.json"
+        try:
+            if not isinstance(json.loads(prompts.read_text(encoding="utf-8")).get("t2i"), str):
+                return "FLUX3-K's prompt upsampler needs a valid t2i system prompt; rerun its setup."
+        except (OSError, ValueError, AttributeError) as error:
+            return f"FLUX3-K's prompt upsampler settings could not be read: {error}"
     return "Missing model/runtime files: " + ", ".join(missing) if missing else ""
 
 
@@ -96,7 +126,7 @@ def device_uuid() -> str:
 
 def fingerprint(model: str, scope: str = "basic") -> dict:
     runtime = gpu_runtime(Path(windows_cuda.python()).parent.parent)
-    return {"contract": CONTRACT, "model": model, "recipe": recipe(scope), "models": model_files(model),
+    return {"contract": CONTRACT, "model": model, "recipe": recipe(scope, model), "models": model_files(model),
             "model_root": hashlib.sha256(str(windows_runtime.model_root().resolve()).encode()).hexdigest(),
             "backend": {"flags": (os.environ.get("SPARK_COMFY_ARGS") or "--use-ck-attention").split(),
                         "python": hashlib.sha256(str(Path(windows_cuda.python()).resolve()).encode()).hexdigest(),
@@ -106,6 +136,8 @@ def fingerprint(model: str, scope: str = "basic") -> dict:
             "hardware": {**hardware_profile(), "device": hashlib.sha256(device_uuid().encode()).hexdigest(),
                          "recorded_cuda_pool_mb": windows_cuda.config().get("cuda_pool_mb")},
             "runtime": runtime, "abi": gpu_version_contract(runtime["python"], runtime["versions"]),
+            **({"image_options": {name: os.environ.get(name, "") for name in ("STEPS", "UPSAMPLE")}}
+               if model != "qwen" else {}),
             "sources": {str(Path(*parts)): hashlib.sha256(features.PACK.joinpath(*parts).read_bytes()).hexdigest()
                         for parts in (("spark", "spark_generate.py"), ("spark", "comfy_win.py"),
                                       ("app", "windows_image_checks.py"), ("scripts", "windows-comfy-check.py"),
@@ -114,6 +146,7 @@ def fingerprint(model: str, scope: str = "basic") -> dict:
 
 def compatibility(value: dict) -> dict:
     return {**{key: value[key] for key in ("contract", "model", "recipe", "hardware", "abi", "backend")},
+            **({"image_options": value["image_options"]} if "image_options" in value else {}),
             "model_sizes": {name: entry["size"] for name, entry in value["models"].items()}}
 
 
@@ -226,7 +259,7 @@ def run_case(model: str, output: Path, observations: dict | None = None, scope: 
     pending_guard = None
     began = time.monotonic()
     result = observations if observations is not None else {}
-    result.update(case=f"Qwen Turbo: {count} image(s), {width}x{height}", scope=scope, rendered=False)
+    result.update(case=f"{title(model)}: {count} image(s), {width}x{height}", scope=scope, rendered=False)
     try:
         with (output / "native-image.log").open("w+", encoding="utf-8") as log:
             try:
@@ -235,11 +268,11 @@ def run_case(model: str, output: Path, observations: dict | None = None, scope: 
                 monitor.wait_ready()
             except RuntimeError as error:
                 raise SafetyRefusal(str(error)) from error
-            print(f"[qualification] Loading Qwen Turbo: {count} image(s), {width}x{height}.", flush=True)
+            print(f"[qualification] Loading {title(model)}: {count} image(s), {width}x{height}.", flush=True)
             env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
             process = job.spawn([windows_cuda.python(), "-X", "utf8",
                                  str(features.PACK / "spark" / "spark_generate.py"), "image",
-                                 "--model", model, "--negative", os.environ.get("NEGATIVE", ""),
+                                 *render_args(model), "--negative", os.environ.get("NEGATIVE", ""),
                                  "--prompt", PROMPT, "--width", str(width), "--height", str(height),
                                  "--seed", "7", "-o", str(target),
                                  *([] if count == 1 else ["--seeds", ",".join(str(seed) for seed in range(7, 7 + count))])],
@@ -250,7 +283,7 @@ def run_case(model: str, output: Path, observations: dict | None = None, scope: 
                     monitor.check()
                 except RuntimeError as error:
                     raise SafetyRefusal(str(error)) from error
-                if time.monotonic() - began > TIMEOUT_S:
+                if time.monotonic() - began > timeout_seconds(model, scope):
                     raise SafetyRefusal("The native image check exceeded its deadline.")
                 time.sleep(0.1)
             try:
@@ -321,8 +354,10 @@ def qualify(model: str, output: Path, job_id: str = "", scope: str = "basic") ->
     try:
         if why := prerequisites(model):
             raise RuntimeError(why)
-        if os.environ.get("TURBO", "1") != "1" or os.environ.get("EXTRA") or os.environ.get("PROMPT_FILE"):
-            raise ValueError("This check uses the default Qwen Turbo recipe. Clear TURBO overrides, EXTRA and PROMPT_FILE first.")
+        if (os.environ.get("TURBO", "1") != "1" or os.environ.get("EXTRA") or os.environ.get("PROMPT_FILE")
+                or model == "qwen-full" and os.environ.get("STEPS", "40") != "40"
+                or model.startswith("flux3k") and os.environ.get("UPSAMPLE", "1") != "1"):
+            raise ValueError("This check uses the production model's default recipe. Clear TURBO, STEPS, UPSAMPLE, EXTRA and PROMPT_FILE overrides first.")
         before = fingerprint(model) if scope == "basic" else fingerprint(model, scope)
         result = (run_case(model, output, observations) if scope == "basic"
                   else run_case(model, output, observations, scope))
@@ -338,7 +373,8 @@ def qualify(model: str, output: Path, job_id: str = "", scope: str = "basic") ->
                 with (windows_runtime.model_root() / name).open("rb") as handle:
                     digests[name] = hashlib.file_digest(handle, "sha256").hexdigest()
         current = fingerprint(model) if scope == "basic" else fingerprint(model, scope)
-        if current != before:
+        if (not matches_qualification(before, current, compatibility(before), compatibility(current))
+                or before["models"] != current["models"] or before["model_root"] != current["model_root"]):
             raise SafetyRefusal("The model or runtime changed during the check; no new pass was saved.")
         receipt = {**attempt, "ok": True, "fingerprint": before, "model_sha256": digests, "results": [result]}
         features.save_pass(receipt_key(model, scope), receipt)

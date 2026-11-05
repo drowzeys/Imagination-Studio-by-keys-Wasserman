@@ -23,11 +23,11 @@ function sparkSet(id, values, max) { const s = document.querySelector('[data-spa
 const M = { storage: null, loading: false, history: null };
 const WFC = { data: null, error: "", timer: null, loading: false, changingMode: false, focus: null, selected: null, open: false, groups: {}, scopes: {} };
 function openFeatureCheck(kind) { WFC.focus = kind; WFC.selected = kind; WFC.open = true; go("Machine"); }
-function featureBadge(kind) {
-  const c = S && S.capabilities && S.capabilities[kind];
+function featureBadge(kind, options = {}) {
+  const c = options.state || S && S.capabilities && S.capabilities[kind];
   const checks = S && S.feature_checks;
   if (!checks || !checks.supported || checks.mode?.enabled === false || !checks.features?.[kind] || !c) return null;
-  const ready = c.qualified ?? c.available, label = ready ? "Qualified" : c.installed === false && kind !== "foley" ? "Setup required" : "Not qualified";
+  const ready = c.qualified ?? c.available, label = ready ? "Qualified" : c.installed === false && kind !== "foley" ? "Setup required" : options.unqualified || "Not qualified";
   return el("button", { type: "button", class: "tag2 feature-link fit " + (ready ? "ok" : "warn"),
     "aria-label": label + ": " + checks.features[kind],
     title: ready ? "View saved qualification evidence and limits." : "Open this feature's checks and setup",
