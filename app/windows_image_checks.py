@@ -242,10 +242,6 @@ def check_output(path: Path, width: int = SIDE, height: int = SIDE) -> None:
 
 
 def run_case(model: str, output: Path, observations: dict | None = None, scope: str = "basic") -> dict:
-    import windows_storyboard
-    from windows_process import OwnedJob
-
-    tools = windows_storyboard.tools().checker()
     output.mkdir(parents=True, exist_ok=True)
     target = output / "image.png"
     settings = scope_settings(scope)
@@ -253,13 +249,35 @@ def run_case(model: str, output: Path, observations: dict | None = None, scope: 
     targets = [target] if count == 1 else [output / f"image_s{seed}.png" for seed in range(7, 7 + count)]
     if any(path.exists() for path in targets):
         raise RuntimeError("The image check needs a fresh output folder; an old image cannot count as a pass.")
+    result = observations if observations is not None else {}
+    result.update(case=f"{title(model)}: {count} image(s), {width}x{height}", scope=scope, rendered=False)
+    command = [windows_cuda.python(), "-X", "utf8", str(features.PACK / "spark" / "spark_generate.py"), "image",
+               *render_args(model), "--negative", os.environ.get("NEGATIVE", ""), "--prompt", PROMPT,
+               "--width", str(width), "--height", str(height), "--seed", "7", "-o", str(target),
+               *([] if count == 1 else ["--seeds", ",".join(str(seed) for seed in range(7, 7 + count))])]
+
+    def validate():
+        for path in targets:
+            if scope == "basic":
+                check_output(path)
+            else:
+                check_output(path, width, height)
+
+    return observe_native(command, output, validate, result, timeout_seconds(model, scope))
+
+
+def observe_native(command: list[str], output: Path, validate, result: dict, timeout_s: int) -> dict:
+    """Supervise a native production subprocess under owned lifetime and fresh Windows memory readings."""
+    import windows_storyboard
+    from windows_process import OwnedJob
+
+    tools = windows_storyboard.tools().checker()
+    output.mkdir(parents=True, exist_ok=True)
     job = OwnedJob()
     monitor = None
     original = None
     pending_guard = None
     began = time.monotonic()
-    result = observations if observations is not None else {}
-    result.update(case=f"{title(model)}: {count} image(s), {width}x{height}", scope=scope, rendered=False)
     try:
         with (output / "native-image.log").open("w+", encoding="utf-8") as log:
             try:
@@ -268,14 +286,9 @@ def run_case(model: str, output: Path, observations: dict | None = None, scope: 
                 monitor.wait_ready()
             except RuntimeError as error:
                 raise SafetyRefusal(str(error)) from error
-            print(f"[qualification] Loading {title(model)}: {count} image(s), {width}x{height}.", flush=True)
+            print("[qualification] " + result["case"], flush=True)
             env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
-            process = job.spawn([windows_cuda.python(), "-X", "utf8",
-                                 str(features.PACK / "spark" / "spark_generate.py"), "image",
-                                 *render_args(model), "--negative", os.environ.get("NEGATIVE", ""),
-                                 "--prompt", PROMPT, "--width", str(width), "--height", str(height),
-                                 "--seed", "7", "-o", str(target),
-                                 *([] if count == 1 else ["--seeds", ",".join(str(seed) for seed in range(7, 7 + count))])],
+            process = job.spawn(command,
                                 env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                 creationflags=0x08000000)
             while process.poll() is None:
@@ -283,8 +296,8 @@ def run_case(model: str, output: Path, observations: dict | None = None, scope: 
                     monitor.check()
                 except RuntimeError as error:
                     raise SafetyRefusal(str(error)) from error
-                if time.monotonic() - began > timeout_seconds(model, scope):
-                    raise SafetyRefusal("The native image check exceeded its deadline.")
+                if time.monotonic() - began > timeout_s:
+                    raise SafetyRefusal("The native generation check exceeded its deadline.")
                 time.sleep(0.1)
             try:
                 monitor.check()
@@ -294,11 +307,7 @@ def run_case(model: str, output: Path, observations: dict | None = None, scope: 
                 log.flush()
                 log.seek(max(0, log.tell() - 4000))
                 raise SafetyRefusal(f"The native image backend failed ({process.returncode}); the group cannot safely continue: " + log.read())
-            for path in targets:
-                if scope == "basic":
-                    check_output(path)
-                else:
-                    check_output(path, width, height)
+            validate()
             result["rendered"] = True
             return result
     except BaseException as error:

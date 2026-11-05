@@ -14,13 +14,44 @@ if (-not (Test-Path -LiteralPath $Python)) {
   $Python = (Get-Command py.exe -ErrorAction Stop).Source
   $PythonArgs = @('-3.13')
 }
-function Invoke-Desktop([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments) {
-  $Text = & $Python @PythonArgs -X utf8 $Controller @Arguments
-  $Result = ($Text | Out-String) | ConvertFrom-Json
-  if (-not $Result.ok) { throw $Result.error }
-  return $Result
+function ConvertTo-DesktopArgument([string]$Value) {
+  '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+}
+function Invoke-Desktop([string[]]$Arguments) {
+  $Info = New-Object System.Diagnostics.ProcessStartInfo
+  $Info.FileName = $Python
+  $Info.Arguments = ((@($PythonArgs) + @('-X','utf8',$Controller) + @($Arguments)) |
+    ForEach-Object { ConvertTo-DesktopArgument $_ }) -join ' '
+  $Info.UseShellExecute = $false
+  $Info.CreateNoWindow = $true
+  $Info.RedirectStandardOutput = $true
+  $Info.RedirectStandardError = $true
+  $Process = New-Object System.Diagnostics.Process
+  $Process.StartInfo = $Info
+  try {
+    if (-not $Process.Start()) { throw 'The desktop controller could not start.' }
+    $Output = $Process.StandardOutput.ReadToEndAsync()
+    $Errors = $Process.StandardError.ReadToEndAsync()
+    if (-not $Process.WaitForExit(240000)) {
+      $Process.Kill()
+      throw 'The desktop operation exceeded its deadline. Check tray status before trying again.'
+    }
+    $Text = $Output.GetAwaiter().GetResult()
+    $ErrorText = $Errors.GetAwaiter().GetResult()
+    if (-not $Text.Trim()) {
+      throw "The desktop controller returned no result (exit $($Process.ExitCode)). $ErrorText"
+    }
+    $Result = $Text | ConvertFrom-Json
+    if (-not $Result.ok) {
+      if ($Result.error) { throw $Result.error }
+      throw "The desktop controller returned an invalid result (exit $($Process.ExitCode))."
+    }
+    if ($Process.ExitCode -ne 0) { throw "The desktop controller failed (exit $($Process.ExitCode)). $ErrorText" }
+    return $Result
+  } finally { $Process.Dispose() }
 }
 function Show-Problem($Message) {
+  Add-Content -LiteralPath (Join-Path $Home_ 'desktop-tray.log') -Value ("{0:o} {1}" -f (Get-Date), [string]$Message)
   [System.Windows.Forms.MessageBox]::Show([string]$Message, 'Imagination Studio', 'OK', 'Warning') | Out-Null
 }
 function Confirm-Stop($Message) {
@@ -60,7 +91,7 @@ function Refresh-Desktop {
   try { $script:Snapshot = Invoke-Desktop @('status'); $script:RefreshError = '' }
   catch { $script:RefreshError = $_.Exception.Message }
 }
-function Run-Desktop([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments, [switch]$Open) {
+function Run-Desktop([string[]]$Arguments, [switch]$Open) {
   if ($script:Busy) { return }
   $script:Busy = $true
   $Tray.Text = 'Imagination Studio - working'
@@ -96,12 +127,19 @@ function Draw-Menu {
     $Value = $Kind
     $Name = $Names[$Kind]
     $Installed = $S.backends.$Kind.available
+    $LaunchAction = if ($S.running) { 'switch' } else { 'start' }
+    $Label = if (-not $Installed) { "$Name - not registered or unavailable" }
+      elseif ($S.running -eq $Kind) { "$Name - running" }
+      elseif (-not $S.running) { "Start $Name" }
+      else { "Switch to $Name" }
     $SwitchHandler = {
-      if (Confirm-Stop "Switch to $Name? The current tray-owned backend will stop first. Active jobs or an externally started app prevent switching.") {
+      if ($LaunchAction -eq 'start') {
+        Run-Desktop @('start','--backend',$Value) -Open
+      } elseif (Confirm-Stop "Switch to $Name? The current tray-owned backend will stop first. Active jobs or an externally started app prevent switching.") {
         Run-Desktop @('switch','--backend',$Value,'--confirmed') -Open
       }
     }.GetNewClosure()
-    Add-Menu "Switch to $Name" $SwitchHandler ([bool]$Installed -and -not $script:Busy -and $S.running -ne $Kind -and $S.running -ne 'external')
+    Add-Menu $Label $SwitchHandler ([bool]$Installed -and -not $script:Busy -and $S.running -ne $Kind -and $S.running -ne 'external')
     $DefaultHandler = { Run-Desktop @('default','--backend',$Value) }.GetNewClosure()
     Add-Menu "Default: $Name" $DefaultHandler ([bool]$Installed -and -not $script:Busy) ($S.default -eq $Kind)
   }
