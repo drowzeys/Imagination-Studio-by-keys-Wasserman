@@ -216,6 +216,9 @@ Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and
 1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
    ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
    the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;
+   Zig is detected before invoking it. Missing or older versions trigger the pinned winget install, a terminal
+   PATH refresh and a version recheck. If Zig is still unavailable, setup stops with instructions to open a new
+   PowerShell window or correct PATH order, rather than continuing to an engine build with missing tools.
 2. the app's venv, FFmpeg, the GPU venv (NVIDIA's PyTorch 2.14 for CUDA 13.4) and the pinned ComfyUI (PR #200's scripts);
 3. TensorFold's engines **built from source** (no prebuilt release yet): drowzeys/TensorFold `studio-1.2.2` at
    `1c8bdbfd`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`

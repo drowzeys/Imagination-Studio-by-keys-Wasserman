@@ -20,8 +20,9 @@ import windows_cuda
 import windows_image_checks as images
 
 CHECKS = {
-    "qwen": FeatureCheck("qwen", "Qwen-Image 2.1 Turbo", "One 512x512 image, using the native production Turbo workflow.",
-                         tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="image"),
+    **{model: FeatureCheck(model, spec[0], "Production native image workflow; qualify canvases and counts separately.",
+                          tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="image")
+       for model, spec in windows_runtime.IMAGE_SPECS.items()},
     "hlg": FeatureCheck("hlg", "HDR grading", "SDR-to-HLG grade and SDR copy; up to ten seconds, 1280x720, 24 fps.",
                         (MemoryRequirement("host", features.COMMIT_MB, "policy"), MemoryRequirement("commit", features.COMMIT_MB, "policy")), group="edit"),
     "finish": FeatureCheck("finish", "Tesseract Finish", "720p, 24 fps; up to 12 cuts and ten seconds including a title; no transcription or editor conversion.",
@@ -52,8 +53,10 @@ def native_image_check(job: dict) -> bool:
 
 
 def timeout_seconds(job: dict) -> int:
-    if native_image_check(job) and job["params"].get("group") in images.GROUPS:
-        return len(images.GROUPS[job["params"]["group"]][1]) * (images.TIMEOUT_S + 120)
+    if native_image_check(job):
+        params = job["params"]
+        scopes = images.GROUPS[params["group"]][1] if params.get("group") in images.GROUPS else (params.get("scope", "basic"),)
+        return sum(images.timeout_seconds(params["feature"], scope) + 120 for scope in scopes)
     return 600
 
 

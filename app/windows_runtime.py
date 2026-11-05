@@ -208,6 +208,11 @@ def usage_status(kind: str, found: dict | None = None, selected_mode: dict | Non
 def image_files(model: str) -> list[Path]:
     _, folder, transformer, _ = IMAGE_SPECS[model]
     root = model_root() / folder
+    if model.startswith("flux3k"):
+        from spark_generate import FLUX3_OLD
+        previous = FLUX3_OLD[transformer]
+        if not (root / "diffusion_models" / transformer).is_file() and (root / "diffusion_models" / previous).is_file():
+            transformer = previous
     needed = [root / "diffusion_models" / transformer, windows_cuda.root() / "ComfyUI" / "extra_model_paths.yaml"]
     if model.startswith("qwen"):
         needed += [root / "text_encoders" / "qwen3vl_8b_int8_convrot.safetensors",
@@ -255,7 +260,7 @@ def image_options(selected_mode: dict | None = None) -> list[dict]:
             verified = found.get("verified_scopes", [])
             rows[-1]["scope"] = ("Verified: " + "; ".join(f"{scope['width']}x{scope['height']}, {scope['count']} image(s)"
                                                         for scope in verified) if verified else
-                                 "512x512, one image is the basic check; larger native Turbo levels are checked separately.")
+                                 "512x512, one image is the basic check; larger canvases and counts are checked separately.")
             rows[-1]["measurement_source"] = "This machine's observed check, not a minimum RAM requirement." if found["qualified"] else "No successful native image check saved yet."
     return rows
 

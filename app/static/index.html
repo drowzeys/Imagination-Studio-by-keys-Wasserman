@@ -336,16 +336,22 @@ const stillParams = params => {
 };
 const imageModelName = (id = imageModel()) => imageModels().find(m => m.id === id)?.label || IMAGE_LABELS[id] || id;
 const imageModelPick = after => {
-  const selected = { imageModel: imageModel() };
+  const descriptions = { "sd-turbo": "Quick storyboard drafts", qwen: "Fast Qwen stills", "qwen-full": "Qwen base model",
+    "flux3k-fast": "Distilled FLUX3-K", "flux3k-full": "FLUX3-K base model", "moss-image": "Prompt-to-picture" };
   return el("div", {}, el("label", {}, "Picture model"),
-    imageModels().length < 2 ? el("b", {}, imageModelName()) : choice(selected, "imageModel",
-      Object.fromEntries(imageModels().map(m => [m.id, [/^(qwen|flux)/.test(m.id) ? mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label) : m.label,
-        [m.quality === "draft" || imageIsDraft(m.id) ? "Storyboard draft · 512 × 512 · one step · 1–6 pictures" : m.quality === "full-model" ? "Full model" : "",
-          m.backend ? m.backend + " backend" : "", m.why || m.note].filter(Boolean).join(" · ")]])),
-      () => { C.imageModel = selected.imageModel; (after || render)(); }, true),
-    imageModelWhy() ? el("div", { class: "note warn" }, imageModelWhy()) : null,
-    imageCheckedRecipe() ? el("div", { class: "note" }, "Verified: " + imageCheckedScopes().map(scope =>
-      scope.width + " × " + scope.height + ", " + scope.count + " image(s)").join("; ") + ". Other settings have not been checked.") : null,
+    el("div", { class: "picture-models", role: "radiogroup", "aria-label": "Picture model" },
+      imageModels().map(m => {
+        const label = IMAGE_LABELS[m.id] || m.label, feature = imageFeature(m.id);
+        const badge = S.platform === "windows" && typeof featureBadge === "function"
+          ? featureBadge(feature, { state: m, unqualified: "Unverified" }) : null;
+        return el("div", { class: "picture-model-option", "data-picture-model": m.id },
+          el("button", { type: "button", role: "radio", "aria-checked": String(m.id === imageModel()),
+            class: "picture-model-card" + (m.id === imageModel() ? " on" : "") + (badge ? " has-badge" : ""),
+            onclick: () => { C.imageModel = m.id; (after || render)(); } },
+            el("b", {}, /^(qwen|flux)/.test(m.id) ? mark(/^flux/.test(m.id) ? "flux" : "qwen", label) : label),
+            el("span", { class: "note m-flat" }, descriptions[m.id] || "Picture model")),
+          badge);
+      })),
     S.platform === "windows" && typeof openFeatureCheck === "function" ? el("button", { type: "button", class: "small",
       onclick: () => openFeatureCheck(imageFeature()) }, "Feature checks and model requirements") : null);
 };

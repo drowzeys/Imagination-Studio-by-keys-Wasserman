@@ -1691,7 +1691,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
         return graphics_build(params, job_id)
     seed = str(int(params.get("seed", 0)))
     if kind == "scout":
-        if (WINDOWS or WIN32) and windows_runtime.mode()["enabled"] and params.get("image_model") == "qwen" and params.get("prompts"):
+        if ((WINDOWS or WIN32) and windows_runtime.mode()["enabled"]
+                and params.get("image_model") in windows_runtime.IMAGE_SPECS and params.get("prompts")):
             raise HTTPException(400, "The checked native recipe takes one image prompt at a time.")
         if params.get("loras"):  # text to picture has no LoRA path: an identity LoRA works only in an edit of a picture
             raise HTTPException(400, "a picture made from words alone cannot take LoRAs (they would be ignored): use Edit a picture with a source picture for an identity LoRA")

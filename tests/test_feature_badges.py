@@ -284,7 +284,7 @@ S.image_model_options[0].qualification_required=false;
 out.ungated=stillParams({image_model:"qwen",width:1344,height:768,count:8,preset:"2k"});
 console.log(JSON.stringify(out));
 """)
-    assert "Verified: 512 × 512, 1 image(s)" in out["text"]
+    assert "Basic" in out["text"] or "Verified size" in out["text"]
     assert "1664 × 928" not in out["text"] and out["count"] == 1
     assert "not been verified" in out["refused"]
     assert out["params"] == {"image_model": "qwen", "width": 512, "height": 512, "count": 1}
@@ -316,6 +316,36 @@ console.log(JSON.stringify(out));
     assert out["request"] == ["/api/feature-checks/check", {"feature": "qwen", "scope": "studio"}]
     assert "1024 × 576" in out["form"] and "512 × 512" in out["form"]
     assert out["params"] == {"image_model": "qwen", "width": 1024, "height": 576, "count": 1}
+
+
+def test_picture_picker_uses_compact_badges_instead_of_inline_diagnostics():
+    out = run_frontend(r"""
+S.feature_checks.mode={enabled:true};
+S.feature_checks.features["flux3k-fast"]="FLUX3-K Fast";
+S.image_model_options=[
+  {id:"qwen",available:true,installed:true,qualified:true},
+  {id:"qwen-full",available:false,installed:true,qualified:false,
+    why:"Installed but recipe not verified; C:\\private\\runtime\\model.safetensors"},
+  {id:"flux3k-full",available:false,installed:true,qualified:false,why:"Technical backend error"},
+  {id:"moss-image",available:false,installed:false,qualified:false,why:"Missing huge list of files"}];
+C.imageModel="qwen-full";
+const picker=imageModelPick();
+const out={text:text(picker),radios:all(picker,n=>n.attrs?.role==="radio").length,
+  nestedButtons:all(picker,n=>n.tag==="button" && all(n.kids,k=>k.tag==="button").length).length};
+button(picker,"Unverified").attrs.onclick();
+out.focus=WFC.focus;out.calls=calls;
+S.feature_checks.mode.enabled=false;
+out.ungated=text(imageModelPick());
+console.log(JSON.stringify(out));
+""")
+    assert out["radios"] == 4 and out["nestedButtons"] == 0
+    assert "Qualified" in out["text"]
+    assert "Unverified" in out["text"] and "Setup required" in out["text"]
+    assert "model.safetensors" not in out["text"] and "Technical backend error" not in out["text"]
+    assert "Missing huge list" not in out["text"] and "Installed but recipe" not in out["text"]
+    assert out["focus"] == "qwen-full" and out["calls"] == []
+    assert "Unverified" not in out["ungated"] and "Setup required" not in out["ungated"]
+    assert "Qualified" not in out["ungated"]
 
 
 def test_grouped_chooser_defaults_to_unchecked_group_and_keeps_individual_actions():

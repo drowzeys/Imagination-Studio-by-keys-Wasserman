@@ -106,22 +106,52 @@ if ($ImageParts.Count -gt 0 -and -not $NoDownload -and -not $ToolchainOnly) {
 New-Item -ItemType Directory -Force -Path $Home_, $Models | Out-Null
 
 # ---------- 1. build tools ----------
-function Winget([string]$id, [string[]]$more = @()) {
-  & winget install -e --id $id --accept-package-agreements --accept-source-agreements --disable-interactivity @more
+function Install-StudioPackage([string]$id, [string[]]$more = @()) {
+  $Manager = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue
+  if (-not $Manager) { throw 'Install Windows Package Manager (winget), then rerun setup.' }
+  & $Manager install -e --id $id --accept-package-agreements --accept-source-agreements --disable-interactivity @more
   if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { throw "winget could not install $id (exit $LASTEXITCODE)" }  # 0x8A15002B: already installed
 }
 function VcVars {
   Find-StudioArm64Compiler
 }
+function Get-StudioZigVersion {
+  $Command = Get-Command zig -ErrorAction SilentlyContinue
+  if (-not $Command) { return '' }
+  $Version = & $Command version
+  if ($LASTEXITCODE -ne 0) { throw "Zig version detection failed (exit $LASTEXITCODE)." }
+  return ($Version | Out-String).Trim()
+}
+function Refresh-StudioToolPath {
+  $Places = @($env:PATH,
+    [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+    [Environment]::GetEnvironmentVariable('Path', 'User'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'))
+  $env:PATH = ($Places | Where-Object { $_ } | Select-Object -Unique) -join ';'
+}
+function Initialize-StudioZig {
+  $Version = Get-StudioZigVersion
+  if ($Version -notmatch '^0\.17(?:\.|$)') {
+    if (-not (Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+      throw 'Zig 0.17 is required. Install Windows Package Manager (winget), then rerun setup.'
+    }
+    Install-StudioPackage "zig.zig" @("--version", "0.17.0")
+    Refresh-StudioToolPath
+    $Version = Get-StudioZigVersion
+    if ($Version -notmatch '^0\.17(?:\.|$)') {
+      throw 'Zig installation finished, but Zig 0.17 is not available in this terminal. Open a new PowerShell window and rerun setup; if another Zig version is first on PATH, correct its order.'
+    }
+  }
+  Ok "Zig $Version"
+}
 . (Join-Path $PSScriptRoot "windows-msvc.ps1")
 if (-not $SkipToolchain) {
   Say "Build tools"
   & py -V:3.13-arm64 -c "1" 2>$null
-  if ($LASTEXITCODE -ne 0) { Winget "Python.Python.3.13" @("--architecture", "arm64") } else { Ok "Python 3.13 (ARM64)" }
-  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Winget "Git.Git" } else { Ok "Git" }
+  if ($LASTEXITCODE -ne 0) { Install-StudioPackage "Python.Python.3.13" @("--architecture", "arm64") } else { Ok "Python 3.13 (ARM64)" }
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Install-StudioPackage "Git.Git" } else { Ok "Git" }
   if ($NeedToolchain) {
-  $zig = (& zig version 2>$null)
-  if ($zig -notmatch "^0\.17") { Winget "zig.zig" @("--version", "0.17.0") } else { Ok "Zig $zig" }
+  Initialize-StudioZig
   $null = Initialize-StudioArm64Compiler
   Ok "Visual Studio Build Tools (ARM64 compiler)"
   # NVIDIA's CUDA toolkit for Windows on Arm, from its redistributable archives: the compiler and the libraries the
