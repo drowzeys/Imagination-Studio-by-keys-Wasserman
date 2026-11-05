@@ -90,11 +90,15 @@ def evidence(kind: str, qualified: bool) -> dict:
         results = [{"case": f"{calibration['count']} 512x512 storyboard drafts" if kind == "scout" else "Five-second sound effect",
                     "peak_job_commit_mb": result["job_commitment"]["peak_job_commit_bytes"] / 2 ** 20,
                     "peak_process_commit_mb": result["job_commitment"]["peak_process_commit_bytes"] / 2 ** 20,
-                    "elapsed_s": calibration.get("request_to_files_seconds")}]
+                    "elapsed_s": calibration.get("request_to_files_seconds"),
+                    "rendered": result.get("ok") is True,
+                    "measurements": result.get("memory_guard", {})}]
     digest = hashlib.sha256(raw).hexdigest()
     saved = features.saved(kind, "")
     matching = saved.get("native_receipt_sha256") == digest
-    return {"matches": qualified, "results": results, "native_receipt_sha256": digest,
+    return {"matches": qualified, "ok": native.get("result", {}).get("ok") is True if kind != "graphics" else native.get("ok") is True,
+            "results": results, "native_receipt_sha256": digest,
+            "hardware": native.get("hardware", {}),
             "checked_at": saved["checked_at"] if matching else datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
             "time_basis": "check" if matching else "receipt_mtime"}
 

@@ -59,7 +59,8 @@ async function dscDo(node, path, body, busy) {
 // one need: its state, where the studio looks, and what the scan found
 function dscRow(node, n) {
   const state = n.optional && n.state === "missing" ? "opt" : n.state;
-  const said = n.optional && n.state === "missing" ? "not installed (optional)" : DSC_WORDS[n.state] || n.state;
+  const said = n.optional && n.state === "missing" ? "not installed (optional)"
+    : n.state === "expected" && n.installed_label ? n.installed_label : DSC_WORDS[n.state] || n.state;
   const use = c => el("button", { class: "small", disabled: !!DSC.busy || (n.unlisted && n.linkable === false),
     title: n.unlisted && n.linkable === false ? "Add it in the LoRA hub under My LoRAs" : "Link " + c.shown + " where the studio looks for it (nothing is moved or copied)",
     onclick: () => dscDo(node, "/api/discover/use", { need: n.id, path: c.path }, n.id) }, "Use it");
@@ -79,6 +80,7 @@ function dscRow(node, n) {
     !n.link && n.state !== "expected" ? (n.conversions || []).map(c => el("div", {}, el("div", { class: "dsc-path" }, "found " + c.shown + ", in another layout: " + (c.note || "")),
       c.convert ? el("div", { class: "dsc-cmd" }, c.convert) : null)) : null,
     dscModelInfo(n, { hideUnknownFit: n.state === "expected" && !!(n.feature || n.features?.length) }),
+    n.requirements_note ? el("div", { class: "note" }, n.requirements_note) : null,
     n.why ? el("div", { class: "note" }, n.why) : null,
     n.state === "missing" ? dscInstall(node, n) : null,
     n.state === "expected" && n.uninstall ? el("details", { class: "fold" },
@@ -171,7 +173,13 @@ function dscDraw(node) {
   const groups = [];
   for (const n of shownNeeds) { let g = groups.find(x => x.name === n.engine); if (!g) groups.push(g = { name: n.engine, needs: [] }); g.needs.push(n); }
   const count = s => needs.filter(n => n.state === s && !(n.optional && s === "missing")).length;
+  const setExpanded = open => {
+    for (const need of needs) DSC.groups[need.engine] = open;
+    dscDraw(node);
+  };
   rows.push(el("div", { class: "dsc-head" }, el("h2", { class: "m-flat" }, "Models & weights"), el("span", { class: "grow" }),
+    el("button", { class: "small", onclick: () => setExpanded(false) }, "Collapse all"),
+    el("button", { class: "small", onclick: () => setExpanded(true) }, "Expand all"),
     el("button", { class: "small", disabled: d.scanning || !!DSC.busy, title: "Search this machine again for everything the studio needs", onclick: () => dscDo(node, "/api/discover/scan", {}, "scan") },
       d.scanning ? "Scanning…" : d.inventory_only ? "Refresh inventory" : "Scan again")));
   rows.push(el("div", { class: "note" }, d.inventory_only ? "Reading the native Windows runtime's configured model folders."
@@ -189,7 +197,7 @@ function dscDraw(node) {
     onchange: e => { DSC.all = e.target.checked; dscDraw(node); } }), "Show optional models that are not installed"));
   for (const g of groups) {
     const inventory = needs.filter(n => n.engine === g.name);
-    rows.push(el("details", { class: "dsc-group", open: DSC.groups[g.name] ?? true,
+    rows.push(el("details", { class: "dsc-group", open: DSC.groups[g.name] ?? false,
       ontoggle: e => { if (e.currentTarget.isConnected) DSC.groups[g.name] = e.currentTarget.open; } },
       el("summary", {}, el("h3", {}, g.name), dscGroupSummary(inventory)), g.needs.map(n => dscRow(node, n))));
   }

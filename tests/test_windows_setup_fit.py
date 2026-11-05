@@ -11,6 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 import windows_setup_fit as fit
+import windows_measurements as measurements
 
 
 def hardware(total=31232, free=28000, physical=65536, n1x=True):
@@ -31,12 +32,12 @@ def test_recipe_summary_uses_current_passes_and_failures_not_invented_gpu_requir
         {"qualified": True}, {"qualified": True},
         {"qualified": False, "outcome": "failed"},
         {"qualified": False, "outcome": "not_checked"}]}
-    result = fit.recipe_fit(evidence)
+    result = measurements.recipe_fit(evidence)
     assert result["passed"] == 2 and result["failed"] == 1 and result["total"] == 4
     assert "some recipes run" in result["summary"] and "1 not verified" in result["summary"]
     assert "GiB" not in result["summary"]
-    assert fit.recipe_fit({"qualification_levels": [{"qualified": True}]})["summary"] == "All 1 recipes verified on this machine."
-    assert fit.recipe_fit({"qualification_levels": [{"qualified": False}]}) is None
+    assert measurements.recipe_fit({"qualification_levels": [{"qualified": True}]})["summary"] == "All 1 recipes verified on this machine."
+    assert measurements.recipe_fit({"qualification_levels": [{"qualified": False}]}) is None
 
 
 def test_observed_ranges_keep_gpu_and_commit_separate_and_mark_partial_memory_runs():
@@ -50,7 +51,7 @@ def test_observed_ranges_keep_gpu_and_commit_separate_and_mark_partial_memory_ru
         {"qualified": False, "outcome": "failed", "attempt": {
             "error": "memory watchdog: commit headroom below floor",
             "observations": readings(4096, 30720, False)}}]
-    result = fit.recipe_memory(levels)
+    result = measurements.recipe_memory(levels)
     assert result["memory_ranges"]["gpu_usage"] == {"min_mb": 20480, "max_mb": 28672, "incomplete": True}
     assert result["memory_ranges"]["job_commitment"] == {"min_mb": 24576, "max_mb": 30720, "incomplete": True}
     assert "20.0–28.0+ GiB" in result["memory_summary"]
@@ -63,15 +64,53 @@ def test_observed_ranges_keep_gpu_and_commit_separate_and_mark_partial_memory_ru
 def test_completed_render_or_nonmemory_failure_does_not_add_lower_bound_marker():
     row = {"rendered": True, "peak_job_commit_mb": 1024, "measurements": {
         "initial": {"gpu_dedicated_total_mb": 4096}, "minima": {"dedicated_gpu_free_mb": 2048}}}
-    result = fit.recipe_memory([{"qualified": False, "outcome": "failed", "attempt": {
+    result = measurements.recipe_memory([{"qualified": False, "outcome": "failed", "attempt": {
         "error": "memory guard cleanup failure", "observations": row}}])
     assert not result["memory_ranges"]["gpu_usage"]["incomplete"]
     assert "+" not in result["memory_summary"]
-    assert fit.recipe_memory([{"qualified": False, "outcome": "failed", "attempt": {
+    assert measurements.recipe_memory([{"qualified": False, "outcome": "failed", "attempt": {
         "error": "source changed", "observations": row}}]) == {}
-    assert fit.recipe_memory([{"qualified": True, "evidence": {"results": [
+    assert measurements.recipe_memory([{"qualified": True, "evidence": {"results": [
         {"peak_job_commit_mb": float("nan"), "measurements": {"initial": {
             "gpu_dedicated_total_mb": 1024}, "minima": {"dedicated_gpu_free_mb": 2048}}}]}}]) == {}
+
+
+@pytest.mark.parametrize("kind", ["scout", "sfx", "foley", "music", "voice", "mask"])
+def test_all_feature_measurements_use_saved_readings_without_qualification_or_hardware_probes(monkeypatch, kind):
+    import windows_baseline_checks as baseline
+    import windows_features as features
+    row = {"peak_job_commit_mb": 8192, "measurements": {
+        "initial": {"gpu_dedicated_total_mb": 32768},
+        "minima": {"dedicated_gpu_free_mb": 24576}}}
+    receipt = {"ok": True, "results": [row]}
+    monkeypatch.setattr(features, "saved", lambda key, suffix: receipt if not suffix else {})
+    monkeypatch.setattr(baseline, "evidence", lambda key, qualified: {**receipt, "matches": False})
+    monkeypatch.setattr(fit, "probe", lambda: pytest.fail("No measurement-time hardware probes"))
+    result = measurements.feature_measurements([kind])
+    assert "8.0–8.0 GiB" in result["memory_summary"]
+    assert result["memory_ranges"]["gpu_usage"]["max_mb"] == 8192
+    assert "not a current fit guarantee" in result["summary"]
+    assert "qualified" not in result
+
+
+def test_component_catalog_wires_all_linked_feature_measurements(monkeypatch):
+    monkeypatch.setattr(measurements, "feature_measurements", lambda kinds: {"linked": kinds})
+    result = fit.model_info("workflows", hardware={})
+    assert result["recipe_fit"]["linked"] == ["turnaround", "upscale", "mask", "remove"]
+    result = fit.model_info("sound", hardware={})
+    assert result["recipe_fit"]["linked"] == ["sfx"]
+
+
+def test_missing_gpu_measurements_never_invent_gpu_usage(monkeypatch):
+    import windows_features as features
+    monkeypatch.setattr(features, "saved", lambda *args: {})
+    assert measurements.feature_measurements(["music", "swap"]) is None
+    monkeypatch.setattr(features, "saved", lambda key, suffix: {"ok": True, "results": [
+        {"peak_job_commit_mb": 2048}]} if not suffix else {})
+    result = measurements.feature_measurements(["foley"])
+    assert result["memory_ranges"]["gpu_usage"] is None
+    assert "GPU usage" not in result["memory_summary"]
+    assert "owned job commitment" in result["memory_summary"]
 
 
 def test_known_insufficient_voice_is_skipped_before_automatic_download():

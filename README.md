@@ -50,9 +50,9 @@ incompatible download after acknowledgment, but never changes the runtime guards
 startup tests. Each passed recipe enables its tested settings; groups run recipes sequentially and retain
 individual passes. Failed larger checks do not remove smaller passes.
 
-| Models & weights | Feature checks |
-|---|---|
-| ![Installed models, download sizes and runtime-fit information](docs/screenshots/windows-models.webp) | ![Grouped recipes, saved passes and qualification progress](docs/screenshots/windows-feature-checks.webp) |
+![Models & weights (left) and Feature checks (right): installed categories, qualifications and observed memory usage](docs/screenshots/windows-setup.webp)
+
+Actual Windows UI: installation, successful checks and failed/unchecked recipes are shown separately.
 
 | Installed physical RAM | Qualification gating and badges |
 |---|---|

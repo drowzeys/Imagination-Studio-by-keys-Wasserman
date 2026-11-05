@@ -103,7 +103,10 @@ def test_check_builder_uses_fixed_runner_and_unique_report_paths(tmp_path, monke
 
 def test_existing_receipts_are_displayed_without_a_render_or_rewrite(tmp_path, monkeypatch):
     marker = tmp_path / "qualification.json"
-    native = {"result": {"calibration": {"count": 1, "request_to_files_seconds": 2},
+    measured = {"initial": {"gpu_dedicated_total_mb": 8192},
+                "minima": {"dedicated_gpu_free_mb": 4096}}
+    native = {"result": {"ok": True, "calibration": {"count": 1, "request_to_files_seconds": 2},
+                         "memory_guard": measured,
                          "job_commitment": {"peak_job_commit_bytes": 4 << 20, "peak_process_commit_bytes": 3 << 20}}}
     raw = json.dumps(native)
     marker.write_text(raw)
@@ -113,6 +116,8 @@ def test_existing_receipts_are_displayed_without_a_render_or_rewrite(tmp_path, m
     assert found["matches"] and found["time_basis"] == "receipt_mtime"
     assert found["results"][0]["case"] == "1 512x512 storyboard drafts"
     assert found["results"][0]["peak_job_commit_mb"] == 4
+    assert found["results"][0]["measurements"] == measured
+    assert found["results"][0]["rendered"] is True
     assert marker.read_text() == raw
 
 

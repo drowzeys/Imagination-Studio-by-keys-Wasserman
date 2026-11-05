@@ -432,6 +432,7 @@ def qualify(output: Path) -> dict:
                         "elapsed_s": result["calibration"]["request_to_file_seconds"],
                         "peak_job_commit_mb": result["job_commitment"]["peak_job_commit_bytes"] / 2 ** 20,
                         "peak_process_commit_mb": result["job_commitment"]["peak_process_commit_bytes"] / 2 ** 20,
+                        "rendered": True, "measurements": result["memory_guard"],
                         "audio": result["calibration"]["audio"]})
     if before != fingerprint():
         raise RuntimeError("Foley's rendering dependencies changed during the check.")

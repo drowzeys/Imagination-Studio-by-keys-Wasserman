@@ -1214,6 +1214,7 @@ def windows_state() -> dict:
     import windows_runtime
     import windows_storyboard
     import windows_setup_fit
+    import windows_measurements
     items = []
 
     def row(nid, label, engine, expected, files, setup, *, installed=None, why="", catalog_id=None, removable=True):
@@ -1229,6 +1230,9 @@ def windows_state() -> dict:
             items[-1].update(windows_setup_fit.model_info(catalog_id, installed=ready))
             import model_catalog
             feature = model_catalog.model(catalog_id).get("feature")
+            for name in ("installed_label", "requirements_note"):
+                if name in model_catalog.model(catalog_id):
+                    items[-1][name] = model_catalog.model(catalog_id)[name]
             if feature:
                 items[-1]["feature"] = feature
             checks = model_catalog.model(catalog_id).get("features")
@@ -1256,8 +1260,13 @@ def windows_state() -> dict:
             installed=model["installed"], why=model["why"] if not model["installed"] else "",
             catalog_id=model["id"] if model["id"] != "sd-turbo" else None)
         items[-1]["feature"] = "scout" if model["id"] == "sd-turbo" else model["id"]
-        items[-1]["recipe_fit"] = windows_setup_fit.recipe_fit(model)
+        items[-1]["recipe_fit"] = (windows_measurements.feature_measurements(["scout"]) if model["id"] == "sd-turbo"
+                                  else windows_measurements.recipe_fit(model))
         if model["id"] == "sd-turbo":
+            import shared_measurements
+            items[-1]["model"] = "sd-turbo"
+            items[-1]["model_metadata"] = {"label": model["title"], "platform": "windows"}
+            items[-1]["shared_measurements"] = shared_measurements.references("sd-turbo", platform="windows", feature="scout")
             items[-1]["download_size"] = {"bytes": sum(size for size, _ in windows_storyboard.FILES.values()),
                                          "basis": "Pinned model manifest byte sizes"}
 
@@ -1333,6 +1342,9 @@ def state() -> dict:
                     "link": {**record, "shown": shown(record["path"]), "link_shown": shown(record["link"])} if record else None,
                     "linked_by_studio": bool(record), "unlisted": bool(item.get("unlisted")), "linkable": item.get("linkable", True),
                     "install": install_plan(item)})
+        if SPARK or MAC:
+            import model_metadata
+            out[-1].update(model_metadata.inventory_info(item["id"], "linux" if SPARK else "macos"))
     scan_info = data.get("scan")
     try:
         import installs

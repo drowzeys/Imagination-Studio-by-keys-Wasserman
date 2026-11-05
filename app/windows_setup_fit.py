@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 from functools import lru_cache
 from pathlib import Path
 import subprocess
 import sys
 import model_catalog
+import windows_measurements
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -67,96 +67,23 @@ def inventory_hardware() -> dict:
     return {key: value for key, value in data.items() if not key.endswith("_free_mb")}
 
 
-def recipe_fit(evidence: dict) -> dict | None:
-    levels = evidence.get("qualification_levels", [])
-    if not levels:
-        return None
-    passed = sum(bool(level.get("qualified")) for level in levels)
-    failed = sum(not level.get("qualified") and level.get("outcome") == "failed" for level in levels)
-    unchecked = len(levels) - passed - failed
-    if not passed and not failed:
-        return None
-    if passed == len(levels):
-        text = f"All {passed} recipes verified on this machine."
-    elif passed:
-        text = f"{passed}/{len(levels)} recipes verified here"
-        if failed:
-            text += f"; {failed} failed — some recipes run, not all have passed."
-        else:
-            text += "."
-    else:
-        text = f"{failed}/{len(levels)} recipes failed here; none verified."
-    if unchecked:
-        text += f" {unchecked} not verified."
-    memory = recipe_memory(levels)
-    return {"passed": passed, "failed": failed, "total": len(levels), "summary": text, **memory}
-
-
-def recipe_memory(levels: list[dict]) -> dict:
-    """Ranges of observed peaks, not model requirements; GPU readings include other adapter users."""
-    gpu, commit, pools = [], [], set()
-
-    def valid(value):
-        return type(value) in (int, float) and math.isfinite(value) and value >= 0
-
-    for level in levels:
-        rows = list(level.get("evidence", {}).get("results", [])) if level.get("qualified") else []
-        attempt = level.get("attempt", {})
-        error = str(attempt.get("error", "")).lower()
-        interrupted = level.get("outcome") == "failed" and any(
-            phrase in error for phrase in ("memory watchdog", "memory guard", "out of memory", "outofmemory"))
-        if interrupted and attempt.get("observations"):
-            rows.append(attempt["observations"])
-        if interrupted:
-            if "commit memory" in error or "commit headroom" in error:
-                pools.add("commit backing")
-            elif "dedicated gpu" in error or "gpu memory" in error or "cuda budget" in error:
-                pools.add("GPU memory")
-            elif "physical memory" in error or "host memory" in error or "memavailable" in error:
-                pools.add("host RAM")
-        for row in rows:
-            partial = interrupted and row is attempt.get("observations") and not row.get("rendered", False)
-            measurements = row.get("measurements", {})
-            initial = measurements.get("initial", {})
-            total = initial.get("gpu_dedicated_total_mb")
-            free = measurements.get("minima", {}).get("dedicated_gpu_free_mb")
-            if valid(total) and total > 0 and valid(free) and free <= total:
-                gpu.append((total - free, partial))
-            peak = row.get("peak_job_commit_mb")
-            if valid(peak):
-                commit.append((peak, partial))
-
-    def span(values):
-        if not values:
-            return None
-        return {"min_mb": min(value for value, _ in values), "max_mb": max(value for value, _ in values),
-                "incomplete": any(partial for _, partial in values)}
-
-    ranges = {"gpu_usage": span(gpu), "job_commitment": span(commit)}
-    labels = []
-    for key, label in (("gpu_usage", "GPU usage (adapter-wide)"), ("job_commitment", "owned job commitment")):
-        value = ranges[key]
-        if value:
-            labels.append(f"{label}: {value['min_mb'] / 1024:.1f}–{value['max_mb'] / 1024:.1f}"
-                          f"{'+' if value['incomplete'] else ''} GiB")
-    if not labels:
-        return {}
-    summary = "Observed " + " · ".join(labels) + "."
-    return {"memory_ranges": ranges, "memory_summary": summary,
-            "memory_note": "Ranges are observed recipe peaks, not minimum requirements. "
-                           "GPU usage includes other apps. + means a memory-limited run ended before completion; "
-                           "the full-run peak may be higher. GPU and commitment pools overlap; do not add them."
-                           + (" Stopped by " + ", ".join(sorted(pools)) + "." if pools else "")}
-
-
 def model_info(key: str, *, hardware: dict | None = None, installed=False, evidence: dict | None = None) -> dict:
     size = model_catalog.size_info(key)
     fit = plan(key, inventory_hardware() if hardware is None else hardware, installed=installed)
     result = {"download_size": size, "runtime_fit": fit}
+    result["model"] = key
+    result["model_metadata"] = {"label": model_catalog.model(key)["label"], "platform": "windows"}
     import shared_measurements
-    result["shared_measurements"] = shared_measurements.references(key)
+    profile = windows_measurements.execution_profile(model_catalog.model(key).get("feature", key))
+    result["shared_measurements"] = shared_measurements.references(
+        key, platform="windows", backend=profile["backend"], engine=profile["engine"])
     if evidence is not None:
-        result["recipe_fit"] = recipe_fit(evidence)
+        result["recipe_fit"] = windows_measurements.recipe_fit(evidence)
+    else:
+        spec = model_catalog.model(key)
+        kinds = spec.get("features") or ([spec["feature"]] if spec.get("feature") else [])
+        if kinds:
+            result["recipe_fit"] = windows_measurements.feature_measurements(kinds)
     return result
 
 

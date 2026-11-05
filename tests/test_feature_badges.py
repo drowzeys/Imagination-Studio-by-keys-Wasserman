@@ -81,6 +81,16 @@ def run_frontend(code):
     return json.loads(done.stdout)
 
 
+def test_feature_checks_link_opens_model_settings_without_running_checks():
+    out = run_frontend(r"""
+globalThis.goSettings = section => { globalThis.settingsSection = section; go("Settings"); };
+wfcDraw();
+button(nodes["#feature-checks"], "Models & weights").attrs.onclick();
+console.log(JSON.stringify({section:settingsSection,destination,calls}));
+""")
+    assert out == {"section": "models", "destination": "Settings", "calls": []}
+
+
 def test_qualification_mode_is_optional_or_locked_without_hiding_checks():
     out = run_frontend(r"""
 const out = {};

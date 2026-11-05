@@ -258,6 +258,7 @@ function wfcDraw() {
   const focusedCard = requestedFocus || box.querySelector("[data-feature-check]:focus")?.dataset.featureCheck;
   const data = WFC.data, memory = data && data.memory || {};
   const head = el("div", { class: "row" },
+    el("button", { class: "small", onclick: () => goSettings("models") }, "Models & weights"),
     el("button", { class: "small", disabled: WFC.loading, onclick: wfcLoad }, "Refresh status"),
     data ? el("button", { class: "small", onclick: async () => {
       try { const report = await api(featureCheckApi("/report"));

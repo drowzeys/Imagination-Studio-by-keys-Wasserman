@@ -241,6 +241,8 @@
       }
     },
     "workflows": {
+      "installed_label": "Components installed",
+      "requirements_note": "Find a person uses SAM and does not need H3. Turnaround, Upscale and Remove also need H3 shared models, the bf16 Ref2VA transformer and their action dependencies. Installation is not qualification; open each action's checks for readiness.",
       "features": ["turnaround", "upscale", "mask", "remove"],
       "label": "Library workflows",
       "kind": "component",
@@ -255,6 +257,8 @@
       "group": "Library workflows"
     },
     "swap": {
+      "installed_label": "Components installed",
+      "requirements_note": "Character Swap also needs H3 shared models, a Ref2VA transformer and its swap/Turbo adapters. Installation is not qualification; open Feature checks for readiness.",
       "feature": "swap",
       "label": "Character Swap",
       "kind": "component",
