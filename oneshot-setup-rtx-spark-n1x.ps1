@@ -239,46 +239,23 @@ if ($Native) {
 Say "Launchers"
 $home_ = Join-Path $env:LOCALAPPDATA "ImaginationStudio"
 New-Item -ItemType Directory -Force -Path $home_ | Out-Null
-$icon = Join-Path $home_ "imagination-studio.ico"
-if ($Native) { Copy-Item (Join-Path $StudioDir "app\static\brand\app-icon.ico") $icon -Force -ErrorAction SilentlyContinue }
-else { Copy-Item "\\wsl.localhost\$Distro$($repoDir -replace '/', '\')\app\static\brand\app-icon.ico" $icon -Force -ErrorAction SilentlyContinue }
 $start = Join-Path $home_ "Start-Studio.cmd"
 $stop = Join-Path $home_ "Stop-Studio.cmd"
-@"
-@echo off
-title Imagination Studio (RTX Spark)
-rem Imagination Studio runs $(if ($Native) { "natively (the CUDA tier)" } else { "in WSL ($Distro)" }) for as long as this window is open: close it, or run Stop, to stop it.
-powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7870/ -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
-if %errorlevel%==0 (
-  echo Imagination Studio is already running: opening it.
-  start "" http://127.0.0.1:7870/
-  timeout /t 3 >nul
-  exit /b 0
-)
-echo Starting Imagination Studio... the page opens when it is ready. Keep this window open.
-start "" /b powershell -NoProfile -WindowStyle Hidden -Command "for (`$i = 0; `$i -lt 150; `$i++) { try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7870/ -TimeoutSec 2 | Out-Null; Start-Process 'http://127.0.0.1:7870/'; break } catch { Start-Sleep 2 } }"
-$(if ($Native) { "powershell -NoProfile -ExecutionPolicy Bypass -File `"$StudioDir\scripts\app.ps1`"" } else { "wsl.exe -d $Distro -u $WslUser -e bash $repoDir/scripts/n1x-studio.sh" })
-echo Imagination Studio stopped.
-timeout /t 5 >nul
-"@ | Set-Content -Path $start -Encoding ascii
-@"
-@echo off
-title Stop Imagination Studio
-$(if ($Native) { "powershell -NoProfile -ExecutionPolicy Bypass -File `"$StudioDir\scripts\stop-windows-studio.ps1`"" } else { "wsl.exe -d $Distro -u $WslUser -e bash $repoDir/scripts/n1x-studio.sh stop" })
-timeout /t 3 >nul
-"@ | Set-Content -Path $stop -Encoding ascii
-$ws = New-Object -ComObject WScript.Shell
+try {
+  if ($Native) {
+    $DesktopSetup = Join-Path $StudioDir 'scripts\setup-windows-desktop.ps1'
+    & $DesktopSetup -Backend native -StudioDir $StudioDir
+  } else {
+    $DesktopSetup = "\\wsl.localhost\$Distro$($repoDir -replace '/', '\')\scripts\setup-windows-desktop.ps1"
+    & $DesktopSetup -Backend wsl -Distro $Distro -WslUser $WslUser -WslRepo $repoDir
+  }
+} catch {
+  Die "Desktop backend registration failed: $_"
+}
+if ($LASTEXITCODE -ne 0) { Die 'Desktop backend registration failed; see its error above.' }
 $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 $links = @{}
-foreach ($where in @([Environment]::GetFolderPath("Desktop"), $menu)) {
-  $l = $ws.CreateShortcut((Join-Path $where "Imagination Studio.lnk"))
-  $l.TargetPath = "$env:WINDIR\System32\cmd.exe"; $l.Arguments = "/c `"$start`""; $l.WorkingDirectory = $home_
-  $l.IconLocation = "$icon,0"; $l.WindowStyle = 7; $l.Description = "Start Imagination Studio and open it"; $l.Save()
-  $links[$where] = $l.FullName
-}
-$s = $ws.CreateShortcut((Join-Path $menu "Stop Imagination Studio.lnk"))
-$s.TargetPath = "$env:WINDIR\System32\cmd.exe"; $s.Arguments = "/c `"$stop`""; $s.IconLocation = "$icon,0"; $s.WindowStyle = 7
-$s.Description = "Stop Imagination Studio and free the GPU"; $s.Save()
+$links[$menu] = Join-Path $menu 'Imagination Studio.lnk'
 Ok "Start and Stop in the Start menu, Start on the Desktop ($home_)"
 
 if (-not $NoPin) {
@@ -349,4 +326,4 @@ if ($EnableSsh) {
   Ok "SSH on port 22 for this home network (Private)$(if ($AuthorizedKey) { ', the key added' })"
 }
 
-Say "Done. Click Imagination Studio on the taskbar (or the Desktop) to start it; close its window, or Stop, to stop it."
+Say "Done. Click Imagination Studio on the taskbar (or the Desktop) to start it. Use its notification tray to switch Native/WSL2, choose a default, or stop it."

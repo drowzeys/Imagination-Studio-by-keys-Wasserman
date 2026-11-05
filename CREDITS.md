@@ -410,6 +410,10 @@ machine; none of their code ships in this pack.
 
 ## The native Windows CUDA tier (RTX Spark N1X): TensorFold on Windows, NVIDIA, Microsoft, Zig
 
+The Native/WSL2 notification tray uses **Microsoft**'s **Windows Forms**, **PowerShell** and **Windows
+Subsystem for Linux**, with Python's standard library for private launch control. No model or engine code
+runs inside the tray.
+
 The native tier runs the DGX Spark's render path on Windows 11 on Arm without WSL. Its engines are **TensorFold
 1.2.2** by **Ash Hart** and the TensorFold contributors (Apache-2.0), whose Windows platform support they build on, at
 the drowzeys/TensorFold branch `studio-1.2.2`: TensorFold's int8 H3 blocks as `tf_h3.dll` (the engine ComfyUI's

@@ -33,12 +33,36 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1
 
 ## Start and stop
 
-- **Start:** click Imagination Studio on the taskbar. A small window opens (minimized) and the Studio opens in the
-  browser at `http://127.0.0.1:7870` when it is ready. Clicked while it runs, it only opens the page.
-- **Stop:** close that window, or run Stop Imagination Studio (it stops the Studio and its ComfyUI, giving the GPU's
-  memory back).
-- Why a window: WSL shuts Ubuntu down shortly after its last Windows window closes, and everything in it with it. The
-  launcher's window is what keeps the Studio alive; a Studio started over SSH alone stops when the session ends.
+- **Start:** click Imagination Studio on the taskbar or Desktop. Its notification-area tray controller starts the
+  selected default backend and opens `http://127.0.0.1:7870`. If an app is already running, it only opens the page.
+- **Stop:** choose Stop Studio in the tray, or Stop Imagination Studio in Start. Confirm the action; queued or
+  running jobs prevent stopping. A tray-owned app gracefully unloads its models before exiting.
+- **Native and WSL2 together:** each install registers separately. The tray shows which backend is running,
+  offers a default for future launches, and confirms an idle stop/start when switching. Changing the default does
+  not stop the running app. A failed drain prevents the next backend from starting.
+- **Exit tray** leaves Studio running. A separate supervisor retains the long-lived `wsl.exe` when using WSL2;
+  no visible command window is needed. It never uses `wsl --shutdown`, terminates a distribution, or kills by name.
+  Models, environments and project folders remain each install's own; switching does not copy or migrate them.
+- An app started manually, over SSH, or by an older launcher is labelled **External Studio**. The tray can open
+  it but will not adopt or stop it. Stop it through its original launcher before starting a tray-owned session.
+
+Existing installs can register without running model setup. Use an updated checkout and a Windows Python 3.13
+runtime (`py` or the native UI environment); the tray controller itself uses only the standard library:
+
+```powershell
+# From the native Windows checkout:
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend native
+# Add an updated WSL2 checkout (replace these stand-ins with that install's values):
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser studio-user -WslRepo /home/studio-user/Imagination-Studio
+```
+
+Registration preserves the other backend and the existing default (`-MakeDefault` changes it explicitly).
+It creates the shared Start/Stop shortcuts and retains a local controller payload, so refreshing the menu does
+not start WSL. WSL registration and start explicitly check the given distro/user/checkout, with a timeout.
+Both backends need the updated `app/desktop_control.py`. Settings and private launch identity live outside the
+repository in `%LOCALAPPDATA%\ImaginationStudio`; credentials never appear in URLs, public app state or logs.
+The usual memory guards remain unchanged. Actual WSL2 lifecycle switching requires validation on an installed
+WSL Studio; deterministic tests do not constitute a GPU or WSL runtime measurement.
 
 ## Memory
 
@@ -237,9 +261,9 @@ Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and
 5. ComfyUI's model folders and `cuda-tier.json`.
 
 Run again, it resumes and updates. `-ToolchainOnly` installs step 1 alone; `-SkipToolchain -Parts <part>` adds one part
-to an install. The Start and Stop launchers then run `scripts\app.ps1` and
-`scripts\stop-windows-studio.ps1`; everything else (taskbar pin, power settings, `-StartAtLogon`, `-EnableSsh`) is as
-for WSL. The WSL install can stay beside it (each has its own models; the native tier needs its own copy, or point
+to an install. Start/Stop shortcuts use the shared Native/WSL2 tray described above; everything else (taskbar
+pin, power settings, `-StartAtLogon`, `-EnableSsh`) is as for WSL. The WSL install can stay beside it
+(each has its own models; the native tier needs its own copy, or point
 `-Models` at a folder that has them).
 
 ### Measured natively
