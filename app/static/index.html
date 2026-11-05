@@ -151,7 +151,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
 let S = null, jobs = [], tab = "Home", project = null;
 const TABS = ["Home", "Apps", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Models", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
-  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
+  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
 const field = (labelText, node) => el("div", {}, el("label", {}, labelText), node);
 const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"; if (isBox) node.checked = !!obj[key]; else node.value = obj[key] ?? "";
@@ -232,7 +232,9 @@ function lastFramePanel() { const set = p => { C.lastImage = p; C.prompt = ""; }
       C.lastImage ? el("button", { class: "fit", onclick: () => { set(null); render(); } }, "No last frame") : null),
     clipFrames(set, "From a clip in the Library"),
     el("div", { class: "row", style: "margin-top:8px;align-items:flex-end" }, field("Or make one from a prompt (" + imageModelName() + ")", bind(L, "prompt", el("input", { placeholder: "the picture the clip ends on" }))),
-      el("button", { class: "fit", onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try { const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: { prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
+      el("button", { class: "fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try {
+        if (imageModelWhy()) throw new Error(imageModelWhy());
+        const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: stillParams({ prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) }) }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
       scout ? el("span", { class: "pill " + scout.status }, scout.status) : null));
   if (L.lib) { const grid = el("div", { class: "grid", style: "margin-top:10px" }); box.append(grid);
     api("/api/library").then(list => list.filter(m => m.kind === "image").slice(0, 24).forEach(m => grid.append(el("div", { class: "tile" + (C.lastImage === m.path ? " on" : ""), onclick: () => { set(m.path); L.lib = false; render(); } }, media(m.path), el("div", { class: "cap" }, m.path.split("/").pop().slice(-26)))))).catch(() => {}); }
@@ -278,17 +280,57 @@ const output = () => C.preset === "custom" ? { label: "Custom " + C.cw + "x" + C
 const extras = () => ({ ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}), ...(String(C.steps).trim() ? { steps: Number(C.steps) } : {}), ...(lorasOf(C).length ? { loras: lorasOf(C) } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) });
 function changed() { sync(); C.prompt = ""; render(); }
 // one decision shown as cards: options are value -> [title, detail]
-// The picture model a prompt goes to (server.py IMAGE_MODELS): Qwen 2.1 Turbo on every install, FLUX3-K Fast and Full
-// where oneshot-setup --flux3 put them, MOSS-Image on a DGX Spark with --moss. Only installed ones are offered; a choice
-// that is not installed falls back to Qwen.
-const imageModels = () => (S.image_models && S.image_models.length ? S.image_models : [{ id: "qwen", label: "Qwen 2.1 Turbo", note: "" }]);
-const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : imageModels()[0].id);
-const stillParams = params => { if (!(S.windows_stills && S.windows_stills.available)) return params;
+// A selected model is never replaced by another backend. The catalog can include blocked models for inspection.
+const IMAGE_LABELS = { "sd-turbo": "SD-Turbo", qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full",
+  "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image" };
+const imageModels = () => {
+  const available = (S.image_models || []).map(m => typeof m === "string" ? m : m.id);
+  const catalog = S.image_model_options || S.windows_runtime?.image_models;
+  const models = catalog?.length ? catalog : S.image_models?.length ? S.image_models
+    : S.windows_stills?.available ? [{ id: "sd-turbo" }] : [{ id: "qwen" }];
+  return models.map(value => { const m = typeof value === "string" ? { id: value } : value;
+    return { ...m, label: m.label || m.title || IMAGE_LABELS[m.id] || m.id,
+      available: m.available ?? (catalog?.length ? available.includes(m.id) : true) }; });
+};
+const defaultImageModel = () => {
+  const models = imageModels(), preferred = typeof prefs === "function" ? prefs().presets?.image_model || "qwen" : "qwen";
+  return models.find(m => m.id === preferred && m.available)?.id || models.find(m => m.available)?.id || models[0].id;
+};
+const imageModel = () => C.imageModel || defaultImageModel();
+const imageIsDraft = (id = imageModel()) => id === "sd-turbo";
+const imageFeature = (id = imageModel()) => S.platform === "windows" && !imageIsDraft(id)
+  ? imageModels().find(m => m.id === id)?.feature || id : "scout";
+const imageModelWhy = (id = imageModel()) => {
+  const m = imageModels().find(m => m.id === id);
+  if (!m) return "This selected model is not offered by this runtime. Choose a model explicitly.";
+  if (m.available === false) return m.why || m.label + " is unavailable. See Feature checks for installation, verification and memory requirements.";
+  const feature = imageFeature(id);
+  return S.platform === "windows" && !imageIsDraft(id) && !S.capabilities?.[feature] ? ""
+    : typeof capWhy === "function" ? capWhy(feature) : "";
+};
+const stillParams = params => {
+  const hasCatalog = Array.isArray(S.image_model_options) || Array.isArray(S.windows_runtime?.image_models) || !!S.image_models?.length;
+  const legacyDraft = !hasCatalog && S.windows_stills?.available;
+  const id = params.image_model || (legacyDraft ? S.windows_stills.model || "sd-turbo"
+    : typeof imageModel === "function" ? imageModel() : null);
+  if (id !== "sd-turbo") return id ? { ...params, image_model: id } : params;
   const { preset, ...rest } = params;
-  return { ...rest, width: S.windows_stills.width, height: S.windows_stills.height, image_model: S.windows_stills.model }; };
-const imageModelName = () => imageModels().find(m => m.id === imageModel()).label;
-const imageModelPick = after => imageModels().length < 2 ? null : el("div", {}, el("label", {}, "Picture model"),
-  choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), after || render, true));
+  return { ...rest, width: 512, height: 512,
+    ...(!params.prompts ? { count: Math.min(6, Math.max(1, Number(params.count) || 1)) } : {}), image_model: id };
+};
+const imageModelName = (id = imageModel()) => imageModels().find(m => m.id === id)?.label || IMAGE_LABELS[id] || id;
+const imageModelPick = after => {
+  const selected = { imageModel: imageModel() };
+  return el("div", {}, el("label", {}, "Picture model"),
+    imageModels().length < 2 ? el("b", {}, imageModelName()) : choice(selected, "imageModel",
+      Object.fromEntries(imageModels().map(m => [m.id, [/^(qwen|flux)/.test(m.id) ? mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label) : m.label,
+        [m.quality === "draft" || imageIsDraft(m.id) ? "Storyboard draft · 512 × 512 · one step · 1–6 pictures" : m.quality === "full-model" ? "Full model" : "",
+          m.backend ? m.backend + " backend" : "", m.why || m.note].filter(Boolean).join(" · ")]])),
+      () => { C.imageModel = selected.imageModel; (after || render)(); }, true),
+    imageModelWhy() ? el("div", { class: "note warn" }, imageModelWhy()) : null,
+    S.platform === "windows" && typeof openFeatureCheck === "function" ? el("button", { type: "button", class: "small",
+      onclick: () => openFeatureCheck(imageFeature()) }, "Feature checks and model requirements") : null);
+};
 const choice = (obj, key, options, after, tight) => el("div", { class: "choice" + (tight ? " tight" : ""), role: "radiogroup" }, Object.entries(options).map(([v, [title, sub]]) =>
   el("button", { type: "button", role: "radio", "aria-checked": String(obj[key]) === v ? "true" : "false", class: String(obj[key]) === v ? "on" : "", onclick: () => { obj[key] = v; if (after) after(); } }, el("b", {}, title), sub ? el("span", {}, sub) : null)));
 // A number of passes of your own is the Custom card of each passes chooser, right after its 20-pass card. C.steps
@@ -628,22 +670,25 @@ function viewCreate() {
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
-    if (S.windows_stills && S.windows_stills.available) C.imageSize = "512x512";
-    const [w, h] = C.imageSize.split("x").map(Number);
-    const qualification = typeof featureBadge === "function" ? featureBadge("scout") : null;
+    const draft = imageIsDraft(), size = draft ? "512x512" : C.imageSize === "512x512" ? "1344x768" : C.imageSize;
+    if (draft && Number(C.count) > 6) C.count = 6;
+    const [w, h] = size.split("x").map(Number);
+    const qualification = typeof featureBadge === "function" ? featureBadge(imageFeature()) : null;
     const title = el("h2", {}, "The picture");
     put(body, qualification ? el("div", { class: "row" }, title, qualification) : title, goes, picture, imageModelPick(),
-      el("label", {}, "Size"), choice(C, "imageSize", S.windows_stills && S.windows_stills.available ? { "512x512": ["Storyboard draft", "512 × 512 square"] }
+      el("label", {}, "Size"), choice(draft ? { imageSize: size } : C, "imageSize", draft ? { "512x512": ["Storyboard draft", "512 × 512 square"] }
         : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
       el("div", { class: "row" },
-        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: S.windows_stills && S.windows_stills.available ? S.windows_stills.max_count : 12 }))),
+        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: draft ? 6 : 12 }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
       el("div", { class: "note" }, (imageModel() === "sd-turbo" ? "SD-Turbo makes square storyboard drafts, one step and one image at a time; it does not guarantee matching faces across shots"
-        : imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
-        : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
+        : /^qwen/.test(imageModel()) ? "Qwen makes the picture at the selected size after the model loads"
+        : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written" + (S.platform === "windows" ? "" : ", about 45 s an image at 1344 × 768 once loaded") + "; put the words to be lettered in quotes"
+        : S.platform === "windows" ? "FLUX3-K writes a full scene description from your prompt first, then makes each image. Feature checks show this backend's memory requirements and measurement source"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
-      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
-        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() } });
+      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
+        if (imageModelWhy()) throw new Error(imageModelWhy());
+        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: stillParams({ prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() }) });
         C.imageJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make image"), el("span")));
     if (made) { put(body, el("h3", {}, "Images"), jobCard(made));
       if (made.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, made.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
@@ -716,10 +761,14 @@ function viewCreate() {
         if (!C.imagePrompt) C.imagePrompt = C.scene;
         const scout = C.scoutJob && jobs.find(j => j.id === C.scoutJob);
         put(body, imageModelPick(), field("Image prompt (" + imageModelName() + ")", bind(C, "imagePrompt", el("textarea"))),
-          el("div", { class: "row" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
-            el("button", { class: "primary fit", disabled: !C.imagePrompt.trim(), onclick: async () => { try { const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
-              params: { prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
-          scout ? el("div", { class: "note" }, "Scout job: ", el("span", { class: "pill " + scout.status }, scout.status)) : el("div", { class: "note" }, "Six scouts take about half a minute. They are made at the size the video model starts from."));
+          el("div", { class: "row" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: imageIsDraft() ? 6 : 12 }))),
+            el("button", { class: "primary fit", disabled: !C.imagePrompt.trim() || !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try {
+              if (imageModelWhy()) throw new Error(imageModelWhy());
+              const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
+              params: stillParams({ prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) }) }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
+          scout ? el("div", { class: "note" }, "Scout job: ", el("span", { class: "pill " + scout.status }, scout.status)) : el("div", { class: "note" },
+            imageIsDraft() ? "Up to six sequential 512 × 512 storyboard drafts; the video route must separately accept this first frame."
+              : "Scouts use the selected model and the size the video model starts from."));
         if (scout && scout.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, scout.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
           el("div", { class: "tile" + (C.image === p ? " on" : ""), onclick: () => { C.image = p; render(); } }, media(p), el("div", { class: "cap" }, p.split("/").pop(), C.image === p ? "✓ selected" : "pick")))));
       } else put(body, field("Upload an image", up), clipFrames(p => { C.image = p; C.prompt = ""; }, "Or continue from a clip in the Library"));

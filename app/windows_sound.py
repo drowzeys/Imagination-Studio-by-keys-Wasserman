@@ -83,7 +83,8 @@ def parameters(params: dict) -> dict:
 def preflight():
     if not shutil.which("ffmpeg"):
         raise RuntimeError("run scripts\\setup-windows-ffmpeg.ps1 and restart Studio before making sound effects")
-    renderer.preflight(status())
+    from windows_runtime import usage_status
+    renderer.preflight(usage_status("sfx", status()))
 
 
 def verify_weights(root: Path):

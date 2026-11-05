@@ -55,9 +55,10 @@ def test_the_full_install_and_a_large_pool_choose_the_native_tier(install, monke
     assert os.environ["SPARK_MODELS"].endswith("models")
 
 
-@pytest.mark.parametrize("what, why", [
-    ("pool", "under 90000 MB"), ("dll", "tf_h3.dll"), ("comfy", "no ComfyUI"), ("record", "cuda-tier.json"), ("preview", "preview")])
-def test_anything_short_of_the_full_install_keeps_the_preview_tier(install, monkeypatch, what, why):
+@pytest.mark.parametrize("what, core_ready, why", [
+    ("pool", True, "90000 MB"), ("dll", True, "tf_h3.dll"), ("comfy", False, "no ComfyUI"),
+    ("record", True, "no valid pool measurement"), ("preview", False, "preview")])
+def test_native_core_does_not_depend_on_h3_installation_or_capacity(install, monkeypatch, what, core_ready, why):
     base = install(cuda_pool_mb=36000 if what == "pool" else 113103)
     if what == "dll":
         (base / "tf-h3/tf_h3.dll").unlink()
@@ -67,8 +68,8 @@ def test_anything_short_of_the_full_install_keeps_the_preview_tier(install, monk
         (base / "cuda-tier.json").unlink()
     if what == "preview":
         monkeypatch.setenv("STUDIO_WINDOWS_TIER", "preview")
-    assert why in windows_cuda.why_not()
-    assert not windows_cuda.active()
+    assert (not windows_cuda.why_not()) == core_ready
+    assert why in windows_cuda.h3_why_not()
 
 
 def test_the_spark_commands_become_their_native_ports(monkeypatch):

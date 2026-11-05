@@ -121,16 +121,19 @@ Separately qualified 512x512 SD-Turbo stills, five-second sound effects, CPU med
 HDR grading and local Tesseract Finish can also be independently qualified without H3:
 see [their setup and measured limits](docs/windows-rtx-spark-testing.md#independent-hdr-and-finish-qualification).
 Bounded MMAudio foley can also qualify independently; see [Foley setup and limits](docs/windows-rtx-spark-testing.md#independent-foley-qualification).
-Other routes including video generation, in-app model installation, other agents, worker management
-and other unverified actions are refused explicitly.
-It is **not** a general Windows CUDA backend. A GPU's shared-memory allowance is not a measured render budget:
-the Linux/Mac memory guards and hardware requirements have not been relaxed.
+There is one Windows runtime, with backends selected per feature/model. The shared CUDA/ComfyUI core does not
+require H3; video retains its own engine and measured-pool prerequisites. Native image alternatives are shown
+with their installation, verification and memory status; this does not establish that they fit a smaller machine.
+A GPU's shared-memory allowance is not a measured render budget: existing guards are not relaxed.
 
 **Machine > Feature checks** groups the six bounded checks by room and reuses their saved evidence.
 Balanced matching is the default: routine updates keep a pass with an update note, rather than demanding
 another render. Model/recipe, hardware-profile, core ABI and explicit compatibility breaks still require a check.
 Exact runtime matching is opt-in with `STUDIO_QUALIFICATION_STRICT=1`; see the
 [update policy](docs/windows-rtx-spark-testing.md#baseline-cards-and-update-policy).
+Qualification gating and badges are on and locked below 128 GiB installed RAM; at 128 GiB and above they are
+off by default and optional. Feature checks and individual diagnostics remain available in either mode.
+Turning gating off does not bypass prerequisites, recipe limits or live memory guards.
 
 Install the official Python install manager (`py`), then run in PowerShell. Install mode obtains missing
 Python 3.13 itself (native ARM64 on an ARM64 machine):

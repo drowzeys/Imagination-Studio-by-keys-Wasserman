@@ -1,9 +1,9 @@
 # Windows RTX Spark: native setup and feature testing
 
 Use a checkout containing the Windows port, native Windows ARM64 PowerShell, and the same model/runtime
-pins on each machine. Sections 1-4 cover bounded features on 48/64 GB; the existing full
-[128 GB native CUDA tier](rtx-spark-n1x.md#native-windows-the-native-cuda-tier) has its own installer and
-measurements. This is not the Mac/DGX installer; do not use WSL as an installation workaround.
+pins on each machine. Sections 1-4 cover the bounded features measured on 48/64 GB; broader native model
+[measurements](rtx-spark-n1x.md#native-windows-the-native-cuda-tier) remain scoped to their tested 128 GB machine.
+Both use one Windows runtime and per-feature routing. This is not the Mac/DGX installer; do not use WSL as an installation workaround.
 The [living plan](windows-rtx-spark-plan.md#current-support) records tested 48/64 GB scopes and a separate
 [remaining-work handoff](windows-rtx-spark-plan.md#handoff-remaining-work). A larger memory inventory does
 not enable another route by itself.
@@ -165,6 +165,23 @@ Check queued/running cancellation and that cancelled jobs publish no take. Forma
 establish listening quality or support for larger/longer inputs.
 
 ### Baseline cards and update policy
+
+The qualification switch controls gating and badges, not visibility of Feature checks. Below 128 GiB installed
+RAM it is on/locked; at 128 GiB+ it defaults off and may be enabled. Change it while the queue is idle.
+Individual implemented checks can run with gating off. Off never disables model/runtime prerequisites,
+recipe constraints or memory guards; saved results still mean only their measured recipe.
+Native image candidate cards show unknown Windows peak memory until a real measurement exists.
+Do not treat model download size or a different platform's measurement as a verified Windows minimum.
+
+Inspect setup dependencies without installing, downloading or probing:
+
+```powershell
+.\scripts\setup-windows-cuda.ps1 -Parts image -PlanOnly
+```
+
+An image-only install does not build H3 or obtain its compiler/CUDA toolkit. Requested native engines obtain
+their own dependencies; CPU Finish alone does not install the GPU runtime. `-Preview` is now a launch alias,
+not a selection of another Windows product. H3's own DLL/capacity guard remains unchanged.
 
 The Image, Sound and Motion graphics groups also expose the existing **SD-Turbo storyboard drafts**,
 **Stable Audio Open effects**, and **Motion graphics** checks. Their saved receipts are reused, including

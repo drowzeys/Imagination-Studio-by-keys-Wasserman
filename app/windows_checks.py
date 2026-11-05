@@ -15,6 +15,8 @@ from feature_checks import FeatureCheck, MemoryRequirement, strict_matching
 import windows_features as features
 import windows_foley
 import windows_baseline_checks as baseline
+import windows_runtime
+import windows_cuda
 
 CHECKS = {
     "hlg": FeatureCheck("hlg", "HDR grading", "SDR-to-HLG grade and SDR copy; up to ten seconds, 1280x720, 24 fps.",
@@ -43,7 +45,10 @@ def gpu_check(job: dict) -> bool:
 
 def discovery(supported: bool) -> dict:
     return {"supported": supported, "url": "/api/feature-checks",
-            "features": {kind: check.title for kind, check in CHECKS.items()} if supported else {}}
+            "features": ({**{kind: check.title for kind, check in CHECKS.items()},
+                          **{kind: spec[0] for kind, spec in windows_runtime.IMAGE_SPECS.items()},
+                          "video": "H3 / FastH3 video", "voice": "Fish Audio Drama 3", "music": "MiniMax-Music3"} if supported else {}),
+            "mode": windows_runtime.mode() if supported else None}
 
 
 def parameters(params: dict) -> dict:
@@ -81,11 +86,12 @@ def attach(server):
 
     def enabled(request, mutation=False):
         agents.local(request, mutation)
-        if not server.WINDOWS:
+        if not (server.WINDOWS or server.WIN32):
             raise HTTPException(501, "Feature checks are not implemented for this runtime profile; existing model guards are unchanged.")
 
     def snapshot():
-        foley = windows_foley.status()
+        selected_mode = windows_runtime.mode()
+        foley = windows_runtime.usage_status("foley", selected_mode=selected_mode)
         try:
             _, free = features.host_memory()
             with features.WindowsSignals() as signals:
@@ -111,7 +117,7 @@ def attach(server):
             current = [server.public(job) for job in server.jobs.values()
                        if job["kind"] == "qualification"]
         for kind in CHECKS:
-            found = baseline.status(kind) if kind in baseline.KINDS else foley if kind == "foley" else features.status(kind)
+            found = foley if kind == "foley" else windows_runtime.usage_status(kind, selected_mode=selected_mode)
             try:
                 attempt = features.saved(kind, "-attempt")
                 if kind in baseline.KINDS:
@@ -145,7 +151,39 @@ def attach(server):
                                     r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-foley.ps1" if kind == "foley" else
                                     r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-finish.ps1" if kind == "finish" else
                                     r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-ffmpeg.ps1")})
-        return {"features": cards, "memory": memory, "policy": "strict" if strict_matching() else "balanced",
+        for choice in windows_runtime.image_options(selected_mode):
+            if choice["id"] == "sd-turbo":
+                continue
+            cards.append({**choice, "group": "image", "check_available": False,
+                          "open_tab": "Image", "open_model": choice["id"], "open_label": "Open " + choice["title"],
+                          "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Windows memory requirement not established",
+                                     "lowest_tested_ram_mb": None, "required_headroom_mb": None, "job_commit_cap_mb": None,
+                                     "gpu_required": True, "basis": choice["measurement_source"]},
+                          "evidence": {"matches": False, "results": []}, "attempt": {}, "job": None})
+        video = windows_runtime.native_status("video", selected_mode)
+        cards.append({"id": "video", "title": "H3 / FastH3 video", "group": "video", **video,
+                      "scope": f"The existing H3 policy requires a measured CUDA allocation pool of at least {windows_cuda.MIN_POOL_MB} MiB. This is not a minimum installed-RAM claim.",
+                      "requirements": [], "check_available": False,
+                      "memory": {"minimum_installed_ram_mb": None, "minimum_label": "See the H3 CUDA-pool policy",
+                                 "lowest_tested_ram_mb": None, "job_commit_cap_mb": None, "gpu_required": True},
+                      "evidence": {"matches": False, "results": []}, "attempt": {}, "job": None,
+                      "setup": r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts video",
+                      "open_tab": "Video", "open_label": "Open video"})
+        import voice
+        import music
+        for kind, title, raw, part, tab in (
+                ("voice", "Fish Audio Drama 3", voice.state(), "voice -Voice", "Voice"),
+                ("music", "MiniMax-Music3", music.state(), "music", "Music")):
+            found = windows_runtime.gate_native_state(kind, raw, selected_mode)
+            cards.append({"id": kind, "title": title, "group": "sound", **found,
+                          "scope": "Native sound generation. Install its components to use it; a Windows verification check is not implemented yet.",
+                          "requirements": [], "check_available": False,
+                          "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Windows recipe memory envelope not established",
+                                     "lowest_tested_ram_mb": None, "job_commit_cap_mb": None, "gpu_required": True},
+                          "evidence": {"matches": False, "results": []}, "attempt": {}, "job": None,
+                          "setup": rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}",
+                          "open_tab": tab, "open_label": "Open " + title})
+        return {"features": cards, "memory": memory, "mode": selected_mode, "policy": "strict" if strict_matching() else "balanced",
                 "note": "Base workflows do not require these checks. Saved evidence is reused; checks only run when you ask."}
 
     @router.get("/api/feature-checks")
@@ -161,6 +199,20 @@ def attach(server):
         return Response(json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(), **snapshot()}, indent=2),
                         media_type="application/json",
                         headers={"Content-Disposition": 'attachment; filename="feature-check-report.json"'})
+
+    @router.post("/api/feature-checks/mode")
+    def set_mode(request: Request, body: dict):
+        enabled(request, True)
+        if set(body) != {"enabled"} or type(body["enabled"]) is not bool:
+            raise HTTPException(400, "Choose whether qualification gating is enabled.")
+        with server.lock:
+            if any(job["status"] in ("queued", "running") for job in server.jobs.values()):
+                raise HTTPException(409, "Wait for queued work to finish before changing qualification gating.")
+            try:
+                selected_mode = windows_runtime.set_mode(body["enabled"])
+            except ValueError as error:
+                raise HTTPException(409, str(error)) from None
+        return {"mode": selected_mode}
 
     @router.post("/api/feature-checks/check")
     @router.post("/api/windows/features/check")

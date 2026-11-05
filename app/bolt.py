@@ -70,7 +70,7 @@ import voice  # mem_available_gb, settle, located, found_hint: the same readings
 import windows_cuda  # the native Windows CUDA tier (False off Windows without a look)
 
 # native Windows with the CUDA tier installed runs the same CUDA backend: tensorfold-native.exe with bolt.dll
-WINCUDA = windows_cuda.active()
+WINCUDA = windows_cuda.native_os()
 SPARK = sys.platform.startswith("linux") or WINCUDA
 MAC = sys.platform == "darwin"
 PACK = Path(__file__).resolve().parent.parent
@@ -815,7 +815,12 @@ def serves(endpoint: str) -> bool:
 
 
 def request(stopped=lambda: False, wait: bool = True, say=None):
-    return engine().request(stopped, wait, say)
+    one = engine()
+    if WINCUDA and not isinstance(one, External) and not one.present():
+        from windows_runtime import mode
+        if mode()["enabled"]:
+            raise RuntimeError("The native Bolt recipe has no Windows verification check yet. See Machine > Feature checks.")
+    return one.request(stopped, wait, say)
 
 
 FORWARD_FAILED = "Bolt's forward failed"  # the engine's 500 when one of its forward passes failed (bolt_native.zig)
@@ -909,6 +914,12 @@ def state() -> dict:
            "managed": not isinstance(one, External), "fallback": _chosen_why or None, "licence": LICENCE, "credit": CREDIT,
            "endpoint": ENDPOINT, "model": SERVED, **one.status()}
     out["backend_label"] = one.label
+    if WINCUDA and not isinstance(one, External):
+        from windows_runtime import gate_native_state
+        operational_state = out.get("state")
+        out = gate_native_state("Bolt", out)
+        out["qualification_state"] = out.get("state")
+        out["state"] = operational_state
     return out
 
 
@@ -923,6 +934,10 @@ def load_async() -> dict:
     why = one.present()
     if why:
         raise RuntimeError(why)
+    if WINCUDA:
+        from windows_runtime import mode
+        if mode()["enabled"]:
+            raise RuntimeError("The native Bolt recipe has no Windows verification check yet. See Machine > Feature checks.")
 
     def run() -> None:
         try:

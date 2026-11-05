@@ -84,13 +84,19 @@ def parse_gpu(line: str) -> dict | None:
             "clock_mhz": int(clock) if clock is not None else None}
 
 
-def parse_gpus(text: str) -> list[dict]:
+def parse_gpus(text: str, *, with_uuid: bool = False) -> list[dict]:
     """Every line of `nvidia-smi --query-gpu=index,memory.used,memory.total,<GPU_FIELDS> ...`: one reading a card,
     each with its nvidia-smi index and its own memory (MB). A line of <GPU_FIELDS> alone still parses, without them."""
 
     cards = []
     for line in text.strip().splitlines():
         parts = [part.strip() for part in line.split(",")]
+        if with_uuid:
+            # N1X's NVIDIA driver also returns its DLA/NPU from --query-gpu.
+            if len(parts) < 9 or not parts[0].startswith("GPU-"):
+                continue
+            parts = parts[1:]
+            line = ",".join(parts)
         if len(parts) < 8 or not parts[0].isdigit():
             one = parse_gpu(line)
             if one is not None:
@@ -299,9 +305,9 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock, guard=None
         try:
             argv = guard.nvidia_argv() if guard is not None and hasattr(guard, "nvidia_argv") else ["nvidia-smi"]
             # every card the argv names: the studio's own, or each paired card (STUDIO_GPUS), the head's first
-            done = subprocess.run([*argv, f"--query-gpu=index,memory.used,memory.total,{GPU_FIELDS}",
+            done = subprocess.run([*argv, f"--query-gpu=uuid,index,memory.used,memory.total,{GPU_FIELDS}",
                                    "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=2)
-            return combine_gpus(parse_gpus(done.stdout)) if done.returncode == 0 else None
+            return combine_gpus(parse_gpus(done.stdout, with_uuid=True)) if done.returncode == 0 else None
         except (OSError, subprocess.TimeoutExpired):
             return None
 

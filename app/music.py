@@ -67,7 +67,7 @@ import windows_cuda  # the native Windows CUDA tier: False off Windows without a
 router = APIRouter()
 HOME: Path = Path.home() / "ImaginationStudio"
 PACK = Path(__file__).resolve().parent.parent
-WINCUDA = windows_cuda.active()  # native Windows with the CUDA tier: the Spark's ComfyUI route, on the Windows ComfyUI
+WINCUDA = windows_cuda.native_os()
 SPARK = sys.platform.startswith("linux") or WINCUDA
 MAC = sys.platform == "darwin"
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
@@ -827,6 +827,9 @@ def state() -> dict:
 
     chosen = default_engine()
     each = {name: engine_state(name) for name in ENGINES}
+    if WINCUDA:
+        from windows_runtime import gate_native_state
+        each = {name: gate_native_state(f"music ({name})", found) for name, found in each.items()}
     return {**each[chosen], "engine": chosen, "engine_names": ENGINES, "engines": each}
 
 

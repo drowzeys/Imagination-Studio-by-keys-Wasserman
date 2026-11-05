@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -83,6 +84,16 @@ def own_identity() -> dict:
     return {"pid": os.getpid(), "created": created(_kernel().GetCurrentProcess())}
 
 
+def session_identity() -> str | None:
+    value = os.environ.get("STUDIO_WINDOWS_SESSION_KEY")
+    return hashlib.sha256(value.encode()).hexdigest() if value else None
+
+
+def same_session(identity: dict) -> bool:
+    expected = session_identity()
+    return identity.get("session") == expected
+
+
 def open_recorded(identity: dict, terminate: bool = False):
     """A handle to the recorded process when it is still that process (same id, same creation time), else None."""
 
@@ -131,8 +142,17 @@ def answers() -> bool:
 
 def start() -> int:
     if running():
-        print("already running")
-        return 0
+        identity = recorded()
+        if not same_session(identity):
+            print("Native ComfyUI belongs to another Studio session; it was not reused or stopped.", file=sys.stderr)
+            return 1
+        previous_python = identity.get("python")
+        if previous_python and Path(previous_python).resolve() != Path(sys.executable).resolve():
+            if stop():
+                return 1
+        else:
+            print("already running")
+            return 0
     python = Path(sys.executable)
     if not python.is_file() or not (PREFIX / "ComfyUI" / "main.py").is_file():
         print(f"run oneshot-setup-rtx-spark-n1x.ps1 -Native first: nothing at {PREFIX}", file=sys.stderr)
@@ -158,6 +178,9 @@ def start() -> int:
 
 def stop() -> int:
     identity = recorded()
+    if identity and session_identity() is not None and not same_session(identity):
+        print("Native ComfyUI belongs to another Studio session; it was not stopped.", file=sys.stderr)
+        return 1
     handle = open_recorded(identity)
     api = _kernel()
     if handle is None:
@@ -282,7 +305,8 @@ def run() -> int:
     env.pop("STUDIO_GPU_JOB_KEY", None)  # a warm server belongs to the GPU session, not to the job that loaded it
     env.update(STUDIO_GPU_MODEL_RAM="1", MAX_JOBS=env.get("MAX_JOBS", "2"), PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     install_nodes(env)
-    STATE.write_text(json.dumps({**own_identity(), "port": PORT}), encoding="utf-8")
+    STATE.write_text(json.dumps({**own_identity(), "port": PORT, "session": session_identity(),
+                                 "python": sys.executable}), encoding="utf-8")
     flags = (os.environ.get("SPARK_COMFY_ARGS") or "--use-ck-attention").split()
     job = OwnedJob()
     try:

@@ -227,26 +227,44 @@ Rules:
   shuts Ubuntu down soon after its last Windows `wsl.exe` closes, so the Studio lives in the Start launcher's window; a
   Studio started over SSH dies with the session. Stop by `[a]pp/...` patterns (a pkill whose own command line holds the
   path kills its shell). The taskbar pin is Windows 11's taskbar layout policy (append); never claim a pin API.
-- Native Windows CUDA tier (`app/windows_cuda.py`, `spark/windows_scripts.py`, `spark/comfy_win.py`,
+- Unified native Windows runtime (`app/windows_runtime.py`, `app/windows_cuda.py`, `spark/windows_scripts.py`, `spark/comfy_win.py`,
   `scripts/setup-windows-cuda.ps1`, `oneshot-setup-rtx-spark-n1x.ps1 -Native`, docs/rtx-spark-n1x.md *Native Windows*):
-  the Spark path on Windows, chosen only where `cuda-tier.json`, the GPU venv, ComfyUI and `tf_h3.dll` are all present
-  and the measured CUDA pool is at least `MIN_POOL_MB` (`why_not`); anything else on Windows keeps the preview tier
-  unchanged (`WINDOWS` stays the preview's flag, `WIN32` the OS's, `SPARK` is True on the native tier). Never run a
+  one Windows experience with per-feature/backend dispatch. `windows_cuda.active` detects the shared GPU Python/ComfyUI
+  core, not an app-wide capability tier; `h3_why_not` alone enforces H3's DLL and `MIN_POOL_MB` measured-pool requirement.
+  Do not make unrelated images, audio or CPU features depend on H3. Standalone native engines select Windows binaries
+  independently of the ComfyUI core. `-Preview` remains a launcher compatibility alias; the environment
+  `STUDIO_WINDOWS_TIER=preview` is only a legacy test/debug backend override. Never run a
   Linux script there: `windows_cuda.translate` maps `bash scripts/X.sh` to the Python port and refuses the rest, and a
   kind without a port is refused when queued with its reason (`NOT_NATIVE`), never sent to WSL. Keep
   `windows_scripts.py` in step with the bash scripts it ports (same checks, same words). ComfyUI is owned by handle
-  (`comfy_win.py`: a job object, the recorded id and creation time, a stop file), never by name or port, and stands
+  (`comfy_win.py`: a job object, private app-session hash, recorded id and creation time, a stop file), never by name or port.
+  Automatic reuse/stop must match the owning session; restart its own backend when the Python environment changes,
+  preserving isolated Foley dependencies and legacy shared environments. Keep ownership keys out of public state,
+  URLs, logs and job parameters. The server stands
   under `windows_memory.pressure`; it leaves the render's job object (breakaway) so it stays warm. Off Windows nothing
   of it runs (`active()` is False without a read). Drama 3 is wired only where `drama3-generate.exe` and
   `tensorfold_drama3.dll` exist, MiniMax Music 3's engine where `music3-generate.exe` does. Every Spark job kind has a
   port (`NOT_NATIVE` is empty); the installer's parts (`windows-cuda-setup.py`: `CHECKED`, `NODE_PACKS`) carry the
   Spark scripts' own pins and SHA-256s, which `tests/test_windows_cuda.py` holds in step. Never `os.kill(pid, 0)` on
-  Windows (signal 0 is CTRL_C_EVENT there): `windows_cuda.pid_alive`. The suite runs the preview tier (`STUDIO_WINDOWS_TIER=preview` in conftest);
-  `tests/test_windows_cuda.py` drives the native one.
+  Windows (signal 0 is CTRL_C_EVENT there): `windows_cuda.pid_alive`. Tests isolate physical memory and runtime
+  inventories; `test_windows_runtime.py` simulates 64/80/128 GiB. Never present those simulations as hardware measurements.
+  Setup is component-driven; `setup-windows-cuda.ps1 -Parts image -PlanOnly` performs no install/probe, and image-only
+  setup does not build H3 or obtain its compiler/toolkit. Foley uses its isolated environment.
 - Independent Windows CPU features (`app/windows_features.py`, `scripts/check-windows-features.ps1`): HDR grading
   and local Tesseract Finish can qualify without H3 or a native CUDA-tier record. Keep their local receipts tied to
   hardware/runtime/code, ten-second 720p/24 fps scopes, 4 GiB owned-job cap, low-memory supervision and API/UI/queue
-  agreement. A stale receipt, installed files alone or more advertised RAM never qualifies another route.
+  agreement. Installed files or advertised RAM alone never constitute verification evidence.
+- Windows qualification controls (`windows_runtime.mode`, `/api/feature-checks/mode`): below 128 GiB installed
+  physical RAM gating/badges are on and locked; unknown capacity fails closed. At 128 GiB+ default off, optional.
+  Off disables evidence gating and badges only: diagnostics remain visible and individual implemented checks run.
+  Never bypass prerequisites, recipe bounds, H3 policy or live admission; do not fabricate passed evidence.
+  Feature checks distinguish installation, verification, current contention and capacity, with measured/estimated/
+  unknown requirements. Native image memory is unknown until measured; model download bytes are not RAM needs.
+- GPU telemetry: NVIDIA's N1X driver returns DLA/NPU rows from `--query-gpu`. Filter positive `GPU-` UUIDs before
+  counting or averaging devices; do not turn one RTX Spark plus its NPU into two GPUs. Keep real multi-GPU readings.
+- Manual UI verification uses the user's real running app. Do not start alternate/hidden app instances or rerun
+  expensive model qualifications unless explicitly requested. Keep automated unit fixtures isolated, and target
+  validation to changed behavior rather than repeating already completed feature verification.
 - Qualification update policy (`app/feature_checks.py`, `app/windows_qualification.py`): balanced by default;
   routine runtime/source/tool updates retain dated evidence with `runtime_updated`, never pretend it is a new test.
   `STUDIO_QUALIFICATION_STRICT=1` opts into exact provenance matching. Requalify model/recipe/hardware-profile,

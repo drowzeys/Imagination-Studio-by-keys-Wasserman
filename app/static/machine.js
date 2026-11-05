@@ -21,20 +21,52 @@ function sparkline(id, tone) { return el("div", { class: "stack m-sparkbox" }, s
   svg("path", { d: "", class: "area" }), svg("path", { d: "", class: "line", "vector-effect": "non-scaling-stroke" }))); }
 function sparkSet(id, values, max) { const s = document.querySelector('[data-spark="' + id + '"]'); if (!s) return; const [line, area] = sparkPath(values, 600, 64, max); const p = s.querySelectorAll("path"); p[0].setAttribute("d", area); p[1].setAttribute("d", line); }
 const M = { storage: null, loading: false, history: null };
-const WFC = { data: null, error: "", timer: null, loading: false, focus: null, selected: null, open: false, groups: {} };
+const WFC = { data: null, error: "", timer: null, loading: false, changingMode: false, focus: null, selected: null, open: false, groups: {} };
 function openFeatureCheck(kind) { WFC.focus = kind; WFC.selected = kind; WFC.open = true; go("Machine"); }
 function featureBadge(kind) {
   const c = S && S.capabilities && S.capabilities[kind];
   const checks = S && S.feature_checks;
-  if (!checks || !checks.supported || !checks.features[kind] || !c) return null;
-  const ready = c.available, label = ready ? "Qualified" : c.installed === false && kind !== "foley" ? "Setup required" : "Not qualified";
+  if (!checks || !checks.supported || checks.mode?.enabled === false || !checks.features?.[kind] || !c) return null;
+  const ready = c.qualified ?? c.available, label = ready ? "Qualified" : c.installed === false && kind !== "foley" ? "Setup required" : "Not qualified";
   return el("button", { type: "button", class: "tag2 feature-link fit " + (ready ? "ok" : "warn"),
     "aria-label": label + ": " + checks.features[kind],
-    title: ready ? "Enabled on this machine. View saved qualification evidence and limits." : "Open this feature's checks and setup",
+    title: ready ? "View saved qualification evidence and limits." : "Open this feature's checks and setup",
     onclick: () => openFeatureCheck(kind) }, label, ready ? "" : " →");
 }
 const wfcGB = mb => mb == null ? "unknown" : (mb / 1024).toFixed(1) + " GiB";
 const featureCheckApi = tail => (S && S.feature_checks && S.feature_checks.url || "/api/feature-checks") + (tail || "");
+async function wfcSetMode(enabled) {
+  if (WFC.changingMode) return;
+  WFC.changingMode = true; wfcDraw();
+  try {
+    const result = await api(featureCheckApi("/mode"), { enabled });
+    if (WFC.data && result.mode) WFC.data.mode = result.mode;
+    S = await api("/api/state");
+    if (typeof ACT !== "undefined") ACT.state = null;
+    if (typeof FIN !== "undefined") FIN.state = null;
+    if (typeof SFX !== "undefined") SFX.state = null;
+    await wfcLoad();
+  } catch (e) { toast(e.message, 7000); }
+  WFC.changingMode = false;
+  render(); wfcDraw();
+}
+function wfcModeControl(data = WFC.data) {
+  const mode = data?.mode || (S && S.feature_checks?.mode);
+  if (!mode) return null;
+  const on = mode.enabled !== false;
+  const toggle = setSwitch(on, wfcSetMode, "Qualification gating and badges");
+  toggle.disabled = !!(WFC.changingMode || WFC.loading || mode.required || mode.can_disable === false);
+  toggle.title = mode.required ? mode.reason || "Qualification is required on this machine." : "Change qualification";
+  const description = mode.required
+    ? mode.physical_total_mb == null ? mode.reason || "Installed memory is unknown; qualification stays on."
+      : "Required below 128 GiB; this machine has " + wfcGB(mode.physical_total_mb) + "."
+    : on ? "Unverified features need a saved pass; badges are shown." : "Features do not need a saved pass; badges are hidden.";
+  return el("div", { class: "stack" },
+    setRow("Qualification", description, el("div", { style: "display:flex;align-items:center;gap:8px" },
+      el("span", { class: "tag2" + (on ? " ok" : "") }, on ? mode.required ? "On · required" : "On" : "Off"), toggle)),
+    el("details", { class: "fold" }, el("summary", {}, "About qualification"),
+      el("div", { class: "note m-flat" }, "Feature checks remain available in either mode, one at a time, only when you choose to run them. Memory guards, prerequisites and recipe limits always apply. Update matching below is separate.")));
+}
 function featureCheckGroups(cards, rooms = typeof ROOMS !== "undefined" ? ROOMS : []) {
   const keys = [...new Set(cards.map(card => card.group || "other"))];
   const rank = key => { const at = rooms.findIndex(room => room.id === key); return at < 0 ? rooms.length : at; };
@@ -75,7 +107,7 @@ function wfcAdmission(card, memory) {
     if (memory.error || !card.requirements.length || card.requirements.some(r => pools[r.pool]?.available_mb == null))
       return el("div", { class: "note" }, "Current memory availability could not be established. Admission is checked when you run a job.");
     const unknown = card.requirements.some(r => r.required_mb == null);
-    const busy = memory.low_memory || card.requirements.some(r => r.required_mb != null && pools[r.pool].available_mb < r.required_mb + r.reserve_mb);
+    const busy = memory.low_memory || card.requirements.some(r => r.required_mb != null && pools[r.pool].available_mb < r.required_mb + (r.reserve_mb || 0));
     return el("div", { class: "note" + (busy ? " warn" : "") }, busy
       ? "Memory is currently busy: a new job may be refused until enough memory is free. Your saved qualification is unchanged."
       : unknown ? "Some expected memory requirements remain unknown. Check-time admission runs after other Studio models are unloaded."
@@ -95,10 +127,12 @@ async function wfcLoad() {
   const wasBusy = WFC.data && WFC.data.features.some(wfcBusy);
   try {
     WFC.data = await api(featureCheckApi()); WFC.error = "";
+    if (S?.feature_checks && WFC.data.mode) S.feature_checks.mode = WFC.data.mode;
     if (wasBusy && !WFC.data.features.some(wfcBusy)) {
       S = await api("/api/state");
       if (typeof ACT !== "undefined") ACT.state = null;
       if (typeof FIN !== "undefined") FIN.state = null;
+      if (typeof SFX !== "undefined") SFX.state = null;
     }
   } catch (e) { WFC.error = e.message; }
   WFC.loading = false;
@@ -127,6 +161,7 @@ function wfcDraw() {
       } catch (e) { toast(e.message); }
     } }, "Download saved report") : null);
   box.replaceChildren(...[head,
+    wfcModeControl(data),
     el("div", { class: "note m-flat" }, "Optional, one feature at a time. Base workflows stay available. Saved passes are reused; opening this page never runs a test."),
     WFC.error ? el("div", { class: "note vt-bad" }, WFC.error) : null,
     data ? el("div", { class: "note m-flat" }, data.policy === "strict"
@@ -147,7 +182,7 @@ function wfcDraw() {
     for (const card of group.cards) {
     const active = wfcBusy(card), evidence = card.evidence || {}, results = evidence.results || [];
     const budgets = card.memory || {};
-    const required = (card.requirements || []).map(r => wfcGB(r.required_mb) + " " + r.pool + " (" + r.basis
+    const required = (card.requirements || []).map(r => wfcGB(r.required_mb) + " " + r.pool + " (" + (r.basis || "unknown")
       + (r.reserve_mb ? ", reserve " + wfcGB(r.reserve_mb) : "") + ")").join(" · ");
     const peak = results.length ? Math.max(...results.map(r => r.peak_job_commit_mb || 0)) : null;
     const job = card.job;
@@ -155,8 +190,12 @@ function wfcDraw() {
       tabindex: -1, "data-feature-check": card.id },
       el("div", { class: "row" }, el("h3", {}, card.title),
         el("span", { class: "tag2 " + (card.qualified ? "ok" : "") },
-          active ? "Check " + job.status : card.qualified ? "Qualified" : card.state.replaceAll("_", " "))),
+          active ? "Check " + job.status : card.qualified ? "Qualified" : (card.state || (card.installed === false ? "Install needed" : "Verification needed")).replaceAll("_", " "))),
       el("div", { class: "note m-flat" }, card.scope || "Use the settings qualified by this check."),
+      card.backend || card.quality || card.measurement_source ? el("div", { class: "note m-flat" },
+        [card.backend ? "Backend: " + card.backend : "", card.quality ? "Quality: " + card.quality : "",
+          card.measurement_source ? "Measurement source: " + card.measurement_source
+            : card.backend === "native" && S?.platform === "windows" ? "Windows measurement: unknown" : ""].filter(Boolean).join(" · ")) : null,
       card.qualified && card.runtime_updated ? el("div", { class: "note m-flat" },
         "Runtime changed since this check. Earlier evidence is retained; rerunning is optional unless compatibility changes.") : null,
       el("div", { class: "note m-flat" }, (budgets.minimum_label || "Minimum installed RAM not established")
@@ -164,18 +203,23 @@ function wfcDraw() {
         + (required || "unknown") + (budgets.basis ? ". " + budgets.basis : "")
         + (budgets.job_commit_cap_mb != null ? ". Job cap: " + wfcGB(budgets.job_commit_cap_mb) : "") + "."),
       el("div", { class: "note m-flat" }, evidence.checked_at ? (evidence.time_basis === "receipt_mtime" ? "Saved evidence updated: " : "Saved live check: ") + new Date(evidence.checked_at).toLocaleString()
-        + " · peak job commitment " + wfcGB(peak) + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware; rerun required.")
+        + " · peak job commitment " + wfcGB(peak) + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware.")
         : "No saved live pass on this machine."),
       card.why ? el("div", { class: "note" }, card.why) : null,
       card.next_step ? el("div", { class: "note" }, card.next_step) : null,
       wfcAdmission(card, memory),
       wfcHistory(card),
       el("div", { class: "row" },
-        el("button", { class: "small", disabled: !card.installed || active || !card.check_available, onclick: () => wfcCheck(card) },
-          !card.check_available ? "Check not available yet" : active ? "Check " + job.status : evidence.checked_at ? "Rerun check" : "Check this feature"),
+        card.check_available ? el("button", { class: "small", disabled: !card.installed || active, onclick: () => wfcCheck(card) },
+          active ? "Check " + job.status : evidence.checked_at ? "Rerun check" : "Check this feature")
+          : el("span", { class: "note m-flat" }, "Individual verification is not implemented yet."),
         card.available ? el("button", { class: "small", onclick: () => {
           if (card.open_query && typeof AP !== "undefined") { AP.cat = card.open_category || "all"; AP.q = card.open_query; }
           if (card.open_mode && typeof SFX !== "undefined") SFX.mode = card.open_mode;
+          if (card.open_model && typeof C !== "undefined") {
+            C.imageModel = card.open_model; C.goes = "image"; C.step = 0;
+            if (typeof sync === "function") sync();
+          }
           go(card.open_tab);
         } }, card.open_label) : null,
         active ? el("button", { class: "small", onclick: async () => {

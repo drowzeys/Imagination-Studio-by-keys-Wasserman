@@ -189,7 +189,8 @@ def clip_info(clip: Path) -> dict:
 
 
 def preflight() -> None:
-    found = status()
+    from windows_runtime import usage_status
+    found = usage_status("foley", status())
     if not found["available"]:
         raise RuntimeError(found["why"])
     check_room()
