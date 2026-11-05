@@ -36,7 +36,7 @@ Run from the repository root in PowerShell:
 .\scripts\setup-windows-comfy.ps1
 ```
 
-If Windows refuses to load a script because script execution is disabled, use the README's process-scoped
+If Windows refuses to load a script because script execution is disabled, use the [Windows guide](windows.md)'s process-scoped
 invocation, for example `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\app.ps1 -Install -InstallOnly`.
 Do not change machine-wide execution policy. The script cannot repair a policy refusal that happens before it
 loads.

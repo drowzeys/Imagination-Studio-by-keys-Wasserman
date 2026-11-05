@@ -20,7 +20,7 @@ REF_IMAGES="face.jpg" bash scripts/video.sh "Use <Picture 1> as the person. The 
 On a **DGX Spark** (Linux, CUDA) the same `bash oneshot-setup.sh` installs the CUDA build (it hands over to
 `oneshot-setup-spark.sh`): needs `git`, `ffmpeg` and Docker (for the prebuilt engines; without it the CUDA toolkit's
 `nvcc`, 12.9 or newer, builds them), 125 GB of free disk for the core install (about 400 GB with `--all`). It takes
-the same flags as on a Mac (README, *Install flags*) plus `--train`; there is no `--turbo`, no `--app` and no 2x
+the same flags as on a Mac ([Install flags](docs/installation.md#install-flags)) plus `--train`; there is no `--turbo`, no `--app` and no 2x
 decoder there. Upgrade an install with `git pull && bash oneshot-setup.sh --upgrade`, then restart the app. `bash spark/comfy.sh stop` frees the models' memory after rendering.
 
 ## Install for a person and build the one-click app
@@ -188,7 +188,7 @@ Rules:
   new measurements. A failed check never fails the job; the retake at the next seed is the user's choice.
 - On a DGX Spark a crop (the 720p preset) is made inside the workflow (`crop_frames` in `spark/spark_generate.py`),
   not with ffmpeg afterwards. What needs ffmpeg is refused when it is queued (`without_ffmpeg` in `app/server.py`).
-- DGX Spark memory (`spark/memory_guard.py`; the README's *The memory guard*): a clip is checked before it is queued
+- DGX Spark memory (`spark/memory_guard.py`; [The memory guard](docs/installation.md#the-memory-guard-dgx-spark)): a clip is checked before it is queued
   (`memory_of` in `app/server.py`) and again in `spark_generate.py` before anything loads, and the guard stands beside
   every server `comfy.sh` starts. Never start ComfyUI another way. With `SPARK_GOVERNOR` (a machine-wide workload
   governor, `spark/workload.py`) `comfy.sh` runs the server through `spark/managed_comfy.py`, which starts the same
@@ -309,7 +309,7 @@ Rules:
   memory only when the engine exports `tf_h3_tp_init` (`memory_guard.tp_engine()`), else the head's card alone;
   one-card engines (Drama 3, Bolt, Music 3) read `head_free_mb`. `STUDIO_DECODE_SPLIT=self` runs the two-card decode
   path on one card for a byte check. Our Sparks have one GPU each: the two-card path is the contributor's measurement.
-- Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
+- Voice (`app/voice.py`, `app/static/voice.js`, [Voice](docs/audio-guide.md#voice-fish-audio-drama-3)): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
   cloud API. `DRAMA3_BACKEND=mlx|cuda` (`mlx` on a Mac, `cuda` on a DGX Spark). Both engines run as a persistent
   server speaking one protocol (`Served`): `python -m tensorfold.drama3 --serve` in `$DRAMA3_VENV` (drama3-mlx
@@ -358,7 +358,7 @@ Rules:
   measured as the reason a run failed or was killed: keep them. The server is stopped after every job
   (`mac_release`, `MAC_COMFY_KEEP=1` keeps it) and holds a kill-guard (`MAC_COMFY_GUARD_GB`, 16). The turnaround sheet
   stays the MLX engine's.
-- Music (`app/music.py`, `app/static/music.js`, README *Music (MiniMax Music 3)*): MiniMax-Music3 makes a song from
+- Music (`app/music.py`, `app/static/music.js`, [Music](docs/audio-guide.md#music-minimax-music-3)): MiniMax-Music3 makes a song from
   lyrics (section tags) and a style caption, on this machine only, never imported into the app's venv. The tab, every
   song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a
   Mac it is TensorFold's MLX port (`music3-mlx`, pinned in `scripts/setup-music.sh`, `oneshot-setup.sh --music`) as a
@@ -379,7 +379,7 @@ Rules:
   `start_s` (the measured no-stall start, `NO_STALL_S`, and `HOLD_MARGIN_S`) and `lead_s`; those are measurements, change
   them only with new ones. The kept song is the engine's finished WAV. A Spark does not stream, on the CUDA engine or ComfyUI's route.
   Lyric accuracy is Whisper's rough count on sung words.
-- The brain engine (`app/bolt.py`, `app/bolt_leash.py`, README *The brain engine*): NVIDIA Nemotron 3.5 Bolt run by
+- The brain engine (`app/bolt.py`, `app/bolt_leash.py`, [The brain engine](docs/audio-guide.md#the-brain-engine-nvidia-nemotron-35-bolt)): NVIDIA Nemotron 3.5 Bolt run by
   the Studio as the brains' local server, the lifecycle of Voice and Music: loaded on the first brain or agent request
   (`bolt.request`) on a loopback port, under the leash (it ends with the app) and a kill-guard (`BOLT_GUARD_GB`, 8;
   MemAvailable, vm_stat on a Mac), unloaded after `BOLT_IDLE_S` (600, `never` allowed) and **before any other local
