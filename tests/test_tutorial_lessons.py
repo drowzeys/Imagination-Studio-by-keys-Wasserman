@@ -93,7 +93,7 @@ def test_the_character_swap_lesson_points_at_the_panel_s_real_controls():
         assert said in text, said
 
 
-def test_the_swap_times_in_the_readme_and_the_tutorial_are_the_panels():
+def test_the_swap_times_in_the_guides_and_the_tutorial_are_the_panels():
     import swap_plan as plan
 
     names = {1: "one", 2: "two", 3: "three", 4: "four"}
@@ -103,8 +103,9 @@ def test_the_swap_times_in_the_readme_and_the_tutorial_are_the_panels():
         rows.append(f"| {n} s, {names[windows]} window{'s' if windows > 1 else ''} | about {round(swap.estimate(n, 480) / 60)} min | "
                     f"about {round(swap.estimate(n, 768) / 60)} min |")
     table = "\n".join(rows)
-    readme, tutorial = ((ROOT / name).read_text(encoding="utf-8") for name in ("README.md", "TUTORIAL.md"))
-    assert table in readme and table in tutorial, table
+    guide, history, tutorial = ((ROOT / name).read_text(encoding="utf-8")
+                                for name in ("docs/user-guide.md", "docs/changelog.md", "TUTORIAL.md"))
+    assert table in guide and table in tutorial, table
     fast, high = (round(swap.estimate(5, q) / 60) for q in (480, 768))
-    assert f"a 5 s part in\n  about **{fast} minutes** at Fast and about **{high} minutes** at High" in readme  # New in 3.4.0
-    assert "a little over twice as long" in tutorial and "a little over twice as long" in readme
+    assert f"a 5 s part in\n  about **{fast} minutes** at Fast and about **{high} minutes** at High" in history
+    assert "a little over twice as long" in tutorial and "a little over twice as long" in guide

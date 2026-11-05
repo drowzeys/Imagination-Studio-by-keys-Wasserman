@@ -244,8 +244,9 @@ current policy, so a fresh install with a 30.5 GiB N1X GPU pool skips Voice auto
 installed RAM still needs a suitable GPU carve-out and live headroom; it is not automatically qualified.
 Passing `-NativeParts` selects an explicit set instead. An explicit capacity mismatch requires
 `-AllowInsufficientModel` to download anyway. Cached files remain untouched; temporary contention and unknown
-requirements are not labelled permanently incompatible. `-PlanOnly` is still probe-free. See the README's
-native audio checks for policy sources, limitations, and the separate unknown-fit image acknowledgment.
+requirements are not labelled permanently incompatible. `-PlanOnly` is still probe-free. See
+[Windows setup and qualification](windows.md) for policy sources, limitations, and the separate unknown-fit
+image acknowledgment.
 
 1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
    ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
