@@ -175,10 +175,17 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds,
     def state() -> dict:
         why = missing()
         lengths = range(int(SECONDS[0]), int(SECONDS[1]) + 1)
-        return {"title": TITLE, "ready": not why, "why": why, "seconds": list(SECONDS), "qualities": list(QUALITIES), "quality": QUALITY,
+        out = {"title": TITLE, "ready": not why, "why": why, "seconds": list(SECONDS), "qualities": list(QUALITIES), "quality": QUALITY,
                 "estimates": {str(q): {str(n): estimate(n, q) for n in lengths} for q in QUALITIES}, "anchor_seconds": {str(q): ANCHOR[q] for q in QUALITIES},
                 "anchor": True, "anchor_model": anchor_model(), "seed": SEED, "window": WINDOW, "history": HISTORY,
                 "direction_most": DIRECTION_MOST, "licence": LICENCE}
+        if windows_cuda.native_os():
+            import windows_library_checks as library
+            found = library.usage_status("swap")
+            out.update(found, ready=found["available"])
+            if found["qualification_required"]:
+                out.update(seconds=[5, 5], qualities=[480], quality=480, anchor=False)
+        return out
 
     def media(params: dict, key: str, suffixes: tuple, what: str) -> Path:
         given = params.get(key)
@@ -294,4 +301,3 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds,
 
     build.weights = weights  # the server's Bolt check asks the memory guard with them (server.bolt_need)
     return router, build, title, source_of, guess
-

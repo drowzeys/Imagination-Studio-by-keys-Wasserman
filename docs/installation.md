@@ -4,6 +4,9 @@
 
 Current platform setup references. For Native Windows and WSL2, use [Windows setup](windows.md), not these shell commands.
 
+Moving to another computer? See [Moving an install](moving-an-install.md) for reusing model downloads,
+preserving compiled packages on similar machines, and Windows/Mac/Linux format differences.
+
 ### Apple silicon
 
 macOS 26 or later, for Metal 4. What runs depends on the memory: **96 GB or more** for video, voice, music and the

@@ -1,0 +1,716 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-05T22:24:15.074449+00:00",
+  "purpose": "Shared observations, not local passes, minimum RAM requirements or guaranteed fit.",
+  "profiles": [
+    {
+      "model": "qwen",
+      "scope": "basic",
+      "outcome": "passed",
+      "checked_at": "2026-11-05T14:22:22.588346+00:00",
+      "identity": {
+        "model": "qwen",
+        "recipe": {
+          "width": 512,
+          "height": 512,
+          "count": 1,
+          "workflow_sha256": "7935806435a83c1ed19a03a2dc1e66d47ca396ef2a8379ec26c5ee9959888f1c"
+        },
+        "contracts": {
+          "contract": 1,
+          "abi": {
+            "contract": 1,
+            "python_abi": "3.13",
+            "torch_major": 2,
+            "numpy_major": 2,
+            "cuda_major": 13
+          },
+          "recipe_sha256": "c05aaf781875396173d8f0c3e1af8e2d3762a854106aca869707982c4a22afb1",
+          "backend_sha256": "8b27808bb6cc3834c8c9b5e1c88fd6b1af26710da37a855411761a4753495ea7"
+        },
+        "weights": [
+          {
+            "sha256": "8b74237a7f505773e2c66726fa696444b4c704585c93a347cff9044937f7914a",
+            "bytes": 14230280616
+          },
+          {
+            "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+            "bytes": 9350798360
+          },
+          {
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+            "bytes": 675509688
+          }
+        ],
+        "sha256": "849c4c3c68b318cfbb23e636724c5ed6004caf9665636f4f42c7b5f48ca5acf8"
+      },
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232,
+        "recorded_cuda_pool_mb": 46680
+      },
+      "runtime_versions": {
+        "numpy": "2.4.6",
+        "torch": "2.14.0+cu134"
+      },
+      "observations": [
+        {
+          "elapsed_s": 56.176,
+          "peak_job_commit_mb": 28471.90625,
+          "rendered": true,
+          "samples": 220,
+          "minimum_free_mb": {
+            "host_available_mb": 3931,
+            "host_commit_headroom_mb": 7822,
+            "dedicated_gpu_free_mb": 6133
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": false,
+      "provenance_complete": true,
+      "id": "681aa743a5908af9ed7d5e2529d259dd58cc720c7642b5e3d45b70a3ff97792e"
+    },
+    {
+      "model": "qwen",
+      "scope": "basic",
+      "outcome": "commit_reserve",
+      "checked_at": "2026-11-05T15:02:51.231296+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 37.223,
+          "peak_job_commit_mb": 28208.8515625,
+          "rendered": false,
+          "samples": 147,
+          "minimum_free_mb": {
+            "host_available_mb": 11644,
+            "host_commit_headroom_mb": 3901,
+            "dedicated_gpu_free_mb": 5899
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "id": "2549e9a9101c8ee89b4f42ec5690ce054e47a3883b11cb1725c4a2e7e8a31bc1"
+    },
+    {
+      "model": "qwen",
+      "scope": "studio",
+      "outcome": "passed",
+      "checked_at": "2026-11-05T14:42:17.606264+00:00",
+      "identity": {
+        "model": "qwen",
+        "recipe": {
+          "width": 1024,
+          "height": 576,
+          "count": 1,
+          "workflow_sha256": "d00674bc61dd382a976a23a1756a3e4b30e4e53dd95e3f415e424fc2320119b1"
+        },
+        "contracts": {
+          "contract": 1,
+          "abi": {
+            "contract": 1,
+            "python_abi": "3.13",
+            "torch_major": 2,
+            "numpy_major": 2,
+            "cuda_major": 13
+          },
+          "recipe_sha256": "a5c8537e719088a9ccef56bdce2a0ce9ac2d4baf9e13655e4d07298e6fbcefb9",
+          "backend_sha256": "8b27808bb6cc3834c8c9b5e1c88fd6b1af26710da37a855411761a4753495ea7"
+        },
+        "weights": [
+          {
+            "sha256": "8b74237a7f505773e2c66726fa696444b4c704585c93a347cff9044937f7914a",
+            "bytes": 14230280616
+          },
+          {
+            "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+            "bytes": 9350798360
+          },
+          {
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+            "bytes": 675509688
+          }
+        ],
+        "sha256": "9e058dfc0e0c02d98251fe879515449a75c2c8b2cb1ca176bfafc7d5b9f35ece"
+      },
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232,
+        "recorded_cuda_pool_mb": 46680
+      },
+      "runtime_versions": {
+        "numpy": "2.4.6",
+        "torch": "2.14.0+cu134"
+      },
+      "observations": [
+        {
+          "elapsed_s": 63.836,
+          "peak_job_commit_mb": 29027.1796875,
+          "rendered": true,
+          "samples": 253,
+          "minimum_free_mb": {
+            "host_available_mb": 6889,
+            "host_commit_headroom_mb": 6722,
+            "dedicated_gpu_free_mb": 5288
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": false,
+      "provenance_complete": true,
+      "id": "173039d050141071422943cc4f3d425956418b55644db862bdc7206b54e4f6eb"
+    },
+    {
+      "model": "qwen",
+      "scope": "scout",
+      "outcome": "passed",
+      "checked_at": "2026-11-05T14:46:49.428622+00:00",
+      "identity": {
+        "model": "qwen",
+        "recipe": {
+          "width": 1280,
+          "height": 736,
+          "count": 1,
+          "workflow_sha256": "748e8f903aeab04461918bf65aef7b262343806b11f1d8d43ff904cb277562f5"
+        },
+        "contracts": {
+          "contract": 1,
+          "abi": {
+            "contract": 1,
+            "python_abi": "3.13",
+            "torch_major": 2,
+            "numpy_major": 2,
+            "cuda_major": 13
+          },
+          "recipe_sha256": "70443940d500c3c7149ef9b55dd190e7d291985002d03531418f1c4d723e1cf9",
+          "backend_sha256": "8b27808bb6cc3834c8c9b5e1c88fd6b1af26710da37a855411761a4753495ea7"
+        },
+        "weights": [
+          {
+            "sha256": "8b74237a7f505773e2c66726fa696444b4c704585c93a347cff9044937f7914a",
+            "bytes": 14230280616
+          },
+          {
+            "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+            "bytes": 9350798360
+          },
+          {
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+            "bytes": 675509688
+          }
+        ],
+        "sha256": "ec0ea505518bf74831db472680d2113fc825cffb0a1adc5c94ed4a3405383031"
+      },
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232,
+        "recorded_cuda_pool_mb": 46680
+      },
+      "runtime_versions": {
+        "numpy": "2.4.6",
+        "torch": "2.14.0+cu134"
+      },
+      "observations": [
+        {
+          "elapsed_s": 39.726,
+          "peak_job_commit_mb": 29328.73828125,
+          "rendered": true,
+          "samples": 157,
+          "minimum_free_mb": {
+            "host_available_mb": 9548,
+            "host_commit_headroom_mb": 6563,
+            "dedicated_gpu_free_mb": 4816
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": false,
+      "provenance_complete": true,
+      "id": "8468c39a84e0d84a7fa49d86cfceadc404741c09c7de8c9a0084dae7c7383b2b"
+    },
+    {
+      "model": "qwen",
+      "scope": "landscape",
+      "outcome": "commit_reserve",
+      "checked_at": "2026-11-05T14:57:18.337967+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 49.648,
+          "peak_job_commit_mb": 26576.1015625,
+          "rendered": false,
+          "samples": 194,
+          "minimum_free_mb": {
+            "host_available_mb": 7606,
+            "host_commit_headroom_mb": 4253,
+            "dedicated_gpu_free_mb": 7720
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "id": "8e4a3bb7f13770b20285596b5a2080949764abcfafd5990c5596f0c67ef00dc3"
+    },
+    {
+      "model": "qwen",
+      "scope": "square",
+      "outcome": "passed",
+      "checked_at": "2026-11-05T15:01:54.867723+00:00",
+      "identity": {
+        "model": "qwen",
+        "recipe": {
+          "width": 1024,
+          "height": 1024,
+          "count": 1,
+          "workflow_sha256": "d89b874b1c3070d6666550f0ea74aece12394ce7ae20b6ae86751cf78ab2ab09"
+        },
+        "contracts": {
+          "contract": 1,
+          "abi": {
+            "contract": 1,
+            "python_abi": "3.13",
+            "torch_major": 2,
+            "numpy_major": 2,
+            "cuda_major": 13
+          },
+          "recipe_sha256": "b96f551f836612652285ecbdaa32b0fa93c3016963abd4e67a21e2f7eb0fcfd6",
+          "backend_sha256": "8b27808bb6cc3834c8c9b5e1c88fd6b1af26710da37a855411761a4753495ea7"
+        },
+        "weights": [
+          {
+            "sha256": "8b74237a7f505773e2c66726fa696444b4c704585c93a347cff9044937f7914a",
+            "bytes": 14230280616
+          },
+          {
+            "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+            "bytes": 9350798360
+          },
+          {
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+            "bytes": 675509688
+          }
+        ],
+        "sha256": "080e63ff3203ee3ab1e1f66015ea5e795ca28e162a72fc8cec6a15e22c616f1e"
+      },
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232,
+        "recorded_cuda_pool_mb": 46680
+      },
+      "runtime_versions": {
+        "numpy": "2.4.6",
+        "torch": "2.14.0+cu134"
+      },
+      "observations": [
+        {
+          "elapsed_s": 38.347,
+          "peak_job_commit_mb": 29568.0859375,
+          "rendered": true,
+          "samples": 151,
+          "minimum_free_mb": {
+            "host_available_mb": 11219,
+            "host_commit_headroom_mb": 4580,
+            "dedicated_gpu_free_mb": 4738
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": false,
+      "provenance_complete": true,
+      "id": "c4f13013d1fd32ec645e99358d4267a76d341ab15d0565dc389785b183b057aa"
+    },
+    {
+      "model": "qwen",
+      "scope": "candidates",
+      "outcome": "passed",
+      "checked_at": "2026-11-05T14:47:29.791958+00:00",
+      "identity": {
+        "model": "qwen",
+        "recipe": {
+          "width": 1024,
+          "height": 576,
+          "count": 4,
+          "workflow_sha256": "d00674bc61dd382a976a23a1756a3e4b30e4e53dd95e3f415e424fc2320119b1"
+        },
+        "contracts": {
+          "contract": 1,
+          "abi": {
+            "contract": 1,
+            "python_abi": "3.13",
+            "torch_major": 2,
+            "numpy_major": 2,
+            "cuda_major": 13
+          },
+          "recipe_sha256": "df92d0e9aea6ced0f76f3babcc7ad51194d57d404613a1436cdcbe90ec498d1a",
+          "backend_sha256": "8b27808bb6cc3834c8c9b5e1c88fd6b1af26710da37a855411761a4753495ea7"
+        },
+        "weights": [
+          {
+            "sha256": "8b74237a7f505773e2c66726fa696444b4c704585c93a347cff9044937f7914a",
+            "bytes": 14230280616
+          },
+          {
+            "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+            "bytes": 9350798360
+          },
+          {
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+            "bytes": 675509688
+          }
+        ],
+        "sha256": "b60a7955a3e3ad772a297a8b9eeeee0d52cee0f403483980b6c64206b8cd9b0b"
+      },
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232,
+        "recorded_cuda_pool_mb": 46680
+      },
+      "runtime_versions": {
+        "numpy": "2.4.6",
+        "torch": "2.14.0+cu134"
+      },
+      "observations": [
+        {
+          "elapsed_s": 53.756,
+          "peak_job_commit_mb": 28871.109375,
+          "rendered": true,
+          "samples": 212,
+          "minimum_free_mb": {
+            "host_available_mb": 9716,
+            "host_commit_headroom_mb": 6909,
+            "dedicated_gpu_free_mb": 5199
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": false,
+      "provenance_complete": true,
+      "id": "4fd244a81be23ad93317715c72c6dda7393a53d9108e08324b29b6768e2e0e85"
+    },
+    {
+      "model": "qwen-full",
+      "scope": "basic",
+      "outcome": "passed",
+      "checked_at": "2026-11-05T15:45:15.767898+00:00",
+      "identity": {
+        "model": "qwen-full",
+        "recipe": {
+          "width": 512,
+          "height": 512,
+          "count": 1,
+          "workflow_sha256": "490ae312eaf4b9aa4873639b7c5b7d23bb09df2fdc3ebef73669f76c885e6968"
+        },
+        "contracts": {
+          "contract": 1,
+          "abi": {
+            "contract": 1,
+            "python_abi": "3.13",
+            "torch_major": 2,
+            "numpy_major": 2,
+            "cuda_major": 13
+          },
+          "recipe_sha256": "e32211332c2e8d8721b54b7ce0cc45dec99c418e307b669ba4adc75ded1bac9c",
+          "image_options_sha256": "ff43a1140c593c196721d7f9b681edff580912c0f970a2bddccc4ae8d5f8efb0",
+          "backend_sha256": "8b27808bb6cc3834c8c9b5e1c88fd6b1af26710da37a855411761a4753495ea7"
+        },
+        "weights": [
+          {
+            "sha256": "89f4158d066cc33906a199fca85634f766892dd78f49b6698dabf187ac86c4bc",
+            "bytes": 14230280616
+          },
+          {
+            "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+            "bytes": 9350798360
+          },
+          {
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+            "bytes": 675509688
+          }
+        ],
+        "sha256": "77f2f80a81542598a85081fb49f0b3b3abc2e5d1bb009932d1a2aed2767a65aa"
+      },
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232,
+        "recorded_cuda_pool_mb": 46680
+      },
+      "runtime_versions": {
+        "numpy": "2.4.6",
+        "torch": "2.14.0+cu134"
+      },
+      "observations": [
+        {
+          "elapsed_s": 76.618,
+          "peak_job_commit_mb": 28572.48828125,
+          "rendered": true,
+          "samples": 303,
+          "minimum_free_mb": {
+            "host_available_mb": 9380,
+            "host_commit_headroom_mb": 5027,
+            "dedicated_gpu_free_mb": 5525
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": false,
+      "provenance_complete": true,
+      "id": "3bbda9921b080ca5d55c756e183dd0dac56d15f3df81aa75480d1d9f8a139620"
+    },
+    {
+      "model": "qwen-full",
+      "scope": "studio",
+      "outcome": "passed",
+      "checked_at": "2026-11-05T15:47:37.229116+00:00",
+      "identity": {
+        "model": "qwen-full",
+        "recipe": {
+          "width": 1024,
+          "height": 576,
+          "count": 1,
+          "workflow_sha256": "c8fc99c7a5cac5535c45515a76a2e6a678d65c5e55f49da789245762ac3186a9"
+        },
+        "contracts": {
+          "contract": 1,
+          "abi": {
+            "contract": 1,
+            "python_abi": "3.13",
+            "torch_major": 2,
+            "numpy_major": 2,
+            "cuda_major": 13
+          },
+          "recipe_sha256": "e171ae61daf1db647bc33c869500cafa1fcc3590097cc0788d3eb91bb61c531c",
+          "image_options_sha256": "ff43a1140c593c196721d7f9b681edff580912c0f970a2bddccc4ae8d5f8efb0",
+          "backend_sha256": "8b27808bb6cc3834c8c9b5e1c88fd6b1af26710da37a855411761a4753495ea7"
+        },
+        "weights": [
+          {
+            "sha256": "89f4158d066cc33906a199fca85634f766892dd78f49b6698dabf187ac86c4bc",
+            "bytes": 14230280616
+          },
+          {
+            "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f",
+            "bytes": 9350798360
+          },
+          {
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+            "bytes": 675509688
+          }
+        ],
+        "sha256": "cbb72ea25620a91702447bb1ce34c1b1f9e6bbe817ca57b771e1ce5fb5f93002"
+      },
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232,
+        "recorded_cuda_pool_mb": 46680
+      },
+      "runtime_versions": {
+        "numpy": "2.4.6",
+        "torch": "2.14.0+cu134"
+      },
+      "observations": [
+        {
+          "elapsed_s": 94.094,
+          "peak_job_commit_mb": 28960.34375,
+          "rendered": true,
+          "samples": 372,
+          "minimum_free_mb": {
+            "host_available_mb": 9864,
+            "host_commit_headroom_mb": 4550,
+            "dedicated_gpu_free_mb": 5059
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": false,
+      "provenance_complete": true,
+      "id": "a72353511355bab5495903267839a84a334b620f2a6926fe76a36e626625068d"
+    },
+    {
+      "model": "qwen-full",
+      "scope": "scout",
+      "outcome": "commit_reserve",
+      "checked_at": "2026-11-05T19:14:29.041002+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 58.226,
+          "peak_job_commit_mb": 26550.8828125,
+          "rendered": false,
+          "samples": 230,
+          "minimum_free_mb": {
+            "host_available_mb": 5259,
+            "host_commit_headroom_mb": 4464,
+            "dedicated_gpu_free_mb": 8633
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "id": "293b4ff75df27db625b3958c5dd9d3143fdc704c3aff1f8d0a852e38b1d79e2e"
+    },
+    {
+      "model": "qwen-full",
+      "scope": "landscape",
+      "outcome": "commit_reserve",
+      "checked_at": "2026-11-05T19:22:43.338330+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 34.992,
+          "peak_job_commit_mb": 26350.6484375,
+          "rendered": false,
+          "samples": 138,
+          "minimum_free_mb": {
+            "host_available_mb": 5604,
+            "host_commit_headroom_mb": 3847,
+            "dedicated_gpu_free_mb": 8260
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "id": "5f2ac4ed988d2cfb91c3be37df39c1e249e2fd53083e27cf1e697773ffe9d6ee"
+    },
+    {
+      "model": "flux3k-fast",
+      "scope": "basic",
+      "outcome": "commit_reserve",
+      "checked_at": "2026-11-05T19:30:28.345493+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 73.735,
+          "peak_job_commit_mb": 29515.4453125,
+          "rendered": false,
+          "samples": 289,
+          "minimum_free_mb": {
+            "host_available_mb": 6613,
+            "host_commit_headroom_mb": 4247,
+            "dedicated_gpu_free_mb": 6177
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "id": "d07e8e556f7c2d3050c79be4f859506296d8ca17fc1b81f681aa37cd02c5db1f"
+    },
+    {
+      "model": "moss-image",
+      "scope": "basic",
+      "outcome": "commit_reserve",
+      "checked_at": "2026-11-05T19:32:37.216996+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 36.09,
+          "peak_job_commit_mb": 29883.84375,
+          "rendered": false,
+          "samples": 142,
+          "minimum_free_mb": {
+            "host_available_mb": 8632,
+            "host_commit_headroom_mb": 3983,
+            "dedicated_gpu_free_mb": 4899
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "id": "44843e39740b77278253e483edcc3186532eb5843206dcdff0134435c71081a9"
+    },
+    {
+      "model": "voice",
+      "scope": "basic",
+      "outcome": "memory_refusal",
+      "checked_at": "2026-11-05T20:31:12.371792+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 1.953,
+          "peak_job_commit_mb": 115.4765625,
+          "rendered": false,
+          "samples": 6,
+          "minimum_free_mb": {
+            "host_available_mb": 9282,
+            "host_commit_headroom_mb": 30188,
+            "dedicated_gpu_free_mb": 28549
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "id": "ddfe661d4cb63a699cae122c2c3ab03869fa36d37fa79cec66ada02e57b76586"
+    }
+  ]
+}

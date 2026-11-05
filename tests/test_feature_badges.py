@@ -478,6 +478,29 @@ console.log(JSON.stringify(out));
     assert out["unrestricted"]["live"] is True and "asr" not in out["unrestricted"]
 
 
+def test_library_action_picker_limits_turnaround_and_keeps_find_independent():
+    out = run_frontend(r"""
+vm.runInThisContext(fs.readFileSync(require("node:path").join(process.argv[1],"app","static","actions.js"),"utf8"));
+globalThis.media=()=>el("img");
+globalThis.select=(obj,key,choices)=>el("select",{},Object.values(choices));
+globalThis.clearButton=()=>[];
+S.capabilities.image_actions={available:true};
+ACT.state={turnaround:{title:"Turnaround",ready:true,qualification_required:true,scope:"512px views"},
+  mask:{title:"Find",ready:true,qualification_required:true},
+  remove:{title:"Remove",ready:false,qualification_required:true,scope:"22 frames",why:"Missing remover LoRA"}};
+ACT.open={kind:"turnaround",path:"uploads/person.png"};
+const turn=actPanel();
+const out={turn:text(turn),size:ACT.turn.size,
+  largeOptions:all(turn,n=>n.attrs?.role==="radio" && text(n).includes("2048")).length};
+ACT.open={kind:"remove",path:"uploads/clip.mp4"};
+const remove=actPanel();
+out.find=!!button(remove,"1. Find the person");out.removeDisabled=button(remove,"2. Remove the person").attrs.disabled;
+console.log(JSON.stringify(out));
+""")
+    assert out["size"]=="512" and out["largeOptions"]==0 and "512px views" in out["turn"]
+    assert out["find"] and out["removeDisabled"]
+
+
 def test_qualification_uses_model_download_size_and_gated_setup_action():
     out = run_frontend(r"""
 globalThis.document.head=null;

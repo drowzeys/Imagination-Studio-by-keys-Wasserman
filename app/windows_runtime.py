@@ -298,6 +298,14 @@ def video_missing(params: dict | None = None) -> list[str]:
 
 
 def require_native(kind: str, params: dict) -> None:
+    import windows_library_checks as library
+    if kind in library.KINDS:
+        found = library.usage_status(kind)
+        if not found["available"]:
+            raise RouteUnavailable(found["why"])
+        if mode()["enabled"]:
+            library.require_scope(kind, params)
+        return
     if kind in ("voice", "music") and mode()["enabled"]:
         import windows_audio_checks as audio
         found = audio.status(kind)

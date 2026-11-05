@@ -118,7 +118,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             return "Not installed yet: run `bash spark/setup-workflows.sh` in the pack's folder (three node packs and 2.5 GB of models), then restart ComfyUI."
         if kind != "mask" and not any((models / "MiniMax-H3-Comfy/diffusion_models" / f"minimax_h3_ref2va_pruned_{one}.safetensors").is_file()
                    for one in ("bf16", "int8_convrot")):  # either: Character Swap's install brings only the int8 file; finding a person is SAM's alone
-            return ("MiniMax H3 Ref2VA is not installed: run `" + (windows_cuda.setup_hint("swap") if native else
+            return ("MiniMax H3 Ref2VA is not installed: run `" + (windows_cuda.setup_hint("library-h3,h3-shared") if native else
                     "bash oneshot-setup-spark.sh --ref2va") + "`.")
         if LORA[kind] and lora_file(LORA[kind]) is None:
             return f"Install {recipe(LORA[kind]).get('name', LORA[kind])} in the LoRA hub first."
@@ -139,6 +139,15 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         out["upscale"].update(megapixels=MEGAPIXELS, megapixel=2.0)
         out["remove"].update(windows=WINDOWS, window=22, steps=12)
         out["hlg"].update(strength=1.0)
+        if windows_cuda.native_os():
+            import windows_library_checks as library
+            for kind in library.KINDS:
+                if kind in out:
+                    found = library.usage_status(kind)
+                    out[kind].update(found, ready=found["available"])
+            if out["turnaround"].get("qualification_required"):
+                out["turnaround"].update(sizes=(512,), size=512)
+                out["upscale"].update(megapixels=(1.0,), megapixel=1.0)
         return out
 
     def media(params: dict, key: str, suffixes: tuple) -> Path:
@@ -207,6 +216,11 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
                 if "<Picture 1>" not in text:
                     raise HTTPException(400, "the instruction names the picture as <Picture 1>")
                 env["PROMPT"] = text
+            if windows_cuda.native_os():
+                import windows_runtime
+                if windows_runtime.mode()["enabled"]:
+                    import spark_workflows
+                    env.update(STEPS=28, PROMPT=spark_workflows.TURN_PROMPT)
             return (["bash", str(pack / "scripts/turnaround.sh"), str(picture), str(folder / "turn")], env,
                     [str(folder / "turn_sheet.png")] + [str(folder / f"turn_view{i}.png") for i in range(1, 6)])
         clip = media(params, "video", (".mp4", ".mov"))
@@ -252,4 +266,6 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         path = params.get("image") if kind == "turnaround" else params.get("video")
         return relative(inside(path)) if path else None
 
+    build.lora_file = lora_file
+    build.prerequisites = missing
     return router, build, title, source_of

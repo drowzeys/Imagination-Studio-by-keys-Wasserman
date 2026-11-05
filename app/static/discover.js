@@ -12,6 +12,12 @@
 .dsc-head .grow{flex:1}
 .dsc-group{margin-top:14px}
 .dsc-group h3{margin:0 0 6px;font:600 13px/1.3 var(--sans);color:var(--text)}
+.dsc-group>summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;padding:8px 0}
+.dsc-group>summary h3{margin:0}
+.dsc-group>summary::before{content:"›";color:var(--dim)}
+.dsc-group[open]>summary::before{transform:rotate(90deg)}
+.dsc-group>summary{list-style:none}
+.dsc-group>summary::-webkit-details-marker{display:none}
 .dsc-row{border:1px solid var(--line);border-radius:var(--r2);background:var(--panel);padding:8px 10px;margin:6px 0}
 .dsc-row .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .dsc-row .top b{font-weight:600;color:var(--text)}
@@ -28,7 +34,7 @@
   document.head.appendChild(style);
 })();
 
-const DSC = { data: null, all: false, busy: "", timer: null, acknowledged: new Set() };
+const DSC = { data: null, all: false, busy: "", timer: null, acknowledged: new Set(), groups: {} };
 const DSC_WORDS = { expected: "in place", found: "found elsewhere", "needs-conversion": "needs converting", missing: "not on this machine", scanning: "scanning…" };
 const dscWhen = t => { if (!t) return "never"; const d = new Date(t * 1000); return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); };
 
@@ -61,20 +67,28 @@ function dscRow(node, n) {
     el("div", { class: "top" }, el("b", {}, n.label), el("span", { class: "dsc-state " + state }, said),
       n.link ? el("button", { class: "small", disabled: !!DSC.busy, title: "Remove the link the studio made (the file itself stays where it is)",
         onclick: () => dscDo(node, "/api/discover/unlink", { need: n.id }, n.id) }, "Unlink") : null,
-      n.feature && typeof openFeatureCheck === "function" ? el("button", { class: "small dsc-check-link",
-        onclick: () => openFeatureCheck(n.feature) }, "Feature checks") : null),
+      n.features?.length && typeof openFeatureCheck === "function" ? el("span", { class: "dsc-check-link dsc-cand" },
+        n.features.map(feature => el("button", { class: "small", onclick: () => openFeatureCheck(feature) },
+          {turnaround:"Turnaround",upscale:"Upscale",mask:"Find",remove:"Remove"}[feature] || feature)))
+        : n.feature && typeof openFeatureCheck === "function" ? el("button", { class: "small dsc-check-link",
+          onclick: () => openFeatureCheck(n.feature) }, "Feature checks") : null),
     n.expected ? el("div", { class: "dsc-path" }, (n.unlisted ? "would be linked at " : "expected at ") + relHome(n.expected) + (n.env ? " (" + n.env + ")" : "")) : null,
     n.link ? el("div", { class: "dsc-path" }, "linked to " + n.link.shown + (n.link.how === "record" ? " (recorded: that folder cannot be written, the studio reads the link itself)" : "")) : null,
     !n.link && n.state !== "expected" ? (n.candidates || []).map(c => el("div", { class: "dsc-cand" }, el("span", { class: "dsc-path" }, "found at " + c.shown),
       el("span", { class: "note" }, c.verified ? "proved by " + c.proof : c.proof), c.copies && c.copies.length ? el("span", { class: "note" }, "identical copies: " + c.copies.length) : null, use(c))) : null,
     !n.link && n.state !== "expected" ? (n.conversions || []).map(c => el("div", {}, el("div", { class: "dsc-path" }, "found " + c.shown + ", in another layout: " + (c.note || "")),
       c.convert ? el("div", { class: "dsc-cmd" }, c.convert) : null)) : null,
-    dscModelInfo(n),
+    dscModelInfo(n, { hideUnknownFit: n.state === "expected" && !!(n.feature || n.features?.length) }),
     n.why ? el("div", { class: "note" }, n.why) : null,
-    n.state === "missing" ? dscInstall(node, n) : null);
+    n.state === "missing" ? dscInstall(node, n) : null,
+    n.state === "expected" && n.uninstall ? el("details", { class: "fold" },
+      el("summary", {}, "Remove model weights"),
+      el("div", { class: "note" }, n.uninstall.scope),
+      el("button", { class: "small", onclick: () => copyText(n.uninstall.shown, "Uninstall command") },
+        "Copy uninstall command")) : null);
 }
-function dscModelInfo(n) {
-  const size = n.download_size, fit = n.runtime_fit;
+function dscModelInfo(n, { hideUnknownFit = false } = {}) {
+  const size = n.download_size, fit = n.runtime_fit, recipes = n.recipe_fit;
   if (!size && !fit) return null;
   const bytes = size?.bytes;
   return el("div", { class: "stack" },
@@ -82,10 +96,30 @@ function dscModelInfo(n) {
       title: bytes != null ? bytes.toLocaleString() + " bytes (" + (bytes / 2 ** 30).toFixed(1)
         + " GiB). GB uses decimal units; GiB uses binary units. Both describe the same download." : "" },
       bytes != null ? "Download size: " + (bytes / 1e9).toFixed(1) + " GB" : "Download size: unknown") : null,
-    fit ? el("div", { class: "note" + (fit.state === "insufficient_capacity" ? " vt-bad" : "") },
+    recipes ? el("div", { class: "note" }, recipes.summary) : null,
+    !recipes && n.shared_measurements?.summary ? el("div", { class: "note" }, n.shared_measurements.summary) : null,
+    recipes?.memory_summary ? el("div", { class: "note", title: recipes.memory_note }, recipes.memory_summary) : null,
+    fit && !(fit.state === "unknown" && (hideUnknownFit || recipes)) ? el("div", { class: "note" + (fit.state === "insufficient_capacity" ? " vt-bad" : ""),
+      title: fit.why },
       el("b", {}, fit.state === "insufficient_capacity" ? "Not expected to run on this configuration. "
         : fit.state === "temporarily_busy" ? "Memory currently busy. " : fit.required_mb == null ? "Runtime fit unknown. " : ""),
-      fit.why) : null);
+      fit.required_mb != null && fit.state === "capacity_possible"
+        ? "Capacity meets the " + (fit.required_mb / 1024).toFixed(0) + " GiB free-pool policy; runtime checks still apply."
+        : fit.why) : null);
+}
+function dscGroupSummary(needs) {
+  const installed = needs.filter(n => n.state === "expected").length;
+  const missing = needs.filter(n => n.state === "missing").length;
+  const found = needs.filter(n => n.state === "found").length;
+  const convert = needs.filter(n => n.state === "needs-conversion").length;
+  const scanning = needs.filter(n => n.state === "scanning").length;
+  if (needs.length && installed === needs.length)
+    return el("span", { class: "dsc-state expected" }, "✓ All installed (" + installed + ")");
+  return el("span", { class: "note m-flat" }, [
+    installed ? installed + " installed" : "", missing ? missing + " need installation" : "",
+    found ? found + " found elsewhere" : "", convert ? convert + " need conversion" : "",
+    scanning ? scanning + " scanning" : ""
+  ].filter(Boolean).join(" · "));
 }
 
 // what Install does for a need that is not on this machine: the engine's own installer, the LoRA hub, or nothing to run
@@ -153,7 +187,12 @@ function dscDraw(node) {
   if (dscRunning()) { const j = DSC.data.installing; rows.push(el("div", { class: "note" }, "Installing " + j.label + "…")); dscFollow(node); }
   rows.push(el("label", { class: "note", style: "display:flex;gap:6px;align-items:center" }, el("input", { type: "checkbox", style: "width:auto", checked: DSC.all,
     onchange: e => { DSC.all = e.target.checked; dscDraw(node); } }), "Show optional models that are not installed"));
-  for (const g of groups) rows.push(el("div", { class: "dsc-group" }, el("h3", {}, g.name), g.needs.map(n => dscRow(node, n))));
+  for (const g of groups) {
+    const inventory = needs.filter(n => n.engine === g.name);
+    rows.push(el("details", { class: "dsc-group", open: DSC.groups[g.name] ?? true,
+      ontoggle: e => { if (e.currentTarget.isConnected) DSC.groups[g.name] = e.currentTarget.open; } },
+      el("summary", {}, el("h3", {}, g.name), dscGroupSummary(inventory)), g.needs.map(n => dscRow(node, n))));
+  }
   if (scan && scan.skipped_mounts && scan.skipped_mounts.length) rows.push(el("div", { class: "note" }, "Network drives not searched: " + scan.skipped_mounts.join(", ") + " (STUDIO_SCAN_NETWORK=1 searches them)."));
   node.replaceChildren(...rows);
 }

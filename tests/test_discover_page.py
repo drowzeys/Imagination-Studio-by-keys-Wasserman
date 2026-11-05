@@ -193,3 +193,77 @@ def test_feature_check_links_are_in_row_headers_and_route_to_exact_audio_cards()
     """)
     assert [row["feature"] for row in out["rows"]] == ["voice", "music", "sfx", "foley", "qwen"]
     assert all(row["inHeader"] and row["right"] and row["count"] == 1 for row in out["rows"])
+
+
+def test_workflow_bundle_links_each_independent_check():
+    out=run("""
+      globalThis.openFeatureCheck=feature=>out.feature=feature;
+      const row=dscRow(null,{id:"workflows",label:"Library workflows",state:"expected",
+        features:["turnaround","upscale","mask","remove"]});
+      const header=find(row,n=>n.attrs && n.attrs.class==="top");
+      out.labels=all(header,n=>n.tag==="button").map(text);
+      button(header,"Find").attrs.onclick();
+    """)
+    assert out["labels"]==["Turnaround","Upscale","Find","Remove"] and out["feature"]=="mask"
+
+
+def test_installed_models_with_checks_hide_only_generic_unknown_fit():
+    out = run("""
+      globalThis.openFeatureCheck=()=>{};
+      const model={id:"qwen",label:"Qwen",state:"expected",feature:"qwen",
+        download_size:{bytes:24260000000},
+        runtime_fit:{state:"unknown",required_mb:null,why:"Runtime memory fit is unknown for this recipe."}};
+      out.installed=text(dscRow(null,model));
+      out.missing=text(dscRow(null,{...model,state:"missing"}));
+      out.incompatible=text(dscRow(null,{...model,runtime_fit:{
+        state:"insufficient_capacity",required_mb:51200,why:"Needs 50 GiB free."}}));
+      out.qualification=text(dscModelInfo(model));
+    """)
+    assert "Runtime fit unknown" not in out["installed"]
+    assert "Runtime memory fit is unknown" not in out["installed"]
+    assert "Download size: 24.3 GB" in out["installed"] and "Feature checks" in out["installed"]
+    assert "Runtime fit unknown" in out["missing"]
+    assert "Not expected to run" in out["incompatible"]
+    assert "Runtime fit unknown" in out["qualification"]
+
+
+def test_installed_model_reports_mixed_local_recipe_evidence():
+    out = run("""
+      const row={download_size:{bytes:24260000000},
+        runtime_fit:{state:"unknown",required_mb:null,why:"Runtime fit is unknown."},
+        recipe_fit:{summary:"5/8 recipes verified here; 2 failed — some recipes run, not all have passed. 1 not verified.",
+          memory_summary:"Observed GPU usage (adapter-wide): 20.0–28.0+ GiB. Stopped by commit backing.",
+          memory_note:"Observed peaks, not requirements."}};
+      out.text=text(dscModelInfo(row));
+    """)
+    assert "5/8 recipes verified" in out["text"] and "2 failed" in out["text"]
+    assert "Runtime fit unknown" not in out["text"]
+    assert "20.0–28.0+ GiB" in out["text"] and "Stopped by commit backing" in out["text"]
+
+
+def test_collapsible_sections_summarize_installation_and_remember_open_state():
+    state = {"inventory_only": True, "scanning": False, "needs": [
+        {"id": "qwen", "label": "Qwen", "engine": "Picture models", "state": "expected"},
+        {"id": "full", "label": "Full", "engine": "Picture models", "state": "missing"},
+        {"id": "voice", "label": "Voice", "engine": "Voice", "state": "expected"}]}
+    out = run(f"""
+      answers["/api/discover"]={json.dumps(state)};
+      const box=viewDiscover(); await tick(); await tick();
+      const groups=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group");
+      out.titles=groups.map(n=>text(n.kids[0]));
+      out.initial=groups[0].attrs.open;
+      groups[0].attrs.ontoggle({{currentTarget:{{isConnected:true,open:false}}}});
+      dscDraw(box);
+      out.closed=!all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group")[0].attrs.open;
+      out.copyText=null;
+      globalThis.copyText=value=>out.copyText=value;
+      const row=dscRow(null,{{id:"qwen",label:"Qwen",state:"expected",
+        uninstall:{{shown:"powershell -File uninstall.ps1 -Model qwen",scope:"Exclusive weights only"}}}});
+      button(row,"Copy uninstall command").attrs.onclick();
+      out.calls=calls;
+    """)
+    assert "1 installed · 1 need installation" in out["titles"][0]
+    assert "✓ All installed (1)" in out["titles"][1]
+    assert out["initial"] and out["closed"]
+    assert out["copyText"] == "powershell -File uninstall.ps1 -Model qwen"
+    assert all(call[0] == "/api/discover" for call in out["calls"])
