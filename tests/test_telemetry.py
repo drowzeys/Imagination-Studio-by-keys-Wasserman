@@ -54,6 +54,29 @@ def test_paired_cards_combine():
     assert "cards" not in telemetry.combine_gpus(spark)
 
 
+def test_n1x_npu_is_not_counted_or_averaged_as_a_second_gpu():
+    cards = telemetry.parse_gpus(
+        "GPU-00000000-0000-0000-0000-000000000001, 0, 1000, 31232, 8, 41, 12, 1500, RTX Spark N1X\n"
+        "DLA-00000000-0000-0000-0000-000000000002, 1, 0, 0, 0, 40, 0, 0, NVIDIA NPU\n",
+        with_uuid=True)
+    assert len(cards) == 1 and cards[0]["index"] == "0"
+    combined = telemetry.combine_gpus(cards)
+    assert combined["name"] == "RTX Spark N1X" and combined["util_pct"] == 8
+    assert "count" not in combined and "cards" not in combined
+
+
+def test_identified_real_gpus_still_combine_without_exposing_uuids():
+    cards = telemetry.parse_gpus(
+        "GPU-00000000-0000-0000-0000-000000000001, 0, 1000, 96000, 80, 41, 12, 1500, Example GPU\n"
+        "GPU-00000000-0000-0000-0000-000000000002, 1, 2000, 96000, 60, 42, 13, 1600, Example GPU\n"
+        "[N/A], 2, 0, 0, 0, 40, 0, 0, Unknown accelerator\n",
+        with_uuid=True)
+    combined = telemetry.combine_gpus(cards)
+    assert combined["count"] == 2 and combined["util_pct"] == 70
+    assert [card["index"] for card in combined["cards"]] == ["0", "1"]
+    assert "GPU-" not in json.dumps(combined)
+
+
 def test_vm_stat_parses():
     text = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 1000.\nPages active: 5000.\n"
             "Pages inactive: 2000.\nPages speculative: 100.\nPages purgeable: 0.\n")
@@ -132,7 +155,8 @@ def test_warnings_in_plain_words(monkeypatch):
     def stand_in(command, *args, **kwargs):
         if command[0] == "nvidia-smi":
             assert kwargs.get("timeout")
-            return subprocess.CompletedProcess(command, 0, "99, 91, 80.0, 2400, NVIDIA GB10\n", "")
+            return subprocess.CompletedProcess(command, 0,
+                                               "GPU-00000000-0000-0000-0000-000000000001, 0, [N/A], [N/A], 99, 91, 80.0, 2400, NVIDIA GB10\n", "")
         return real(command, *args, **kwargs)
 
     monkeypatch.setattr(telemetry.subprocess, "run", stand_in)

@@ -1,4 +1,4 @@
-"""The native Windows CUDA tier: the DGX Spark's render path (ComfyUI + TensorFold's engines) run natively on Windows.
+"""Native Windows CUDA plumbing shared by individually selected feature backends.
 
 An NVIDIA RTX Spark N1X laptop (Windows 11 on Arm, sm_121 like a GB10) has a CUDA pool of about 113 GB under its
 native WDDM driver. With the full install there (``oneshot-setup-rtx-spark-n1x.ps1 -Native``: the GPU venv, the pinned
@@ -7,11 +7,10 @@ same jobs as on a DGX Spark, without WSL: the Spark logic, with the bash scripts
 (``spark/windows_scripts.py`` for scripts/video.sh, studio.sh, scout.sh, image.sh and edit.sh, ``spark/comfy_win.py``
 for spark/comfy.sh).
 
-The tier is chosen only when all of it is present (``why_not`` is ""): the installer's ``cuda-tier.json`` in
-%LOCALAPPDATA%\\ImaginationStudio, the GPU venv's python.exe, ComfyUI's main.py, the H3 engine DLL, and a CUDA pool of
-at least ``MIN_POOL_MB`` measured by the installer. Anything else on Windows keeps the small preview tier
-(``windows_storyboard`` and friends) unchanged; ``STUDIO_WINDOWS_TIER=preview`` forces it. Nothing here runs on Linux or
-macOS: ``active()`` is False there without reading a file.
+``active`` identifies the shared GPU Python/ComfyUI installation, not an app-wide capability tier.
+H3's engine and measured pool requirement are checked separately by ``h3_why_not``; they must not
+block unrelated picture, sound or CPU features. ``STUDIO_WINDOWS_TIER=preview`` remains a legacy
+test/debug override. Nothing here runs on Linux or macOS.
 
 Every job kind runs natively: the Library's actions on the authors' node packs, Character Swap, MMAudio foley, LoRA
 training (musubi-tuner in a venv of its own) and Tesseract Finish (its windows-x86_64 build, through Windows' x64
@@ -40,6 +39,10 @@ PORTED = {"video.sh": "video", "studio.sh": "studio", "scout.sh": "scout", "imag
 _STATE: dict = {}
 
 
+def native_os() -> bool:
+    return sys.platform == "win32" and os.environ.get("STUDIO_WINDOWS_TIER", "").strip().lower() != "preview"
+
+
 def root() -> Path:
     return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "ImaginationStudio"
 
@@ -53,6 +56,17 @@ def config() -> dict:
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def configuration_error() -> str:
+    path = Path(os.environ.get("STUDIO_CUDA_TIER") or root() / "cuda-tier.json")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError) as error:
+        return f"The native CUDA settings could not be read ({type(error).__name__}); rerun native setup."
+    return "" if isinstance(value, dict) else "The native CUDA settings are not an object; rerun native setup."
 
 
 def _path(data: dict, key: str, default: Path) -> Path:
@@ -76,27 +90,40 @@ def paths(data: dict | None = None) -> dict[str, Path]:
 
 
 def why_not() -> str:
-    """Why this machine runs the preview tier instead ("" when the native CUDA tier is installed and chosen)."""
+    """Why the shared native CUDA backend is unavailable, independent of H3."""
 
     if sys.platform != "win32":
         return "not Windows"
     if os.environ.get("STUDIO_WINDOWS_TIER", "").strip().lower() == "preview":
         return "STUDIO_WINDOWS_TIER=preview"
+    if why := configuration_error():
+        return why
     data = config()
-    if not data:
-        return "no native CUDA install (oneshot-setup-rtx-spark-n1x.ps1 -Native writes cuda-tier.json)"
     found = paths(data)
-    for key, what in (("python", "the GPU venv"), ("tf_h3", "TensorFold's H3 engine (tf_h3.dll)")):
+    for key, what in (("python", "the GPU venv"),):
         if not found[key].is_file():
             return f"no {what} at {found[key]}"
     if not (found["comfy"] / "main.py").is_file():
         return f"no ComfyUI at {found['comfy']}"
+    return ""
+
+
+def h3_why_not() -> str:
+    """The existing H3-specific engine/pool boundary; no memory limit is relaxed."""
+    if why := why_not():
+        return why
+    data = config()
+    found = paths(data)
+    if not found["tf_h3"].is_file():
+        return f"TensorFold's H3 engine is not installed at {found['tf_h3']}"
     try:
         pool = int(data.get("cuda_pool_mb") or 0)
     except (TypeError, ValueError):
         pool = 0
+    if pool <= 0:
+        return f"H3 requires an installer-measured CUDA pool of at least {MIN_POOL_MB} MB; no valid pool measurement is recorded yet"
     if pool < MIN_POOL_MB:
-        return f"the CUDA pool the installer measured ({pool} MB) is under {MIN_POOL_MB} MB: the preview tier fits this machine"
+        return f"H3 requires an installer-measured CUDA pool of at least {MIN_POOL_MB} MB; the recorded pool is {pool} MB"
     return ""
 
 
@@ -221,4 +248,5 @@ def status() -> dict:
             "pool_mb": config().get("cuda_pool_mb") if on else None,
             "engines": {"tf_h3": found["tf_h3"].is_file(), "bolt": found["bolt_bin"].is_file(),
                         "drama3": found["drama3_bin"].is_file(), "music3": found["music3_bin"].is_file()} if on else {},
-            "not_native": sorted(NOT_NATIVE) if on else []}
+            "not_native": sorted(NOT_NATIVE) if on else [],
+            "h3_available": on and not h3_why_not(), "h3_why": h3_why_not() if on else why_not()}

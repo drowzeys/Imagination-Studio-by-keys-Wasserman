@@ -64,7 +64,7 @@ def status(kind: str) -> dict:
             return {"available": False, "qualified": False, "installed": False, "state": "not_installed", "why": why}
         native = (windows_storyboard.status() if kind == "scout" else windows_sound.status() if kind == "sfx"
                   else graphics.ready())
-        qualified = native["ok"] if kind == "graphics" else native["available"]
+        qualified = native.get("qualified", native["ok"]) if kind == "graphics" else native["available"]
         return {"available": qualified, "qualified": qualified, "installed": True,
                 "state": "qualified" if qualified else "not_qualified", "why": native.get("why") or "",
                 "runtime_updated": native.get("runtime_updated", False), "hardware": native.get("hardware", {})}

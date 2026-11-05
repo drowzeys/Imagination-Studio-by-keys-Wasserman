@@ -199,7 +199,9 @@ def test_progressive_status_and_report_never_run_a_test(check_ui, monkeypatch):
     response = check_ui.get("/api/windows/features")
     assert response.status_code == 200, response.text
     cards = response.json()["features"]
-    assert [card["id"] for card in cards] == ["hlg", "finish", "foley", "scout", "sfx", "graphics"]
+    assert [card["id"] for card in cards] == [
+        "hlg", "finish", "foley", "scout", "sfx", "graphics",
+        "qwen", "qwen-full", "flux3k-fast", "flux3k-full", "moss-image", "video", "voice", "music"]
     assert all(not card["qualified"] and card["memory"]["minimum_installed_ram_mb"] is None for card in cards)
     assert all(card["memory"]["required_headroom_mb"] == 4096 for card in cards[:2])
     assert cards[2]["memory"]["required_headroom_mb"] == 9216 and cards[2]["check_available"]
@@ -236,6 +238,7 @@ def test_progressive_mutations_are_local_same_origin_and_native_tier_unchanged(c
                          headers={"sec-fetch-site": "cross-site"}).status_code == 403
     assert check_ui.post("/api/windows/features/check", content="{}").status_code in (415, 422)
     monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", False)
     assert check_ui.get("/api/windows/features").status_code == 501
 
 

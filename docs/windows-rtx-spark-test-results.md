@@ -86,6 +86,13 @@ the failed attempt ran out of memory. These are bounded 48 GB results, not large
 
 ## Interpretation limits
 
+The unified-routing change was checked on the actual 64 GB app: one native Windows label, no global support
+banner, qualification on/locked, six saved passes retained and informational native-model cards, with no
+new qualification renders. The live GPU inventory reports one RTX Spark GPU and excludes the NPU. Default
+selection uses the available SD-Turbo draft rather than freezing an unavailable Qwen preference; explicit
+full-model choices are not silently replaced. 80/128 GiB policy cases are model-free simulations, not hardware
+or larger-model qualification.
+
 - Image/sound retained 12/12/16 GiB allocator/process/job caps and a 2 GiB GPU reserve; graphics retained
   its 4 GiB job cap. Memory counters overlap and must not be added as physical capacity.
 - Sound's private commitment is close to its cap. No longer effect, larger image or other model is

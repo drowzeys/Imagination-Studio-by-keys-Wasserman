@@ -1,0 +1,210 @@
+"""Unified Windows dispatch and qualification policy; synthetic installations, no model/GPU work."""
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+
+from test_windows_ui import client, server  # noqa: F401
+import windows_checks
+import windows_cuda
+import windows_runtime as runtime
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def install(tmp_path, monkeypatch):
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(windows_cuda, "root", lambda: root)
+    monkeypatch.setenv("STUDIO_CUDA_TIER", str(root / "cuda-tier.json"))
+    monkeypatch.setenv("SPARK_MODELS", str(root / "models"))
+    monkeypatch.setattr(windows_cuda, "why_not", lambda: "")
+    monkeypatch.setattr(runtime, "mode_file", lambda: root / "qualification-mode.json")
+    for name in ("gpu-venv/Scripts/python.exe", "ComfyUI/main.py", "ComfyUI/extra_model_paths.yaml"):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("test")
+    (root / "cuda-tier.json").write_text(json.dumps({"cuda_pool_mb": 46680, "models": str(root / "models")}))
+    title, folder, transformer, _ = runtime.IMAGE_SPECS["qwen"]
+    for name in ("diffusion_models/" + transformer, "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+                 "vae/qwen_image_2.1_vae_bf16.safetensors"):
+        path = root / "models" / folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"test")
+    return root
+
+
+@pytest.mark.parametrize("physical,required", [(49152, True), (65536, True), (81920, True), (131072, False), (262144, False)])
+def test_qualification_defaults_and_locked_small_hardware(tmp_path, monkeypatch, physical, required):
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: physical)
+    monkeypatch.setattr(runtime, "mode_file", lambda: tmp_path / "mode.json")
+    assert runtime.mode()["enabled"] == required
+    assert runtime.mode()["required"] == required
+    assert runtime.mode()["can_disable"] is not required
+    if required:
+        with pytest.raises(ValueError, match="cannot be disabled"):
+            runtime.set_mode(False)
+        assert not runtime.mode_file().exists()
+    else:
+        assert runtime.set_mode(True)["enabled"]
+        assert runtime.set_mode(False)["enabled"] is False
+
+
+def test_unknown_capacity_keeps_gating_on_and_reports_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 0)
+    monkeypatch.setattr(runtime, "mode_file", lambda: tmp_path / "mode.json")
+    runtime.mode_file().write_text('{"enabled":false}')
+    found = runtime.mode()
+    assert found["enabled"] and found["required"] and not found["can_disable"]
+    assert found["physical_total_mb"] is None and "could not be established" in found["reason"]
+
+
+def test_corrupt_mode_setting_is_not_silently_disabled(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
+    monkeypatch.setattr(runtime, "mode_file", lambda: tmp_path / "mode.json")
+    runtime.mode_file().write_text("invalid")
+    assert runtime.mode()["enabled"]
+    assert "could not be read" in runtime.mode()["reason"]
+    assert not runtime.set_mode(False)["enabled"]
+
+
+def test_image_candidates_are_not_blocked_by_h3_or_its_pool(install, monkeypatch):
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 65536)
+    qwen = next(row for row in runtime.image_options() if row["id"] == "qwen")
+    assert qwen["installed"] and not qwen["available"] and not qwen["qualified"]
+    assert qwen["state"] == "needs_verification" and "verification" in qwen["why"]
+    assert "H3" not in qwen["why"] and "90000" not in qwen["why"]
+    assert all(requirement["required_mb"] is None for requirement in qwen["requirements"])
+    assert "not measured" in qwen["scope"]
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
+    qwen = next(row for row in runtime.image_options() if row["id"] == "qwen")
+    assert qwen["available"] and not qwen["qualified"] and not qwen["qualification_required"]
+    assert runtime.default_image() == "qwen"
+    assert not runtime.bounded("scout", {"image_model": "qwen"})
+    assert runtime.bounded("scout", {"image_model": "sd-turbo"})
+
+
+def test_missing_image_files_are_installation_not_memory_failure(install, monkeypatch):
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
+    qwen = next(row for row in runtime.image_options() if row["id"] == "qwen")
+    path = runtime.model_root() / runtime.IMAGE_SPECS["qwen"][1] / "diffusion_models" / runtime.IMAGE_SPECS["qwen"][2]
+    path.unlink()
+    missing = next(row for row in runtime.image_options() if row["id"] == "qwen")
+    assert qwen["available"] and not missing["installed"] and not missing["available"]
+    assert missing["state"] == "needs_install" and "Missing model/runtime files" in missing["why"]
+
+
+def test_gating_off_does_not_bypass_h3_capacity(install, monkeypatch):
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
+    (install / "tf-h3").mkdir()
+    (install / "tf-h3" / "tf_h3.dll").write_bytes(b"engine")
+    video = runtime.model_root() / "FastH3-Comfy"
+    for name in ("text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+                 "vae/minimax_h3_video_vae_int8_convrot.safetensors", "vae/minimax_h3_audio_vae_fp32.safetensors",
+                 "diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors"):
+        path = video / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"test")
+    assert not runtime.mode()["enabled"]
+    found = runtime.native_status("video", runtime.mode())
+    assert found["installed"] and not found["available"]
+    assert found["state"] == "insufficient_capacity" and found["cuda_pool_required_mb"] == 90000
+    with pytest.raises(runtime.RouteUnavailable, match="90000"):
+        runtime.require_native("video", {})
+
+
+def test_prerequisite_failure_is_not_relabelled_as_verification(monkeypatch):
+    monkeypatch.setattr(windows_cuda, "configuration_error", lambda: "")
+    found = runtime.gate_native_state("voice", {"installed": True, "available": False, "why": "Not enough GPU memory"},
+                                      {"enabled": True})
+    assert found["why"] == "Not enough GPU memory" and not found["available"]
+
+
+def test_mode_api_stays_available_without_native_core_and_checks_remain_runnable(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "jobs", {})
+    monkeypatch.setattr(runtime, "mode_file", lambda: tmp_path / "mode.json")
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
+    monkeypatch.setattr(server, "WINDOWS", True)
+    monkeypatch.setattr(server, "WIN32", True)
+    assert client.post("/api/feature-checks/mode", json={"enabled": False}).status_code == 200
+    queued = []
+    monkeypatch.setattr(server, "enqueue", lambda *args: queued.append(args) or {"status": "queued"})
+    response = client.post("/api/feature-checks/check", json={"feature": "hlg"})
+    assert response.status_code == 200 and queued
+    assert not runtime.mode()["enabled"]
+    assert client.post("/api/feature-checks/mode", json={"enabled": "false"}).status_code == 400
+    assert client.post("/api/feature-checks/mode", json={"enabled": False}, headers={"origin": "http://example.invalid"}).status_code == 403
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 81920)
+    assert client.post("/api/feature-checks/mode", json={"enabled": False}).status_code == 409
+    assert runtime.mode()["enabled"]
+
+
+def test_explicit_native_model_is_not_silently_replaced_by_draft(client, install, monkeypatch):
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", True)
+    monkeypatch.setattr(server, "WINCUDA", True)
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 65536)
+    before = len(server.jobs)
+    response = client.post("/api/jobs", json={"kind": "scout", "params": {"prompt": "A hall.", "image_model": "qwen"}})
+    assert response.status_code == 501 and "verification" in response.json()["error"]
+    assert len(server.jobs) == before
+    assert client.post("/api/jobs", json={"kind": "scout", "params": {"image_model": "unknown"}}).status_code == 400
+
+
+def test_native_image_build_does_not_require_h3(client, install, monkeypatch):
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", True)
+    monkeypatch.setattr(server, "WINCUDA", True)
+    monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 131072)
+    command, env, outputs = server.build("scout", {"image_model": "qwen", "prompt": "A hall.", "count": 1}, "native-image")
+    assert command[0] == "bash" and Path(command[1]).name == "scout.sh"
+    assert env["IMAGE_MODEL"] == "qwen" and len(outputs) == 2
+    assert not (install / "tf-h3" / "tf_h3.dll").exists()
+
+
+def test_native_comfy_ownership_rejects_other_session_before_opening_pid(monkeypatch):
+    import comfy_win
+    monkeypatch.setenv("STUDIO_WINDOWS_SESSION_KEY", "test-session")
+    monkeypatch.setattr(comfy_win, "recorded", lambda: {"pid": 123, "created": 456, "session": "someone-else"})
+    monkeypatch.setattr(comfy_win, "running", lambda: True)
+    monkeypatch.setattr(comfy_win, "open_recorded", lambda *_args, **_kwargs: pytest.fail("Must not open or kill another session"))
+    assert comfy_win.stop() == 1
+    assert comfy_win.start() == 1
+
+
+def test_native_comfy_restarts_owned_server_when_environment_changes(tmp_path, monkeypatch):
+    import comfy_win
+    import sys
+    monkeypatch.setenv("STUDIO_WINDOWS_SESSION_KEY", "test-session")
+    monkeypatch.setattr(comfy_win, "recorded", lambda: {
+        "session": hashlib.sha256(b"test-session").hexdigest(), "python": str(tmp_path / "previous" / "python.exe")})
+    monkeypatch.setattr(comfy_win, "running", lambda: True)
+    monkeypatch.setattr(comfy_win, "PREFIX", tmp_path)
+    monkeypatch.setattr(comfy_win, "COMFY_LOG", tmp_path / "native.log")
+    monkeypatch.setattr(comfy_win, "COMFY_KIND", tmp_path / "kind")
+    monkeypatch.setattr(comfy_win, "STOP", tmp_path / "stop")
+    (tmp_path / "ComfyUI").mkdir()
+    (tmp_path / "ComfyUI" / "main.py").write_text("not executed")
+    calls = []
+    monkeypatch.setattr(comfy_win, "stop", lambda: calls.append("stopped") or 0)
+    monkeypatch.setattr(comfy_win.subprocess, "Popen", lambda command, **kwargs: calls.append(command[0]))
+    assert comfy_win.start() == 0
+    assert calls == ["stopped", sys.executable]
+
+
+@pytest.mark.skipif(not (shutil.which("powershell") or shutil.which("pwsh")), reason="PowerShell is required")
+@pytest.mark.parametrize("parts,h3,toolchain,gpu", [
+    ("image", False, False, True), ("moss", False, False, True), ("music", False, True, True),
+    ("video,image", True, True, True), ("foley", False, False, True), ("finish", False, False, False),
+])
+def test_setup_plan_only_selects_needed_components(parts, h3, toolchain, gpu):
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    done = subprocess.run([shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                           str(ROOT / "scripts" / "setup-windows-cuda.ps1"), "-Parts", parts, "-PlanOnly"],
+                          capture_output=True, text=True, timeout=30, check=True)
+    found = json.loads(done.stdout)
+    assert found["h3_engine"] == h3 and found["native_toolchain"] == toolchain and found["gpu_runtime"] == gpu

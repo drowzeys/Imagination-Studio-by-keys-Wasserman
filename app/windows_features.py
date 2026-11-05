@@ -206,7 +206,8 @@ def compatibility(value: dict) -> dict:
 
 
 def preflight(kind: str) -> None:
-    found = status(kind)
+    from windows_runtime import usage_status
+    found = usage_status(kind, status(kind))
     if not found["available"]:
         raise RuntimeError(found["why"])
     headroom(kind)

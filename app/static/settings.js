@@ -44,7 +44,7 @@ function recipeParams(id) { const up = typeof UPSCALED !== "undefined" && UPSCAL
   return { engine: "fasth3", passes: "4", res: "480p", up: false, preset: "small", quality: "fh4" }; }
 const prefSeed = () => prefs().presets.seed === "random" ? 1 + Math.floor(Math.random() * 99999) : (typeof C !== "undefined" && Number(C.seed)) || 1;
 function prefsToCreate() { if (typeof C === "undefined" || (typeof location !== "undefined" && location.search && location.search.length > 1)) return;
-  const p = prefs().presets; C.imageModel = p.image_model; C.seconds = p.seconds;
+  const p = prefs().presets; C.imageModel = ""; C.seconds = p.seconds;
   if (p.recipe !== "custom") { const r = recipeParams(p.recipe); Object.assign(C, { engine: r.engine, passes: r.passes, res: r.res, up: r.up, steps: "" }); if (r.seed) C.seed = r.seed; }
   if (p.seed === "random") C.seed = prefSeed(); if (typeof sync === "function") sync(); }
 // the sidebar's rooms in the user's order, without the hidden ones (Machine and Settings always stay)

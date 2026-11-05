@@ -58,7 +58,7 @@ except ImportError:  # pragma: no cover - imported as app.voice from outside the
 router = APIRouter()
 HOME: Path = Path.home() / "ImaginationStudio"
 qa = None  # app/qa.py, given by attach
-WINCUDA = windows_cuda.active()  # native Windows with the CUDA tier: the Spark's CUDA backend, its Windows build
+WINCUDA = windows_cuda.native_os()
 SPARK = sys.platform.startswith("linux") or WINCUDA
 FRAME_RATE = 21.5  # the Fish codec's frames per second of audio
 SAMPLING = {"temperature": (1.0, 0.1, 2.0), "top_p": (0.9, 0.1, 1.0), "top_k": (30, 1, 200)}  # Fish's defaults, then the range
@@ -1049,6 +1049,9 @@ def state() -> dict:
            "serves": bool(hasattr(one, "serving") and one.serving())}
     if hasattr(one, "status"):
         out["server"] = one.status()
+    if WINCUDA:
+        from windows_runtime import gate_native_state
+        out = gate_native_state("voice", out)
     return out
 
 

@@ -144,6 +144,7 @@ def ready() -> dict:
     """Whether a graphic can be rendered here: {ok, node, hyperframes, browser, gsap, ffmpeg, why}."""
 
     runtime_updated = False
+    qualified = False
     node, node_said = node_bin()
     version = installed_version() if cli().is_file() else None
     found = browser()
@@ -158,6 +159,7 @@ def ready() -> dict:
            else "ffprobe is not installed" if WINDOWS and not shutil.which("ffprobe", path=search_path()) else "")
     if not why and WINDOWS:
         why = windows_probe_error()
+    prerequisites_ok = not why
     if not why and WINDOWS:
         compatible = False
         try:
@@ -184,13 +186,18 @@ def ready() -> dict:
             why = "The bounded Windows graphics render check has not passed"
         except (OSError, ValueError, KeyError, TypeError) as error:
             why = f"The Windows graphics check is unreadable: {type(error).__name__}"
+        qualified = not why
+        if prerequisites_ok:
+            from windows_runtime import mode
+            if not mode()["enabled"]:
+                why = ""
     if why and WINDOWS:
         why += ": run `powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-graphics.ps1`."
     elif why:
         why += ": run `bash scripts/setup-graphics.sh` (or oneshot-setup" + ("-spark" if sys.platform.startswith("linux") else "") + ".sh --graphics)."
     return {"ok": not why, "node": node, "node_version": node_said if node else None, "hyperframes": version,
             "pinned": HYPERFRAMES, "browser": found, "gsap": gsap_file().is_file(), "ffmpeg": ffmpeg, "why": why or None,
-            "runtime_updated": runtime_updated}
+            "runtime_updated": runtime_updated, "qualified": qualified if WINDOWS else not why}
 
 
 WINDOWS_QUALIFICATION_CONTRACT = 1

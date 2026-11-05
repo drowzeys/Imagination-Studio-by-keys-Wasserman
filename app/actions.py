@@ -15,6 +15,7 @@ scripts/setup-comfy.sh, `oneshot-setup.sh --upscale` and `--remove`), reading Mi
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import os
 import shutil
@@ -47,7 +48,9 @@ MAC_OPTION = {"upscale": "--upscale", "remove": "--remove", "mask": "--remove"}
 MAC_H3 = ("Ref2VA/transformer", "FL2VA/text_encoder", "FL2VA/video_vae")
 
 
-def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool = False):
+def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool | Callable[[], bool] = False):
+    def bounded_windows() -> bool:
+        return bool(windows() if callable(windows) else windows)
     router = APIRouter()
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
     models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
@@ -125,8 +128,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
     def state() -> dict:
         out = {}
         for kind in KINDS:
-            why = f"{TITLES[kind]} is not qualified in this Windows preview." if windows else missing(kind)
-            if windows and kind == "hlg":
+            why = f"{TITLES[kind]} needs a verified Windows recipe." if bounded_windows() else missing(kind)
+            if bounded_windows() and kind == "hlg":
                 import windows_features
                 why = windows_features.status(kind)["why"] or missing(kind)
             card = recipe(LORA[kind] or "person-remover") if kind != "hlg" else {}
@@ -161,7 +164,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             raise HTTPException(400, why)
         if kind == "hlg":
             clip = media(params, "video", (".mp4", ".mov"))
-            if windows:
+            if bounded_windows():
                 import graphics
                 import windows_features
                 try:

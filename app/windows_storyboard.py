@@ -156,7 +156,11 @@ def image_plan(params: dict) -> list[tuple[str, int, str]]:
 
 def preflight(qualification: dict | None = None) -> None:
     from windows_memory import DedicatedMemory, WindowsSignals, gpu_memory_warning, host_memory, physical_memory_mb
-    found = status() if qualification is None else qualification
+    if qualification is None:
+        from windows_runtime import usage_status
+        found = usage_status("scout", status())
+    else:
+        found = qualification
     if not found["available"]:
         raise RuntimeError(found["why"])
     hardware = found["hardware"]

@@ -9,20 +9,28 @@ This is a best-effort hobby project, with reviewed changes and route-specific va
 the 64 GB test machine. Full Mac/DGX feature parity is not established.** It uses guarded PyTorch/ComfyUI,
 a small local writing brain, native media tools and Copilot CLI integration.
 
-Upstream also reports a separate **native Windows CUDA tier on a 128 GB RTX Spark N1X**: ComfyUI and
+Upstream also reports **native Windows CUDA results on a 128 GB RTX Spark N1X**: ComfyUI and
 TensorFold's Windows engines, with measured FastH3, Qwen-Image, Drama 3, Music 3, Bolt, person-mask,
 foley and Finish results.
 Its installation, restrictions and measurements are in
-[N1X: Native Windows](rtx-spark-n1x.md#native-windows-the-native-cuda-tier). It is selected only with the
-complete install and a measured CUDA pool of at least 90 GB (`app/windows_cuda.py`); the smaller machines
-retain the bounded feature path. `scripts\app.ps1 -Preview` is its legacy compatibility switch, not a
-different product. Availability depends on installed and qualified recipes, not a 128 GB label.
+[N1X: Native Windows](rtx-spark-n1x.md#native-windows-the-native-cuda-tier). There is now one Windows runtime:
+installed backends are selected per feature/model rather than by a global H3-based tier decision.
+`scripts\app.ps1 -Preview` is a compatibility alias, not a different product. The common CUDA/ComfyUI core
+does not require H3; H3 keeps its own engine and 90,000 MiB recorded CUDA-pool safety policy.
+Availability depends on prerequisites, the selected recipe and live admission, not a blanket 128 GB label.
 The H3 gate is unchanged. Independent, locally qualified CPU routes now enable HDR grading and
 Tesseract Finish without H3, a CUDA-tier record or 128 GB hardware.
 MMAudio foley is also independently qualified on the 64 GB machine within the limits below.
 
 Use the [native Windows setup/testing runbook](windows-rtx-spark-testing.md) for installation and checks.
 This document records current support and remaining work, not troubleshooting history.
+
+Qualification gating/badges are on and locked below 128 GiB installed RAM, optional/off by default above that
+boundary. Feature checks remain visible and individual implemented checks run in either mode. This is a
+verification-policy default, not a claim that every model fits 128 GiB. Informational Qwen/FLUX3-K/MOSS cards
+explain missing installation, verification and unknown Windows memory requirements; no new model was qualified
+on 64 GiB by this routing refactor. The actual model and draft/full-model recipe are shown rather than silently
+substituting a fallback for an explicit full-model request.
 
 ## Hardware handoff at a glance
 

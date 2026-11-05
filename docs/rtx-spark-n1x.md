@@ -155,16 +155,21 @@ clients ran on another machine through an SSH tunnel.
 - Native Windows against WSL: within about ±15% (three samples a class), and more memory left for streams.
 - On TensorFold the N1X matches or passes the DGX Spark's EXL3 figures for this model.
 
-## Native Windows: the native CUDA tier
+<a id="native-windows-the-native-cuda-tier"></a>
+
+## Native Windows: one runtime, per-feature backends
 
 The Studio can also run on the laptop **natively on Windows, without WSL**: the DGX Spark's render path (ComfyUI, the
 Studio's graphs and TensorFold's engines) on Windows' own NVIDIA driver, where the CUDA pool is about 113 GB (WSL sees
-96) and TensorFold's Windows engines run. It is the same Studio, on a tier of its own (`app/windows_cuda.py`):
+96) and TensorFold's Windows engines run. It is the same Studio (`app/windows_runtime.py`, `app/windows_cuda.py`):
 
-- it is chosen only where the whole install is there: `%LOCALAPPDATA%\ImaginationStudio\cuda-tier.json` (written by the
-  installer with the CUDA pool it measured, at least 90 GB), the GPU venv, the pinned ComfyUI and `tf_h3.dll`. Any other
-  Windows machine (the 48 GB one of [the Windows plan](windows-rtx-spark-plan.md)) keeps the small preview tier as it is;
-  `scripts\app.ps1 -Preview` asks for the preview tier here too;
+- each feature uses its installed backend. The shared GPU Python/ComfyUI core does not depend on H3;
+  H3 alone retains its DLL and installer-measured pool requirement of at least 90,000 MiB.
+  Bounded recipes measured on [48/64 GB](windows-rtx-spark-plan.md) remain available alongside native alternatives.
+  The legacy file `cuda-tier.json` records paths/capacity rather than selecting a different app; `-Preview` is a launch alias;
+- qualification gating and badges are required below 128 GiB installed RAM and optional/off by default above it.
+  Diagnostics remain visible and individual checks can run either way. Prerequisites and live memory guards always
+  apply; the threshold does not guarantee model eligibility or qualify unmeasured Windows image recipes;
 - the Spark's jobs build the same commands; the bash scripts they run are replaced by their Python ports
   (`spark/windows_scripts.py`: scripts/video.sh, studio.sh, scout.sh, image.sh, edit.sh, with the same checks and words)
   and spark/comfy.sh by `spark/comfy_win.py`: TensorFold's H3 node copied into ComfyUI with `TF_H3_LIB` at

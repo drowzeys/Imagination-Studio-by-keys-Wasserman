@@ -224,6 +224,52 @@ def test_create_carries_what_the_prompt_goes_to_as_one_small_control():
     assert out["on"] == ["Image"] and out["goes"] == ["video", 0]
 
 
+def test_create_branding_follows_selected_model_and_backend_without_borrowed_logos():
+    out = run("""
+      S.platform = "windows"; C.goes = "image";
+      S.image_models = ["sd-turbo", "qwen", "flux3k-full", "moss-image"];
+      S.image_model_options = [
+        {id:"sd-turbo",label:"SD-Turbo storyboard drafts",backend:"bounded",available:true},
+        {id:"qwen",label:"Qwen-Image 2.1 Turbo",backend:"native",available:true},
+        {id:"flux3k-full",title:"FLUX3-K Full",backend:"native",available:false},
+        {id:"moss-image",label:"MOSS-Image",backend:"native",available:true}];
+      const snapshot = () => { const bar = intentBar(), marks = find(bar,n=>n.attrs?.class==="marks"), logos=[];
+        find(marks,n=>{if(n.tag==="img") logos.push(n.attrs.src);return false;});
+        return {text:text(marks),model:marks.attrs["data-image-model"],backend:marks.attrs["data-image-backend"],
+          logos};
+      };
+      out.models = {};
+      for (const id of S.image_models) { C.imageModel=id; out.models[id]=snapshot(); }
+      delete S.image_model_options;
+      S.image_models=[{id:"qwen",label:"Legacy Qwen label"},{id:"flux3k-full",label:"Legacy FLUX label"}];
+      C.imageModel="flux3k-full"; out.legacy=snapshot();
+      delete S.image_models; S.windows_stills={available:true,model:"sd-turbo"};
+      C.imageModel=""; out.oldDraft=snapshot();
+      C.imageModel="qwen-full"; out.missing=snapshot();
+      S.windows_runtime={image_models:[{id:"moss-image",label:"MOSS runtime label",backend:"native",available:true}]};
+      C.imageModel="moss-image"; out.alias=snapshot();
+      globalThis.edModel=()=>"flux3k-full";
+      globalThis.edModels=()=>[{id:"flux3k-full",label:"FLUX3-K Full edit",backend:"native"}];
+      C.goes="edit"; C.imageModel="sd-turbo"; out.edit=snapshot();
+      C.goes="video"; out.video=text(intentBar()); out.calls=calls;
+    """)
+    draft = out["models"]["sd-turbo"]
+    assert draft["model"] == "sd-turbo" and draft["backend"] == "bounded" and draft["logos"] == []
+    assert "SD-Turbo storyboard drafts" in draft["text"] and "bounded backend" in draft["text"]
+    assert "Qwen" not in draft["text"] and "FLUX" not in draft["text"]
+    assert out["models"]["qwen"]["logos"] == ["brand/qwen.svg"]
+    assert "Qwen-Image 2.1 Turbo" in out["models"]["qwen"]["text"] and "native backend" in out["models"]["qwen"]["text"]
+    assert out["models"]["flux3k-full"]["logos"] == ["brand/bfl-white.svg"]
+    assert "FLUX3-K Full" in out["models"]["flux3k-full"]["text"]
+    assert out["models"]["moss-image"]["logos"] == [] and "MOSS-Image" in out["models"]["moss-image"]["text"]
+    assert out["legacy"]["model"] == "flux3k-full" and "Legacy FLUX label" in out["legacy"]["text"]
+    assert out["oldDraft"]["model"] == "sd-turbo" and out["oldDraft"]["logos"] == []
+    assert out["missing"]["model"] == "qwen-full" and "qwen-full" in out["missing"]["text"]
+    assert out["alias"]["model"] == "moss-image" and "MOSS runtime label" in out["alias"]["text"]
+    assert out["edit"]["model"] == "flux3k-full" and "FLUX3-K Full edit" in out["edit"]["text"]
+    assert "MiniMax H3" in out["video"] and out["calls"] == []
+
+
 def test_the_updates_panel_shows_the_followed_branch_and_the_latest_release():
     out = run("""UPD.data = { message: "Studio is up to date.", source: "drowzeys/studio", branch: "development/wasserman-studio", following: "development/wasserman-studio",
         installed_version: "2.9.2", installed_commit: "189a988", available: false, managed: true, automatic: false, checking: false, updating: false, session: "s1",
@@ -724,7 +770,8 @@ def test_windows_home_and_engine_cards_honor_the_qualified_capabilities():
     assert not any(cards[c] for c in ("still", "sfx", "graphics", "film", "script", "agent"))
     assert out["videoButton"] and "Video not qualified" in out["video"]
     assert "512" in out["image"] and "Qwen 2.1 or" not in out["image"]
-    assert "five-second" in out["sound"].lower() and out["descriptionDisabled"]
+    assert "Stable Audio Open" in out["sound"] and "Each backend has its own recipe" in out["sound"]
+    assert out["descriptionDisabled"]
     assert out["mac"] == "clip" and "Qwen 2.1" in out["macImage"]
 
 
