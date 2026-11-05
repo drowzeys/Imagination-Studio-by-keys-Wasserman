@@ -332,9 +332,61 @@ try {{
   if (-not $switch.Enabled) {{throw 'Installed WSL switch disabled'}}
   $switch.PerformClick()
   if (($global:Sent -join ' ') -ne 'switch --backend wsl --confirmed') {{throw 'Wrong switch closure'}}
+  if (@($Menu.Items | Where-Object Text -eq 'Native Windows - running')[0].Enabled) {{throw 'Running backend must not offer a switch to itself'}}
+  $script:Snapshot.running=$null
+  Draw-Menu
+  $start=@($Menu.Items | Where-Object Text -eq 'Start Native Windows')[0]
+  if (-not $start.Enabled) {{throw 'Stopped backend must offer Start'}}
+  $start.PerformClick()
+  if (($global:Sent -join ' ') -ne 'start --backend native') {{throw 'Start must not use switch semantics'}}
+  $script:Snapshot.backends.wsl.available=$false
+  Draw-Menu
+  if (@($Menu.Items | Where-Object Text -eq 'WSL2 - not registered or unavailable')[0].Enabled) {{throw 'Unavailable backend must explain its state'}}
   $script:Snapshot.running='external'
   Draw-Menu
   if (@($Menu.Items | Where-Object Text -eq 'Stop Studio')[0].Enabled) {{throw 'External app must not be stoppable'}}
+}} finally {{$Menu.Dispose()}}
+"""
+    done = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", script],
+                          capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+@pytest.mark.skipif(not shutil.which("powershell"), reason="WinForms on Windows is required")
+def test_real_tray_process_capture_inside_winforms_stop_event(tmp_path):
+    helper = tmp_path / "fake controller.py"
+    helper.write_text("import json,sys\nprint(json.dumps({'ok':True,'operation':sys.argv[1:]}))\n", encoding="utf-8")
+    source = str(ROOT / "scripts" / "studio-tray.ps1").replace("'", "''")
+    python = sys.executable.replace("'", "''")
+    controller = str(helper).replace("'", "''")
+    script = f"""
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName System.Windows.Forms
+$tree=[System.Management.Automation.Language.Parser]::ParseFile('{source}',[ref]$null,[ref]$null)
+$names=@('ConvertTo-DesktopArgument','Invoke-Desktop','Run-Desktop','Add-Menu','Draw-Menu')
+$tree.FindAll({{param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in $names}},$true) |
+  ForEach-Object {{Invoke-Expression $_.Extent.Text}}
+$Python='{python}'
+$PythonArgs=@()
+$Controller='{controller}'
+$Menu=New-Object System.Windows.Forms.ContextMenuStrip
+$Tray=[pscustomobject]@{{Text=''}}
+$script:Snapshot=[pscustomobject]@{{running='native';default='native';detail='Ready';backends=@{{
+  native=@{{available=$true}};wsl=@{{available=$false}}
+}}}}
+$script:Busy=$false
+$script:RefreshError=''
+function Refresh-Desktop {{}}
+function Confirm-Stop {{return $true}}
+function Show-Problem($Message) {{throw $Message}}
+try {{
+  Draw-Menu
+  @($Menu.Items | Where-Object Text -eq 'Stop Studio')[0].PerformClick()
+  if (($script:Snapshot.operation -join ' ') -ne 'stop --confirmed') {{throw 'Stop event lost controller result'}}
+  $result=Invoke-Desktop @('test','a path with spaces','trailing\\','quote"inside')
+  if ($result.operation[1] -ne 'a path with spaces' -or $result.operation[2] -ne 'trailing\\' -or $result.operation[3] -ne 'quote"inside') {{
+    throw ('Argument quoting failed: ' + ($result.operation | ConvertTo-Json -Compress))
+  }}
 }} finally {{$Menu.Dispose()}}
 """
     done = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", script],
