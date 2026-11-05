@@ -2,6 +2,9 @@
 
 [Back to the README](../README.md#windows)
 
+Moving to another computer? See [Moving an install](moving-an-install.md) for copying installed environments
+and models, resetting machine-specific state, and reusing compatible weights on Mac or Linux.
+
 ## Native Windows
 
 Native Windows is the first Windows path: one Studio with per-feature backends, not separate basic/full
@@ -49,6 +52,24 @@ sizes and runtime policies. Setup and the engines read the same admission values
 not RAM requirements or a total disk/dependency-install estimate. Metadata refresh:
 `python scripts\refresh-model-sizes.py` (repository metadata only, no weights).
 New models on an existing supported layout can extend the catalog; a new renderer still needs implementation.
+
+Models & weights sections can be collapsed; headings summarize installed, missing, found and conversion states.
+An installed model with a Feature checks link omits the generic unknown-fit message, while known capacity
+warnings remain visible. Installation status is separate from qualification.
+Where local recipe evidence exists, model information summarizes passed/total and failed recipes instead:
+some recipes can be verified while others fail or remain untested. Failed checks are not permanent capacity
+limits. Observed recipe peak ranges are shown separately for adapter-wide GPU usage and owned job commitment.
+The GPU figure includes other applications; neither range is a model's minimum memory requirement.
+A `+` marks a range including a memory-limited run stopped before completion, whose full-run peak may be higher.
+The limiting pool is named when the saved error identifies it. GPU usage and commitment overlap; do not add them.
+
+Installed catalog weights offer **Remove model weights → Copy uninstall command**. This only copies a command;
+it never deletes through the browser. Stop Studio and its engines, then run the command in PowerShell to preview
+exclusive weight files and confirm by typing the model id. `-PlanOnly` previews without prompting or deleting.
+Shared files are preserved even if the other catalog model is not installed. Engines, environments, configuration,
+projects, media, cached downloads and qualification receipts stay intact; reinstalling is separate.
+Linked/junction/hard-linked weights and external model overrides require manual review and are refused by this
+helper. Some components may have no exclusive weights; engine-only rows and SD-Turbo do not offer this action.
 
 ### Component commands
 
@@ -116,6 +137,42 @@ engines are not qualified by those checks. They validate runtime/output, not art
 
 Existing bounded SFX, Foley, graphics, HDR and Finish checks retain their own scopes.
 See the [Windows testing runbook](windows-rtx-spark-testing.md) for detailed recipes and measured limits.
+
+### Library workflows and Character Swap
+
+The Library bundle is not one qualification: **Turnaround**, **Upscale**, **Find a person**, **Remove a person**
+and **Character Swap** have independent cards and saved results. Models & weights links to each check.
+An installed bundle means those component files are present, not that every shared H3 file, node pack or
+action LoRA is installed. Each check lists missing prerequisites before it can run.
+`-Parts workflows` installs the node packs and auxiliary models, `-Parts h3-shared` the shared text
+encoder/decoders, and `-Parts library-h3` the bf16 Ref2VA transformer used by generative actions. These
+component-only parts do not build H3's DLL or download FastH3's unrelated transformer. Install the action's
+Turnaround/Upscaler/Person Remover LoRA separately through the LoRA Hub. Swap uses `swap,h3-shared`.
+
+Checks consistently use the repository's generated baker still and five-second clip, with SHA-256 identities
+included in their recipes. No personal media, downloaded fixture or preliminary model generation is required.
+CPU-only preparation creates isolated resized/trimmed copies; originals are unchanged.
+
+| Action | Initial tested recipe |
+|---|---|
+| Turnaround | Input at most 512×288, five 512×512 views, strength 1, 28 production passes |
+| Upscale | 512×288 silent input, 22 frames at 24 fps; 1 MP output, denoise 0.1 |
+| Find a person | Same 22-frame silent input; SAM mask, matte and reconstructed plate |
+| Remove a person | Same input; 22-frame windows, 12 passes, automatic clean frame, silent output |
+| Character Swap | Five-second 864×480/24 fps shot, 512×288 character reference, quality 480, anchor off |
+
+These are real production graphs/builders, not replacement standalone model implementations. Find uses SAM
+and does not require the H3 DLL, H3 transformer or an action LoRA. Turnaround/Upscale/Remove on Windows require
+the bf16 Ref2VA transformer and their own LoRAs: runtime merging into the int8 file is refused rather than
+silently corrupting output. Swap uses its production weight-route selection and memory preflight; its first
+pass does not qualify the optional image-edit anchor, high resolution, longer/multiple windows or visual likeness.
+
+Qualification validates that all required media outputs exist and have bounded dimensions/frame timing;
+Find also rejects an empty or full-frame matte. It is not a semantic/creative-quality certificate: inspect
+the actual mask, views, removed subject or swapped result. Larger inputs/settings and unrelated actions are
+not enabled by a pass. With gating off, existing native prerequisites and live guards still apply.
+All runtime checks keep native Windows memory floors, owned cancellation/deadlines and drain before saving
+a success; failures retain observations and never remove an earlier pass. No checks run just by opening the UI.
 
 ### Memory and evidence
 

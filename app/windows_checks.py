@@ -20,8 +20,13 @@ import windows_cuda
 import windows_image_checks as images
 import windows_audio_checks as audio
 import windows_setup_fit
+import windows_library_checks as library
 
 CHECKS = {
+    **{kind: FeatureCheck(kind, library.TITLES[kind],
+                         "Production Library workflow on pinned bundled media; only its tested input/settings are enabled.",
+                         tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")),
+                         group="edit") for kind in library.KINDS},
     "voice": FeatureCheck("voice", "Fish Audio Drama 3", "Short plain speech, up to 20 words / 120 characters, no cloning, streaming or transcription.",
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="sound"),
     "music": FeatureCheck("music", "MiniMax-Music3", "10-second instrumental, native CUDA int8 engine, default sampling; no streaming or transcription.",
@@ -55,12 +60,14 @@ def gpu_check(job: dict) -> bool:
 
 
 def native_image_check(job: dict) -> bool:
-    return job["kind"] == "qualification" and job["params"].get("feature") in (*images.KINDS, *audio.KINDS)
+    return job["kind"] == "qualification" and job["params"].get("feature") in (*images.KINDS, *audio.KINDS, *library.KINDS)
 
 
 def timeout_seconds(job: dict) -> int:
     if native_image_check(job):
         params = job["params"]
+        if params["feature"] in library.KINDS:
+            return library.TIMEOUT_S + 180
         if params["feature"] in audio.KINDS:
             return audio.TIMEOUT_S + 120
         scopes = images.GROUPS[params["group"]][1] if params.get("group") in images.GROUPS else (params.get("scope", "basic"),)
@@ -114,6 +121,13 @@ def parameters(params: dict) -> dict:
 def build(home, params, job_id):
     params = parameters(params)
     kind = params["feature"]
+    if kind in library.KINDS:
+        if why := library.prerequisites(kind):
+            raise HTTPException(400, why)
+        target = home / "exports" / f"{job_id}-qualification.json"
+        return [sys.executable, "-X", "utf8", str(features.PACK / "scripts" / "windows-library-check.py"),
+                "--feature", kind, "--job-id", job_id, "--output", str(home / "renders" / "calibration" / job_id),
+                "--report", str(target)], {}, [str(target)]
     if kind in audio.KINDS:
         if why := audio.prerequisites(kind):
             raise HTTPException(400, why)
@@ -188,7 +202,7 @@ def attach(server):
             current = [server.public(job) for job in server.jobs.values()
                        if job["kind"] == "qualification"]
         for kind in CHECKS:
-            if kind in (*images.KINDS, *audio.KINDS):
+            if kind in (*images.KINDS, *audio.KINDS, *library.KINDS):
                 continue
             found = foley if kind == "foley" else windows_runtime.usage_status(kind, selected_mode=selected_mode)
             try:
@@ -237,7 +251,7 @@ def attach(server):
             except (OSError, ValueError, TypeError) as error:
                 receipt, attempt = {}, {"error": str(error)}
             cards.append({**choice, "group": "image", "check_available": implemented,
-                          **windows_setup_fit.model_info(choice["id"], installed=choice["installed"]),
+                          **windows_setup_fit.model_info(choice["id"], installed=choice["installed"], evidence=choice),
                           "open_tab": "Create", "open_model": choice["id"], "open_label": "Open " + choice["title"],
                           "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Windows memory requirement not established",
                                      "lowest_tested_ram_mb": choice.get("hardware", {}).get("physical_total_mb"),
@@ -247,6 +261,26 @@ def attach(server):
                                        "checked_at": receipt.get("checked_at")},
                           "attempt": attempt,
                           "job": max(jobs, key=lambda job: job["created"], default=None)})
+        for kind in library.KINDS:
+            found = library.usage_status(kind, selected_mode)
+            try:
+                receipt = features.saved(kind, "")
+                attempt = features.saved(kind, "-attempt")
+            except (OSError, ValueError, TypeError) as error:
+                receipt, attempt = {}, {"error": str(error)}
+            cards.append({**CHECKS[kind].public(), **found, "check_available": True, "open_tab": "Library",
+                          "open_label": "Open Library", "backend": "native", "recipe": library.recipe(kind),
+                          "scope": library.scope_label(kind),
+                          "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Windows recipe requirement not established",
+                                     "lowest_tested_ram_mb": found.get("hardware", {}).get("physical_total_mb"),
+                                     "gpu_required": True, "job_commit_cap_mb": None},
+                          "evidence": {"matches": found["qualified"], "checked_at": receipt.get("checked_at"),
+                                       "results": receipt.get("results", [])}, "attempt": attempt,
+                          "job": max((job for job in current if job["params"].get("feature") == kind),
+                                     key=lambda job: job["created"], default=None),
+                          "setup": windows_cuda.setup_hint("swap,h3-shared" if kind == "swap" else
+                                                           "workflows" if kind == "mask" else
+                                                           "workflows,library-h3,h3-shared")})
         video = windows_runtime.native_status("video", selected_mode)
         cards.append({"id": "video", "title": "H3 / FastH3 video", "group": "video", **video,
                       "scope": f"The existing H3 policy requires a measured CUDA allocation pool of at least {windows_cuda.MIN_POOL_MB} MiB. This is not a minimum installed-RAM claim.",

@@ -1216,7 +1216,7 @@ def windows_state() -> dict:
     import windows_setup_fit
     items = []
 
-    def row(nid, label, engine, expected, files, setup, *, installed=None, why="", catalog_id=None):
+    def row(nid, label, engine, expected, files, setup, *, installed=None, why="", catalog_id=None, removable=True):
         missing = [path.name for path in files if not path.is_file() or path.stat().st_size == 0]
         ready = not missing if installed is None else installed
         items.append({"id": nid, "label": label, "engine": engine, "optional": False,
@@ -1231,8 +1231,17 @@ def windows_state() -> dict:
             feature = model_catalog.model(catalog_id).get("feature")
             if feature:
                 items[-1]["feature"] = feature
+            checks = model_catalog.model(catalog_id).get("features")
+            if checks:
+                items[-1]["features"] = checks
             if items[-1]["runtime_fit"]["state"] == "insufficient_capacity":
                 items[-1]["install"]["override_shown"] = setup + " -AllowInsufficientModel"
+            if ready and removable:
+                # Pass this app's configured weight root, not the terminal's possibly different default.
+                model_path = str(windows_runtime.model_root()).replace("'", "''")
+                items[-1]["uninstall"] = {
+                    "shown": rf"powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows-model.ps1 -Model {catalog_id} -Models '{model_path}'",
+                    "scope": "Exclusive weight files only; previews files and requires confirmation. Stop Studio first. Shared files and runtime environments are kept."}
 
     for model in windows_runtime.image_options():
         if model["id"] == "sd-turbo":
@@ -1247,6 +1256,7 @@ def windows_state() -> dict:
             installed=model["installed"], why=model["why"] if not model["installed"] else "",
             catalog_id=model["id"] if model["id"] != "sd-turbo" else None)
         items[-1]["feature"] = "scout" if model["id"] == "sd-turbo" else model["id"]
+        items[-1]["recipe_fit"] = windows_setup_fit.recipe_fit(model)
         if model["id"] == "sd-turbo":
             items[-1]["download_size"] = {"bytes": sum(size for size, _ in windows_storyboard.FILES.values()),
                                          "basis": "Pinned model manifest byte sizes"}
@@ -1276,7 +1286,8 @@ def windows_state() -> dict:
              [Path(os.environ.get("MUSIC3_CUDA_BIN") or paths["music3_bin"])], "music")):
         row(nid, label, engine, files[0], files,
             rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}",
-            catalog_id="voice" if part.startswith("voice") else "music" if part == "music" else "video")
+            catalog_id="voice" if part.startswith("voice") else "music" if part == "music" else "video",
+            removable=False)
     drama = Path(os.environ.get("DRAMA3_CUDA_MODEL") or root / "drama-3")
     codec = Path(os.environ.get("DRAMA3_CUDA_CODEC") or paths["drama3_bin"].parent / "codec-v1.safetensors")
     checkpoint = drama / "model.safetensors"

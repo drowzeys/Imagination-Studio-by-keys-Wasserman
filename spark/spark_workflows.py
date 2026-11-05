@@ -90,7 +90,7 @@ def server(action: str) -> None:
     if sg.up() and ((last and not last.startswith("workflow-")) or clash):
         say("restarting ComfyUI: this starts from a server with nothing loaded" if not clash else
             "restarting ComfyUI: the upscaler's and the remover's node packs do not share one server")
-        subprocess.run(sg.comfy_control("stop"), check=False)
+        sg.run_comfy_control("stop", check=False)
         for _ in range(60):
             if not sg.up():
                 break
@@ -211,10 +211,12 @@ def take(item: dict, target: Path) -> None:
 
 
 def ref2va() -> str | None:
-    """The Ref2VA weights the actions load: bf16, the file they were made and measured with, else the int8 file that
-    Character Swap's install brings (oneshot-setup-spark.sh --swap); None when neither is listed."""
+    """Prefer the measured bf16 action weights. Windows refuses int8 runtime adapter merging; the existing
+    Linux fallback is retained. Character Swap has its own weight-route selection."""
 
     have = listed("UNETLoader", "unet_name")
+    if sg.WINDOWS:
+        return sg.REF2VA["bf16"] if sg.REF2VA["bf16"] in have else None
     return next((sg.REF2VA[one] for one in ("bf16", "int8") if sg.REF2VA.get(one) in have), None)
 
 

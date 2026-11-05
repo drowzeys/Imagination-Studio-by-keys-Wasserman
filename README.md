@@ -176,6 +176,7 @@ sign-in. Never post keys, tokens or private addresses in issues, logs or screens
 |---|---|
 | [Windows](docs/windows.md) | Native-first setup, WSL2, components, qualification and tray |
 | [Mac & Linux installation](docs/installation.md) | Hardware, install flags, upgrades, memory guards and workers |
+| [Moving an install](docs/moving-an-install.md) | Reusing models and compiled Python packages, similar-machine copies and cross-platform limits |
 | [User guide](docs/user-guide.md) | Screenshots, phone access, image/video tools, Slate and the Library |
 | [Voice, music and brains](docs/audio-guide.md) | Audio backends, song engines, references and local brains |
 | [Production workflows](docs/production-guide.md) | Beat edits, Finish, motion graphics and Motion Previs |
@@ -183,6 +184,7 @@ sign-in. Never post keys, tokens or private addresses in issues, logs or screens
 | [Command-line recipes](docs/cli.md) | Mac/Linux image, video and reference commands |
 | [Engine notes](docs/engine-notes.md) | Rendering architecture, native engines and audio processing |
 | [Performance evidence](docs/performance.md) | Dated measurements and picture-model comparisons |
+| [Updating model measurements](docs/model-measurements.md) | Changed-only/forced qualification sweeps and shared JSON |
 | [Release history](docs/changelog.md) | Earlier release notes, retained as historical context |
 
 [Tutorial](TUTORIAL.md) · [Licences and attribution](docs/licensing.md) · [Brand guide](docs/BRAND.md)

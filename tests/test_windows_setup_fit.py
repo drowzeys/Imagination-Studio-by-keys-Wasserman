@@ -26,6 +26,54 @@ def test_requirements_are_runtime_policies_not_weight_sizes():
         assert fit.requirement(part)["required_mb"] is None
 
 
+def test_recipe_summary_uses_current_passes_and_failures_not_invented_gpu_requirements():
+    evidence = {"qualification_levels": [
+        {"qualified": True}, {"qualified": True},
+        {"qualified": False, "outcome": "failed"},
+        {"qualified": False, "outcome": "not_checked"}]}
+    result = fit.recipe_fit(evidence)
+    assert result["passed"] == 2 and result["failed"] == 1 and result["total"] == 4
+    assert "some recipes run" in result["summary"] and "1 not verified" in result["summary"]
+    assert "GiB" not in result["summary"]
+    assert fit.recipe_fit({"qualification_levels": [{"qualified": True}]})["summary"] == "All 1 recipes verified on this machine."
+    assert fit.recipe_fit({"qualification_levels": [{"qualified": False}]}) is None
+
+
+def test_observed_ranges_keep_gpu_and_commit_separate_and_mark_partial_memory_runs():
+    def readings(free, peak, rendered=True):
+        return {"rendered": rendered, "peak_job_commit_mb": peak, "measurements": {
+            "initial": {"gpu_dedicated_total_mb": 32768},
+            "minima": {"dedicated_gpu_free_mb": free}}}
+    levels = [
+        {"qualified": True, "evidence": {"results": [readings(12288, 24576)]}},
+        {"qualified": True, "evidence": {"results": [readings(8192, 28672)]}},
+        {"qualified": False, "outcome": "failed", "attempt": {
+            "error": "memory watchdog: commit headroom below floor",
+            "observations": readings(4096, 30720, False)}}]
+    result = fit.recipe_memory(levels)
+    assert result["memory_ranges"]["gpu_usage"] == {"min_mb": 20480, "max_mb": 28672, "incomplete": True}
+    assert result["memory_ranges"]["job_commitment"] == {"min_mb": 24576, "max_mb": 30720, "incomplete": True}
+    assert "20.0–28.0+ GiB" in result["memory_summary"]
+    assert "24.0–30.0+ GiB" in result["memory_summary"]
+    assert "Stopped by" not in result["memory_summary"]
+    assert "Stopped by commit backing" in result["memory_note"]
+    assert "other apps" in result["memory_note"]
+
+
+def test_completed_render_or_nonmemory_failure_does_not_add_lower_bound_marker():
+    row = {"rendered": True, "peak_job_commit_mb": 1024, "measurements": {
+        "initial": {"gpu_dedicated_total_mb": 4096}, "minima": {"dedicated_gpu_free_mb": 2048}}}
+    result = fit.recipe_memory([{"qualified": False, "outcome": "failed", "attempt": {
+        "error": "memory guard cleanup failure", "observations": row}}])
+    assert not result["memory_ranges"]["gpu_usage"]["incomplete"]
+    assert "+" not in result["memory_summary"]
+    assert fit.recipe_memory([{"qualified": False, "outcome": "failed", "attempt": {
+        "error": "source changed", "observations": row}}]) == {}
+    assert fit.recipe_memory([{"qualified": True, "evidence": {"results": [
+        {"peak_job_commit_mb": float("nan"), "measurements": {"initial": {
+            "gpu_dedicated_total_mb": 1024}, "minima": {"dedicated_gpu_free_mb": 2048}}}]}}]) == {}
+
+
 def test_known_insufficient_voice_is_skipped_before_automatic_download():
     plan = fit.plan("voice", hardware(), automatic=True)
     assert plan["state"] == "insufficient_capacity" and plan["action"] == "skip"

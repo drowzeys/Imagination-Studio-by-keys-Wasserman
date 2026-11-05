@@ -212,7 +212,36 @@
       },
       "group": "Training"
     },
+    "h3-shared": {
+      "label": "H3 shared text encoder and decoders",
+      "kind": "component",
+      "part": "h3-shared",
+      "group": "Library workflows",
+      "features": ["turnaround", "upscale", "remove", "swap"],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "Shared components only; each Library recipe has independent admission."
+        }
+      }
+    },
+    "library-h3": {
+      "label": "Library H3 bf16 transformer",
+      "kind": "component",
+      "part": "library-h3",
+      "group": "Library workflows",
+      "features": ["turnaround", "upscale", "remove"],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "Production bf16 Library LoRA route; no int8 adapter merge."
+        }
+      }
+    },
     "workflows": {
+      "features": ["turnaround", "upscale", "mask", "remove"],
       "label": "Library workflows",
       "kind": "component",
       "part": "workflows",
@@ -226,6 +255,7 @@
       "group": "Library workflows"
     },
     "swap": {
+      "feature": "swap",
       "label": "Character Swap",
       "kind": "component",
       "part": "swap",
@@ -240,6 +270,24 @@
     }
   },
   "downloads": {
+    "h3-shared": [
+      {
+        "repo": "FastVideo/FastVideo-FastH3-Comfy",
+        "folder": "FastH3-Comfy",
+        "files": [
+          "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+          "vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "vae/minimax_h3_audio_vae_fp32.safetensors"
+        ]
+      }
+    ],
+    "library-h3": [
+      {
+        "repo": "Comfy-Org/MiniMax-H3",
+        "folder": "MiniMax-H3-Comfy",
+        "files": ["diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors"]
+      }
+    ],
     "video": [
       {
         "repo": "FastVideo/FastVideo-FastH3-Comfy",

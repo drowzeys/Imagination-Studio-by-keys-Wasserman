@@ -43,6 +43,7 @@ async function wfcSetMode(enabled) {
     if (WFC.data && result.mode) WFC.data.mode = result.mode;
     S = await api("/api/state");
     if (typeof ACT !== "undefined") ACT.state = null;
+    if (typeof SWAP !== "undefined") SWAP.state = null;
     if (typeof FIN !== "undefined") FIN.state = null;
     if (typeof SFX !== "undefined") SFX.state = null;
     await wfcLoad();

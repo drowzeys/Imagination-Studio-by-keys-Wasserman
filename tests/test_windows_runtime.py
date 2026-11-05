@@ -280,6 +280,28 @@ def test_native_audio_cards_are_registered_once_and_checks_available(client, ins
         assert rows[0]["check_available"] and rows[0]["installed"] and not rows[0]["qualified"]
 
 
+def test_native_library_cards_are_independent_and_not_hidden_by_h3(client, install, monkeypatch):
+    import windows_library_checks as library
+    monkeypatch.setattr(server,"WIN32",True)
+    monkeypatch.setattr(server,"WINDOWS",False)
+    monkeypatch.setattr(library,"status",lambda kind:{
+        "installed":kind=="mask","available":kind=="mask","qualified":kind=="mask",
+        "state":"qualified" if kind=="mask" else "not_installed",
+        "why":"" if kind=="mask" else "Missing model files","verified_recipe":library.recipe(kind)})
+    response=client.get("/api/feature-checks")
+    assert response.status_code==200
+    cards=response.json()["features"]
+    for kind in library.KINDS:
+        found=[card for card in cards if card["id"]==kind]
+        assert len(found)==1 and found[0]["check_available"]
+        assert found[0]["installed"] is (kind=="mask")
+        assert "bundled" in found[0]["scope"].lower()
+    state=server.state()
+    assert state["capabilities"]["mask"]["available"]
+    assert state["capabilities"]["image_actions"]["available"]
+    assert not state["capabilities"]["remove"]["available"]
+
+
 @pytest.mark.parametrize("model", tuple(runtime.IMAGE_SPECS))
 def test_native_qualification_only_unlocks_its_checked_canvas_and_count(client, install, monkeypatch, model):
     import windows_image_checks

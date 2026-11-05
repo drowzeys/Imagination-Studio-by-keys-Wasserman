@@ -82,6 +82,16 @@ def test_optional_checksum_pins_remain_shared_with_the_downloader():
     assert all(len(row) == 6 for rows in module.CHECKED.values() for row in rows)
 
 
+def test_library_component_parts_reuse_existing_shared_files_without_fasth3_download():
+    shared = catalog.parts()["h3-shared"]
+    assert len(shared)==1 and len(shared[0][2])==3
+    assert all(not name.startswith("diffusion_models/") for name in shared[0][2])
+    transformer=catalog.parts()["library-h3"]
+    assert transformer[0][2]==["diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors"]
+    assert catalog.size_info("h3-shared")["bytes"] > 0
+    assert catalog.size_info("library-h3")["bytes"] > 0
+
+
 def test_catalog_loader_rejects_invalid_policy(tmp_path, monkeypatch):
     data = copy.deepcopy(catalog.catalogue())
     data["models"]["voice"]["runtime"]["cuda"]["required_free_gib"] = -1

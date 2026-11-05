@@ -2524,6 +2524,12 @@ def state() -> dict:
         out["capabilities"].update({choice["id"]: choice for choice in choices if choice["id"] != "sd-turbo"})
         for kind in ("video", "edit", "image_actions", "looks"):
             out["capabilities"][kind] = windows_runtime.native_status(kind, selected_mode)
+        import windows_library_checks as library
+        library_states = {kind: library.usage_status(kind, selected_mode) for kind in library.KINDS}
+        out["capabilities"].update(library_states)
+        usable = any(found["available"] for found in library_states.values())
+        out["capabilities"]["image_actions"] = {"available": usable, "installed": any(found["installed"] for found in library_states.values()),
+            "why": "" if usable else "Model-based Library actions need their own setup and qualification in Machine > Feature checks."}
         for kind in ("voice", "music"):
             out["capabilities"][kind] = {key: out[kind].get(key) for key in ("available", "installed", "qualified", "why", "backend")}
         out["engine"] = "Per-feature native Windows backends"
