@@ -16,6 +16,12 @@ import windows_runtime as runtime
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_desktop_route_is_not_hidden_behind_static_mount(client):
+    response = client.get("/api/desktop/session")
+    assert response.status_code == 404
+    assert response.json()["error"] == "This app was not started by the desktop controller."
+
+
 @pytest.mark.parametrize("feature,hidden", [("qwen", True), ("hlg", False)])
 def test_native_image_checker_outer_process_does_not_open_a_console(monkeypatch, feature, hidden):
     import windows_process

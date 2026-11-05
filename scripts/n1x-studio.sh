@@ -10,6 +10,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export STUDIO_N1X=1
 export PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 mkdir -p "$HOME/ImaginationStudio"
+if [ -n "${STUDIO_DESKTOP_SESSION:-}" ]; then
+  # The tray owns one long-lived wsl.exe, and stops this session through its authenticated idle-stop endpoint.
+  [ "${1:-}" != stop ] || { echo "Stop this session through the Windows tray." >&2; exit 1; }
+  export HOST=127.0.0.1 PORT=7870
+  cd "$HERE"
+  exec bash scripts/app.sh
+fi
 if [ "${1:-}" = stop ]; then
   # [a]pp: the pattern does not match this script's own command line
   pkill -f "[a]pp/launcher.py" 2>/dev/null

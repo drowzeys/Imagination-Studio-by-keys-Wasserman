@@ -3717,6 +3717,8 @@ async def fresh_pages(request, call_next):
     return response
 
 
+import desktop_control  # noqa: E402
+app.include_router(desktop_control.attach(sys.modules[__name__]))
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 
 if not media_tools()["ffmpeg"]:
@@ -3850,6 +3852,21 @@ if __name__ == "__main__":
         web_server.should_exit = True
 
     updater.restart = restart
+    def desktop_shutdown() -> None:
+        voice.release("Desktop stop")
+        music.release("Desktop stop")
+        bolt.shutdown()
+        if WINDOWS or WIN32:
+            windows_storyboard.release_backend()
+            windows_runtime.release_native()
+        else:
+            command = ["bash", str(PACK / "spark" / "comfy.sh"), "stop"]
+            done = subprocess.run(command, cwd=PACK, capture_output=True, text=True, timeout=90)
+            if done.returncode:
+                raise RuntimeError("The session's ComfyUI did not stop.")
+        restart()
+
+    app.state.desktop_shutdown = desktop_shutdown
     try:
         web_server.run()
     except KeyboardInterrupt:  # Uvicorn re-raises Ctrl-C after the shutdown hooks have run
