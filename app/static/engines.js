@@ -39,6 +39,7 @@ const ENGINE_PAGES = {
       { art: "start-still", sign: "image", title: "A still", one: "One picture or several, any size", run: () => startCreate({ goes: "image" }) },
       { art: "act-image-scouts", sign: "image", title: "Scouts", one: "Six candidates in one load; pick one", run: () => startCreate({ goes: "image", count: 6 }) },
       { art: "act-image-edit", sign: "image", title: "Edit a picture", one: "Change it in words, or move the camera", run: () => startCreate({ goes: "edit" }) },
+      { art: "act-image-quick", sign: "image", title: "Quick Edit", one: "Paste a picture, say what changes, go", run: () => go("Quick Edit") },
       { art: "act-image-looks", sign: "looks", title: "Looks", one: "LoRA styles for pictures and clips", run: () => go("Looks") }] }),
   video: () => ({ line: "Clips with sound on MiniMax H3 and FastH3, up to 15 seconds; longer ones as chained takes.",
     marks: [mark("minimax"), mark("tensorfold"), S && S.platform === "spark" ? mark("comfy") : null],

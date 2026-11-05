@@ -2594,6 +2594,20 @@ On a Mac the step runs mflux's Qwen-Image-2.1 edit pipeline in bfloat16 (43 GiB 
 the app asks for 8-bit weights (30 GiB at its peak in one run on a 256 GB Mac; not run on a smaller Mac). On a DGX
 Spark it is one more ComfyUI graph, with the LoRA merged at run time on the bfloat16 file.
 
+### Quick Edit
+
+The Image room's third tab, and a card on its Overview: one box, like a chat. Paste a picture from the clipboard
+(⌘V / Ctrl+V anywhere on the page), drop one on the box, press **+** for a file, or take one from the **Library**;
+type what is different; press the arrow (or Enter; Shift+Enter makes a new line). The result appears under the
+box, with *Edit this result* to keep going from it, *Download*, *Make a clip of it* and *Ask again*. A pasted clip
+gives its first frame.
+
+There is nothing else to set. The one choice on the bar is the picture model, each with its own best settings
+built in: **Qwen 2.1 Turbo** (8 steps), **FLUX3-K Fast** (16 steps) and **FLUX3-K Full** (50 steps), those of them
+installed here. The result keeps the picture's size and every turn draws a new seed, shown under the turn. It is
+the same `edit` job as *Edit a picture*; for LoRAs, the camera ring, several pictures or a size of your own use
+Create › Edit a picture.
+
 ### A scout image, then video
 
 ![Create: Qwen scout to video](samples/ui_create_qwen_h3.png)

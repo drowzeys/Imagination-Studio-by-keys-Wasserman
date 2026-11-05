@@ -300,7 +300,9 @@ Rules:
   Mac on flux3-mlx in `$PREFIX/flux3-venv`, never in the Studio's venv. Edit a picture takes `image_model` too
   (`app/picture_edit.py`, `IMAGE_MODEL` to `scripts/edit.sh`): FLUX3-K edits are `flux3_workflow` in `spark/spark_edit.py`
   (ReferenceMultiLatent, upsampler with the i2i prompt) and `flux3_edit.py` on a Mac; LoRAs, angles and `base` are
-  Qwen's and a FLUX3-K edit refuses them. FLUX Kommunity
+  Qwen's and a FLUX3-K edit refuses them. Quick Edit (`app/static/quick.js`, the Image room's third tab) is the same
+  `edit` job with nothing to set but the model (`image`, `prompt`, a new `seed` a turn, `size: "source"`,
+  `image_model`): keep it that way, the settings are the model's own. FLUX Kommunity
   License: say so when asked about commercial use, and do not redistribute the weights.
 - MOSS-Image (`moss-image` in `IMAGE_MODELS`, `oneshot-setup-spark.sh --moss`, `moss_workflow` in
   `spark/spark_generate.py`): OpenMOSS's model, Apache 2.0, inside ComfyUI's workflow (v0.42.0 and

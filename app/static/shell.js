@@ -8,7 +8,7 @@ const ROOMS = [
   // every tool as a one-click app (apps.js), above the engines
   { id: "apps", group: "apps", name: "Apps", key: "", tabs: ["Apps"], says: "every tool as a one-click app" },
   { id: "video", group: "engines", name: "Video", key: "1", tabs: ["Video", "Create"], says: "clips with sound, long takes, references" },
-  { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create"], says: "stills, scouts, edit a picture" },
+  { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create", "Quick Edit"], says: "stills, scouts, edit a picture, Quick Edit" },
   { id: "sound", group: "engines", name: "Sound", key: "3", tabs: ["Sound", "Voice", "Music", "Foley"], says: "voices, score and sound effects" },
   { id: "story", group: "engines", name: "Story", key: "4", tabs: ["Story", "Production"], says: "the film: board, Wasserman Slate, First AD" },
   // a room of its own for a part that also sits inside a bigger page; `fold`: in the More sheet on a phone, not the bar
@@ -27,7 +27,7 @@ const ROOMS = [
   { id: "learn", group: "vaults", name: "Learn", key: "", tabs: ["Tutorial"], says: "lessons, step by step" },
   { id: "settings", group: "vaults", name: "Settings", key: ",", tabs: ["Settings"], says: "looks, layout, presets and connections" },
 ];
-const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", Previs: "Overview", "Motion Previs": "Motion Previs",
+const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", "Quick Edit": "Quick Edit", Previs: "Overview", "Motion Previs": "Motion Previs",
   Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Foley: "Sound effects", Edit: "Overview", Editor: "Timeline", Graphics: "Graphics", Finish: "Finish",
   Apps: "Apps", "Cast & Places": "Cast & Places", Director: "Director", "Motion graphics": "Motion graphics", "Night shift": "Night shift", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
   Machine: "Telemetry", Models: "Models & weights", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn", Nodes: "Nodes", Settings: "Settings" };
