@@ -209,13 +209,56 @@ def test_cli_plans_before_any_download_and_keeps_unknown_parts(tmp_path, monkeyp
     assert json.loads(capsys.readouterr().out)["blocked"]
 
 
-def test_unknown_only_plan_does_not_probe_hardware(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(fit, "probe", lambda: pytest.fail("Unknown requirements need no GPU probe"))
+def test_unknown_only_plan_uses_shared_configuration_inventory(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fit, "probe", lambda: hardware())
     monkeypatch.setattr(fit, "cached", lambda *args: False)
     assert fit.main(["--parts", "image,flux3,moss", "--models", str(tmp_path), "--automatic"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert all(row["state"] == "unknown" for row in result["plans"])
     assert result["skip_parts"] == []
+
+
+def measured_hardware():
+    return {**hardware(), "gpu_dedicated_total_mb": 31232, "architecture": "arm64"}
+
+
+def test_matching_failed_shared_recipes_block_downloads_only_without_explicit_override():
+    pools = measured_hardware()
+    result = fit.download_plan("moss", pools)
+    assert result["action"] == "blocked"
+    assert result["shared_advice"][0]["state"] == "matching_failures"
+    assert fit.download_plan("moss", pools, allow_insufficient=True)["action"] == "download"
+    assert fit.download_plan("moss", pools, allow_shared_image_failures=True)["action"] == "download"
+    assert fit.download_plan("moss", pools, automatic=True)["action"] == "skip"
+    assert fit.download_plan("moss", pools, installed=True)["action"] == "reuse"
+    useful = fit.download_plan("image", pools)
+    assert useful["action"] == "download" and useful["shared_advice"][0]["state"] == "partially_useful"
+    assert fit.download_plan("voice", pools, allow_shared_image_failures=True)["action"] == "blocked"
+
+
+def test_missing_shared_metadata_warns_only_and_different_configuration_does_not_block():
+    result = fit.shared_advice("bolt", measured_hardware())
+    assert result["state"] == "no_matching_metadata" and not result["blocked"]
+    assert "WARNING" in result["why"]
+    for changed in ({"architecture": "x86-64"}, {"n1x": False}, {"physical_total_mb": 131072},
+                    {"gpu_dedicated_total_mb": 98304}):
+        result = fit.shared_advice("qwen", {**measured_hardware(), **changed})
+        assert not result["blocked"] and result["state"] == "no_matching_metadata"
+    # A model with successful shared tests but no failures on this config is not blocked.
+    result = fit.shared_advice("sound", measured_hardware())
+    assert not result["blocked"] and result["state"] == "matching_observations"
+
+
+def test_shared_preflight_cli_blocks_before_download_and_emits_missing_metadata_warning(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(fit, "probe", measured_hardware)
+    monkeypatch.setattr(fit, "cached", lambda *args: False)
+    args = ["--parts", "image,flux3", "--models", str(tmp_path)]
+    assert fit.main(args) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["blocked"]
+    assert "failed recipe" in captured.err and "no passing recipes" in captured.err
+    assert fit.main([*args, "--allow-insufficient"]) == 0
+    assert not json.loads(capsys.readouterr().out)["blocked"]
 
 
 @pytest.mark.skipif(not (shutil.which("powershell") or shutil.which("pwsh")), reason="PowerShell is required")

@@ -53,10 +53,11 @@ def test_cached_sd_is_detected_without_network_qualification_or_hardware(tmp_pat
 
 
 @pytest.mark.parametrize("model", setup.MODELS[2:])
-def test_explicit_native_is_never_downgraded_and_requires_acknowledgment(model):
+def test_unknown_native_warns_without_blocking_or_substituting(model):
     result = setup.plan(model)
     assert result["selected_model"] == model
-    assert not result["allowed"] and result["native_fit"] == "unknown"
+    assert result["allowed"] and result["native_fit"] == "unknown"
+    assert "WARNING" in result["shared_advice"]["why"]
     assert setup.plan(model, allow_unverified=True)["allowed"]
     assert setup.plan(model, no_download=True)["allowed"]
     cached = setup.plan(model, installed={model})
@@ -72,6 +73,26 @@ def test_native_notice_distinguishes_download_size_from_ram_and_license():
         setup.plan("unknown")
 
 
+def test_image_matching_failure_requires_flag_but_cached_and_unknown_downloads_do_not():
+    pools = {"physical_total_mb": 65536, "gpu_dedicated_total_mb": 31232,
+             "architecture": "arm64", "n1x": True}
+    assert setup.plan("qwen", hardware=pools)["allowed"]
+    assert setup.plan("qwen", hardware=pools)["shared_advice"]["state"] == "partially_useful"
+    assert not setup.plan("moss-image", hardware=pools)["allowed"]
+    assert setup.plan("moss-image", hardware=pools, allow_unverified=True)["allowed"]
+    assert setup.plan("moss-image", hardware=pools, no_download=True)["allowed"]
+    assert setup.plan("moss-image", hardware=pools, installed={"moss-image"})["allowed"]
+    assert not setup.plan("flux3k-full", hardware=pools)["allowed"]
+
+
+def test_cached_image_guard_never_probes_hardware(tmp_path, monkeypatch, capsys):
+    import windows_setup_fit
+    install_model(tmp_path, "qwen")
+    monkeypatch.setattr(windows_setup_fit, "probe", lambda: pytest.fail("No probes for cached repair"))
+    assert setup.main(["--guard-parts", "image", "--models", str(tmp_path)]) == 0
+    assert not json.loads(capsys.readouterr().out)[0]["download"]
+
+
 def test_complete_native_files_skip_guard_without_gpu_or_model_imports(tmp_path, monkeypatch):
     monkeypatch.setattr(setup.subprocess, "run", lambda *a, **k: pytest.fail("No probes for cached weights"))
     install_model(tmp_path, "qwen")
@@ -80,19 +101,19 @@ def test_complete_native_files_skip_guard_without_gpu_or_model_imports(tmp_path,
     weight = tmp_path / setup.model_files("qwen")[0][1] / setup.model_files("qwen")[0][2][0]
     original = weight.read_bytes()
     weight.write_bytes(original[:-1])
-    assert not setup.guard_parts(["image"], tmp_path)[0]["allowed"]
+    assert setup.guard_parts(["image"], tmp_path)[0]["download"]
     weight.write_bytes(b"not an installed model")
-    assert not setup.guard_parts(["image"], tmp_path)[0]["allowed"]
+    assert setup.guard_parts(["image"], tmp_path)[0]["download"]
 
 
 def test_turbo_does_not_certify_full_or_flux_variants(tmp_path):
     install_model(tmp_path, "qwen")
     found = {row["selected_model"]: row for row in setup.guard_parts(["image", "image-edit", "flux3", "moss"], tmp_path)}
     assert found["qwen"]["allowed"]
-    assert all(not row["allowed"] for name, row in found.items() if name != "qwen")
+    assert all(row["allowed"] and row["download"] for name, row in found.items() if name != "qwen")
     install_model(tmp_path, "flux3k-fast")
     fast, full = setup.guard_parts(["flux3"], tmp_path)
-    assert fast["allowed"] and not full["allowed"]
+    assert fast["allowed"] and full["allowed"] and full["download"]
     install_model(tmp_path, "flux3k-full")
     assert all(row["allowed"] for row in setup.guard_parts(["flux3"], tmp_path))
 
@@ -229,7 +250,7 @@ def test_unsupported_or_insufficient_fallback_is_refused_not_reported_success(mo
 def test_bounded_sd_admission_does_not_invent_a_total_ram_minimum(physical_gb):
     setup.validate_sd_capacity(sd_hardware(physical_total_mb=physical_gb * 1024))
     assert setup.plan()["selected_model"] == "sd-turbo"
-    assert not setup.plan("qwen")["allowed"]
+    assert setup.plan("qwen")["allowed"]  # Unknown hardware warns; RAM size alone neither qualifies nor blocks.
 
 
 def test_native_inventory_uses_existing_positive_gpu_uuid_filter(monkeypatch):
@@ -246,8 +267,11 @@ def test_native_inventory_uses_existing_positive_gpu_uuid_filter(monkeypatch):
 
 
 def test_guard_cli_fails_before_download_and_no_download_does_not_need_ack(tmp_path, monkeypatch, capsys):
+    import windows_setup_fit
+    monkeypatch.setattr(windows_setup_fit, "probe", lambda: {
+        "physical_total_mb": 65536, "gpu_dedicated_total_mb": 31232, "n1x": True, "architecture": "arm64"})
     monkeypatch.setattr(setup, "download_model", lambda *a: pytest.fail("Guard must run first"))
-    args = ["--model", "qwen", "--models", str(tmp_path)]
+    args = ["--model", "moss-image", "--models", str(tmp_path)]
     assert setup.main([*args, "--download-model"]) == 1
     said = capsys.readouterr().err
     assert "No model bytes" in said and "-AllowUnverifiedImageModel" in said and "-Model auto" in said
@@ -372,7 +396,7 @@ def test_explicit_native_script_downloads_only_selected_model_and_configures_wit
 
 
 @pytest.mark.skipif(not SHELL, reason="PowerShell is required")
-@pytest.mark.parametrize("cached,no_download,allowed", [(False, False, False), (True, False, True), (False, True, True)])
+@pytest.mark.parametrize("cached,no_download,allowed", [(False, False, True), (True, False, True), (False, True, True)])
 def test_direct_native_image_guard_runs_before_installation(tmp_path, cached, no_download, allowed):
     if cached:
         install_model(tmp_path / "models", "qwen")

@@ -3,7 +3,7 @@
 Auto deliberately chooses the bounded SD-Turbo route. The Windows ARM64 N1X
 128 GB Qwen Turbo reference (8 steps, 864x480, pinned Torch/ComfyUI) is a
 reference, not a model minimum or a qualification for other configurations.
-No automatic native-reference matcher is implemented here.
+Matching failed shared recipes require explicit download acknowledgment; missing shared metadata warns only.
 """
 from __future__ import annotations
 
@@ -27,10 +27,6 @@ NATIVE_PARTS = {part: tuple(key for key, row in model_catalog.catalogue()["model
 PART_FOR_MODEL = {model: part for part, models in NATIVE_PARTS.items() for model in models}
 AUTO_WHY = ("Auto selects SD-Turbo: native image memory fit is unknown without a matched "
             "runtime/hardware profile. RAM size alone does not establish fit.")
-ACK_WHY = ("Native image memory fit is unknown. No model bytes were downloaded. "
-           "Use scripts\\setup-windows-images.ps1 -Model auto (SD-Turbo), or explicitly "
-           "accept an unverified calibration install with -AllowUnverifiedImageModel. "
-           "Installation does not qualify rendering.")
 
 
 @lru_cache(maxsize=1)
@@ -114,13 +110,16 @@ def notices(model: str) -> list[str]:
 
 
 def plan(model: str = "auto", *, installed: set[str] | None = None,
-         no_download: bool = False, allow_unverified: bool = False) -> dict:
+         no_download: bool = False, allow_unverified: bool = False, hardware: dict | None = None) -> dict:
     if model not in MODELS:
         raise ValueError(f"Unknown image model: {model}")
     selected = "sd-turbo" if model == "auto" else model
     cached = selected in (installed or set())
     native = selected != "sd-turbo"
-    needs_ack = native and not cached and not no_download and not allow_unverified
+    from windows_setup_fit import shared_advice
+    advice = (shared_advice(selected, hardware or {}) if native else
+              {"state": "bounded", "blocked": False, "why": "SD-Turbo retains its bounded capacity preflight."})
+    needs_ack = native and advice["blocked"] and not cached and not no_download and not allow_unverified
     return {"requested_model": model, "selected_model": selected,
             "why": AUTO_WHY if model == "auto" else "Explicit model retained; no silent substitution.",
             "model_files_complete": cached, "download": not cached and not no_download,
@@ -128,13 +127,14 @@ def plan(model: str = "auto", *, installed: set[str] | None = None,
             "requires_acknowledgment": needs_ack, "allowed": not needs_ack,
             "prerequisites": ["native ARM64 GPU environment", "pinned ComfyUI"],
             "cache_check": "file structure/length only; not identity verification or render qualification",
-            "notices": notices(selected), "qualification": "not performed; weights setup only"}
+            "notices": [*notices(selected), advice["why"]],
+            "shared_advice": advice, "qualification": "not performed; weights setup only"}
 
 
-def guard_parts(parts: list[str], base: Path, *, allow_unverified: bool = False) -> list[dict]:
+def guard_parts(parts: list[str], base: Path, *, allow_unverified: bool = False, hardware: dict | None = None) -> list[dict]:
     models = list(dict.fromkeys(model for part in parts for model in NATIVE_PARTS.get(part, ())))
     installed = installed_models(base, models)
-    return [plan(model, installed=installed, allow_unverified=allow_unverified) for model in models]
+    return [plan(model, installed=installed, allow_unverified=allow_unverified, hardware=hardware) for model in models]
 
 
 def validate_sd_capacity(hardware: dict) -> None:
@@ -225,9 +225,6 @@ def check_model_access(models: list[str], base: Path) -> None:
 def download_model(model: str, base: Path) -> int:
     module = downloader()
     rows = model_files(model)
-    from windows_setup_fit import plan
-    fit = plan(PART_FOR_MODEL[model], {})
-    print("[setup-fit] " + fit["why"], file=sys.stderr)
     for _, folder, names in rows:
         for name in names:
             path = base / folder / name
@@ -269,18 +266,27 @@ def main(argv: list[str] | None = None) -> int:
             native_device()
             return 0
         if args.guard_parts:
+            from windows_setup_fit import probe
+            parts = [part.strip() for part in args.guard_parts.split(",")]
+            selected_models = {model for part in parts for model in NATIVE_PARTS.get(part, ())}
+            missing = selected_models - installed_models(base, list(selected_models))
+            hardware = probe() if not args.no_download and missing else {}
             plans = [] if args.no_download else guard_parts(
-                [part.strip() for part in args.guard_parts.split(",")], base,
-                allow_unverified=args.allow_unverified)
+                parts, base, allow_unverified=args.allow_unverified, hardware=hardware)
         else:
             selected = "sd-turbo" if args.model == "auto" else args.model
-            plans = [plan(args.model, installed=installed_models(base, [selected]),
+            installed = installed_models(base, [selected])
+            from windows_setup_fit import probe
+            hardware = probe() if selected != "sd-turbo" and selected not in installed and not args.no_download else {}
+            plans = [plan(args.model, installed=installed, hardware=hardware,
                           no_download=args.no_download, allow_unverified=args.allow_unverified)]
         for row in plans:
             for notice in row["notices"]:
                 print(notice, file=sys.stderr)
         if any(not row["allowed"] for row in plans):
-            raise RuntimeError(ACK_WHY)
+            raise RuntimeError("Shared tests failed on this configuration. Add -AllowUnverifiedImageModel "
+                               "to explicitly accept the download risk, or use -Model auto for SD-Turbo. "
+                               "No model bytes were downloaded; runtime guards remain unchanged.")
         if args.check_access:
             check_model_access([row["selected_model"] for row in plans if row["download"]], base)
             print("Model repository access checked; no model downloads started.")

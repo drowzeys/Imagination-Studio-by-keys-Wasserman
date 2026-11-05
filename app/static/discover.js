@@ -90,7 +90,7 @@ function dscRow(node, n) {
         "Copy uninstall command")) : null);
 }
 function dscModelInfo(n, { hideUnknownFit = false } = {}) {
-  const size = n.download_size, fit = n.runtime_fit, recipes = n.recipe_fit;
+  const size = n.download_size, fit = n.runtime_fit, recipes = n.recipe_fit, shared = n.shared_measurements;
   if (!size && !fit) return null;
   const bytes = size?.bytes;
   return el("div", { class: "stack" },
@@ -101,7 +101,9 @@ function dscModelInfo(n, { hideUnknownFit = false } = {}) {
     recipes ? el("div", { class: "note" }, recipes.summary) : null,
     !recipes && n.shared_measurements?.summary ? el("div", { class: "note" }, n.shared_measurements.summary) : null,
     recipes?.memory_summary ? el("div", { class: "note", title: recipes.memory_note }, recipes.memory_summary) : null,
-    fit && !(fit.state === "unknown" && (hideUnknownFit || recipes)) ? el("div", { class: "note" + (fit.state === "insufficient_capacity" ? " vt-bad" : ""),
+    !recipes?.memory_summary && shared?.memory_summary ? el("div", { class: "note", title: shared.memory_note },
+      "Shared measurements: " + shared.memory_summary) : null,
+    fit && !(fit.state === "unknown" && (hideUnknownFit || recipes || shared?.memory_summary)) ? el("div", { class: "note" + (fit.state === "insufficient_capacity" ? " vt-bad" : ""),
       title: fit.why },
       el("b", {}, fit.state === "insufficient_capacity" ? "Not expected to run on this configuration. "
         : fit.state === "temporarily_busy" ? "Memory currently busy. " : fit.required_mb == null ? "Runtime fit unknown. " : ""),

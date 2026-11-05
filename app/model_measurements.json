@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-11-05T23:15:14.130230+00:00",
+  "generated_at": "2026-11-05T23:53:54.739120+00:00",
   "purpose": "Shared observations, not local passes, minimum RAM requirements or guaranteed fit.",
   "profiles": [
     {
@@ -75,18 +75,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "aa1f669f1d3c519a145af2f5f07a3d529fab62350a1eddec3866ec75eceb6f20",
+      "id": "ff2a4e129a3d41a4a98fbe0ddd04a7c80df12bc14486525b1cf848e3049b6183",
       "feature": "qwen",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -126,18 +126,18 @@
       ],
       "interrupted": true,
       "provenance_complete": false,
-      "id": "0c1510361e34d99057074204a28d59cadc2bcf549256e95b54be4c72a12c58a3",
+      "id": "52315e008f07f915412861ebab7686da7a860874287ea509d79f3305a7a9581e",
       "feature": "qwen",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -218,18 +218,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "2ec70b0573a4b51f30c468cc7f7dcc4b4d469e438899c47a7c86b90a214eb1ac",
+      "id": "8bf6bfbd2e15af68ff0866e19b248d8474326be32ce6860a065929c024e18066",
       "feature": "qwen",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -311,18 +311,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "1d0531e9c3adae82f9040f1514abd0388b0d472c160a852a5ce34c50a569edf2",
+      "id": "39ab1bf697e3f77523655133f6cdc5b4173f55b3cbeb57012666c940d4881781",
       "feature": "qwen",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -362,18 +362,18 @@
       ],
       "interrupted": true,
       "provenance_complete": false,
-      "id": "7fb652e434f7a5b7420d399bc00612df3ca1dde47516790cba4a00a920b932fd",
+      "id": "3fd04f7d50f65220de647a8d8280050dfbcc0d4fb76818a1ad7ff7da752db730",
       "feature": "qwen",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -454,18 +454,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "babbd6984e620e2142333f2e88782a9a91ffaae3ffcc340d10a8092561d58d9d",
+      "id": "111f8702c2c69999a64ca3647cb7fe752b41fadbfd68786d49d090242c0e5995",
       "feature": "qwen",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -547,18 +547,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "8adcf7d0989c8a735bb3fa4e510ca416186f34d643f3a664ff26b29e18f741fd",
+      "id": "be023f3beabe91ff1ce718e0f3232664b94de8d8907d6b2eeb72069806ff75df",
       "feature": "qwen",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -641,18 +641,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "1b97ad9320d399a79b359cfe7ea7c575465660390e79f4446c4421283f0ce8dd",
+      "id": "c63d513deb003a484471a9f89aaeb9be46ef99b21155cbe84a7a7723c7000727",
       "feature": "qwen-full",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -735,18 +735,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "10191991246f6853b28d6e30cea2f51ab913ce792ab02f7a46b7f97c8664079e",
+      "id": "332f6e7f5b27edd2ae7f6f134f92b174d514b1d6d99d72f9cacd44f139d8f05e",
       "feature": "qwen-full",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -786,18 +786,18 @@
       ],
       "interrupted": true,
       "provenance_complete": false,
-      "id": "f33969693603ead1924bb59bbb5118fb7dba57480229ebf06335a2b23eeb701e",
+      "id": "0f169b185c96519a4a7dba7e27ff9c4bd2f5560f385cd39731488e0d0718ef72",
       "feature": "qwen-full",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -836,18 +836,18 @@
       ],
       "interrupted": true,
       "provenance_complete": false,
-      "id": "e0a9571a5b7033834a526fddd30a02bca86974e16b655f1288ab1caa55891700",
+      "id": "5f49c761aef1c42dc9d8eb6d9c5ef027a49ec7979dd817f71137655746dab802",
       "feature": "qwen-full",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -886,18 +886,18 @@
       ],
       "interrupted": true,
       "provenance_complete": false,
-      "id": "a9dc643fabad2a6f9c67443005f589dcf2e1e6982cc4d12a22ca97177e858723",
+      "id": "b0ed0ab2f521a84de0c93c5f0169301cf572b3c49fc5619bbb9d551d4f72fe29",
       "feature": "flux3k-fast",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -936,18 +936,18 @@
       ],
       "interrupted": true,
       "provenance_complete": false,
-      "id": "1958f6138b4b621c5e33b147a70254bdf8a42fed24ac0be87b6df8d6cdf67c89",
+      "id": "79c82c54416dcdcae482089b5a75aebabcabfb95adb0ac34575f2db5040565f8",
       "feature": "moss-image",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -986,18 +986,18 @@
       ],
       "interrupted": true,
       "provenance_complete": false,
-      "id": "ab5d8943642e999ca11c017d00f6cd7aa1c44a29124d6967c82c6364a7baca82",
+      "id": "33bf60afea07516a24a9f9ae18a51a90d88a4a98be47e649c949588b35a3583a",
       "feature": "voice",
       "execution": {
         "platform": "windows",
         "backend": "native-cuda",
         "engine": "tensorfold",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -1037,18 +1037,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "a31e8e719f72eaf8c953dfbbbb5dc2c26c8b13a3f55f391af0a836c4d3e34368",
+      "id": "015ab8e28ca66bfb89ea6fcde80867f8f49b404eb1d982d3f73aa4a92a84e281",
       "feature": "scout",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "diffusers",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -1088,18 +1088,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "5c7a20c84795298575c96d762a4f956e570a38f6bd54d48532b32892f199e8d4",
+      "id": "3510891eb6445de290b9d235307f16c29945b1af84d8369538e55b1c51d181e7",
       "feature": "sfx",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "diffusers",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -1154,18 +1154,18 @@
       ],
       "interrupted": false,
       "provenance_complete": false,
-      "id": "942d1f2723e451d0b4eaebc52e3fd7657d96030d305099e34ff3eaeb94fec54a",
+      "id": "e61e7107d220192b248dc74f1416093c08d3b984ed3929b3c97fa001565a0e0d",
       "feature": "foley",
       "execution": {
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "mmaudio",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "provenance": {
@@ -1557,12 +1557,12 @@
         "platform": "windows",
         "backend": "torch-cuda",
         "engine": "comfyui",
-        "architecture": "unknown",
+        "architecture": "arm64",
         "topology": {
-          "memory": "unknown",
-          "devices": null,
-          "device_family": "unknown",
-          "device_model": "unknown"
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
         }
       },
       "runtime_versions": {},
@@ -1585,7 +1585,53 @@
       "interrupted": false,
       "provenance_complete": true,
       "provenance": {},
-      "id": "1d801c66eea3bcfe38991ac7fdcf025953961af3b85639231b7fbbf53971e08a"
+      "id": "89100031e6f6f38cc0ffcd42e9372afce1195771ad80f0a7d3e8df82206460af"
+    },
+    {
+      "model": "flux3k-full",
+      "feature": "flux3k-full",
+      "scope": "basic",
+      "outcome": "commit_reserve",
+      "checked_at": "2026-11-05T23:52:03.625704+00:00",
+      "identity": null,
+      "hardware": {
+        "physical_total_mb": 65536,
+        "host_total_mb": 32460,
+        "gpu_dedicated_total_mb": 31232
+      },
+      "execution": {
+        "platform": "windows",
+        "backend": "torch-cuda",
+        "engine": "comfyui",
+        "architecture": "arm64",
+        "topology": {
+          "memory": "unified",
+          "devices": 1,
+          "device_family": "nvidia-n1x",
+          "device_model": "nvidia-rtx-spark-n1x"
+        }
+      },
+      "runtime_versions": {},
+      "observations": [
+        {
+          "elapsed_s": 69.124,
+          "peak_job_commit_mb": 26078.1484375,
+          "rendered": false,
+          "samples": 271,
+          "minimum_free_mb": {
+            "host_available_mb": 5544,
+            "host_commit_headroom_mb": 4171,
+            "dedicated_gpu_free_mb": 9584
+          },
+          "gpu_pool_mb": 31232,
+          "commit_limit_mb": 67276,
+          "case": "FLUX3-K Full: 1 image(s), 512x512"
+        }
+      ],
+      "interrupted": true,
+      "provenance_complete": false,
+      "provenance": {},
+      "id": "9ff64a8e7be9a7a9c15138291646adee37b2b931659b11724448fd6d79df9683"
     }
   ]
 }

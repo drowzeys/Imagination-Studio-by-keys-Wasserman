@@ -40,11 +40,9 @@ Already have a local checkout? Register its tray and shortcuts without installin
 powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend native
 ```
 
-**Add models from Settings → Models & weights.** It shows installed components, download sizes and runtime-fit
-warnings, with the appropriate PowerShell setup commands. Setup reuses existing files. Automatic selection
-skips missing models whose known runtime requirement exceeds the machine's applicable memory pool.
-Unknown fit is labelled unknown—not supported or unsupported by guesswork. An explicit override allows an
-incompatible download after acknowledgment, but never changes the runtime guards.
+**Add models from Settings → Models & weights:** see download sizes, measured memory usage and setup commands.
+Below 128 GiB RAM, setup helps avoid huge downloads unlikely to run; an explicit flag lets you proceed anyway.
+See [Windows setup](docs/windows.md) for the details.
 
 **Verify features in Machine → Feature checks.** Checks are opt-in renders on this machine, not background
 startup tests. Each passed recipe enables its tested settings; groups run recipes sequentially and retain

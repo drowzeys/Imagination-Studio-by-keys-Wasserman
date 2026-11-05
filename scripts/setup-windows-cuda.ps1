@@ -40,7 +40,7 @@ param(
   [switch]$Sound,
   [switch]$Voice,                         # Fish Audio Drama 3: build drama3-generate.exe + tensorfold_drama3.dll, fetch fishaudio/drama-3
   [switch]$NoDownload,                    # no model downloads (the files are already in -Models)
-  [switch]$AllowUnverifiedImageModel,     # explicitly accept unknown native image fit before downloading missing weights
+  [switch]$AllowUnverifiedImageModel,     # accept failed shared image recipes on matching hardware before download
   [switch]$AutomaticModelSelection,      # broad/automatic setup skips components whose runtime pool is known too small
   [switch]$AllowInsufficientModel,        # explicit download despite a known capacity mismatch; never relaxes runtime guards
   [switch]$SkipToolchain,
@@ -80,8 +80,7 @@ if ($PlanOnly) {
      runtime_fit='Not probed in PlanOnly. Before downloads: known insufficient automatic choices are skipped; explicit mismatches require -AllowInsufficientModel. Unknown fit is not a pass.';
      automatic_model_selection=[bool]$AutomaticModelSelection;
      image_fit='unknown; the N1X 128 GB Turbo measurement is a reference, not a minimum or a qualification for other variants';
-     image_download_guard=(@($Want | Where-Object { $_ -in @("image", "image-edit", "flux3", "moss") }).Count -gt 0 -and
-                          -not $NoDownload -and -not $AllowUnverifiedImageModel);
+     image_download_guard='Not probed. Matching failed shared tests require explicit override; no shared metadata warns only.';
      safe_image_setup='scripts\setup-windows-images.ps1 -Model auto' } |
     ConvertTo-Json -Compress
   exit 0
@@ -97,6 +96,7 @@ if (-not $NoDownload -and -not $ToolchainOnly -and @($Want | Where-Object { $_ -
                '--parts',($Want -join ','),'--models',$Models)
   if ($AutomaticModelSelection) { $FitArgs += '--automatic' }
   if ($AllowInsufficientModel) { $FitArgs += '--allow-insufficient' }
+  if ($AllowUnverifiedImageModel) { $FitArgs += '--allow-shared-image-failures' }
   if (Test-Path -LiteralPath $Gpu) { $FitText = & $Gpu @FitArgs }
   else {
     if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
@@ -107,7 +107,7 @@ if (-not $NoDownload -and -not $ToolchainOnly -and @($Want | Where-Object { $_ -
   if ($LASTEXITCODE -ne 0) { throw 'Pre-download runtime-fit planning failed; no install or download was started.' }
   $Fit = ($FitText | Out-String) | ConvertFrom-Json
   if ($Fit.blocked) {
-    throw 'A requested model exceeds a known runtime pool. Review the requirement above; explicitly add -AllowInsufficientModel to download anyway. Runtime guards remain unchanged.'
+    throw 'A requested model exceeds a known runtime pool or has failed shared tests on matching hardware/capacity. Review the messages above; explicitly add -AllowInsufficientModel to download anyway. Runtime guards remain unchanged.'
   }
   $Want = @($Want | Where-Object { $_ -notin $Fit.skip_parts })
   if ('voice' -in $Fit.skip_parts) { $Voice = $false }
@@ -124,7 +124,7 @@ $ImageParts = @($Want | Where-Object { $_ -in @("image", "image-edit", "flux3", 
 if ($ImageParts.Count -gt 0 -and -not $NoDownload -and -not $ToolchainOnly) {
   $Guard = @("-X", "utf8", (Join-Path $Root "app\windows_image_setup.py"),
              "--guard-parts", ($ImageParts -join ","), "--models", $Models)
-  if ($AllowUnverifiedImageModel) { $Guard += "--allow-unverified" }
+  if ($AllowUnverifiedImageModel -or $AllowInsufficientModel) { $Guard += "--allow-unverified" }
   if (Test-Path -LiteralPath $Gpu) {
     & $Gpu @Guard
   } else {

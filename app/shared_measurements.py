@@ -302,9 +302,49 @@ def references(model, data=None, *, platform, backend=None, engine=None, feature
             and (feature is None or row["feature"] == feature)]
     passed = {(row["feature"], row["scope"]) for row in rows if row["outcome"] == "passed"}
     failed = {(row["feature"], row["scope"]) for row in rows if row["outcome"] != "passed"}
-    return {"passed_recipes": len(passed), "failed_recipes": len(failed),
+    observations = [{**reading, "interrupted": row.get("interrupted", False)}
+                    for row in rows for reading in row.get("observations", [])]
+    memory = memory_summary(observations)
+    capacities = sorted({row.get("hardware", {}).get("physical_total_mb") for row in rows
+                         if number(row.get("hardware", {}).get("physical_total_mb"))})
+    hardware_note = ("Recorded on " + "/".join(f"{size / 1024:g}" for size in capacities)
+                     + " GiB installed RAM. ") if capacities else ""
+    return {"passed_recipes": len(passed), "failed_recipes": len(failed), **memory,
             "summary": f"Shared tests: {len(passed)} recipes passed, {len(failed)} had unsuccessful attempts on recorded hardware."
-                       " Reference only; local fit is not inferred."} if rows else {}
+                       " " + hardware_note + "Reference only; local fit is not inferred."} if rows else {}
+
+
+def install_advice(model, hardware, execution, data=None):
+    """Failed shared recipes gate downloads only on the same recorded execution/capacity profile."""
+    rows = [row for row in (data if data is not None else load())["profiles"] if row["model"] == model]
+    matching = [row for row in rows if compatible(row["execution"], execution)
+                and all(number(hardware.get(key)) and hardware[key] == row["hardware"].get(key)
+                        for key in ("physical_total_mb", "gpu_dedicated_total_mb"))]
+    failures = [row for row in matching if row["outcome"] in
+                ("commit_reserve", "memory_refusal", "execution_failed")]
+    passes = [row for row in matching if row["outcome"] == "passed"]
+    if failures and not passes:
+        limited = number(hardware.get("physical_total_mb")) and 0 < hardware["physical_total_mb"] < 128 * 1024
+        return {"state": "matching_failures", "blocked": limited,
+                "why": f"Shared tests for {model} include {len(failures)} failed recipe attempt(s) on matching "
+                       "hardware/backend and memory capacities, with no passing recipes. This is not "
+                       "a universal no-fit claim. "
+                       + ("Below 128 GiB installed RAM, an explicit download override is required to avoid "
+                          "large downloads that are unlikely to be useful. " if limited else
+                          "At 128 GiB or more, this is a warning only; download is allowed. ")
+                       + "Live guards remain unchanged."}
+    if failures and passes:
+        return {"state": "partially_useful", "blocked": False,
+                "why": f"Shared tests for {model}: {len(passes)} passing and {len(failures)} failed recipe attempt(s) "
+                       "on matching hardware/backend and capacities. Some tested presets work; larger or other "
+                       "recipes may not. Download allowed; local qualification and live guards still apply."}
+    if matching:
+        return {"state": "matching_observations", "blocked": False,
+                "why": f"Shared observations for {model} exist on matching hardware/capacity. "
+                       "They do not qualify this machine or guarantee every recipe fits."}
+    return {"state": "no_matching_metadata", "blocked": False,
+            "why": f"WARNING: {model} has no shared measurement metadata for this hardware/backend and capacity "
+                   "configuration. Runtime fit is unverified; download size is not runtime memory."}
 
 
 def memory_summary(observations):

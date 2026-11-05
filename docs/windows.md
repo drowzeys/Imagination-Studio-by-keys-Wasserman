@@ -15,7 +15,20 @@ H3 video retains its own engine and pool prerequisites; it does not gate unrelat
 Native CUDA setup currently targets **Windows 11 on Arm / RTX Spark N1X**. The UI environment can run without
 the CUDA engine installation; that does not make an arbitrary Windows GPU supported.
 
-### Start with the app
+### Install from the web
+
+For a new install, run in an administrator PowerShell:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1" -Native
+```
+
+This clones Studio, installs selected components and registers Desktop/Start shortcuts and the tray.
+Review model licences, download sizes and the runtime-fit plan before proceeding. Open **Imagination Studio**
+from Desktop or Start when setup finishes.
+
+### Start with the app only (local checkout)
 
 Install the official Python install manager (`py`) and Git, clone this repository, then use PowerShell in the
 checkout:
@@ -41,11 +54,22 @@ not that every recipe has passed a render check.
 - **Temporary contention:** current free memory is lower than required, but the pool could meet the policy.
   This is not a permanent unsupported-machine result.
 - **Unknown fit:** there is no declared envelope for that route. It is not labelled a success or a capacity failure.
+- **Below 128 GiB RAM, matching shared failures with no passes:** failed tests on the same recorded OS/backend, device family/model,
+  architecture and physical/dedicated capacities block missing-model downloads before setup. Automatic setup
+  skips the affected component. This is a risk acknowledgment, not a claim that every recipe is impossible.
+  At 128 GiB or more, shared failures warn only. This download-risk gate is separate from declared
+  admission policies and live safety guards, which remain unchanged.
+- **Mixed shared results:** some tested presets passed, so download is allowed with a warning that other
+  presets failed. Local qualification and runtime guards still apply.
+- **No matching shared metadata:** setup logs a warning and continues; missing evidence alone never blocks.
 - **Existing files:** retained and reused; nothing is deleted to force a fresh download.
 
 The UI withholds an incompatible missing model's setup command until **download anyway** is acknowledged.
-The copied command then includes `-AllowInsufficientModel`. Unknown native image installs have a separate
-`-AllowUnverifiedImageModel` acknowledgment. Neither changes runtime guards.
+The copied command then includes `-AllowInsufficientModel`. This flag also explicitly overrides matching
+shared-test failures. For the image-only installer use `-AllowUnverifiedImageModel` to accept matching failed
+image recipes. Unknown-image metadata warns without requiring either flag. Neither changes runtime guards.
+`-NoDownload` and complete cached weights remain reusable without a new download acknowledgment; `-PlanOnly`
+performs no probes or installation.
 
 The shared [model catalog](../app/model_catalog.json) holds file lists, pinned checksums, published download
 sizes and runtime policies. Setup and the engines read the same admission values. Sizes are model payload,

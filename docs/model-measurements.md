@@ -30,6 +30,9 @@ The portable identity's `feature` names the checked recipe family, not a second 
 public identifiers, not a device UUID, host name or arbitrary GPU-name string.
 
 Missing historical architecture/device/topology is explicitly `unknown`/`null`, not inferred from capacity.
+The 18 actual observations collected on this branch have a known source configuration: Windows ARM64 RTX
+Spark (N1X), one unified-memory device. Their execution metadata was annotated from that known test machine,
+not inferred from pool sizes. Recorded measurements, dates and legacy content provenance remain unchanged.
 Missing historical per-result `case` is `null`; new exports preserve allowlisted production case labels
 or numeric recipe descriptors. Historical weight/engine file counts were not retained, so
 `identity.weights_expected` and `engine_expected` are `null`, completeness is false, and the original
@@ -58,7 +61,10 @@ Find a person uses SAM without H3; generative Library actions additionally requi
 action-specific dependencies. Each action's Feature checks remains the source of qualification status.
 
 Models & weights shows recorded GPU usage and owned-job commitment for every linked feature with saved
-readings, including bounded SD-Turbo, SFX and Foley. Installed files alone do not provide observed usage.
+readings. Before installation, applicable shared profiles also show their observed ranges and recorded RAM
+capacity instead of a generic unknown-fit message. These are reference observations, not local passes or
+guaranteed fit; known admission-policy warnings remain visible.
+Local readings include bounded SD-Turbo, SFX and Foley. Installed files alone do not provide observed usage.
 Historical observations remain distinct from current qualification and admission.
 
 Do not replace an admission requirement with an observed peak or treat a failed run as a measured minimum.
@@ -152,6 +158,21 @@ Hardware fields describe capacity/pools, not a person's machine identity.
 4. Merge reviewed schema-1 `profiles` into `app/model_measurements.json`, deduplicating by profile `id`; retain distinct
    hardware/weight/recipe observations. Do not copy the full raw local report into the repository.
 5. Run the tests below, then review/stage/commit yourself. The tool never stages, commits or pushes.
+
+Installers use shared observations as a conservative download-risk gate, not a fit guarantee:
+
+- Below 128 GiB installed RAM, failed recipe attempts with no passes on matching Windows backend/engine, architecture, public device family/model
+  and physical/dedicated capacities require an explicit override before missing weights are downloaded.
+  Automatic broad setup skips the affected component. Mixed pass/fail results allow downloading with a
+  partial-usefulness warning: passing presets remain useful, but not every recipe has passed.
+  At 128 GiB or more shared failures warn without blocking downloads. This helps smaller machines avoid
+  huge, likely-unusable downloads by default; it does not change declared admission policies or runtime guards.
+- `setup-windows-cuda.ps1 -AllowInsufficientModel` overrides that gate (and the existing declared-capacity gate).
+  `setup-windows-images.ps1 -AllowUnverifiedImageModel` overrides shared image failures only.
+- No shared metadata, unknown hardware identity or different capacities log a warning without blocking.
+  A successful reference is not local qualification. Cancelled or provenance-changed attempts are not
+  treated as model execution failures.
+- Complete cached weights and `-NoDownload` remain reusable; `-PlanOnly` stays probe-free.
 
 Shared rows are references in Models & weights, not installer guarantees. Setup's existing known-capacity
 policy remains authoritative; observations do not fabricate predictive minimums, extend recipe bounds or
