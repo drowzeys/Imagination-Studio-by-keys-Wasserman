@@ -74,6 +74,22 @@ function featureCheckGroups(cards, rooms = typeof ROOMS !== "undefined" ? ROOMS 
   return keys.map(key => ({ id: key, title: rooms.find(room => room.id === key)?.name || (key === "other" ? "Other features" : key),
     cards: cards.filter(card => (card.group || "other") === key) }));
 }
+function wfcSummary(cards) {
+  const credit = card => {
+    if (card.installed === false) return 0;
+    const levels = card.qualification_levels;
+    return levels?.length ? levels.filter(level => level.qualified).length / levels.length : card.qualified ? 1 : 0;
+  };
+  const score = cards.reduce((sum, card) => sum + credit(card), 0);
+  const complete = cards.length > 0 && cards.every(card => credit(card) === 1);
+  const missing = cards.filter(card => card.installed === false).length;
+  const shown = Number(score.toFixed(2));
+  return el("span", { class: "qualification-summary", "data-qualified-total": cards.length },
+    el("span", { class: "tag2" + (complete ? " ok" : ""),
+      title: "Each feature counts as one point. Its recipes share that point equally; missing features remain in the total." },
+      complete ? "✓ All features qualified" : shown + "/" + cards.length + " features qualified"),
+    missing ? el("span", { class: "dsc-state missing" }, missing + " not on this machine") : null);
+}
 const wfcBusy = card => card.job && ["queued", "running"].includes(card.job.status);
 const wfcTime = value => { const time = typeof value === "number" ? value * 1000 : Date.parse(value || ""); return Number.isFinite(time) ? time : 0; };
 function wfcAttempt(card) {
@@ -138,6 +154,16 @@ function wfcAdmission(card, memory) {
     ? "Memory is currently busy: a new job may be refused until enough memory is free. Your saved qualification is unchanged."
     : "Memory headroom is available now; admission is checked again when you run a job.");
 }
+let WFC_JOB_SIGNATURE = null;
+async function wfcObserveJobs(currentJobs) {
+  if (!S?.feature_checks?.supported || WFC.loading) return;
+  const checks = currentJobs.filter(job => job.kind === "qualification");
+  const signature = checks.map(job => job.id + ":" + job.status).sort().join("|");
+  const changed = signature !== WFC_JOB_SIGNATURE;
+  WFC_JOB_SIGNATURE = signature;
+  if (checks.some(job => ["queued", "running"].includes(job.status)) || changed && (checks.length || WFC.data))
+    await wfcLoad();
+}
 async function wfcLoad() {
   if (WFC.loading) return;
   WFC.loading = true;
@@ -177,17 +203,23 @@ function wfcCheckDetails(card, ...content) {
 function wfcRecipePicker(card, active) {
   const selected = WFC.scopes[card.id] || wfcNextSelection(card);
   const choose = value => { WFC.scopes[card.id] = value; wfcDraw(); };
-  const mark = (passed, outcome) => el("span", { class: "qualification-mark" + (passed ? " passed" : outcome === "failed" ? " failed" : ""),
-    "aria-hidden": "true" }, passed ? "✓" : outcome === "failed" ? "×" : "○");
+  const mark = (passed, outcome) => el("span", { class: "qualification-mark" + (passed ? " passed" : outcome === "failed" ? " failed" : outcome === "partial" ? " partial" : ""),
+    "aria-hidden": "true" }, passed ? "✓" : outcome === "failed" ? "×" : outcome === "partial" ? "◐" : "○");
   const groups = card.qualification_groups || [], levels = card.qualification_levels || [];
   return el("div", { class: "qualification-recipes" },
     groups.length ? el("div", { class: "qualification-group-grid", role: "radiogroup", "aria-label": "Check groups: " + card.title },
       groups.map(group => {
         const complete = group.remaining.length === 0, value = "group:" + group.id;
+        const members = levels.filter(level => group.scopes?.includes(level.id));
+        const passed = members.filter(level => level.qualified).length;
+        const failed = members.filter(level => !level.qualified && level.outcome === "failed").length;
+        const progress = members.length ? passed + "/" + members.length + " passed" : "";
+        const status = complete ? "Passed · nothing to check"
+          : [progress, failed ? failed + " failed" : "", group.remaining.length + " recipes remaining"].filter(Boolean).join(" · ");
         return el("button", { type: "button", class: "qualification-group" + (selected === value ? " selected" : ""),
           role: "radio", "aria-checked": selected === value, disabled: active, onclick: () => choose(value) },
-          mark(complete), el("span", {}, el("b", {}, group.title),
-            el("small", {}, complete ? "Passed · nothing to check" : group.remaining.length + " recipes remaining")));
+          mark(complete, failed ? "failed" : passed ? "partial" : ""), el("span", {}, el("b", {}, group.title),
+            el("small", {}, status)));
       })) : null,
     el("details", { class: "fold qualification-individuals", open: !groups.length || !selected.startsWith("group:") },
       el("summary", {}, "Individual recipes", el("span", { class: "tag2" },
@@ -243,13 +275,15 @@ function wfcDraw() {
     data ? el("div", { class: "note" }, memory.error || Object.values(memory.pools || {}).map(pool => pool.label + " available: " + wfcGB(pool.available_mb)).join(" · ")
       + ". Memory pools may overlap; do not add them.") : el("div", { class: "note" }, "Reading saved results…")].filter(Boolean));
   if (!data) return;
+  const total = document.querySelector("#feature-check-summary");
+  if (total) total.replaceChildren(wfcSummary(data.features));
   for (const group of featureCheckGroups(data.features)) {
     if (requestedFocus && group.cards.some(card => card.id === requestedFocus)) WFC.groups[group.id] = true;
     const groupBody = el("div", { class: "stack", style: "margin-top:12px" });
     const groupBox = el("details", { class: "feature-check-group", "data-check-group": group.id, open: !!WFC.groups[group.id],
       ontoggle: e => { if (e.currentTarget.isConnected) WFC.groups[group.id] = e.currentTarget.open; } },
       el("summary", {}, typeof icon === "function" && group.id !== "other" ? icon(group.id) : null,
-        el("b", {}, group.title), el("span", { class: "note m-flat" }, group.cards.length + " feature" + (group.cards.length === 1 ? "" : "s"))),
+        el("b", {}, group.title), wfcSummary(group.cards)),
       groupBody);
     put(box, groupBox);
     for (const card of group.cards) {
@@ -325,8 +359,10 @@ function featureChecksPanel() {
       if (WFC.open) { wfcDraw(); wfcLoad(); }
       else { clearTimeout(WFC.timer); WFC.timer = null; }
     } },
-    el("summary", {}, el("b", {}, "Feature checks"), el("span", { class: "note m-flat" }, " · optional checks and saved results")), body);
-  setTimeout(() => { wfcDraw(); if (section.open) wfcLoad(); }, 0);
+    el("summary", {}, el("b", {}, "Feature checks"),
+      el("span", { id: "feature-check-summary" }, WFC.data ? wfcSummary(WFC.data.features) :
+        el("span", { class: "note m-flat" }, "Optional checks and saved results"))), body);
+  setTimeout(() => { wfcDraw(); wfcLoad(); }, 0);
   return section;
 }
 function featureChecksSection() {

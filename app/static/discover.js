@@ -17,11 +17,9 @@
 .dsc-row .top b{font-weight:600;color:var(--text)}
 .dsc-path{font:12px/1.4 var(--mono);color:var(--dim);word-break:break-all}
 .dsc-cand{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px}
-.dsc-state{font:600 11px/1 var(--sans);padding:3px 7px;border-radius:999px;border:1px solid var(--line2);color:var(--dim)}
 .dsc-state.expected{color:var(--green);border-color:var(--green)}
 .dsc-state.found{color:var(--blue);border-color:var(--blue)}
 .dsc-state.needs-conversion{color:var(--amber);border-color:var(--amber)}
-.dsc-state.missing{color:var(--red);border-color:var(--red)}
 .dsc-state.scanning{color:var(--amber);border-color:var(--amber)}
 .dsc-state.opt{color:var(--faint);border-color:var(--line)}
 .dsc-cmd{font:12px/1.4 var(--mono);background:var(--bg2);border:1px solid var(--line);border-radius:var(--r1);padding:4px 6px;margin-top:4px;word-break:break-all;color:var(--text)}

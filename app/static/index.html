@@ -1343,6 +1343,7 @@ function queueDraw(box) { const shown = jobs.slice(0, 30), was = CARDS.size ? [.
   CARDS.clear(); for (const [id, one] of next) CARDS.set(id, one); }
 async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   if (HELD) return;  // the next poll draws it, once the pointer is up
+  if (typeof wfcObserveJobs === "function") await wfcObserveJobs(jobs);
   jobTools(); queueDraw($("#jobs")); bayUpdate();
   // a timeline changed from another window or device shows here without a reload
   if (project && tab === "Editor" && !busyHere()) { try { const fresh = await api("/api/projects/" + project.id);

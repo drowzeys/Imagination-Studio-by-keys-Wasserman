@@ -370,6 +370,28 @@ console.log(JSON.stringify(out));
     assert out["individual"] == ["/api/feature-checks/check", {"feature": "qwen", "scope": "basic"}]
 
 
+def test_group_status_distinguishes_partial_progress_from_partial_or_total_failure():
+    out = run_frontend(r"""
+const levels=[
+  {id:"basic",qualified:true},{id:"studio",qualified:false,outcome:"not_checked"},
+  {id:"landscape",qualified:false,outcome:"failed"},{id:"square",qualified:true}];
+const groups=[
+  {id:"partial",title:"Partial",scopes:["basic","studio"],remaining:["studio"]},
+  {id:"mixed",title:"Mixed",scopes:["landscape","square"],remaining:["landscape"]},
+  {id:"failed",title:"Failed",scopes:["landscape"],remaining:["landscape"]},
+  {id:"passed",title:"Passed",scopes:["basic","square"],remaining:[]},
+  {id:"untested",title:"Untested",scopes:["studio"],remaining:["studio"]}];
+const picker=wfcRecipePicker({id:"qwen",title:"Qwen",qualification_groups:groups,qualification_levels:levels},false);
+const grid=find(picker,n=>n.attrs?.class==="qualification-group-grid");
+console.log(JSON.stringify(grid.kids.map(node=>({text:text(node),mark:node.kids[0].attrs.class}))));
+""")
+    assert "◐" in out[0]["text"] and "1/2 passed" in out[0]["text"] and "partial" in out[0]["mark"]
+    assert "×" in out[1]["text"] and "1/2 passed" in out[1]["text"] and "1 failed" in out[1]["text"]
+    assert "×" in out[2]["text"] and "0/1 passed" in out[2]["text"]
+    assert "✓" in out[3]["text"] and "nothing to check" in out[3]["text"]
+    assert "○" in out[4]["text"] and "0/1 passed" in out[4]["text"]
+
+
 def test_failed_and_cancelled_recipes_are_not_labelled_unchecked():
     out = run_frontend(r"""
 const card={id:"qwen",title:"Qwen",qualification_levels:[
@@ -383,6 +405,61 @@ console.log(JSON.stringify(rows.map(text)));
     assert "Failed" in out[0] and "×" in out[0] and "Not checked" not in out[0]
     assert "Cancelled" in out[1] and "Not checked" not in out[1]
     assert "Not checked" in out[2]
+
+
+def test_overall_and_category_scores_refresh_when_closed_panel_job_finishes():
+    out = run_frontend(r"""
+const overall=el("span"); nodes["#feature-check-summary"]=overall;
+const feature={id:"qwen",title:"Qwen",group:"image",installed:true,qualified:true,check_available:true,
+  qualification_levels:[{id:"basic",qualified:true},{id:"studio",qualified:false}],evidence:{results:[]},
+  job:{id:"check1",status:"running"}};
+WFC.data={features:[feature],mode:{enabled:true},memory:{}};
+wfcDraw();
+const out={before:text(overall)};
+const savedApi=api;
+globalThis.api=async(path,body)=>{
+  if(path==="/api/feature-checks")return {features:[{...feature,
+    qualification_levels:[{id:"basic",qualified:true},{id:"studio",qualified:true}],job:{id:"check1",status:"done"}}],
+    mode:{enabled:true},memory:{}};
+  return savedApi(path,body);
+};
+WFC_JOB_SIGNATURE="check1:running";
+await wfcObserveJobs([{id:"check1",kind:"qualification",status:"done"}]);
+out.after=text(overall);
+out.category=text(find(nodes["#feature-checks"],n=>n.attrs?.["data-check-group"]==="image"));
+console.log(JSON.stringify(out));
+""")
+    assert "0.5/1 features qualified" in out["before"]
+    assert "All features qualified" in out["after"]
+    assert "All features qualified" in out["category"]
+
+
+def test_heading_summary_weights_recipes_once_per_feature_and_counts_missing():
+    out = run_frontend(r"""
+const cards=[
+  {installed:true,qualified:true},
+  {installed:true,qualified:true,qualification_levels:[{qualified:true},{qualified:true},{qualified:false},{qualified:false}]},
+  {installed:true,qualified:true,qualification_levels:Array.from({length:5},(_,i)=>({qualified:i===0}))},
+  {installed:false,qualified:false},
+  {installed:true,qualified:false,available:true}];
+const out={partial:text(wfcSummary(cards)),missingBadge:find(wfcSummary(cards),n=>n.attrs?.class==="dsc-state missing")?.tag,
+  complete:text(wfcSummary([{installed:true,qualified:true},
+  {installed:true,qualification_levels:[{qualified:true},{qualified:true}]}])),
+  empty:text(wfcSummary([])),installed:text(wfcSummary([{installed:true,qualified:false}])),
+  stale:text(wfcSummary([{installed:false,qualified:true,qualification_levels:[{qualified:true}]}]))};
+WFC.data={features:cards,mode:{enabled:false},memory:{}};
+out.heading=text(featureChecksPanel());
+console.log(JSON.stringify(out));
+""")
+    assert "1.7/5 features qualified" in out["partial"]
+    assert "1 not on this machine" in out["partial"]
+    assert out["missingBadge"] == "span"
+    assert "✓ All features qualified" in out["complete"]
+    assert "not on this machine" not in out["complete"]
+    assert "0/0 features qualified" in out["empty"] and "All features qualified" not in out["empty"]
+    assert "not on this machine" not in out["installed"]
+    assert "0/1 features qualified" in out["stale"]
+    assert "1.7/5 features qualified" in out["heading"]
 
 
 def test_completed_groups_and_recipes_have_checkmarks_and_collapsed_measurements():
