@@ -227,6 +227,19 @@ def test_installed_models_with_checks_hide_only_generic_unknown_fit():
     assert "Runtime fit unknown" in out["qualification"]
 
 
+def test_missing_model_shows_shared_measurements_instead_of_generic_unknown_fit():
+    out = run("""
+      out.text=text(dscModelInfo({state:"missing",download_size:{bytes:24260000000},
+        runtime_fit:{state:"unknown",required_mb:null,why:"Runtime fit is unknown."},
+        shared_measurements:{summary:"Shared tests: 5 recipes passed. Recorded on 64 GiB installed RAM.",
+          memory_summary:"Observed GPU usage (adapter-wide): 23.0–25.9+ GiB.",
+          memory_note:"Reference only; not a local qualification."}}));
+    """)
+    assert "Shared measurements:" in out["text"] and "23.0–25.9+ GiB" in out["text"]
+    assert "64 GiB" in out["text"]
+    assert "Runtime fit unknown" not in out["text"]
+
+
 def test_installed_model_reports_mixed_local_recipe_evidence():
     out = run("""
       const row={download_size:{bytes:24260000000},

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -54,6 +55,8 @@ def probe() -> dict:
             raise ValueError("The driver returned invalid GPU capacity.")
         result.update(gpu_total_mb=total, gpu_free_mb=free,
                       n1x=os.environ.get("STUDIO_N1X") == "1" or "N1X" in name or "RTX Spark" in name)
+        result["gpu_dedicated_total_mb"] = total
+        result["architecture"] = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86-64"
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         result.update(gpu_total_mb=None, gpu_free_mb=None, n1x=None,
                       error=f"GPU capacity could not be established: {type(error).__name__}: {error}")
@@ -124,6 +127,30 @@ def cached(part: str, models: Path) -> bool:
     return False
 
 
+def shared_advice(model: str, hardware: dict) -> dict:
+    import shared_measurements as shared
+    spec = model_catalog.model(model)
+    execution = windows_measurements.execution_profile(spec.get("feature", model))
+    if hardware.get("n1x") is True and hardware.get("architecture") == "arm64":
+        execution["architecture"] = "arm64"
+        execution["topology"] = {"memory": "unified", "devices": 1, "device_family": "nvidia-n1x",
+                                 "device_model": "nvidia-rtx-spark-n1x"}
+    return shared.install_advice(model, hardware, execution)
+
+
+def download_plan(part: str, hardware: dict, *, installed=False, automatic=False, allow_insufficient=False,
+                  allow_shared_image_failures=False) -> dict:
+    result = plan(part, hardware, installed=installed, automatic=automatic, allow_insufficient=allow_insufficient)
+    models = [key for key, spec in model_catalog.catalogue()["models"].items() if spec["part"] == part]
+    advice = [shared_advice(model, hardware) for model in models]
+    result["shared_advice"] = advice
+    image_override = allow_shared_image_failures and models and all(
+        model_catalog.model(model)["kind"] == "image" for model in models)
+    if not installed and any(row["blocked"] for row in advice) and not (allow_insufficient or image_override):
+        result["action"] = "skip" if automatic else "blocked"
+    return result
+
+
 def plan(part: str, hardware: dict, *, installed=False, automatic=False, allow_insufficient=False) -> dict:
     need = requirement(part)
     required = need["required_mb"]
@@ -163,15 +190,19 @@ def main(argv=None):
     parser.add_argument("--models", type=Path, required=True)
     parser.add_argument("--automatic", action="store_true")
     parser.add_argument("--allow-insufficient", action="store_true")
+    parser.add_argument("--allow-shared-image-failures", action="store_true")
     args = parser.parse_args(argv)
     try:
         parts = list(dict.fromkeys(part.strip() for part in args.parts.split(",") if part.strip()))
-        hardware = probe() if any(requirement(part)["required_mb"] is not None for part in parts) else {}
-        plans = [plan(part, hardware, installed=cached(part, args.models), automatic=args.automatic,
-                      allow_insufficient=args.allow_insufficient)
+        hardware = probe()
+        plans = [download_plan(part, hardware, installed=cached(part, args.models), automatic=args.automatic,
+                      allow_insufficient=args.allow_insufficient,
+                      allow_shared_image_failures=args.allow_shared_image_failures)
                  for part in parts]
         for row in plans:
             print(f"[setup-fit] {row['part']}: {row['state']} / {row['action']}. {row['why']}", file=sys.stderr)
+            for advice in row["shared_advice"]:
+                print("[setup-fit] " + advice["why"], file=sys.stderr)
         if hardware.get("error"):
             print("[setup-fit] " + hardware["error"], file=sys.stderr)
         print(json.dumps({"plans": plans, "skip_parts": [row["part"] for row in plans if row["action"] == "skip"],

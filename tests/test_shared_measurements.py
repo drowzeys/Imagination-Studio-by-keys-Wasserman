@@ -83,6 +83,28 @@ def test_export_does_not_invent_provenance_for_old_failures():
     assert row["hardware"] == {}
 
 
+def test_published_local_measurements_are_visible_without_installed_models():
+    result = shared.references("qwen", platform="windows", backend="torch-cuda", engine="comfyui")
+    assert result["passed_recipes"] >= 5
+    assert result["memory_ranges"]["gpu_usage"]["incomplete"]
+    assert "23.0" in result["memory_summary"] and "25.9+" in result["memory_summary"]
+    assert "64 GiB installed RAM" in result["summary"]
+    assert "qualified" not in result
+
+
+@pytest.mark.parametrize("physical,blocked", [(65536, True), (131071, True), (131072, False), (262144, False)])
+def test_shared_failure_download_gate_applies_only_below_128_gib(physical, blocked):
+    execution = {**shared.execution_profile("windows", "torch-cuda", "comfyui"),
+                 "architecture": "arm64", "topology": {"memory": "unified", "devices": 1,
+                 "device_family": "nvidia-n1x", "device_model": "nvidia-rtx-spark-n1x"}}
+    hardware = {"physical_total_mb": physical, "gpu_dedicated_total_mb": 31232}
+    data = {"profiles": [{"model": "moss-image", "execution": execution, "hardware": hardware,
+                          "outcome": "commit_reserve"}]}
+    advice = shared.install_advice("moss-image", hardware, execution, data)
+    assert advice["blocked"] is blocked and advice["state"] == "matching_failures"
+    assert ("warning only" in advice["why"]) is (not blocked)
+
+
 def test_reference_never_creates_local_qualification():
     execution = shared.execution_profile("windows", "torch-cuda", "comfyui")
     data={"profiles":[{"model":"qwen","feature":"qwen","scope":"basic","outcome":"passed","execution":execution},
@@ -220,8 +242,8 @@ def test_migration_round_trips_every_original_profile_and_identity_without_loss(
         for reading in restored["observations"]:
             assert reading.pop("case") is None
         assert restored["id"] == shared.digest({k: v for k, v in restored.items() if k != "id"})
-        assert row["execution"]["architecture"] == "unknown"
-        assert row["execution"]["topology"]["device_family"] == "unknown"
+        assert row["execution"]["architecture"] == "arm64"
+        assert row["execution"]["topology"]["device_family"] == "nvidia-n1x"
         assert not row["provenance_complete"]
     assert shared.validate(json.loads(json.dumps(data))) == data
 

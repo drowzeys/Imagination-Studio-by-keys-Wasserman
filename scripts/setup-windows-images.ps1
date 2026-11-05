@@ -4,7 +4,8 @@
 .DESCRIPTION
   Reuses healthy GPU/ComfyUI installations; installs only missing prerequisites using their existing pins/feed policy.
   No model render or qualification is started. Run the separate live image check after setup.
-  Explicit native choices never become SD-Turbo. Unknown-fit downloads require -AllowUnverifiedImageModel.
+  Explicit native choices never become SD-Turbo. Matching failed shared tests require -AllowUnverifiedImageModel.
+  Missing shared measurement metadata produces a warning, not a download block.
   The N1X 128 GB Qwen Turbo measurement is a reference, not a model minimum or a fit claim for other variants.
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\setup-windows-images.ps1 -Model auto
@@ -29,7 +30,7 @@ if ($PlanOnly) {
      prerequisites=@('GPU environment: install only if missing; otherwise offline verify',
                      'pinned ComfyUI: install only if missing; otherwise offline verify');
      native_toolchain=$false; qualification=$false; no_download=[bool]$NoDownload;
-     native_download_requires_acknowledgment=($Selected -ne 'sd-turbo' -and -not $NoDownload -and -not $AllowUnverifiedImageModel);
+     native_download_requires_acknowledgment='Not probed. Only failed shared tests on matching hardware/capacity require an override.';
      cached_models='Complete existing native files bypass the download acknowledgment; no render qualification implied.' } |
     ConvertTo-Json -Compress
   exit 0

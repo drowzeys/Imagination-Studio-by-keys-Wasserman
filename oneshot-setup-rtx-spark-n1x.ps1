@@ -60,8 +60,8 @@ param(
   [string]$NativeParts = "video,image,music,flux3,sound,swap,workflows,foley,finish",  # -Native: the parts (add train for Looks -> Train a LoRA, 46 GB)
   [switch]$NoBolt,                   # -Native: no Bolt brain (its engine build and NVIDIA's 25 GB of checkpoints)
   [switch]$NoVoice,                  # -Native: no Fish Audio Drama 3 (its engine build and the 70 GB checkpoint)
-  [switch]$AllowUnverifiedImageModel, # -Native: explicitly accept missing native image weights before fit is measured
-  [switch]$AllowInsufficientModel    # -Native: explicit opt-in download despite known insufficient runtime capacity
+  [switch]$AllowUnverifiedImageModel, # -Native: accept matching shared image test failures before download
+  [switch]$AllowInsufficientModel    # -Native: accept known insufficient capacity or matching shared test failures
 )
 $ErrorActionPreference = "Continue"   # native tools (wsl, powercfg) report through exit codes, checked where it matters
 $ProgressPreference = "SilentlyContinue"
