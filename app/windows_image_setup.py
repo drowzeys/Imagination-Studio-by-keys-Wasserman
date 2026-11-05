@@ -16,11 +16,14 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import model_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = ("auto", "sd-turbo", "qwen", "qwen-full", "flux3k-fast", "flux3k-full", "moss-image")
-NATIVE_PARTS = {"image": ("qwen",), "image-edit": ("qwen-full",),
-                "flux3": ("flux3k-fast", "flux3k-full"), "moss": ("moss-image",)}
+NATIVE_PARTS = {part: tuple(key for key, row in model_catalog.catalogue()["models"].items()
+                           if row.get("kind") == "image" and row["part"] == part)
+                for part in dict.fromkeys(row["part"] for row in model_catalog.catalogue()["models"].values()
+                                          if row.get("kind") == "image")}
 PART_FOR_MODEL = {model: part for part, models in NATIVE_PARTS.items() for model in models}
 AUTO_WHY = ("Auto selects SD-Turbo: native image memory fit is unknown without a matched "
             "runtime/hardware profile. RAM size alone does not establish fit.")
@@ -41,19 +44,7 @@ def downloader():
 
 def model_files(model: str) -> list[tuple[str, str, list[str]]]:
     """Use the existing downloader's manifest, without fetching another variant."""
-    parts = downloader().PARTS
-    if model == "qwen-full":
-        rows = [(repo, folder, [name for name in names if not name.startswith("diffusion_models/")])
-                for repo, folder, names in parts["image"]]
-        return rows + parts["image-edit"]
-    rows = parts[PART_FOR_MODEL[model]]
-    if model.startswith("flux3k-"):
-        weight = ("flux3-image-klein-bf16.safetensors" if model == "flux3k-fast"
-                  else "flux3-image-klein-base-bf16.safetensors")
-        return [(repo, folder, [name for name in names
-                               if not name.startswith("diffusion_models/") or name.endswith("/" + weight)])
-                for repo, folder, names in rows]
-    return rows
+    return [(row["repo"], row["folder"], row["files"]) for row in model_catalog.download_rows(model)]
 
 
 def complete_file(path: Path) -> bool:
@@ -234,6 +225,9 @@ def check_model_access(models: list[str], base: Path) -> None:
 def download_model(model: str, base: Path) -> int:
     module = downloader()
     rows = model_files(model)
+    from windows_setup_fit import plan
+    fit = plan(PART_FOR_MODEL[model], {})
+    print("[setup-fit] " + fit["why"], file=sys.stderr)
     for _, folder, names in rows:
         for name in names:
             path = base / folder / name

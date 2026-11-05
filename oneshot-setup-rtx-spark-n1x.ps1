@@ -60,7 +60,8 @@ param(
   [string]$NativeParts = "video,image,music,flux3,sound,swap,workflows,foley,finish",  # -Native: the parts (add train for Looks -> Train a LoRA, 46 GB)
   [switch]$NoBolt,                   # -Native: no Bolt brain (its engine build and NVIDIA's 25 GB of checkpoints)
   [switch]$NoVoice,                  # -Native: no Fish Audio Drama 3 (its engine build and the 70 GB checkpoint)
-  [switch]$AllowUnverifiedImageModel # -Native: explicitly accept missing native image weights before fit is measured
+  [switch]$AllowUnverifiedImageModel, # -Native: explicitly accept missing native image weights before fit is measured
+  [switch]$AllowInsufficientModel    # -Native: explicit opt-in download despite known insufficient runtime capacity
 )
 $ErrorActionPreference = "Continue"   # native tools (wsl, powercfg) report through exit codes, checked where it matters
 $ProgressPreference = "SilentlyContinue"
@@ -226,6 +227,8 @@ if ($Native) {
   if (-not $SkipStudioSetup) {
     Say "The native CUDA tier (scripts\setup-windows-cuda.ps1): build tools, engines, ComfyUI, models; this can take a while"
     $setup = @{ Parts = $NativeParts }
+    if (-not $PSBoundParameters.ContainsKey('NativeParts')) { $setup.AutomaticModelSelection = $true }
+    if ($AllowInsufficientModel) { $setup.AllowInsufficientModel = $true }
     if ($AllowUnverifiedImageModel) { $setup.AllowUnverifiedImageModel = $true }
     if ($Models) { $setup.Models = $Models }
     if (-not $NoBolt) { $setup.Bolt = $true }

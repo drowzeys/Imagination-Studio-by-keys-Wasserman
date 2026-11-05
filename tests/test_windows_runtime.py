@@ -22,7 +22,7 @@ def test_desktop_route_is_not_hidden_behind_static_mount(client):
     assert response.json()["error"] == "This app was not started by the desktop controller."
 
 
-@pytest.mark.parametrize("feature,hidden", [("qwen", True), ("hlg", False)])
+@pytest.mark.parametrize("feature,hidden", [("qwen", True), ("voice", True), ("music", True), ("hlg", False)])
 def test_native_image_checker_outer_process_does_not_open_a_console(monkeypatch, feature, hidden):
     import windows_process
 
@@ -159,6 +159,9 @@ def test_gating_off_does_not_bypass_h3_capacity(install, monkeypatch):
 
 
 def test_prerequisite_failure_is_not_relabelled_as_verification(monkeypatch):
+    import windows_audio_checks
+    monkeypatch.setattr(windows_audio_checks, "status", lambda _: {
+        "installed": True, "qualified": False, "available": False, "why": "Run the check.", "state": "needs_verification"})
     monkeypatch.setattr(windows_cuda, "configuration_error", lambda: "")
     found = runtime.gate_native_state("voice", {"installed": True, "available": False, "why": "Not enough GPU memory"},
                                       {"enabled": True})
@@ -225,6 +228,10 @@ def test_native_discovery_uses_runtime_image_inventory_and_powershell(install, m
         assert row["install"]["shown"].startswith("powershell ")
         assert "bash " not in row["install"]["shown"] and ".sh " not in row["install"]["shown"]
     assert rows["qwen-full"]["install"]["shown"].endswith("-Model qwen-full")
+    for row_id, feature in (("windows-music", "music"), ("windows-music-engine", "music"),
+                            ("windows-sound", "sfx"), ("windows-foley", "foley"),
+                            ("windows-drama-engine", "voice"), ("windows-drama-weights", "voice")):
+        assert rows[row_id]["feature"] == feature
     path = runtime.image_files("qwen")[0]
     path.unlink()
     rows = {row["id"]: row for row in discover.state()["needs"]}
@@ -251,6 +258,26 @@ def test_native_discovery_never_starts_posix_scan_or_installer(client, install, 
             response = local.post("/api/discover/" + action, json={"need": "qwen"})
             assert response.status_code == 400
             assert "PowerShell" in response.json()["detail"]
+
+
+def test_native_audio_cards_are_registered_once_and_checks_available(client, install, monkeypatch):
+    import windows_audio_checks
+    import voice
+    import music
+    monkeypatch.setattr(server, "WIN32", True)
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(windows_audio_checks, "status", lambda kind: {
+        "installed": True, "available": False, "qualified": False, "why": "Check the audio recipe.",
+        "state": "needs_verification", "verified_recipe": windows_audio_checks.recipe(kind)})
+    monkeypatch.setattr(voice, "state", lambda: {"available": True, "backend": "cuda", "why": ""})
+    monkeypatch.setattr(music, "state", lambda: {"available": True, "route": "cuda", "why": ""})
+    response = client.get("/api/feature-checks")
+    assert response.status_code == 200
+    cards = response.json()["features"]
+    for kind in windows_audio_checks.KINDS:
+        rows = [card for card in cards if card["id"] == kind]
+        assert len(rows) == 1
+        assert rows[0]["check_available"] and rows[0]["installed"] and not rows[0]["qualified"]
 
 
 @pytest.mark.parametrize("model", tuple(runtime.IMAGE_SPECS))

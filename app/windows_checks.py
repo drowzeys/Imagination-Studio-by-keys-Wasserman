@@ -18,8 +18,14 @@ import windows_baseline_checks as baseline
 import windows_runtime
 import windows_cuda
 import windows_image_checks as images
+import windows_audio_checks as audio
+import windows_setup_fit
 
 CHECKS = {
+    "voice": FeatureCheck("voice", "Fish Audio Drama 3", "Short plain speech, up to 20 words / 120 characters, no cloning, streaming or transcription.",
+                          tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="sound"),
+    "music": FeatureCheck("music", "MiniMax-Music3", "10-second instrumental, native CUDA int8 engine, default sampling; no streaming or transcription.",
+                          tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="sound"),
     **{model: FeatureCheck(model, spec[0], "Production native image workflow; qualify canvases and counts separately.",
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="image")
        for model, spec in windows_runtime.IMAGE_SPECS.items()},
@@ -49,12 +55,14 @@ def gpu_check(job: dict) -> bool:
 
 
 def native_image_check(job: dict) -> bool:
-    return job["kind"] == "qualification" and job["params"].get("feature") in images.KINDS
+    return job["kind"] == "qualification" and job["params"].get("feature") in (*images.KINDS, *audio.KINDS)
 
 
 def timeout_seconds(job: dict) -> int:
     if native_image_check(job):
         params = job["params"]
+        if params["feature"] in audio.KINDS:
+            return audio.TIMEOUT_S + 120
         scopes = images.GROUPS[params["group"]][1] if params.get("group") in images.GROUPS else (params.get("scope", "basic"),)
         return sum(images.timeout_seconds(params["feature"], scope) + 120 for scope in scopes)
     return 600
@@ -106,6 +114,13 @@ def parameters(params: dict) -> dict:
 def build(home, params, job_id):
     params = parameters(params)
     kind = params["feature"]
+    if kind in audio.KINDS:
+        if why := audio.prerequisites(kind):
+            raise HTTPException(400, why)
+        target = home / "exports" / f"{job_id}-qualification.json"
+        return [sys.executable, "-X", "utf8", str(features.PACK / "scripts" / "windows-native-audio-check.py"),
+                "--feature", kind, "--job-id", job_id, "--output", str(home / "renders" / "calibration" / job_id),
+                "--report", str(target)], {}, [str(target)]
     if kind in images.KINDS:
         if why := images.prerequisites(kind):
             raise HTTPException(400, why)
@@ -173,7 +188,7 @@ def attach(server):
             current = [server.public(job) for job in server.jobs.values()
                        if job["kind"] == "qualification"]
         for kind in CHECKS:
-            if kind in images.KINDS:
+            if kind in (*images.KINDS, *audio.KINDS):
                 continue
             found = foley if kind == "foley" else windows_runtime.usage_status(kind, selected_mode=selected_mode)
             try:
@@ -222,6 +237,7 @@ def attach(server):
             except (OSError, ValueError, TypeError) as error:
                 receipt, attempt = {}, {"error": str(error)}
             cards.append({**choice, "group": "image", "check_available": implemented,
+                          **windows_setup_fit.model_info(choice["id"], installed=choice["installed"]),
                           "open_tab": "Create", "open_model": choice["id"], "open_label": "Open " + choice["title"],
                           "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Windows memory requirement not established",
                                      "lowest_tested_ram_mb": choice.get("hardware", {}).get("physical_total_mb"),
@@ -247,11 +263,21 @@ def attach(server):
                 ("music", "MiniMax-Music3", music.state(), "music", "Music")):
             found = windows_runtime.gate_native_state(kind, raw, selected_mode)
             cards.append({"id": kind, "title": title, "group": "sound", **found,
-                          "scope": "Native sound generation. Install its components to use it; a Windows verification check is not implemented yet.",
-                          "requirements": [], "check_available": False,
-                          "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Windows recipe memory envelope not established",
+                          **windows_setup_fit.model_info(kind, installed=found["installed"]),
+                          "scope": CHECKS[kind].scope,
+                          "requirements": [{"pool": "device", "required_mb": windows_setup_fit.requirement(kind)["required_mb"],
+                                            "reserve_mb": 0, "basis": "policy"},
+                                           {"pool": "host", "required_mb": None, "reserve_mb": 0, "basis": "unknown"},
+                                           {"pool": "commit", "required_mb": None, "reserve_mb": 0, "basis": "unknown"}],
+                          "check_available": True,
+                          "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Installed RAM alone does not establish fit",
+                                     "basis": f"Existing native engine admission: about {windows_setup_fit.requirement(kind)['required_mb'] / 1024:g} GiB free GPU pool. Not a minimum installed-RAM claim.",
                                      "lowest_tested_ram_mb": None, "job_commit_cap_mb": None, "gpu_required": True},
-                          "evidence": {"matches": False, "results": []}, "attempt": {}, "job": None,
+                          "evidence": {"matches": found["qualified"], "results": features.saved(kind, "").get("results", []),
+                                       "checked_at": features.saved(kind, "").get("checked_at")},
+                          "attempt": features.saved(kind, "-attempt"),
+                          "job": max((job for job in current if job["params"].get("feature") == kind),
+                                     key=lambda job: job["created"], default=None),
                           "setup": rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}",
                           "open_tab": tab, "open_label": "Open " + title})
         return {"features": cards, "memory": memory, "mode": selected_mode, "policy": "strict" if strict_matching() else "balanced",

@@ -462,6 +462,42 @@ console.log(JSON.stringify(out));
     assert "1.7/5 features qualified" in out["heading"]
 
 
+def test_qualified_voice_request_uses_nonstreamed_plain_scope():
+    out = run_frontend(r"""
+vm.runInThisContext(fs.readFileSync(require("node:path").join(process.argv[1],"app","static","voice.js"),"utf8"));
+S.voice={available:true,qualified:true,qualification_required:true,verified_recipe:{max_words:20}};
+VO.text="The studio is ready."; VO.stream=true;
+await voRender();
+const out={checked:calls.find(([path])=>path==="/api/voice/takes")[1]};
+S.voice.qualification_required=false;
+await voRender();
+out.unrestricted=calls.filter(([path])=>path==="/api/voice/takes").at(-1)[1];
+console.log(JSON.stringify(out));
+""")
+    assert out["checked"]["live"] is False and out["checked"]["asr"] is False
+    assert out["unrestricted"]["live"] is True and "asr" not in out["unrestricted"]
+
+
+def test_qualification_uses_model_download_size_and_gated_setup_action():
+    out = run_frontend(r"""
+globalThis.document.head=null;
+vm.runInThisContext(fs.readFileSync(require("node:path").join(process.argv[1],"app","static","discover.js"),"utf8"));
+const info={id:"voice",download_size:{bytes:12500000000},runtime_fit:{
+  state:"insufficient_capacity",required_mb:51200,why:"Needs 50 GiB free; GPU pool totals 30.5 GiB."}};
+const out={details:text(dscModelInfo(info))};
+const row={...info,install:{how:"command",shown:"powershell -File setup.ps1 -Parts voice"}};
+const setup=dscInstall(null,row);
+out.blocked=button(setup,"Copy setup command").attrs.disabled;
+find(setup,n=>n.tag==="input").attrs.onchange({target:{checked:true}});
+const permitted=dscInstall(null,row);
+out.enabled=!button(permitted,"Copy setup command").attrs.disabled;
+out.command=text(permitted);
+console.log(JSON.stringify(out));
+""")
+    assert "12.5 GB" in out["details"] and "50 GiB" in out["details"]
+    assert out["blocked"] and out["enabled"]
+    assert "-AllowInsufficientModel" in out["command"]
+
 def test_completed_groups_and_recipes_have_checkmarks_and_collapsed_measurements():
     out = run_frontend(r"""
 const card={id:"qwen",title:"Qwen Turbo",installed:true,qualified:true,

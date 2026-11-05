@@ -27,79 +27,18 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+import model_catalog
+
 ROOT = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ImaginationStudio"
 TENSORFOLD = {"repo": "https://github.com/drowzeys/TensorFold.git", "branch": "studio-1.2.2",
               "commit": "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2"}
 # (repo, folder under the model folder, files): oneshot-setup-cuda.sh's fetch lines, part by part
-PARTS = {
-    "video": [("FastVideo/FastVideo-FastH3-Comfy", "FastH3-Comfy",
-               ["diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors",
-                "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
-                "vae/minimax_h3_video_vae_int8_convrot.safetensors", "vae/minimax_h3_audio_vae_fp32.safetensors"])],
-    "image": [("Comfy-Org/Qwen-Image-2.1", "Qwen-Image-2.1-Comfy",
-               ["diffusion_models/qwen_image_2.1_turbo_bf16.safetensors", "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
-                "vae/qwen_image_2.1_vae_bf16.safetensors"])],
-    "image-edit": [("Comfy-Org/Qwen-Image-2.1", "Qwen-Image-2.1-Comfy", ["diffusion_models/qwen_image_2.1_bf16.safetensors"])],
-    "ref2va": [("Comfy-Org/MiniMax-H3", "MiniMax-H3-Comfy",
-                ["diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors",
-                 "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"])],
-    "flux3": [("black-forest-labs/flux-3-image-klein-comfy", "FLUX3-K-Comfy",
-               ["diffusion_models/flux3-image-klein-bf16.safetensors", "diffusion_models/flux3-image-klein-base-bf16.safetensors",
-                "text_encoders/qwen3vl_4b_bf16.safetensors",
-                "text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors", "vae/flux2-vae.safetensors"]),
-              ("black-forest-labs/flux-3-image-klein-pup", "FLUX3-K-Comfy", ["system_prompts.json"])],
-    "moss": [("Comfy-Org/MOSS-Image", "MOSS-Image-Comfy",
-              ["diffusion_models/moss_image_sft_bf16.safetensors", "text_encoders/qwen3.5_9b_bf16.safetensors",
-               "vae/flux2-vae_small.safetensors"])],
-    "music": [("Comfy-Org/MiniMax-Music-3", "MiniMax-Music3-Comfy",
-               ["diffusion_models/minimax_music3_dit_fp16.safetensors",
-                "text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors", "vae/minimax_music3_dav.safetensors"])],
-    "sound": [("stabilityai/stable-audio-open-1.0", "Sound-Comfy/stable-audio-open-1.0",
-               ["model.safetensors", "text_encoder/model.safetensors", "LICENSE.md"])],
-}
+PARTS = model_catalog.parts()
 # files checked against a SHA-256 (spark/setup-workflows.sh, spark/setup-swap.sh, spark/setup-train.sh: the same pins;
 # tests/test_windows_cuda.py holds the two lists in step): (repo, revision, file in it, folder under the model folder,
 # name there, sha256 or "")
-CHECKED = {
-    "workflows": [
-        ("Comfy-Org/sam3.1", "7bb8374780a725b4353ed31f3a9395c9742b5621", "checkpoints/sam3.1_multiplex_fp16.safetensors",
-         "Workflows-Comfy/checkpoints", "sam3.1_multiplex_fp16.safetensors",
-         "9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03"),
-        ("LBH-123-AI/Minimax_h3_latent_Upscaler", "main",
-         "minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
-         "Workflows-Comfy/latent_upscale_models", "minimax_h3_latent_upscaler_3d_bf16.safetensors",
-         "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6")],
-    # Character Swap on Ref2VA's int8 weights (what its memory was measured on), its LoRA, LightX2V's Turbo and SAM 3.1
-    "swap": [
-        ("Comfy-Org/MiniMax-H3", "main", "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
-         "MiniMax-H3-Comfy/diffusion_models", "minimax_h3_ref2va_pruned_int8_convrot.safetensors", ""),
-        ("akatz-ai/MiniMax-H3-Character-Swap-LoRA", "d06323b7c8e70e97cdab48b78a1e05f786c8cba9", "h3_character_swap_v1.5.safetensors",
-         "MiniMax-H3-Comfy/loras", "h3_character_swap_v1.5.safetensors",
-         "8f2c3c3eba161df8d0c6099598b4730f641f5ce01e04cd16d2427cff8a35218f"),
-        ("lightx2v/Minimax-h3-Turbo", "3ec17a324ced54151364f24f8b5fb6bf7e26414f",
-         "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors", "MiniMax-H3-Comfy/loras",
-         "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
-         "08cfe946033af7d27719b964b6e0a0e50c32138daabbd6ce4137e23df6bf9980"),
-        ("Comfy-Org/sam3.1", "7bb8374780a725b4353ed31f3a9395c9742b5621", "checkpoints/sam3.1_multiplex_fp16.safetensors",
-         "Workflows-Comfy/checkpoints", "sam3.1_multiplex_fp16.safetensors",
-         "9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03")],
-    # foley: kijai's MMAudio safetensors and NVIDIA's BigVGAN v2, which the 44 kHz decoder loads by folder name
-    "foley": [("Kijai/MMAudio_safetensors", "main", name, "Sound-Comfy/mmaudio", name, "") for name in (
-        "mmaudio_large_44k_v2_fp16.safetensors", "mmaudio_vae_44k_fp16.safetensors", "mmaudio_synchformer_fp16.safetensors",
-        "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors")] + [
-        ("nvidia/bigvgan_v2_44khz_128band_512x", "main", name, "Sound-Comfy/mmaudio/nvidia/bigvgan_v2_44khz_128band_512x", name, "")
-        for name in ("bigvgan_generator.pt", "config.json")],
-    # Looks -> Train a LoRA: MiniMax H3's video encoder in fp16, ostris's de-distillation adapter, the FL2VA transformer
-    "train": [
-        ("Comfy-Org/MiniMax-H3", "e5eb578a89295337b8ff433a035929ce0279e0b6", "vae/minimax_h3_video_vae_fp16.safetensors",
-         "Train-H3/vae", "minimax_h3_video_vae_fp16.safetensors",
-         "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522"),
-        ("ostris/minimax_h3_training_adapter", "a7203c31a0016c73d1e8f8df7cc119a880015621",
-         "minimax_h3_training_adapter_v2.safetensors", "Train-H3/adapters", "ostris_dd_adapter_v2.safetensors",
-         "5646c07bada64c87478d2b89b7f564bf723b2c8330d608a16c9dcbaad8d3cb58"),
-        ("Comfy-Org/MiniMax-H3", "e5eb578a89295337b8ff433a035929ce0279e0b6", "diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors",
-         "MiniMax-H3-Comfy/diffusion_models", "minimax_h3_fl2va_pruned_bf16.safetensors", "")],
-}
+CHECKED = model_catalog.checked_downloads()
 # the authors' ComfyUI node packs, at the commits spark/setup-workflows.sh and oneshot-setup-cuda.sh pin
 NODE_PACKS = {
     "workflows": [("ComfyUI-H3-ContactSheet", "https://github.com/matlowai/ComfyUI-H3-ContactSheet", "3c8c8c66e69362e5abf9cf4c4e693baddab90ca3"),
@@ -108,8 +47,7 @@ NODE_PACKS = {
     "foley": [("ComfyUI-MMAudio", "https://github.com/kijai/ComfyUI-MMAudio", "8eaeb72edc3aaf2059b57f2d96a1f6f689f19ae2")],
 }
 # NVIDIA's checkpoints for the Bolt brain, at the revisions app/bolt.py names (whole repos)
-BOLT = {"Nemotron-3.5-Bolt-24GB": ("nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB", "a326822af111290f2af5ac59ef4b5040347dabc4"),
-        "Nemotron-3.5-Bolt-24GB-LiLiCorr": ("nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr", "4c6a5613b6d887194a3a5493e3a18a5b3930bb86")}
+BOLT = {key: value for key, value in model_catalog.checkpoints().items() if key != "drama-3"}
 # ComfyUI's folders, as oneshot-setup-cuda.sh writes them on a DGX Spark
 YAML = """studio:
   base_path: {base}

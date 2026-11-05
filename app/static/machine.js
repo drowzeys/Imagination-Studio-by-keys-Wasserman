@@ -314,6 +314,7 @@ function wfcDraw() {
         + (budgets.basis ? ". " + budgets.basis : "")
         + (budgets.job_commit_cap_mb != null ? ". Job cap: " + wfcGB(budgets.job_commit_cap_mb) : "") + "."),
       wfcAdmission(card, memory)),
+      typeof dscModelInfo === "function" ? dscModelInfo(card) : null,
       el("div", { class: "note m-flat" }, evidence.checked_at ? (evidence.time_basis === "receipt_mtime" ? "Saved evidence updated: " : "Saved live check: ") + new Date(evidence.checked_at).toLocaleString()
         + (card.qualification_levels?.length ? "" : " · peak job commitment " + wfcGB(peak)
           + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware."))
@@ -339,7 +340,9 @@ function wfcDraw() {
         active ? el("button", { class: "small", onclick: async () => {
           try { await api("/api/jobs/" + job.id + "/cancel", {}); await wfcLoad(); } catch (e) { toast(e.message); }
         } }, "Cancel check") : null,
-        !card.installed && card.setup ? el("button", { class: "small", onclick: () => copyText(card.setup, "Setup command") }, "Copy setup command") : null)));
+        !card.installed && card.setup && typeof dscInstall === "function"
+          ? dscInstall(null, { id: card.id, runtime_fit: card.runtime_fit,
+              install: { how: "command", shown: card.setup } }) : null)));
     }
   }
   if (focusedCard) {

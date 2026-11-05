@@ -78,6 +78,10 @@ def isolated_gpu_runtime(gpu_launch_environment, tmp_path, monkeypatch):
     if os.environ.get("STUDIO_TEST_HARDWARE") != "1":
         import windows_runtime
         monkeypatch.setattr(windows_runtime, "physical_memory_mb", lambda: 65536)
+        import windows_setup_fit
+        monkeypatch.setattr(windows_setup_fit, "inventory_hardware", lambda: {
+            "physical_total_mb": 65536, "host_total_mb": 32460,
+            "gpu_total_mb": 31232, "n1x": True})
     server = sys.modules.get("server")
     if server is not None and os.environ.get("STUDIO_TEST_HARDWARE") != "1":
         monkeypatch.setattr(server, "GPU_NAME", ["GB10"])

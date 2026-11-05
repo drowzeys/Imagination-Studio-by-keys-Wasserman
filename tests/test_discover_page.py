@@ -150,3 +150,46 @@ def test_windows_inventory_refreshes_paths_and_copies_native_commands_without_in
     assert "bash" not in out["text"] and "powershell" in out["copied"]
     assert out["feature"] == "qwen" and out["installButtons"] == 0
     assert ["/api/discover/scan", {}] in out["calls"]
+
+
+def test_incompatible_model_requires_explicit_acknowledgment_before_copy():
+    state = {"inventory_only": True, "platform": "windows", "scanning": False, "needs": [{
+        "id": "voice", "label": "Drama 3", "engine": "Voice", "state": "missing",
+        "download_size": {"bytes": 12500000000},
+        "runtime_fit": {"state": "insufficient_capacity", "required_mb": 51200,
+                        "why": "Needs 50 GiB free; this GPU pool totals 30.5 GiB."},
+        "install": {"how": "command", "shown": "powershell -File setup.ps1 -Parts voice"}}]}
+    out = run(f"""
+      globalThis.copyText=value=>out.copied=value;
+      answers["/api/discover"]={json.dumps(state)};
+      const box=viewDiscover(); await tick(); await tick();
+      out.before=text(box); out.disabled=button(box,"Copy setup command").attrs.disabled;
+      button(box,"Copy setup command").attrs.onclick();
+      out.copiedBefore=!!out.copied;
+      find(box,n=>n.tag==="input" && text(n).length===0 && n.attrs.type==="checkbox" && !n.attrs.style).attrs.onchange({{target:{{checked:true}}}});
+      out.enabled=!button(box,"Copy setup command").attrs.disabled;
+      button(box,"Copy setup command").attrs.onclick();
+      out.after=text(box);
+    """)
+    assert "Download size: 12.5 GB" in out["before"]
+    assert "Storage/download only" not in out["before"]
+    assert "Not expected to run on this configuration" in out["before"]
+    assert out["disabled"] and not out["copiedBefore"] and out["enabled"]
+    assert out["copied"].endswith("-AllowInsufficientModel")
+
+
+def test_feature_check_links_are_in_row_headers_and_route_to_exact_audio_cards():
+    out = run("""
+      globalThis.openFeatureCheck=feature=>out.feature=feature;
+      out.rows=[];
+      for (const feature of ["voice","music","sfx","foley","qwen"]) {
+        const row=dscRow(null,{id:feature,label:feature,state:"expected",feature});
+        const header=find(row,n=>n.attrs && n.attrs.class==="top");
+        const link=button(header,"Feature checks");
+        link.attrs.onclick();
+        out.rows.push({feature:out.feature,inHeader:!!link,right:link.attrs.class.includes("dsc-check-link"),
+          count:all(row,n=>n.tag==="button" && text(n)==="Feature checks").length});
+      }
+    """)
+    assert [row["feature"] for row in out["rows"]] == ["voice", "music", "sfx", "foley", "qwen"]
+    assert all(row["inHeader"] and row["right"] and row["count"] == 1 for row in out["rows"])

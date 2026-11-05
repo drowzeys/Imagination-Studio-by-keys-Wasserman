@@ -1213,9 +1213,10 @@ def windows_state() -> dict:
     import windows_cuda
     import windows_runtime
     import windows_storyboard
+    import windows_setup_fit
     items = []
 
-    def row(nid, label, engine, expected, files, setup, *, installed=None, why=""):
+    def row(nid, label, engine, expected, files, setup, *, installed=None, why="", catalog_id=None):
         missing = [path.name for path in files if not path.is_file() or path.stat().st_size == 0]
         ready = not missing if installed is None else installed
         items.append({"id": nid, "label": label, "engine": engine, "optional": False,
@@ -1224,6 +1225,14 @@ def windows_state() -> dict:
                       "linked_by_studio": False, "unlisted": False, "linkable": False,
                       "download": setup, "install": {"how": "command", "shown": setup},
                       "why": why or ("Missing files: " + ", ".join(missing) if missing else "")})
+        if catalog_id:
+            items[-1].update(windows_setup_fit.model_info(catalog_id, installed=ready))
+            import model_catalog
+            feature = model_catalog.model(catalog_id).get("feature")
+            if feature:
+                items[-1]["feature"] = feature
+            if items[-1]["runtime_fit"]["state"] == "insufficient_capacity":
+                items[-1]["install"]["override_shown"] = setup + " -AllowInsufficientModel"
 
     for model in windows_runtime.image_options():
         if model["id"] == "sd-turbo":
@@ -1235,20 +1244,28 @@ def windows_state() -> dict:
             folder = windows_runtime.model_root() / windows_runtime.IMAGE_SPECS[model["id"]][1]
             setup = model["setup"]
         row(model["id"], model["title"], "Picture models", folder, files, setup,
-            installed=model["installed"], why=model["why"] if not model["installed"] else "")
+            installed=model["installed"], why=model["why"] if not model["installed"] else "",
+            catalog_id=model["id"] if model["id"] != "sd-turbo" else None)
         items[-1]["feature"] = "scout" if model["id"] == "sd-turbo" else model["id"]
+        if model["id"] == "sd-turbo":
+            items[-1]["download_size"] = {"bytes": sum(size for size, _ in windows_storyboard.FILES.values()),
+                                         "basis": "Pinned model manifest byte sizes"}
 
     # Installer manifests name native files independently of Mac/MLX environments.
-    manifests = literals(PACK / "scripts" / "windows-cuda-setup.py")
+    import model_catalog
     root = windows_runtime.model_root()
-    for part, label, engine in (("video", "FastH3 model components", "Video"),
-                                 ("ref2va", "H3 reference model components", "Video"),
-                                 ("music", "MiniMax-Music3 ComfyUI weights", "Music"),
-                                 ("sound", "Stable Audio Open weights", "Sound")):
-        rows = manifests["PARTS"][part]
-        files = [root / folder / name for _, folder, names in rows for name in names]
-        row("windows-" + part, label, engine, root / rows[0][1], files,
-            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}")
+    for key, spec in model_catalog.catalogue()["models"].items():
+        if spec["kind"] not in ("component", "music"):
+            continue
+        part = spec["part"]
+        downloads = model_catalog.parts().get(part, [])
+        checked = model_catalog.checked_downloads().get(part, [])
+        files = ([root / folder / name for _, folder, names in downloads for name in names]
+                 + [root / folder / target for _, _, _, folder, target, _ in checked])
+        if not files:
+            continue
+        row("windows-" + key, spec["label"], spec["group"], files[0].parent, files,
+            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}", catalog_id=key)
     paths = windows_cuda.paths()
     for nid, label, engine, files, part in (
             ("windows-h3-engine", "TensorFold H3 native engine", "Video", [paths["tf_h3"]], "video"),
@@ -1258,7 +1275,8 @@ def windows_state() -> dict:
             ("windows-music-engine", "MiniMax-Music3 native engine", "Music",
              [Path(os.environ.get("MUSIC3_CUDA_BIN") or paths["music3_bin"])], "music")):
         row(nid, label, engine, files[0], files,
-            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}")
+            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}",
+            catalog_id="voice" if part.startswith("voice") else "music" if part == "music" else "video")
     drama = Path(os.environ.get("DRAMA3_CUDA_MODEL") or root / "drama-3")
     codec = Path(os.environ.get("DRAMA3_CUDA_CODEC") or paths["drama3_bin"].parent / "codec-v1.safetensors")
     checkpoint = drama / "model.safetensors"
@@ -1268,7 +1286,8 @@ def windows_state() -> dict:
     row("windows-drama-weights", "Fish Audio Drama 3 weights and codec", "Voice", drama, [codec],
         r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts voice -Voice",
         installed=not fish_checkpoint(drama) and bool(weights) and codec.is_file(),
-        why="" if weights and codec.is_file() else "Drama 3 needs its complete local checkpoint and converted codec.")
+        why="" if weights and codec.is_file() else "Drama 3 needs its complete local checkpoint and converted codec.",
+        catalog_id="voice")
     return {"needs": items, "scanning": False, "progress": {}, "last_scan": None, "installing": {"state": "idle"},
             "tools": {}, "platform": "windows", "inventory_only": True,
             "note": "Current native Windows installation inventory. Installation is separate from recipe qualification. "

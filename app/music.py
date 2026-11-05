@@ -62,6 +62,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 import voice
+import model_catalog
 import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
 
 router = APIRouter()
@@ -530,7 +531,7 @@ class Cuda(voice.Served):
     RTF_OF = {"int8": 2.1, "bf16": 3.3}
     # free memory wanted before it loads: the song's peak above an idle machine (19.3 GB int8 at 120 s, 26.6 GB bf16)
     # and the guard's 8 GB beside it
-    NEED_OF = {"int8": 30.0, "bf16": 38.0}
+    NEED_OF = {route: model_catalog.required_free_gib("music", route) for route in ("int8", "bf16")}
 
     def __init__(self) -> None:
         super().__init__()

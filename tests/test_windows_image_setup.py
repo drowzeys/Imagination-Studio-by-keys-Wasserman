@@ -384,6 +384,11 @@ $env:LOCALAPPDATA = '{tmp_path}'
 $env:OS = 'Windows_NT'
 $env:PROCESSOR_ARCHITECTURE = 'ARM64'
 function global:py {{
+  if ($args -contains '--parts') {{
+    '{{"plans":[],"skip_parts":[],"blocked":false}}'
+    $global:LASTEXITCODE=0
+    return
+  }}
   & '{sys.executable}' -X utf8 '{helper}' --guard-parts image --models '{tmp_path / "models"}'
   $global:LASTEXITCODE = $LASTEXITCODE
 }}

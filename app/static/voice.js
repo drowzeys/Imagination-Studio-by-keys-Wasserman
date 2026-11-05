@@ -8,6 +8,7 @@ const VO = { takes: null, text: "", ref: null, refText: "", consent: false, seed
 const VO_EXAMPLE = "<|speaker:0|> [whispering] Did you hear that noise downstairs?\n<|speaker:1|> [sighs] It's probably just the cat. Go back to sleep.\n<|speaker:0|> Cats don't knock on doors.";
 const voOn = () => !!(S && S.voice && S.voice.available);
 const voActive = () => VO.job && ["queued", "running"].includes(VO.job.status);
+const voBounded = () => !!(S.voice?.qualification_required && S.voice?.qualified && S.voice?.verified_recipe);
 // the CUDA engine's take plays while it is made (GET /api/voice/takes/{id}/live): one player a take, kept across redraws
 function voLive(job) {
   if (!(S.voice && S.voice.live) || !job || job.status !== "running" || (job.params && job.params.live === false)) return null;
@@ -49,7 +50,8 @@ async function voRender() {
   if (VO.ref && !VO.consent) return toast("Tick the consent box to clone this voice, or take the clip out");
   // the queue takes a moment to answer: a second click before it does must not make a second take
   if (VO.busy) return; VO.busy = true; render();
-  try { VO.job = await api("/api/voice/takes", { text: VO.text, seed: VO.seed, temperature: VO.temperature, top_p: VO.top_p, top_k: VO.top_k, live: VO.stream,
+  try { VO.job = await api("/api/voice/takes", { text: VO.text, seed: VO.seed, temperature: VO.temperature, top_p: VO.top_p, top_k: VO.top_k,
+    live: voBounded() ? false : VO.stream, ...(voBounded() ? { asr: false } : {}),
     ...(VO.ref ? { ref_audio: VO.ref, ref_text: VO.refText, consent: VO.consent } : {}) }); } catch (e) { VO.busy = false; return toast(e.message); }
   VO.busy = false; await poll(); render(); }
 function voReference() {
@@ -79,22 +81,27 @@ function viewVoice() {
   const box = el("section", { class: "card" }, el("h2", {}, "Voice · Fish Audio Drama 3"));
   if (VO.takes === null) { VO.takes = []; voLoad(); }
   const st = S.voice || { available: false, why: "This app does not know Drama 3.", defaults: {} };
+  const bounded = voBounded();
   if (VO.job) { const fresh = jobs.find(j => j.id === VO.job.id); if (fresh) { if (fresh.status === "done" && VO.job.status !== "done") voLoad(); VO.job = fresh; } }
-  put(box, el("div", { class: "note", style: "margin-top:-4px" }, "Speech from text with Fish Audio Drama 3, on this machine: several speakers, directions for the delivery, a voice cloned from a clip. A take can go to a MiniMax H3 reference clip as its voice (", el("b", {}, "Use as Ref2VA voice reference"), ")."),
+  put(box, el("div", { class: "note", style: "margin-top:-4px" }, bounded
+    ? "Short plain speech from text with Fish Audio Drama 3, on this machine."
+    : ["Speech from text with Fish Audio Drama 3, on this machine: several speakers, directions for the delivery, a voice cloned from a clip. A take can go to a MiniMax H3 reference clip as its voice (", el("b", {}, "Use as Ref2VA voice reference"), ")."]),
     el("div", { class: "note vt-credit" }, typeof mark === "function" ? mark("fish", "") : null, el("b", {}, "Built with Fish Audio."), " " + (st.licence || "") + " Nothing is sent to Fish Audio: " + (typeof measuredLabel === "function" ? measuredLabel(st.label || "TensorFold") : (st.label || "TensorFold")) + "."));
   if (!st.available) put(box, el("div", { class: "tip" }, el("b", {}, "Not available here. "), st.why || ""));
-  const text = el("textarea", { style: "min-height:130px", disabled: !st.available, placeholder: "What is said. <|speaker:0|> … <|speaker:15|> switch voices; [whispering], [sighs], [laughs] or a description in brackets steer the delivery." });
+  if (bounded) put(box, el("div", { class: "note" }, "Verified: short plain speech, up to 20 words / 120 characters. Cloning, multiple speakers, streaming and transcription are not checked."));
+  const text = el("textarea", { style: "min-height:130px", disabled: !st.available, maxlength: bounded ? 120 : st.text_limit,
+    placeholder: bounded ? "A short plain sentence, one speaker." : "What is said. <|speaker:0|> … <|speaker:15|> switch voices; [whispering], [sighs], [laughs] or a description in brackets steer the delivery." });
   bind(VO, "text", text);
   const num = (key, attrs) => bind(VO, key, el("input", { type: "number", disabled: !st.available, ...attrs }));
   put(box, el("div", { class: "group", "data-clear": "voice" }, el("h3", {}, "What is said"), text,
-    el("div", { class: "note" }, "Speaker tags ", el("code", {}, "<|speaker:0|>"), " to ", el("code", {}, "<|speaker:15|>"), " switch voices (text without one is speaker 0). Directions in brackets steer the delivery: ", el("code", {}, "[whispering]"), ", ", el("code", {}, "[sighs]"), ", ", el("code", {}, "[laughs]"),
+    bounded ? null : el("div", { class: "note" }, "Speaker tags ", el("code", {}, "<|speaker:0|>"), " to ", el("code", {}, "<|speaker:15|>"), " switch voices (text without one is speaker 0). Directions in brackets steer the delivery: ", el("code", {}, "[whispering]"), ", ", el("code", {}, "[sighs]"), ", ", el("code", {}, "[laughs]"),
       ", or a description of the voice. Long text is split at sentence ends and keeps one voice. ", el("a", { href: "#", onclick: e => { e.preventDefault(); VO.text = VO_EXAMPLE; render(); } }, "Two-speaker example")),
     el("div", { class: "row", style: "margin-top:8px" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Seed"), num("seed", { min: 0, step: 1 })),
       el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 1.0" }, "Temperature"), num("temperature", { min: 0.1, max: 2, step: 0.05 })),
       el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 0.9" }, "Top-p"), num("top_p", { min: 0.1, max: 1, step: 0.05 })),
       el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 30" }, "Top-k"), num("top_k", { min: 1, max: 200, step: 1 })),
       el("button", { class: "small fit", disabled: !st.available, title: "Fish's sampling: temperature 1.0, top-p 0.9, top-k 30", onclick: () => { Object.assign(VO, { temperature: 1.0, top_p: 0.9, top_k: 30 }); render(); } }, "Fish defaults"), ...clearButton("voice"))),
-    voReference());
+    bounded ? null : voReference());
   put(box, el("div", { class: "row", style: "margin-top:16px;align-items:center" }, el("div", { class: "fit" }, el("button", { class: "hot", disabled: !st.available || voActive() || VO.busy || (VO.ref && !VO.consent), onclick: voRender }, VO.busy || voActive() ? "Rendering…" : "Render the take")),
     el("div", { class: "note", style: "margin:0" }, st.available ? voSpeed(st) : "")));
   if (st.available && st.checks) put(box, el("label", { class: "check", title: "Sent audio cannot be taken back: played as it is made, a part with missing words is reported, not drawn again" },
