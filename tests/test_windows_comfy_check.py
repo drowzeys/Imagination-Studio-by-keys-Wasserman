@@ -240,6 +240,50 @@ def test_backend_monitor_starts_only_after_server_readiness(monkeypatch, tmp_pat
     assert check.run_check(tmp_path, 5, 0, guarded=True)["ok"]
 
 
+@pytest.mark.parametrize("startup_failure", [True, False])
+def test_workspace_cleanup_failure_preserves_the_original_error_or_fails_the_check(monkeypatch, tmp_path, capsys,
+                                                                                 startup_failure):
+    workspace = check.tempfile.TemporaryDirectory(dir=tmp_path)
+    cleanup = workspace.cleanup
+
+    def locked_cleanup():
+        raise PermissionError("startup.log is locked")
+
+    def response(*args, **kwargs):
+        if startup_failure:
+            raise RuntimeError("original startup failure")
+        return {"system": {"comfyui_version": "test", "pytorch_version": "test"}}
+
+    process = SimpleNamespace(poll=lambda: None, wait=lambda **kwargs: None,
+                              send_signal=lambda *args: None, returncode=0)
+    monkeypatch.setattr(check.sys, "platform", "win32")
+    monkeypatch.setattr(check, "verify_source", lambda *args: None)
+    monkeypatch.setattr(check, "OwnedJob", lambda: SimpleNamespace(spawn=lambda *args, **kwargs: process, close=lambda: None))
+    monkeypatch.setattr(check, "validate_identity", lambda *args: None)
+    monkeypatch.setattr(check, "validate_ready", lambda *args: None)
+    monkeypatch.setattr(check, "read_json", response)
+    monkeypatch.setattr(check.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, raising=False)
+    monkeypatch.setattr(check.signal, "CTRL_BREAK_EVENT", 1, raising=False)
+    monkeypatch.setattr(check.tempfile, "TemporaryDirectory", lambda **kwargs: workspace)
+    monkeypatch.setattr(workspace, "cleanup", locked_cleanup)
+    try:
+        expected = RuntimeError if startup_failure else PermissionError
+        message = "original startup failure" if startup_failure else "startup.log is locked"
+        try:
+            raise LookupError("unrelated caller error")
+        except LookupError as caller_error:
+            with pytest.raises(expected, match=message) as caught:
+                check.run_check(tmp_path, 5, 0)
+            assert not hasattr(caller_error, "__notes__")
+        diagnostic = capsys.readouterr().err
+        assert "workspace cleanup failed" in diagnostic and workspace.name in diagnostic
+        if startup_failure:
+            assert "original startup failure" in diagnostic
+            assert any("startup.log is locked" in note for note in caught.value.__notes__)
+    finally:
+        cleanup()
+
+
 @pytest.mark.parametrize("planned", [True, False])
 def test_inflight_backend_disconnect_is_ignored_only_during_planned_shutdown(monkeypatch, planned):
     from windows_memory import Snapshot

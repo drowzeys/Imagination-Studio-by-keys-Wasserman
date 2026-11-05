@@ -181,6 +181,11 @@ For opt-in diagnostic strictness, set `$env:STUDIO_QUALIFICATION_STRICT = '1'` b
 Strict mode requires exact matching and may require a new check, including for older receipts without full
 runtime provenance. Remove that variable and restart to return to balanced matching; no saved pass is erased.
 
+If a guarded ComfyUI check fails and its temporary workspace is also locked during cleanup, the original
+startup/render error remains the failure; the log records the cleanup error and retained workspace path.
+A cleanup failure after an otherwise successful check still fails the check. Neither case relaxes its
+startup deadline or memory guards.
+
 ## 4. Capture each machine separately
 
 ```powershell
