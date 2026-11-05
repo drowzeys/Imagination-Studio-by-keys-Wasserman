@@ -352,6 +352,24 @@ dialog::backdrop { background:rgba(5,6,9,.7); }
 .feature-check-group > summary { cursor:pointer; padding:8px 0; }
 .feature-check-group > summary svg { width:20px; height:20px; vertical-align:middle; margin-right:8px; }
 .feature-check-group > summary .note { margin-left:10px; }
+.qualification-group-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.qualification-group, .qualification-recipe { display:flex; align-items:center; gap:10px; text-align:left; background:var(--bg2); border:1px solid var(--line2); border-radius:var(--r1); padding:10px 12px; min-width:0; }
+.qualification-group span:last-child, .qualification-recipe span:last-child { display:grid; gap:3px; min-width:0; }
+.qualification-group b, .qualification-recipe b { font:500 14px var(--sans); }
+.qualification-group small, .qualification-recipe small { color:var(--dim); font:400 12px var(--sans); }
+.qualification-group.selected, .qualification-recipe.selected { border-color:var(--blue); background:var(--bg2); }
+.qualification-mark { color:var(--faint); font:600 17px var(--sans); }
+.qualification-mark.passed { color:var(--green); }
+.qualification-mark.failed { color:var(--red); }
+.qualification-details, .qualification-individuals { margin-top:0; }
+.qualification-recipes { display:grid; gap:10px; }
+.qualification-recipe-list { display:grid; gap:6px; }
+.qualification-recipe-row { display:grid; grid-template-columns:minmax(0,1fr) 130px; align-items:start; gap:10px; }
+.qualification-result { padding:10px 0; max-width:360px; }
+.qualification-result summary { color:var(--dim); cursor:pointer; font-size:12px; }
+.qualification-result[open] { grid-column:1/-1; max-width:none; padding:0 12px 10px; }
+.qualification-selection { font-size:12px; }
+@media (max-width:600px) { .qualification-group-grid { grid-template-columns:1fr; } }
 .sectionhead { display:flex; align-items:end; justify-content:space-between; gap:12px; margin:44px 0 16px; }
 .sectionhead h2 { margin:0; font:600 24px/1.2 var(--sans); letter-spacing:-.01em; }
 .sectionhead .note { margin:0; }

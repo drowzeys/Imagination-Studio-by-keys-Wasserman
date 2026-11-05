@@ -21,7 +21,7 @@ function sparkline(id, tone) { return el("div", { class: "stack m-sparkbox" }, s
   svg("path", { d: "", class: "area" }), svg("path", { d: "", class: "line", "vector-effect": "non-scaling-stroke" }))); }
 function sparkSet(id, values, max) { const s = document.querySelector('[data-spark="' + id + '"]'); if (!s) return; const [line, area] = sparkPath(values, 600, 64, max); const p = s.querySelectorAll("path"); p[0].setAttribute("d", area); p[1].setAttribute("d", line); }
 const M = { storage: null, loading: false, history: null };
-const WFC = { data: null, error: "", timer: null, loading: false, changingMode: false, focus: null, selected: null, open: false, groups: {} };
+const WFC = { data: null, error: "", timer: null, loading: false, changingMode: false, focus: null, selected: null, open: false, groups: {}, scopes: {} };
 function openFeatureCheck(kind) { WFC.focus = kind; WFC.selected = kind; WFC.open = true; go("Machine"); }
 function featureBadge(kind) {
   const c = S && S.capabilities && S.capabilities[kind];
@@ -89,7 +89,24 @@ function wfcAttempt(card) {
     catch (e) { if (!(e instanceof SyntaxError)) throw e; }
   }
   const time = wfcTime(attempt.finished || attempt.started || attempt.created);
-  return { message: String(message), when: time ? new Date(time).toLocaleString() : "Time not recorded" };
+  return { message: String(message), when: time ? new Date(time).toLocaleString() : "Time not recorded",
+    state: attempt.state || attempt.status || "failed" };
+}
+function wfcObserved(card) {
+  const failed = card.attempt?.ok === false && card.attempt?.observations;
+  const observed = failed || (card.evidence?.results || []).find(result => result.measurements);
+  if (!observed) return null;
+  const measured = observed.measurements || {}, minima = measured.minima || {};
+  const values = [["Peak job commitment", observed.peak_job_commit_mb],
+    ["Lowest host available", minima.host_available_mb], ["Lowest commit headroom", minima.host_commit_headroom_mb],
+    ["Lowest dedicated GPU free", minima.dedicated_gpu_free_mb]]
+    .filter(([, value]) => Number.isFinite(value)).map(([label, value]) => label + ": " + wfcGB(value));
+  if (measured.samples != null) values.unshift(measured.samples + " samples");
+  if (observed.measurement_error) values.push("Readings incomplete: " + observed.measurement_error);
+  if (!values.length) return null;
+  return el("div", { class: "note m-flat", "data-check-observations": card.id },
+    (failed ? "Last failed check observed (not qualified): " : "Saved check observed: ") + values.join(" · ")
+    + ". Observations are not minimum RAM requirements.");
 }
 function wfcHistory(card) {
   const attempt = wfcAttempt(card); if (!attempt) return null;
@@ -142,9 +159,65 @@ async function wfcLoad() {
     WFC.timer = setTimeout(wfcLoad, 2000);
 }
 async function wfcCheck(card) {
-  try { await api(featureCheckApi("/check"), { feature: card.id }); toast("Queued: check " + card.title); }
+  const selected = card.qualification_levels?.length ? WFC.scopes[card.id] || wfcNextSelection(card) : null;
+  const recipe = selected?.startsWith("group:") ? { group: selected.slice(6) } : selected ? { scope: selected } : {};
+  try { await api(featureCheckApi("/check"), { feature: card.id, ...recipe }); toast("Queued: check " + card.title); }
   catch (e) { toast(e.message, 7000); }
   await wfcLoad();
+}
+function wfcNextSelection(card) {
+  const group = card.qualification_groups?.find(group => group.remaining?.length);
+  return group ? "group:" + group.id : card.next_scope || "basic";
+}
+function wfcCheckDetails(card, ...content) {
+  return card.qualification_levels?.length ? el("details", { class: "fold qualification-details" },
+    el("summary", {}, "Runtime, memory and check details"), ...content,
+    el("div", { class: "note m-flat" }, "Groups skip valid passes and save each recipe. Memory, backend, timeout or cleanup failures stop the group; ordinary output errors do not. Existing passes are kept.")) : content;
+}
+function wfcRecipePicker(card, active) {
+  const selected = WFC.scopes[card.id] || wfcNextSelection(card);
+  const choose = value => { WFC.scopes[card.id] = value; wfcDraw(); };
+  const mark = (passed, outcome) => el("span", { class: "qualification-mark" + (passed ? " passed" : outcome === "failed" ? " failed" : ""),
+    "aria-hidden": "true" }, passed ? "✓" : outcome === "failed" ? "×" : "○");
+  const groups = card.qualification_groups || [], levels = card.qualification_levels || [];
+  return el("div", { class: "qualification-recipes" },
+    groups.length ? el("div", { class: "qualification-group-grid", role: "radiogroup", "aria-label": "Check groups: " + card.title },
+      groups.map(group => {
+        const complete = group.remaining.length === 0, value = "group:" + group.id;
+        return el("button", { type: "button", class: "qualification-group" + (selected === value ? " selected" : ""),
+          role: "radio", "aria-checked": selected === value, disabled: active, onclick: () => choose(value) },
+          mark(complete), el("span", {}, el("b", {}, group.title),
+            el("small", {}, complete ? "Passed · nothing to check" : group.remaining.length + " recipes remaining")));
+      })) : null,
+    el("details", { class: "fold qualification-individuals", open: !groups.length || !selected.startsWith("group:") },
+      el("summary", {}, "Individual recipes", el("span", { class: "tag2" },
+        levels.filter(level => level.qualified).length + "/" + levels.length + " passed")),
+      el("div", { class: "qualification-recipe-list", role: "radiogroup", "aria-label": "Individual recipes: " + card.title },
+        levels.map(level => {
+          const results = level.evidence?.results || [];
+          return el("div", { class: "qualification-recipe-row", "data-qualification-recipe": level.id },
+            el("button", { type: "button", role: "radio", "aria-checked": selected === level.id,
+              class: "qualification-recipe" + (selected === level.id ? " selected" : ""), disabled: active,
+              onclick: () => choose(level.id) },
+              mark(level.qualified, level.outcome), el("span", {}, el("b", {}, level.title),
+                el("small", {}, level.width + " × " + level.height + " · " + level.count + " image(s) · "
+                  + (level.qualified ? "Passed" : level.outcome === "failed" ? "Failed"
+                    : level.outcome === "cancelled" ? "Cancelled" : "Not checked")))),
+            level.qualified ? el("details", { class: "qualification-result" },
+              el("summary", {}, "Measurements"),
+              el("div", { class: "note m-flat" }, level.evidence?.checked_at
+                ? "Checked " + new Date(level.evidence.checked_at).toLocaleString() : "Saved pass"),
+              results.map(result => el("div", { class: "stack" },
+                el("div", { class: "note m-flat" }, "Elapsed: " + result.elapsed_s + " s"),
+                wfcObserved({ id: card.id + "-" + level.id, evidence: { results: [result] } })))) :
+              level.attempt?.error ? el("details", { class: "qualification-result" },
+                el("summary", {}, "Failure details"),
+                el("div", { class: "note m-flat" }, level.attempt.error),
+                wfcObserved({ id: card.id + "-" + level.id, attempt: { ...level.attempt, ok: false } })) : null);
+        }))),
+    el("div", { class: "note m-flat qualification-selection" }, "Selected: "
+      + (selected.startsWith("group:") ? groups.find(group => "group:" + group.id === selected)?.title
+        : levels.find(level => level.id === selected)?.title)));
 }
 function wfcDraw() {
   const box = document.querySelector("#feature-checks"); if (!box) return;
@@ -182,6 +255,7 @@ function wfcDraw() {
     for (const card of group.cards) {
     const active = wfcBusy(card), evidence = card.evidence || {}, results = evidence.results || [];
     const budgets = card.memory || {};
+    const lastAttempt = wfcAttempt(card), failed = !card.qualified && !active && lastAttempt;
     const required = (card.requirements || []).map(r => wfcGB(r.required_mb) + " " + r.pool + " (" + (r.basis || "unknown")
       + (r.reserve_mb ? ", reserve " + wfcGB(r.reserve_mb) : "") + ")").join(" · ");
     const peak = results.length ? Math.max(...results.map(r => r.peak_job_commit_mb || 0)) : null;
@@ -190,28 +264,34 @@ function wfcDraw() {
       tabindex: -1, "data-feature-check": card.id },
       el("div", { class: "row" }, el("h3", {}, card.title),
         el("span", { class: "tag2 " + (card.qualified ? "ok" : "") },
-          active ? "Check " + job.status : card.qualified ? "Qualified" : (card.state || (card.installed === false ? "Install needed" : "Verification needed")).replaceAll("_", " "))),
+          active ? "Check " + job.status : card.qualified ? "Qualified" : failed
+            ? lastAttempt.state === "cancelled" ? "Check cancelled" : "Check failed"
+            : (card.state || (card.installed === false ? "Install needed" : "Verification needed")).replaceAll("_", " "))),
       el("div", { class: "note m-flat" }, card.scope || "Use the settings qualified by this check."),
-      card.backend || card.quality || card.measurement_source ? el("div", { class: "note m-flat" },
+      wfcCheckDetails(card, card.backend || card.quality || card.measurement_source ? el("div", { class: "note m-flat" },
         [card.backend ? "Backend: " + card.backend : "", card.quality ? "Quality: " + card.quality : "",
           card.measurement_source ? "Measurement source: " + card.measurement_source
             : card.backend === "native" && S?.platform === "windows" ? "Windows measurement: unknown" : ""].filter(Boolean).join(" · ")) : null,
       card.qualified && card.runtime_updated ? el("div", { class: "note m-flat" },
         "Runtime changed since this check. Earlier evidence is retained; rerunning is optional unless compatibility changes.") : null,
       el("div", { class: "note m-flat" }, (budgets.minimum_label || "Minimum installed RAM not established")
-        + ". Lowest tested machine: " + wfcGB(budgets.lowest_tested_ram_mb) + ". Required headroom: "
-        + (required || "unknown") + (budgets.basis ? ". " + budgets.basis : "")
+        + (budgets.lowest_tested_ram_mb != null ? ". Lowest tested machine: " + wfcGB(budgets.lowest_tested_ram_mb) : "")
+        + ((card.requirements || []).some(r => r.required_mb != null) ? ". Required headroom: " + required : "")
+        + (budgets.basis ? ". " + budgets.basis : "")
         + (budgets.job_commit_cap_mb != null ? ". Job cap: " + wfcGB(budgets.job_commit_cap_mb) : "") + "."),
+      wfcAdmission(card, memory)),
       el("div", { class: "note m-flat" }, evidence.checked_at ? (evidence.time_basis === "receipt_mtime" ? "Saved evidence updated: " : "Saved live check: ") + new Date(evidence.checked_at).toLocaleString()
-        + " · peak job commitment " + wfcGB(peak) + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware.")
+        + (card.qualification_levels?.length ? "" : " · peak job commitment " + wfcGB(peak)
+          + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware."))
         : "No saved live pass on this machine."),
-      card.why ? el("div", { class: "note" }, card.why) : null,
+      card.attempt?.ok === false || !card.qualification_levels?.length ? wfcObserved(card) : null,
+      failed || card.why ? el("div", { class: "note" }, failed ? lastAttempt.message : card.why) : null,
       card.next_step ? el("div", { class: "note" }, card.next_step) : null,
-      wfcAdmission(card, memory),
       wfcHistory(card),
+      card.qualification_levels?.length ? wfcRecipePicker(card, active) : null,
       el("div", { class: "row" },
         card.check_available ? el("button", { class: "small", disabled: !card.installed || active, onclick: () => wfcCheck(card) },
-          active ? "Check " + job.status : evidence.checked_at ? "Rerun check" : "Check this feature")
+          active ? "Check " + job.status : card.qualification_levels?.length ? "Check selected recipes" : evidence.checked_at ? "Rerun check" : "Check this feature")
           : el("span", { class: "note m-flat" }, "Individual verification is not implemented yet."),
         card.available ? el("button", { class: "small", onclick: () => {
           if (card.open_query && typeof AP !== "undefined") { AP.cat = card.open_category || "all"; AP.q = card.open_query; }

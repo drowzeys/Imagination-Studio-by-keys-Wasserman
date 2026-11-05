@@ -49,7 +49,7 @@ SAMPLE_STALE_S = 5.0  # a sampler silent this long is replaced by the plain host
 COMMIT_FLOOR_MB = 4096  # Windows commit headroom kept: under it any allocation on the machine may fail
 DEDICATED_FLOOR_MB = 512  # NVML's dedicated GPU memory kept free (past it WDDM spills into shared system memory)
 BELOW_NORMAL = 0x4000  # BELOW_NORMAL_PRIORITY_CLASS: comfy.sh's nice, without starving the GPU's feeder thread
-DETACHED, NEW_GROUP, BREAKAWAY = 0x8, 0x200, 0x01000000
+DETACHED, NEW_GROUP, BREAKAWAY, NO_WINDOW = 0x8, 0x200, 0x01000000, 0x08000000
 
 
 # ---------- process identity: an id and its creation time, never a name ----------
@@ -249,7 +249,7 @@ class Guard:
         # the sampler opens a CUDA context through torch: the GPU venv's python (this one, for the server)
         self.process = job.spawn([python or sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", "0"],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                                 encoding="utf-8", creationflags=NEW_GROUP)
+                                 encoding="utf-8", creationflags=NEW_GROUP | NO_WINDOW)
         threading.Thread(target=self.read, daemon=True).start()
 
     def read(self) -> None:
@@ -311,7 +311,7 @@ def run() -> int:
     job = OwnedJob()
     try:
         server = job.spawn([sys.executable, "-X", "utf8", "main.py", "--listen", "127.0.0.1", "--port", PORT, *flags],
-                           cwd=str(PREFIX / "ComfyUI"), env=env, stdin=subprocess.DEVNULL, creationflags=BELOW_NORMAL | NEW_GROUP)
+                           cwd=str(PREFIX / "ComfyUI"), env=env, stdin=subprocess.DEVNULL, creationflags=BELOW_NORMAL | NEW_GROUP | NO_WINDOW)
         floor = (os.environ.get("SPARK_MEMORY_FLOOR_MB") or "").strip()
         try:
             guard = Guard(job, floor)

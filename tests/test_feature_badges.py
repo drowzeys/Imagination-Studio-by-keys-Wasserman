@@ -136,7 +136,8 @@ console.log(JSON.stringify(out));
     assert out["checkEnabled"] and out["openEnabled"] and out["evidenceUnchanged"]
     assert out["unsupportedButtons"] == 0 and out["badge"] is None and out["section"] == "details"
     assert "Strict update matching is enabled" in out["text"] and "Update matching below is separate" in out["text"]
-    assert "Windows measurement: unknown" in out["text"] and "unknown host (unknown)" in out["text"]
+    assert "Windows measurement: unknown" in out["text"]
+    assert "unknown host (unknown)" not in out["text"]
     assert "No saved live pass" in out["text"]
     assert out["checkCalls"] == [["/api/feature-checks/check", {"feature": "foley"}]]
 
@@ -250,6 +251,132 @@ console.log(JSON.stringify(out));
                              "params": {"image_model": "qwen", "width": 1024, "height": 1024}}
     assert out["reset"] == {"explicit": "", "model": "sd-turbo"}
     assert out["newlyAvailable"] == "qwen"
+
+
+def test_failed_check_observations_are_not_presented_as_memory_requirements():
+    out = run_frontend(r"""
+const card={id:"qwen",qualified:false,attempt:{ok:false,error:"native commit floor reached",
+  observations:{peak_job_commit_mb:20000,measurements:{samples:215,minima:{
+    host_available_mb:3000,host_commit_headroom_mb:4000,dedicated_gpu_free_mb:5000}}}}};
+const out={failed:text(wfcObserved(card))};
+card.evidence={results:[card.attempt.observations]}; card.attempt={ok:true}; card.qualified=true;
+out.passed=text(wfcObserved(card));
+console.log(JSON.stringify(out));
+""")
+    assert "failed check observed (not qualified)" in out["failed"]
+    assert "215 samples" in out["failed"] and "Lowest commit headroom" in out["failed"]
+    assert "not minimum RAM requirements" in out["failed"]
+    assert "Saved check observed" in out["passed"] and "failed check" not in out["passed"]
+
+
+def test_native_checked_image_settings_are_visible_and_only_apply_with_gating():
+    out = run_frontend(r"""
+S.platform="windows"; S.capabilities={}; S.windows_stills={available:false};
+S.image_model_options=[{id:"qwen",available:true,qualified:true,qualification_required:true,
+  verified_recipe:{width:512,height:512,count:1},backend:"native",quality:"full-model"}];
+C.imageModel="qwen"; C.mode="image"; C.count=8;
+const form=viewCreate();
+const out={text:text(form),count:C.count,
+  params:stillParams({image_model:"qwen",width:512,height:512,count:1})};
+try { stillParams({image_model:"qwen",width:1344,height:768,count:8,preset:"2k"}); }
+catch(error) {out.refused=error.message;}
+S.image_model_options[0].qualification_required=false;
+out.ungated=stillParams({image_model:"qwen",width:1344,height:768,count:8,preset:"2k"});
+console.log(JSON.stringify(out));
+""")
+    assert "Verified: 512 × 512, 1 image(s)" in out["text"]
+    assert "1664 × 928" not in out["text"] and out["count"] == 1
+    assert "not been verified" in out["refused"]
+    assert out["params"] == {"image_model": "qwen", "width": 512, "height": 512, "count": 1}
+    assert out["ungated"] == {"image_model": "qwen", "width": 1344, "height": 768, "count": 8, "preset": "2k"}
+
+
+def test_progressive_chooser_sends_only_selected_scope_and_exposes_checked_sizes():
+    out = run_frontend(r"""
+S.platform="windows"; S.capabilities={}; S.feature_checks.mode={enabled:true};
+const card={id:"qwen",title:"Qwen Turbo",group:"image",installed:true,qualified:true,available:true,
+  qualification_required:true,verified_recipe:{width:512,height:512,count:1},
+  verified_scopes:[{id:"basic",title:"Basic",width:512,height:512,count:1},
+    {id:"studio",title:"Studio",width:1024,height:576,count:1}],
+  next_scope:"scout",check_available:true,evidence:{results:[]},qualification_levels:[
+    {id:"basic",title:"Basic",width:512,height:512,count:1,qualified:true,evidence:{results:[]}},
+    {id:"studio",title:"Studio",width:1024,height:576,count:1,qualified:true,evidence:{results:[]}},
+    {id:"scout",title:"Scout",width:1280,height:736,count:1,qualified:false}]};
+WFC.data={features:[card],mode:S.feature_checks.mode,memory:{},policy:"balanced"};
+wfcDraw(); const recipes=all(nodes["#feature-checks"],n=>n.attrs?.role==="radio");
+const out={options:recipes.map(n=>({selected:n.attrs["aria-checked"],text:text(n)}))};
+recipes.find(n=>text(n).includes("Studio")).attrs.onclick();
+await wfcCheck(card); out.request=calls.find(([path])=>path.endsWith("/check"));
+S.image_model_options=[card]; C.imageModel="qwen"; C.mode="image"; C.count=1; C.imageSize="1024x576";
+out.form=text(viewCreate()); out.params=stillParams({image_model:"qwen",width:1024,height:576,count:1});
+console.log(JSON.stringify(out));
+""")
+    assert "Scout" in next(option for option in out["options"] if option["selected"])["text"]
+    assert "Passed" in out["options"][0]["text"]
+    assert out["request"] == ["/api/feature-checks/check", {"feature": "qwen", "scope": "studio"}]
+    assert "1024 × 576" in out["form"] and "512 × 512" in out["form"]
+    assert out["params"] == {"image_model": "qwen", "width": 1024, "height": 576, "count": 1}
+
+
+def test_grouped_chooser_defaults_to_unchecked_group_and_keeps_individual_actions():
+    out = run_frontend(r"""
+const card={id:"qwen",title:"Qwen Turbo",group:"image",installed:true,qualified:true,check_available:true,
+  next_scope:"studio",evidence:{results:[]},qualification_groups:[
+    {id:"studio",title:"Studio & scouting",remaining:["studio","scout","candidates"]},
+    {id:"images",title:"Image presets",remaining:["landscape","square","portrait"]}],
+  qualification_levels:[{id:"basic",title:"Basic",width:512,height:512,count:1,qualified:true,evidence:{results:[]}},
+    {id:"studio",title:"Studio",width:1024,height:576,count:1,qualified:false}]};
+WFC.data={features:[card],mode:{enabled:true},memory:{},policy:"balanced"};
+wfcDraw(); const recipes=all(nodes["#feature-checks"],n=>n.attrs?.role==="radio");
+const out={options:recipes.map(n=>({selected:n.attrs["aria-checked"],text:text(n)}))};
+await wfcCheck(card); out.group=calls.find(([path])=>path.endsWith("/check"));
+recipes.find(n=>text(n).includes("Basic")).attrs.onclick();
+await wfcCheck(card); out.individual=calls.filter(([path])=>path.endsWith("/check")).at(-1);
+console.log(JSON.stringify(out));
+""")
+    assert "Studio & scouting" in next(option for option in out["options"] if option["selected"])["text"]
+    assert "3 recipes remaining" in out["options"][0]["text"]
+    assert out["group"] == ["/api/feature-checks/check", {"feature": "qwen", "group": "studio"}]
+    assert out["individual"] == ["/api/feature-checks/check", {"feature": "qwen", "scope": "basic"}]
+
+
+def test_failed_and_cancelled_recipes_are_not_labelled_unchecked():
+    out = run_frontend(r"""
+const card={id:"qwen",title:"Qwen",qualification_levels:[
+  {id:"landscape",title:"Landscape",width:1344,height:768,count:1,outcome:"failed",
+    attempt:{error:"commit reserve",state:"failed"}},
+  {id:"portrait",title:"Portrait",width:768,height:1344,count:1,outcome:"cancelled"},
+  {id:"square",title:"Square",width:1024,height:1024,count:1,outcome:"not_checked"}]};
+const rows=all(wfcRecipePicker(card,false),n=>n.attrs?.role==="radio");
+console.log(JSON.stringify(rows.map(text)));
+""")
+    assert "Failed" in out[0] and "×" in out[0] and "Not checked" not in out[0]
+    assert "Cancelled" in out[1] and "Not checked" not in out[1]
+    assert "Not checked" in out[2]
+
+
+def test_completed_groups_and_recipes_have_checkmarks_and_collapsed_measurements():
+    out = run_frontend(r"""
+const card={id:"qwen",title:"Qwen Turbo",installed:true,qualified:true,
+  qualification_groups:[{id:"studio",title:"Studio & scouting",remaining:[]},
+    {id:"images",title:"Image presets",remaining:["square"]}],
+  qualification_levels:[{id:"basic",title:"Basic",width:512,height:512,count:1,qualified:true,
+    evidence:{checked_at:"2026-11-05T14:22:00Z",results:[{elapsed_s:56,peak_job_commit_mb:28000,
+      measurements:{samples:220,minima:{host_available_mb:3000}}}]}},
+    {id:"square",title:"Square",width:1024,height:1024,count:1,qualified:false}]};
+const picker=wfcRecipePicker(card,false);
+const radios=all(picker,n=>n.attrs?.role==="radio"), folds=all(picker,n=>n.tag==="details");
+const out={radios:radios.map(n=>({text:text(n),selected:n.attrs["aria-checked"]})),
+  collapsed:folds.every(n=>!n.attrs.open),measurements:text(picker)};
+const busy=wfcRecipePicker(card,true);
+out.busy=all(busy,n=>n.attrs?.role==="radio").every(n=>n.attrs.disabled);
+console.log(JSON.stringify(out));
+""")
+    assert "✓" in out["radios"][0]["text"] and "Passed" in out["radios"][0]["text"]
+    assert "✓" not in out["radios"][1]["text"] and out["radios"][1]["selected"]
+    assert "✓" in out["radios"][2]["text"]
+    assert out["collapsed"] and out["busy"]
+    assert "220 samples" in out["measurements"] and "Elapsed: 56 s" in out["measurements"]
 
 
 def test_still_params_works_alone_for_legacy_storyboards_without_changing_new_catalog_choices():

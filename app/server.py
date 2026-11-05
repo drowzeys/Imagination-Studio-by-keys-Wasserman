@@ -1691,6 +1691,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
         return graphics_build(params, job_id)
     seed = str(int(params.get("seed", 0)))
     if kind == "scout":
+        if (WINDOWS or WIN32) and windows_runtime.mode()["enabled"] and params.get("image_model") == "qwen" and params.get("prompts"):
+            raise HTTPException(400, "The checked native recipe takes one image prompt at a time.")
         if params.get("loras"):  # text to picture has no LoRA path: an identity LoRA works only in an edit of a picture
             raise HTTPException(400, "a picture made from words alone cannot take LoRAs (they would be ignored): use Edit a picture with a source picture for an identity LoRA")
         folder = HOME / "scouts" / job_id
@@ -1702,6 +1704,13 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
             width, height = int(params["width"]), int(params["height"])
             if width % 16 or height % 16 or not (256 <= width <= 2048 and 256 <= height <= 2048):
                 raise HTTPException(400, "image sides are multiples of 16 between 256 and 2048")
+        if (WINDOWS or WIN32) and windows_runtime.mode()["enabled"]:
+            import windows_image_checks
+            if params.get("image_model") in windows_image_checks.KINDS:
+                try:
+                    windows_image_checks.require_scope(params["image_model"], width, height, count)
+                except ValueError as error:
+                    raise HTTPException(400, str(error)) from None
         env = {"SEED": seed, "WIDTH": width, "HEIGHT": height, **image_model_env(params)}
         if room:
             mac_comfy_room(params.get("image_model") or "")
@@ -1899,14 +1908,16 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
                 command = windows_cuda.translate(command)
             # the native tier's job tree may let ComfyUI break away (spark/comfy_win.py): it stays warm after the job
             gpu_check = local_windows and bounded_job and windows_checks.gpu_check(job)
-            commit = (windows_storyboard.JOB_LIMIT_MB if gpu_check else
+            # Native image checks keep production native guards; draft allocator/commit caps do not apply.
+            commit = (0 if windows_checks.native_image_check(job) else windows_storyboard.JOB_LIMIT_MB if gpu_check else
                       windows_features.COMMIT_MB if bounded_job and job["kind"] in (*windows_features.KINDS, "qualification") else
                       graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0)
             owned = OwnedJob(job_commit_mb=commit, breakaway=WINCUDA and not bounded_job)
             try:
                 process = owned.spawn(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                                      stdin=subprocess.PIPE if "prompts" in job["params"] else subprocess.DEVNULL)
+                                      stdin=subprocess.PIPE if "prompts" in job["params"] else subprocess.DEVNULL,
+                                      creationflags=0x08000000 if windows_checks.native_image_check(job) else 0)
             except (OSError, RuntimeError):
                 owned.close()
                 raise
@@ -1914,7 +1925,7 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
                 expired.set()
                 owned.terminate()
             if bounded_job:
-                deadline = threading.Timer(600, timed_out)
+                deadline = threading.Timer(windows_checks.timeout_seconds(job), timed_out)
                 deadline.daemon = True
                 deadline.start()
         else:
@@ -1969,7 +1980,7 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     if job["status"] == "cancelled":
         return False
     if expired.is_set():
-        raise RuntimeError("the Windows image job exceeded its 600 second deadline")
+        raise RuntimeError(f"the Windows image job exceeded its {windows_checks.timeout_seconds(job)} second deadline")
     if code:
         # The script's own last words explain a refusal better than the runner's exit status.
         said = [line.strip() for line in job["log"].splitlines() if line.strip() and not STEP.search(line)]
@@ -2397,10 +2408,7 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             job["finished"] = time.time()
             if (WINDOWS or WIN32) and job["kind"] == "qualification" and job["status"] in ("failed", "cancelled"):
                 try:
-                    windows_features.save_attempt(job["params"]["feature"],
-                                                  {"ok": False, "state": job["status"],
-                                                   "finished": job["finished"],
-                                                   "error": job.get("error") or "The check was cancelled."})
+                    windows_checks.save_outcome(job)
                 except (OSError, ValueError) as error:
                     job["log"] += f"\n[studio] Could not save the qualification attempt: {error}\n"
             if job["kind"] in swap.KINDS:  # a cancelled or failed swap's frames do not stay behind
@@ -2916,9 +2924,8 @@ def cancel(job_id: str) -> dict:
         hub.kick.set()  # a worker's render loop sees the cancelled job and interrupts its own prompt
         if (WINDOWS or WIN32) and job["kind"] == "qualification":
             try:
-                windows_features.save_attempt(job["params"]["feature"],
-                                              {"ok": False, "state": "cancelled", "finished": time.time(),
-                                               "error": "The check was cancelled."})
+                windows_checks.save_outcome({**job, "status": "cancelled", "finished": time.time(),
+                                             "error": "The check was cancelled."})
             except (OSError, ValueError) as error:
                 job["log"] += f"\n[studio] Could not save the qualification cancellation: {error}\n"
     return public(job)

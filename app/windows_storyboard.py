@@ -81,7 +81,7 @@ def status() -> dict:
                          for key in ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb"))
                  and hardware_matches(receipt["hardware"]))
     except FileNotFoundError:
-        return {"available": False, "why": "Run setup-windows-storyboard.ps1 and check-windows-storyboard.ps1 first."}
+        return {"available": False, "why": "Run setup-windows-images.ps1 -Model auto, then check it in Machine > Feature checks."}
         if valid:
             verify_model_updates(root, FILES, receipt.get("model_mtime_ns", {}))
     except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError) as error:

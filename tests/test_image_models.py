@@ -15,6 +15,31 @@ sys.path.insert(0, str(ROOT / "app"))
 sys.path.insert(0, str(ROOT / "spark"))
 
 
+@pytest.mark.parametrize("base", [False, True])
+def test_qwen_production_uses_the_same_graph_as_qualification(tmp_path, monkeypatch, base):
+    from types import SimpleNamespace
+    import spark_generate as generation
+
+    args = SimpleNamespace(model="qwen", base=base, width=512, height=512, output=str(tmp_path / "image.png"),
+                           seeds="", seed=7, steps=None, cfg=4.0, negative="", upsample=True)
+    graph = generation.qwen_image_workflow(args, "A sunlit hallway.", 7)
+    if base:
+        assert graph["12"]["class_type"] == "KSampler"
+        assert graph["12"]["inputs"]["steps"] == 40 and graph["12"]["inputs"]["cfg"] == 4.0
+    else:
+        assert graph["12"]["class_type"] == "SamplerCustomAdvanced"
+        assert graph["11"]["inputs"]["cfg"] == 1.0 and graph["10"]["inputs"]["sigmas"] == generation.TURBO_SIGMAS
+    calls = []
+    monkeypatch.setattr(generation, "qwen_image_workflow", lambda *given: calls.append(given) or graph)
+    monkeypatch.setattr(generation, "ensure_server", lambda *_: None)
+    monkeypatch.setattr(generation, "prompt_of", lambda _: "A sunlit hallway.")
+    monkeypatch.setattr(generation, "render", lambda actual, sampler: ({"filename": "image.png"}, 0.1)
+                        if actual is graph and sampler == "12" else pytest.fail("Different production graph"))
+    monkeypatch.setattr(generation, "fetch", lambda *_: None)
+    generation.image(args)
+    assert calls == [(args, "A sunlit hallway.", 7)]
+
+
 def test_only_installed_models_are_offered_and_asked_for():
     import server
     from fastapi import HTTPException

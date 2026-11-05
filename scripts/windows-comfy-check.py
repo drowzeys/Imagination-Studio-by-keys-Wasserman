@@ -34,7 +34,8 @@ BELOW_NORMAL_PRIORITY = 0x4000
 class MemoryWatchdog:
     """Sample in a separate process so a stalled CUDA query cannot block the supervisor."""
 
-    def __init__(self, job: OwnedJob, device_index: int, log, python: str | None = None, wddm_device_uuid: str | None = None):
+    def __init__(self, job: OwnedJob, device_index: int, log, python: str | None = None,
+                 wddm_device_uuid: str | None = None, pressure_policy=None):
         self.job = job
         self.stopping = threading.Event()
         self.failed = threading.Event()
@@ -47,6 +48,7 @@ class MemoryWatchdog:
         self.minima = {}
         self.max_commit_used_mb = 0
         self.samples = 0
+        self.refused_sample = None
         self.backend_thread = None
         self.backend_stopping = threading.Event()
         self.backend_ready = threading.Event()
@@ -55,6 +57,7 @@ class MemoryWatchdog:
         self.backend_budget = None
         self.backend_handle = None
         self.wddm_device_uuid = wddm_device_uuid
+        self.pressure_policy = pressure_policy
         self.budget_basis = "owned ComfyUI CUDA context over HTTP"
         self.configured_floor = os.environ.get("SPARK_MEMORY_FLOOR_MB", "").strip()
         command = [python or sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", str(device_index)]
@@ -63,7 +66,7 @@ class MemoryWatchdog:
         self.process = job.spawn(
             command,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True, encoding="utf-8",
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | (NORMAL_PRIORITY if wddm_device_uuid else 0),
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000 | (NORMAL_PRIORITY if wddm_device_uuid else 0),
         )
         self.reader = threading.Thread(target=self.read, daemon=True)
         self.supervisor = threading.Thread(target=self.supervise, daemon=True)
@@ -133,14 +136,11 @@ class MemoryWatchdog:
                     raise ValueError("memory sampler returned stale data")
                 # Current freshness is checked independently; old history is not a valid trend baseline.
                 trend = previous if previous is None or snapshot.at - previous.at <= SAMPLE_FRESHNESS else None
-                reason = pressure(snapshot, self.configured_floor, trend)
+                reason = (self.pressure_policy(snapshot, trend) if self.pressure_policy is not None
+                          else pressure(snapshot, self.configured_floor, trend))
             except (TypeError, ValueError) as error:
                 self.fail(f"invalid memory sample: {error}")
                 return
-            if reason:
-                self.fail(reason)
-                return
-            previous = snapshot
             with self.state_lock:
                 if self.initial is None:
                     self.initial = snapshot
@@ -154,6 +154,12 @@ class MemoryWatchdog:
                     self.minima[name] = min(self.minima.get(name, value), value)
                 self.max_commit_used_mb = max(self.max_commit_used_mb, snapshot.host_commit_used_mb)
                 self.samples += 1
+                if reason:
+                    self.refused_sample = asdict(snapshot)
+            if reason:
+                self.fail(reason)
+                return
+            previous = snapshot
             self.ready.set()
 
     def check(self):
@@ -270,7 +276,7 @@ class MemoryWatchdog:
             self.fail("owned handle memory reporting did not answer within its deadline")
         self.check()
 
-    def finish(self):
+    def finish(self, check_result=True):
         self.process.wait(timeout=10)
         self.reader.join(timeout=3)
         self.supervisor.join(timeout=SAMPLE_FRESHNESS + 1)
@@ -284,7 +290,8 @@ class MemoryWatchdog:
                 self.backend_handle.wait()
             finally:
                 self.backend_handle.close()
-        self.check()
+        if check_result:
+            self.check()
 
     def begin_backend_shutdown(self):
         self.backend_stopping.set()
@@ -294,6 +301,7 @@ class MemoryWatchdog:
             if self.initial is None or self.latest is None:
                 raise RuntimeError("the memory watchdog has no valid samples")
             return {"samples": self.samples, "minima": dict(self.minima),
+                    "refused_sample": self.refused_sample,
                     "max_host_commit_used_mb": self.max_commit_used_mb,
                     "initial": asdict(self.initial), "final": asdict(self.latest),
                     "sampler_cuda_scope": "WDDM dedicated-memory budget, no sampler CUDA context" if self.wddm_device_uuid else "sampler process context, not backend headroom",

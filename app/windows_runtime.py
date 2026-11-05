@@ -205,6 +205,23 @@ def usage_status(kind: str, found: dict | None = None, selected_mode: dict | Non
     return result
 
 
+def image_files(model: str) -> list[Path]:
+    _, folder, transformer, _ = IMAGE_SPECS[model]
+    root = model_root() / folder
+    needed = [root / "diffusion_models" / transformer, windows_cuda.root() / "ComfyUI" / "extra_model_paths.yaml"]
+    if model.startswith("qwen"):
+        needed += [root / "text_encoders" / "qwen3vl_8b_int8_convrot.safetensors",
+                   root / "vae" / "qwen_image_2.1_vae_bf16.safetensors"]
+    elif model.startswith("flux3k"):
+        needed += [root / "text_encoders" / "qwen3vl_4b_bf16.safetensors",
+                   root / "text_encoders" / "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors",
+                   root / "vae" / "flux2-vae.safetensors", root / "system_prompts.json"]
+    else:
+        needed += [root / "text_encoders" / "qwen3.5_9b_bf16.safetensors", root / "vae" / "flux2-vae_small.safetensors",
+                   windows_cuda.root() / "ComfyUI" / "comfy_extras" / "nodes_moss_image.py"]
+    return needed
+
+
 def image_options(selected_mode: dict | None = None) -> list[dict]:
     selected_mode = mode() if selected_mode is None else selected_mode
     draft = usage_status("scout", selected_mode=selected_mode)
@@ -213,18 +230,7 @@ def image_options(selected_mode: dict | None = None) -> list[dict]:
              "requirements": [{"pool": "device", "required_mb": 12288, "reserve_mb": 2048, "basis": "policy"},
                               {"pool": "host", "required_mb": None, "reserve_mb": 0, "basis": "unknown"}]}]
     for model, (title, folder, transformer, part) in IMAGE_SPECS.items():
-        root = model_root() / folder
-        needed = [root / "diffusion_models" / transformer, windows_cuda.root() / "ComfyUI" / "extra_model_paths.yaml"]
-        if model.startswith("qwen"):
-            needed += [root / "text_encoders" / "qwen3vl_8b_int8_convrot.safetensors",
-                       root / "vae" / "qwen_image_2.1_vae_bf16.safetensors"]
-        elif model.startswith("flux3k"):
-            needed += [root / "text_encoders" / "qwen3vl_4b_bf16.safetensors",
-                       root / "text_encoders" / "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors",
-                       root / "vae" / "flux2-vae.safetensors", root / "system_prompts.json"]
-        else:
-            needed += [root / "text_encoders" / "qwen3.5_9b_bf16.safetensors", root / "vae" / "flux2-vae_small.safetensors",
-                       windows_cuda.root() / "ComfyUI" / "comfy_extras" / "nodes_moss_image.py"]
+        needed = image_files(model)
         core_why = windows_cuda.why_not()
         missing = [path.name for path in needed if not path.is_file() or path.stat().st_size == 0]
         installed = not core_why and not missing
@@ -237,8 +243,20 @@ def image_options(selected_mode: dict | None = None) -> list[dict]:
                      "scope": "Native model workflow; existing canvas and engine limits apply. Windows peak memory is not measured yet.",
                      "requirements": [{"pool": pool, "required_mb": None, "reserve_mb": 0, "basis": "unknown"}
                                       for pool in ("host", "device", "commit")],
-                     "setup": rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}",
+                     "setup": rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-images.ps1 -Model {model}",
                      "check_available": False, "measurement_source": "No Windows peak-memory envelope established."})
+        import windows_image_checks
+        if model in windows_image_checks.KINDS:
+            found = windows_image_checks.status(model)
+            available = found["qualified"] or found["installed"] and not selected_mode["enabled"]
+            rows[-1].update({**found, "available": available, "qualification_required": selected_mode["enabled"]})
+            if available:
+                rows[-1].update(why="", state="qualified" if found["qualified"] else "available_unverified")
+            verified = found.get("verified_scopes", [])
+            rows[-1]["scope"] = ("Verified: " + "; ".join(f"{scope['width']}x{scope['height']}, {scope['count']} image(s)"
+                                                        for scope in verified) if verified else
+                                 "512x512, one image is the basic check; larger native Turbo levels are checked separately.")
+            rows[-1]["measurement_source"] = "This machine's observed check, not a minimum RAM requirement." if found["qualified"] else "No successful native image check saved yet."
     return rows
 
 
