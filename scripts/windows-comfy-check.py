@@ -455,10 +455,16 @@ def run_check(source: Path, timeout: float, device_index: int, guarded: bool = F
                     else:
                         monitor = MemoryWatchdog(job, device_index, output)
                     monitor.wait_ready()
+                startup = None
+                if sys.platform == "win32":
+                    startup = subprocess.STARTUPINFO()
+                    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startup.wShowWindow = subprocess.SW_HIDE
                 process = job.spawn(
                     command, cwd=source, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                     env={**os.environ, "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1"},
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | (BELOW_NORMAL_PRIORITY if calibration and calibration.wddm_device_uuid else 0),
+                    startupinfo=startup,
                 )
                 base, deadline = f"http://127.0.0.1:{port}", time.monotonic() + timeout
                 last_error = "server has not answered"

@@ -1918,7 +1918,7 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
                 process = owned.spawn(command, cwd=PACK, env=child_env, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                       stdin=subprocess.PIPE if "prompts" in job["params"] else subprocess.DEVNULL,
-                                      creationflags=0x08000000 if windows_checks.native_image_check(job) else 0)
+                                      creationflags=0x08000000)
             except (OSError, RuntimeError):
                 owned.close()
                 raise

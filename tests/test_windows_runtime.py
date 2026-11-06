@@ -22,7 +22,8 @@ def test_desktop_route_is_not_hidden_behind_static_mount(client):
     assert response.json()["error"] == "This app was not started by the desktop controller."
 
 
-@pytest.mark.parametrize("feature,hidden", [("qwen", True), ("voice", True), ("music", True), ("hlg", False)])
+@pytest.mark.parametrize("feature,hidden", [(feature, True) for feature in
+    ("qwen", "voice", "music", "hlg", "finish", "scout", "sfx", "foley", "graphics", "mask")])
 def test_native_image_checker_outer_process_does_not_open_a_console(monkeypatch, feature, hidden):
     import windows_process
 
