@@ -314,6 +314,8 @@ def test_native_qualification_only_unlocks_its_checked_canvas_and_count(client, 
     monkeypatch.setattr(server, "WIN32", True)
     monkeypatch.setattr(server, "WINCUDA", True)
     monkeypatch.setattr(runtime, "physical_memory_mb", lambda: 65536)
+    # the scope is under test, not the live memory of the machine running the suite (a 16 GB CI runner refused MOSS)
+    monkeypatch.setattr(server, "mac_comfy_room", lambda *_: None)
     monkeypatch.setattr(windows_image_checks, "status", lambda _: {
         "installed": True, "available": True, "qualified": True, "check_available": True, "why": "",
         "verified_recipe": {"width": 512, "height": 512, "count": 1},

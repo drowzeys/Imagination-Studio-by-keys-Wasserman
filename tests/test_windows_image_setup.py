@@ -396,6 +396,7 @@ def test_explicit_native_script_downloads_only_selected_model_and_configures_wit
 
 
 @pytest.mark.skipif(not SHELL, reason="PowerShell is required")
+@pytest.mark.skipif(sys.platform != "win32", reason="the guard probes this machine's Windows memory; run by the windows-arm64 CI job")
 @pytest.mark.parametrize("cached,no_download,allowed", [(False, False, True), (True, False, True), (False, True, True)])
 def test_direct_native_image_guard_runs_before_installation(tmp_path, cached, no_download, allowed):
     if cached:
