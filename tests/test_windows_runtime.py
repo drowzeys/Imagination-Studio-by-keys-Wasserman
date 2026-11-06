@@ -342,6 +342,36 @@ def test_native_comfy_ownership_rejects_other_session_before_opening_pid(monkeyp
     assert comfy_win.start() == 1
 
 
+def test_comfy_guard_trims_before_host_pressure_can_stop_the_render():
+    import comfy_win
+    clock = [100.0]
+    trims = []
+    relief = comfy_win.Relief(lambda: trims.append(clock[0]) or True, clock=lambda: clock[0])
+    low = "Windows reports low physical memory (CUDA 105721 MiB free, dedicated 49092, host 840, commit 73345 of 116587)"
+    assert relief.judge(low) == "" and trims == [100.0]          # the first pressure trims instead of stopping
+    clock[0] += 1.0
+    assert relief.judge(low) == "" and trims == [100.0]          # waited out while the trim takes effect
+    assert relief.judge("") == ""                                # relieved: re-armed
+    clock[0] += 0.5
+    assert relief.judge(low) == "" and len(trims) == 2           # a later load gets its own trim
+    clock[0] += comfy_win.TRIM_GRACE_S + 0.1
+    stopped = relief.judge(low)
+    assert stopped.startswith(low) and "still after trimming" in stopped and len(trims) == 2
+
+
+def test_comfy_guard_never_relaxes_commit_or_gpu_floors_and_stops_when_trim_fails():
+    import comfy_win
+    relief = comfy_win.Relief(lambda: pytest.fail("only host pressure is trimmed"), clock=lambda: 0.0)
+    for why in ("Windows commit headroom is exhausted", "Windows commit headroom 100 MiB is under the 4096 MiB floor",
+                "dedicated GPU memory 100 MiB is under the 512 MiB floor", "CUDA budget 1 MiB is below the 2048 MiB reserve"):
+        assert relief.judge(why) == why
+    def failed():
+        raise OSError("access denied")
+    refused = comfy_win.Relief(failed, clock=lambda: 0.0)
+    assert refused.judge("Windows reports low physical memory") == "Windows reports low physical memory"
+    assert comfy_win.Relief(lambda: False, clock=lambda: 0.0).judge("host memory 10 MiB is below the 20 MiB reserve")
+
+
 def test_native_comfy_restarts_owned_server_when_environment_changes(tmp_path, monkeypatch):
     import comfy_win
     import sys

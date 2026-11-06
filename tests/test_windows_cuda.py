@@ -95,7 +95,7 @@ def test_every_spark_job_kind_runs_natively_and_an_unported_one_is_refused():
                  "turnaround", "upscale", "mask", "remove", "swap", "train", "finish", "foley"):
         assert windows_cuda.unsupported(kind) == "", kind
     said = windows_cuda.unsupported("something-new")
-    assert said.startswith("Not available on native Windows yet") and "WSL" in said
+    assert said.startswith("Not available on Windows yet") and "WSL" not in said
     assert windows_cuda.NOT_NATIVE == {}
 
 

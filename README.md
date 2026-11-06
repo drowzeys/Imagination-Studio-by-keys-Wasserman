@@ -1,7 +1,7 @@
 # Imagination Studio by keys+Wasserman, powered by TensorFold
 
 A local film studio: plan a film, generate pictures, video, voices and music, then edit and export it.
-Use Native Windows, WSL2, an Apple-silicon Mac, or a supported NVIDIA Linux machine.
+Use Windows (natively, no WSL), an Apple-silicon Mac, or a supported NVIDIA Linux machine.
 Available models and settings depend on the machine, installed components and runtime memory.
 
 ![Imagination Studio](docs/screenshots/imagination-studio.webp)
@@ -11,9 +11,7 @@ Available models and settings depend on the machine, installed components and ru
 
 ## Windows
 
-### Native Windows
-
-**Run Studio directly on Windows, without WSL.** The native GPU setup targets **Windows 11 on Arm with an
+**Studio runs natively on Windows; there is no WSL version.** The native GPU setup targets **Windows 11 on Arm with an
 NVIDIA RTX Spark**, with 128 GB configurations intended for the full feature set. Smaller machines can use
 features that fit their GPU/runtime memory requirements and pass local validation.
 Planning, imports, settings and media browsing do not require large model downloads.
@@ -22,7 +20,7 @@ Run the Windows installer in an administrator PowerShell:
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
-powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1" -Native
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1"
 ```
 
 The installer clones Studio, sets up the selected components, and registers Desktop/Start shortcuts and a
@@ -30,8 +28,7 @@ notification-area tray icon. Review the model licences, download sizes and runti
 It is a component/model installation, not just a download-free UI launcher.
 
 Open **Imagination Studio** from Desktop or Start, then use **http://127.0.0.1:7870**.
-The tray starts/stops Studio, remembers a default backend, and switches between registered Native and WSL2
-installations after an idle, confirmed stop.
+The tray starts Studio and stops it after an idle, confirmed stop.
 [Component selection, UI-only setup and tray details](docs/windows.md).
 
 Already have a local checkout? Register its tray and shortcuts without installing models:
@@ -64,31 +61,11 @@ is a verification-policy default, not a guarantee that every model fits.
 GPU memory, Windows commit backing and available system RAM are separate limits; download size is not a RAM
 requirement. Adaptive setup currently uses known admission policies, not a complete predictive model for every
 recipe. For example, a 64 GB RTX Spark's GPU carve-out may not meet Voice's current requirement even though other
-image and sound recipes work.
+image and sound recipes work. On a 128 GB RTX Spark the firmware gives the GPU about 98 GB and Windows about 30 GB;
+the models load straight into the GPU's share ([how](docs/rtx-spark-n1x.md#memory)).
 
 [Native setup, components and qualification](docs/windows.md) ·
-[Measured Windows results and troubleshooting](docs/windows-rtx-spark-testing.md)
-
-### WSL2
-
-**An alternative Linux runtime on Windows**, installed separately from Native Windows. Use the same RTX Spark
-installer in an administrator PowerShell:
-
-```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
-powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1"
-```
-
-This sets up WSL2/Ubuntu and the Linux Studio. Review the selected components, model licences and disk
-requirements before starting: the WSL setup defaults to a broad model installation.
-The Native Windows qualification policy above does **not** describe WSL's Linux admission behavior.
-
-Both installations can coexist. The notification tray can remember both and a default backend, and switch
-after an idle, confirmed stop. Registration requires an updated Studio in each runtime.
-Models, environments and project folders remain separate; switching does not copy them or automatically run
-both backends.
-
-[WSL2 install and tray registration](docs/windows.md#wsl2) ·
+[Measured Windows results and troubleshooting](docs/windows-rtx-spark-testing.md) ·
 [RTX Spark hardware, memory pools and measurements](docs/rtx-spark-n1x.md)
 
 ## Mac
@@ -172,7 +149,7 @@ sign-in. Never post keys, tokens or private addresses in issues, logs or screens
 
 | Guide | Contents |
 |---|---|
-| [Windows](docs/windows.md) | Native-first setup, WSL2, components, qualification and tray |
+| [Windows](docs/windows.md) | Native setup, components, qualification and tray |
 | [Mac & Linux installation](docs/installation.md) | Hardware, install flags, upgrades, memory guards and workers |
 | [Moving an install](docs/moving-an-install.md) | Reusing models and compiled Python packages, similar-machine copies and cross-platform limits |
 | [User guide](docs/user-guide.md) | Screenshots, phone access, image/video tools, Slate and the Library |

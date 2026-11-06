@@ -800,7 +800,7 @@ class Cuda(Served):
             return (f"Fish Audio Drama 3's native Windows engine is not installed: no {self.bin.name if not self.bin.is_file() else self.lib.name} "
                     f"in {self.bin.parent if not self.bin.is_file() else self.lib.parent} (drama3-generate.exe and "
                     "tensorfold_drama3.dll from TensorFold's studio-1.2.2 Windows build; DRAMA3_CUDA_BIN and DRAMA3_CUDA_LIB "
-                    "name other files). The WSL install runs Drama 3 meanwhile.")
+                    "name other files). Run oneshot-setup-rtx-spark-n1x.ps1 again to build it.")
         if not sys.platform.startswith("linux") and not self.windows:
             return "The CUDA backend runs on a DGX Spark (Linux, CUDA)."
         if managed() and not os.environ.get("SPARK_GOVERNOR"):

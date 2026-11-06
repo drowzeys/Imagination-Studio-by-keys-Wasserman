@@ -190,9 +190,9 @@ if [ -n "$VRAM_GB" ] && [[ "${STUDIO_GPUS:-}" =~ ^[0-9]+(,[0-9]+)+$ ]] && [ "${S
   fi
 fi
 case "$GPU" in *GB10*) ;; *) if [ -z "$VRAM_GB" ]; then echo "  ! measured only on a DGX Spark (GB10, 128 GB unified memory) and an RTX Pro 6000; other GPUs are untested"; fi;; esac
-# NVIDIA RTX Spark N1X (oneshot-setup-rtx-spark-n1x.sh sets STUDIO_N1X=1): sm_121 like a GB10, under WSL2 on Windows,
-# with the GPU's fixed carve-out of the memory (96 of 128 GB on an HP OmniBook X) and the rest (about 30 GB) for WSL.
-# The models live in the carve-out, so WSL's small RAM is not held against video. A GB10 install does not set it.
+# NVIDIA RTX Spark N1X (STUDIO_N1X=1, for a Linux install on that card; on Windows the Studio is native): sm_121 like a
+# GB10, with the GPU's fixed carve-out of the memory (96 of 128 GB on an HP OmniBook X) and the rest (about 30 GB) for
+# the OS. The models live in the carve-out, so the small RAM is not held against video. A GB10 install does not set it.
 if [ "${STUDIO_N1X:-0}" = 1 ]; then
   STUDIO_ALLOW_SMALL_VRAM=1
   echo "  ! RTX Spark N1X: the GPU's ${VRAM_GB:-?} GB carve-out holds the models; this Linux has ${MEM_GB} GB beside it"

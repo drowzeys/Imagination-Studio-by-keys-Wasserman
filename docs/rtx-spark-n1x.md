@@ -1,9 +1,12 @@
 # Imagination Studio on an NVIDIA RTX Spark N1X laptop
 
 The RTX Spark N1X (Windows 11 on Arm) has the same GPU architecture as the DGX Spark's GB10: Blackwell, sm_121,
-6144 CUDA cores. The Studio runs the **DGX Spark recipe unchanged inside the laptop's WSL2 Ubuntu**, so it is the
-whole Studio (every part `oneshot-setup-spark.sh --all` installs), and a clip comes out **byte for byte the DGX Spark's**.
-What differs is the laptop's memory split and its power budget.
+6144 CUDA cores. The Studio runs on it **natively on Windows**: the DGX Spark's render path (ComfyUI, the Studio's
+graphs and TensorFold's engines) on Windows' own NVIDIA driver. There is no WSL version: the WSL2 install was removed
+on 2026-11-06. The dated measurements below that compare with WSL are kept as they were taken.
+What differs from a DGX Spark is the laptop's memory split and its power budget.
+
+<a id="install-one-shot-natively"></a>
 
 ## Install: one shot
 
@@ -14,70 +17,152 @@ irm https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasser
 powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1
 ```
 
-`oneshot-setup-rtx-spark-n1x.ps1`:
+`oneshot-setup-rtx-spark-n1x.ps1` checks the machine (ARM64, an N1X), clones the Studio on Windows (`-StudioDir`,
+default `%USERPROFILE%\Imagination-Studio`), asks once for a **Hugging Face read token**
+(https://huggingface.co/settings/tokens; accept the FLUX3-K and Stable Audio Open licences with that account; saved in
+`%USERPROFILE%\.cache\huggingface\token`, `-HfToken hf_...` passes it, `-NoHfToken` skips the gated models) and runs
+`scripts\setup-windows-cuda.ps1`. It then makes **Imagination Studio** (start) and **Stop Imagination Studio** with the
+Studio's icon on the Desktop and in Start, **pins Imagination Studio to the taskbar** (Windows 11's taskbar layout,
+appended to your own pins; it shows after Explorer restarts, or at the next sign-in), and keeps the laptop awake for
+renders: no sleep or hibernate plugged in, the lid does nothing, Windows on Best performance, the Wi-Fi adapter never
+powered down (`-NeverSleepOnBattery` for battery too, `-NoPower` to skip). Optional: `-StartAtLogon` (starts the Studio
+at sign-in), `-EnableSsh -AuthorizedKey "ssh-ed25519 ..."` (another machine reaches the laptop over SSH on the home
+network). `-Native` is accepted for older command lines and changes nothing.
 
-1. checks the machine (ARM64, an N1X) and WSL2 with Ubuntu (it installs them when missing; a first Ubuntu asks for its
-   Linux user, then run the script again), turns systemd on, and sets `.wslconfig` so WSL can use the RAM Windows has;
-2. clones the Studio into Ubuntu (`~/src/Imagination-Studio-by-keys-Wasserman`) and runs `oneshot-setup-rtx-spark-n1x.sh
-   --yes --all` there: the DGX Spark recipe with `STUDIO_N1X=1`. Run again, it updates (`--upgrade`). `-Parts "--sound"`
-   installs less. It first asks once for a **Hugging Face read token** (https://huggingface.co/settings/tokens;
-   accept the FLUX3-K and Stable Audio Open licences with that account) and saves it in Ubuntu, so the gated models
-   download in the same run (`-HfToken hf_...` passes it, `-NoHfToken` skips them);
-3. makes **Imagination Studio** (start) and **Stop Imagination Studio** with the Studio's icon, on the Desktop and in Start,
-   and **pins Imagination Studio to the taskbar** (Windows 11's taskbar layout, appended to your own pins; it shows after
-   Explorer restarts, or at the next sign-in);
-4. keeps the laptop awake for renders: no sleep or hibernate plugged in, the lid does nothing, Windows on Best
-   performance, the Wi-Fi adapter never powered down (`-NeverSleepOnBattery` for battery too, `-NoPower` to skip);
-5. optional: `-StartAtLogon` (starts the Studio at sign-in), `-EnableSsh -AuthorizedKey "ssh-ed25519 ..."` (another
-   machine reaches the laptop over SSH on the home network).
+Before any component install/download, native setup prints a runtime-fit plan. The default broad selection
+skips missing models whose existing runtime admission requirement exceeds this machine's GPU pool (and host
+pool where applicable), not merely its current free memory. For example, Drama 3 needs 50 GiB free under its
+current policy, so a fresh install with a 30.5 GiB N1X GPU pool skips Voice automatically. A machine with 96 GiB
+installed RAM still needs a suitable GPU carve-out and live headroom; it is not automatically qualified.
+Passing `-NativeParts` selects an explicit set instead. An explicit capacity mismatch requires
+`-AllowInsufficientModel` to download anyway. Cached files remain untouched; temporary contention and unknown
+requirements are not labelled permanently incompatible. `-PlanOnly` is still probe-free. See
+[Windows setup and qualification](windows.md) for policy sources, limitations, and the separate unknown-fit
+image acknowledgment.
+
+`scripts\setup-windows-cuda.ps1` installs:
+
+1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
+   ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
+   the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;
+   Zig is detected before invoking it. Missing or older versions trigger the pinned winget install, a terminal
+   PATH refresh and a version recheck. If Zig is still unavailable, setup stops with instructions to open a new
+   PowerShell window or correct PATH order, rather than continuing to an engine build with missing tools.
+2. the app's venv, FFmpeg, the GPU venv (NVIDIA's PyTorch 2.14 for CUDA 13.4) and the pinned ComfyUI (PR #200's scripts);
+3. TensorFold's engines **built from source** (no prebuilt release yet): drowzeys/TensorFold `studio-1.2.2` at
+   `1c8bdbfd`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`
+   (`tensorfold-native.exe` + `bolt.dll`), `zig build fish-drama3-generate fish-drama3-lib -Dsm=121`
+   (`drama3-generate.exe` + `tensorfold_drama3.dll`) and, with the music part, `zig build music3-generate -Dsm=121
+   -Doptimize=ReleaseFast` (`music3-generate.exe`), in an ARM64 developer prompt, into
+   `%LOCALAPPDATA%\ImaginationStudio\tf-h3`, `...\bolt\native\bin`, `...\drama3\bin` and `...\music3\bin`, each with
+   the commit it was built from (a run at the same commit keeps them);
+4. the models (`scripts\windows-cuda-setup.py models`: the DGX Spark's files from the same repos, with the Spark
+   scripts' own SHA-256s where they pin one; `-NativeParts`, default video, image, music, FLUX3-K, sound effects, swap
+   (Ref2VA int8, the Character Swap and Turbo LoRAs, SAM 3.1: 25 GB), workflows (the Library's actions: three node packs,
+   SAM 3.1 and the latent upscaler), foley (kijai's ComfyUI-MMAudio and MMAudio's 5.6 GB) and finish (Tesseract), plus
+   NVIDIA's Bolt checkpoints and Fish Audio's Drama 3; `-NoBolt` and `-NoVoice` leave those out; `train` adds
+   musubi-tuner's venv and its 46 GB of files: MiniMax H3's FL2VA transformer in bf16, its fp16 video encoder and ostris's
+   adapter);
+5. ComfyUI's model folders and `cuda-tier.json`.
+
+Run again, it resumes and updates. `-ToolchainOnly` installs step 1 alone; `-SkipToolchain -Parts <part>` adds one part
+to an install.
 
 ## Start and stop
 
 - **Start:** click Imagination Studio on the taskbar or Desktop. Its notification-area tray controller starts the
-  selected default backend and opens `http://127.0.0.1:7870`. If an app is already running, it only opens the page.
+  Studio and opens `http://127.0.0.1:7870`. If an app is already running, it only opens the page.
 - **Stop:** choose Stop Studio in the tray, or Stop Imagination Studio in Start. Confirm the action; queued or
   running jobs prevent stopping. A tray-owned app gracefully unloads its models before exiting.
-- **Native and WSL2 together:** each install registers separately. The tray shows which backend is running,
-  offers a default for future launches, and confirms an idle stop/start when switching. Changing the default does
-  not stop the running app. A failed drain prevents the next backend from starting.
-- **Exit tray** leaves Studio running. A separate supervisor retains the long-lived `wsl.exe` when using WSL2;
-  no visible command window is needed. It never uses `wsl --shutdown`, terminates a distribution, or kills by name.
-  Models, environments and project folders remain each install's own; switching does not copy or migrate them.
+- **Exit tray** leaves Studio running; a separate supervisor owns the app, so no visible command window is needed.
+  It never kills by name.
 - An app started manually, over SSH, or by an older launcher is labelled **External Studio**. The tray can open
   it but will not adopt or stop it. Stop it through its original launcher before starting a tray-owned session.
 
-Existing installs can register without running model setup. Use an updated checkout and a Windows Python 3.13
+An existing checkout can register without running model setup. Use an updated checkout and a Windows Python 3.13
 runtime (`py` or the native UI environment); the tray controller itself uses only the standard library:
 
 ```powershell
-# From the native Windows checkout:
-powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend native
-# Add an updated WSL2 checkout (replace these stand-ins with that install's values):
-powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser spark -WslRepo /home/spark/Imagination-Studio
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1
 ```
 
-Registration preserves the other backend and the existing default (`-MakeDefault` changes it explicitly).
-It creates the shared Start/Stop shortcuts and retains a local controller payload, so refreshing the menu does
-not start WSL. WSL registration and start explicitly check the given distro/user/checkout, with a timeout.
-Both backends need the updated `app/desktop_control.py`. Settings and private launch identity live outside the
-repository in `%LOCALAPPDATA%\ImaginationStudio`; credentials never appear in URLs, public app state or logs.
-The usual memory guards remain unchanged. Actual WSL2 lifecycle switching requires validation on an installed
-WSL Studio; deterministic tests do not constitute a GPU or WSL runtime measurement.
+Registration creates the Start/Stop shortcuts and keeps a local copy of the tray controller. A WSL2 registration left
+by an older install is ignored and dropped at the next registration. Settings and private launch identity live outside
+the repository in `%LOCALAPPDATA%\ImaginationStudio`; credentials never appear in URLs, public app state or logs.
 
 ## Memory
 
-The firmware gives the GPU a **fixed carve-out**: 96 of 128 GB on an HP OmniBook X 14, leaving Windows and WSL about
-30 GB. The laptop's BIOS has no setting for that split. The models live in the carve-out, so it suits the Studio. With
-`STUDIO_N1X=1` (`spark/memory_guard.py`):
+The firmware gives the GPU a **fixed carve-out**: on an HP OmniBook X 14 with 128 GB, the driver reports 98,304 MiB for
+the GPU and Windows sees about 30 GB. Nothing on Windows changes that split: the laptop's BIOS (F.05) has no graphics or
+memory-size setting among its 128, and the driver's carve-out is fixed. The CUDA pool Windows offers is about 113 GB
+(the dedicated 98 GB plus shared system memory). The models live in the GPU's part, so the split suits the Studio;
+what has to fit in Windows' 30 GB is loading them.
 
-- the card's whole carve-out is the pool: WSL's nvidia-smi names no process's memory, so the Studio's own loaded models
-  are counted as the job's (a clip, or a long take's part 2, no longer refuses because the models are resident);
-- WSL's ~30 GB of RAM does not hold a job back;
-- the checks are relaxed: a job the estimate says may not fit is **flagged** (`[tensorfold] memory warning: ...`) and
-  tried, and fails with the error if the memory really runs out (`STUDIO_MEMORY_GUARD=warn`, the N1X default; `strict`
-  refuses as on a DGX Spark, where running out can take the machine down).
+ComfyUI loads a model with its dynamic VRAM loader: the file is mapped, and the weights are streamed into GPU memory as
+they are first used. The pages it reads stay in ComfyUI's working set after they are copied, so a big load (FastH3's
+42 GB, after the 26 GB text encoder) runs Windows' available memory down to under 1 GB, with commit and the GPU fine;
+Windows then raises its low-memory signal. `spark/comfy_win.py`'s memory guard answers that signal by trimming
+ComfyUI's working set first (`EmptyWorkingSet`: clean file pages go back to Windows' standby list, as Linux's page cache
+gives them back on a Spark), and stops the render only if host memory is still low 2 seconds after the trim. Commit and
+GPU floors are never relaxed this way.
 
-## Speed: performance mode against the DGX Spark
+Measured 2026-11-06 on that laptop: FastH3, 864x480, 90 frames, 4 passes, from a stopped Studio: **133 s** in all,
+4.7 s a pass, of which 71.6 s was TensorFold's one-time int8 conversion of the checkpoint (saved for the next start).
+The trim fired once during the load; Windows' available memory stayed between 1 and 6 GB until the model was
+in GPU memory, then went back to about 20 GB. Without the trim the
+same render was stopped by the guard at the load, each time. ComfyUI's classic loader (`--highvram`) is no way out:
+it builds the 42 GB model in Windows' RAM before moving it and crashed reading the file.
+
+<a id="native-windows-the-native-cuda-tier"></a>
+
+## How the native Studio works
+
+On Windows the Studio is the same app as on a DGX Spark (`app/windows_runtime.py`, `app/windows_cuda.py`), with
+TensorFold's Windows engines and a CUDA pool of about 113 GB:
+
+- each feature uses its installed backend. The shared GPU Python/ComfyUI core does not depend on H3;
+  H3 alone retains its DLL and installer-measured pool requirement of at least 90,000 MiB.
+  Bounded recipes measured on [48/64 GB](windows-rtx-spark-plan.md) remain available alongside native alternatives.
+  The legacy file `cuda-tier.json` records paths/capacity rather than selecting a different app; `-Preview` is a launch alias;
+- qualification gating and badges are required below 128 GiB installed RAM and optional/off by default above it.
+  Diagnostics remain visible and individual checks can run either way. Prerequisites and live memory guards always
+  apply; the threshold does not guarantee model eligibility or qualify unmeasured Windows image recipes;
+- the Spark's jobs build the same commands; the bash scripts they run are replaced by their Python ports
+  (`spark/windows_scripts.py`: scripts/video.sh, studio.sh, scout.sh, image.sh, edit.sh, with the same checks and words)
+  and spark/comfy.sh by `spark/comfy_win.py`: TensorFold's H3 node copied into ComfyUI with `TF_H3_LIB` at
+  `tf_h3.dll`, a lower priority, the server owned by a job object and its recorded identity (never by name or port), the
+  Windows memory guard beside it (`app/windows_memory.py`: Windows' commit and low-memory signals and the CUDA pool,
+  four times a second; it stops the server and the render says why), and the server left warm after a render;
+- the Bolt brain is TensorFold 1.2.2's `tensorfold-native.exe` with `bolt.dll` (Mia's recipe on the Windows build), run by
+  the Studio as on a DGX Spark (loaded on the first question, unloaded when idle or when a render needs the memory),
+  in a job object that ends with the Studio;
+- every job kind of the DGX Spark runs natively once its part is installed; a part that is not installed says which
+  command installs it (`scripts\setup-windows-cuda.ps1 -SkipToolchain -Parts <part>`). Only
+  DGX Spark workers (handing clips to other Sparks) are not offered: this machine renders alone;
+- the Library's actions (turnaround sheet, upscale, find a person, remove a person) run their authors' own ComfyUI node
+  packs at the Spark's pinned commits (MATLOWAI's H3 Contact Sheet, dntpi's H3 Video Upsampler, Akatz Labs' H3 Relay,
+  SAM 3.1 on ComfyUI's nodes) through `spark/spark_workflows.py`, and `scripts/turnaround.sh` has its port
+  (`windows_scripts.py turnaround`); Character Swap runs `spark/spark_swap.py` as on a Spark. Their frames and LoRAs are
+  hard links where a Spark makes symlinks (a symlink needs a privilege a person may not have), and which ComfyUI serves
+  is read from `comfy_win.py`'s record instead of `pgrep`;
+- MMAudio foley runs kijai's ComfyUI-MMAudio with the Studio's sampler node, as on a Spark; the installer adds the pack's
+  requirements only where they add packages (librosa, numba and the rest have Windows ARM64 wheels);
+- Looks -> Train a LoRA runs kohya-ss's musubi-tuner in a venv of its own (`%LOCALAPPDATA%\ImaginationStudio\train`,
+  NVIDIA's PyTorch for CUDA 13.4, musubi-tuner's own Pillow fallback where opencv has no ARM64 wheel; bitsandbytes'
+  8-bit AdamW runs a step on the N1X), each step in a job object with the Windows memory guard beside it;
+- Finish runs Tesseract and Tesseract Converter from their windows-x86_64 releases (the only Windows builds Mirage
+  publishes) through the x64 emulation of Windows 11 on Arm (`scripts\setup-windows-finish.ps1`: pinned SHA-256s, the
+  bundles' own checksum lists; Tesseract's own install.ps1 refuses an ARM64 processor, so it is not used);
+- Fish Audio Drama 3 runs on its native Windows engine (`drama3-generate.exe` with `tensorfold_drama3.dll`) and MiniMax
+  Music 3 on its own (`music3-generate.exe`, in place of ComfyUI's nodes), both TensorFold `studio-1.2.2` `1c8bdbfd`, the
+  same server protocol as on a DGX Spark; where their files are missing the Voice and Music tabs say so (songs then run on
+  ComfyUI's MiniMax Music 3 nodes).
+
+## Measurements from the WSL2 install (2026-11-03 and 04)
+
+Taken while the Studio also had a WSL2 version on the laptop (removed 2026-11-06); kept as measured.
+
+### Speed: performance mode against the DGX Spark
 
 Measured 2026-11-03, HP OmniBook X 14 (RTX Spark N1X, 128 GB, BIOS F.05), plugged in, Windows on Best performance,
 against a DGX Spark (GB10). Same Studio (`main`), same TensorFold int8 engine (`1f7ecc75`), same ComfyUI, same seed:
@@ -111,7 +196,7 @@ the passes ran.
   open (many laptops cut power with the lid shut).
 - The whole-job times include loading the models and the QA gate's look at the take, which differ between runs.
 
-## An LLM on the N1X: Performance against power saving
+### An LLM on the N1X: Performance against power saving
 
 Not the Studio's own workload, measured the same way for anyone serving a language model on the laptop beside it.
 Measured 2026-11-04 on the same HP OmniBook X 14, plugged in, in WSL2 Ubuntu: vcruz305's
@@ -142,7 +227,7 @@ performance; "power saving" is Windows' Best power efficiency. GPU clock and pow
 - vcruz305's DSV4.1-Flash-1017 EXL3 recipe holds about 107 GiB of device memory on a GB10 and does not fit the N1X's
   96 GB carve-out.
 
-## TensorFold on the N1X: in WSL and native on Windows
+### TensorFold on the N1X: in WSL and native on Windows
 
 The same model family on [TensorFold](https://github.com/ashhart/TensorFold) 1.2.2's Flash-Next CUDA engine, serving
 [Blackfrost-AI/CYBER-FROST-3.8-FP4-Local](https://huggingface.co/Blackfrost-AI/CYBER-FROST-3.8-FP4-Local) (ModelOpt
@@ -179,103 +264,7 @@ clients ran on another machine through an SSH tunnel.
 - Native Windows against WSL: within about ±15% (three samples a class), and more memory left for streams.
 - On TensorFold the N1X matches or passes the DGX Spark's EXL3 figures for this model.
 
-<a id="native-windows-the-native-cuda-tier"></a>
-
-## Native Windows: one runtime, per-feature backends
-
-The Studio can also run on the laptop **natively on Windows, without WSL**: the DGX Spark's render path (ComfyUI, the
-Studio's graphs and TensorFold's engines) on Windows' own NVIDIA driver, where the CUDA pool is about 113 GB (WSL sees
-96) and TensorFold's Windows engines run. It is the same Studio (`app/windows_runtime.py`, `app/windows_cuda.py`):
-
-- each feature uses its installed backend. The shared GPU Python/ComfyUI core does not depend on H3;
-  H3 alone retains its DLL and installer-measured pool requirement of at least 90,000 MiB.
-  Bounded recipes measured on [48/64 GB](windows-rtx-spark-plan.md) remain available alongside native alternatives.
-  The legacy file `cuda-tier.json` records paths/capacity rather than selecting a different app; `-Preview` is a launch alias;
-- qualification gating and badges are required below 128 GiB installed RAM and optional/off by default above it.
-  Diagnostics remain visible and individual checks can run either way. Prerequisites and live memory guards always
-  apply; the threshold does not guarantee model eligibility or qualify unmeasured Windows image recipes;
-- the Spark's jobs build the same commands; the bash scripts they run are replaced by their Python ports
-  (`spark/windows_scripts.py`: scripts/video.sh, studio.sh, scout.sh, image.sh, edit.sh, with the same checks and words)
-  and spark/comfy.sh by `spark/comfy_win.py`: TensorFold's H3 node copied into ComfyUI with `TF_H3_LIB` at
-  `tf_h3.dll`, a lower priority, the server owned by a job object and its recorded identity (never by name or port), the
-  Windows memory guard beside it (`app/windows_memory.py`: Windows' commit and low-memory signals and the CUDA pool,
-  four times a second; it stops the server and the render says why), and the server left warm after a render;
-- the Bolt brain is TensorFold 1.2.2's `tensorfold-native.exe` with `bolt.dll` (Mia's recipe on the Windows build), run by
-  the Studio as on a DGX Spark (loaded on the first question, unloaded when idle or when a render needs the memory),
-  in a job object that ends with the Studio;
-- every job kind of the DGX Spark runs natively once its part is installed; a part that is not installed says which
-  command installs it (`scripts\setup-windows-cuda.ps1 -SkipToolchain -Parts <part>`), and nothing is sent to WSL. Only
-  DGX Spark workers (handing clips to other Sparks) are not offered: this machine renders alone;
-- the Library's actions (turnaround sheet, upscale, find a person, remove a person) run their authors' own ComfyUI node
-  packs at the Spark's pinned commits (MATLOWAI's H3 Contact Sheet, dntpi's H3 Video Upsampler, Akatz Labs' H3 Relay,
-  SAM 3.1 on ComfyUI's nodes) through `spark/spark_workflows.py`, and `scripts/turnaround.sh` has its port
-  (`windows_scripts.py turnaround`); Character Swap runs `spark/spark_swap.py` as on a Spark. Their frames and LoRAs are
-  hard links where a Spark makes symlinks (a symlink needs a privilege a person may not have), and which ComfyUI serves
-  is read from `comfy_win.py`'s record instead of `pgrep`;
-- MMAudio foley runs kijai's ComfyUI-MMAudio with the Studio's sampler node, as on a Spark; the installer adds the pack's
-  requirements only where they add packages (librosa, numba and the rest have Windows ARM64 wheels);
-- Looks -> Train a LoRA runs kohya-ss's musubi-tuner in a venv of its own (`%LOCALAPPDATA%\ImaginationStudio\train`,
-  NVIDIA's PyTorch for CUDA 13.4, musubi-tuner's own Pillow fallback where opencv has no ARM64 wheel; bitsandbytes'
-  8-bit AdamW runs a step on the N1X), each step in a job object with the Windows memory guard beside it;
-- Finish runs Tesseract and Tesseract Converter from their windows-x86_64 releases (the only Windows builds Mirage
-  publishes) through the x64 emulation of Windows 11 on Arm (`scripts\setup-windows-finish.ps1`: pinned SHA-256s, the
-  bundles' own checksum lists; Tesseract's own install.ps1 refuses an ARM64 processor, so it is not used);
-- Fish Audio Drama 3 runs on its native Windows engine (`drama3-generate.exe` with `tensorfold_drama3.dll`) and MiniMax
-  Music 3 on its own (`music3-generate.exe`, in place of ComfyUI's nodes), both TensorFold `studio-1.2.2` `1c8bdbfd`, the
-  same server protocol as on a DGX Spark; where their files are missing the Voice and Music tabs say so (songs then run on
-  ComfyUI's MiniMax Music 3 nodes).
-
-### Install: one shot, natively
-
-In an administrator PowerShell on the laptop:
-
-```powershell
-irm https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile $env:TEMP\n1x.ps1
-powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1 -Native
-```
-
-`-Native` clones the Studio on Windows (`-StudioDir`, default `%USERPROFILE%\Imagination-Studio`), asks once for the
-Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and runs `scripts\setup-windows-cuda.ps1`:
-
-Before any component install/download, native setup prints a runtime-fit plan. The default broad selection
-skips missing models whose existing runtime admission requirement exceeds this machine's GPU pool (and host
-pool where applicable), not merely its current free memory. For example, Drama 3 needs 50 GiB free under its
-current policy, so a fresh install with a 30.5 GiB N1X GPU pool skips Voice automatically. A machine with 96 GiB
-installed RAM still needs a suitable GPU carve-out and live headroom; it is not automatically qualified.
-Passing `-NativeParts` selects an explicit set instead. An explicit capacity mismatch requires
-`-AllowInsufficientModel` to download anyway. Cached files remain untouched; temporary contention and unknown
-requirements are not labelled permanently incompatible. `-PlanOnly` is still probe-free. See
-[Windows setup and qualification](windows.md) for policy sources, limitations, and the separate unknown-fit
-image acknowledgment.
-
-1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
-   ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
-   the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;
-   Zig is detected before invoking it. Missing or older versions trigger the pinned winget install, a terminal
-   PATH refresh and a version recheck. If Zig is still unavailable, setup stops with instructions to open a new
-   PowerShell window or correct PATH order, rather than continuing to an engine build with missing tools.
-2. the app's venv, FFmpeg, the GPU venv (NVIDIA's PyTorch 2.14 for CUDA 13.4) and the pinned ComfyUI (PR #200's scripts);
-3. TensorFold's engines **built from source** (no prebuilt release yet): drowzeys/TensorFold `studio-1.2.2` at
-   `1c8bdbfd`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`
-   (`tensorfold-native.exe` + `bolt.dll`), `zig build fish-drama3-generate fish-drama3-lib -Dsm=121`
-   (`drama3-generate.exe` + `tensorfold_drama3.dll`) and, with the music part, `zig build music3-generate -Dsm=121
-   -Doptimize=ReleaseFast` (`music3-generate.exe`), in an ARM64 developer prompt, into
-   `%LOCALAPPDATA%\ImaginationStudio\tf-h3`, `...\bolt\native\bin`, `...\drama3\bin` and `...\music3\bin`, each with
-   the commit it was built from (a run at the same commit keeps them);
-4. the models (`scripts\windows-cuda-setup.py models`: the DGX Spark's files from the same repos, with the Spark
-   scripts' own SHA-256s where they pin one; `-NativeParts`, default video, image, music, FLUX3-K, sound effects, swap
-   (Ref2VA int8, the Character Swap and Turbo LoRAs, SAM 3.1: 25 GB), workflows (the Library's actions: three node packs,
-   SAM 3.1 and the latent upscaler), foley (kijai's ComfyUI-MMAudio and MMAudio's 5.6 GB) and finish (Tesseract), plus
-   NVIDIA's Bolt checkpoints and Fish Audio's Drama 3; `-NoBolt` and `-NoVoice` leave those out; `train` adds
-   musubi-tuner's venv and its 46 GB of files: MiniMax H3's FL2VA transformer in bf16, its fp16 video encoder and ostris's
-   adapter);
-5. ComfyUI's model folders and `cuda-tier.json`.
-
-Run again, it resumes and updates. `-ToolchainOnly` installs step 1 alone; `-SkipToolchain -Parts <part>` adds one part
-to an install. Start/Stop shortcuts use the shared Native/WSL2 tray described above; everything else (taskbar
-pin, power settings, `-StartAtLogon`, `-EnableSsh`) is as for WSL. The WSL install can stay beside it
-(each has its own models; the native tier needs its own copy, or point
-`-Models` at a folder that has them).
+## Native measurements (2026-11-04)
 
 ### Measured natively
 

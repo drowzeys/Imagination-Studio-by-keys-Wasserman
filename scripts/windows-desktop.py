@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Windows desktop backend registrations and identity-checked Native/WSL lifecycle. No model setup."""
+"""The Windows desktop backend registration and its identity-checked lifecycle (the native Studio). No model setup.
+
+Windows runs the Studio natively only. A "wsl" registration saved by an older install is ignored (and dropped at the
+next registration); a default that names it falls back to the native backend."""
 from __future__ import annotations
 
 import argparse
 import contextlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import secrets
 import socket
 import subprocess
@@ -20,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 BASE = "http://127.0.0.1:7870"
 NO_WINDOW = 0x08000000
+BACKENDS = ("native",)  # the backends the tray can start: Windows is native only
 
 
 class DesktopError(RuntimeError):
@@ -77,28 +81,33 @@ def locked(name="desktop.lock"):
             msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-def profile(backend: str, *, studio: str = "", distro: str = "", user: str = "", repo: str = "") -> dict:
-    if backend == "native":
-        path = Path(studio).resolve()
-        if not studio or not (path / "scripts" / "app.ps1").is_file() or not (path / "app" / "desktop_control.py").is_file():
-            raise DesktopError("Choose an updated native Studio checkout containing the desktop controller.")
-        return {"studio": str(path)}
-    if backend != "wsl" or not distro or distro.startswith("-") or any(c in distro for c in "\r\n\0"):
-        raise DesktopError("Choose the installed WSL distribution.")
-    if not user or user.startswith("-") or any(c in user for c in "\r\n\0"):
-        raise DesktopError("Specify the WSL login user.")
-    if not repo.startswith("/") or any(c in repo for c in "\r\n\0") or ".." in PurePosixPath(repo).parts:
-        raise DesktopError("Specify the absolute Linux Studio checkout path.")
-    return {"distro": distro, "user": user, "repo": repo.rstrip("/")}
+def profile(backend: str, *, studio: str = "") -> dict:
+    if backend not in BACKENDS:
+        raise DesktopError("Windows runs the native Studio only.")
+    path = Path(studio).resolve()
+    if not studio or not (path / "scripts" / "app.ps1").is_file() or not (path / "app" / "desktop_control.py").is_file():
+        raise DesktopError("Choose an updated native Studio checkout containing the desktop controller.")
+    return {"studio": str(path)}
+
+
+def registered(config: dict) -> dict:
+    """The registrations the tray can use: an older install's "wsl" entry is not one."""
+
+    found = config.get("backends", {})
+    return {kind: found[kind] for kind in BACKENDS if isinstance(found, dict) and isinstance(found.get(kind), dict)}
+
+
+def default_backend(config: dict) -> str | None:
+    usable = registered(config)
+    return config.get("default") if config.get("default") in usable else next(iter(usable), None)
 
 
 def register(backend: str, **kwargs):
     found = profile(backend, **kwargs)
-    if backend == "wsl":
-        verify_wsl(found)
-        found["verified"] = True
     data = read(home() / "desktop.json")
     registrations = data.setdefault("backends", {})
+    for kind in [kind for kind in registrations if kind not in BACKENDS]:
+        del registrations[kind]  # an older install's WSL registration
     registrations[backend] = found
     if data.get("default") not in registrations:
         data["default"] = backend
@@ -126,19 +135,10 @@ def owned_status(identity: dict) -> dict:
 
 
 def available(backend: str, found: dict) -> bool:
-    if backend == "native":
-        return ((Path(found["studio"]) / "app" / "desktop_control.py").is_file()
-                and (home() / "ui-venv" / "Scripts" / "python.exe").is_file())
-    return found.get("verified") is True
-
-
-def verify_wsl(found: dict):
-    script = "import pathlib,sys; p=pathlib.Path(sys.argv[1]); sys.exit(0 if (p/'app'/'desktop_control.py').is_file() and (p/'scripts'/'n1x-studio.sh').is_file() else 1)"
-    done = subprocess.run(["wsl.exe", "-d", found["distro"], "-u", found["user"], "--exec",
-                           "python3", "-c", script, found["repo"]],
-                          stdin=subprocess.DEVNULL, capture_output=True, timeout=30, creationflags=NO_WINDOW)
-    if done.returncode:
-        raise DesktopError("The registered WSL checkout is unavailable or needs the updated desktop-control files.")
+    if backend not in BACKENDS or not found.get("studio"):
+        return False
+    return ((Path(found["studio"]) / "app" / "desktop_control.py").is_file()
+            and (home() / "ui-venv" / "Scripts" / "python.exe").is_file())
 
 
 def status() -> dict:
@@ -164,11 +164,11 @@ def status() -> dict:
                 running, detail = "external", "Started outside this tray; stop it from its own launcher before switching."
         else:
             running, detail = "external", "Started outside this tray; stop it from its own launcher before switching."
-    registrations = config.get("backends", {})
-    return {"default": config.get("default"), "running": running, "detail": detail,
+    registrations = registered(config)
+    return {"default": default_backend(config), "running": running, "detail": detail,
             "backends": {kind: {"registered": kind in registrations,
                                 "available": available(kind, registrations[kind]) if kind in registrations else False}
-                         for kind in ("native", "wsl")}}
+                         for kind in BACKENDS}}
 
 
 def supervisor_alive(identity: dict) -> bool:
@@ -209,7 +209,7 @@ def stop_backend():
 
 def launch(backend: str):
     config = read(home() / "desktop.json")
-    chosen = config.get("backends", {}).get(backend)
+    chosen = registered(config).get(backend)
     if not chosen or not available(backend, chosen):
         raise DesktopError("That backend is not registered, installed, or updated for tray control.")
     current = status()
@@ -217,8 +217,6 @@ def launch(backend: str):
         return
     if current["running"] is not None:
         raise DesktopError("Stop the current backend before starting another.")
-    if backend == "wsl":
-        verify_wsl(chosen)
     python = home() / "ui-venv" / "Scripts" / "python.exe"
     if not python.is_file():
         python = Path(sys.executable)
@@ -244,24 +242,14 @@ def launch(backend: str):
     raise DesktopError("Startup is still pending. No second backend was started; check the tray status and desktop log.")
 
 
-def launch_command(backend: str, found: dict, identity: dict) -> tuple[list[str], dict, str | None]:
+def launch_command(backend: str, found: dict, identity: dict) -> tuple[list[str], dict]:
+    if backend not in BACKENDS:
+        raise DesktopError("Windows runs the native Studio only.")
+    # The session's secrets go through this process's environment, never argv or a URL.
     env = {**os.environ, "STUDIO_DESKTOP_TOKEN": identity["token"],
            "STUDIO_DESKTOP_SESSION": identity["session"], "STUDIO_DESKTOP_BACKEND": backend}
-    if backend == "native":
-        return (["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                 str(Path(found["studio"]) / "scripts" / "app.ps1"), "-Port", "7870"], env, None)
-    # Secrets go over stdin, never WSLENV, argv, a URL, or the Linux checkout.
-    script = """import json,os,sys
-c=json.loads(sys.stdin.readline())
-os.environ.update(c['env'])
-os.chdir(c['repo'])
-os.execvp('bash',['bash','scripts/n1x-studio.sh'])
-"""
-    data = json.dumps({"repo": found["repo"], "env": {
-        "STUDIO_DESKTOP_TOKEN": identity["token"], "STUDIO_DESKTOP_SESSION": identity["session"],
-        "STUDIO_DESKTOP_BACKEND": "wsl", "HOST": "127.0.0.1", "PORT": "7870",
-        "STUDIO_PIDFILE": "/tmp/studio-desktop-" + identity["session"] + ".pid"}})
-    return ["wsl.exe", "-d", found["distro"], "-u", found["user"], "--exec", "python3", "-c", script], env, data
+    return (["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+             str(Path(found["studio"]) / "scripts" / "app.ps1"), "-Port", "7870"], env)
 
 
 def supervise(backend: str):
@@ -278,18 +266,15 @@ def supervise_owned(backend: str):
     identity = {"token": secrets.token_hex(32), "session": os.environ.get("STUDIO_DESKTOP_LAUNCH") or uuid.uuid4().hex,
                 "backend": backend, "supervisor": os.getpid(), "created": created}
     config = read(home() / "desktop.json")
-    found = config["backends"][backend]
-    command, env, data = launch_command(backend, found, identity)
+    found = registered(config)[backend]
+    command, env = launch_command(backend, found, identity)
     owned = OwnedJob(breakaway=True)
     try:
         write(home() / "desktop-session.json", identity, private=True)
         with (home() / ("desktop-" + backend + ".log")).open("a", encoding="utf-8") as log:
-            process = owned.spawn(command, env=env, stdin=subprocess.PIPE if data else subprocess.DEVNULL,
+            process = owned.spawn(command, env=env, stdin=subprocess.DEVNULL,
                                   stdout=log, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                   creationflags=NO_WINDOW | 0x200)
-            if data:
-                process.stdin.write(data + "\n")
-                process.stdin.close()
             code = process.wait()
         if code:
             raise DesktopError("The desktop backend exited unsuccessfully; see its local desktop log.")
@@ -303,11 +288,8 @@ def supervise_owned(backend: str):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("register", "status", "start", "stop", "switch", "default", "supervise"))
-    parser.add_argument("--backend", choices=("native", "wsl"))
+    parser.add_argument("--backend", choices=BACKENDS)
     parser.add_argument("--studio", default="")
-    parser.add_argument("--distro", default="")
-    parser.add_argument("--user", default="")
-    parser.add_argument("--repo", default="")
     parser.add_argument("--confirmed", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -319,12 +301,10 @@ def main(argv=None):
         else:
             with locked():
                 if args.action == "register":
-                    if not args.backend:
-                        raise DesktopError("Choose Native or WSL.")
-                    register(args.backend, studio=args.studio, distro=args.distro, user=args.user, repo=args.repo)
+                    register(args.backend or "native", studio=args.studio)
                 elif args.action == "default":
                     config = read(home() / "desktop.json")
-                    if args.backend not in config.get("backends", {}):
+                    if args.backend not in registered(config):
                         raise DesktopError("Register that backend before choosing it as default.")
                     config["default"] = args.backend
                     write(home() / "desktop.json", config)
@@ -336,7 +316,7 @@ def main(argv=None):
                     if args.action in ("start", "switch"):
                         current = status()
                         if args.action == "switch" or args.backend or not current["running"]:
-                            launch(args.backend or read(home() / "desktop.json").get("default"))
+                            launch(args.backend or default_backend(read(home() / "desktop.json")) or "native")
                 result = status()
         print(json.dumps({"ok": True, **result}))
         return 0

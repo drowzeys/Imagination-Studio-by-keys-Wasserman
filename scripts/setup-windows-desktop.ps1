@@ -1,23 +1,20 @@
 <#
 .SYNOPSIS
-  Register a Native Windows or WSL2 Studio without replacing the other backend or its default.
-  Creates one notification tray launcher and Start/Stop shortcuts. No models, engines or system policy installs.
+  Register the native Windows Studio with the notification tray (Windows runs the Studio natively only; an older
+  install's WSL2 registration is dropped). Creates the tray launcher and Start/Stop shortcuts. No models, engines or
+  system policy installs.
 #>
 param(
-  [Parameter(Mandatory=$true)]
-  [ValidateSet('native','wsl')]
-  [string]$Backend,
+  [ValidateSet('native')]
+  [string]$Backend = 'native',
   [string]$StudioDir = (Split-Path $PSScriptRoot -Parent),
-  [string]$Distro,
-  [string]$WslUser,
-  [string]$WslRepo,
   [switch]$MakeDefault
 )
 $ErrorActionPreference = 'Stop'
 $Home_ = Join-Path $env:LOCALAPPDATA 'ImaginationStudio'
 $Payload = Join-Path $Home_ 'desktop-controller'
 $Source = Split-Path $PSScriptRoot -Parent
-# Keep the Windows tray payload local even when registering a checkout inside a stopped WSL distribution.
+# The tray's own copy of its scripts, so a checkout being updated never runs half-written files.
 New-Item -ItemType Directory -Force -Path (Join-Path $Payload 'scripts'), (Join-Path $Payload 'app\static\brand') | Out-Null
 foreach ($Name in @('windows-desktop.py','studio-tray.ps1')) {
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot $Name) -Destination (Join-Path $Payload "scripts\$Name") -Force
@@ -33,9 +30,7 @@ if (-not (Test-Path -LiteralPath $Python)) {
   $PythonArgs = @('-3.13')
 }
 $Controller = Join-Path $Payload 'scripts\windows-desktop.py'
-$Arguments = @('register','--backend',$Backend)
-if ($Backend -eq 'native') { $Arguments += @('--studio',$StudioDir) }
-else { $Arguments += @('--distro',$Distro,'--user',$WslUser,'--repo',$WslRepo) }
+$Arguments = @('register','--backend',$Backend,'--studio',$StudioDir)
 $Result = (& $Python @PythonArgs -X utf8 $Controller @Arguments | Out-String) | ConvertFrom-Json
 if (-not $Result.ok) { throw $Result.error }
 if ($MakeDefault) {
@@ -60,7 +55,7 @@ foreach ($Folder in @([Environment]::GetFolderPath('Desktop'),$Menu)) {
   $Link.Arguments = "-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Tray`" -Action Start"
   $Link.WorkingDirectory = $Home_
   $Link.IconLocation = "$Icon,0"
-  $Link.Description = 'Start the default Studio backend and show its tray controller'
+  $Link.Description = 'Start the native Studio and show its tray controller'
   $Link.Save()
 }
 $Link = $Shell.CreateShortcut((Join-Path $Menu 'Stop Imagination Studio.lnk'))
@@ -68,4 +63,4 @@ $Link.TargetPath = $PowerShell
 $Link.Arguments = "-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Tray`" -Action Stop"
 $Link.IconLocation = "$Icon,0"
 $Link.Save()
-Write-Host "Registered $Backend. Existing backend registrations/default are preserved. Start Imagination Studio from its shortcut."
+Write-Host "Registered the native Studio. Start Imagination Studio from its shortcut."

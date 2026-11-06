@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md)
 
-Current platform setup references. For Native Windows and WSL2, use [Windows setup](windows.md), not these shell commands.
+Current platform setup references. For Windows (native only), use [Windows setup](windows.md), not these shell commands.
 
 Moving to another computer? See [Moving an install](moving-an-install.md) for reusing model downloads,
 preserving compiled packages on similar machines, and Windows/Mac/Linux format differences.

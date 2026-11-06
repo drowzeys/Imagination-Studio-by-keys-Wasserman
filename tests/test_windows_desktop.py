@@ -1,4 +1,4 @@
-"""Desktop backend ownership, idle switching and registrations. No real app, WSL or GPU runs."""
+"""Desktop backend ownership, idle stopping and the native registration. No real app or GPU runs."""
 import contextlib
 import importlib.util
 import json
@@ -98,45 +98,39 @@ def test_unmanaged_app_has_no_desktop_control(monkeypatch):
         assert client.get("/api/desktop/session").status_code == 404
 
 
-def test_registration_preserves_both_installations_and_explicit_default(folder, monkeypatch):
+def checkout(folder):
     native = folder / "checkout"
     (native / "scripts").mkdir(parents=True)
     (native / "app").mkdir()
     (native / "scripts" / "app.ps1").write_text("test")
     (native / "app" / "desktop_control.py").write_text("test")
-    probes = []
-    monkeypatch.setattr(desktop, "verify_wsl", lambda found: probes.append(found.copy()))
-    first = desktop.register("native", studio=str(native))
-    assert first["default"] == "native"
-    second = desktop.register("wsl", distro="Ubuntu", user="studio-user", repo="/opt/studio")
-    assert set(second["backends"]) == {"native", "wsl"} and second["default"] == "native"
-    second["default"] = "wsl"
-    desktop.write(folder / "desktop.json", second)
-    assert desktop.register("native", studio=str(native))["default"] == "wsl"
-    assert len(probes) == 1
+    return native
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"distro": "-x", "user": "studio", "repo": "/opt/studio"},
-    {"distro": "Ubuntu", "user": "", "repo": "/opt/studio"},
-    {"distro": "Ubuntu", "user": "studio", "repo": "relative"},
-    {"distro": "Ubuntu", "user": "studio", "repo": "/opt/../studio"},
-])
-def test_invalid_wsl_registration_is_refused(kwargs):
-    with pytest.raises(desktop.DesktopError):
-        desktop.profile("wsl", **kwargs)
+def test_native_registration_drops_an_older_wsl_registration_and_its_default(folder):
+    native = checkout(folder)
+    desktop.write(folder / "desktop.json", {"default": "wsl", "backends": {"wsl": {
+        "distro": "Ubuntu", "user": "studio", "repo": "/opt/studio", "verified": True}}})
+    data = desktop.register("native", studio=str(native))
+    assert data["backends"] == {"native": {"studio": str(native.resolve())}} and data["default"] == "native"
+    assert desktop.read(folder / "desktop.json") == data
 
 
-def test_wsl_launch_keeps_credentials_off_argv_and_does_not_use_broad_stop():
+def test_only_the_native_backend_can_be_registered_or_launched():
+    with pytest.raises(desktop.DesktopError, match="native"):
+        desktop.profile("wsl", studio="/opt/studio")
+    with pytest.raises(desktop.DesktopError, match="native"):
+        desktop.launch_command("wsl", {"studio": "/opt/studio"}, {"token": "t", "session": "s"})
+    with pytest.raises(SystemExit):
+        desktop.main(["start", "--backend", "wsl"])
+
+
+def test_native_launch_keeps_credentials_off_argv():
     identity = {"token": "private-value", "session": "example-session"}
-    command, env, data = desktop.launch_command("wsl", {"distro": "Ubuntu", "user": "studio", "repo": "/opt/studio"}, identity)
-    assert command[:7] == ["wsl.exe", "-d", "Ubuntu", "-u", "studio", "--exec", "python3"]
+    command, env = desktop.launch_command("native", {"studio": "C:/Studio"}, identity)
+    assert command[0] == "powershell.exe" and command[-3].endswith("app.ps1") and command[-2:] == ["-Port", "7870"]
     assert "private-value" not in " ".join(command)
-    assert "pkill" not in " ".join(command) and "--terminate" not in command
-    settings = json.loads(data)
-    assert settings["env"]["STUDIO_DESKTOP_TOKEN"] == "private-value"
-    assert settings["env"]["HOST"] == "127.0.0.1"
-    assert "scripts/n1x-studio.sh" in command[-1]
+    assert env["STUDIO_DESKTOP_TOKEN"] == "private-value" and env["STUDIO_DESKTOP_BACKEND"] == "native"
 
 
 def test_legacy_or_foreign_port_is_not_adopted_or_stopped(folder, monkeypatch):
@@ -155,12 +149,12 @@ def test_legacy_or_foreign_port_is_not_adopted_or_stopped(folder, monkeypatch):
 
 def test_switch_waits_for_stop_before_start_and_does_not_change_default(folder, monkeypatch, capsys):
     events = []
-    desktop.write(folder / "desktop.json", {"default": "native", "backends": {"native": {}, "wsl": {}}})
+    desktop.write(folder / "desktop.json", {"default": "native", "backends": {"native": {}}})
     monkeypatch.setattr(desktop, "stop_backend", lambda: events.append("stop/drain"))
     monkeypatch.setattr(desktop, "launch", lambda backend: events.append("start:" + backend))
     monkeypatch.setattr(desktop, "status", lambda: {})
-    assert desktop.main(["switch", "--backend", "wsl", "--confirmed"]) == 0
-    assert events == ["stop/drain", "start:wsl"]
+    assert desktop.main(["switch", "--backend", "native", "--confirmed"]) == 0
+    assert events == ["stop/drain", "start:native"]
     assert desktop.read(folder / "desktop.json")["default"] == "native"
     events.clear()
     assert desktop.main(["switch", "--backend", "native"]) == 1
@@ -173,8 +167,17 @@ def test_busy_or_failed_stop_never_starts_another_backend(folder, monkeypatch):
         raise desktop.DesktopError("Queue busy or drain failed")
     monkeypatch.setattr(desktop, "stop_backend", stop)
     monkeypatch.setattr(desktop, "launch", starts.append)
-    assert desktop.main(["switch", "--backend", "wsl", "--confirmed"]) == 1
+    assert desktop.main(["switch", "--backend", "native", "--confirmed"]) == 1
     assert not starts
+
+
+def test_a_default_naming_an_older_wsl_registration_starts_native(folder, monkeypatch):
+    desktop.write(folder / "desktop.json", {"default": "wsl", "backends": {"native": {"studio": "C:/Studio"}, "wsl": {}}})
+    monkeypatch.setattr(desktop, "status", lambda: {"running": None})
+    started = []
+    monkeypatch.setattr(desktop, "launch", started.append)
+    assert desktop.main(["start"]) == 0
+    assert started == ["native"]
 
 
 def test_start_shortcut_opens_existing_app_without_adopting_or_launching(folder, monkeypatch):
@@ -183,14 +186,11 @@ def test_start_shortcut_opens_existing_app_without_adopting_or_launching(folder,
     assert desktop.main(["start"]) == 0
 
 
-def test_failed_registration_does_not_replace_existing_default(folder, monkeypatch):
+def test_failed_registration_does_not_replace_existing_default(folder):
     config = {"default": "native", "backends": {"native": {"studio": "existing"}}}
     desktop.write(folder / "desktop.json", config)
-    def failed(_):
-        raise desktop.DesktopError("WSL files not updated")
-    monkeypatch.setattr(desktop, "verify_wsl", failed)
     with pytest.raises(desktop.DesktopError, match="updated"):
-        desktop.register("wsl", distro="Ubuntu", user="studio", repo="/opt/studio")
+        desktop.register("native", studio=str(folder / "missing"))
     assert desktop.read(folder / "desktop.json") == config
 
 
@@ -210,9 +210,9 @@ def test_stop_waits_for_supervisor_to_remove_its_identity(folder, monkeypatch):
 
 
 def test_stop_timeout_never_force_kills_or_releases_identity(folder, monkeypatch):
-    identity = {"session": "ours", "backend": "wsl", "token": "test"}
+    identity = {"session": "ours", "backend": "native", "token": "test"}
     desktop.write(folder / "desktop-session.json", identity)
-    monkeypatch.setattr(desktop, "status", lambda: {"running": "wsl"})
+    monkeypatch.setattr(desktop, "status", lambda: {"running": "native"})
     monkeypatch.setattr(desktop, "owned_status", lambda _: {"busy": False})
     monkeypatch.setattr(desktop, "request", lambda *args, **kwargs: {})
     times = iter((0, 100))
@@ -220,17 +220,6 @@ def test_stop_timeout_never_force_kills_or_releases_identity(folder, monkeypatch
     with pytest.raises(desktop.DesktopError, match="not force-killed"):
         desktop.stop_backend()
     assert desktop.read(folder / "desktop-session.json") == identity
-
-
-def test_wsl_validation_uses_exact_registration_without_shell_interpolation(monkeypatch):
-    calls = []
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return SimpleNamespace(returncode=0)
-    monkeypatch.setattr(desktop.subprocess, "run", run)
-    desktop.verify_wsl({"distro": "Ubuntu", "user": "studio", "repo": "/opt/Studio With Spaces"})
-    assert calls[0][0][-1] == "/opt/Studio With Spaces"
-    assert calls[0][1]["timeout"] == 30 and calls[0][1]["creationflags"] == desktop.NO_WINDOW
 
 
 def test_native_start_matches_launch_identity_not_windows_venv_trampoline_pid(folder, monkeypatch):
@@ -256,14 +245,17 @@ def test_stop_rechecks_busy_with_private_identity(folder, monkeypatch):
         desktop.stop_backend()
 
 
-def test_wsl_menu_refresh_does_not_launch_distro_or_touch_unc(folder, monkeypatch):
+def test_an_older_wsl_registration_is_ignored_without_starting_wsl(folder, monkeypatch):
     desktop.write(folder / "desktop.json", {"default": "wsl", "backends": {"wsl": {
         "distro": "Ubuntu", "user": "studio", "repo": "/opt/studio", "verified": True}}})
     def absent(*args, **kwargs):
         raise ConnectionRefusedError
     monkeypatch.setattr(desktop.socket, "create_connection", absent)
     monkeypatch.setattr(desktop.subprocess, "run", lambda *args, **kwargs: pytest.fail("Menu must not start WSL"))
-    assert desktop.status()["backends"]["wsl"]["available"]
+    found = desktop.status()
+    assert found["backends"] == {"native": {"registered": False, "available": False}} and found["default"] is None
+    with pytest.raises(desktop.DesktopError, match="not registered"):
+        desktop.launch("native")
 
 
 @pytest.mark.skipif(not shutil.which("powershell"), reason="PowerShell parser required")
@@ -292,10 +284,10 @@ function Refresh-Desktop {{}}
 function Show-Problem($Message) {{throw $Message}}
 $Tray=[pscustomobject]@{{Text=''}}
 $script:Busy=$false
-$Value='wsl'
-$handler={{Run-Desktop @('switch','--backend',$Value,'--confirmed')}}.GetNewClosure()
+$Value='native'
+$handler={{Run-Desktop @('start','--backend',$Value)}}.GetNewClosure()
 & $handler
-if (($global:Received -join ' ') -ne 'switch --backend wsl --confirmed') {{throw ($global:Received -join ',')}}
+if (($global:Received -join ' ') -ne 'start --backend native') {{throw ($global:Received -join ',')}}
 """
     done = subprocess.run(["powershell", "-NoProfile", "-Command", script],
                           capture_output=True, text=True, timeout=30)
@@ -303,7 +295,7 @@ if (($global:Received -join ' ') -ne 'switch --backend wsl --confirmed') {{throw
 
 
 @pytest.mark.skipif(not shutil.which("powershell"), reason="WinForms on Windows is required")
-def test_actual_winforms_menu_has_independent_defaults_and_bound_switch_actions():
+def test_actual_winforms_menu_offers_only_the_native_backend_with_bound_actions():
     path = str(ROOT / "scripts" / "studio-tray.ps1").replace("'", "''")
     script = f"""
 $ErrorActionPreference='Stop'
@@ -314,8 +306,8 @@ $tree.FindAll({{param($n) $n -is [System.Management.Automation.Language.Function
   ForEach-Object {{Invoke-Expression $_.Extent.Text}}
 $Menu=New-Object System.Windows.Forms.ContextMenuStrip
 $Tray=[pscustomobject]@{{Text=''}}
-$script:Snapshot=[pscustomobject]@{{running='native';default='wsl';detail='Ready';backends=@{{
-  native=@{{available=$true}};wsl=@{{available=$true}}
+$script:Snapshot=[pscustomobject]@{{running='native';default='native';detail='Ready';backends=@{{
+  native=@{{available=$true}}
 }}}}
 $script:Busy=$false
 $script:RefreshError=''
@@ -326,22 +318,20 @@ function Run-Desktop([Parameter(ValueFromRemainingArguments=$true)][string[]]$Ar
 }}
 try {{
   Draw-Menu
-  $default=@($Menu.Items | Where-Object Text -eq 'Default: WSL2')
-  if ($default.Count -ne 1 -or -not $default[0].Checked) {{throw 'Default not checked'}}
-  $switch=@($Menu.Items | Where-Object Text -eq 'Switch to WSL2')[0]
-  if (-not $switch.Enabled) {{throw 'Installed WSL switch disabled'}}
-  $switch.PerformClick()
-  if (($global:Sent -join ' ') -ne 'switch --backend wsl --confirmed') {{throw 'Wrong switch closure'}}
-  if (@($Menu.Items | Where-Object Text -eq 'Native Windows - running')[0].Enabled) {{throw 'Running backend must not offer a switch to itself'}}
+  if (@($Menu.Items | Where-Object {{ $_.Text -match 'WSL|Default:|Switch to' }}).Count) {{throw 'Only the native backend is offered'}}
+  if (@($Menu.Items | Where-Object Text -eq 'Native Windows - running')[0].Enabled) {{throw 'Running backend must not offer to start again'}}
   $script:Snapshot.running=$null
   Draw-Menu
   $start=@($Menu.Items | Where-Object Text -eq 'Start Native Windows')[0]
   if (-not $start.Enabled) {{throw 'Stopped backend must offer Start'}}
   $start.PerformClick()
-  if (($global:Sent -join ' ') -ne 'start --backend native') {{throw 'Start must not use switch semantics'}}
-  $script:Snapshot.backends.wsl.available=$false
+  if (($global:Sent -join ' ') -ne 'start --backend native') {{throw 'Wrong start closure'}}
+  $script:Snapshot.backends.native.available=$false
   Draw-Menu
-  if (@($Menu.Items | Where-Object Text -eq 'WSL2 - not registered or unavailable')[0].Enabled) {{throw 'Unavailable backend must explain its state'}}
+  if (@($Menu.Items | Where-Object Text -eq 'Native Windows - not registered or unavailable')[0].Enabled) {{throw 'Unavailable backend must explain its state'}}
+  $script:Snapshot.running='wsl'
+  Draw-Menu
+  if (-not @($Menu.Items | Where-Object Text -eq 'Stop Studio')[0].Enabled) {{throw 'An older tray-owned session must still be stoppable'}}
   $script:Snapshot.running='external'
   Draw-Menu
   if (@($Menu.Items | Where-Object Text -eq 'Stop Studio')[0].Enabled) {{throw 'External app must not be stoppable'}}
@@ -372,7 +362,7 @@ $Controller='{controller}'
 $Menu=New-Object System.Windows.Forms.ContextMenuStrip
 $Tray=[pscustomobject]@{{Text=''}}
 $script:Snapshot=[pscustomobject]@{{running='native';default='native';detail='Ready';backends=@{{
-  native=@{{available=$true}};wsl=@{{available=$false}}
+  native=@{{available=$true}}
 }}}}
 $script:Busy=$false
 $script:RefreshError=''

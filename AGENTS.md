@@ -219,16 +219,20 @@ Rules:
   there, ended with the Mac's ssh or its heartbeat). Never add the Mac's key to a worker for it, and never open the
   relay to a network.
 - keys-HDR LORA, the HDR finish (`app/hlg.py`, the Library action `hlg`): processor and ffmpeg only, never under the GPU lock, numpy only (no OpenCV in the Studio's venv). It is a grade of an 8-bit SDR clip into BT.2020 / HLG: do not describe it as recovered detail or as what the model made. `TARGET` and `BANDS` are one look chosen by eye, not a standard. One curve for the whole clip: fit per frame or per shot, it flickers or jumps at cuts. A clip already HLG or PQ is refused.
-- RTX Spark N1X (`memory_guard.n1x()`: STUDIO_N1X=1 or the GPU name): the GPU's carve-out is the pool (WSL's
-  nvidia-smi names no process, so `device_room_mb` is the whole card; `card_pool` is not held to WSL's ~30 GB RAM) and
-  `guard_mode()` is "warn": `_relaxable` turns a check's refusal into `warning` (job tried, fails on a real OOM). A DGX
-  Spark stays "strict" (an OOM there can take the machine down); never make warn the default where RAM is the pool.
-- RTX Spark N1X launcher (`oneshot-setup-rtx-spark-n1x.ps1`, `scripts/n1x-studio.sh`, `docs/rtx-spark-n1x.md`): WSL
-  shuts Ubuntu down soon after its last Windows `wsl.exe` closes, so the Studio lives in the Start launcher's window; a
-  Studio started over SSH dies with the session. Stop by `[a]pp/...` patterns (a pkill whose own command line holds the
-  path kills its shell). The taskbar pin is Windows 11's taskbar layout policy (append); never claim a pin API.
+- RTX Spark N1X on Windows is native only: there is no WSL version (removed 2026-11-06); never add one back or send a
+  job to WSL. The one-shot (`oneshot-setup-rtx-spark-n1x.ps1`, `docs/rtx-spark-n1x.md`) installs natively (`-Native` is
+  an accepted no-op) and registers only the `native` desktop backend; `scripts/windows-desktop.py` ignores an older
+  install's `wsl` registration and drops it at the next registration. The taskbar pin is Windows 11's taskbar layout
+  policy (append); never claim a pin API. `memory_guard.n1x()` (STUDIO_N1X=1 or the GPU name) is the Linux guard's
+  N1X mode, kept for a Linux install on that card: the carve-out is the pool and `guard_mode()` is "warn"; a DGX Spark
+  stays "strict" (an OOM there can take the machine down); never make warn the default where RAM is the pool.
+- N1X memory on Windows: the firmware splits it (about 98 GB GPU, 30 GB Windows; no BIOS setting). ComfyUI's dynamic VRAM
+  loader streams mapped weights into the GPU, and the read pages stay in ComfyUI's working set: `comfy_win.Relief` trims
+  that working set (`EmptyWorkingSet`) when host pressure appears and stops ComfyUI only if the pressure outlasts
+  `TRIM_GRACE_S`. Never relax commit or GPU floors this way, and do not switch to `--highvram`: the classic loader builds
+  the whole model in Windows' RAM first.
 - Unified native Windows runtime (`app/windows_runtime.py`, `app/windows_cuda.py`, `spark/windows_scripts.py`, `spark/comfy_win.py`,
-  `scripts/setup-windows-cuda.ps1`, `oneshot-setup-rtx-spark-n1x.ps1 -Native`, docs/rtx-spark-n1x.md *Native Windows*):
+  `scripts/setup-windows-cuda.ps1`, `oneshot-setup-rtx-spark-n1x.ps1`, docs/rtx-spark-n1x.md *How the native Studio works*):
   one Windows experience with per-feature/backend dispatch. `windows_cuda.active` detects the shared GPU Python/ComfyUI
   core, not an app-wide capability tier; `h3_why_not` alone enforces H3's DLL and `MIN_POOL_MB` measured-pool requirement.
   Do not make unrelated images, audio or CPU features depend on H3. Standalone native engines select Windows binaries
