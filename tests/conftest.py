@@ -15,6 +15,9 @@ os.environ.setdefault("STUDIO_WINDOWS_SOUND_DIR", tempfile.mkdtemp(prefix="studi
 os.environ.setdefault("STUDIO_WINDOWS_FOLEY_DIR", tempfile.mkdtemp(prefix="studio-test-foley-"))
 os.environ.setdefault("STUDIO_WINDOWS_FEATURE_DIR", tempfile.mkdtemp(prefix="studio-test-features-"))
 os.environ.setdefault("GRAPHICS_DIR", tempfile.mkdtemp(prefix="studio-test-graphics-"))
+# the native Windows runtime's own folder (app/windows_cuda.py root(), finish.py prefix()): read off Windows by the
+# tests that set sys.platform to win32, so the Linux and Mac runs have one of their own too
+os.environ.setdefault("LOCALAPPDATA", tempfile.mkdtemp(prefix="studio-test-localappdata-"))
 # Import-time managers and per-test managers must never share the user's leases or RAM ledger.
 _gpu_temp = Path(tempfile.mkdtemp(prefix="studio-test-gpu-"))
 os.environ["STUDIO_GPU_RUNTIME_DIR"] = str(_gpu_temp / "runtime")

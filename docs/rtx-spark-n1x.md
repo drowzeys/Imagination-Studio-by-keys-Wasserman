@@ -53,7 +53,7 @@ runtime (`py` or the native UI environment); the tray controller itself uses onl
 # From the native Windows checkout:
 powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend native
 # Add an updated WSL2 checkout (replace these stand-ins with that install's values):
-powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser studio-user -WslRepo /home/studio-user/Imagination-Studio
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser spark -WslRepo /home/spark/Imagination-Studio
 ```
 
 Registration preserves the other backend and the existing default (`-MakeDefault` changes it explicitly).

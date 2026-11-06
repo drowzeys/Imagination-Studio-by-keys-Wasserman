@@ -74,6 +74,7 @@ def test_native_queue_check_registration_keeps_supervision_not_draft_caps(tmp_pa
     assert windows_checks.timeout_seconds(job) > checks.TIMEOUT_S
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="uses Windows-only APIs or file layouts; run by the windows-arm64 CI job")
 def test_mask_does_not_require_h3_or_loras_but_generative_actions_need_bf16(tmp_path, monkeypatch):
     monkeypatch.setattr(windows_runtime, "model_root", lambda: tmp_path / "models")
     monkeypatch.setattr(windows_cuda, "root", lambda: tmp_path)
@@ -88,6 +89,7 @@ def test_mask_does_not_require_h3_or_loras_but_generative_actions_need_bf16(tmp_
         assert "minimax_h3_ref2va_pruned_int8_convrot.safetensors" not in names
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="uses Windows-only APIs or file layouts; run by the windows-arm64 CI job")
 def test_windows_workflow_refuses_int8_for_runtime_action_adapter_merge(monkeypatch):
     import spark_workflows as workflow
     monkeypatch.setattr(workflow.sg, "WINDOWS", True)

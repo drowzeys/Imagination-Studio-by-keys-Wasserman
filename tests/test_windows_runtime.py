@@ -7,6 +7,7 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
+import sys
 
 from test_windows_ui import client, server  # noqa: F401
 import windows_checks
@@ -260,6 +261,7 @@ def test_native_discovery_never_starts_posix_scan_or_installer(client, install, 
             assert "PowerShell" in response.json()["detail"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="uses Windows-only APIs or file layouts; run by the windows-arm64 CI job")
 def test_native_audio_cards_are_registered_once_and_checks_available(client, install, monkeypatch):
     import windows_audio_checks
     import voice
@@ -280,6 +282,7 @@ def test_native_audio_cards_are_registered_once_and_checks_available(client, ins
         assert rows[0]["check_available"] and rows[0]["installed"] and not rows[0]["qualified"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="uses Windows-only APIs or file layouts; run by the windows-arm64 CI job")
 def test_native_library_cards_are_independent_and_not_hidden_by_h3(client, install, monkeypatch):
     import windows_library_checks as library
     monkeypatch.setattr(server,"WIN32",True)

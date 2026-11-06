@@ -192,6 +192,7 @@ def test_invalid_backend_headroom_is_refused(free):
         check.backend_budget({"devices": [{"type": "cuda", "vram_total": 36000 << 20, "vram_free": free}]})
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="uses Windows-only APIs or file layouts; run by the windows-arm64 CI job")
 def test_backend_monitor_starts_only_after_server_readiness(monkeypatch, tmp_path):
     ready = {"stats": False, "core": False, "attempts": 0}
 
@@ -245,6 +246,7 @@ def test_backend_monitor_starts_only_after_server_readiness(monkeypatch, tmp_pat
     assert check.run_check(tmp_path, 5, 0, guarded=True)["ok"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="uses Windows-only APIs or file layouts; run by the windows-arm64 CI job")
 @pytest.mark.parametrize("startup_failure", [True, False])
 def test_workspace_cleanup_failure_preserves_the_original_error_or_fails_the_check(monkeypatch, tmp_path, capsys,
                                                                                  startup_failure):

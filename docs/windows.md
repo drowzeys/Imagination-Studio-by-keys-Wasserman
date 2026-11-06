@@ -253,7 +253,7 @@ N1X's Linux guard has an explicitly configured warning policy; the DGX Spark str
 To register an existing **updated** WSL Studio from the Windows checkout:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser studio-user -WslRepo /home/studio-user/Imagination-Studio
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser spark -WslRepo /home/spark/Imagination-Studio
 ```
 
 Replace the example distro/user/path with that installation's values. Both checkouts need desktop-control
