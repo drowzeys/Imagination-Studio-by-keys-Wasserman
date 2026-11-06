@@ -123,3 +123,198 @@ def test_install_and_use_everything_found_are_one_click_each():
     assert out["sent"] == ["/api/discover/install", {"need": "flux3k-full"}]
     assert "installing…" in out["running"] and "Cancel" in out["running"] and "✓ environment" in out["running"]
     assert out["all"]
+
+
+def test_windows_inventory_refreshes_paths_and_copies_native_commands_without_install():
+    state = {"inventory_only": True, "platform": "windows", "scanning": False,
+             "note": "Current native Windows installation inventory.", "needs": [
+                 {"id": "qwen", "label": "Qwen Turbo", "engine": "Picture models", "state": "expected",
+                  "expected": "C:\\models\\Qwen-Image-2.1-Comfy", "feature": "qwen"},
+                 {"id": "qwen-full", "label": "Qwen Full", "engine": "Picture models", "state": "missing",
+                  "expected": "C:\\models\\Qwen-Image-2.1-Comfy",
+                  "install": {"how": "command", "shown": "powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-images.ps1 -Model qwen-full"}}]}
+    out = run(f"""
+      globalThis.copyText=(value)=>out.copied=value;
+      globalThis.openFeatureCheck=(feature)=>out.feature=feature;
+      answers["/api/discover"]={json.dumps(state)};
+      const box=viewDiscover(); await tick(); await tick();
+      out.text=text(box);
+      button(box,"Copy setup command").attrs.onclick();
+      button(box,"Feature checks").attrs.onclick();
+      button(box,"Refresh inventory").attrs.onclick(); await tick();
+      out.calls=calls;
+      out.installButtons=all(box,n=>n.tag==="button" && text(n)==="Install").length;
+    """)
+    assert "Qwen Turbo" in out["text"] and "in place" in out["text"]
+    assert "Last scan" not in out["text"] and "Not scanned yet" not in out["text"]
+    assert "bash" not in out["text"] and "powershell" in out["copied"]
+    assert out["feature"] == "qwen" and out["installButtons"] == 0
+    assert ["/api/discover/scan", {}] in out["calls"]
+
+
+def test_incompatible_model_requires_explicit_acknowledgment_before_copy():
+    state = {"inventory_only": True, "platform": "windows", "scanning": False, "needs": [{
+        "id": "voice", "label": "Drama 3", "engine": "Voice", "state": "missing",
+        "download_size": {"bytes": 12500000000},
+        "runtime_fit": {"state": "insufficient_capacity", "required_mb": 51200,
+                        "why": "Needs 50 GiB free; this GPU pool totals 30.5 GiB."},
+        "install": {"how": "command", "shown": "powershell -File setup.ps1 -Parts voice"}}]}
+    out = run(f"""
+      globalThis.copyText=value=>out.copied=value;
+      answers["/api/discover"]={json.dumps(state)};
+      const box=viewDiscover(); await tick(); await tick();
+      out.before=text(box); out.disabled=button(box,"Copy setup command").attrs.disabled;
+      button(box,"Copy setup command").attrs.onclick();
+      out.copiedBefore=!!out.copied;
+      find(box,n=>n.tag==="input" && text(n).length===0 && n.attrs.type==="checkbox" && !n.attrs.style).attrs.onchange({{target:{{checked:true}}}});
+      out.enabled=!button(box,"Copy setup command").attrs.disabled;
+      button(box,"Copy setup command").attrs.onclick();
+      out.after=text(box);
+    """)
+    assert "Download size: 12.5 GB" in out["before"]
+    assert "Storage/download only" not in out["before"]
+    assert "Not expected to run on this configuration" in out["before"]
+    assert out["disabled"] and not out["copiedBefore"] and out["enabled"]
+    assert out["copied"].endswith("-AllowInsufficientModel")
+
+
+def test_feature_check_links_are_in_row_headers_and_route_to_exact_audio_cards():
+    out = run("""
+      globalThis.openFeatureCheck=feature=>out.feature=feature;
+      out.rows=[];
+      for (const feature of ["voice","music","sfx","foley","qwen"]) {
+        const row=dscRow(null,{id:feature,label:feature,state:"expected",feature});
+        const header=find(row,n=>n.attrs && n.attrs.class==="top");
+        const link=button(header,"Feature checks");
+        link.attrs.onclick();
+        out.rows.push({feature:out.feature,inHeader:!!link,right:link.attrs.class.includes("dsc-check-link"),
+          count:all(row,n=>n.tag==="button" && text(n)==="Feature checks").length});
+      }
+    """)
+    assert [row["feature"] for row in out["rows"]] == ["voice", "music", "sfx", "foley", "qwen"]
+    assert all(row["inHeader"] and row["right"] and row["count"] == 1 for row in out["rows"])
+
+
+def test_workflow_bundle_links_each_independent_check():
+    out=run("""
+      globalThis.openFeatureCheck=feature=>out.feature=feature;
+      const row=dscRow(null,{id:"workflows",label:"Library workflows",state:"expected",
+        features:["turnaround","upscale","mask","remove"]});
+      const header=find(row,n=>n.attrs && n.attrs.class==="top");
+      out.labels=all(header,n=>n.tag==="button").map(text);
+      button(header,"Find").attrs.onclick();
+    """)
+    assert out["labels"]==["Turnaround","Upscale","Find","Remove"] and out["feature"]=="mask"
+
+
+def test_installed_models_with_checks_hide_only_generic_unknown_fit():
+    out = run("""
+      globalThis.openFeatureCheck=()=>{};
+      const model={id:"qwen",label:"Qwen",state:"expected",feature:"qwen",
+        download_size:{bytes:24260000000},
+        runtime_fit:{state:"unknown",required_mb:null,why:"Runtime memory fit is unknown for this recipe."}};
+      out.installed=text(dscRow(null,model));
+      out.missing=text(dscRow(null,{...model,state:"missing"}));
+      out.incompatible=text(dscRow(null,{...model,runtime_fit:{
+        state:"insufficient_capacity",required_mb:51200,why:"Needs 50 GiB free."}}));
+      out.qualification=text(dscModelInfo(model));
+    """)
+    assert "Runtime fit unknown" not in out["installed"]
+    assert "Runtime memory fit is unknown" not in out["installed"]
+    assert "Download size: 24.3 GB" in out["installed"] and "Feature checks" in out["installed"]
+    assert "Runtime fit unknown" in out["missing"]
+    assert "Not expected to run" in out["incompatible"]
+    assert "Runtime fit unknown" in out["qualification"]
+
+
+def test_missing_model_shows_shared_measurements_instead_of_generic_unknown_fit():
+    out = run("""
+      out.text=text(dscModelInfo({state:"missing",download_size:{bytes:24260000000},
+        runtime_fit:{state:"unknown",required_mb:null,why:"Runtime fit is unknown."},
+        shared_measurements:{summary:"Shared tests: 5 recipes passed. Recorded on 64 GiB installed RAM.",
+          memory_summary:"Observed GPU usage (adapter-wide): 23.0–25.9+ GiB.",
+          memory_note:"Reference only; not a local qualification."}}));
+    """)
+    assert "Shared measurements:" in out["text"] and "23.0–25.9+ GiB" in out["text"]
+    assert "Shared tests:" not in out["text"]
+    assert "Runtime fit unknown" not in out["text"]
+
+
+def test_shared_download_warning_requires_acknowledgment_before_copying_command():
+    out = run("""
+      const card=dscInstall(null,{id:"moss",runtime_fit:{state:"unknown"},
+        download_advice:{blocked:true},install:{how:"command",shown:"setup -Parts moss"}});
+      out.disabled=button(card,"Copy setup command").attrs.disabled;
+      out.text=text(card);
+      DSC.acknowledged.add("moss");
+      const accepted=dscInstall(null,{id:"moss",download_advice:{blocked:true},
+        install:{how:"command",shown:"setup -Parts moss"}});
+      out.accepted=text(accepted);
+    """)
+    assert out["disabled"] and "download anyway" in out["text"]
+    assert "-AllowInsufficientModel" in out["accepted"]
+
+
+def test_installed_model_reports_mixed_local_recipe_evidence():
+    out = run("""
+      const row={download_size:{bytes:24260000000},
+        runtime_fit:{state:"unknown",required_mb:null,why:"Runtime fit is unknown."},
+        recipe_fit:{summary:"5/8 recipes verified here; 2 failed — some recipes run, not all have passed. 1 not verified.",
+          memory_summary:"Observed GPU usage (adapter-wide): 20.0–28.0+ GiB. Stopped by commit backing.",
+          memory_note:"Observed peaks, not requirements."}};
+      out.text=text(dscModelInfo(row));
+    """)
+    assert "5/8 recipes verified" in out["text"] and "2 failed" in out["text"]
+    assert "Runtime fit unknown" not in out["text"]
+    assert "20.0–28.0+ GiB" in out["text"] and "Stopped by commit backing" in out["text"]
+
+
+def test_component_installation_is_not_workflow_readiness():
+    out = run("""
+      const card=dscRow(null,{id:"windows-workflows",label:"Library workflows",state:"expected",
+        installed_label:"Components installed",
+        requirements_note:"Find uses SAM, not H3. Other actions also need H3 models and action dependencies."});
+      out.text=text(card);
+    """)
+    assert "Components installed" in out["text"]
+    assert "Find uses SAM, not H3" in out["text"]
+    assert "Other actions also need H3" in out["text"]
+    assert "in place" not in out["text"]
+
+
+def test_collapsible_sections_summarize_installation_and_remember_open_state():
+    state = {"inventory_only": True, "scanning": False, "needs": [
+        {"id": "qwen", "label": "Qwen", "engine": "Picture models", "state": "expected"},
+        {"id": "full", "label": "Full", "engine": "Picture models", "state": "missing"},
+        {"id": "voice", "label": "Voice", "engine": "Voice", "state": "expected"}]}
+    out = run(f"""
+      answers["/api/discover"]={json.dumps(state)};
+      const box=viewDiscover(); await tick(); await tick();
+      const groups=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group");
+      out.titles=groups.map(n=>text(n.kids[0]));
+      out.initial=groups[0].attrs.open;
+      button(box,"Expand all").attrs.onclick();
+      out.expanded=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group").every(n=>n.attrs.open);
+      dscDraw(box);
+      out.retained=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group").every(n=>n.attrs.open);
+      button(box,"Collapse all").attrs.onclick();
+      out.collapsed=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group").every(n=>!n.attrs.open);
+      groups[0].attrs.ontoggle({{currentTarget:{{isConnected:true,open:true}}}});
+      dscDraw(box);
+      out.individual=all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group")[0].attrs.open;
+      groups[0].attrs.ontoggle({{currentTarget:{{isConnected:true,open:false}}}});
+      dscDraw(box);
+      out.closed=!all(box,n=>n.tag==="details" && n.attrs.class==="dsc-group")[0].attrs.open;
+      out.copyText=null;
+      globalThis.copyText=value=>out.copyText=value;
+      const row=dscRow(null,{{id:"qwen",label:"Qwen",state:"expected",
+        uninstall:{{shown:"powershell -File uninstall.ps1 -Model qwen",scope:"Exclusive weights only"}}}});
+      button(row,"Copy uninstall command").attrs.onclick();
+      out.calls=calls;
+    """)
+    assert "1 installed · 1 need installation" in out["titles"][0]
+    assert "✓ All installed (1)" in out["titles"][1]
+    assert not out["initial"] and out["closed"]
+    assert out["expanded"] and out["retained"] and out["collapsed"] and out["individual"]
+    assert out["copyText"] == "powershell -File uninstall.ps1 -Model qwen"
+    assert all(call[0] == "/api/discover" for call in out["calls"])

@@ -257,6 +257,10 @@ safetensors copies of MMAudio's weights. The studio clones it at a pinned commit
 (`spark/studio_mmaudio`) calls kijai's loaders' models and generate. On a Spark a sound effect runs on **ComfyUI**'s
 own Stable Audio nodes.
 
+**KEUM Myungchul** provides **python-soxr** (LGPL-2.1-or-later), the native resampler used by librosa.
+The Windows ARM64 foley setup builds it when a compatible wheel is unavailable, using the Microsoft
+compiler/SDK credited below; it does not replace the installed CUDA packages.
+
 ## Motion graphics: HeyGen's HyperFrames and GreenSock's GSAP
 
 **HeyGen** and the HyperFrames contributors made **HyperFrames** (Apache-2.0), which renders the Graphics tab's
@@ -266,6 +270,7 @@ standard no-charge licence. Both are installed from npm at pinned versions by `s
 ships neither. The browser is a Chromium already on the machine, else HyperFrames' own, and on a DGX Spark **Playwright**'s Chromium for arm64 (Microsoft, Apache-2.0).
 The bounded Windows graphics route reuses the person's installed **Microsoft Edge**, by **Microsoft**;
 it downloads neither Edge nor a separate browser and does not redistribute either.
+Missing Node.js is installed through **Windows Package Manager (winget)**, by **Microsoft** (MIT).
 Its Windows-only HyperFrames compatibility patch uses **Puppeteer**, by **Google and the Puppeteer contributors**
 (Apache-2.0), to check the browser headlessly in a temporary profile instead of opening the person's browser.
 
@@ -404,6 +409,10 @@ machine; none of their code ships in this pack.
 - The **LobeHub** icon set — the agents' marks on the page (unofficial, MIT; `app/static/brand/THIRD-PARTY-MARKS.md`).
 
 ## The native Windows CUDA tier (RTX Spark N1X): TensorFold on Windows, NVIDIA, Microsoft, Zig
+
+The Native/WSL2 notification tray uses **Microsoft**'s **Windows Forms**, **PowerShell** and **Windows
+Subsystem for Linux**, with Python's standard library for private launch control. No model or engine code
+runs inside the tray.
 
 The native tier runs the DGX Spark's render path on Windows 11 on Arm without WSL. Its engines are **TensorFold
 1.2.2** by **Ash Hart** and the TensorFold contributors (Apache-2.0), whose Windows platform support they build on, at

@@ -7,6 +7,7 @@ import folder_paths
 from aiohttp import web
 from server import PromptServer
 from windows_memory import process_memory
+from windows_backend_handle import identity
 
 
 def allocation_receipt():
@@ -18,6 +19,7 @@ def allocation_receipt():
         "gpu_fraction": torch.cuda.get_per_process_memory_fraction(0),
         "gpu_total_bytes": torch.cuda.get_device_properties(0).total_memory,
         "process_memory": process_memory(-1),
+        "process_identity": identity(),
     }
 
 

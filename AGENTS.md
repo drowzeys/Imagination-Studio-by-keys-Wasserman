@@ -20,7 +20,7 @@ REF_IMAGES="face.jpg" bash scripts/video.sh "Use <Picture 1> as the person. The 
 On a **DGX Spark** (Linux, CUDA) the same `bash oneshot-setup.sh` installs the CUDA build (it hands over to
 `oneshot-setup-spark.sh`): needs `git`, `ffmpeg` and Docker (for the prebuilt engines; without it the CUDA toolkit's
 `nvcc`, 12.9 or newer, builds them), 125 GB of free disk for the core install (about 400 GB with `--all`). It takes
-the same flags as on a Mac (README, *Install flags*) plus `--train`; there is no `--turbo`, no `--app` and no 2x
+the same flags as on a Mac ([Install flags](docs/installation.md#install-flags)) plus `--train`; there is no `--turbo`, no `--app` and no 2x
 decoder there. Upgrade an install with `git pull && bash oneshot-setup.sh --upgrade`, then restart the app. `bash spark/comfy.sh stop` frees the models' memory after rendering.
 
 ## Install for a person and build the one-click app
@@ -188,7 +188,7 @@ Rules:
   new measurements. A failed check never fails the job; the retake at the next seed is the user's choice.
 - On a DGX Spark a crop (the 720p preset) is made inside the workflow (`crop_frames` in `spark/spark_generate.py`),
   not with ffmpeg afterwards. What needs ffmpeg is refused when it is queued (`without_ffmpeg` in `app/server.py`).
-- DGX Spark memory (`spark/memory_guard.py`; the README's *The memory guard*): a clip is checked before it is queued
+- DGX Spark memory (`spark/memory_guard.py`; [The memory guard](docs/installation.md#the-memory-guard-dgx-spark)): a clip is checked before it is queued
   (`memory_of` in `app/server.py`) and again in `spark_generate.py` before anything loads, and the guard stands beside
   every server `comfy.sh` starts. Never start ComfyUI another way. With `SPARK_GOVERNOR` (a machine-wide workload
   governor, `spark/workload.py`) `comfy.sh` runs the server through `spark/managed_comfy.py`, which starts the same
@@ -227,22 +227,60 @@ Rules:
   shuts Ubuntu down soon after its last Windows `wsl.exe` closes, so the Studio lives in the Start launcher's window; a
   Studio started over SSH dies with the session. Stop by `[a]pp/...` patterns (a pkill whose own command line holds the
   path kills its shell). The taskbar pin is Windows 11's taskbar layout policy (append); never claim a pin API.
-- Native Windows CUDA tier (`app/windows_cuda.py`, `spark/windows_scripts.py`, `spark/comfy_win.py`,
+- Unified native Windows runtime (`app/windows_runtime.py`, `app/windows_cuda.py`, `spark/windows_scripts.py`, `spark/comfy_win.py`,
   `scripts/setup-windows-cuda.ps1`, `oneshot-setup-rtx-spark-n1x.ps1 -Native`, docs/rtx-spark-n1x.md *Native Windows*):
-  the Spark path on Windows, chosen only where `cuda-tier.json`, the GPU venv, ComfyUI and `tf_h3.dll` are all present
-  and the measured CUDA pool is at least `MIN_POOL_MB` (`why_not`); anything else on Windows keeps the preview tier
-  unchanged (`WINDOWS` stays the preview's flag, `WIN32` the OS's, `SPARK` is True on the native tier). Never run a
+  one Windows experience with per-feature/backend dispatch. `windows_cuda.active` detects the shared GPU Python/ComfyUI
+  core, not an app-wide capability tier; `h3_why_not` alone enforces H3's DLL and `MIN_POOL_MB` measured-pool requirement.
+  Do not make unrelated images, audio or CPU features depend on H3. Standalone native engines select Windows binaries
+  independently of the ComfyUI core. `-Preview` remains a launcher compatibility alias; the environment
+  `STUDIO_WINDOWS_TIER=preview` is only a legacy test/debug backend override. Never run a
   Linux script there: `windows_cuda.translate` maps `bash scripts/X.sh` to the Python port and refuses the rest, and a
   kind without a port is refused when queued with its reason (`NOT_NATIVE`), never sent to WSL. Keep
   `windows_scripts.py` in step with the bash scripts it ports (same checks, same words). ComfyUI is owned by handle
-  (`comfy_win.py`: a job object, the recorded id and creation time, a stop file), never by name or port, and stands
+  (`comfy_win.py`: a job object, private app-session hash, recorded id and creation time, a stop file), never by name or port.
+  Automatic reuse/stop must match the owning session; restart its own backend when the Python environment changes,
+  preserving isolated Foley dependencies and legacy shared environments. Keep ownership keys out of public state,
+  URLs, logs and job parameters. The server stands
   under `windows_memory.pressure`; it leaves the render's job object (breakaway) so it stays warm. Off Windows nothing
   of it runs (`active()` is False without a read). Drama 3 is wired only where `drama3-generate.exe` and
   `tensorfold_drama3.dll` exist, MiniMax Music 3's engine where `music3-generate.exe` does. Every Spark job kind has a
   port (`NOT_NATIVE` is empty); the installer's parts (`windows-cuda-setup.py`: `CHECKED`, `NODE_PACKS`) carry the
   Spark scripts' own pins and SHA-256s, which `tests/test_windows_cuda.py` holds in step. Never `os.kill(pid, 0)` on
-  Windows (signal 0 is CTRL_C_EVENT there): `windows_cuda.pid_alive`. The suite runs the preview tier (`STUDIO_WINDOWS_TIER=preview` in conftest);
-  `tests/test_windows_cuda.py` drives the native one.
+  Windows (signal 0 is CTRL_C_EVENT there): `windows_cuda.pid_alive`. Tests isolate physical memory and runtime
+  inventories; `test_windows_runtime.py` simulates 64/80/128 GiB. Never present those simulations as hardware measurements.
+  Setup is component-driven; `setup-windows-cuda.ps1 -Parts image -PlanOnly` performs no install/probe, and image-only
+  setup does not build H3 or obtain its compiler/toolkit. Foley uses its isolated environment.
+- Independent Windows CPU features (`app/windows_features.py`, `scripts/check-windows-features.ps1`): HDR grading
+  and local Tesseract Finish can qualify without H3 or a native CUDA-tier record. Keep their local receipts tied to
+  hardware/runtime/code, ten-second 720p/24 fps scopes, 4 GiB owned-job cap, low-memory supervision and API/UI/queue
+  agreement. Installed files or advertised RAM alone never constitute verification evidence.
+- Windows qualification controls (`windows_runtime.mode`, `/api/feature-checks/mode`): below 128 GiB installed
+  physical RAM gating/badges are on and locked; unknown capacity fails closed. At 128 GiB+ default off, optional.
+  Off disables evidence gating and badges only: diagnostics remain visible and individual implemented checks run.
+  Never bypass prerequisites, recipe bounds, H3 policy or live admission; do not fabricate passed evidence.
+  Feature checks distinguish installation, verification, current contention and capacity, with measured/estimated/
+  unknown requirements. Native image memory is unknown until measured; model download bytes are not RAM needs.
+- GPU telemetry: NVIDIA's N1X driver returns DLA/NPU rows from `--query-gpu`. Filter positive `GPU-` UUIDs before
+  counting or averaging devices; do not turn one RTX Spark plus its NPU into two GPUs. Keep real multi-GPU readings.
+- Manual UI verification uses the user's real running app. Do not start alternate/hidden app instances or rerun
+  expensive model qualifications unless explicitly requested. Keep automated unit fixtures isolated, and target
+  validation to changed behavior rather than repeating already completed feature verification.
+- Qualification update policy (`app/feature_checks.py`, `app/windows_qualification.py`): balanced by default;
+  routine runtime/source/tool updates retain dated evidence with `runtime_updated`, never pretend it is a new test.
+  `STUDIO_QUALIFICATION_STRICT=1` opts into exact provenance matching. Requalify model/recipe/hardware-profile,
+  core Python ABI/Torch/NumPy/CUDA-family or explicit execution-contract breaks. Bump `RUNNER_CONTRACT`,
+  `GPU_CONTRACT` or `WINDOWS_QUALIFICATION_CONTRACT` for incompatible execution/safety changes, not UI/bookkeeping.
+  A model timestamp change calls for cached checksum verification, not another render. Baseline progressive cards
+  (`app/windows_baseline_checks.py`, `scripts/windows-baseline-check.py`) reuse native receipts/checkers; failed or
+  cancelled reruns must not remove them. GPU qualification drains the warm owned backend before execution.
+- Independent Windows Foley (`app/windows_foley.py`, `scripts/setup-windows-foley.ps1`): pinned MMAudio in
+  `foley-gpu-venv`, source/weights shared but baseline GPU/UI packages isolated. Both restore stages use the GPU
+  manifest and its wheel source; repeat setup and read-only verification must work without manual pip repair.
+  Qualification is local 1-5 s / 24 fps, 25 passes / CFG 4.5, 360-row analysis (width at most 660), original video
+  copied. Keep 12/12/16 GiB tensor/process/job caps, two-second freshness, OS signals and 2 GiB dedicated reserve.
+  Bounded warm image/sound and cold Foley use UUID/LUID-bound WDDM adapter usage plus identity-validated owned
+  handles, not busy-model HTTP/NVML polling or another process's CUDA allocator budget. Missing/invalid/stale
+  counters refuse; never sum dedicated, shared and host pools or relax guards to qualify a recipe.
 - Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers
@@ -271,7 +309,7 @@ Rules:
   memory only when the engine exports `tf_h3_tp_init` (`memory_guard.tp_engine()`), else the head's card alone;
   one-card engines (Drama 3, Bolt, Music 3) read `head_free_mb`. `STUDIO_DECODE_SPLIT=self` runs the two-card decode
   path on one card for a byte check. Our Sparks have one GPU each: the two-card path is the contributor's measurement.
-- Voice (`app/voice.py`, `app/static/voice.js`, README *Voice (Fish Audio Drama 3)*): Fish Audio Drama 3 runs on this
+- Voice (`app/voice.py`, `app/static/voice.js`, [Voice](docs/audio-guide.md#voice-fish-audio-drama-3)): Fish Audio Drama 3 runs on this
   machine only, as a TensorFold process outside the app, never imported into the app's venv. Never call Fish Audio's
   cloud API. `DRAMA3_BACKEND=mlx|cuda` (`mlx` on a Mac, `cuda` on a DGX Spark). Both engines run as a persistent
   server speaking one protocol (`Served`): `python -m tensorfold.drama3 --serve` in `$DRAMA3_VENV` (drama3-mlx
@@ -322,7 +360,7 @@ Rules:
   measured as the reason a run failed or was killed: keep them. The server is stopped after every job
   (`mac_release`, `MAC_COMFY_KEEP=1` keeps it) and holds a kill-guard (`MAC_COMFY_GUARD_GB`, 16). The turnaround sheet
   stays the MLX engine's.
-- Music (`app/music.py`, `app/static/music.js`, README *Music (MiniMax Music 3)*): MiniMax-Music3 makes a song from
+- Music (`app/music.py`, `app/static/music.js`, [Music](docs/audio-guide.md#music-minimax-music-3)): MiniMax-Music3 makes a song from
   lyrics (section tags) and a style caption, on this machine only, never imported into the app's venv. The tab, every
   song and any page that plays one show "MiniMax-Music3" (its licence requires it in a commercial UI): keep it. On a
   Mac it is TensorFold's MLX port (`music3-mlx`, pinned in `scripts/setup-music.sh`, `oneshot-setup.sh --music`) as a
@@ -343,7 +381,7 @@ Rules:
   `start_s` (the measured no-stall start, `NO_STALL_S`, and `HOLD_MARGIN_S`) and `lead_s`; those are measurements, change
   them only with new ones. The kept song is the engine's finished WAV. A Spark does not stream, on the CUDA engine or ComfyUI's route.
   Lyric accuracy is Whisper's rough count on sung words.
-- The brain engine (`app/bolt.py`, `app/bolt_leash.py`, README *The brain engine*): NVIDIA Nemotron 3.5 Bolt run by
+- The brain engine (`app/bolt.py`, `app/bolt_leash.py`, [The brain engine](docs/audio-guide.md#the-brain-engine-nvidia-nemotron-35-bolt)): NVIDIA Nemotron 3.5 Bolt run by
   the Studio as the brains' local server, the lifecycle of Voice and Music: loaded on the first brain or agent request
   (`bolt.request`) on a loopback port, under the leash (it ends with the app) and a kill-guard (`BOLT_GUARD_GB`, 8;
   MemAvailable, vm_stat on a Mac), unloaded after `BOLT_IDLE_S` (600, `never` allowed) and **before any other local

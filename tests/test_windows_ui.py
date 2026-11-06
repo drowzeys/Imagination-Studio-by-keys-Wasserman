@@ -28,8 +28,8 @@ def test_windows_state_is_not_a_mac_or_a_render_backend(client):
     assert response.status_code == 200
     state = response.json()
     assert state["platform"] == "windows" and state["ui_only"]
-    assert "UI-ONLY" in state["platform_label"]
-    assert state["platform_note"] == server.WINDOWS_NOTE
+    assert state["platform_label"] == "NATIVE WINDOWS"
+    assert state["platform_note"] == ""
     assert state["image_models"] == [] and state["text_encoders"] == []
     assert not any(state[key] for key in ("zig", "turbo", "x2", "ref2va", "ref2va_turbo", "ref_media"))
     assert not state["voice"]["available"] and not state["music"]["available"]
@@ -49,12 +49,13 @@ def test_windows_keeps_upstream_paired_gpu_and_hdr_features_unqualified(client, 
         server.enqueue("hlg", "Unqualified", {})
     assert error.value.status_code == 501
     monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", False)
     monkeypatch.setattr(server.memory_guard, "paired_gpus", lambda: ["0", "1"])
     assert client.get("/api/state").json()["gpu_index"] == "0,1"
 
 
 @pytest.mark.parametrize("path", [
-    "/api/jobs", "/api/bolt/load", "/api/nodes/run", "/api/discover/scan",
+    "/api/bolt/load", "/api/nodes/run", "/api/discover/scan",
     "/api/voice/takes", "/api/music/takes",
     "/api/sparks", "/api/updates/apply",
     "/api/motion/analyse", "/api/slate/render",
@@ -71,6 +72,7 @@ def test_internal_queues_cannot_bypass_windows_refusal(client):
     with pytest.raises(server.HTTPException) as error:
         server.enqueue("voice", "test", {})
     assert error.value.status_code == 501
+    assert client.post("/api/jobs", json={}).status_code == 400
     with pytest.raises(server.HTTPException) as error:
         server.queue_job({"kind": "video"})
     assert error.value.status_code == 501

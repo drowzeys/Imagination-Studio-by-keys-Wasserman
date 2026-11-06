@@ -394,10 +394,27 @@ function takeSheet() {
 }
 // what the prompt goes to, as one small control over Create: the Image and Video rooms open it already set
 function intentBar() { const opts = { video: "Video with sound", image: "Image", edit: "Edit a picture" };
-  const marks = C.goes === "video" ? [mark("minimax"), S && S.platform === "spark" ? mark("comfy") : null, mark("tensorfold")] : [mark("qwen", "Qwen 2.1"), mark("flux")];
+  let marks = [mark("minimax"), S && S.platform === "spark" ? mark("comfy") : null, mark("tensorfold")], selected = "", backend = "";
+  if (C.goes !== "video") {
+    const editing = C.goes === "edit" && typeof edModel === "function";
+    const rows = typeof imageModels === "function" ? imageModels()
+      : S && (S.image_model_options || S.windows_runtime?.image_models || S.image_models) || [];
+    const models = rows.map(m => typeof m === "string" ? { id: m } : m);
+    if (editing || C.imageModel || models.length || typeof imageModelName === "function" || S?.windows_stills?.available) {
+      selected = editing ? edModel() : C.imageModel || (typeof imageModel === "function" && typeof imageModelName === "function" ? imageModel()
+        : models.find(m => m.available !== false)?.id || S?.windows_stills?.model || "qwen");
+      const model = { ...models.find(m => m.id === selected),
+        ...(editing && typeof edModels === "function" ? edModels().find(m => m.id === selected) : {}) };
+      const label = model.label || model.title || (!editing && typeof imageModelName === "function" ? imageModelName(selected)
+        : selected === "sd-turbo" ? "SD-Turbo" : selected === "qwen" ? "Qwen 2.1" : selected);
+      backend = model.backend || (selected === "sd-turbo" ? "bounded" : "");
+      marks = [/^(qwen|flux)/.test(selected) ? mark(/^flux/.test(selected) ? "flux" : "qwen", label) : el("span", {}, label),
+        backend ? el("span", { class: "tag2" }, backend + " backend") : null];
+    } else marks = [mark("qwen", "Qwen 2.1"), mark("flux")];
+  }
   return el("div", { class: "createbar" }, el("span", { class: "eyebrow" }, "The prompt goes to"),
     el("div", { class: "seg-ctl", role: "tablist", "aria-label": "The prompt goes to" }, Object.entries(opts).map(([k, label]) => el("button", { type: "button", role: "tab", "aria-selected": C.goes === k ? "true" : "false", class: C.goes === k ? "on" : "",
       onclick: () => { if (C.goes === k) return; C.goes = k; C.step = 0; changed(); } }, label))),
-    el("div", { class: "marks" }, marks)); }
+    el("div", { class: "marks", ...(selected ? { "data-image-model": selected, "data-image-backend": backend || false } : {}) }, marks)); }
 function createLayout(node) { const bar = intentBar(); if (C.goes === "edit") return el("div", {}, bar, node);
   return el("div", {}, bar, el("div", { class: "split", style: "grid-template-columns:minmax(0,1fr) 330px" }, node, takeSheet())); }

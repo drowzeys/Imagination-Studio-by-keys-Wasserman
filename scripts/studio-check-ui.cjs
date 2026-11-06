@@ -6,7 +6,7 @@
 // For each tab of TABS (index.html) it opens #Tab, records console errors, page errors, failed requests and broken
 // media, then clicks every visible button of the view one by one. Every request that is not a GET is answered 418 by
 // the sweep itself (recorded as "would send"), so a click never queues a job, saves a setting or deletes a file; a
-// confirm() is dismissed and a file chooser left empty. A page error raised by a click is a broken control.
+// confirm() is dismissed and a file chooser left empty. Only the sweep's own blocked-write errors are expected.
 // Writes <outdir>/ui.json and one screenshot a tab; exits 1 when a tab has a page error or a broken control.
 //
 // Needs playwright-core and a Chromium: PLAYWRIGHT (a playwright-core folder) and CHROME (its executable) override
@@ -15,44 +15,85 @@
 const fs = require("fs"), path = require("path");
 const base = (process.argv[2] || "http://127.0.0.1:7870").replace(/\/$/, "");
 const out = process.argv[3] || "studio-check-ui";
-// the app's access key (app/access.py): STUDIO_KEY for another machine's app, else this computer's studio folder's
-const KEY = process.env.STUDIO_KEY || (() => { try { const home = require("child_process").execFileSync("python3", [path.join(__dirname, "../app/studio_home.py")]).toString().trim();
-  return fs.readFileSync(path.join(home, "access-key"), "utf8").trim(); } catch (e) { return ""; } })();
-const KEYED = KEY ? { extraHTTPHeaders: { "X-Studio-Key": KEY } } : {};
-const pw = (() => { for (const p of [process.env.PLAYWRIGHT, "playwright-core", "playwright"].filter(Boolean)) {
-  try { return require(p); } catch (e) { /* next */ } } throw new Error("playwright-core not found: set PLAYWRIGHT"); })();
-const chrome = process.env.CHROME || (() => { const d = path.join(process.env.HOME || "", ".cache/ms-playwright");
-  try { for (const v of fs.readdirSync(d).filter(n => n.startsWith("chromium-")).sort().reverse())
-    for (const c of ["chrome-linux-arm64/chrome", "chrome-linux/chrome", "chrome-mac/Chromium.app/Contents/MacOS/Chromium"])
-      if (fs.existsSync(path.join(d, v, c))) return path.join(d, v, c); } catch (e) { /* none */ } return undefined; })();
 const ONLY = (process.env.TABS || "").split(",").filter(Boolean);
 const CLICKS = Number(process.env.CLICKS || 80);  // buttons clicked a tab at most
 // buttons never clicked even with writes blocked: they leave the page or open the OS
 const SKIP = /^(sign in|sign out|log ?in|download|open in finder|reveal|print|quit|stop the app|restart)/i;
 // what a view shows when something went wrong in its drawing
 const BAD_TEXT = /\b(undefined|NaN|\[object Object\]|Traceback|Internal Server Error)\b/;
+const BLOCKED_WRITE = "studio-check-ui: writes are blocked";
 
-(async () => {
+function pageErrorType(message, context, writes) {
+  return message === BLOCKED_WRITE && writes.some(w => w.tab === context.tab && w.click === context.click)
+    ? "blocked-write" : "pageerror";
+}
+
+function confirmDownload(events, url) {
+  for (const event of events)
+    if (event.type === "requestfailed" && event.method === "GET" && event.error === "net::ERR_ABORTED" && event.url === url)
+      event.type = "download";
+}
+
+async function main() {
+  // The key stays in memory; loopback checks never need it in a URL.
+  const KEY = process.env.STUDIO_KEY || (() => { try { const home = require("child_process").execFileSync("python3", [path.join(__dirname, "../app/studio_home.py")]).toString().trim();
+    return fs.readFileSync(path.join(home, "access-key"), "utf8").trim(); } catch (e) { return ""; } })();
+  const KEYED = KEY ? { extraHTTPHeaders: { "X-Studio-Key": KEY } } : {};
+  const pw = (() => { for (const p of [process.env.PLAYWRIGHT, "playwright-core", "playwright"].filter(Boolean)) {
+    try { return require(p); } catch (e) { /* next */ } } throw new Error("playwright-core not found: set PLAYWRIGHT"); })();
+  const chrome = process.env.CHROME || (() => { const d = path.join(process.env.HOME || "", ".cache/ms-playwright");
+    try { for (const v of fs.readdirSync(d).filter(n => n.startsWith("chromium-")).sort().reverse())
+      for (const c of ["chrome-linux-arm64/chrome", "chrome-linux/chrome", "chrome-mac/Chromium.app/Contents/MacOS/Chromium"])
+        if (fs.existsSync(path.join(d, v, c))) return path.join(d, v, c); } catch (e) { /* none */ } return undefined; })();
   fs.mkdirSync(out, { recursive: true });
   const browser = await pw.chromium.launch({ executablePath: chrome });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...KEYED });
   const page = await ctx.newPage();
   let now = { tab: "(load)", click: null }, events = [];
-  const note = (type, text) => events.push({ tab: now.tab, click: now.click, type, text: String(text).slice(0, 400) });
-  page.on("pageerror", e => note("pageerror", e.message));
+  const wouldSend = [], downloads = new Set(), downloadChecks = [];
+  const note = (type, text) => {
+    const event = { tab: now.tab, click: now.click, type, text: String(text).slice(0, 400) };
+    events.push(event);
+    return event;
+  };
+  page.on("pageerror", e => note(pageErrorType(e.message, now, wouldSend), e.message));
   page.on("console", m => { if (m.type() === "error") { const t = m.text();
     if (!/status of 418|Failed to load resource: the server responded with a status of 418/.test(t)) note("console", t); } });
   page.on("requestfailed", r => { const f = r.failure() && r.failure().errorText;
-    if (!/ERR_ABORTED/.test(f || "") || r.resourceType() !== "media") note("requestfailed", r.method() + " " + r.url().replace(base, "") + " " + f); });
+    if (!/ERR_ABORTED/.test(f || "") || r.resourceType() !== "media") {
+      Object.assign(note("requestfailed", r.method() + " " + r.url().replace(base, "") + " " + f),
+        { method: r.method(), url: r.url(), error: f });
+      if (downloads.has(r.url())) confirmDownload(events, r.url());
+    } });
+  page.on("download", download => {
+    const event = note("download", download.url().replace(base, ""));
+    downloadChecks.push((async () => {
+      let timer;
+      try {
+        const failure = await Promise.race([download.failure(), new Promise(resolve => {
+          timer = setTimeout(() => resolve("download did not finish within 30 seconds"), 30000);
+        })]);
+        if (failure) {
+          event.type = "requestfailed";
+          event.text += " " + failure;
+        } else {
+          downloads.add(download.url());
+          confirmDownload(events, download.url());
+        }
+      } catch (error) {
+        event.type = "requestfailed";
+        event.text += " download status failed: " + error.message;
+      } finally { clearTimeout(timer); }
+    })());
+  });
   page.on("response", r => { if (r.status() >= 400 && r.status() !== 418 && r.url().startsWith(base))
     note("http" + r.status(), r.request().method() + " " + r.url().replace(base, "")); });
   page.on("dialog", d => { note("dialog", d.type() + ": " + d.message().slice(0, 160)); d.dismiss().catch(() => {}); });
   page.on("filechooser", () => note("filechooser", "opened"));
   page.on("popup", p => { note("popup", p.url()); p.close().catch(() => {}); });
-  const wouldSend = [];
   await page.route("**/*", route => { const r = route.request();
     if (r.method() !== "GET" && r.method() !== "HEAD") { wouldSend.push({ tab: now.tab, click: now.click, method: r.method(), url: r.url().replace(base, "") });
-      return route.fulfill({ status: 418, contentType: "application/json", body: JSON.stringify({ error: "studio-check-ui: writes are blocked" }) }); }
+      return route.fulfill({ status: 418, contentType: "application/json", body: JSON.stringify({ error: BLOCKED_WRITE }) }); }
     if (!r.url().startsWith(base) && !/^data:|^blob:/.test(r.url())) note("external", r.method() + " " + r.url());
     return route.continue(); });
 
@@ -118,6 +159,12 @@ const BAD_TEXT = /\b(undefined|NaN|\[object Object\]|Traceback|Internal Server E
   await phone.goto(base + "/", { waitUntil: "load" }); await phone.waitForTimeout(2000);
   report.phone_overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   await phone.screenshot({ path: path.join(out, "99-phone.png") });
+  await Promise.all(downloadChecks);
+  for (const tab of report.tabs) {
+    const mine = events.filter(e => e.tab === tab.tab);
+    tab.failed = mine.filter(e => e.type === "requestfailed");
+    tab.other = mine.filter(e => !/^(pageerror|console|http\d+|requestfailed)$/.test(e.type));
+  }
   report.would_send = wouldSend;
   report.seconds = (Date.now() - t0) / 1000;
   fs.writeFileSync(path.join(out, "ui.json"), JSON.stringify(report, null, 1));
@@ -125,4 +172,7 @@ const BAD_TEXT = /\b(undefined|NaN|\[object Object\]|Traceback|Internal Server E
   console.log(`\n${report.tabs.length} tabs in ${report.seconds.toFixed(0)} s, ${failing.length} with problems, ${wouldSend.length} writes blocked; phone overflow ${report.phone_overflow}px; ${path.join(out, "ui.json")}`);
   await browser.close();
   process.exit(failing.length ? 1 : 0);
-})().catch(e => { console.error(e); process.exit(2); });
+}
+
+if (require.main === module) main().catch(e => { console.error(e); process.exit(2); });
+module.exports = { pageErrorType, confirmDownload };

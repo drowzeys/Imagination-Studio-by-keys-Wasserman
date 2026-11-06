@@ -1,6 +1,7 @@
 """Windows still admission and persistent storyboard links; no model/GPU probes."""
 import json
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,108 @@ from PIL import Image
 from test_windows_ui import client, server  # noqa: F401
 import suite
 import windows_storyboard as image
+
+
+def test_still_preflight_adds_gpu_process_diagnostics_only_on_refusal(monkeypatch):
+    from contextlib import nullcontext
+    import windows_memory
+
+    hardware = {"physical_total_mb": 48000, "host_total_mb": 22000, "gpu_dedicated_total_mb": 26000}
+    free = [4512]
+    queries = []
+
+    class Memory:
+        def read(self):
+            return 26000, free[0]
+
+        def processes(self):
+            queries.append(True)
+            return {"processes": [{"pid": 11, "name": "model-host.exe", "used_mb": None}], "warnings": []}
+
+    monkeypatch.delenv("SPARK_MEMORY_FLOOR_MB", raising=False)
+    monkeypatch.setattr(image, "_backend", None)
+    monkeypatch.setattr(image, "status", lambda: {"available": True, "hardware": hardware})
+    monkeypatch.setattr(windows_memory, "host_memory", lambda: (22000, 12000))
+    monkeypatch.setattr(windows_memory, "physical_memory_mb", lambda: 48000)
+    monkeypatch.setattr(windows_memory, "WindowsSignals", lambda: nullcontext(
+        SimpleNamespace(read=lambda: (10000, 40000, 1000, False))))
+    monkeypatch.setattr(windows_memory, "DedicatedMemory", lambda _: nullcontext(Memory()))
+    monkeypatch.setattr(windows_memory, "windows_gpu_process_memory", lambda: {11: 24576})
+    monkeypatch.setattr(image.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="selected-device"))
+    with pytest.raises(RuntimeError, match="4.4 GiB available; 14.0 GiB required") as error:
+        image.preflight()
+    assert "model-host.exe (PID 11, 24.00 GiB, Windows total across adapters)" in str(error.value)
+    assert queries == [True]
+    free[0] = 14336
+    image.preflight()
+    assert queries == [True]
+
+
+@pytest.mark.parametrize("release", [image.release_backend, image.shutdown_backend])
+def test_admission_waits_for_backend_cleanup_instead_of_reading_closed_process(monkeypatch, release):
+    from contextlib import nullcontext
+    import windows_memory
+
+    hardware = {"physical_total_mb": 48000, "host_total_mb": 22000, "gpu_dedicated_total_mb": 26000}
+    closing, finish_close, waiting = threading.Event(), threading.Event(), threading.Event()
+    errors = []
+
+    class Lock:
+        def __init__(self):
+            self.lock = threading.RLock()
+
+        def __enter__(self):
+            if threading.current_thread().name == "admission":
+                waiting.set()
+            if not self.lock.acquire(timeout=3):
+                raise RuntimeError("test lock timed out")
+            return self
+
+        def __exit__(self, *_):
+            self.lock.release()
+
+    class Backend:
+        def close(self):
+            closing.set()
+            if not finish_close.wait(3):
+                raise RuntimeError("test cleanup timed out")
+
+        def accounting(self):
+            raise RuntimeError("admission inspected the closing backend")
+
+    def run(function):
+        try:
+            function()
+        except Exception as error:
+            errors.append(error)
+
+    monkeypatch.delenv("SPARK_MEMORY_FLOOR_MB", raising=False)
+    monkeypatch.setattr(image, "_backend_lock", Lock())
+    monkeypatch.setattr(image, "_backend", Backend())
+    monkeypatch.setattr(image, "_backend_kind", "scout")
+    monkeypatch.setattr(image, "_active_job", None)
+    monkeypatch.setattr(image, "status", lambda: {"available": True, "hardware": hardware})
+    monkeypatch.setattr(windows_memory, "host_memory", lambda: (22000, 12000))
+    monkeypatch.setattr(windows_memory, "physical_memory_mb", lambda: 48000)
+    monkeypatch.setattr(windows_memory, "WindowsSignals", lambda: nullcontext(
+        SimpleNamespace(read=lambda: (10000, 40000, 1000, False))))
+    monkeypatch.setattr(windows_memory, "DedicatedMemory", lambda _: nullcontext(
+        SimpleNamespace(read=lambda: (26000, 24000))))
+    monkeypatch.setattr(image.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="selected-device"))
+    cleanup = threading.Thread(target=run, args=(release,))
+    admission = threading.Thread(target=run, args=(image.preflight,), name="admission")
+    cleanup.start()
+    try:
+        assert closing.wait(2)
+        admission.start()
+        assert waiting.wait(2), "admission did not take the backend lifecycle lock"
+    finally:
+        finish_close.set()
+        cleanup.join(timeout=5)
+        if admission.ident is not None:
+            admission.join(timeout=5)
+    assert not cleanup.is_alive() and not admission.is_alive()
+    assert not errors
 
 
 @pytest.fixture

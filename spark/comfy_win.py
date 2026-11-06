@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -48,7 +49,7 @@ SAMPLE_STALE_S = 5.0  # a sampler silent this long is replaced by the plain host
 COMMIT_FLOOR_MB = 4096  # Windows commit headroom kept: under it any allocation on the machine may fail
 DEDICATED_FLOOR_MB = 512  # NVML's dedicated GPU memory kept free (past it WDDM spills into shared system memory)
 BELOW_NORMAL = 0x4000  # BELOW_NORMAL_PRIORITY_CLASS: comfy.sh's nice, without starving the GPU's feeder thread
-DETACHED, NEW_GROUP, BREAKAWAY = 0x8, 0x200, 0x01000000
+DETACHED, NEW_GROUP, BREAKAWAY, NO_WINDOW = 0x8, 0x200, 0x01000000, 0x08000000
 
 
 # ---------- process identity: an id and its creation time, never a name ----------
@@ -81,6 +82,16 @@ def created(handle) -> int:
 
 def own_identity() -> dict:
     return {"pid": os.getpid(), "created": created(_kernel().GetCurrentProcess())}
+
+
+def session_identity() -> str | None:
+    value = os.environ.get("STUDIO_WINDOWS_SESSION_KEY")
+    return hashlib.sha256(value.encode()).hexdigest() if value else None
+
+
+def same_session(identity: dict) -> bool:
+    expected = session_identity()
+    return identity.get("session") == expected
 
 
 def open_recorded(identity: dict, terminate: bool = False):
@@ -131,8 +142,17 @@ def answers() -> bool:
 
 def start() -> int:
     if running():
-        print("already running")
-        return 0
+        identity = recorded()
+        if not same_session(identity):
+            print("Native ComfyUI belongs to another Studio session; it was not reused or stopped.", file=sys.stderr)
+            return 1
+        previous_python = identity.get("python")
+        if previous_python and Path(previous_python).resolve() != Path(sys.executable).resolve():
+            if stop():
+                return 1
+        else:
+            print("already running")
+            return 0
     python = Path(sys.executable)
     if not python.is_file() or not (PREFIX / "ComfyUI" / "main.py").is_file():
         print(f"run oneshot-setup-rtx-spark-n1x.ps1 -Native first: nothing at {PREFIX}", file=sys.stderr)
@@ -158,6 +178,9 @@ def start() -> int:
 
 def stop() -> int:
     identity = recorded()
+    if identity and session_identity() is not None and not same_session(identity):
+        print("Native ComfyUI belongs to another Studio session; it was not stopped.", file=sys.stderr)
+        return 1
     handle = open_recorded(identity)
     api = _kernel()
     if handle is None:
@@ -226,7 +249,7 @@ class Guard:
         # the sampler opens a CUDA context through torch: the GPU venv's python (this one, for the server)
         self.process = job.spawn([python or sys.executable, "-X", "utf8", str(APP / "windows_memory.py"), "--watch", "--device-index", "0"],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                                 encoding="utf-8", creationflags=NEW_GROUP)
+                                 encoding="utf-8", creationflags=NEW_GROUP | NO_WINDOW)
         threading.Thread(target=self.read, daemon=True).start()
 
     def read(self) -> None:
@@ -282,12 +305,13 @@ def run() -> int:
     env.pop("STUDIO_GPU_JOB_KEY", None)  # a warm server belongs to the GPU session, not to the job that loaded it
     env.update(STUDIO_GPU_MODEL_RAM="1", MAX_JOBS=env.get("MAX_JOBS", "2"), PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     install_nodes(env)
-    STATE.write_text(json.dumps({**own_identity(), "port": PORT}), encoding="utf-8")
+    STATE.write_text(json.dumps({**own_identity(), "port": PORT, "session": session_identity(),
+                                 "python": sys.executable}), encoding="utf-8")
     flags = (os.environ.get("SPARK_COMFY_ARGS") or "--use-ck-attention").split()
     job = OwnedJob()
     try:
         server = job.spawn([sys.executable, "-X", "utf8", "main.py", "--listen", "127.0.0.1", "--port", PORT, *flags],
-                           cwd=str(PREFIX / "ComfyUI"), env=env, stdin=subprocess.DEVNULL, creationflags=BELOW_NORMAL | NEW_GROUP)
+                           cwd=str(PREFIX / "ComfyUI"), env=env, stdin=subprocess.DEVNULL, creationflags=BELOW_NORMAL | NEW_GROUP | NO_WINDOW)
         floor = (os.environ.get("SPARK_MEMORY_FLOOR_MB") or "").strip()
         try:
             guard = Guard(job, floor)

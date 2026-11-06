@@ -12,7 +12,12 @@ os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp(prefix="studio-te
 os.environ.setdefault("PREFIX", tempfile.mkdtemp(prefix="studio-test-runtime-"))
 os.environ.setdefault("STUDIO_WINDOWS_IMAGE_DIR", tempfile.mkdtemp(prefix="studio-test-images-"))
 os.environ.setdefault("STUDIO_WINDOWS_SOUND_DIR", tempfile.mkdtemp(prefix="studio-test-sounds-"))
+os.environ.setdefault("STUDIO_WINDOWS_FOLEY_DIR", tempfile.mkdtemp(prefix="studio-test-foley-"))
+os.environ.setdefault("STUDIO_WINDOWS_FEATURE_DIR", tempfile.mkdtemp(prefix="studio-test-features-"))
 os.environ.setdefault("GRAPHICS_DIR", tempfile.mkdtemp(prefix="studio-test-graphics-"))
+# the native Windows runtime's own folder (app/windows_cuda.py root(), finish.py prefix()): read off Windows by the
+# tests that set sys.platform to win32, so the Linux and Mac runs have one of their own too
+os.environ.setdefault("LOCALAPPDATA", tempfile.mkdtemp(prefix="studio-test-localappdata-"))
 # Import-time managers and per-test managers must never share the user's leases or RAM ledger.
 _gpu_temp = Path(tempfile.mkdtemp(prefix="studio-test-gpu-"))
 os.environ["STUDIO_GPU_RUNTIME_DIR"] = str(_gpu_temp / "runtime")
@@ -73,6 +78,13 @@ def isolated_gpu_runtime(gpu_launch_environment, tmp_path, monkeypatch):
     monkeypatch.setenv("STUDIO_GPU_RUNTIME_DIR", str(tmp_path / "gpu-runtime"))
     monkeypatch.setenv("STUDIO_GPU_RAM_DIR", str(tmp_path / "gpu-ram"))
     monkeypatch.setattr(local_gpus, "inventory", _no_inventory)
+    if os.environ.get("STUDIO_TEST_HARDWARE") != "1":
+        import windows_runtime
+        monkeypatch.setattr(windows_runtime, "physical_memory_mb", lambda: 65536)
+        import windows_setup_fit
+        monkeypatch.setattr(windows_setup_fit, "inventory_hardware", lambda: {
+            "physical_total_mb": 65536, "host_total_mb": 32460,
+            "gpu_total_mb": 31232, "n1x": True})
     server = sys.modules.get("server")
     if server is not None and os.environ.get("STUDIO_TEST_HARDWARE") != "1":
         monkeypatch.setattr(server, "GPU_NAME", ["GB10"])

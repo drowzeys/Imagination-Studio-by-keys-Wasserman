@@ -57,6 +57,10 @@ def comfy_control(action: str) -> list[str]:
         return [sys.executable, "-X", "utf8", str(HERE / "comfy_win.py"), action]
     return ["bash", str(COMFY_SH), action]
 
+
+def run_comfy_control(action: str, **kwargs):
+    return subprocess.run(comfy_control(action), creationflags=0x08000000 if WINDOWS else 0, **kwargs)
+
 if MAC:
     URL = os.environ.get("MAC_COMFY_URL", "http://127.0.0.1:" + os.environ.get("MAC_COMFY_PORT", "8191"))
     MODELS = Path(os.environ.get("MAC_COMFY_MODELS") or PREFIX / "comfy-models").expanduser()
@@ -183,13 +187,13 @@ def ensure_server(kind: str) -> None:
 
     if not up():
         print("[tensorfold] starting ComfyUI (first render after a start loads the models)", flush=True)
-        subprocess.run(comfy_control("start"), check=True)
+        run_comfy_control("start", check=True)
         for tries in range(180):
             if up():
                 break
             # on Windows the server's guard may have stopped it while it loaded: said at once, not after six minutes
-            if WINDOWS and tries >= 5 and tries % 5 == 0 and "not running" in subprocess.run(
-                    comfy_control("status"), capture_output=True, text=True).stdout:
+            if WINDOWS and tries >= 5 and tries % 5 == 0 and "not running" in run_comfy_control(
+                    "status", capture_output=True, text=True).stdout:
                 sys.exit(stopped() or f"ComfyUI stopped while it started: see {side('log')}")
             time.sleep(2)
         else:
@@ -206,7 +210,7 @@ def fresh_server(why: str) -> None:
     """Stop the ComfyUI server and wait until its memory is back: the next render starts with nothing loaded."""
 
     print(f"[tensorfold] restarting ComfyUI: {why}", flush=True)
-    subprocess.run(comfy_control("stop"), check=False)
+    run_comfy_control("stop", check=False)
     for _ in range(60):
         if not up():
             break
@@ -1199,14 +1203,16 @@ def foley_workflow(video: str, prompt: str, negative: str, seconds: float, seed:
     }
 
 
-def prepared_clip(path, seconds: float, folder: Path) -> Path:
+def prepared_clip(path, seconds: float, folder: Path, rows: int = FOLEY_ROWS) -> Path:
     """The clip as ComfyUI is to decode it for foley: FOLEY_ROWS rows, its own frame rate, at most ``seconds``, no
     sound, stored without loss. ComfyUI holds every decoded frame in memory as floats: at the clip's own size a 15 s
     clip at 1376x768 would be 4.6 GB of them, at 384 rows 1.1 GB."""
 
+    if type(rows) is not int or rows <= 0:
+        raise ValueError("the foley analysis height must be a positive integer")
     target = folder / f"foley_{uuid.uuid4().hex[:8]}.mp4"
     done = subprocess.run([_tool("ffmpeg"), "-v", "error", "-y", "-i", str(path), "-map", "0:v:0", "-an", "-t", f"{seconds:.3f}",
-                           "-vf", f"scale=-2:{FOLEY_ROWS}:flags=lanczos,setsar=1", "-c:v", "libx264rgb", "-qp", "0",
+                           "-vf", f"scale=-2:{rows}:flags=lanczos,setsar=1", "-c:v", "libx264rgb", "-qp", "0",
                            "-preset", "veryfast", "-pix_fmt", "rgb24", str(target)], capture_output=True, text=True)
     if done.returncode or not target.is_file():
         sys.exit(f"cannot read frames from {path}: {done.stderr.strip()[-300:]}")
@@ -1289,6 +1295,36 @@ def sound(args) -> None:
     print("[tensorfold] " + json.dumps({"output": str(target), **made}), flush=True)
 
 
+def qwen_image_workflow(args, text: str, seed: int) -> dict:
+    """The production Qwen graph, shared with recipe qualification."""
+    w = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_BASE if args.base else QWEN,
+                                                     "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN_TEXT, "type": "qwen_image", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_VAE}},
+        "5": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["3", 0], "prompt": text,
+                                                                "negative_prompt": args.negative, "resolution": 1024}},
+        "6": {"class_type": "EmptyLatentImage", "inputs": {"width": args.width, "height": args.height, "batch_size": 1}},
+        "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/image_{uuid.uuid4().hex[:8]}"}},
+    }
+    if args.base:
+        w["12"] = {"class_type": "KSampler",
+                   "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps or 40, "cfg": args.cfg,
+                              "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
+                              "negative": ["5", 1], "latent_image": ["6", 0], "denoise": 1.0}}
+    else:
+        w["8"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}}
+        w["9"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
+        w["10"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": TURBO_SIGMAS}}
+        w["11"] = {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": ["5", 0],
+                                                         "negative": ["5", 1], "cfg": 1.0}}
+        w["12"] = {"class_type": "SamplerCustomAdvanced",
+                   "inputs": {"noise": ["8", 0], "guider": ["11", 0], "sampler": ["9", 0], "sigmas": ["10", 0],
+                              "latent_image": ["6", 0]}}
+    return w
+
+
 def image(args) -> None:
     for name, value in (("width", args.width), ("height", args.height)):
         if value % 16:
@@ -1319,31 +1355,7 @@ def image(args) -> None:
                                                 "total_s": round(seconds, 1)}), flush=True)
         return
     for seed in seeds:
-        w = {
-            "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_BASE if args.base else QWEN,
-                                                         "weight_dtype": "default"}},
-            "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN_TEXT, "type": "qwen_image", "device": "default"}},
-            "4": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_VAE}},
-            "5": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["3", 0], "prompt": text,
-                                                                    "negative_prompt": args.negative, "resolution": 1024}},
-            "6": {"class_type": "EmptyLatentImage", "inputs": {"width": args.width, "height": args.height, "batch_size": 1}},
-            "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
-            "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/image_{uuid.uuid4().hex[:8]}"}},
-        }
-        if args.base:
-            w["12"] = {"class_type": "KSampler",
-                       "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps or 40, "cfg": args.cfg,
-                                  "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
-                                  "negative": ["5", 1], "latent_image": ["6", 0], "denoise": 1.0}}
-        else:
-            w["8"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}}
-            w["9"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
-            w["10"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": TURBO_SIGMAS}}
-            w["11"] = {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": ["5", 0],
-                                                             "negative": ["5", 1], "cfg": 1.0}}
-            w["12"] = {"class_type": "SamplerCustomAdvanced",
-                       "inputs": {"noise": ["8", 0], "guider": ["11", 0], "sampler": ["9", 0], "sigmas": ["10", 0],
-                                  "latent_image": ["6", 0]}}
+        w = qwen_image_workflow(args, text, seed)
         item, seconds = render(w, "12")
         out = target.with_name(f"{target.stem}_s{seed}{target.suffix}") if args.seeds else target
         fetch(item, out)

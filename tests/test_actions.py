@@ -96,7 +96,7 @@ def test_remove_and_mask():
     assert "not a picture" in refused(build, "remove", {"video": "renders/c.mp4", "person": "x", "clean_frame": "renders/c.mp4"}, "j")
 
 
-def test_the_actions_run_on_character_swap_s_int8_ref2va_when_the_bf16_file_is_not_there():
+def test_the_actions_run_on_character_swap_s_int8_ref2va_when_the_bf16_file_is_not_there(monkeypatch):
     import importlib
 
     home, build, _, _, state = studio()
@@ -107,6 +107,7 @@ def test_the_actions_run_on_character_swap_s_int8_ref2va_when_the_bf16_file_is_n
     assert state()["upscale"]["ready"] and build("upscale", {"video": "renders/c.mp4"}, "j5")
     sys.path.insert(0, str(PACK / "spark"))
     W = importlib.import_module("spark_workflows")
+    monkeypatch.setattr(W.sg, "WINDOWS", False)  # Legacy Linux behavior; Windows action adapters require bf16.
     had, files = W.listed, W.sg.REF2VA
     W.sg.REF2VA = {"bf16": "minimax_h3_ref2va_pruned_bf16.safetensors", "int8": "minimax_h3_ref2va_pruned_int8_convrot.safetensors"}  # a Spark's files, on a Mac too
     try:

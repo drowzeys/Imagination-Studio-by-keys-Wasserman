@@ -11,6 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
+from windows_memory import single_gpu_uuid
+
 
 class WindowsComfy:
     def __init__(self, check, prepare):
@@ -33,7 +35,8 @@ class WindowsComfy:
             self.prepare(self.directory)
             self.log = (self.directory / "startup.log").open("wb")
             self.job = self.api.OwnedJob(self.api.CalibrationCase.process_commit_mb, self.api.CalibrationCase.job_commit_mb)
-            self.monitor = self.api.MemoryWatchdog(self.job, 0, self.log, python=python)
+            self.monitor = self.api.MemoryWatchdog(self.job, 0, self.log, python=python,
+                                                   wddm_device_uuid=single_gpu_uuid())
             self.monitor.wait_ready()
             with socket.socket() as reserve:
                 reserve.bind(("127.0.0.1", 0))
@@ -65,7 +68,8 @@ class WindowsComfy:
                     self.api.validate_identity(stats, str(self.directory))
                     break
             self.api.validate_ready(self.api.read_json(self.base, "/queue"), self.api.read_json(self.base, "/object_info"))
-            self.monitor.start_backend(self.base, str(self.directory))
+            owner = self.api.read_json(self.base, "/windows_calibration/metrics")["process_identity"]
+            self.monitor.start_backend_handle(self.process, owner)
             self.check()
             self.ready = True
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):

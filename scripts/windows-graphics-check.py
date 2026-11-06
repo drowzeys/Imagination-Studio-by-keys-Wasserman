@@ -113,7 +113,6 @@ def check() -> dict:
         raise RuntimeError(why + "; run setup-windows-graphics.ps1 before checking")
     fingerprint = graphics.windows_fingerprint()
     marker = graphics.install_dir() / "windows-checked.json"
-    marker.unlink(missing_ok=True)
     results = []
     with tempfile.TemporaryDirectory(prefix="studio-graphics-check-") as scratch:
         root = Path(scratch)
@@ -164,7 +163,8 @@ def check() -> dict:
             results.append({"template": params["template"], **result, "seconds": info["seconds"]})
     if graphics.windows_fingerprint() != fingerprint:
         raise RuntimeError("The graphics runtime changed during the check; repeat it")
-    receipt = {"fingerprint": fingerprint, "results": results, "fps": graphics.FPS, "size": [1280, 720], "visible_windows_added": 0}
+    receipt = {"fingerprint": fingerprint, "compatibility": graphics.windows_compatibility(),
+               "results": results, "fps": graphics.FPS, "size": [1280, 720], "visible_windows_added": 0}
     pending = marker.with_suffix(".tmp")
     pending.write_text(json.dumps(receipt), encoding="utf-8")
     pending.replace(marker)

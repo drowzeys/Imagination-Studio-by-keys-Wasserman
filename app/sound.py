@@ -48,6 +48,13 @@ LICENCES = {"sfx": "Stable Audio Open 1.0 · Stability AI Community License (fre
             "foley": "MMAudio · its weights are CC-BY-NC 4.0: non-commercial use only"}
 
 
+def bounded_windows(kind: str) -> bool:
+    if not (WINDOWS or WINCUDA):
+        return False
+    import windows_runtime
+    return windows_runtime.bounded(kind)
+
+
 def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, seconds_of=None):
     """``room``: what this machine has for a render with none of the Studio's own engines counted (MB, or None),
     the queue's memory_of as the server keeps it; a Spark's memory check reads it. ``seconds_of``: the server's
@@ -58,7 +65,10 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
     models = Path(os.environ.get("SOUND_MODELS", prefix / "sound-models"))
     spark_models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Sound-Comfy"
 
-    def python() -> Path:
+    def python(kind: str | None = None) -> Path:
+        if WINCUDA and kind in KINDS:
+            import windows_runtime
+            return windows_runtime.sound_python(kind)
         if spark:
             return Path(os.environ.get("SOUND_PYTHON") or prefix / "venv/bin/python")
         return Path(os.environ.get("SOUND_PYTHON") or prefix / "sound-venv/bin/python")
@@ -76,7 +86,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
         return memory_guard.sound_check(kind, seconds, available_mb=room() if room else None)
 
     def spark_missing(kind: str) -> str:
-        if not python().is_file() or not (prefix / "ComfyUI" / "main.py").is_file():
+        if not python(kind).is_file() or not (prefix / "ComfyUI" / "main.py").is_file():
             return "The studio's ComfyUI is not installed on this machine: run `bash oneshot-setup-spark.sh`."
         gone = [name for name in SPARK_FILES[kind] if not (spark_models / name).is_file()]
         if kind == "foley" and not (prefix / "ComfyUI" / "custom_nodes" / "ComfyUI-MMAudio" / "nodes.py").is_file():
@@ -94,11 +104,9 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
     def missing(kind: str) -> str:
         """Why this kind cannot run here ("" when it can)."""
 
-        if WINDOWS:
-            if kind != "sfx":
-                return "MMAudio foley is not qualified on Windows; sound effects support the measured five-second recipe only."
-            import windows_sound
-            found = windows_sound.status()
+        if bounded_windows(kind):
+            import windows_runtime
+            found = windows_runtime.usage_status(kind)
             if not found["available"]:
                 return found["why"]
             return "" if shutil.which("ffmpeg") else "Run scripts\\setup-windows-ffmpeg.ps1 and restart Studio."
@@ -153,7 +161,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
         folder = home / "sound" / kind
         folder.mkdir(parents=True, exist_ok=True)
         runner = [str(pack / "spark" / "spark_generate.py"), kind] if spark else [str(pack / "sound_generate.py"), kind, "--models", str(models)]
-        command = [str(python()), *runner, "--seed", str(seed), "--take", str(folder / f"{job_id}.take.json"), "--home", str(home)]
+        command = [str(python(kind)), *runner, "--seed", str(seed), "--take", str(folder / f"{job_id}.take.json"), "--home", str(home)]
         if prompt:
             command += ["--prompt", prompt]
         if negative:
@@ -201,9 +209,14 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
 
     @router.get("/api/sound/state")
     def state() -> dict:
-        return {"kinds": {kind: {"ready": not missing(kind), "why": missing(kind) or None, "licence": LICENCES[kind]} for kind in KINDS},
-                "seconds": {"sfx": (5, 5) if WINDOWS else SFX_SECONDS, "foley": FOLEY_SECONDS},
-                "spark": spark, "windows": WINDOWS}
+        kinds = {}
+        for kind in KINDS:
+            why = missing(kind)
+            kinds[kind] = {"ready": not why, "why": why or None, "licence": LICENCES[kind], "bounded": bounded_windows(kind)}
+        return {"kinds": kinds,
+                "seconds": {"sfx": (5, 5) if bounded_windows("sfx") else SFX_SECONDS,
+                            "foley": (1, 5) if bounded_windows("foley") else FOLEY_SECONDS},
+                "spark": spark, "windows": bounded_windows("sfx") or bounded_windows("foley")}
 
     @router.get("/api/sound/takes")
     def takes() -> list[dict]:

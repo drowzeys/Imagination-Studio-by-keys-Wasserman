@@ -26,7 +26,9 @@ if (Test-Path $Source) {
 }
 if (-not $Verify) {
     & $Python -X utf8 -m pip install --only-binary=:all: -r (Join-Path $Root 'app\requirements-windows-comfy.txt')
-    if ($LASTEXITCODE -ne 0) { throw 'ComfyUI dependency installation failed.' }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'ComfyUI dependency installation failed; see the pip error above for the package and required version. If your configured mirror does not supply it, ask your package-source administrator to make that pinned version available, then rerun .\scripts\setup-windows-comfy.ps1. Do not change the tested pins or bypass your package-source policy.'
+    }
     if (-not (Test-Path $Source)) {
         & git init --quiet $Source
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the isolated ComfyUI checkout.' }

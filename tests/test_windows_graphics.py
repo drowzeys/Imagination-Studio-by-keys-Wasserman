@@ -95,7 +95,8 @@ def test_renderer_is_one_software_worker(windows, monkeypatch, tmp_path):
     assert command[-3:] == ["--workers", "1", "--no-browser-gpu"]
 
 
-def test_readiness_requires_a_current_successful_render_receipt(monkeypatch, tmp_path):
+def test_readiness_retains_successful_evidence_until_a_compatibility_break(monkeypatch, tmp_path):
+    monkeypatch.delenv("STUDIO_QUALIFICATION_STRICT", raising=False)
     monkeypatch.setattr(graphics, "WINDOWS", True)
     monkeypatch.setattr(graphics, "install_dir", lambda: tmp_path)
     for name in ("cli.js", "gsap.min.js"):
@@ -115,8 +116,19 @@ def test_readiness_requires_a_current_successful_render_receipt(monkeypatch, tmp
     marker.write_text(json.dumps({"fingerprint": [{"revision": 1}]}))
     assert "browser-isolation" in graphics.ready()["why"]
     marker.write_text(json.dumps({"fingerprint": [{"revision": 1}], "visible_windows_added": 0}))
+    assert "incomplete" in graphics.ready()["why"]
+    saved = json.dumps({"fingerprint": [{"revision": 1}], "visible_windows_added": 0,
+                        "size": [1280, 720], "fps": 24,
+                        "results": [{"template": name} for name in graphics.WINDOWS_TEMPLATES]})
+    marker.write_text(saved)
     assert graphics.ready()["ok"]
     monkeypatch.setattr(graphics, "windows_fingerprint", lambda: [{"revision": 2}])
+    assert graphics.ready()["ok"] and graphics.ready()["runtime_updated"]
+    assert marker.read_text() == saved
+    monkeypatch.setenv("STUDIO_QUALIFICATION_STRICT", "1")
+    assert "changed" in graphics.ready()["why"]
+    monkeypatch.delenv("STUDIO_QUALIFICATION_STRICT")
+    monkeypatch.setattr(graphics, "WINDOWS_QUALIFICATION_CONTRACT", 2)
     assert "changed" in graphics.ready()["why"]
 
 

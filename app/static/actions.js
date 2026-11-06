@@ -16,7 +16,10 @@ function actOpen(kind, path) { ACT.open = { kind, path }; if (kind === "remove")
   setTimeout(() => { const n = document.querySelector("#actpanel"); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60); }
 // the buttons a Library tile gets for its kind of file
 function actButtons(m) { const gfx = typeof gfxButtons === "function" ? gfxButtons(m) : [];  // Add a title, Caption this clip (graphics.js)
-  if ((typeof capWhy === "function" ? capWhy : () => "")("image_actions")) return [el("button", { class: "small", disabled: true, title: (typeof capWhy === "function" ? capWhy : () => "")("image_actions") }, "Model actions unavailable"), ...gfx];
+  if ((typeof capWhy === "function" ? capWhy : () => "")("image_actions")) return [
+    el("button", { class: "small", disabled: true, title: capWhy("image_actions") }, "Model actions unavailable"),
+    m.kind === "video" ? el("button", { class: "small", disabled: !!capWhy("hlg"), title: capWhy("hlg") || "Grade this clip as HLG with an SDR copy",
+      onclick: () => actOpen("hlg", m.path) }, "keys-HDR LORA") : null, ...gfx].filter(Boolean);
   if (!ACT.state) return gfx;
   const one = (kind, label, title) => el("button", { class: "small", title: actOf(kind).ready ? title : actOf(kind).why, onclick: () => actOpen(kind, m.path) }, label);
   return (m.kind === "video" ? [one("upscale", "Upscale", "Make this clip larger and sharper: a latent upscale, then one light re-draw guided by the clip itself"),
@@ -41,25 +44,37 @@ function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KI
   if (o.kind === "swap" && typeof swapPanel === "function") return swapPanel(o);  // swap.js
   const a = actOf(o.kind), f = ACT[ACT_KEY[o.kind]], redraw = () => render();
   const box = el("div", { class: "seg", id: "actpanel", style: "margin-top:12px" },
-    el("div", { class: "seghead" }, el("b", {}, a.title || o.kind), el("span", { class: "note", style: "margin:0" }, o.path.split("/").pop()), el("span", { style: "flex:1" }),
+    el("div", { class: "seghead" }, el("b", {}, a.title || o.kind),
+      typeof featureBadge === "function" ? featureBadge(o.kind) : null,
+      el("span", { class: "note", style: "margin:0" }, o.path.split("/").pop()), el("span", { style: "flex:1" }),
       el("button", { class: "small", onclick: () => { ACT.open = null; render(); } }, "Close")));
-  if (!a.ready) { put(box, el("div", { class: "note", style: "color:var(--warn)" }, a.why || "Not available on this machine.")); return box; }
+  if (!a.ready && !(o.kind === "remove" && actOf("mask").ready)) { put(box, el("div", { class: "note", style: "color:var(--warn)" }, a.why || "Not available on this machine.")); return box; }
+  if (a.qualification_required) {
+    put(box, el("div", { class: "note" }, "Verified recipe: " + a.scope));
+    if (o.kind === "turnaround") Object.assign(f, {size:"512",strength:"1",prompt:""});
+    if (o.kind === "upscale") Object.assign(f, {megapixels:"1",denoise:"0.1"});
+    if (o.kind === "remove") Object.assign(f, {window:"22",steps:12,clean:"auto",silent:true});
+  }
   const by = el("div", { class: "note" }, "With " + a.lora_name + " by " + a.author + ".");
   if (o.kind === "turnaround") {
     put(box, el("div", { class: "row", style: "align-items:flex-start" }, el("div", { style: "flex:0 0 220px" }, media(o.path, { style: "width:220px;border-radius:8px" })),
       el("div", {}, el("div", { class: "note", style: "margin-top:0" }, "Five views of the subject of this picture, turning from where it faces now, made together so they agree. Each is a picture of its own in the Library: use one as a first frame, or several as reference pictures of the same character."),
-        field("Size of each view", choice(f, "size", { 512: ["512", "fastest, what the LoRA was trained at"], 1024: ["1024", "the sweet spot"], 2048: ["2048", "slow; the turn comes late"] }, redraw, true)),
-        field("What matters more", choice(f, "strength", { 1: ["The turn", "strength 1.0"], 0.7: ["The look", "strength 0.7, turns less"] }, redraw, true)),
+        field("Size of each view", choice(f, "size", a.qualification_required ? {512:["512","Verified view size"]}
+          : { 512: ["512", "fastest, what the LoRA was trained at"], 1024: ["1024", "the sweet spot"], 2048: ["2048", "slow; the turn comes late"] }, redraw, true)),
+        field("What matters more", choice(f, "strength", a.qualification_required ? {1:["The turn","Verified strength 1.0"]}
+          : { 1: ["The turn", "strength 1.0"], 0.7: ["The look", "strength 0.7, turns less"] }, redraw, true)),
         el("div", { class: "row" }, field("Seed", bind(f, "seed", el("input", { type: "number", min: 0, style: "max-width:110px" }))),
-          field("Instruction (optional)", bind(f, "prompt", el("input", { placeholder: "the camera orbits horizontally around the subject of <Picture 1> at eye level, ninety degrees clockwise, the subject stays upright on the ground" })))),
+          field("Instruction (optional)", bind(f, "prompt", el("input", { disabled: !!a.qualification_required, placeholder: "the camera orbits horizontally around the subject of <Picture 1> at eye level, ninety degrees clockwise, the subject stays upright on the ground" })))),
         by, el("button", { class: "hot", disabled: ACT.busy, onclick: () => actQueue("turnaround", { image: o.path, size: Number(f.size), strength: Number(f.strength), seed: Number(f.seed) || 0, prompt: f.prompt }) }, "Make the turnaround sheet"))),
       actShow("turnaround", job => el("div", {}, el("img", { src: file(job.outputs[0]), style: "width:100%;border-radius:8px;margin-top:8px", alt: "the five views side by side" }),
         el("div", { class: "grid", style: "margin-top:8px" }, job.outputs.slice(1).map((p, i) => el("div", { class: "tile" }, media(p, { style: "aspect-ratio:1" }), el("div", { class: "cap", style: "justify-content:flex-end" }, el("span", { style: "flex:1" }, "view " + (i + 1)),
           el("button", { class: "small", title: "Start a clip on this picture", onclick: actUse(p, "first") }, "first frame"), el("button", { class: "small", title: "Add it to a reference clip’s pictures", onclick: actUse(p, "ref") }, "reference"))))))));
   } else if (o.kind === "upscale") {
     put(box, el("div", { class: "note", style: "margin-top:0" }, "Makes a finished clip larger: the model’s latent upscaler enlarges it, then one light re-draw in tiles puts detail back, guided by the clip itself so it restores what is there. Mouths, motion and the clip’s own sound stay."),
-      field("Size", choice(f, "megapixels", { 1: ["1 megapixel", "about 1344 × 768"], 2: ["2 megapixels", "about 1920 × 1080"], 3: ["3 megapixels", "about 2304 × 1280"], 4: ["4 megapixels", "about 2688 × 1504, slowest"] }, redraw, true)),
-      field("Re-draw", choice(f, "denoise", { 0: ["None", "only enlarge"], 0.1: ["Light", "0.1, the tested setting"], 0.2: ["Stronger", "0.2, adds more of its own"] }, redraw, true)),
+      field("Size", choice(f, "megapixels", a.qualification_required ? {1:["1 megapixel","Verified output size"]}
+        : { 1: ["1 megapixel", "about 1344 × 768"], 2: ["2 megapixels", "about 1920 × 1080"], 3: ["3 megapixels", "about 2304 × 1280"], 4: ["4 megapixels", "about 2688 × 1504, slowest"] }, redraw, true)),
+      field("Re-draw", choice(f, "denoise", a.qualification_required ? {0.1:["Light","Verified denoise 0.1"]}
+        : { 0: ["None", "only enlarge"], 0.1: ["Light", "0.1, the tested setting"], 0.2: ["Stronger", "0.2, adds more of its own"] }, redraw, true)),
       by, el("button", { class: "hot", disabled: ACT.busy, onclick: () => actQueue("upscale", { video: o.path, megapixels: Number(f.megapixels), denoise: Number(f.denoise) }) }, "Upscale this clip"),
       actShow("upscale", job => el("video", { class: "main", src: file(job.outputs[0]), controls: true, style: "margin-top:8px" })));
   } else if (o.kind === "hlg") {
@@ -83,7 +98,7 @@ function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KI
       el("div", { class: "row" }, field("Window", select(f, "window", { 22: "22 frames (proven)", 39: "39 frames", 56: "56 frames" })), field("Passes", bind(f, "steps", el("input", { type: "number", min: 4, max: 30, style: "max-width:90px" }))),
         field("Seed", bind(f, "seed", el("input", { type: "number", min: 0, style: "max-width:120px" }))),
         el("label", { style: "display:flex;gap:6px;align-items:center;flex:none", title: "The clip’s own sound is put back under the result. It still holds the removed person’s voice: tick this to leave the sound out." }, bind(f, "silent", el("input", { type: "checkbox", style: "width:auto" })), "No sound")),
-      by, el("button", { class: "hot", disabled: ACT.busy, onclick: () => { if (!need()) return; if (f.clean === "own" && !f.clean_frame) return toast("Load the clean first frame, or choose “Build it for me”");
+      by, el("button", { class: "hot", disabled: ACT.busy || !a.ready, onclick: () => { if (!need()) return; if (f.clean === "own" && !f.clean_frame) return toast("Load the clean first frame, or choose “Build it for me”");
         actQueue("remove", { video: o.path, person: f.person, window: Number(f.window), steps: Number(f.steps), seed: Number(f.seed), silent: !!f.silent, ...(f.clean === "own" ? { clean_frame: f.clean_frame } : {}) }); } }, "2. Remove the person"),
       actShow("remove", job => el("div", {}, (job.log || "").split("\n").filter(l => l.includes("] check: ")).map(l => el("div", { class: "note", style: l.includes("still show green") ? "color:var(--warn)" : "" }, l.split("] check: ")[1])),
         el("div", { class: "row", style: "align-items:flex-start;margin-top:8px" }, el("div", {}, el("label", {}, "Without the person"), el("video", { class: "main", src: file(job.outputs[0]), controls: true })),

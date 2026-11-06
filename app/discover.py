@@ -1208,7 +1208,115 @@ def hint(nid: str) -> str:
 
 # ---------- the page's view ----------
 
+def windows_state() -> dict:
+    """Read the native runtime's actual files, not Mac layouts or stale discovery scans."""
+    import windows_cuda
+    import windows_runtime
+    import windows_storyboard
+    import windows_setup_fit
+    import windows_measurements
+    items = []
+
+    def row(nid, label, engine, expected, files, setup, *, installed=None, why="", catalog_id=None, removable=True):
+        missing = [path.name for path in files if not path.is_file() or path.stat().st_size == 0]
+        ready = not missing if installed is None else installed
+        items.append({"id": nid, "label": label, "engine": engine, "optional": False,
+                      "state": "expected" if ready else "missing", "expected": shown(expected),
+                      "env": None, "candidates": [], "conversions": [], "link": None,
+                      "linked_by_studio": False, "unlisted": False, "linkable": False,
+                      "download": setup, "install": {"how": "command", "shown": setup},
+                      "why": why or ("Missing files: " + ", ".join(missing) if missing else "")})
+        if catalog_id:
+            items[-1].update(windows_setup_fit.model_info(catalog_id, installed=ready))
+            import model_catalog
+            feature = model_catalog.model(catalog_id).get("feature")
+            for name in ("installed_label", "requirements_note"):
+                if name in model_catalog.model(catalog_id):
+                    items[-1][name] = model_catalog.model(catalog_id)[name]
+            if feature:
+                items[-1]["feature"] = feature
+            checks = model_catalog.model(catalog_id).get("features")
+            if checks:
+                items[-1]["features"] = checks
+            if items[-1]["runtime_fit"]["state"] == "insufficient_capacity":
+                items[-1]["install"]["override_shown"] = setup + " -AllowInsufficientModel"
+            if ready and removable:
+                # Pass this app's configured weight root, not the terminal's possibly different default.
+                model_path = str(windows_runtime.model_root()).replace("'", "''")
+                items[-1]["uninstall"] = {
+                    "shown": rf"powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows-model.ps1 -Model {catalog_id} -Models '{model_path}'",
+                    "scope": "Exclusive weight files only; previews files and requires confirmation. Stop Studio first. Shared files and runtime environments are kept."}
+
+    for model in windows_runtime.image_options():
+        if model["id"] == "sd-turbo":
+            folder = windows_storyboard.folder()
+            files = [folder / name for name in windows_storyboard.FILES]
+            setup = r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-images.ps1 -Model auto"
+        else:
+            files = windows_runtime.image_files(model["id"])
+            folder = windows_runtime.model_root() / windows_runtime.IMAGE_SPECS[model["id"]][1]
+            setup = model["setup"]
+        row(model["id"], model["title"], "Picture models", folder, files, setup,
+            installed=model["installed"], why=model["why"] if not model["installed"] else "",
+            catalog_id=model["id"] if model["id"] != "sd-turbo" else None)
+        items[-1]["feature"] = "scout" if model["id"] == "sd-turbo" else model["id"]
+        items[-1]["recipe_fit"] = (windows_measurements.feature_measurements(["scout"]) if model["id"] == "sd-turbo"
+                                  else windows_measurements.recipe_fit(model))
+        if model["id"] == "sd-turbo":
+            import shared_measurements
+            items[-1]["model"] = "sd-turbo"
+            items[-1]["model_metadata"] = {"label": model["title"], "platform": "windows"}
+            items[-1]["shared_measurements"] = shared_measurements.references("sd-turbo", platform="windows", feature="scout")
+            items[-1]["download_size"] = {"bytes": sum(size for size, _ in windows_storyboard.FILES.values()),
+                                         "basis": "Pinned model manifest byte sizes"}
+
+    # Installer manifests name native files independently of Mac/MLX environments.
+    import model_catalog
+    root = windows_runtime.model_root()
+    for key, spec in model_catalog.catalogue()["models"].items():
+        if spec["kind"] not in ("component", "music"):
+            continue
+        part = spec["part"]
+        downloads = model_catalog.parts().get(part, [])
+        checked = model_catalog.checked_downloads().get(part, [])
+        files = ([root / folder / name for _, folder, names in downloads for name in names]
+                 + [root / folder / target for _, _, _, folder, target, _ in checked])
+        if not files:
+            continue
+        row("windows-" + key, spec["label"], spec["group"], files[0].parent, files,
+            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}", catalog_id=key)
+    paths = windows_cuda.paths()
+    for nid, label, engine, files, part in (
+            ("windows-h3-engine", "TensorFold H3 native engine", "Video", [paths["tf_h3"]], "video"),
+            ("windows-drama-engine", "Fish Audio Drama 3 native engine", "Voice",
+             [Path(os.environ.get("DRAMA3_CUDA_BIN") or paths["drama3_bin"]),
+              Path(os.environ.get("DRAMA3_CUDA_LIB") or paths["drama3_lib"])], "voice -Voice"),
+            ("windows-music-engine", "MiniMax-Music3 native engine", "Music",
+             [Path(os.environ.get("MUSIC3_CUDA_BIN") or paths["music3_bin"])], "music")):
+        row(nid, label, engine, files[0], files,
+            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}",
+            catalog_id="voice" if part.startswith("voice") else "music" if part == "music" else "video",
+            removable=False)
+    drama = Path(os.environ.get("DRAMA3_CUDA_MODEL") or root / "drama-3")
+    codec = Path(os.environ.get("DRAMA3_CUDA_CODEC") or paths["drama3_bin"].parent / "codec-v1.safetensors")
+    checkpoint = drama / "model.safetensors"
+    index = json_of(drama / "model.safetensors.index.json")
+    shards = set((index.get("weight_map") or {}).values())
+    weights = checkpoint.is_file() or bool(shards) and all((drama / name).is_file() for name in shards)
+    row("windows-drama-weights", "Fish Audio Drama 3 weights and codec", "Voice", drama, [codec],
+        r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts voice -Voice",
+        installed=not fish_checkpoint(drama) and bool(weights) and codec.is_file(),
+        why="" if weights and codec.is_file() else "Drama 3 needs its complete local checkpoint and converted codec.",
+        catalog_id="voice")
+    return {"needs": items, "scanning": False, "progress": {}, "last_scan": None, "installing": {"state": "idle"},
+            "tools": {}, "platform": "windows", "inventory_only": True,
+            "note": "Current native Windows installation inventory. Installation is separate from recipe qualification. "
+                    "Refresh reads configured paths; it does not scan disks, link files, download models or run checks."}
+
+
 def state() -> dict:
+    if sys.platform == "win32" and not SPARK and not MAC:
+        return windows_state()
     data = load()
     links = data.get("links") or {}
     out = []
@@ -1234,6 +1342,9 @@ def state() -> dict:
                     "link": {**record, "shown": shown(record["path"]), "link_shown": shown(record["link"])} if record else None,
                     "linked_by_studio": bool(record), "unlisted": bool(item.get("unlisted")), "linkable": item.get("linkable", True),
                     "install": install_plan(item)})
+        if SPARK or MAC:
+            import model_metadata
+            out[-1].update(model_metadata.inventory_info(item["id"], "linux" if SPARK else "macos"))
     scan_info = data.get("scan")
     try:
         import installs
@@ -1273,8 +1384,15 @@ def attach(home_folder: Path, prefix_folder: Path):
     globals()["Request"] = Request  # the handlers' annotations are read from this module (annotations are strings here)
     os.environ.setdefault("STUDIO_HOME", str(home_folder))
     os.environ.setdefault("PREFIX", str(prefix_folder))
-    apply_links()
+    native_windows = sys.platform == "win32" and not SPARK and not MAC
+    if not native_windows:
+        apply_links()
     router = APIRouter()
+
+    def require_discovery():
+        if native_windows:
+            raise HTTPException(400, "Native Windows uses its configured model folders. "
+                                "Use the PowerShell setup command shown in Models & weights; automatic linking/install is not available here.")
 
     @router.get("/api/discover")
     def listing() -> dict:
@@ -1283,11 +1401,14 @@ def attach(home_folder: Path, prefix_folder: Path):
     @router.post("/api/discover/scan")
     def again(request: Request) -> dict:
         suite.local(request, json_body=True)
+        if native_windows:
+            return {"started": False, **state()}
         return {"started": start_scan(), **state()}
 
     @router.post("/api/discover/use")
     async def link(request: Request) -> dict:
         suite.local(request, json_body=True)
+        require_discovery()
         body = await request.json()
         try:
             record = use(str(body.get("need") or ""), str(body.get("path") or ""))
@@ -1302,6 +1423,7 @@ def attach(home_folder: Path, prefix_folder: Path):
         """Install a need this machine does not have: its own installer, one at a time (installs.py)."""
 
         suite.local(request, json_body=True)
+        require_discovery()
         import installs
         body = await request.json()
         item = find_need(str(body.get("need") or ""))
@@ -1323,6 +1445,7 @@ def attach(home_folder: Path, prefix_folder: Path):
     @router.post("/api/discover/install/cancel")
     async def stop_install(request: Request) -> dict:
         suite.local(request, json_body=True)
+        require_discovery()
         import installs
         installs.cancel()
         return state()
@@ -1332,12 +1455,14 @@ def attach(home_folder: Path, prefix_folder: Path):
         """Every need found on this machine with exactly one proved copy, linked where the studio looks."""
 
         suite.local(request, json_body=True)
+        require_discovery()
         done = auto_link()
         return {"linked": done, **state()}
 
     @router.post("/api/discover/unlink")
     async def undo(request: Request) -> dict:
         suite.local(request, json_body=True)
+        require_discovery()
         body = await request.json()
         try:
             unlink(str(body.get("need") or ""))
@@ -1348,7 +1473,7 @@ def attach(home_folder: Path, prefix_folder: Path):
         return state()
 
     delay = float(os.environ.get("STUDIO_DISCOVER_DELAY", 20))
-    if delay >= 0:
+    if delay >= 0 and not native_windows:
         timer = threading.Timer(delay, start_scan)
         timer.daemon = True
         timer.start()

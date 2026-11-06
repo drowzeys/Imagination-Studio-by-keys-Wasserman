@@ -55,9 +55,10 @@ def test_the_full_install_and_a_large_pool_choose_the_native_tier(install, monke
     assert os.environ["SPARK_MODELS"].endswith("models")
 
 
-@pytest.mark.parametrize("what, why", [
-    ("pool", "under 90000 MB"), ("dll", "tf_h3.dll"), ("comfy", "no ComfyUI"), ("record", "cuda-tier.json"), ("preview", "preview")])
-def test_anything_short_of_the_full_install_keeps_the_preview_tier(install, monkeypatch, what, why):
+@pytest.mark.parametrize("what, core_ready, why", [
+    ("pool", True, "90000 MB"), ("dll", True, "tf_h3.dll"), ("comfy", False, "no ComfyUI"),
+    ("record", True, "no valid pool measurement"), ("preview", False, "preview")])
+def test_native_core_does_not_depend_on_h3_installation_or_capacity(install, monkeypatch, what, core_ready, why):
     base = install(cuda_pool_mb=36000 if what == "pool" else 113103)
     if what == "dll":
         (base / "tf-h3/tf_h3.dll").unlink()
@@ -67,8 +68,8 @@ def test_anything_short_of_the_full_install_keeps_the_preview_tier(install, monk
         (base / "cuda-tier.json").unlink()
     if what == "preview":
         monkeypatch.setenv("STUDIO_WINDOWS_TIER", "preview")
-    assert why in windows_cuda.why_not()
-    assert not windows_cuda.active()
+    assert (not windows_cuda.why_not()) == core_ready
+    assert why in windows_cuda.h3_why_not()
 
 
 def test_the_spark_commands_become_their_native_ports(monkeypatch):
@@ -221,6 +222,77 @@ def _setup_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize("isolated", [False, True])
+def test_node_restore_uses_the_gpu_wheel_manifest_and_preserves_installed_versions(tmp_path, monkeypatch, isolated):
+    from importlib import metadata
+    from types import SimpleNamespace
+    import subprocess
+
+    setup = _setup_module()
+    monkeypatch.setattr(setup, "ROOT", tmp_path)
+    node = tmp_path / "ComfyUI" / "custom_nodes" / "ComfyUI-MMAudio"
+    node.mkdir(parents=True)
+    (node / "requirements.txt").write_text("torchdiffeq>=0.2.3\n")
+    installed = SimpleNamespace(metadata={"Name": "torch"}, version="2.14.0+cu134")
+    monkeypatch.setattr(metadata, "distributions", lambda: [installed])
+
+    def missing(name):
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "version", missing)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "rev-parse" in command:
+            return SimpleNamespace(stdout=setup.NODE_PACKS["foley"][0][2], returncode=0)
+        if "install" in command:
+            constraint = Path(command[command.index("--constraint") + 1])
+            assert constraint.read_text().strip() == "torch==2.14.0+cu134"
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    destination = str(tmp_path / "isolated") if isolated else ""
+    assert setup.nodes(SimpleNamespace(parts="foley", target=destination, pip_python="authenticated-python")) == 0
+    command = next(command for command in calls if "install" in command)
+    assert command[0] == "authenticated-python"
+    manifests = [command[i + 1] for i, value in enumerate(command) if value == "-r"]
+    assert str(ROOT / "app" / "requirements-windows-gpu.txt") in manifests
+    assert "-q" not in command
+    assert ("--target" in command) == isolated
+    assert any("check" in command for command in calls) == isolated
+
+
+@pytest.mark.parametrize("repaired", [True, False])
+def test_reused_isolated_node_environment_repairs_and_rechecks_missing_dependencies(tmp_path, monkeypatch, repaired):
+    from importlib import metadata
+    from types import SimpleNamespace
+    import subprocess
+
+    setup = _setup_module()
+    monkeypatch.setattr(setup, "ROOT", tmp_path)
+    node = tmp_path / "ComfyUI" / "custom_nodes" / "ComfyUI-MMAudio"
+    node.mkdir(parents=True)
+    (node / "requirements.txt").write_text("torchdiffeq>=0.2.3\n")
+    monkeypatch.setattr(metadata, "version", lambda name: "0.2.5")
+    monkeypatch.setattr(metadata, "distributions", lambda: [])
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "rev-parse" in command:
+            return SimpleNamespace(stdout=setup.NODE_PACKS["foley"][0][2], returncode=0)
+        if "install" in command:
+            return SimpleNamespace(returncode=0)
+        assert command[-2:] == ["pip", "check"]
+        return SimpleNamespace(returncode=0 if repaired and any("install" in call for call in calls) else 1)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert setup.nodes(SimpleNamespace(parts="foley", target=str(tmp_path / "isolated"))) == (0 if repaired else 1)
+    assert sum("install" in command for command in calls) == 1
+    assert sum(command[-2:] == ["pip", "check"] for command in calls) == 2
 
 
 def test_the_native_installer_pins_what_the_spark_scripts_pin():

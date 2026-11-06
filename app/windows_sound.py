@@ -15,6 +15,8 @@ import uuid
 
 import windows_sfx
 import windows_storyboard as renderer
+from feature_checks import matches_qualification
+from windows_qualification import LEGACY_GPU_COMPATIBILITY, baseline_gpu_compatibility, baseline_gpu_runtime, hardware_matches, verify_model_updates
 
 SECONDS, STEPS, CFG = 5, 100, 7.0
 RECIPE = {"seconds": SECONDS, "steps": STEPS, "cfg": CFG}
@@ -29,22 +31,32 @@ def status() -> dict:
     root = folder()
     try:
         receipt = json.loads((root / "qualification.json").read_text(encoding="utf-8"))
+        current_files = {name: {"size": size, "sha256": digest, "mtime_ns": (root / name).stat().st_mtime_ns}
+                         for name, (size, digest) in windows_sfx.FILES.items()}
+        previous_files = receipt.get("files", {})
+        current_tools = renderer.tool_hashes()
+        provenance = {"tools": receipt.get("tool_sha256"), "files": previous_files, "runtime": receipt.get("runtime")}
+        current = {"tools": current_tools, "files": current_files, "runtime": baseline_gpu_runtime()}
         valid = (receipt.get("revision") == windows_sfx.REVISION and receipt.get("recipe") == RECIPE
-                 and receipt.get("tool_sha256") == renderer.tool_hashes()
-                 and receipt.get("files") == {name: {"size": size, "sha256": digest, "mtime_ns": (root / name).stat().st_mtime_ns}
-                                              for name, (size, digest) in windows_sfx.FILES.items()}
+                 and {name: (value["size"], value["sha256"]) for name, value in previous_files.items()}
+                     == {name: (size, digest) for name, (size, digest) in windows_sfx.FILES.items()}
+                 and matches_qualification(provenance, current, receipt.get("compatibility", LEGACY_GPU_COMPATIBILITY),
+                                           baseline_gpu_compatibility())
                  and all((root / name).stat().st_size == info[0] for name, info in windows_sfx.FILES.items())
                  and (root / "LICENSE.md").is_file() and receipt.get("result", {}).get("ok") is True
                  and isinstance(receipt.get("hardware"), dict)
                  and all(type(receipt["hardware"].get(key)) is int and receipt["hardware"][key] > 0
-                         for key in ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb")))
+                         for key in ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb"))
+                 and hardware_matches(receipt["hardware"]))
     except FileNotFoundError:
         return {"available": False, "why": "Run setup-windows-sfx.ps1, then check-windows-sound.ps1 to qualify the five-second route."}
-    except (OSError, ValueError, TypeError, AttributeError) as error:
+        if valid:
+            verify_model_updates(root, windows_sfx.FILES, {name: value["mtime_ns"] for name, value in previous_files.items()})
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError) as error:
         return {"available": False, "why": f"The Windows sound qualification is unreadable: {type(error).__name__}."}
     if not valid:
         return {"available": False, "why": "The sound files or render code changed; repeat check-windows-sound.ps1."}
-    return {"available": True, "why": "", "hardware": receipt["hardware"], **RECIPE}
+    return {"available": True, "why": "", "hardware": receipt["hardware"], "runtime_updated": provenance != current, **RECIPE}
 
 
 def parameters(params: dict) -> dict:
@@ -71,30 +83,31 @@ def parameters(params: dict) -> dict:
 def preflight():
     if not shutil.which("ffmpeg"):
         raise RuntimeError("run scripts\\setup-windows-ffmpeg.ps1 and restart Studio before making sound effects")
-    renderer.preflight(status())
+    from windows_runtime import usage_status
+    renderer.preflight(usage_status("sfx", status()))
 
 
 def verify_weights(root: Path):
     windows_sfx.verify(root)
 
 
-def validate_audio(path: Path) -> dict:
+def validate_audio(path: Path, *, channels: int = 2, expected_samples: int | None = None) -> dict:
     probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                             "stream=codec_type,sample_rate,channels", "-of", "json", str(path)],
                            capture_output=True, text=True, timeout=30, check=True)
     streams = json.loads(probe.stdout).get("streams", [])
-    if len(streams) != 1 or streams[0].get("sample_rate") != "44100" or streams[0].get("channels") != 2:
-        raise RuntimeError("sound must be one 44.1 kHz stereo stream")
+    if len(streams) != 1 or streams[0].get("sample_rate") != "44100" or streams[0].get("channels") != channels:
+        raise RuntimeError(f"sound must be one 44.1 kHz stream with {channels} channels")
     decoded = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-acodec", "pcm_f32le", "-"],
                              capture_output=True, timeout=30, check=True)
-    if len(decoded.stdout) % 8:
-        raise RuntimeError("the sound has an incomplete stereo sample")
+    if len(decoded.stdout) % (4 * channels):
+        raise RuntimeError("the sound has an incomplete audio sample")
     values = array("f")
     values.frombytes(decoded.stdout)
     if sys.byteorder != "little":
         values.byteswap()
-    samples = len(values) // 2
-    expected = round((SECONDS * 44100 / 2048) / 2) * 2 * 2048
+    samples = len(values) // channels
+    expected = expected_samples if expected_samples is not None else round((SECONDS * 44100 / 2048) / 2) * 2 * 2048
     if not values or abs(samples - expected) > 2048 or any(not math.isfinite(value) for value in values):
         raise RuntimeError("sound has invalid samples or the wrong five-second latent window")
     peak = max(abs(value) for value in values)
@@ -102,7 +115,7 @@ def validate_audio(path: Path) -> dict:
     if rms < 1e-6 or peak > 10 ** (-1 / 20):
         raise RuntimeError("sound is silent or exceeds -1 dBFS")
     return {"samples_per_channel": samples, "seconds": samples / 44100, "sample_rate": 44100,
-            "channels": 2, "peak_dbfs": 20 * math.log10(peak), "rms": rms}
+            "channels": channels, "peak_dbfs": 20 * math.log10(peak), "rms": rms}
 
 
 def render_case(output: Path, params: dict, cancelled=lambda: False, submit=None, completed=None, progress=None):
@@ -180,7 +193,8 @@ def render_case(output: Path, params: dict, cancelled=lambda: False, submit=None
             progress(1, 1)
         return {"model": "Stable Audio Open 1.0", "audio": audio, "allocator_receipts": [receipt],
                 "request_to_files_seconds": time.monotonic() - started}
-    return check.CalibrationCase(prepare, exercise)
+    from windows_memory import single_gpu_uuid
+    return check.CalibrationCase(prepare, exercise, wddm_device_uuid=single_gpu_uuid())
 
 
 def save_take(job: dict, home: Path, target: Path, seconds: float):
@@ -206,13 +220,14 @@ def main() -> int:
             raise RuntimeError("this check requires Windows and FFmpeg; run setup-windows-ffmpeg.ps1 first")
         root = folder()
         windows_sfx.verify(root)
-        (root / "qualification.json").unlink(missing_ok=True)
         params = parameters({"prompt": "Soft steady rain falling on a metal roof.", "seed": 7})
         case = render_case(args.output, params)
         source = Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio" / "ComfyUI"
         result = renderer.tools().checker().run_check(source, 120, 0, guarded=True, calibration=case)
         initial = result["memory_guard"]["initial"]
         receipt = {"revision": windows_sfx.REVISION, "recipe": RECIPE, "tool_sha256": renderer.tool_hashes(),
+                   "compatibility": baseline_gpu_compatibility(),
+                   "runtime": baseline_gpu_runtime(),
                    "files": {name: {"size": size, "sha256": digest, "mtime_ns": (root / name).stat().st_mtime_ns}
                              for name, (size, digest) in windows_sfx.FILES.items()},
                    "hardware": {key: initial[key] for key in

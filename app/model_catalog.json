@@ -1,0 +1,957 @@
+{
+  "schema": 1,
+  "models": {
+    "qwen": {
+      "label": "Qwen-Image 2.1 Turbo",
+      "kind": "image",
+      "part": "image",
+      "folder": "Qwen-Image-2.1-Comfy",
+      "transformer": "qwen_image_2.1_turbo_bf16.safetensors",
+      "download_parts": [
+        "image"
+      ],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "No general Windows recipe envelope established; use local per-recipe qualification."
+        }
+      },
+      "group": "Picture models"
+    },
+    "qwen-full": {
+      "label": "Qwen-Image 2.1 Full",
+      "kind": "image",
+      "part": "image-edit",
+      "folder": "Qwen-Image-2.1-Comfy",
+      "transformer": "qwen_image_2.1_bf16.safetensors",
+      "download_parts": [
+        "image",
+        "image-edit"
+      ],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "No general Windows recipe envelope established; use local per-recipe qualification."
+        }
+      },
+      "group": "Picture models"
+    },
+    "flux3k-fast": {
+      "label": "FLUX3-K Fast",
+      "kind": "image",
+      "part": "flux3",
+      "folder": "FLUX3-K-Comfy",
+      "transformer": "flux3-image-klein-bf16.safetensors",
+      "download_parts": [
+        "flux3"
+      ],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "No general Windows recipe envelope established; use local per-recipe qualification."
+        }
+      },
+      "group": "Picture models"
+    },
+    "flux3k-full": {
+      "label": "FLUX3-K Full",
+      "kind": "image",
+      "part": "flux3",
+      "folder": "FLUX3-K-Comfy",
+      "transformer": "flux3-image-klein-base-bf16.safetensors",
+      "download_parts": [
+        "flux3"
+      ],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "No general Windows recipe envelope established; use local per-recipe qualification."
+        }
+      },
+      "group": "Picture models"
+    },
+    "moss-image": {
+      "label": "MOSS-Image",
+      "kind": "image",
+      "part": "moss",
+      "folder": "MOSS-Image-Comfy",
+      "transformer": "moss_image_sft_bf16.safetensors",
+      "download_parts": [
+        "moss"
+      ],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "No general Windows recipe envelope established; use local per-recipe qualification."
+        }
+      },
+      "group": "Picture models"
+    },
+    "voice": {
+      "label": "Fish Audio Drama 3",
+      "kind": "voice",
+      "part": "voice",
+      "feature": "voice",
+      "checkpoint_parts": [
+        "drama-3"
+      ],
+      "runtime": {
+        "cuda": {
+          "required_free_gib": 50.0,
+          "basis": "policy",
+          "note": "Existing CUDA admission: measured Spark peak about 41.6 GiB plus engine reserve; not a Windows minimum-RAM measurement."
+        }
+      },
+      "group": "Voice"
+    },
+    "music": {
+      "label": "MiniMax-Music3",
+      "kind": "music",
+      "part": "music",
+      "feature": "music",
+      "runtime": {
+        "int8": {
+          "required_free_gib": 30.0,
+          "basis": "policy",
+          "note": "Existing CUDA admission based on Spark observations plus reserve; not a Windows minimum-RAM measurement."
+        },
+        "bf16": {
+          "required_free_gib": 38.0,
+          "basis": "policy",
+          "note": "Existing CUDA admission based on Spark observations plus reserve; not a Windows minimum-RAM measurement."
+        }
+      },
+      "group": "Music"
+    },
+    "bolt": {
+      "label": "NVIDIA Nemotron 3.5 Bolt",
+      "kind": "brain",
+      "part": "bolt",
+      "checkpoint_parts": [
+        "Nemotron-3.5-Bolt-24GB",
+        "Nemotron-3.5-Bolt-24GB-LiLiCorr"
+      ],
+      "runtime": {
+        "cuda": {
+          "required_free_gib": 43.0,
+          "basis": "policy",
+          "note": "Existing CUDA recipe admission including runtime state and reserve; not a Windows minimum-RAM measurement."
+        }
+      },
+      "group": "Brain"
+    },
+    "video": {
+      "label": "FastH3",
+      "kind": "component",
+      "part": "video",
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "This catalog does not establish a general Windows recipe envelope."
+        }
+      },
+      "group": "Video"
+    },
+    "ref2va": {
+      "label": "MiniMax H3 references",
+      "kind": "component",
+      "part": "ref2va",
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "This catalog does not establish a general Windows recipe envelope."
+        }
+      },
+      "group": "Video"
+    },
+    "sound": {
+      "label": "Stable Audio Open",
+      "kind": "component",
+      "part": "sound",
+      "feature": "sfx",
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "This catalog does not establish a general Windows recipe envelope."
+        }
+      },
+      "group": "Sound"
+    },
+    "foley": {
+      "label": "MMAudio Foley",
+      "kind": "component",
+      "part": "foley",
+      "feature": "foley",
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "This catalog does not establish a general Windows recipe envelope."
+        }
+      },
+      "group": "Sound"
+    },
+    "train": {
+      "label": "H3 training",
+      "kind": "component",
+      "part": "train",
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "This catalog does not establish a general Windows recipe envelope."
+        }
+      },
+      "group": "Training"
+    },
+    "h3-shared": {
+      "label": "H3 shared text encoder and decoders",
+      "kind": "component",
+      "part": "h3-shared",
+      "group": "Library workflows",
+      "features": ["turnaround", "upscale", "remove", "swap"],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "Shared components only; each Library recipe has independent admission."
+        }
+      }
+    },
+    "library-h3": {
+      "label": "Library H3 bf16 transformer",
+      "kind": "component",
+      "part": "library-h3",
+      "group": "Library workflows",
+      "features": ["turnaround", "upscale", "remove"],
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "Production bf16 Library LoRA route; no int8 adapter merge."
+        }
+      }
+    },
+    "workflows": {
+      "installed_label": "Components installed",
+      "requirements_note": "Find a person uses SAM and does not need H3. Turnaround, Upscale and Remove also need H3 shared models, the bf16 Ref2VA transformer and their action dependencies. Installation is not qualification; open each action's checks for readiness.",
+      "features": ["turnaround", "upscale", "mask", "remove"],
+      "label": "Library workflows",
+      "kind": "component",
+      "part": "workflows",
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "This catalog does not establish a general Windows recipe envelope."
+        }
+      },
+      "group": "Library workflows"
+    },
+    "swap": {
+      "installed_label": "Components installed",
+      "requirements_note": "Character Swap also needs H3 shared models, a Ref2VA transformer and its swap/Turbo adapters. Installation is not qualification; open Feature checks for readiness.",
+      "feature": "swap",
+      "label": "Character Swap",
+      "kind": "component",
+      "part": "swap",
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "This catalog does not establish a general Windows recipe envelope."
+        }
+      },
+      "group": "Character Swap"
+    }
+  },
+  "downloads": {
+    "h3-shared": [
+      {
+        "repo": "FastVideo/FastVideo-FastH3-Comfy",
+        "folder": "FastH3-Comfy",
+        "files": [
+          "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+          "vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "vae/minimax_h3_audio_vae_fp32.safetensors"
+        ]
+      }
+    ],
+    "library-h3": [
+      {
+        "repo": "Comfy-Org/MiniMax-H3",
+        "folder": "MiniMax-H3-Comfy",
+        "files": ["diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors"]
+      }
+    ],
+    "video": [
+      {
+        "repo": "FastVideo/FastVideo-FastH3-Comfy",
+        "folder": "FastH3-Comfy",
+        "files": [
+          "diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors",
+          "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+          "vae/minimax_h3_video_vae_int8_convrot.safetensors",
+          "vae/minimax_h3_audio_vae_fp32.safetensors"
+        ]
+      }
+    ],
+    "image": [
+      {
+        "repo": "Comfy-Org/Qwen-Image-2.1",
+        "folder": "Qwen-Image-2.1-Comfy",
+        "files": [
+          "diffusion_models/qwen_image_2.1_turbo_bf16.safetensors",
+          "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+          "vae/qwen_image_2.1_vae_bf16.safetensors"
+        ]
+      }
+    ],
+    "image-edit": [
+      {
+        "repo": "Comfy-Org/Qwen-Image-2.1",
+        "folder": "Qwen-Image-2.1-Comfy",
+        "files": [
+          "diffusion_models/qwen_image_2.1_bf16.safetensors"
+        ]
+      }
+    ],
+    "ref2va": [
+      {
+        "repo": "Comfy-Org/MiniMax-H3",
+        "folder": "MiniMax-H3-Comfy",
+        "files": [
+          "diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors",
+          "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
+        ]
+      }
+    ],
+    "flux3": [
+      {
+        "repo": "black-forest-labs/flux-3-image-klein-comfy",
+        "folder": "FLUX3-K-Comfy",
+        "files": [
+          "diffusion_models/flux3-image-klein-bf16.safetensors",
+          "diffusion_models/flux3-image-klein-base-bf16.safetensors",
+          "text_encoders/qwen3vl_4b_bf16.safetensors",
+          "text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors",
+          "vae/flux2-vae.safetensors"
+        ]
+      },
+      {
+        "repo": "black-forest-labs/flux-3-image-klein-pup",
+        "folder": "FLUX3-K-Comfy",
+        "files": [
+          "system_prompts.json"
+        ]
+      }
+    ],
+    "moss": [
+      {
+        "repo": "Comfy-Org/MOSS-Image",
+        "folder": "MOSS-Image-Comfy",
+        "files": [
+          "diffusion_models/moss_image_sft_bf16.safetensors",
+          "text_encoders/qwen3.5_9b_bf16.safetensors",
+          "vae/flux2-vae_small.safetensors"
+        ]
+      }
+    ],
+    "music": [
+      {
+        "repo": "Comfy-Org/MiniMax-Music-3",
+        "folder": "MiniMax-Music3-Comfy",
+        "files": [
+          "diffusion_models/minimax_music3_dit_fp16.safetensors",
+          "text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors",
+          "vae/minimax_music3_dav.safetensors"
+        ]
+      }
+    ],
+    "sound": [
+      {
+        "repo": "stabilityai/stable-audio-open-1.0",
+        "folder": "Sound-Comfy/stable-audio-open-1.0",
+        "files": [
+          "model.safetensors",
+          "text_encoder/model.safetensors",
+          "LICENSE.md"
+        ]
+      }
+    ]
+  },
+  "checkpoints": {
+    "Nemotron-3.5-Bolt-24GB": {
+      "repo": "nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB",
+      "revision": "a326822af111290f2af5ac59ef4b5040347dabc4"
+    },
+    "Nemotron-3.5-Bolt-24GB-LiLiCorr": {
+      "repo": "nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr",
+      "revision": "4c6a5613b6d887194a3a5493e3a18a5b3930bb86"
+    },
+    "drama-3": {
+      "repo": "fishaudio/drama-3",
+      "revision": "main"
+    }
+  },
+  "file_sizes": {
+    "FastVideo/FastVideo-FastH3-Comfy@main": {
+      "files": {
+        "diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors": 44079246824,
+        "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors": 27141342152,
+        "vae/minimax_h3_audio_vae_fp32.safetensors": 605254808,
+        "vae/minimax_h3_video_vae_int8_convrot.safetensors": 2811065184
+      }
+    },
+    "Comfy-Org/Qwen-Image-2.1@main": {
+      "files": {
+        "diffusion_models/qwen_image_2.1_bf16.safetensors": 14230280616,
+        "diffusion_models/qwen_image_2.1_turbo_bf16.safetensors": 14230280616,
+        "text_encoders/qwen3vl_8b_int8_convrot.safetensors": 9350798360,
+        "vae/qwen_image_2.1_vae_bf16.safetensors": 675509688
+      }
+    },
+    "Comfy-Org/MiniMax-H3@main": {
+      "files": {
+        "diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors": 40225724176,
+        "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors": 20970379616,
+        "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors": 1956193000
+      }
+    },
+    "black-forest-labs/flux-3-image-klein-comfy@main": {
+      "files": {
+        "diffusion_models/flux3-image-klein-base-bf16.safetensors": 11076957072,
+        "diffusion_models/flux3-image-klein-bf16.safetensors": 11097404512,
+        "text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors": 9748113996,
+        "text_encoders/qwen3vl_4b_bf16.safetensors": 8875719408,
+        "vae/flux2-vae.safetensors": 336211292
+      }
+    },
+    "black-forest-labs/flux-3-image-klein-pup@main": {
+      "files": {
+        "system_prompts.json": 12602
+      }
+    },
+    "Comfy-Org/MOSS-Image@main": {
+      "files": {
+        "diffusion_models/moss_image_sft_bf16.safetensors": 10164655808,
+        "text_encoders/qwen3.5_9b_bf16.safetensors": 19306312328,
+        "vae/flux2-vae_small.safetensors": 249521340
+      }
+    },
+    "Comfy-Org/MiniMax-Music-3@main": {
+      "files": {
+        "diffusion_models/minimax_music3_dit_fp16.safetensors": 4914197682,
+        "text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors": 16706629398,
+        "vae/minimax_music3_dav.safetensors": 216696128
+      }
+    },
+    "stabilityai/stable-audio-open-1.0@main": {
+      "files": {
+        "LICENSE.md": 11852,
+        "model.safetensors": 4853889016,
+        "text_encoder/model.safetensors": 438525864
+      }
+    },
+    "Comfy-Org/sam3.1@7bb8374780a725b4353ed31f3a9395c9742b5621": {
+      "files": {
+        "checkpoints/sam3.1_multiplex_fp16.safetensors": 1745546848
+      }
+    },
+    "LBH-123-AI/Minimax_h3_latent_Upscaler@main": {
+      "files": {
+        "minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors": 690592992
+      }
+    },
+    "akatz-ai/MiniMax-H3-Character-Swap-LoRA@d06323b7c8e70e97cdab48b78a1e05f786c8cba9": {
+      "files": {
+        "h3_character_swap_v1.5.safetensors": 155110792
+      }
+    },
+    "lightx2v/Minimax-h3-Turbo@3ec17a324ced54151364f24f8b5fb6bf7e26414f": {
+      "files": {
+        "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors": 1956193000
+      }
+    },
+    "Kijai/MMAudio_safetensors@main": {
+      "files": {
+        "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors": 1973509450,
+        "mmaudio_large_44k_v2_fp16.safetensors": 2061198424,
+        "mmaudio_synchformer_fp16.safetensors": 474981098,
+        "mmaudio_vae_44k_fp16.safetensors": 610966060
+      }
+    },
+    "nvidia/bigvgan_v2_44khz_128band_512x@main": {
+      "files": {
+        "bigvgan_generator.pt": 489041291,
+        "config.json": 1403
+      }
+    },
+    "Comfy-Org/MiniMax-H3@e5eb578a89295337b8ff433a035929ce0279e0b6": {
+      "files": {
+        "diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors": 40225724176,
+        "vae/minimax_h3_video_vae_fp16.safetensors": 5207808496
+      }
+    },
+    "ostris/minimax_h3_training_adapter@a7203c31a0016c73d1e8f8df7cc119a880015621": {
+      "files": {
+        "minimax_h3_training_adapter_v2.safetensors": 310168544
+      }
+    },
+    "nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB@a326822af111290f2af5ac59ef4b5040347dabc4": {
+      "files": {
+        ".gitattributes": 1619,
+        "README.md": 85188,
+        "__init__.py": 0,
+        "accuracy.png": 841176,
+        "bias.md": 3254,
+        "chat_template.jinja": 12514,
+        "config.json": 8637780,
+        "configuration_nemotron_h.py": 19822,
+        "configuration_nemotron_h_omni.py": 8912,
+        "configuration_nemotron_h_puzzle.py": 6129,
+        "configuration_radio.py": 4219,
+        "explainability.md": 3126,
+        "generation_config.json": 209,
+        "hf_quant_config.json": 6568799,
+        "image_processing_nemotron_h_omni.py": 10159,
+        "model-00001-of-00090.safetensors": 1644175760,
+        "model-00002-of-00090.safetensors": 61765944,
+        "model-00003-of-00090.safetensors": 281832856,
+        "model-00004-of-00090.safetensors": 61765944,
+        "model-00005-of-00090.safetensors": 216952088,
+        "model-00006-of-00090.safetensors": 61765944,
+        "model-00007-of-00090.safetensors": 281832856,
+        "model-00008-of-00090.safetensors": 61765944,
+        "model-00009-of-00090.safetensors": 37888672,
+        "model-00010-of-00090.safetensors": 392672584,
+        "model-00011-of-00090.safetensors": 61765944,
+        "model-00012-of-00090.safetensors": 314273704,
+        "model-00013-of-00090.safetensors": 61765960,
+        "model-00014-of-00090.safetensors": 281833344,
+        "model-00015-of-00090.safetensors": 61765960,
+        "model-00016-of-00090.safetensors": 281833344,
+        "model-00017-of-00090.safetensors": 61765960,
+        "model-00018-of-00090.safetensors": 37888680,
+        "model-00019-of-00090.safetensors": 392673200,
+        "model-00020-of-00090.safetensors": 61765960,
+        "model-00021-of-00090.safetensors": 351582080,
+        "model-00022-of-00090.safetensors": 61765960,
+        "model-00023-of-00090.safetensors": 607865224,
+        "model-00024-of-00090.safetensors": 61765960,
+        "model-00025-of-00090.safetensors": 549472184,
+        "model-00026-of-00090.safetensors": 61765960,
+        "model-00027-of-00090.safetensors": 37888680,
+        "model-00028-of-00090.safetensors": 281833344,
+        "model-00029-of-00090.safetensors": 61765960,
+        "model-00030-of-00090.safetensors": 549472184,
+        "model-00031-of-00090.safetensors": 61765960,
+        "model-00032-of-00090.safetensors": 433764608,
+        "model-00033-of-00090.safetensors": 61765960,
+        "model-00034-of-00090.safetensors": 392673200,
+        "model-00035-of-00090.safetensors": 61765960,
+        "model-00036-of-00090.safetensors": 549472184,
+        "model-00037-of-00090.safetensors": 61765960,
+        "model-00038-of-00090.safetensors": 37888680,
+        "model-00039-of-00090.safetensors": 471072688,
+        "model-00040-of-00090.safetensors": 61765960,
+        "model-00041-of-00090.safetensors": 421330824,
+        "model-00042-of-00090.safetensors": 61765960,
+        "model-00043-of-00090.safetensors": 471072688,
+        "model-00044-of-00090.safetensors": 61765960,
+        "model-00045-of-00090.safetensors": 607865224,
+        "model-00046-of-00090.safetensors": 61765960,
+        "model-00047-of-00090.safetensors": 520814912,
+        "model-00048-of-00090.safetensors": 61765960,
+        "model-00049-of-00090.safetensors": 37888680,
+        "model-00050-of-00090.safetensors": 694915528,
+        "model-00051-of-00090.safetensors": 61765960,
+        "model-00052-of-00090.safetensors": 607865224,
+        "model-00053-of-00090.safetensors": 61765960,
+        "model-00054-of-00090.safetensors": 314273704,
+        "model-00055-of-00090.safetensors": 61765960,
+        "model-00056-of-00090.safetensors": 471072688,
+        "model-00057-of-00090.safetensors": 61765960,
+        "model-00058-of-00090.safetensors": 520814912,
+        "model-00059-of-00090.safetensors": 61765960,
+        "model-00060-of-00090.safetensors": 37888680,
+        "model-00061-of-00090.safetensors": 351582080,
+        "model-00062-of-00090.safetensors": 61765960,
+        "model-00063-of-00090.safetensors": 314273704,
+        "model-00064-of-00090.safetensors": 61765960,
+        "model-00065-of-00090.safetensors": 314273704,
+        "model-00066-of-00090.safetensors": 61765960,
+        "model-00067-of-00090.safetensors": 281833344,
+        "model-00068-of-00090.safetensors": 61765960,
+        "model-00069-of-00090.safetensors": 281833344,
+        "model-00070-of-00090.safetensors": 61765960,
+        "model-00071-of-00090.safetensors": 37888680,
+        "model-00072-of-00090.safetensors": 421330824,
+        "model-00073-of-00090.safetensors": 61765960,
+        "model-00074-of-00090.safetensors": 471072688,
+        "model-00075-of-00090.safetensors": 61765960,
+        "model-00076-of-00090.safetensors": 549472184,
+        "model-00077-of-00090.safetensors": 61765960,
+        "model-00078-of-00090.safetensors": 607865224,
+        "model-00079-of-00090.safetensors": 61765960,
+        "model-00080-of-00090.safetensors": 37888680,
+        "model-00081-of-00090.safetensors": 694915528,
+        "model-00082-of-00090.safetensors": 61765960,
+        "model-00083-of-00090.safetensors": 607865224,
+        "model-00084-of-00090.safetensors": 61765960,
+        "model-00085-of-00090.safetensors": 607865224,
+        "model-00086-of-00090.safetensors": 61765960,
+        "model-00087-of-00090.safetensors": 694915528,
+        "model-00088-of-00090.safetensors": 61765960,
+        "model-00089-of-00090.safetensors": 520814912,
+        "model-00090-of-00090.safetensors": 1684771096,
+        "model.safetensors.index.json": 3180256,
+        "modeling_nemotron_h.py": 82338,
+        "modeling_nemotron_h_omni.py": 24301,
+        "modeling_nemotron_h_puzzle.py": 1505,
+        "modeling_radio.py": 22804,
+        "preprocessor_config.json": 693,
+        "privacy.md": 1671,
+        "processing_nemotron_h_omni.py": 16450,
+        "processor_config.json": 1062,
+        "safety.md": 2103,
+        "tokenizer.json": 17077366,
+        "tokenizer_config.json": 617,
+        "ultra_v3_reasoning_parser.py": 2490
+      },
+      "snapshot_files": [
+        ".gitattributes",
+        "README.md",
+        "__init__.py",
+        "accuracy.png",
+        "bias.md",
+        "chat_template.jinja",
+        "config.json",
+        "configuration_nemotron_h.py",
+        "configuration_nemotron_h_omni.py",
+        "configuration_nemotron_h_puzzle.py",
+        "configuration_radio.py",
+        "explainability.md",
+        "generation_config.json",
+        "hf_quant_config.json",
+        "image_processing_nemotron_h_omni.py",
+        "model-00001-of-00090.safetensors",
+        "model-00002-of-00090.safetensors",
+        "model-00003-of-00090.safetensors",
+        "model-00004-of-00090.safetensors",
+        "model-00005-of-00090.safetensors",
+        "model-00006-of-00090.safetensors",
+        "model-00007-of-00090.safetensors",
+        "model-00008-of-00090.safetensors",
+        "model-00009-of-00090.safetensors",
+        "model-00010-of-00090.safetensors",
+        "model-00011-of-00090.safetensors",
+        "model-00012-of-00090.safetensors",
+        "model-00013-of-00090.safetensors",
+        "model-00014-of-00090.safetensors",
+        "model-00015-of-00090.safetensors",
+        "model-00016-of-00090.safetensors",
+        "model-00017-of-00090.safetensors",
+        "model-00018-of-00090.safetensors",
+        "model-00019-of-00090.safetensors",
+        "model-00020-of-00090.safetensors",
+        "model-00021-of-00090.safetensors",
+        "model-00022-of-00090.safetensors",
+        "model-00023-of-00090.safetensors",
+        "model-00024-of-00090.safetensors",
+        "model-00025-of-00090.safetensors",
+        "model-00026-of-00090.safetensors",
+        "model-00027-of-00090.safetensors",
+        "model-00028-of-00090.safetensors",
+        "model-00029-of-00090.safetensors",
+        "model-00030-of-00090.safetensors",
+        "model-00031-of-00090.safetensors",
+        "model-00032-of-00090.safetensors",
+        "model-00033-of-00090.safetensors",
+        "model-00034-of-00090.safetensors",
+        "model-00035-of-00090.safetensors",
+        "model-00036-of-00090.safetensors",
+        "model-00037-of-00090.safetensors",
+        "model-00038-of-00090.safetensors",
+        "model-00039-of-00090.safetensors",
+        "model-00040-of-00090.safetensors",
+        "model-00041-of-00090.safetensors",
+        "model-00042-of-00090.safetensors",
+        "model-00043-of-00090.safetensors",
+        "model-00044-of-00090.safetensors",
+        "model-00045-of-00090.safetensors",
+        "model-00046-of-00090.safetensors",
+        "model-00047-of-00090.safetensors",
+        "model-00048-of-00090.safetensors",
+        "model-00049-of-00090.safetensors",
+        "model-00050-of-00090.safetensors",
+        "model-00051-of-00090.safetensors",
+        "model-00052-of-00090.safetensors",
+        "model-00053-of-00090.safetensors",
+        "model-00054-of-00090.safetensors",
+        "model-00055-of-00090.safetensors",
+        "model-00056-of-00090.safetensors",
+        "model-00057-of-00090.safetensors",
+        "model-00058-of-00090.safetensors",
+        "model-00059-of-00090.safetensors",
+        "model-00060-of-00090.safetensors",
+        "model-00061-of-00090.safetensors",
+        "model-00062-of-00090.safetensors",
+        "model-00063-of-00090.safetensors",
+        "model-00064-of-00090.safetensors",
+        "model-00065-of-00090.safetensors",
+        "model-00066-of-00090.safetensors",
+        "model-00067-of-00090.safetensors",
+        "model-00068-of-00090.safetensors",
+        "model-00069-of-00090.safetensors",
+        "model-00070-of-00090.safetensors",
+        "model-00071-of-00090.safetensors",
+        "model-00072-of-00090.safetensors",
+        "model-00073-of-00090.safetensors",
+        "model-00074-of-00090.safetensors",
+        "model-00075-of-00090.safetensors",
+        "model-00076-of-00090.safetensors",
+        "model-00077-of-00090.safetensors",
+        "model-00078-of-00090.safetensors",
+        "model-00079-of-00090.safetensors",
+        "model-00080-of-00090.safetensors",
+        "model-00081-of-00090.safetensors",
+        "model-00082-of-00090.safetensors",
+        "model-00083-of-00090.safetensors",
+        "model-00084-of-00090.safetensors",
+        "model-00085-of-00090.safetensors",
+        "model-00086-of-00090.safetensors",
+        "model-00087-of-00090.safetensors",
+        "model-00088-of-00090.safetensors",
+        "model-00089-of-00090.safetensors",
+        "model-00090-of-00090.safetensors",
+        "model.safetensors.index.json",
+        "modeling_nemotron_h.py",
+        "modeling_nemotron_h_omni.py",
+        "modeling_nemotron_h_puzzle.py",
+        "modeling_radio.py",
+        "preprocessor_config.json",
+        "privacy.md",
+        "processing_nemotron_h_omni.py",
+        "processor_config.json",
+        "safety.md",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "ultra_v3_reasoning_parser.py"
+      ]
+    },
+    "nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr@4c6a5613b6d887194a3a5493e3a18a5b3930bb86": {
+      "files": {
+        ".gitattributes": 1519,
+        "LICENSE": 2618,
+        "README.md": 14491,
+        "config.json": 2389,
+        "hf_quant_config.json": 5594,
+        "model.safetensors": 962485872
+      },
+      "snapshot_files": [
+        ".gitattributes",
+        "LICENSE",
+        "README.md",
+        "config.json",
+        "hf_quant_config.json",
+        "model.safetensors"
+      ]
+    },
+    "fishaudio/drama-3@main": {
+      "files": {
+        ".gitattributes": 1570,
+        "LICENSE": 19685,
+        "README.md": 7996,
+        "chat_template.jinja": 7756,
+        "codec.pth": 1871099728,
+        "config.json": 5534,
+        "model-00001-of-00015.safetensors": 2862881576,
+        "model-00002-of-00015.safetensors": 2628610248,
+        "model-00003-of-00015.safetensors": 2628610224,
+        "model-00004-of-00015.safetensors": 2628611792,
+        "model-00005-of-00015.safetensors": 2641525264,
+        "model-00006-of-00015.safetensors": 2628614896,
+        "model-00007-of-00015.safetensors": 2628614880,
+        "model-00008-of-00015.safetensors": 2628614888,
+        "model-00009-of-00015.safetensors": 2641525264,
+        "model-00010-of-00015.safetensors": 2628614896,
+        "model-00011-of-00015.safetensors": 2628614880,
+        "model-00012-of-00015.safetensors": 2628614888,
+        "model-00013-of-00015.safetensors": 2641525264,
+        "model-00014-of-00015.safetensors": 3749111392,
+        "model-00015-of-00015.safetensors": 1409461016,
+        "model.safetensors.index.json": 6880196,
+        "special_tokens_map.json": 102779,
+        "tokenizer.json": 20791070,
+        "tokenizer_config.json": 103580
+      },
+      "snapshot_files": [
+        ".gitattributes",
+        "LICENSE",
+        "README.md",
+        "chat_template.jinja",
+        "codec.pth",
+        "config.json",
+        "model-00001-of-00015.safetensors",
+        "model-00002-of-00015.safetensors",
+        "model-00003-of-00015.safetensors",
+        "model-00004-of-00015.safetensors",
+        "model-00005-of-00015.safetensors",
+        "model-00006-of-00015.safetensors",
+        "model-00007-of-00015.safetensors",
+        "model-00008-of-00015.safetensors",
+        "model-00009-of-00015.safetensors",
+        "model-00010-of-00015.safetensors",
+        "model-00011-of-00015.safetensors",
+        "model-00012-of-00015.safetensors",
+        "model-00013-of-00015.safetensors",
+        "model-00014-of-00015.safetensors",
+        "model-00015-of-00015.safetensors",
+        "model.safetensors.index.json",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json"
+      ]
+    }
+  },
+  "sizes_checked_at": "2026-11-05T20:48:07.750663+00:00",
+  "checked_downloads": {
+    "workflows": [
+      {
+        "repo": "Comfy-Org/sam3.1",
+        "revision": "7bb8374780a725b4353ed31f3a9395c9742b5621",
+        "file": "checkpoints/sam3.1_multiplex_fp16.safetensors",
+        "folder": "Workflows-Comfy/checkpoints",
+        "target": "sam3.1_multiplex_fp16.safetensors",
+        "sha256": "9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03"
+      },
+      {
+        "repo": "LBH-123-AI/Minimax_h3_latent_Upscaler",
+        "revision": "main",
+        "file": "minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
+        "folder": "Workflows-Comfy/latent_upscale_models",
+        "target": "minimax_h3_latent_upscaler_3d_bf16.safetensors",
+        "sha256": "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6"
+      }
+    ],
+    "swap": [
+      {
+        "repo": "Comfy-Org/MiniMax-H3",
+        "revision": "main",
+        "file": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "folder": "MiniMax-H3-Comfy/diffusion_models",
+        "target": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "sha256": ""
+      },
+      {
+        "repo": "akatz-ai/MiniMax-H3-Character-Swap-LoRA",
+        "revision": "d06323b7c8e70e97cdab48b78a1e05f786c8cba9",
+        "file": "h3_character_swap_v1.5.safetensors",
+        "folder": "MiniMax-H3-Comfy/loras",
+        "target": "h3_character_swap_v1.5.safetensors",
+        "sha256": "8f2c3c3eba161df8d0c6099598b4730f641f5ce01e04cd16d2427cff8a35218f"
+      },
+      {
+        "repo": "lightx2v/Minimax-h3-Turbo",
+        "revision": "3ec17a324ced54151364f24f8b5fb6bf7e26414f",
+        "file": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+        "folder": "MiniMax-H3-Comfy/loras",
+        "target": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+        "sha256": "08cfe946033af7d27719b964b6e0a0e50c32138daabbd6ce4137e23df6bf9980"
+      },
+      {
+        "repo": "Comfy-Org/sam3.1",
+        "revision": "7bb8374780a725b4353ed31f3a9395c9742b5621",
+        "file": "checkpoints/sam3.1_multiplex_fp16.safetensors",
+        "folder": "Workflows-Comfy/checkpoints",
+        "target": "sam3.1_multiplex_fp16.safetensors",
+        "sha256": "9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03"
+      }
+    ],
+    "foley": [
+      {
+        "repo": "Kijai/MMAudio_safetensors",
+        "revision": "main",
+        "file": "mmaudio_large_44k_v2_fp16.safetensors",
+        "folder": "Sound-Comfy/mmaudio",
+        "target": "mmaudio_large_44k_v2_fp16.safetensors",
+        "sha256": ""
+      },
+      {
+        "repo": "Kijai/MMAudio_safetensors",
+        "revision": "main",
+        "file": "mmaudio_vae_44k_fp16.safetensors",
+        "folder": "Sound-Comfy/mmaudio",
+        "target": "mmaudio_vae_44k_fp16.safetensors",
+        "sha256": ""
+      },
+      {
+        "repo": "Kijai/MMAudio_safetensors",
+        "revision": "main",
+        "file": "mmaudio_synchformer_fp16.safetensors",
+        "folder": "Sound-Comfy/mmaudio",
+        "target": "mmaudio_synchformer_fp16.safetensors",
+        "sha256": ""
+      },
+      {
+        "repo": "Kijai/MMAudio_safetensors",
+        "revision": "main",
+        "file": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+        "folder": "Sound-Comfy/mmaudio",
+        "target": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+        "sha256": ""
+      },
+      {
+        "repo": "nvidia/bigvgan_v2_44khz_128band_512x",
+        "revision": "main",
+        "file": "bigvgan_generator.pt",
+        "folder": "Sound-Comfy/mmaudio/nvidia/bigvgan_v2_44khz_128band_512x",
+        "target": "bigvgan_generator.pt",
+        "sha256": ""
+      },
+      {
+        "repo": "nvidia/bigvgan_v2_44khz_128band_512x",
+        "revision": "main",
+        "file": "config.json",
+        "folder": "Sound-Comfy/mmaudio/nvidia/bigvgan_v2_44khz_128band_512x",
+        "target": "config.json",
+        "sha256": ""
+      }
+    ],
+    "train": [
+      {
+        "repo": "Comfy-Org/MiniMax-H3",
+        "revision": "e5eb578a89295337b8ff433a035929ce0279e0b6",
+        "file": "vae/minimax_h3_video_vae_fp16.safetensors",
+        "folder": "Train-H3/vae",
+        "target": "minimax_h3_video_vae_fp16.safetensors",
+        "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522"
+      },
+      {
+        "repo": "ostris/minimax_h3_training_adapter",
+        "revision": "a7203c31a0016c73d1e8f8df7cc119a880015621",
+        "file": "minimax_h3_training_adapter_v2.safetensors",
+        "folder": "Train-H3/adapters",
+        "target": "ostris_dd_adapter_v2.safetensors",
+        "sha256": "5646c07bada64c87478d2b89b7f564bf723b2c8330d608a16c9dcbaad8d3cb58"
+      },
+      {
+        "repo": "Comfy-Org/MiniMax-H3",
+        "revision": "e5eb578a89295337b8ff433a035929ce0279e0b6",
+        "file": "diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors",
+        "folder": "MiniMax-H3-Comfy/diffusion_models",
+        "target": "minimax_h3_fl2va_pruned_bf16.safetensors",
+        "sha256": ""
+      }
+    ]
+  }
+}

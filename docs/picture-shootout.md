@@ -1,7 +1,7 @@
 # Picture-model shootout: four models, Mac against DGX Spark
 
 Measured on 2026-10-16 with Studio 2.8.1. The README's
-[Which picture model to use](../README.md#which-picture-model-to-use-the-evidence) is the short version of this page.
+[Which picture model to use](performance.md#which-picture-model-to-use-the-evidence) is the short version of this page.
 
 ## Setup
 

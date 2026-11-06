@@ -42,7 +42,9 @@ const APPS = () => [
   { id: "scout", cat: "cinema", title: "Scout, then animate", one: "First frames in one go; pick the best, then roll", art: "start-scout", sign: "video", run: apCreate({ goes: "video", start: "scout" }, 1) },
   { id: "long-take", cat: "cinema", title: "Long take", one: "30 seconds to 30 minutes, clip by clip, beat by beat", art: "start-long", sign: "video",
     run: () => { const k = S && S.long ? Object.keys(S.long)[0] : null; startCreate({ goes: "video", start: "text", ...(k ? { seconds: k } : {}) }); } },
-  { id: "still", cat: "cinema", title: "Image generator", one: "Stills at any size with Qwen-Image 2.1 or FLUX3-K", art: "start-still", sign: "image", run: apCreate({ goes: "image" }) },
+  { id: "still", cat: "cinema", title: "Image generator", one: S && S.platform === "windows" && typeof imageModelName === "function"
+    ? imageModelName() + (imageModel() === "sd-turbo" ? ": 512 × 512 storyboard drafts" : ": full-model pictures")
+    : "Stills at any size with Qwen-Image 2.1 or FLUX3-K", art: "start-still", sign: "image", run: apCreate({ goes: "image" }) },
   { id: "sharp", cat: "cinema", title: "Sharp Spec", one: "Sam's locked recipe: 1376 × 768, eight passes", art: "start-sharp", sign: "video", run: () => { if (typeof sharpCreate === "function") sharpCreate(); go("Create"); } },
   { id: "horror", cat: "cinema", title: "80s Horror", one: "Wasserman's own LoRA: VHS neon or 16mm grindhouse", src: "art/looks/80s-horror.webp", sign: "looks", lora: "wasserman-80s-horror" },
 
@@ -85,7 +87,10 @@ const APPS = () => [
 
   { id: "voice", cat: "sound", title: "Voices & cloning", one: "Fish Audio Drama 3: cast a voice or clone your own", art: "start-voice", sign: "sound", run: () => go("Voice") },
   { id: "song", cat: "sound", title: "Songs & score", one: "YuE2 or MiniMax-Music3: lyrics and a style to a song", art: "start-song", sign: "sound", run: () => go("Music") },
-  { id: "foley", cat: "sound", title: "Sound effects & foley", one: "Foley for a clip, or any sound from words", art: "start-sfx", sign: "sound", run: () => go("Foley") },
+  ...(S && S.platform === "windows" ? [
+    { id: "sfx", cat: "sound", title: "Sound effects", one: "Stable Audio Open, with the selected backend's recipe", art: "start-sfx", sign: "sound", off: () => capWhy("sfx"), run: () => { SFX.mode = "sfx"; go("Foley"); } },
+    { id: "foley", cat: "sound", title: "MMAudio foley", one: "Sound made for a clip's picture", art: "start-sfx", sign: "sound", off: () => capWhy("foley"), run: () => { SFX.mode = "foley"; go("Foley"); } },
+  ] : [{ id: "foley", cat: "sound", title: "Sound effects & foley", one: "Foley for a clip, or any sound from words", art: "start-sfx", sign: "sound", run: () => go("Foley") }]),
 
   { id: "upscale", cat: "finish", title: "Upscale", one: "A clip twice the size and sharper", art: "look-video-upscaler", sign: "video",
     off: () => apActReady("upscale"), run: apAct("upscale", "video", "Upscale") },
@@ -94,7 +99,7 @@ const APPS = () => [
   { id: "captions", cat: "finish", title: "Captions", one: "A clip's speech burned in, word by word", art: apArt("app-captions", ""), sign: "graphics", run: () => apPick("video", "Captions", path => gfxOpen("captions", path)) },
   { id: "titles", cat: "finish", title: "Titles & motion graphics", one: "Lower thirds, title cards, slideshows and music videos", art: apArt("app-titles", ""), sign: "graphics", run: () => go("Motion graphics") },
   { id: "timeline", cat: "finish", title: "Timeline editor", one: "Cut your takes together, with sound", art: "act-edit-timeline", sign: "edit", run: () => go("Editor") },
-  { id: "finish", cat: "finish", title: "Finish & export", one: "The final cut and mix, out to Resolve, Premiere or After Effects", art: "act-edit-resolve", sign: "edit", run: () => go("Finish") },
+  { id: "finish", cat: "finish", title: "Finish & export", one: "The final cut and mix, out to Resolve, Premiere or After Effects", art: "act-edit-resolve", sign: "edit", off: () => capWhy("finish"), run: () => go("Finish") },
 
   { id: "night", cat: "studio", title: "Night shift", one: "Queue a batch tonight, wake up to dailies on your phone", art: "engine-night", sign: "night", run: () => go("Night shift") },
   { id: "nodes", cat: "studio", title: "Nodes", one: "Words to pictures to clips, wired in order", art: "vault-nodes", sign: "nodes", off: () => typeof viewNodes === "function" ? "" : "The node canvas is not in this install", run: () => go("Nodes") },
@@ -113,6 +118,8 @@ function apSuite() { if (typeof suApps !== "function") return [];
 
 // what an app does on this machine now: {run, off, need}; a LoRA app follows the hub's own state of that LoRA
 function apState(a) {
+  if (a.id === "still" && S && S.platform === "windows" && typeof imageModelWhy === "function")
+    return { run: a.run, off: imageModelWhy() };
   if (!a.lora) { const off = a.off ? a.off() : ""; return { run: a.run, off }; }
   const r = apLora(a.lora);
   if (!r) return { off: "Not in this copy of the Looks hub" };
@@ -123,7 +130,8 @@ function apCard(a) { const st = apState(a);
   const card = pcard({ art: a.art, src: a.src, sign: a.sign, title: a.title, one: a.one, k: (AP_CATS.find(c => c.id === a.cat) || {}).name.toUpperCase(), off: st.off, run: st.run, data: { "data-app": a.id } });
   if (a.icon) card.classList.add("ap-icon");  // an app's square icon, whole, on the card's ground
   if (st.need) card.append(el("span", { class: "ap-need" }, st.need));
-  return card; }
+  const checkId = { still: typeof imageFeature === "function" ? imageFeature() : "scout", titles: "graphics", sfx: "sfx", hlg: "hlg", finish: "finish", foley: "foley" }[a.id];
+  return withFeatureBadge(card, checkId, { "data-feature-app": a.id }); }
 const apHit = (a, words) => !words || [a.title, a.one, a.words, (AP_CATS.find(c => c.id === a.cat) || {}).name].join(" ").toLowerCase().includes(words);
 
 // the take a Library action works on: the newest of the kind it needs

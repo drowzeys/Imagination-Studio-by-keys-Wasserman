@@ -18,6 +18,8 @@ import uuid
 
 from windows_brain import fetch, verify_file
 from windows_comfy import WindowsComfy
+from feature_checks import matches_qualification
+from windows_qualification import LEGACY_GPU_COMPATIBILITY, baseline_gpu_compatibility, baseline_gpu_runtime, hardware_matches, verify_model_updates
 
 PACK = Path(__file__).resolve().parents[1]
 MODEL = "sd-turbo"
@@ -65,23 +67,29 @@ def status() -> dict:
     try:
         receipt = json.loads((root / "qualification.json").read_text(encoding="utf-8"))
         mtimes = {name: (root / name).stat().st_mtime_ns for name in FILES}
+        current_tools = tool_hashes()
+        provenance = {"tools": receipt.get("tool_sha256"), "models": receipt.get("model_mtime_ns"), "runtime": receipt.get("runtime")}
+        current = {"tools": current_tools, "models": mtimes, "runtime": baseline_gpu_runtime()}
         valid = (receipt.get("weight_manifest_sha256") == MANIFEST_SHA256 and receipt.get("revision") == REVISION
                  and receipt.get("width") == SIDE and receipt.get("height") == SIDE
-                 and receipt.get("tool_sha256") == tool_hashes()
-                 and receipt.get("model_mtime_ns") == mtimes
+                 and matches_qualification(provenance, current, receipt.get("compatibility", LEGACY_GPU_COMPATIBILITY),
+                                           baseline_gpu_compatibility())
                  and all((root / name).stat().st_size == info[0] for name, info in FILES.items())
                  and receipt.get("result", {}).get("ok") is True
                  and isinstance(receipt.get("hardware"), dict)
                  and all(type(receipt["hardware"].get(key)) is int and receipt["hardware"][key] > 0
-                         for key in ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb")))
+                         for key in ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb"))
+                 and hardware_matches(receipt["hardware"]))
     except FileNotFoundError:
-        return {"available": False, "why": "Run setup-windows-storyboard.ps1 and check-windows-storyboard.ps1 first."}
-    except (OSError, ValueError, TypeError, AttributeError) as error:
+        return {"available": False, "why": "Run setup-windows-images.ps1 -Model auto, then check it in Machine > Feature checks."}
+        if valid:
+            verify_model_updates(root, FILES, receipt.get("model_mtime_ns", {}))
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError) as error:
         return {"available": False, "why": f"The Windows storyboard qualification is unreadable: {type(error).__name__}."}
     if not valid:
         return {"available": False, "why": "The model or render code changed; repeat check-windows-storyboard.ps1."}
     return {"available": True, "why": "", "width": SIDE, "height": SIDE, "max_count": MAX_COUNT,
-            "model": MODEL, "hardware": receipt["hardware"]}
+            "model": MODEL, "hardware": receipt["hardware"], "runtime_updated": provenance != current}
 
 
 def parameters(params: dict) -> dict:
@@ -147,8 +155,12 @@ def image_plan(params: dict) -> list[tuple[str, int, str]]:
 
 
 def preflight(qualification: dict | None = None) -> None:
-    from windows_memory import DedicatedMemory, WindowsSignals, host_memory, physical_memory_mb
-    found = status() if qualification is None else qualification
+    from windows_memory import DedicatedMemory, WindowsSignals, gpu_memory_warning, host_memory, physical_memory_mb
+    if qualification is None:
+        from windows_runtime import usage_status
+        found = usage_status("scout", status())
+    else:
+        found = qualification
     if not found["available"]:
         raise RuntimeError(found["why"])
     hardware = found["hardware"]
@@ -162,8 +174,9 @@ def preflight(qualification: dict | None = None) -> None:
         used, limit, _, low = signals.read()
     if low or not available or available < int(floor or "0"):
         raise RuntimeError("Windows reports low physical memory or the configured host reserve was reached")
-    backend = _backend
-    credit = backend.accounting() if backend is not None else {"commit_mb": 0, "reserved_mb": 0}
+    with _backend_lock:
+        backend = _backend
+        credit = backend.accounting() if backend is not None else {"commit_mb": 0, "reserved_mb": 0}
     if limit - used < JOB_LIMIT_MB - credit["commit_mb"] + 2048:
         raise RuntimeError("the Windows image job cap does not fit commit headroom with its reserve")
     device = subprocess.run(["nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader", "--id=0"],
@@ -173,7 +186,7 @@ def preflight(qualification: dict | None = None) -> None:
     if dedicated != hardware["gpu_dedicated_total_mb"]:
         raise RuntimeError("the dedicated GPU partition changed; repeat storyboard qualification")
     if free < GPU_LIMIT_MB - credit["reserved_mb"] + 2048:
-        raise RuntimeError("the Windows image allocation cap does not fit dedicated GPU headroom with its reserve")
+        raise RuntimeError(gpu_memory_warning(free, GPU_LIMIT_MB - credit["reserved_mb"] + 2048, device))
 
 
 def build(params: dict, home: Path, job_id: str) -> tuple[list[str], dict, list[str]]:
@@ -309,15 +322,14 @@ def render_case(output: Path, params: dict, cancelled=lambda: False, submit=None
         return {"model": MODEL, "count": count, "width": SIDE, "height": SIDE,
                 "request_to_files_seconds": time.monotonic() - started, "allocator_receipts": receipts}
 
-    return check.CalibrationCase(prepare, exercise)
+    from windows_memory import single_gpu_uuid
+    return check.CalibrationCase(prepare, exercise, wddm_device_uuid=single_gpu_uuid())
 
 
 def render(output: Path, params: dict, qualify: bool) -> dict:
     root = folder()
     verify_weights(root)
-    if qualify:
-        (root / "qualification.json").unlink(missing_ok=True)
-    else:
+    if not qualify:
         preflight()
     check = tools().checker()
     case = render_case(output, params)
@@ -327,7 +339,7 @@ def render(output: Path, params: dict, qualify: bool) -> dict:
         initial = result["memory_guard"]["initial"]
         qualification = {"weight_manifest_sha256": MANIFEST_SHA256, "revision": REVISION, "width": SIDE, "height": SIDE,
                          "model_mtime_ns": {name: (root / name).stat().st_mtime_ns for name in FILES},
-                         "tool_sha256": tool_hashes(),
+                         "tool_sha256": tool_hashes(), "compatibility": baseline_gpu_compatibility(), "runtime": baseline_gpu_runtime(),
                          "hardware": {key: initial[key] for key in
                                       ("physical_total_mb", "host_total_mb", "gpu_dedicated_total_mb")},
                          "result": result}
@@ -363,10 +375,11 @@ def release_backend():
 
 def shutdown_backend():
     global _backend, _backend_kind
-    if _backend:
-        _backend.close()
-        _backend = None
-        _backend_kind = None
+    with _backend_lock:
+        if _backend:
+            _backend.close()
+            _backend = None
+            _backend_kind = None
 
 
 atexit.register(shutdown_backend)

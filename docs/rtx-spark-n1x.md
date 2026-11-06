@@ -33,12 +33,36 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1
 
 ## Start and stop
 
-- **Start:** click Imagination Studio on the taskbar. A small window opens (minimized) and the Studio opens in the
-  browser at `http://127.0.0.1:7870` when it is ready. Clicked while it runs, it only opens the page.
-- **Stop:** close that window, or run Stop Imagination Studio (it stops the Studio and its ComfyUI, giving the GPU's
-  memory back).
-- Why a window: WSL shuts Ubuntu down shortly after its last Windows window closes, and everything in it with it. The
-  launcher's window is what keeps the Studio alive; a Studio started over SSH alone stops when the session ends.
+- **Start:** click Imagination Studio on the taskbar or Desktop. Its notification-area tray controller starts the
+  selected default backend and opens `http://127.0.0.1:7870`. If an app is already running, it only opens the page.
+- **Stop:** choose Stop Studio in the tray, or Stop Imagination Studio in Start. Confirm the action; queued or
+  running jobs prevent stopping. A tray-owned app gracefully unloads its models before exiting.
+- **Native and WSL2 together:** each install registers separately. The tray shows which backend is running,
+  offers a default for future launches, and confirms an idle stop/start when switching. Changing the default does
+  not stop the running app. A failed drain prevents the next backend from starting.
+- **Exit tray** leaves Studio running. A separate supervisor retains the long-lived `wsl.exe` when using WSL2;
+  no visible command window is needed. It never uses `wsl --shutdown`, terminates a distribution, or kills by name.
+  Models, environments and project folders remain each install's own; switching does not copy or migrate them.
+- An app started manually, over SSH, or by an older launcher is labelled **External Studio**. The tray can open
+  it but will not adopt or stop it. Stop it through its original launcher before starting a tray-owned session.
+
+Existing installs can register without running model setup. Use an updated checkout and a Windows Python 3.13
+runtime (`py` or the native UI environment); the tray controller itself uses only the standard library:
+
+```powershell
+# From the native Windows checkout:
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend native
+# Add an updated WSL2 checkout (replace these stand-ins with that install's values):
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser spark -WslRepo /home/spark/Imagination-Studio
+```
+
+Registration preserves the other backend and the existing default (`-MakeDefault` changes it explicitly).
+It creates the shared Start/Stop shortcuts and retains a local controller payload, so refreshing the menu does
+not start WSL. WSL registration and start explicitly check the given distro/user/checkout, with a timeout.
+Both backends need the updated `app/desktop_control.py`. Settings and private launch identity live outside the
+repository in `%LOCALAPPDATA%\ImaginationStudio`; credentials never appear in URLs, public app state or logs.
+The usual memory guards remain unchanged. Actual WSL2 lifecycle switching requires validation on an installed
+WSL Studio; deterministic tests do not constitute a GPU or WSL runtime measurement.
 
 ## Memory
 
@@ -155,16 +179,21 @@ clients ran on another machine through an SSH tunnel.
 - Native Windows against WSL: within about ±15% (three samples a class), and more memory left for streams.
 - On TensorFold the N1X matches or passes the DGX Spark's EXL3 figures for this model.
 
-## Native Windows: the native CUDA tier
+<a id="native-windows-the-native-cuda-tier"></a>
+
+## Native Windows: one runtime, per-feature backends
 
 The Studio can also run on the laptop **natively on Windows, without WSL**: the DGX Spark's render path (ComfyUI, the
 Studio's graphs and TensorFold's engines) on Windows' own NVIDIA driver, where the CUDA pool is about 113 GB (WSL sees
-96) and TensorFold's Windows engines run. It is the same Studio, on a tier of its own (`app/windows_cuda.py`):
+96) and TensorFold's Windows engines run. It is the same Studio (`app/windows_runtime.py`, `app/windows_cuda.py`):
 
-- it is chosen only where the whole install is there: `%LOCALAPPDATA%\ImaginationStudio\cuda-tier.json` (written by the
-  installer with the CUDA pool it measured, at least 90 GB), the GPU venv, the pinned ComfyUI and `tf_h3.dll`. Any other
-  Windows machine (the 48 GB one of [the Windows plan](windows-rtx-spark-plan.md)) keeps the small preview tier as it is;
-  `scripts\app.ps1 -Preview` asks for the preview tier here too;
+- each feature uses its installed backend. The shared GPU Python/ComfyUI core does not depend on H3;
+  H3 alone retains its DLL and installer-measured pool requirement of at least 90,000 MiB.
+  Bounded recipes measured on [48/64 GB](windows-rtx-spark-plan.md) remain available alongside native alternatives.
+  The legacy file `cuda-tier.json` records paths/capacity rather than selecting a different app; `-Preview` is a launch alias;
+- qualification gating and badges are required below 128 GiB installed RAM and optional/off by default above it.
+  Diagnostics remain visible and individual checks can run either way. Prerequisites and live memory guards always
+  apply; the threshold does not guarantee model eligibility or qualify unmeasured Windows image recipes;
 - the Spark's jobs build the same commands; the bash scripts they run are replaced by their Python ports
   (`spark/windows_scripts.py`: scripts/video.sh, studio.sh, scout.sh, image.sh, edit.sh, with the same checks and words)
   and spark/comfy.sh by `spark/comfy_win.py`: TensorFold's H3 node copied into ComfyUI with `TF_H3_LIB` at
@@ -208,9 +237,23 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1 -Native
 `-Native` clones the Studio on Windows (`-StudioDir`, default `%USERPROFILE%\Imagination-Studio`), asks once for the
 Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and runs `scripts\setup-windows-cuda.ps1`:
 
+Before any component install/download, native setup prints a runtime-fit plan. The default broad selection
+skips missing models whose existing runtime admission requirement exceeds this machine's GPU pool (and host
+pool where applicable), not merely its current free memory. For example, Drama 3 needs 50 GiB free under its
+current policy, so a fresh install with a 30.5 GiB N1X GPU pool skips Voice automatically. A machine with 96 GiB
+installed RAM still needs a suitable GPU carve-out and live headroom; it is not automatically qualified.
+Passing `-NativeParts` selects an explicit set instead. An explicit capacity mismatch requires
+`-AllowInsufficientModel` to download anyway. Cached files remain untouched; temporary contention and unknown
+requirements are not labelled permanently incompatible. `-PlanOnly` is still probe-free. See
+[Windows setup and qualification](windows.md) for policy sources, limitations, and the separate unknown-fit
+image acknowledgment.
+
 1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
    ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
    the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;
+   Zig is detected before invoking it. Missing or older versions trigger the pinned winget install, a terminal
+   PATH refresh and a version recheck. If Zig is still unavailable, setup stops with instructions to open a new
+   PowerShell window or correct PATH order, rather than continuing to an engine build with missing tools.
 2. the app's venv, FFmpeg, the GPU venv (NVIDIA's PyTorch 2.14 for CUDA 13.4) and the pinned ComfyUI (PR #200's scripts);
 3. TensorFold's engines **built from source** (no prebuilt release yet): drowzeys/TensorFold `studio-1.2.2` at
    `1c8bdbfd`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`
@@ -229,9 +272,9 @@ Hugging Face read token (saved in `%USERPROFILE%\.cache\huggingface\token`), and
 5. ComfyUI's model folders and `cuda-tier.json`.
 
 Run again, it resumes and updates. `-ToolchainOnly` installs step 1 alone; `-SkipToolchain -Parts <part>` adds one part
-to an install. The Start and Stop launchers then run `scripts\app.ps1` and
-`scripts\stop-windows-studio.ps1`; everything else (taskbar pin, power settings, `-StartAtLogon`, `-EnableSsh`) is as
-for WSL. The WSL install can stay beside it (each has its own models; the native tier needs its own copy, or point
+to an install. Start/Stop shortcuts use the shared Native/WSL2 tray described above; everything else (taskbar
+pin, power settings, `-StartAtLogon`, `-EnableSsh`) is as for WSL. The WSL install can stay beside it
+(each has its own models; the native tier needs its own copy, or point
 `-Models` at a folder that has them).
 
 ### Measured natively

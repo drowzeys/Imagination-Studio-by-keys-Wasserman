@@ -14,11 +14,11 @@ PS1 = ROOT / "oneshot-setup-rtx-spark-n1x.ps1"
 def test_the_one_shot_covers_install_launchers_pin_power_and_startup():
     text = PS1.read_text()
     for words in ("oneshot-setup-rtx-spark-n1x.sh", '"--all"', "--upgrade", "systemd=true", ".wslconfig",
-                  "Start-Studio.cmd", "Stop-Studio.cmd", "app-icon.ico", "TaskbarPinList", 'PinListPlacement="Append"',
+                  "Start-Studio.cmd", "Stop-Studio.cmd", "TaskbarPinList", 'PinListPlacement="Append"',
                   "standby-timeout-ac 0", "hibernate-timeout-ac 0", "Disable-NetAdapterPowerManagement",
                   "StartAtLogon", "EnableSsh", "administrators_authorized_keys", "HfToken", "WSLENV", "huggingface/token"):
         assert words in text, words
-    assert "scripts/n1x-studio.sh" in text and "scripts/n1x-studio.sh stop" in text
+    assert "setup-windows-desktop.ps1" in text and "-Backend native" in text and "-Backend wsl" in text
     assert (ROOT / "app/static/brand/app-icon.ico").read_bytes()[:4] == b"\x00\x00\x01\x00"  # an .ico
 
 

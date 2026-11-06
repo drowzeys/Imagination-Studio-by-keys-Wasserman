@@ -62,12 +62,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 import voice
+import model_catalog
 import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
 
 router = APIRouter()
 HOME: Path = Path.home() / "ImaginationStudio"
 PACK = Path(__file__).resolve().parent.parent
-WINCUDA = windows_cuda.active()  # native Windows with the CUDA tier: the Spark's ComfyUI route, on the Windows ComfyUI
+WINCUDA = windows_cuda.native_os()
 SPARK = sys.platform.startswith("linux") or WINCUDA
 MAC = sys.platform == "darwin"
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
@@ -530,7 +531,7 @@ class Cuda(voice.Served):
     RTF_OF = {"int8": 2.1, "bf16": 3.3}
     # free memory wanted before it loads: the song's peak above an idle machine (19.3 GB int8 at 120 s, 26.6 GB bf16)
     # and the guard's 8 GB beside it
-    NEED_OF = {"int8": 30.0, "bf16": 38.0}
+    NEED_OF = {route: model_catalog.required_free_gib("music", route) for route in ("int8", "bf16")}
 
     def __init__(self) -> None:
         super().__init__()
@@ -827,6 +828,9 @@ def state() -> dict:
 
     chosen = default_engine()
     each = {name: engine_state(name) for name in ENGINES}
+    if WINCUDA:
+        from windows_runtime import gate_native_state
+        each = {name: gate_native_state(f"music ({name})", found) for name, found in each.items()}
     return {**each[chosen], "engine": chosen, "engine_names": ENGINES, "engines": each}
 
 
