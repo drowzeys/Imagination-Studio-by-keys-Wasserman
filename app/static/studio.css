@@ -1035,3 +1035,32 @@ button.appick-t:hover { border-color:var(--amber-muted); }
 .apps-grid .pcard.ap-icon .art { background:radial-gradient(ellipse at 50% 60%, var(--amber-wash, rgba(241,173,102,.12)), transparent 70%), var(--bg2); }
 .apps-grid .pcard.ap-icon .art > img { position:static; width:auto; height:58%; aspect-ratio:1; object-fit:contain; border-radius:22%; box-shadow:0 12px 32px rgba(0,0,0,.45); }
 .apps-grid .pcard.ap-icon .art::after { display:none; }
+
+/* Quick Edit (quick.js): one box like a chat. The picture (or where to paste it), the words, and a bar with +, the
+   Library, the picture model and the amber arrow. Turns of this session sit under it, the newest first. */
+.quick { max-width:860px; margin:0 auto; }
+.quick .pagehead { text-align:center; justify-content:center; } .quick .pagehead .stack { align-items:center; }
+.quick .pagehead .display { font:600 clamp(26px,2.4vw,32px)/1.2 var(--sans); letter-spacing:-.01em; }  /* the regular face, not the display serif */
+.qbox { border-radius:var(--r3); border:1px solid var(--line2); background:var(--bg2); padding:12px; box-shadow:var(--sh-card); transition:border-color var(--t1) var(--ease); }
+.qbox:focus-within { border-color:var(--blue); } .qbox.over { border-color:var(--amber); background:var(--raise); }
+.qbox textarea { border:0; background:transparent; min-height:72px; font-size:17px; box-shadow:none; padding:12px 6px 4px; resize:none; }
+.qbox textarea:focus { background:transparent; box-shadow:none; }
+.qpic { display:flex; gap:12px; align-items:flex-start; }
+.qpic .thumb { position:relative; width:168px; height:168px; border-radius:var(--r2); overflow:hidden; border:1px solid var(--line2); background:var(--ink); flex:none; }
+.qpic .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.qpic .thumb button { position:absolute; top:6px; right:6px; width:28px; height:28px; padding:0; border-radius:50%; font-size:13px; line-height:1; background:rgba(0,0,0,.55); border-color:transparent; color:#fff; }
+.qdrop { flex:1; min-height:120px; border:1px dashed var(--line3); border-radius:var(--r2); display:flex; align-items:center; justify-content:center; text-align:center; color:var(--dim); font-size:14.5px; line-height:1.5; padding:14px 18px; cursor:pointer; }
+.qdrop:hover, .qdrop:focus-visible { border-color:var(--amber); color:var(--text); outline:none; } .qdrop b { color:var(--text); font-size:16px; }
+.qbar { display:flex; align-items:center; gap:10px; padding-top:6px; flex-wrap:wrap; }
+.qbar .plus { width:40px; height:40px; padding:0; border-radius:50%; font-size:24px; line-height:1; flex:none; }
+.qbar .seg-ctl { margin-left:auto; } .qbar .seg-ctl .mk { margin:0; }
+.qbar .go { width:46px; height:46px; padding:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:none; font-size:0; }
+.qbar .go svg { width:24px; height:24px; stroke:currentColor; fill:none; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
+.qturns h3 { margin-top:28px; }
+.qturn { border:1px solid var(--line); border-radius:var(--r3); background:var(--raise); padding:14px 16px; margin-top:12px; box-shadow:var(--sh-card); }
+.qturn .said { display:flex; gap:12px; align-items:center; margin-bottom:10px; }
+.qturn .said .mini { width:56px; height:56px; object-fit:cover; border-radius:var(--r1); border:1px solid var(--line2); flex:none; }
+.qturn .said b { display:block; font:500 16px/1.35 var(--sans); } .qturn .said .note { display:block; font-size:13.5px; }
+.qresult img { width:100%; border-radius:var(--r2); display:block; border:1px solid var(--line2); }
+.qresult .acts a { display:inline-flex; align-items:center; padding:6px 12px; border:1px solid var(--line2); border-radius:var(--r1); background:var(--raise); color:var(--text); text-decoration:none; font:500 14px var(--sans); }
+@media (max-width:720px) { .qpic { flex-direction:column; } .qpic .thumb { width:100%; height:auto; aspect-ratio:16/9; } .qbar .seg-ctl { margin-left:0; width:100%; } }
