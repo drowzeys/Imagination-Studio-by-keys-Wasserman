@@ -85,7 +85,10 @@ def test_model_timestamp_change_checks_contents_without_rendering(tmp_path):
     path.write_bytes(b"weights")
     files = {"model": (7, hashlib.sha256(b"weights").hexdigest())}
     policy.verify_model_updates(tmp_path, files, {"model": 0})
+    before = path.stat()
     path.write_bytes(b"changed")
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+    assert path.stat().st_mtime_ns != before.st_mtime_ns
     with pytest.raises(RuntimeError, match="SHA-256"):
         policy.verify_model_updates(tmp_path, files, {"model": 0})
 
