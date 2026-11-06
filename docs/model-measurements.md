@@ -161,6 +161,11 @@ Hardware fields describe capacity/pools, not a person's machine identity.
 
 Installers use shared observations as a conservative download-risk gate, not a fit guarantee:
 
+The UI uses the same advice to gate copying a missing model's setup command. It shows observed memory
+instead of shared attempt counts. Failure evidence applies to equal or lower RAM/dedicated capacities on
+the same execution, device-family and memory-topology route; successful evidence is not extrapolated down.
+Different discrete/unified pool layouts remain reference-only rather than inheriting another layout's block.
+
 - Below 128 GiB installed RAM, failed recipe attempts with no passes on matching Windows backend/engine, architecture, public device family/model
   and physical/dedicated capacities require an explicit override before missing weights are downloaded.
   Automatic broad setup skips the affected component. Mixed pass/fail results allow downloading with a

@@ -256,9 +256,17 @@ def test_shared_preflight_cli_blocks_before_download_and_emits_missing_metadata_
     assert fit.main(args) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)["blocked"]
-    assert "failed recipe" in captured.err and "no passing recipes" in captured.err
+    assert "Not recommended for this machine" in captured.err and "no tested preset completed" in captured.err
     assert fit.main([*args, "--allow-insufficient"]) == 0
     assert not json.loads(capsys.readouterr().out)["blocked"]
+
+
+def test_shared_failure_applies_to_lower_capacity_but_success_is_not_extrapolated():
+    pools = {**measured_hardware(), "physical_total_mb": 49152, "gpu_dedicated_total_mb": 24576}
+    assert fit.shared_advice("moss-image", pools)["blocked"]
+    assert fit.shared_advice("qwen", pools)["blocked"]
+    assert fit.shared_advice("sound", pools)["state"] == "no_matching_metadata"
+    assert not fit.shared_advice("moss-image", {**pools, "n1x": False})["blocked"]
 
 
 @pytest.mark.skipif(not (shutil.which("powershell") or shutil.which("pwsh")), reason="PowerShell is required")

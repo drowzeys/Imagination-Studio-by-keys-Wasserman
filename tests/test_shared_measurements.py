@@ -111,7 +111,7 @@ def test_reference_never_creates_local_qualification():
                       {"model":"qwen","feature":"qwen","scope":"large","outcome":"commit_reserve","execution":execution}]}
     found=shared.references("qwen",data,platform="windows")
     assert found["passed_recipes"]==1 and found["failed_recipes"]==1
-    assert "local fit is not inferred" in found["summary"]
+    assert "not a local qualification" in found["summary"]
     assert "qualified" not in found
 
 

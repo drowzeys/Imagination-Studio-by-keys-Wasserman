@@ -236,8 +236,23 @@ def test_missing_model_shows_shared_measurements_instead_of_generic_unknown_fit(
           memory_note:"Reference only; not a local qualification."}}));
     """)
     assert "Shared measurements:" in out["text"] and "23.0–25.9+ GiB" in out["text"]
-    assert "64 GiB" in out["text"]
+    assert "Shared tests:" not in out["text"]
     assert "Runtime fit unknown" not in out["text"]
+
+
+def test_shared_download_warning_requires_acknowledgment_before_copying_command():
+    out = run("""
+      const card=dscInstall(null,{id:"moss",runtime_fit:{state:"unknown"},
+        download_advice:{blocked:true},install:{how:"command",shown:"setup -Parts moss"}});
+      out.disabled=button(card,"Copy setup command").attrs.disabled;
+      out.text=text(card);
+      DSC.acknowledged.add("moss");
+      const accepted=dscInstall(null,{id:"moss",download_advice:{blocked:true},
+        install:{how:"command",shown:"setup -Parts moss"}});
+      out.accepted=text(accepted);
+    """)
+    assert out["disabled"] and "download anyway" in out["text"]
+    assert "-AllowInsufficientModel" in out["accepted"]
 
 
 def test_installed_model_reports_mixed_local_recipe_evidence():

@@ -72,14 +72,16 @@ def inventory_hardware() -> dict:
 
 def model_info(key: str, *, hardware: dict | None = None, installed=False, evidence: dict | None = None) -> dict:
     size = model_catalog.size_info(key)
-    fit = plan(key, inventory_hardware() if hardware is None else hardware, installed=installed)
+    hardware = inventory_hardware() if hardware is None else hardware
+    fit = plan(key, hardware, installed=installed)
     result = {"download_size": size, "runtime_fit": fit}
     result["model"] = key
     result["model_metadata"] = {"label": model_catalog.model(key)["label"], "platform": "windows"}
     import shared_measurements
     profile = windows_measurements.execution_profile(model_catalog.model(key).get("feature", key))
     result["shared_measurements"] = shared_measurements.references(
-        key, platform="windows", backend=profile["backend"], engine=profile["engine"])
+        key, platform="windows", backend=profile["backend"], engine=profile["engine"], hardware=hardware)
+    result["download_advice"] = shared_advice(key, hardware)
     if evidence is not None:
         result["recipe_fit"] = windows_measurements.recipe_fit(evidence)
     else:
