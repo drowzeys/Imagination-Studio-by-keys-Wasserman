@@ -1353,7 +1353,9 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
 // A redraw keeps where the page and its scrolling strips were (the Editor timeline, #54): marked with data-keep-scroll
 function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [...document.querySelectorAll("[data-keep-scroll]")].map(n => [n.dataset.keepScroll, n.scrollLeft, n.scrollTop]);
   return () => { for (const [key, left, top] of strips) { const n = document.querySelector(`[data-keep-scroll="${key}"]`); if (n) { n.scrollLeft = left; n.scrollTop = top; } } window.scrollTo(...at); }; }
-function render() { const back = keepScroll(); renderShell(); releaseMedia($("#view"));
+function render() {
+  if (!S) { $("#view").replaceChildren(el("div", { class: "note", role: "status" }, "Loading Studio...")); return; }
+  const back = keepScroll(); renderShell(); releaseMedia($("#view"));
   const unavailable = capWhy(({ Voice: "voice", Music: "music", "Motion Previs": "motion", Finish: "finish", Director: "video", "Night shift": "video", Looks: "looks", Models: "models", Updates: "updates", Sparks: "workers" })[tab]);
   $("#view").replaceChildren(unavailable ? el("div", {}, pageHead("Feature availability", tab, unavailable),
     tab === "Finish" && typeof featureBadge === "function" ? featureBadge("finish") : null,
