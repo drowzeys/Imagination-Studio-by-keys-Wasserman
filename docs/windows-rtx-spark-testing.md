@@ -4,6 +4,8 @@ Use a checkout containing the Windows port, native Windows ARM64 PowerShell, and
 pins on each machine. Sections 1-4 cover the bounded features measured on 48/64 GB; broader native model
 [measurements](rtx-spark-n1x.md#native-windows-the-native-cuda-tier) remain scoped to their tested 128 GB machine.
 Both use one Windows runtime and per-feature routing. This is not the Mac/DGX installer; do not use WSL as an installation workaround.
+The page shows `Loading Studio...` until its initial state arrives; early background-panel updates must not
+render a model-dependent room before that state is available.
 The [living plan](windows-rtx-spark-plan.md#current-support) records tested 48/64 GB scopes and a separate
 [remaining-work handoff](windows-rtx-spark-plan.md#handoff-remaining-work). A larger memory inventory does
 not enable another route by itself.

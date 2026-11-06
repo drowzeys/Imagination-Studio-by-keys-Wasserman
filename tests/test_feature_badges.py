@@ -91,6 +91,36 @@ console.log(JSON.stringify({section:settingsSection,destination,calls}));
     assert out == {"section": "models", "destination": "Settings", "calls": []}
 
 
+def test_early_redraw_waits_for_state_before_rendering_the_selected_room():
+    result = run_frontend(r"""
+globalThis.$ = selector => nodes[selector];
+nodes["#view"] = el("main");
+globalThis.keepScroll = () => () => {};
+let shellDraws = 0;
+globalThis.renderShell = () => { shellDraws++; };
+globalThis.releaseMedia = () => {};
+globalThis.coach = () => {};
+globalThis.bayUpdate = () => {};
+globalThis.T = {};
+globalThis.tab = "Image";
+const drawSource = source.slice(source.indexOf("function render() {"), source.indexOf("(async () => { const want"));
+for (const name of new Set(drawSource.match(/\bview[A-Z]\w+/g)))
+  if (vm.runInThisContext("typeof " + name) === "undefined") globalThis[name] = () => null;
+vm.runInThisContext(drawSource);
+const loaded = S;
+S = null;
+render();
+const loading = text(nodes["#view"]), earlyShellDraws = shellDraws;
+S = loaded;
+render();
+console.log(JSON.stringify({loading,earlyShellDraws,shellDraws,ready:text(nodes["#view"])}));
+""")
+    assert result["loading"] == "Loading Studio..."
+    assert result["earlyShellDraws"] == 0
+    assert result["shellDraws"] == 1
+    assert "SD-Turbo" in result["ready"]
+
+
 def test_qualification_mode_is_optional_or_locked_without_hiding_checks():
     out = run_frontend(r"""
 const out = {};
