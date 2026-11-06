@@ -186,6 +186,14 @@
    "ready": true
   },
   {
+   "name": "act-image-quick",
+   "file": "art/act-image-quick.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Image: Quick Edit",
+   "ready": true
+  },
+  {
    "name": "act-image-looks",
    "file": "art/act-image-looks.webp",
    "size": "1280x720",

@@ -52,6 +52,7 @@ Rendered for this app on 2026-10-18 with the studio's own Image Engine (FLUX3-K 
 - art/act-edit-resolve.webp
 - art/act-edit-timeline.webp
 - art/act-image-edit.webp
+- art/act-image-quick.webp (2026-11-05, FLUX3-K Full on a DGX Spark: a seaside print on a desk, its grey sky painted into a sunset)
 - art/act-image-looks.webp
 - art/act-image-scouts.webp
 - art/act-previs-motion.webp

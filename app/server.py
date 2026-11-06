@@ -2038,8 +2038,9 @@ def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str
 
 
 def hush(clip: Path) -> None:
-    """The clip with its sound track silenced (``silent`` in a job's settings: a Flow clip without music). Asking the
-    model for near silence is not enough: on the Mac it laid music of its own over two of three such clips."""
+    """The clip with its sound track silenced (``silent`` in a job's settings: the Video page's *No sound*, or a Flow
+    clip without music; for a long video, its joined file). Asking the model for near silence is not enough: on the
+    Mac it laid music of its own over two of three such clips."""
 
     quiet = clip.with_name(clip.stem + ".quiet" + clip.suffix)
     done = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip), "-map", "0:v:0", "-map", "0:a?", "-c:v", "copy", "-af", "volume=0",
@@ -2349,6 +2350,8 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
         elif job["kind"] == "long":
             if not long_take(job):
                 return
+            if params.get("silent"):  # the joined video, delivered silent like a single clip (hush)
+                hush(HOME / job["outputs"][0])
         elif job["kind"] == "voice":  # Fish Audio Drama 3 text to speech (voice.py), under the GPU lock
             if not voice_perform(job):
                 return

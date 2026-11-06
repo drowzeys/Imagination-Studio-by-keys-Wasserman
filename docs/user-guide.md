@@ -21,6 +21,22 @@ Feature reference and screenshots. Availability depends on the selected runtime,
 | ![Wasserman's Filmmaker Suite, built in](screenshots/filmmaker-suite.webp) | ![Machine: live readings and storage on a DGX Spark](screenshots/machine.png) |
 | **Wasserman's Filmmaker Suite** | **Machine** |
 
+## Quick Edit
+
+The Image room's **Quick Edit** tab offers a single picture-edit box. Paste or drop a picture, press **+**
+to choose a file, or select one from the Library. Describe the change and press the arrow or Enter;
+Shift+Enter adds a line. A pasted clip supplies its first frame.
+
+The result offers **Edit this result**, **Download**, **Make a clip of it** and **Ask again**. The model
+chooser uses installed Qwen Turbo or FLUX3-K variants with their production settings. Each turn keeps the
+picture's size and draws a new seed. For LoRAs, camera angles, multiple pictures or custom sizing, use
+**Create > Edit a picture** instead. Platform prerequisites and qualification still apply.
+
+## Silent video
+
+Choose **No sound** in step 3 of the Video wizard to silence the delivered clip. For a long video,
+the joined output is silenced. This is post-render processing, not a promise that the model generates silence.
+
 ## Using it on your phone
 
 The models run on your Mac or DGX Spark; the phone is only the screen and the remote. Everything works from it:
