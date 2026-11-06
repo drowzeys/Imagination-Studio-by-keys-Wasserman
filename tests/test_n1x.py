@@ -70,7 +70,6 @@ def test_a_refusal_is_a_flagged_warning_in_warn_mode_and_a_refusal_in_strict(mon
     assert fine["fits"] is True and "warning" not in fine
 
 
-def test_the_n1x_installer_opts_in():
-    text = (ROOT / "oneshot-setup-rtx-spark-n1x.sh").read_text()
-    assert "export STUDIO_N1X=1" in text and "oneshot-setup-spark.sh" in text
+def test_the_linux_setup_still_honours_studio_n1x():
+    # STUDIO_N1X is a Linux-side setting (memory_guard.n1x() also knows the card by name); the Windows install is native
     assert 'STUDIO_N1X:-0}" = 1' in (ROOT / "oneshot-setup-cuda.sh").read_text()

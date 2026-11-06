@@ -1,51 +1,46 @@
 <#
 .SYNOPSIS
-  One-shot Imagination Studio install for an NVIDIA RTX Spark N1X laptop (Windows 11 on Arm): the Studio in WSL2 Ubuntu,
-  or with -Native the same render path natively on Windows (ComfyUI and TensorFold's Windows engines, no WSL).
+  One-shot Imagination Studio install for an NVIDIA RTX Spark N1X laptop (Windows 11 on Arm), natively on Windows:
+  ComfyUI and TensorFold's Windows engines on the GPU, no WSL.
 
 .DESCRIPTION
   Run once in an administrator PowerShell on the laptop. Then click "Imagination Studio" on the taskbar to use it.
   It:
-    1. checks the machine (ARM64, an N1X GPU) and WSL2 with an Ubuntu distribution, systemd on;
-    2. sets .wslconfig so WSL may use the memory Windows has (the GPU keeps its own fixed carve-out);
-    3. asks once for a Hugging Face read token (saved in Ubuntu, so gated models such as FLUX3-K download), then
-       clones or updates the Studio inside Ubuntu and runs the DGX Spark recipe there (oneshot-setup-rtx-spark-n1x.sh:
-       STUDIO_N1X=1, the GPU carve-out as the memory pool, memory checks that flag rather than refuse);
-       every part is installed by default (--all), so the whole Studio runs on the laptop;
-    4. makes a Start and a Stop launcher with the Studio's icon (Desktop, Start menu) and pins Start to the taskbar;
+    1. checks the machine (ARM64, an N1X GPU);
+    2. clones or updates the Studio on Windows (-StudioDir) and asks once for a Hugging Face read token (saved where
+       huggingface_hub reads it, %USERPROFILE%\.cache\huggingface\token), so gated models such as FLUX3-K download;
+    3. runs scripts\setup-windows-cuda.ps1: the build tools (winget, NVIDIA's CUDA 13.4 for Windows on Arm), the app and
+       GPU environments, the pinned ComfyUI, TensorFold's engines built from source (the studio-1.2.2 branch: tf_h3.dll,
+       tensorfold-native.exe + bolt.dll for the Bolt brain, drama3-generate.exe for Fish Audio Drama 3 and
+       music3-generate.exe for MiniMax Music 3), the models and what each part needs (-NativeParts: the Library's
+       actions' and foley's node packs, Character Swap's files, Tesseract for Finish; add train for musubi-tuner and its
+       46 GB);
+    4. makes a Start and a Stop launcher with the Studio's icon (Desktop, Start menu), registers the native backend with
+       the notification tray and pins Start to the taskbar;
     5. keeps the laptop awake for renders: no sleep or hibernate plugged in (and on battery with -NeverSleepOnBattery),
        the lid does nothing, the Wi-Fi adapter is never powered down;
     6. optionally starts the Studio at sign-in (-StartAtLogon) and opens SSH for another machine (-EnableSsh).
-  Running it again updates the Studio (--upgrade) and leaves what is already set as it is.
+  Running it again updates the Studio and resumes an unfinished install; what is already set is left as it is.
 
-  -Native (docs/rtx-spark-n1x.md, "Native Windows"): instead of steps 2 and 3, the Studio is cloned on Windows
-  (-StudioDir) and scripts\setup-windows-cuda.ps1 installs the build tools (winget, NVIDIA's CUDA 13.4 for Windows on
-  Arm), the app and GPU environments, the pinned ComfyUI, TensorFold's engines built from source (the studio-1.2.2
-  branch: tf_h3.dll, tensorfold-native.exe + bolt.dll for the Bolt brain, drama3-generate.exe for Fish Audio Drama 3 and
-  music3-generate.exe for MiniMax Music 3), the models and what each part needs (-NativeParts: the Library's actions'
-  and foley's node packs, Character Swap's files, Tesseract for Finish; add train for musubi-tuner and its 46 GB); the
-  launchers then start the Studio natively (scripts\app.ps1) on the native CUDA tier.
+  The N1X's memory is split by its firmware: about 98 GB for the GPU and about 30 GB for Windows (an HP OmniBook X with
+  128 GB; no BIOS setting changes it). The models live in the GPU's part; docs/rtx-spark-n1x.md explains how video
+  loads within Windows' 30 GB. -Native is accepted for older command lines and changes nothing: the install is native.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\oneshot-setup-rtx-spark-n1x.ps1
 .EXAMPLE
-  .\oneshot-setup-rtx-spark-n1x.ps1 -Parts "--sound --music" -StartAtLogon -NeverSleepOnBattery
+  .\oneshot-setup-rtx-spark-n1x.ps1 -NativeParts "video,image" -NoBolt -Models D:\studio-models
 .EXAMPLE
-  .\oneshot-setup-rtx-spark-n1x.ps1 -Native
-.EXAMPLE
-  .\oneshot-setup-rtx-spark-n1x.ps1 -Native -NativeParts "video,image" -NoBolt -Models D:\studio-models
+  .\oneshot-setup-rtx-spark-n1x.ps1 -StartAtLogon -NeverSleepOnBattery
 .EXAMPLE
   .\oneshot-setup-rtx-spark-n1x.ps1 -EnableSsh -AuthorizedKey "ssh-ed25519 AAAA... you@your-machine"
 #>
 [CmdletBinding()]
 param(
-  [string]$Distro = "Ubuntu",
-  [string]$WslUser = "",
   [string]$Repo = "https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git",
   [string]$Branch = "main",
-  [string]$Parts = "--all",          # what oneshot-setup-spark.sh installs; "" for the core only
   [switch]$SkipStudioSetup,          # only the Windows side (launchers, pin, power, startup)
-  [string]$HfToken = "",             # a Hugging Face read token (asked for when none is saved in Ubuntu yet)
+  [string]$HfToken = "",             # a Hugging Face read token (asked for when none is saved yet)
   [switch]$NoHfToken,                # do not ask: gated models (FLUX3-K, Stable Audio Open) are then left out
   [switch]$NoPin,
   [switch]$NoPower,
@@ -54,16 +49,16 @@ param(
   [switch]$EnableSsh,
   [string]$AuthorizedKey = "",
   [switch]$Force,                    # go on even when the GPU is not an N1X
-  [switch]$Native,                   # the native Windows CUDA tier instead of WSL (scripts\setup-windows-cuda.ps1)
-  [string]$StudioDir = "$env:USERPROFILE\Imagination-Studio",   # -Native: the Studio's Windows clone
-  [string]$Models = "",              # -Native: the model folder (default %LOCALAPPDATA%\ImaginationStudio\models)
-  [string]$NativeParts = "video,image,music,flux3,sound,swap,workflows,foley,finish",  # -Native: the parts (add train for Looks -> Train a LoRA, 46 GB)
-  [switch]$NoBolt,                   # -Native: no Bolt brain (its engine build and NVIDIA's 25 GB of checkpoints)
-  [switch]$NoVoice,                  # -Native: no Fish Audio Drama 3 (its engine build and the 70 GB checkpoint)
-  [switch]$AllowUnverifiedImageModel, # -Native: accept matching shared image test failures before download
-  [switch]$AllowInsufficientModel    # -Native: accept known insufficient capacity or matching shared test failures
+  [switch]$Native,                   # accepted for older command lines: the install is always native
+  [string]$StudioDir = "$env:USERPROFILE\Imagination-Studio",   # the Studio's Windows clone
+  [string]$Models = "",              # the model folder (default %LOCALAPPDATA%\ImaginationStudio\models)
+  [string]$NativeParts = "video,image,music,flux3,sound,swap,workflows,foley,finish",  # the parts (add train for Looks -> Train a LoRA, 46 GB)
+  [switch]$NoBolt,                   # no Bolt brain (its engine build and NVIDIA's 25 GB of checkpoints)
+  [switch]$NoVoice,                  # no Fish Audio Drama 3 (its engine build and the 70 GB checkpoint)
+  [switch]$AllowUnverifiedImageModel, # accept matching shared image test failures before download
+  [switch]$AllowInsufficientModel    # accept known insufficient capacity or matching shared test failures
 )
-$ErrorActionPreference = "Continue"   # native tools (wsl, powercfg) report through exit codes, checked where it matters
+$ErrorActionPreference = "Continue"   # native tools (git, winget, powercfg) report through exit codes, checked where it matters
 $ProgressPreference = "SilentlyContinue"
 function Say($text) { Write-Host "==> $text" -ForegroundColor Cyan }
 function Ok($text) { Write-Host "  + $text" -ForegroundColor Green }
@@ -92,62 +87,23 @@ if ($gpu -match "N1X|RTX Spark") { Ok "GPU: $gpu" } else { Warn "GPU: '$gpu' is 
 $ramGB = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
 Ok "Windows sees $ramGB GB of RAM (the GPU's carve-out is apart from it)"
 
-if (-not $Native) {
-# ---------- 2. WSL2 and Ubuntu ----------
-Say "WSL2 and $Distro"
-& wsl.exe --status *> $null
-if ($LASTEXITCODE -ne 0) {
-  Warn "WSL is not installed: installing it (a restart follows)"
-  & wsl.exe --install --no-distribution
-  Die "restart Windows, then run this script again"
+# ---------- 2. the Studio on Windows, and 3. its native CUDA tier ----------
+Say "The Studio on Windows ($StudioDir)"
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  & winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements --disable-interactivity
+  $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 }
-$old = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::Unicode
-$distros = (& wsl.exe -l -q) | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-[Console]::OutputEncoding = $old
-if ($distros -notcontains $Distro) {
-  Warn "$Distro is not installed: installing it. Make your Linux user when it asks, type exit, then run this script again"
-  & wsl.exe --install -d $Distro
-  exit 0
-}
-if (-not $WslUser) {
-  $WslUser = (& wsl.exe -d $Distro -e sh -c "id -un").Trim()
-  if ($WslUser -eq "root") {  # the default user is root: take the first normal user (uid 1000 and up)
-    $WslUser = (& wsl.exe -d $Distro -u root -e sh -c "awk -F: '`$3>=1000 && `$3<60000 {print `$1; exit}' /etc/passwd").Trim()
-  }
-}
-if (-not $WslUser -or $WslUser -eq "root") { Die "set a normal Linux user in $Distro (or pass -WslUser)" }
-Ok "$Distro, user $WslUser"
-function InWsl([string]$cmd, [string]$user = $WslUser) {
-  & wsl.exe -d $Distro -u $user -e bash -lc $cmd
-  if ($LASTEXITCODE -ne 0) { throw "in WSL ($user): $cmd exited ${LASTEXITCODE}" }
-}
-# systemd (the Studio's ComfyUI and guards expect a normal init), set once
-$conf = (& wsl.exe -d $Distro -u root -e sh -c "cat /etc/wsl.conf 2>/dev/null") -join "`n"
-if ($conf -notmatch "systemd\s*=\s*true") {
-  InWsl "printf '\n[boot]\nsystemd=true\n' >> /etc/wsl.conf" "root"
-  & wsl.exe --shutdown
-  Ok "systemd turned on in $Distro"
-} else { Ok "systemd on" }
-
-# .wslconfig: let WSL use the RAM Windows has, a 16 GB swap, localhost forwarding (the Studio's page on 127.0.0.1)
-$wslcfg = Join-Path $env:USERPROFILE ".wslconfig"
-$text = if (Test-Path $wslcfg) { Get-Content $wslcfg -Raw } else { "" }
-$want = [ordered]@{ "memory" = "$([math]::Max(16, $ramGB - 2))GB"; "swap" = "16GB"; "localhostForwarding" = "true" }
-$changed = $false
-if ($text -notmatch "(?m)^\[wsl2\]") { $text = $text.TrimEnd() + "`r`n[wsl2]`r`n"; $changed = $true }
-foreach ($k in $want.Keys) {
-  if ($text -notmatch "(?mi)^\s*$k\s*=") { $text = $text -replace "(?m)^\[wsl2\]\s*$", "[wsl2]`r`n$k=$($want[$k])"; $changed = $true }
-}
-if ($changed) {
-  if (Test-Path $wslcfg) { Copy-Item $wslcfg "$wslcfg.bak-imagination" -Force }
-  Set-Content -Path $wslcfg -Value $text -Encoding ascii
-  & wsl.exe --shutdown
-  Ok ".wslconfig set (backup .wslconfig.bak-imagination)"
-} else { Ok ".wslconfig already set" }
-
-# ---------- Hugging Face: one token, asked once, so the gated models download in the same run ----------
-$hasToken = ((& wsl.exe -d $Distro -u $WslUser -e sh -c "test -s ~/.cache/huggingface/token && echo yes") -join "").Trim() -eq "yes"
-if (-not $hasToken -and -not $NoHfToken) {
+if (Test-Path (Join-Path $StudioDir ".git")) {
+  & git -C $StudioDir fetch -q origin $Branch
+  & git -C $StudioDir checkout -q $Branch 2>$null
+  if ($LASTEXITCODE -ne 0) { & git -C $StudioDir checkout -q -b $Branch FETCH_HEAD }
+  & git -C $StudioDir merge -q --ff-only FETCH_HEAD
+} else { & git clone -q -b $Branch $Repo $StudioDir }
+if ($LASTEXITCODE -ne 0) { Die "could not clone or update the Studio at $StudioDir" }
+Ok "the Studio: $(& git -C $StudioDir log --oneline -1)"
+# Hugging Face: the token saved where huggingface_hub reads it on Windows (%USERPROFILE%\.cache\huggingface\token)
+$tokenFile = Join-Path $env:USERPROFILE ".cache\huggingface\token"
+if (-not (Test-Path $tokenFile) -and -not $NoHfToken) {
   Say "Hugging Face"
   if (-not $HfToken) {
     Write-Host "  FLUX3-K and Stable Audio Open are gated: make a READ token at https://huggingface.co/settings/tokens and accept"
@@ -157,85 +113,27 @@ if (-not $hasToken -and -not $NoHfToken) {
     $HfToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
   }
   if ($HfToken) {
-    # handed over through the environment (WSLENV), never on a command line
-    $env:HF_TOKEN_IN = $HfToken.Trim(); $env:WSLENV = "HF_TOKEN_IN/u" + $(if ($env:WSLENV) { ":$env:WSLENV" } else { "" })
-    & wsl.exe -d $Distro -u $WslUser -e sh -c 'umask 077; mkdir -p ~/.cache/huggingface && printf %s $HF_TOKEN_IN > ~/.cache/huggingface/token'
-    Remove-Item Env:HF_TOKEN_IN; $HfToken = ""
     $who = ""
-    try { $who = (Invoke-RestMethod -Uri "https://huggingface.co/api/whoami-v2" -Headers @{ Authorization = "Bearer $((& wsl.exe -d $Distro -u $WslUser -e cat /home/$WslUser/.cache/huggingface/token) -join '')" } -TimeoutSec 20).name } catch {}
-    if ($who) { Ok "Hugging Face: signed in as $who (token saved in Ubuntu, ~/.cache/huggingface/token)" }
-    else {
-      & wsl.exe -d $Distro -u $WslUser -e sh -c "rm -f ~/.cache/huggingface/token"  # not kept: the next run asks again
-      Warn "Hugging Face did not accept that token: the gated models will be left out (run again to enter another)"
-    }
+    try { $who = (Invoke-RestMethod -Uri "https://huggingface.co/api/whoami-v2" -Headers @{ Authorization = "Bearer $($HfToken.Trim())" } -TimeoutSec 20).name } catch {}
+    if ($who) {
+      New-Item -ItemType Directory -Force -Path (Split-Path $tokenFile) | Out-Null
+      [IO.File]::WriteAllText($tokenFile, $HfToken.Trim())
+      Ok "Hugging Face: signed in as $who (token saved in $tokenFile)"
+    } else { Warn "Hugging Face did not accept that token: the gated models will be left out (run again to enter another)" }
+    $HfToken = ""
   } else { Warn "no token: FLUX3-K and Stable Audio Open are left out (run again to add them)" }
-} elseif ($hasToken) { Ok "Hugging Face token already saved in Ubuntu" }
-
-# ---------- 3. the Studio inside Ubuntu ----------
-$repoDir = "/home/$WslUser/src/Imagination-Studio-by-keys-Wasserman"
+} elseif (Test-Path $tokenFile) { Ok "Hugging Face token already saved" }
 if (-not $SkipStudioSetup) {
-  Say "The Studio in $Distro ($repoDir)"
-  InWsl "command -v git >/dev/null && command -v ffmpeg >/dev/null && command -v curl >/dev/null || (apt-get update -q && apt-get install -y -q git ffmpeg curl)" "root"
-  InWsl "mkdir -p ~/src && if [ -d '$repoDir/.git' ]; then cd '$repoDir' && git fetch -q origin '$Branch' && (git checkout -q '$Branch' 2>/dev/null || git checkout -q -b '$Branch' FETCH_HEAD) && git merge -q --ff-only FETCH_HEAD; else git clone -q -b '$Branch' '$Repo' '$repoDir'; fi && git -C '$repoDir' log --oneline -1"
-  $installed = (& wsl.exe -d $Distro -u $WslUser -e sh -c "test -x ~/.local/opt/tensorfold-studio/venv/bin/python && echo yes").Trim()
-  $how = if ($installed -eq "yes") { "--upgrade" } else { "--yes $Parts" }
-  Say "Installing (oneshot-setup-rtx-spark-n1x.sh $how): models are large, this can take a while"
-  & wsl.exe -d $Distro -u $WslUser -e bash -lc "cd '$repoDir' && bash oneshot-setup-rtx-spark-n1x.sh $how"
-  if ($LASTEXITCODE -ne 0) { Warn "the Studio's setup ended with ${LASTEXITCODE}: see its last lines above (a gated model needs: hf auth login, inside $Distro)" }
-  else { Ok "the Studio is installed" }
-}
-
-}  # the WSL install
-
-if ($Native) {
-# ---------- 2N. the Studio natively on Windows (the native CUDA tier) ----------
-  Say "The Studio on Windows ($StudioDir)"
-  if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    & winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements --disable-interactivity
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
-  }
-  if (Test-Path (Join-Path $StudioDir ".git")) {
-    & git -C $StudioDir fetch -q origin $Branch
-    & git -C $StudioDir checkout -q $Branch 2>$null
-    if ($LASTEXITCODE -ne 0) { & git -C $StudioDir checkout -q -b $Branch FETCH_HEAD }
-    & git -C $StudioDir merge -q --ff-only FETCH_HEAD
-  } else { & git clone -q -b $Branch $Repo $StudioDir }
-  if ($LASTEXITCODE -ne 0) { Die "could not clone or update the Studio at $StudioDir" }
-  Ok "the Studio: $(& git -C $StudioDir log --oneline -1)"
-  # Hugging Face: the token saved where huggingface_hub reads it on Windows (%USERPROFILE%\.cache\huggingface\token)
-  $tokenFile = Join-Path $env:USERPROFILE ".cache\huggingface\token"
-  if (-not (Test-Path $tokenFile) -and -not $NoHfToken) {
-    Say "Hugging Face"
-    if (-not $HfToken) {
-      Write-Host "  FLUX3-K and Stable Audio Open are gated: make a READ token at https://huggingface.co/settings/tokens and accept"
-      Write-Host "  each licence with that account (https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy,"
-      Write-Host "  https://huggingface.co/stabilityai/stable-audio-open-1.0). Paste the token here (Enter to skip them):"
-      $secure = Read-Host "  token" -AsSecureString
-      $HfToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-    }
-    if ($HfToken) {
-      $who = ""
-      try { $who = (Invoke-RestMethod -Uri "https://huggingface.co/api/whoami-v2" -Headers @{ Authorization = "Bearer $($HfToken.Trim())" } -TimeoutSec 20).name } catch {}
-      if ($who) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $tokenFile) | Out-Null
-        [IO.File]::WriteAllText($tokenFile, $HfToken.Trim())
-        Ok "Hugging Face: signed in as $who (token saved in $tokenFile)"
-      } else { Warn "Hugging Face did not accept that token: the gated models will be left out (run again to enter another)" }
-      $HfToken = ""
-    } else { Warn "no token: FLUX3-K and Stable Audio Open are left out (run again to add them)" }
-  } elseif (Test-Path $tokenFile) { Ok "Hugging Face token already saved" }
-  if (-not $SkipStudioSetup) {
-    Say "The native CUDA tier (scripts\setup-windows-cuda.ps1): build tools, engines, ComfyUI, models; this can take a while"
-    $setup = @{ Parts = $NativeParts }
-    if (-not $PSBoundParameters.ContainsKey('NativeParts')) { $setup.AutomaticModelSelection = $true }
-    if ($AllowInsufficientModel) { $setup.AllowInsufficientModel = $true }
-    if ($AllowUnverifiedImageModel) { $setup.AllowUnverifiedImageModel = $true }
-    if ($Models) { $setup.Models = $Models }
-    if (-not $NoBolt) { $setup.Bolt = $true }
-    if (-not $NoVoice) { $setup.Voice = $true }
-    try { & (Join-Path $StudioDir "scripts\setup-windows-cuda.ps1") @setup; Ok "the native CUDA tier is installed" }
-    catch { Warn "the native setup stopped ($_): see its last lines above, then run this again (it resumes)" }
-  }
+  Say "The native CUDA tier (scripts\setup-windows-cuda.ps1): build tools, engines, ComfyUI, models; this can take a while"
+  $setup = @{ Parts = $NativeParts }
+  if (-not $PSBoundParameters.ContainsKey('NativeParts')) { $setup.AutomaticModelSelection = $true }
+  if ($AllowInsufficientModel) { $setup.AllowInsufficientModel = $true }
+  if ($AllowUnverifiedImageModel) { $setup.AllowUnverifiedImageModel = $true }
+  if ($Models) { $setup.Models = $Models }
+  if (-not $NoBolt) { $setup.Bolt = $true }
+  if (-not $NoVoice) { $setup.Voice = $true }
+  try { & (Join-Path $StudioDir "scripts\setup-windows-cuda.ps1") @setup; Ok "the native CUDA tier is installed" }
+  catch { Warn "the native setup stopped ($_): see its last lines above, then run this again (it resumes)" }
 }
 
 # ---------- 4. launchers, icon, taskbar ----------
@@ -245,13 +143,7 @@ New-Item -ItemType Directory -Force -Path $home_ | Out-Null
 $start = Join-Path $home_ "Start-Studio.cmd"
 $stop = Join-Path $home_ "Stop-Studio.cmd"
 try {
-  if ($Native) {
-    $DesktopSetup = Join-Path $StudioDir 'scripts\setup-windows-desktop.ps1'
-    & $DesktopSetup -Backend native -StudioDir $StudioDir
-  } else {
-    $DesktopSetup = "\\wsl.localhost\$Distro$($repoDir -replace '/', '\')\scripts\setup-windows-desktop.ps1"
-    & $DesktopSetup -Backend wsl -Distro $Distro -WslUser $WslUser -WslRepo $repoDir
-  }
+  & (Join-Path $StudioDir 'scripts\setup-windows-desktop.ps1') -Backend native -StudioDir $StudioDir
 } catch {
   Die "Desktop backend registration failed: $_"
 }
@@ -329,4 +221,4 @@ if ($EnableSsh) {
   Ok "SSH on port 22 for this home network (Private)$(if ($AuthorizedKey) { ', the key added' })"
 }
 
-Say "Done. Click Imagination Studio on the taskbar (or the Desktop) to start it. Use its notification tray to switch Native/WSL2, choose a default, or stop it."
+Say "Done. Click Imagination Studio on the taskbar (or the Desktop) to start it. Use its notification tray to start or stop it."

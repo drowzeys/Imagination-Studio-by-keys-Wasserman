@@ -7,8 +7,8 @@ and models, resetting machine-specific state, and reusing compatible weights on 
 
 ## Native Windows
 
-Native Windows is the first Windows path: one Studio with per-feature backends, not separate basic/full
-editions or a global GPU capability tier. Planning, imports, settings and browsing work without generation
+Studio runs natively on Windows; there is no WSL version (it was removed on 2026-11-06). It is one Studio with
+per-feature backends, not separate basic/full editions or a global GPU capability tier. Planning, imports, settings and browsing work without generation
 models. Images, Voice, Music, effects, Foley and CPU tools have their own installation and qualification status.
 H3 video retains its own engine and pool prerequisites; it does not gate unrelated features.
 
@@ -21,7 +21,7 @@ For a new install, run in an administrator PowerShell:
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
-powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1" -Native
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1"
 ```
 
 This clones Studio, installs selected components and registers Desktop/Start shortcuts and the tray.
@@ -215,52 +215,22 @@ note. Model, recipe, hardware, ABI or execution-contract changes can require a n
 `STUDIO_QUALIFICATION_STRICT=1` opts into exact provenance matching. Changing the policy never fabricates a pass.
 Model timestamps trigger identity verification, not automatic re-rendering.
 
-## Start, stop and switch backends
+## Start and stop
 
-Register the current Native checkout without downloading anything:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend native
-```
-
-Open **Imagination Studio** from Desktop/Start. The notification tray offers Open, Start/Stop, backend selection
-and a default for future launches. When stopped it says **Start Native Windows**; it does not offer switching to
-the already running backend. Changing the default does not stop the current app.
-
-Switching requires confirmation and an idle queue. The controller authenticates its own launch, drains owned
-model backends and waits for shutdown before starting the other runtime. It does not kill processes by name,
-shut down WSL distributions or adopt an app started manually. Such an app is labelled **External Studio**:
-stop it from its original launcher first. **Exit tray** leaves Studio running.
-
-Both one-shot installers register with the same tray. Registration preserves the other install and the existing
-default; `-MakeDefault` changes the default explicitly. Relaunch the tray after updating its script; refreshing
-the browser only updates the web UI.
-
-## WSL2
-
-WSL2 is a separate Linux Studio installation, not an automatic fallback for a native job.
-On an N1X, run the one-shot installer **without `-Native`** from an administrator PowerShell:
+Register the current checkout without downloading anything:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\n1x.ps1"
-powershell -ExecutionPolicy Bypass -File "$env:TEMP\n1x.ps1"
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1
 ```
 
-Review the broad default component selection and disk requirements first. This installs WSL2/Ubuntu and the
-Linux runtime; its model memory policy is not the Native Windows qualification table above.
-N1X's Linux guard has an explicitly configured warning policy; the DGX Spark strict policy is not relaxed.
+Open **Imagination Studio** from Desktop/Start. The notification tray offers Open, **Start Native Windows** and
+Stop Studio. Stopping requires confirmation and an idle queue: the controller authenticates its own launch, drains
+owned model backends and waits for shutdown. It does not kill processes by name or adopt an app started manually.
+Such an app is labelled **External Studio**: stop it from its original launcher first. **Exit tray** leaves Studio
+running.
 
-To register an existing **updated** WSL Studio from the Windows checkout:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup-windows-desktop.ps1 -Backend wsl -Distro Ubuntu -WslUser spark -WslRepo /home/spark/Imagination-Studio
-```
-
-Replace the example distro/user/path with that installation's values. Both checkouts need desktop-control
-support. Registration/start checks only the specified distro and path, with a timeout. The tray keeps the
-Windows WSL process alive; a Studio launched over SSH alone may end with the SSH session.
-Native and WSL models, Python environments and project folders stay separate. No migration or concurrent
-GPU-backend launch is implied by switching.
+A WSL2 registration left by an older install is ignored, and dropped the next time the native Studio registers.
+Relaunch the tray after updating its script; refreshing the browser only updates the web UI.
 
 ## Files, maintenance and troubleshooting
 
@@ -275,7 +245,7 @@ GPU-backend launch is implied by switching.
   default loopback binding unless remote access is intended. See [remote access](user-guide.md#using-it-on-your-phone).
 
 More detail:
-[N1X native/WSL implementation and measurements](rtx-spark-n1x.md) ·
+[N1X implementation, memory and measurements](rtx-spark-n1x.md) ·
 [Windows testing runbook](windows-rtx-spark-testing.md) ·
 [Measured results](windows-rtx-spark-test-results.md).
 The older [Windows implementation plan](windows-rtx-spark-plan.md) and

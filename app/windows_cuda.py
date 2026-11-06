@@ -174,7 +174,7 @@ def unsupported(kind: str) -> str:
     if kind in NATIVE:
         return ""
     why = NOT_NATIVE.get(kind, f"a {kind} job has not been ported to native Windows")
-    return f"Not available on native Windows yet: {why}. The WSL install (oneshot-setup-rtx-spark-n1x.ps1) runs it."
+    return f"Not available on Windows yet: {why}. A DGX Spark or a Mac runs it."
 
 
 def translate(argv: list[str]) -> list[str]:

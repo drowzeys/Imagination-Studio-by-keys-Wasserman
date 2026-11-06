@@ -48,6 +48,16 @@ SAMPLE_WAIT_S = 60.0  # the sampler's first reading (it imports torch and opens 
 SAMPLE_STALE_S = 5.0  # a sampler silent this long is replaced by the plain host-memory loop
 COMMIT_FLOOR_MB = 4096  # Windows commit headroom kept: under it any allocation on the machine may fail
 DEDICATED_FLOOR_MB = 512  # NVML's dedicated GPU memory kept free (past it WDDM spills into shared system memory)
+# Host pressure Windows can relieve by itself: a model load reads its file through a mapping, and the pages it has
+# already copied to the GPU stay in ComfyUI's working set until Windows trims them. On an RTX Spark N1X (98 GB GPU
+# carve-out, about 30 GB for Windows) the 42 GB FastH3 load ran Windows' available memory down to 0.8 GB that way, with
+# commit at 73 of 116 GB and the GPU half empty, and the low-memory signal stopped the render. So before host pressure
+# stops ComfyUI, its working set is trimmed (EmptyWorkingSet: clean file pages go back to Windows' standby list, as
+# Linux's page cache gives them back on a Spark); only pressure that the trim does not relieve within TRIM_GRACE_S stops
+# it. Commit and GPU floors are never relaxed this way.
+TRIM_GRACE_S = 2.0
+HOST_PRESSURE = ("Windows reports low physical memory", "Windows physical memory headroom is exhausted", "host memory ",
+                 "available memory ")
 BELOW_NORMAL = 0x4000  # BELOW_NORMAL_PRIORITY_CLASS: comfy.sh's nice, without starving the GPU's feeder thread
 DETACHED, NEW_GROUP, BREAKAWAY, NO_WINDOW = 0x8, 0x200, 0x01000000, 0x08000000
 
@@ -298,6 +308,51 @@ def host_reason(floor_mb: int) -> str:
     return ""
 
 
+def trim(process) -> bool:
+    """EmptyWorkingSet on ComfyUI: its pages leave its working set (file-backed ones to the standby list, private ones
+    to the modified list and the page file), so Windows counts them as available again. Nothing is freed or lost."""
+
+    from ctypes import wintypes
+
+    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api.K32EmptyWorkingSet.argtypes = [wintypes.HANDLE]
+    api.K32EmptyWorkingSet.restype = wintypes.BOOL
+    return bool(api.K32EmptyWorkingSet(wintypes.HANDLE(int(process._handle))))
+
+
+class Relief:
+    """Host pressure gets one trim of ComfyUI's working set before it can stop the server: within TRIM_GRACE_S of a
+    trim, host pressure is waited out (the trim shows in the next readings); pressure still there after it stops ComfyUI.
+    Pressure that clears re-arms the trim. Any other reason (commit, GPU) is returned unchanged."""
+
+    def __init__(self, trim_once, clock=time.monotonic):
+        self.trim_once, self.clock = trim_once, clock
+        self.trimmed, self.trims, self.said = None, 0, -60.0
+
+    def judge(self, why: str) -> str:
+        if not why.startswith(HOST_PRESSURE):
+            if not why:
+                self.trimmed = None  # relieved: the next pressure gets its own trim
+            return why
+        now = self.clock()
+        if self.trimmed is None:
+            try:
+                done = self.trim_once()
+            except OSError:
+                done = False
+            if not done:
+                return why
+            self.trimmed, self.trims = now, self.trims + 1
+            if now - self.said >= 60:
+                self.said = now
+                say(f"memory guard: {why.split(' (')[0]}: gave ComfyUI's loaded file pages back to Windows "
+                    f"({self.trims} so far)")
+            return ""
+        if now - self.trimmed < TRIM_GRACE_S:
+            return ""
+        return why + f" (still after trimming ComfyUI's working set {TRIM_GRACE_S:g} s ago)"
+
+
 def run() -> int:
     from windows_process import OwnedJob
 
@@ -320,6 +375,7 @@ def run() -> int:
             say(f"memory guard: the sampler could not start ({error}); holding a floor of free memory with a plain loop")
         plain = int(floor) if floor.isdigit() and int(floor) > 0 else 2048
         began, previous, told = time.monotonic(), None, 0.0
+        relief = Relief(lambda: trim(server))
         while True:
             code = server.poll()
             if code is not None:
@@ -349,6 +405,7 @@ def run() -> int:
                     guard = None
             if guard is None:
                 why = host_reason(plain)
+            why = relief.judge(why)
             if why:
                 say(f"memory guard: {why}: stopping ComfyUI")
                 job.terminate()

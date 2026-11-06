@@ -16,7 +16,7 @@ def attach(server):
     draining = False
 
     def authorize(request):
-        if not token or not session or backend not in ("native", "wsl"):
+        if not token or not session or backend != "native":
             raise HTTPException(404, "This app was not started by the desktop controller.")
         try:
             local = request.client is not None and ipaddress.ip_address(request.client.host).is_loopback

@@ -112,8 +112,8 @@ function Draw-Menu {
   Refresh-Desktop
   $Menu.Items.Clear()
   $S = $script:Snapshot
-  $Names = @{native='Native Windows'; wsl='WSL2'; external='External Studio'}
-  $Running = if ($S.running) { $Names[$S.running] } else { 'Stopped' }
+  $Names = @{native='Native Windows'; external='External Studio'}
+  $Running = if (-not $S.running) { 'Stopped' } elseif ($Names.ContainsKey($S.running)) { $Names[$S.running] } else { $S.running }
   Add-Menu "Studio: $Running" $null $false
   if ($script:RefreshError) {
     Add-Menu $script:RefreshError $null $false
@@ -122,26 +122,15 @@ function Draw-Menu {
   }
   $Tray.Text = "Imagination Studio - $Running"
   Add-Menu 'Open Studio' { Start-Process 'http://127.0.0.1:7870/' } ([bool]$S.running)
-  Add-Menu 'Start default backend' { Run-Desktop @('start') -Open } (-not $S.running -and -not $script:Busy)
-  foreach ($Kind in @('native','wsl')) {
+  foreach ($Kind in @('native')) {
     $Value = $Kind
     $Name = $Names[$Kind]
     $Installed = $S.backends.$Kind.available
-    $LaunchAction = if ($S.running) { 'switch' } else { 'start' }
     $Label = if (-not $Installed) { "$Name - not registered or unavailable" }
       elseif ($S.running -eq $Kind) { "$Name - running" }
-      elseif (-not $S.running) { "Start $Name" }
-      else { "Switch to $Name" }
-    $SwitchHandler = {
-      if ($LaunchAction -eq 'start') {
-        Run-Desktop @('start','--backend',$Value) -Open
-      } elseif (Confirm-Stop "Switch to $Name? The current tray-owned backend will stop first. Active jobs or an externally started app prevent switching.") {
-        Run-Desktop @('switch','--backend',$Value,'--confirmed') -Open
-      }
-    }.GetNewClosure()
-    Add-Menu $Label $SwitchHandler ([bool]$Installed -and -not $script:Busy -and $S.running -ne $Kind -and $S.running -ne 'external')
-    $DefaultHandler = { Run-Desktop @('default','--backend',$Value) }.GetNewClosure()
-    Add-Menu "Default: $Name" $DefaultHandler ([bool]$Installed -and -not $script:Busy) ($S.default -eq $Kind)
+      else { "Start $Name" }
+    $StartHandler = { Run-Desktop @('start','--backend',$Value) -Open }.GetNewClosure()
+    Add-Menu $Label $StartHandler ([bool]$Installed -and -not $script:Busy -and -not $S.running)
   }
   Add-Menu 'Stop Studio' {
     if (Confirm-Stop 'Stop the tray-owned Studio? Active jobs prevent stopping.') { Run-Desktop @('stop','--confirmed') }
