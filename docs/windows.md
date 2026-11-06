@@ -61,6 +61,11 @@ not that every recipe has passed a render check.
   admission policies and live safety guards, which remain unchanged.
 - **Mixed shared results:** some tested presets passed, so download is allowed with a warning that other
   presets failed. Local qualification and runtime guards still apply.
+- Models & weights leads with observed memory and a short download recommendation, not shared attempt counts.
+  Below 128 GiB, failure-only evidence also discourages downloads on lower RAM/GPU capacities in the same
+  execution and memory-topology family. The copy-command button requires acknowledgment and includes the
+  override flag. Passing recipes are not extrapolated to smaller machines. Unified-memory Spark commit
+  failures are not applied as hard blocks to discrete NVIDIA cards.
 - **No matching shared metadata:** setup logs a warning and continues; missing evidence alone never blocks.
 - **Existing files:** retained and reused; nothing is deleted to force a fresh download.
 

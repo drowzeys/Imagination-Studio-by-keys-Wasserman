@@ -99,10 +99,11 @@ function dscModelInfo(n, { hideUnknownFit = false } = {}) {
         + " GiB). GB uses decimal units; GiB uses binary units. Both describe the same download." : "" },
       bytes != null ? "Download size: " + (bytes / 1e9).toFixed(1) + " GB" : "Download size: unknown") : null,
     recipes ? el("div", { class: "note" }, recipes.summary) : null,
-    !recipes && n.shared_measurements?.summary ? el("div", { class: "note" }, n.shared_measurements.summary) : null,
     recipes?.memory_summary ? el("div", { class: "note", title: recipes.memory_note }, recipes.memory_summary) : null,
     !recipes?.memory_summary && shared?.memory_summary ? el("div", { class: "note", title: shared.memory_note },
       "Shared measurements: " + shared.memory_summary) : null,
+    n.download_advice && n.download_advice.state !== "no_matching_metadata" ? el("div", {
+      class: "note" + (n.download_advice.blocked ? " vt-bad" : "") }, n.download_advice.why) : null,
     fit && !(fit.state === "unknown" && (hideUnknownFit || recipes || shared?.memory_summary)) ? el("div", { class: "note" + (fit.state === "insufficient_capacity" ? " vt-bad" : ""),
       title: fit.why },
       el("b", {}, fit.state === "insufficient_capacity" ? "Not expected to run on this configuration. "
@@ -130,7 +131,8 @@ function dscGroupSummary(needs) {
 const dscRunning = () => DSC.data && DSC.data.installing && DSC.data.installing.state === "running";
 function dscInstall(node, n) { const p = n.install || {}, job = DSC.data?.installing || {}, mine = job.need === n.id;
   if (p.how === "command") {
-    const mismatch = n.runtime_fit?.state === "insufficient_capacity", accepted = DSC.acknowledged.has(n.id);
+    const mismatch = n.runtime_fit?.state === "insufficient_capacity" || n.download_advice?.blocked,
+      accepted = DSC.acknowledged.has(n.id);
     const command = mismatch ? p.override_shown || p.shown + " -AllowInsufficientModel" : p.shown;
     return el("div", { class: "stack" },
       mismatch ? el("label", { class: "note" }, el("input", { type: "checkbox", checked: accepted,

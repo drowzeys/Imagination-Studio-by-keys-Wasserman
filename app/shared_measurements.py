@@ -294,12 +294,17 @@ def load(path=PATH):
     return validate(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def references(model, data=None, *, platform, backend=None, engine=None, feature=None):
+def references(model, data=None, *, platform, backend=None, engine=None, feature=None, hardware=None):
     rows = [row for row in (data if data is not None else load())["profiles"]
             if row["model"] == model and row["execution"]["platform"] == platform
             and (backend is None or row["execution"]["backend"] == backend)
             and (engine is None or row["execution"]["engine"] == engine)
             and (feature is None or row["feature"] == feature)]
+    if hardware is not None:
+        rows = [row for row in rows if all(
+            number(hardware.get(key)) and number(row["hardware"].get(key))
+            and hardware[key] <= row["hardware"][key]
+            for key in ("physical_total_mb", "gpu_dedicated_total_mb"))]
     passed = {(row["feature"], row["scope"]) for row in rows if row["outcome"] == "passed"}
     failed = {(row["feature"], row["scope"]) for row in rows if row["outcome"] != "passed"}
     observations = [{**reading, "interrupted": row.get("interrupted", False)}
@@ -310,38 +315,48 @@ def references(model, data=None, *, platform, backend=None, engine=None, feature
     hardware_note = ("Recorded on " + "/".join(f"{size / 1024:g}" for size in capacities)
                      + " GiB installed RAM. ") if capacities else ""
     return {"passed_recipes": len(passed), "failed_recipes": len(failed), **memory,
-            "summary": f"Shared tests: {len(passed)} recipes passed, {len(failed)} had unsuccessful attempts on recorded hardware."
-                       " " + hardware_note + "Reference only; local fit is not inferred."} if rows else {}
+            "summary": hardware_note + "Reference measurements; not a local qualification."} if rows else {}
 
 
 def install_advice(model, hardware, execution, data=None):
     """Failed shared recipes gate downloads only on the same recorded execution/capacity profile."""
     rows = [row for row in (data if data is not None else load())["profiles"] if row["model"] == model]
-    matching = [row for row in rows if compatible(row["execution"], execution)
-                and all(number(hardware.get(key)) and hardware[key] == row["hardware"].get(key)
+    def comparable(recorded):
+        validate_execution(recorded)
+        validate_execution(execution)
+        return (all(recorded[key] == execution[key] and execution[key] != "unknown"
+                    for key in ("platform", "backend", "engine", "architecture"))
+                and execution["topology"]["memory"] != "unknown"
+                and recorded["topology"]["memory"] == execution["topology"]["memory"]
+                and recorded["topology"]["device_family"] == execution["topology"]["device_family"]
+                and execution["topology"]["device_family"] != "unknown"
+                and recorded["topology"]["devices"] == execution["topology"]["devices"] == 1)
+
+    matching = [row for row in rows if comparable(row["execution"])
+                and all(number(hardware.get(key)) and number(row["hardware"].get(key))
+                        and 0 < hardware[key] <= row["hardware"][key]
                         for key in ("physical_total_mb", "gpu_dedicated_total_mb"))]
     failures = [row for row in matching if row["outcome"] in
                 ("commit_reserve", "memory_refusal", "execution_failed")]
-    passes = [row for row in matching if row["outcome"] == "passed"]
+    passes = [row for row in matching if row["outcome"] == "passed"
+              and all(hardware[key] == row["hardware"][key]
+                      for key in ("physical_total_mb", "gpu_dedicated_total_mb"))]
     if failures and not passes:
         limited = number(hardware.get("physical_total_mb")) and 0 < hardware["physical_total_mb"] < 128 * 1024
         return {"state": "matching_failures", "blocked": limited,
-                "why": f"Shared tests for {model} include {len(failures)} failed recipe attempt(s) on matching "
-                       "hardware/backend and memory capacities, with no passing recipes. This is not "
-                       "a universal no-fit claim. "
+                "why": "Not recommended for this machine: no tested preset completed on a comparable "
+                       "configuration with at least this much RAM and GPU memory. "
                        + ("Below 128 GiB installed RAM, an explicit download override is required to avoid "
                           "large downloads that are unlikely to be useful. " if limited else
                           "At 128 GiB or more, this is a warning only; download is allowed. ")
                        + "Live guards remain unchanged."}
     if failures and passes:
         return {"state": "partially_useful", "blocked": False,
-                "why": f"Shared tests for {model}: {len(passes)} passing and {len(failures)} failed recipe attempt(s) "
-                       "on matching hardware/backend and capacities. Some tested presets work; larger or other "
-                       "recipes may not. Download allowed; local qualification and live guards still apply."}
-    if matching:
+                "why": "Some presets should be usable; larger presets may exceed this machine's memory. "
+                       "Local qualification and live guards still apply."}
+    if passes:
         return {"state": "matching_observations", "blocked": False,
-                "why": f"Shared observations for {model} exist on matching hardware/capacity. "
-                       "They do not qualify this machine or guarantee every recipe fits."}
+                "why": "Tested presets ran on comparable memory capacity; local checks still apply."}
     return {"state": "no_matching_metadata", "blocked": False,
             "why": f"WARNING: {model} has no shared measurement metadata for this hardware/backend and capacity "
                    "configuration. Runtime fit is unverified; download size is not runtime memory."}
