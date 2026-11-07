@@ -7,10 +7,6 @@ const SUITE_APPS = [
   ["Storyboard Reference", "reframed stills with a prompt each"], ["Master Canvas", "boards, references and shot order"], ["Slate", "the desktop film planner"],
   ["Circle Take", "dailies and a QC gate"], ["Stem Studio", "dialogue, music and effects stems"],
 ];
-function timeOfDay() { const h = new Date().getHours(); const night = typeof cardFace === "function" && cardFace() ? "Queue it up and let the GPU work." : "Queue it up and let the Sparks work.";
-  return h < 5 ? ["Night shoot", "Still rolling at this hour."] : h < 12 ? ["Morning call", "Fresh light. Good time to scout."]
-  : h < 17 ? ["Afternoon shoot", "Plenty of day left for coverage."] : h < 21 ? ["Golden hour", "Make something that glows."] : ["Tonight's slate", night]; }
-function timecode(d = new Date()) { const p = n => String(n).padStart(2, "0"); return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + ":" + p(Math.floor(d.getMilliseconds() / 41.67)); }
 // where Keys and Wasserman Productions publish (Home under the credit; Settings → About lists them with the rest)
 const HOME_LINKS = [["Keys on GitHub", "https://github.com/drowzeys"], ["Wasserman Productions on GitHub", "https://github.com/wassermanproductions"]];
 const startCreate = (set, step = 0) => { Object.assign(C, set); C.step = step; C.prompt = ""; sync(); go("Create"); };
@@ -28,9 +24,9 @@ function machineStrip() {
     t && t.gpu ? m(t.gpu.count > 1 ? t.gpu.count + " GPUs" : "GPU", t.gpu.util_pct, (t.gpu.util_pct ?? "–") + "%" + (t.gpu.temp_c != null ? " · " + t.gpu.temp_c + "°C" : ""), t.gpu.util_pct > 60 ? "var(--red)" : "var(--green)") : el("div", { class: "m" }, el("span", { class: "note", style: "margin:0" }, t ? "" : "Readouts appear once the machine reports them.")),
     t && t.memory ? m("Memory", memUsed, (card ? gb(card.used_mb) + " of " + gb(card.total_mb) : gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb)) + " GB", memUsed > 85 ? "var(--red)" : "var(--amber)", card ? null : (t.memory.floor_mb ? 100 - pct(t.memory.floor_mb, t.memory.total_mb) : null)) : el("div", { class: "m" }),
     t && t.disk ? m("Disk", t.disk.used_pct, Math.round(t.disk.free_gb) + " GB free", t.disk.used_pct > 90 ? "var(--red)" : "var(--blue)", null, "disk") : el("div", { class: "m disk" }),
-    el("button", { class: "small", onclick: () => go("Machine") }, "Telemetry"));
+    el("button", { class: "small ghost", onclick: () => go("Machine") }, "Telemetry"));
 }
-function homeLive() { const box = $("#homemachine"); if (box) box.replaceWith(machineStrip()); }
+function homeLive() { const box = $("#homenow"); if (box) box.replaceWith(homeNow()); }
 
 // the eight ways in, each a picture card (art/start-*.webp); Settings → Appearance picks which show (six fill a row)
 const STARTS = () => {
@@ -206,12 +202,13 @@ function homeComposer() {
   area.addEventListener("input", () => { HC.text = area.value; grow(); });
   area.addEventListener("keydown", e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); hcGenerate(); } });
   const recipes = HC_RECIPES(), ids = Object.keys(recipes), rec = hcRecipe();
-  return el("section", { class: "composer", id: "composer" },
-    el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).filter(([id]) => hcHas(id)).map(([id, [label, mk, model]]) =>
-      el("button", { type: "button", role: "tab", "data-mode": id, title: hcWhy(id), disabled: !!hcWhy(id), "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
-        el("b", {}, label), S && S.platform === "windows" && ["picture", "flux"].includes(id)
-          ? hcModels().find(m => m.id === hcModel(id))?.label || hcModel(id) : typeof mark === "function" ? mark(mk, model) : model))),
-    area, el("div", { class: "cmp-hint" }, hint),
+  return el("div", { class: "cmp-wrap" }, el("section", { class: "composer", id: "composer" },
+    el("div", { class: "cmp-head" },
+      el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).filter(([id]) => hcHas(id)).map(([id, [label, mk, model]]) =>
+        el("button", { type: "button", role: "tab", "data-mode": id, title: hcWhy(id) || label + " · " + model, disabled: !!hcWhy(id), "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
+          el("b", {}, label), S && S.platform === "windows" && ["picture", "flux"].includes(id)
+            ? hcModels().find(m => m.id === hcModel(id))?.label || hcModel(id) : typeof mark === "function" ? mark(mk, model) : model)))),
+    area,
     S && S.platform === "windows" && ["picture", "flux"].includes(mode) ? el("div", { class: "row" },
       el("label", {}, "Picture model", el("select", { "aria-label": "Home picture model", onchange: e => {
         HC[mode === "flux" ? "fluxModel" : "pictureModel"] = e.target.value; render();
@@ -222,45 +219,53 @@ function homeComposer() {
         onclick: () => openFeatureCheck(imageFeature(hcModel(mode))) }, "Feature checks") : null) : null,
     hcWhy(mode) ? el("div", { class: "note warn" }, hcWhy(mode)) : null,
     el("div", { class: "cmp-bar" },
-      el("button", { type: "button", class: "primary cmp-go", title: hcWhy(mode), disabled: HC.busy || !!hcWhy(mode), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
       mode === "clip" ? el("button", { type: "button", class: "small cmp-recipe", title: "The render recipe: click for the next one (Settings → Presets sets the default)",
-        onclick: () => { HC.recipe = ids[(ids.indexOf(rec) + 1) % ids.length]; render(); } }, el("span", { class: "eyebrow" }, "Recipe"), recipes[rec]) : null,
+        onclick: () => { HC.recipe = ids[(ids.indexOf(rec) + 1) % ids.length]; render(); } }, recipes[rec]) : null,
       mode === "clip" ? hcLength() : null,
-      el("button", { type: "button", class: "ghost cmp-agent", onclick: hcAgent }, "Ask your agent instead"),
-      typeof suitePromptPicker === "function" ? el("button", { type: "button", class: "ghost cmp-suite", onclick: () => suitePromptPicker(hcFromSuite) }, "From the suite") : null,
       mode === "clip" && HC.image ? el("span", { class: "tag2", title: HC.image }, "First frame: " + HC.image.split("/").pop(), el("button", { type: "button", class: "small ghost", "aria-label": "Take the first frame off", onclick: () => { HC.image = null; render(); } }, "Remove")) : null,
       el("span", { class: "su-grow" }),
-      el("a", { href: "#Create", class: "cmp-more", onclick: e => { if (e.preventDefault) e.preventDefault(); hcMore(); } }, "More options →")),
-    hcMade()); }
+      el("button", { type: "button", class: "primary cmp-go", title: hcWhy(mode), disabled: HC.busy || !!hcWhy(mode), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵"))),
+    hcMade()),
+    el("div", { class: "cmp-alt" }, el("span", { class: "cmp-hint" }, hint), el("span", { class: "su-grow" }),
+      el("button", { type: "button", class: "ghost small cmp-agent", onclick: hcAgent }, "Ask your agent instead"),
+      typeof suitePromptPicker === "function" ? el("button", { type: "button", class: "ghost small cmp-suite", onclick: () => suitePromptPicker(hcFromSuite) }, "From the suite") : null,
+      el("a", { href: "#Create", class: "cmp-more", onclick: e => { if (e.preventDefault) e.preventDefault(); hcMore(); } }, "More options →"))); }
 
+// Home, right of the composer: what is rendering now and what is next, then this machine in one card
+function homeNow() {
+  const running = jobs.filter(j => j.status === "running"), queued = jobs.filter(j => j.status === "queued");
+  const now = running.map(j => { const { share, left } = jobShare(j), out = (j.inputs && j.inputs.image) || (j.params && j.params.image);
+    return el("div", { class: "now-card" },
+      el("div", { class: "now-top" }, el("span", { class: "now-tag" }, "Rendering"), j.spark ? el("span", { class: "now-where" }, typeof spkLabel === "function" ? spkLabel(j.spark) : j.spark) : null),
+      el("b", {}, j.title), el("span", { class: "now-kind" }, (j.kind === "video" ? "Clip with sound" : j.kind === "long" ? "Long take" : j.kind === "scout" ? "Pictures" : j.kind) || ""),
+      el("div", { class: "bar" }, el("i", { style: "width:" + share + "%" })),
+      el("div", { class: "kv" }, el("span", {}, share + "%"), el("b", {}, left == null ? "" : left > 5 ? mmss(left) + " left" : "almost done"))); });
+  return el("aside", { class: "home-now", id: "homenow", "aria-label": "Now" },
+    now.length ? now : el("div", { class: "now-card idle" }, el("span", { class: "dotl" }), el("div", {}, el("b", {}, "Nothing rendering"), el("span", { class: "now-kind" }, "Generate something and it shows here."))),
+    queued.length ? el("div", { class: "now-next" }, el("span", { class: "eyebrow" }, "Up next"),
+      queued.slice(0, 4).map((j, i) => el("button", { type: "button", class: "now-row", onclick: () => bayOpen(true) }, el("span", { class: "n" }, String(i + 2 - (running.length ? 0 : 1))),
+        el("span", { class: "t" }, el("b", {}, j.title), el("small", {}, j.kind))))) : null,
+    machineStrip()); }
 function viewHome() {
-  const [hello, line] = timeOfDay(), wrap = el("div", { class: "home" }), look = homePrefs().appearance;
-  const tc = el("span", { class: "tc" }, timecode()); const tick = setInterval(() => { if (!tc.isConnected) return clearInterval(tick); tc.textContent = timecode(); }, 1000 / 24);
-  // the greeting beside the poster (smaller now: the composer under it leads the screen); Settings can take the poster off
-  const poster = look.poster !== false;
-  const hero = el("div", { class: "homehero slim" + (poster && ART.ready.has("poster") ? " has-art" : "") + (poster ? "" : " no-art") }, poster ? artSlot("poster", "", "home") : null,
-    el("div", { class: "over" },
-      el("div", { class: "stack" }, el("div", { style: "display:flex;gap:14px;align-items:center;flex-wrap:wrap" }, el("span", { class: "eyebrow" }, new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })), tc),
-        el("h1", { class: "display" }, hello), el("p", { class: "tagline" }, "Local Creative ", el("em", {}, "All in One"), " Studio"),
-        el("p", { class: "creator" }, el("span", { class: "by" }, "by"), el("img", { src: "brand/keys-wasserman-neon.svg", alt: "Keys + Wasserman", width: 320, height: 37 })),
-        el("p", { class: "home-links" }, HOME_LINKS.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label))),
-        el("p", { class: "sub", style: "margin:0" }, line + " Pictures, clips with sound, voices and score, made on your own machine.")),
-      el("div", { class: "acts" }, el("button", { onclick: () => go("Production") }, "Plan a film"), el("button", { class: "ghost", onclick: palOpen }, "Search ", el("kbd", {}, "⌘K")))));
-  put(wrap, hero, typeof connectNudge === "function" ? connectNudge("home") : null, homeComposer());
+  const wrap = el("div", { class: "home" }), look = homePrefs().appearance;
+  const recent = el("div", { class: "home-takes" }, el("div", { class: "note" }, "Loading recent takes…"));
+  const main = el("div", { class: "home-main" },
+    el("h1", { class: "home-ask" }, "What are we making?"),
+    typeof connectNudge === "function" ? connectNudge("home") : null, homeComposer());
   const starts = STARTS().filter(s => startShown(look, s.id));
-  if (starts.length) put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Start something"), el("span", { class: "note" }, "Each opens the full form with sensible settings.")),
-    el("div", { class: "cards startrow" }, starts.map(pcard)));
-  const recent = el("div", { class: "strip2" }, el("div", { class: "note" }, "Loading recent takes…"));
-  put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Recent takes"), el("button", { class: "small", onclick: () => go("Library") }, "Library")), recent);
-  api("/api/library").then(list => { SHELL.libCache = list; const pick = list.filter(m => m.kind !== "audio").slice(0, 12);
-    recent.replaceChildren(...(pick.length ? pick.map(m => el("div", { class: "tile" }, media(m.path, m.kind === "video" ? { controls: false, muted: true, loop: true, playsinline: true, onmouseenter: e => e.target.play().catch(() => {}), onmouseleave: e => e.target.pause() } : {}),
-      el("div", { class: "cap" }, el("span", {}, m.path.split("/").pop()), m.kind === "video" ? el("button", { class: "small", onclick: () => addToTimeline(m.path) }, "+ timeline")
-        : el("button", { class: "small", onclick: () => startCreate({ image: m.path, goes: "video", start: "own" }, 1) }, "animate"))))
+  if (starts.length) put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Start something"), el("span", { class: "note" }, "Each opens the full form with sensible settings.")),
+    el("div", { class: "starts" }, starts.map(s => el("button", { type: "button", class: "start", "data-start": s.id, title: s.one, onclick: s.run }, icon(s.sign || "video", "ic"), el("span", { class: "t" }, el("b", {}, s.title), el("small", {}, s.one))))));
+  put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Recent takes"), el("a", { href: "#Library", onclick: e => { if (e.preventDefault) e.preventDefault(); go("Library"); } }, "Open Library →")), recent);
+  api("/api/library").then(list => { SHELL.libCache = list; const pick = list.filter(m => m.kind !== "audio").slice(0, 8);
+    recent.replaceChildren(...(pick.length ? pick.map(m => el("div", { class: "take" }, el("div", { class: "pic" }, media(m.path, m.kind === "video" ? { controls: false, muted: true, loop: true, playsinline: true, preload: "metadata", src: file(m.path) + "#t=0.5", onmouseenter: e => e.target.play().catch(() => {}), onmouseleave: e => e.target.pause() } : {})),
+      el("div", { class: "cap" }, el("span", {}, m.path.split("/").pop()), m.kind === "video" ? el("button", { class: "small ghost", onclick: () => addToTimeline(m.path) }, "+ timeline")
+        : el("button", { class: "small ghost", onclick: () => startCreate({ image: m.path, goes: "video", start: "own" }, 1) }, "Animate"))))
       : [el("div", { class: "note" }, "Nothing rendered yet. Your takes will line up here.")])); }).catch(() => recent.replaceChildren(el("div", { class: "note" }, "The Library could not be read.")));
-  if (typeof nightPanel === "function") put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Night shift"), el("span", { class: "note" }, "A batch rendered while you sleep, with dailies in the morning.")), nightPanel());
-  put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Machine")), machineStrip());
-  put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Wasserman's Filmmaker Suite"), el("button", { class: "small", onclick: () => go("Import") }, "The whole suite, built in →")),
+  if (typeof nightPanel === "function") put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Night shift"), el("span", { class: "note" }, "A batch rendered while you sleep, with dailies in the morning.")), nightPanel());
+  put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Wasserman's Filmmaker Suite"), el("a", { href: "#Import", onclick: e => { if (e.preventDefault) e.preventDefault(); go("Import"); } }, "The whole suite, built in →")),
     el("div", { class: "suiteRow" }, SUITE_APPS.map(([n, s]) => el("button", { class: "app", type: "button", title: s, onclick: () => go("Import") },
       el("img", { src: "art/suite/" + SUITE_SLUG[n] + ".webp", alt: "", width: 32, height: 32, loading: "lazy" }), el("b", {}, n)))));
+  put(main, el("p", { class: "home-foot" }, "Imagination Studio by keys+Wasserman · ", el("span", { class: "home-links" }, HOME_LINKS.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label)))));
+  put(wrap, main, homeNow());
   return wrap;
 }

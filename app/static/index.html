@@ -4,39 +4,40 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Imagination Studio by keys+Wasserman · powered by TensorFold · built with integrated Fish Audio Drama 3</title>
-<meta name="theme-color" content="#080D16">
+<meta name="theme-color" content="#0C0C0E">
 <link rel="icon" href="brand/favicon.ico" sizes="any">
 <link rel="icon" href="brand/app-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
 <link rel="manifest" href="site.webmanifest">
 <link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="fonts/instrument-serif.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="studio.css">
 <link rel="stylesheet" href="nodes.css">
 <script>
-// Settings → Appearance, kept in this browser by settings.js: applied before the first paint
-try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = document.documentElement.classList;
-  if (a) { if (a.theme === "oled") c.add("theme-oled");
-    if (a.type_size === "large" || a.type_size === "largest") c.add("type-" + a.type_size); if (a.glow === false) c.add("no-glow"); if (a.poster === false) c.add("no-poster");
-    if (a.accent === "cobalt") c.add("accent-cobalt"); if (a.motion === "reduce") c.add("motion-reduce"); } } catch (e) {}
+// Settings → Appearance, kept in this browser by settings.js: applied before the first paint (prefsApply does the same
+// afterwards). The theme: dark ("studio"), light, OLED, or the computer's own setting ("system")
+try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = document.documentElement.classList,
+    th = a && a.theme || "studio", sys = th === "system" && window.matchMedia ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "studio") : th;
+  if (sys === "light") c.add("theme-light"); if (sys === "oled") c.add("theme-oled");
+  if (a) { if (["compact", "large", "largest"].includes(a.type_size)) c.add("type-" + a.type_size);
+    if (a.accent === "cobalt") c.add("accent-cobalt"); if (a.motion === "reduce") c.add("motion-reduce"); }
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute("content", sys === "light" ? "#FAFAF9" : sys === "oled" ? "#000000" : "#0C0C0E"); } catch (e) {}
 </script>
 </head>
 <body>
 <aside id="side" aria-label="Studio">
-  <a class="brand" id="gohome" href="#Home" title="Home: start something, see what is rolling" aria-label="Imagination Studio: Home"><img class="ribbon" src="brand/film-ribbon.webp" alt="" width="230" height="92"><img class="title" src="brand/ribbon-title-only-color.svg" alt="Imagination Studio" width="240" height="83"><span class="byline"><span class="by">by</span><img class="creator" src="brand/keys-wasserman-neon.svg" alt="keys+Wasserman" width="206" height="24"></span></a>
+  <a class="brand" id="gohome" href="#Home" title="Home: start something, see what is rolling" aria-label="Imagination Studio by keys+Wasserman: Home"><svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><rect x="0.5" y="0.5" width="25" height="25" rx="7"/><circle class="ring" cx="13" cy="13" r="6"/><circle class="dot" cx="13" cy="13" r="1.8"/></svg><span class="names"><b>Imagination Studio</b><span>keys+Wasserman</span></span></a>
+  <button class="kbtn" id="kbtn" type="button" title="Search or run anything (⌘K)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M21 21l-5-5"/></svg><span>Search or run</span><kbd>⌘K</kbd></button>
   <nav id="rooms" aria-label="Rooms"></nav>
   <div class="sidefoot">
     <button class="machinepill" id="mpill" type="button" title="Machine"><span class="dotl" id="mdot"></span><span id="plat"></span><span class="txt" id="mtxt"></span><span class="meter" aria-hidden="true"><i id="mgpu"></i><i id="mmem"></i></span></button>
-    <div class="verline"><span id="ver"></span><button id="studio-updates-open" type="button" title="Updates" aria-label="Updates"></button></div>
-    <div class="credit"><span class="pby">Powered by</span><span class="tf"><img class="sym" src="brand/tensorfold-symbol.webp" alt="TensorFold symbol" width="36" height="22"><img class="wm" src="brand/tensorfold-wordmark.webp" alt="TensorFold" width="104" height="17"></span><span class="for">for NVIDIA Sparks or Apple Silicon</span></div>
   </div>
 </aside>
 <header id="top">
-  <a class="mhome" href="#Home" id="mhome" aria-label="Imagination Studio: Home"><img class="mark" src="brand/aperture-mark-color.svg" alt="Imagination Studio aperture mark" width="24" height="24"><img class="hlogo" src="brand/ribbon-horizontal-color.svg" alt="Imagination Studio" width="280" height="26"></a>
+  <a class="mhome" href="#Home" id="mhome" aria-label="Imagination Studio: Home"><svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><rect x="0.5" y="0.5" width="25" height="25" rx="7"/><circle class="ring" cx="13" cy="13" r="6"/><circle class="dot" cx="13" cy="13" r="1.8"/></svg><span class="hlogo">Imagination Studio</span></a>
   <button class="navpill" id="backbtn" type="button" aria-label="Back" disabled></button><button class="navpill" id="homebtn" type="button" aria-label="Home" title="Home (⌥H)"></button>
   <span id="roomname"></span><div id="subtabs"></div><span class="fill"></span>
-  <button class="kbtn" id="kbtn" type="button" title="Search or run anything (⌘K)"><span>Search or run</span><kbd>⌘K</kbd></button>
   <button id="helpbtn" class="iconbtn" type="button" title="Learn" aria-label="Learn"></button>
+  <button id="themebtn" class="iconbtn" type="button" title="Light or dark" aria-label="Switch to the light theme"></button>
 </header>
 <div id="warnbar" class="hide" role="status"></div>
 <main>
@@ -675,7 +676,6 @@ function useMotionReference(ref, pack) {
 }
 
 /* ---------- Create ---------- */
-const STEPS = ["1. Intent / Mode", "2. First frame", "3. Words / Sound", "4. Review prompt", "5. Render"];
 const C_TEXT = { scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", prompt: "", beats: "" }, C_NOTES = { subjects: "refs", video_subjects: "refVideos", audio_notes: "refAudios" };
 function clearAllCreate() { const keys = [...Object.keys(C_TEXT), ...Object.keys(C_NOTES)], was = JSON.parse(JSON.stringify(Object.fromEntries(keys.map(k => [k, C[k]]))));
   const empty = { ...JSON.parse(JSON.stringify(C_TEXT)), ...Object.fromEntries(Object.entries(C_NOTES).map(([k, of]) => [k, C[of].map(() => "")])) };
@@ -683,10 +683,6 @@ function clearAllCreate() { const keys = [...Object.keys(C_TEXT), ...Object.keys
   Object.assign(C, empty); CLEARED = { key: "create-all", model: () => Object.assign(C, was) }; render(); undoToast("Every prompt field of this clip is empty."); }
 function viewCreate() {
   const body = el("div");
-  const steps = el("div", { class: "steps" }, STEPS.map((name, i) => el("button", { class: i === C.step ? "on" : "", onclick: () => { C.step = i; render(); } }, i === 1 && isRef() ? "2. " + refWord() : name)));
-  const next = el("div", { class: "row", style: "margin-top:14px" }, el("button", { class: "fit", disabled: C.step === 0, onclick: () => { C.step--; render(); } }, "Back"),
-    el("span"), C.step === 3 && C.mode !== "image" ? null : clearButton("create-" + C.step, "Clear this step"), el("button", { class: "small fit", title: "Empty every prompt field of this clip: scene, action, camera, lines, sound, and the composed prompt. Pictures, clips and settings stay.", onclick: clearAllCreate }, "Clear all"),
-    C.step < 4 ? el("button", { class: "primary fit", onclick: () => { C.step++; render(); } }, "Next") : null);
   body.setAttribute("data-clear", "create-" + C.step);
   sync();
   const goes = null;  // what the prompt goes to is chosen over the form (intentBar in shell.js)
@@ -731,21 +727,20 @@ function viewCreate() {
           el("a", { href: "#", onclick: e => { e.preventDefault(); C.image = p; C.goes = "video"; C.start = "own"; C.step = 1; changed(); } }, "animate this")))))); }
     return el("section", { class: "card" }, body);
   }
-  if (C.step === 0) {
+  const step0 = body => {
     const est = el("span", { class: "eta" });
     put(body, el("h2", {}, "The shot"), goes,
       el("label", {}, "The clip starts from"), choice(C, "start", { text: ["Text only", "no first frame"], scout: ["A scout image", "make several with " + imageModels().map(m => m.label).join(" or ") + ", pick one"], own: ["Your own image", "upload a picture"],
         ...(S.ref2va ? { refs: S.ref_media ? ["References", "pictures, videos or audio: keep a face, a motion or a voice"] : ["Reference pictures", "keep a face or a thing, in a new scene"] } : {}) }, changed),
-      isRef() ? el("div", { class: "note", style: "margin:8px 0" }, "You add them on the next screen: ", el("a", { href: "#", onclick: e => { e.preventDefault(); C.step = 1; render(); } }, "2. " + refWord()), ".") : null,
-      videoControls(() => { render(); }), summary(est), picture,
+      picture,
       field("What happens to the characters inside the scene / clip", bind(C, "action", el("textarea", { placeholder: "He lifts the loaf with both hands, sets it down, looks at the camera and smiles." }))),
       field("Camera (optional)", bind(C, "camera", el("input", { placeholder: "The camera slowly pushes in throughout the single continuous shot." }))),
       isLong() ? field("Story beats (optional): one line per 15 s clip, in order; the last line holds for the rest", bind(C, "beats", el("textarea", { placeholder: "He rides down the chute.\nHe stops at the river and looks back.\nHe wades across carrying the bike." }))) : null,
       isLong() ? el("div", { class: "note" }, "The model makes at most 15 s at a time, so this is rendered as " + Math.ceil(C.seconds / 15) + " clips, each opening on the last frame of the one before, then joined. Finished clips appear in the queue as they land. Expect the look to drift over many clips; beats help it stay on a story.") : null);
-    showEstimate(C, est);
-  } else if (C.step === 1) {
+  };
+  const step1 = body => {
     if (isRef()) {
-      for (const path of [...C.refVideos, ...C.refAudios]) if (!REF_META[path]) refMeta(path).then(() => { if (tab === "Create" && C.step === 1) render(); });
+      for (const path of [...C.refVideos, ...C.refAudios]) if (!REF_META[path]) refMeta(path).then(() => { if (tab === "Create") render(); });
       const send = async one => { const data = new FormData(); data.append("file", one); const r = await fetch("/api/upload", { method: "POST", body: data }); const j = await r.json().catch(() => ({})); if (!j.path) throw new Error(j.detail || j.error || "upload failed"); return j.path; };
       const add = el("input", { type: "file", accept: "image/*", multiple: true, onchange: async () => { REF_SAID.pictures = "";
         for (const one of add.files) { try { const full = refFull("pictures", C.refs); if (full) throw new Error(full); const path = await send(one); C.refs.push(path); C.subjects.push(""); } catch (e) { REF_SAID.pictures = one.name + ": " + e.message; break; } }
@@ -787,7 +782,8 @@ function viewCreate() {
             el("div", { class: "cap" }, el("span", {}, audioName(i) + length(p)), drop(C.refAudios, C.audio_notes, i)),
             bind(C.audio_notes, i, el("input", { placeholder: "what it is: the voice timbre reference for the woman's voice" }), () => { C.prompt = ""; })))) : null,
           C.refAudios.length && !C.refs.length && !C.refVideos.length ? el("div", { class: "note", style: "color:var(--warn)" }, "Add a picture or a video too: audio cannot be the only reference.") : null ] : null);
-    } else if (noFrame()) put(body, el("h2", {}, "First frame"), el("div", { class: "note" }, "Text to video has no first frame. Change “The clip starts from” in step 1 to start from an image. A last frame alone works too: the clip then arrives at that picture."), lastFramePanel());
+    } else if (noFrame()) put(body, el("details", { class: "fold", open: !!lastOf(), ontoggle: e => { C.openLast = e.target.open; } }, el("summary", {}, "End on a picture (optional)"),
+      el("div", { class: "note" }, "A clip from text can end on a picture: it then arrives at it. To open on a picture instead, choose it under “The clip starts from”."), lastFramePanel()));
     else {
       const up = el("input", { type: "file", accept: "image/*", onchange: async () => { const data = new FormData(); data.append("file", up.files[0]);
         const r = await fetch("/api/upload", { method: "POST", body: data }); const j = await r.json(); if (j.path) { C.image = j.path; render(); } else toast(j.error || "upload failed"); } });
@@ -812,8 +808,9 @@ function viewCreate() {
         el("div", { class: "note" }, "The image is stretched onto the clip's canvas, so match its aspect ratio (16:9 for the presets here)."));
       put(body, lastFramePanel());
     }
-  } else if (C.step === 2) {
-    put(body, el("h2", {}, "Words and sound"), el("div", { class: "note" }, "Spoken or sung lines are written into the prompt exactly. Leave empty for a clip with no speech."),
+  };
+  const step2 = body => {
+    put(body, el("h2", {}, "Lines and sound"), el("div", { class: "note" }, "Spoken or sung lines are written into the prompt exactly. Leave empty for a clip with no speech."),
       C.dialogue.map((line, i) => el("div", { class: "seg" }, el("div", { class: "row" }, field("Voice", bind(line, "voice", el("input", { placeholder: "a calm, slightly raspy male voice" }))),
         keep(el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Language"), bind(line, "language", el("input")))),
         isRef() && refPeople() > 1 ? el("div", { class: "fit", style: "width:140px" }, el("label", {}, "Speaker"), select(line, "subject", Object.fromEntries(Array.from({ length: refPeople() }, (_, k) => [k + 1, "<Subject " + (k + 1) + ">"])), () => { C.prompt = ""; })) : null,
@@ -825,42 +822,54 @@ function viewCreate() {
       // the model always makes a sound track and takes no negative prompt: the app mutes it after the render (hush)
       el("label", { class: "check", style: "margin-top:10px", title: "MiniMax H3 always makes sound, and asking it for silence is not enough. Ticked, the clip's sound track is muted after the render; the clip keeps a silent track." },
         bind(C, "silent", el("input", { type: "checkbox" })), el("span", {}, "No sound: deliver the clip silent")));
-  } else if (C.step === 3) {
-    const area = bind(C, "prompt", el("textarea", { style: "min-height:260px;font-family:ui-monospace,monospace;font-size:13.5px" }));
-    const again = async () => { const r = await api("/api/compose", { fields: { ...C, motion: isRef() ? motionFields() : null }, first_frame: !noFrame(), last_frame: !!lastOf(), ...lengthOf(C), references: isRef() ? Math.max(C.refs.length, refMedia() ? 0 : 1) : 0, referenced: isRef(), loras: isRef() ? lorasOf(C) : [] }); C.prompt = r.prompt; area.value = r.prompt; negShow(warned); };
+  };
+  const step3 = body => {
+    const area = bind(C, "prompt", el("textarea", { style: "min-height:260px;font-family:var(--mono);font-size:13px" }), () => { C.promptEdited = true; });
+    const again = async () => { C.promptEdited = false; await composeCreate(); area.value = C.prompt; negShow(warned); };
     const warned = el("div"); area.addEventListener("change", () => negShow(warned));
-    if (!C.prompt) again(); else negShow(warned);
-    put(body, el("h2", {}, "Review the prompt"), el("div", { class: "note" }, "This is what the video model receives, in MiniMax H3's own three-part format. Edit it freely; “Rebuild” discards edits."), area, warned,
-      el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: again }, "Rebuild from steps 1–3"), el("span")));
-  } else {
-    const est = el("div", { class: "note" }); showEstimate(C, est);
-    const job = C.job && jobs.find(j => j.id === C.job);
-    const wants = loraWants();
-    const ready = C.prompt.trim() && (isRef() ? C.refs.length + C.refVideos.length > 0 : noFrame() || C.image) && !wants.length;
-    put(body, el("h2", {}, "Render"), el("div", { class: "note" }, output().label + (String(C.steps).trim() && !isRef() ? " · " + C.steps + " passes (custom)" : "") + " · " + (isRef() ? "MiniMax H3 Ref2VA, " + refPassText() + ", " + [[C.refs.length, "picture"], [C.refVideos.length, "video"], [C.refAudios.length, "audio clip"]].filter(k => k[0]).map(k => k[0] + " reference " + k[1] + (k[0] === 1 ? "" : "s")).join(", ") + (motionFields() ? ", motion: " + MOTION_MODES[C.motion.mode][0].toLowerCase() + " from the " + MOTION_LAYERS[C.motion.layer][0].toLowerCase() + (C.motion.layer === "reference" ? "" : " layer") : "") : S.qualities[C.quality]) + " · " + (isLong() ? S.long[C.seconds] : exact(framesOf(C))) + (lastOf() ? " · ends on the last frame" : "") + (C.silent ? " · no sound" : "") + " · seed " + C.seed), est,
+    if (!C.prompt || !C.promptEdited) again(); else negShow(warned);
+    put(body, el("div", { class: "note m-flat" }, "What the video model receives, in MiniMax H3's own three-part format. It is rebuilt from the fields above when you render, unless you edit it here; “Rebuild” drops your edits."), area, warned,
+      el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit small", onclick: again }, "Rebuild from the fields above"), el("span")));
+  };
+  const step4 = body => {
+    const job = C.job && jobs.find(j => j.id === C.job), wants = loraWants(), why = createNotReady();
+    put(body, el("h2", {}, "Render"),
       wants.map(w => el("div", { class: "note lorawant", style: "color:var(--warn)" }, el("b", {}, w.name + " needs: "), w.text + " ", el("button", { type: "button", class: "small", onclick: w.go }, w.label))),
-      !ready ? el("div", { class: "note", style: "color:var(--warn)" }, C.prompt.trim() ? (isRef() ? (S.ref_media ? "Add a reference picture or video in step 2." : "Add a reference picture in step 2.") : "Pick or upload a first frame in step 2.") : "Open step 4 once to build the prompt.") : null,
+      el("div", { class: "note c1-notready", style: "color:var(--warn)" + (why && !wants.length ? "" : ";display:none") }, why || ""),
       negNote(),
-      isLong() ? null : el("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px", title: "After the render the app looks at the clip (app/shot.py): does it open on its first frame and end on its last, and is there a cut inside it. The verdict is shown beside the clip either way." },
-        bind(C, "retake", el("input", { type: "checkbox", style: "width:auto" })), "If the shot check fails (a keyframe not held, or a cut inside the shot), render it once more at the next seed. That is a second full render."),
+      isLong() ? null : el("label", { class: "check", title: "After the render the app looks at the clip (app/shot.py): does it open on its first frame and end on its last, and is there a cut inside it. The verdict is shown beside the clip either way." },
+        bind(C, "retake", el("input", { type: "checkbox" })), el("span", {}, "If the shot check fails (a keyframe not held, or a cut inside the shot), render it once more at the next seed. That is a second full render.")),
       // how many Sparks this job may use, and what that means for it, before it is queued (sparks.js)
       el("div", { style: "margin-top:10px" }, sparksPick({ kind: isLong() ? "long" : "video", clips: 1, params: { loras: lorasOf(C), ...(isRef() ? { references: C.refs, reference_videos: C.refVideos, reference_audios: C.refAudios, ref_turbo: C.refPasses === "4" } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) } })),
-      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !ready, onclick: async () => { try {
-        const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}), ...(C.silent ? { silent: true } : {}) };
-        const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
-          : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
-        C.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Queue this clip"),
-        // the way back to step 1 once a clip is queued: with the same settings, or with the words cleared
-        el("button", { class: "fit", onclick: () => { C.step = 0; C.job = null; render(); } }, "Back to the start, keep this setup"),
-        el("button", { class: "fit", onclick: () => { Object.assign(C, { step: 0, job: null, prompt: "", scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, lastImage: null, scoutJob: null, beats: "", refs: [], subjects: [], refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null }); MA.job = null; Object.assign(REF_SAID, { pictures: "", videos: "", audios: "" }); render(); } }, "Start a new clip"), el("span")));
+      el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "hot fit", disabled: !!why, onclick: createQueue }, "Render clip"),
+        // a new clip with the same settings, or with the words cleared
+        C.job ? el("button", { class: "fit", onclick: () => { C.job = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); } }, "Another take, same setup") : null,
+        el("button", { class: "fit ghost", onclick: () => { Object.assign(C, { step: 0, job: null, prompt: "", promptEdited: false, scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, lastImage: null, scoutJob: null, beats: "", refs: [], subjects: [], refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null }); MA.job = null; Object.assign(REF_SAID, { pictures: "", videos: "", audios: "" }); render(); } }, "Start a new clip"), el("span")));
     if (job) { put(body, el("h3", {}, "This clip"), jobCard(job));
       if (job.status === "done") put(body, el("video", { class: "main", src: file(job.outputs[0]), controls: true }),
         el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: () => addToTimeline(job.outputs[0]) }, "Add to the editor timeline"), el("a", { class: "fit", href: file(job.outputs[0]), download: "" }, "Download"),
           job.kind === "long" ? el("button", { class: "fit", title: "Opens the Music tab with this video chosen: pick a song there and press “Use as soundtrack”", onclick: () => { MU.under = job.outputs[0]; MU.videos = null; tab = "Music"; history.replaceState(null, "", "#Music"); render(); toast("This video is chosen: open “Use as soundtrack” under a song"); } }, "Lay a song under it") : el("span"))); }
-  }
-  return el("section", { class: "card" }, steps, body, next);
+  };
+  // one page: the shot, its first frame or references, the lines and sound, the engine and the prompt folded, then Render.
+  // The side panel (takeSheet in shell.js) holds the recipes, the length, the take at a glance and the same Render.
+  const sec = (cls, fill) => { const n = el("section", { class: "c1-sec" + (cls ? " " + cls : "") }); fill(n); return n; };
+  const est = el("span", { class: "eta" });
+  const engine = el("details", { class: "c1-sec c1-fold", open: !!C.openEngine, ontoggle: e => { C.openEngine = e.target.open; } },
+    el("summary", {}, el("b", {}, "Engine, size and length"), el("span", { class: "c1-sum" }, (isRef() ? "MiniMax H3 Ref2VA" : C.engine === "fasth3" ? "FastH3 · " + (customOn() ? C.steps : C.passes) + " passes" : "MiniMax H3") + " · " + (output().size || []).join(" × ") + " · " + (isLong() ? S.long[C.seconds] : exact(framesOf(C))))),
+    videoControls(() => { render(); }), summary(est));
+  showEstimate(C, est);
+  const reviewBox = el("div");
+  const review = el("details", { class: "c1-sec c1-fold", open: !!C.openReview, ontoggle: e => { C.openReview = e.target.open; if (e.target.open && !reviewBox.firstChild) step3(reviewBox); } },
+    el("summary", {}, el("b", {}, "Review the full prompt"), el("span", { class: "c1-sum" }, C.promptEdited ? "edited by hand" : "built from the fields above")), reviewBox);
+  if (C.openReview) step3(reviewBox);
+  const page = el("div", { class: "create1", "data-clear": "create-all" },
+    el("div", { class: "c1-head" }, el("div", {}, el("h1", {}, isLong() ? "A long take" : "A clip with sound"), el("p", { class: "note m-flat" }, "Describe the shot. Everything else has a sensible default on the right.")),
+      el("button", { class: "small ghost", title: "Empty every prompt field of this clip: scene, action, camera, lines, sound, and the composed prompt. Pictures, clips and settings stay.", onclick: clearAllCreate }, "Clear all")),
+    sec("", step0), sec("c1-frame", step1), sec("", step2), engine, review, sec("c1-render", step4));
+  // typing does not redraw the page: Render and its reason follow the words as they change
+  page.addEventListener("input", () => { if (typeof createReadyPaint === "function") createReadyPaint(); });
+  return page;
 }
-
 /* ---------- Production ---------- */
 async function ensureProject() { if (project) return project; const list = await api("/api/projects"); project = list.length ? await api("/api/projects/" + list[0].id) : await api("/api/projects", { name: "Project 1" }); return project; }
 const saveProject = () => api("/api/projects/" + project.id, project, "PUT").catch(e => toast(e.message));
@@ -988,58 +997,92 @@ function viewEditor() {
 const LIBF = { kind: "all", q: "" };
 // a voice line, a song or a sound effect: its player, its words, and where it goes next (kept in Voice and Music, not deleted here)
 const LIB_SOUND = { voice: ["Voice line", "Voice"], music: ["Song", "Music"], sfx: ["Sound effect", null] };
-function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
-  return el("div", { class: "tile lib-sound", "data-path": m.path, "data-sound": m.sound || "sfx", style: shown ? null : "display:none" },
-    el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
-    el("div", { class: "cap" }, el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
-    el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
-      el("button", { class: "small", disabled: !!capWhy("video"), title: capWhy("video") || "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
-      room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null)); }
-function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
-  const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
+// the Library: a toolbar (kind, find, search what is in the clips), the grid of takes, and the selected take in a side panel
+// with what can be done with it. Select switches the grid to ticking several for a bulk delete or Finish.
+const LIBJOB = path => jobs.find(j => (j.outputs || []).includes(path)) || null;
+const libWhen = t => { if (!t) return ""; const d = new Date(t * 1000), now = new Date(), day = 864e5;
+  const same = d.toDateString() === now.toDateString(), yest = new Date(now - day).toDateString() === d.toDateString();
+  return same ? "today, " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : yest ? "yesterday" : d.toLocaleDateString([], { month: "short", day: "numeric" }); };
+const libKindName = m => m.kind === "video" ? "Clip" : m.kind === "image" ? "Picture" : (LIB_SOUND[m.sound] || LIB_SOUND.sfx)[0];
+// the selected take: its preview, what made it, then what can be done with it
+function libInspect(m) {
+  if (!m) return [el("div", { class: "lib-empty" }, el("b", {}, "Nothing selected"), el("span", { class: "note m-flat" }, "Click a take to see it here, with what made it and what to do with it next."))];
+  const j = LIBJOB(m.path), pr = j && j.params || {}, name = m.path.split("/").pop();
+  const row = (k, v) => v ? [el("dt", {}, k), el("dd", {}, v)] : [];
+  const toCreate = set => { Object.assign(C, { prompt: "", goes: "video", ...set }); C.step = 0; tab = "Create"; history.replaceState(null, "", "#Create"); render(); };
+  const main = m.kind === "video"
+    ? [el("button", { class: "primary", disabled: !!capWhy("frame"), title: capWhy("frame") || (S.platform === "windows" ? "Extract the last frame into the Library" : "Start a new clip on this clip's last frame"), onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); if (S.platform === "windows") { toast("Last frame extracted"); render(); return; } toCreate({ image: r.path, start: "own" }); } catch (e) { toast(e.message); } } }, S.platform === "windows" ? "Extract last frame" : "Continue from its end"),
+       el("button", { onclick: () => addToTimeline(m.path) }, "Add to the timeline")]
+    : m.kind === "image"
+    ? [el("button", { class: "primary", disabled: !!capWhy("video"), title: capWhy("video") || "Open a new clip on this picture", onclick: () => toCreate({ image: m.path, start: "own" }) }, "Animate"),
+       el("button", { disabled: !!capWhy("edit"), title: capWhy("edit") || "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "Edit"),
+       el("button", { disabled: !!capWhy("video"), title: capWhy("video") || "End a new clip on this picture", onclick: () => { C.lastImage = m.path; toCreate({ start: C.start === "refs" ? "text" : C.start }); } }, "End a clip on it"),
+       LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? el("button", { title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "New angle") : null]
+    : [el("button", { class: "primary", disabled: !!capWhy("video"), title: capWhy("video") || "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } toCreate({ start: "refs" }); toast("Added as reference sound"); } }, "Use as reference sound"),
+       (LIB_SOUND[m.sound] || LIB_SOUND.sfx)[1] ? el("button", { onclick: () => go((LIB_SOUND[m.sound] || LIB_SOUND.sfx)[1]) }, "Open in " + (LIB_SOUND[m.sound] || LIB_SOUND.sfx)[1]) : null];
+  const more = m.kind === "audio" ? [] : [actButtons(m), capButton(m)].flat().filter(Boolean);
+  return [
+    el("div", { class: "lib-preview" }, media(m.path, m.kind === "video" ? { controls: true, preload: "metadata", playsinline: true } : {})),
+    el("div", { class: "lib-title" }, el("b", { title: m.path }, j && j.title || name), el("span", {}, libKindName(m) + " · " + libWhen(m.modified) + (m.failed ? " · failed its check" : ""))),
+    el("div", { class: "lib-main" }, main),
+    pr.prompt ? el("div", { class: "lib-prompt" }, el("span", { class: "eyebrow" }, "Prompt"), el("p", {}, pr.prompt)) : null,
+    el("dl", { class: "lib-facts" },
+      row("Made by", j ? ({ video: "Clip with sound", long: "Long take", scout: "Pictures", edit: "Picture edit" }[j.kind] || j.kind) + (pr.image_model ? " · " + pr.image_model : pr.quality ? " · " + ((S.qualities || {})[pr.quality] || pr.quality) : "") : ""),
+      row("Size", pr.width && pr.height ? pr.width + " × " + pr.height : (S.presets && S.presets[pr.preset] && S.presets[pr.preset].size ? S.presets[pr.preset].size.join(" × ") : "")),
+      row("Length", pr.frames ? (typeof exact === "function" ? exact(pr.frames) : pr.frames + " frames") : pr.seconds ? pr.seconds + " s" : ""),
+      row("Seed", pr.seed != null ? String(pr.seed) : m.seed != null ? String(m.seed) : ""),
+      row("Rendered on", m.spark ? (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) : ""),
+      row("Folder", m.folder || m.path.split("/").slice(0, -1).join("/")), row("File", sizeText(m.size || 0))),
+    more.length ? el("details", { class: "lib-more fold" }, el("summary", {}, "More actions"), el("div", { class: "chips" }, more)) : null,
+    el("div", { class: "lib-links" },
+      el("a", { href: file(m.path), download: "" }, "Download"),
+      el("a", { href: "#", onclick: e => { e.preventDefault(); navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, "Copy path"),
+      el("span", { class: "su-grow" }),
+      el("a", { href: "#", class: "lib-del", title: "Moves the file to the trash folder", onclick: e => { e.preventDefault(); clearOut({ paths: [m.path], films: true }, "Delete " + name + "?"); } }, "Delete"))]; }
+function viewLibrary() { const box = el("section", { class: "lib" });
   Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
-    // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
-    // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
+    // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect; words filter in place as they are typed
     const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
     const hits = () => { const words = LIBF.q.trim().toLowerCase().split(/\s+/).filter(Boolean); return kindList.filter(m => words.every(w => (m.path + " " + (m.spark || "") + (m.failed ? " failed check" : "")).toLowerCase().includes(w))); };
     let list = hits(); const capBar = capSearch(() => grid, () => show()); if (!CAP.map) capLoad().then(() => { if (tab === "Library") render(); });
-    const kinds = { all: "Everything", video: "Clips", image: "Stills", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
-    const find = el("input", { type: "search", placeholder: "Find by name, folder, Spark or \"failed\"", value: LIBF.q, style: "max-width:320px", "aria-label": "Find in the Library" });
+    const kinds = { all: "All", video: "Clips", image: "Pictures", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
+    const find = el("input", { type: "search", class: "lib-find", placeholder: "Find by name or folder", title: "Words in the file name or folder, a Spark's name, or \"failed\"", value: LIBF.q, "aria-label": "Find in the Library" });
     let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits(); const on = new Set(list.map(m => m.path));
-      for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none"; tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
+      for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none"; tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length) + " takes"; show(); };
     find.addEventListener("input", () => { clearTimeout(wait); wait = setTimeout(apply, 150); }); find.addEventListener("change", apply);
     find.addEventListener("keydown", e => { if (e.key === "Enter") apply(); });
-    put(box, el("div", { class: "row", style: "align-items:center;margin-bottom:6px" }, el("div", { class: "chips fit" }, Object.entries(kinds).map(([k, t]) => el("button", { class: "small" + (LIBF.kind === k ? " on" : ""), onclick: () => { LIBF.kind = k; render(); } }, t + " · " + n(k)))), el("span"), el("div", { class: "fit" }, find), capBar.box));
-    const many = el("button", { class: "fit", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
-    // Select all takes what is shown: the search's matches while searching, else the listing
+    const many = el("button", { class: "small", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
     const pool = () => { const f = capBar.found ? capBar.found() : []; return f.length ? f : list.filter(m => m.kind !== "audio").map(m => m.path); };
-    const all = el("button", { class: "fit", onclick: () => { const them = pool(), every = them.length && them.every(p => LIBPICK.has(p)); LIBPICK.clear(); if (!every) for (const p of them) LIBPICK.add(p); render(); } }, "Select all");
+    const all = el("button", { class: "small", onclick: () => { const them = pool(), every = them.length && them.every(p => LIBPICK.has(p)); LIBPICK.clear(); if (!every) for (const p of them) LIBPICK.add(p); render(); } }, "Select all");
     const show = () => { const them = pool(); many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
-    const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
-    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
-    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
-      el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
-      m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? " · s" + m.seed : "")) : null,
-      m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
-      // the buttons on a row of their own: a long file name no longer pushes them out of the tile
-      el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" }, actButtons(m), capButton(m),
-      m.kind === "video" ? el("button", { class: "small", disabled: !!capWhy("frame"), title: capWhy("frame") || (S.platform === "windows" ? "Extract the last frame into the Library" : "Start a new clip on this clip's last frame"), onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); if (S.platform === "windows") { toast("Last frame extracted"); render(); return; } C.image = r.path; C.prompt = ""; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } catch (e) { toast(e.message); } } }, S.platform === "windows" ? "Extract last frame" : "continue") : el("button", { class: "small", disabled: !!capWhy("video"), title: capWhy("video") || "End a new clip on this picture", onclick: () => { C.lastImage = m.path; C.prompt = ""; C.goes = "video"; if (C.start === "refs") C.start = "text"; C.step = 1; tab = "Create"; render(); } }, "last frame"),
-      m.kind === "video" ? el("button", { class: "small", onclick: () => addToTimeline(m.path) }, "+ timeline") : el("button", { class: "small", disabled: !!capWhy("video"), title: capWhy("video"), onclick: () => { C.image = m.path; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } }, "use"),
-      m.kind === "video" ? null : el("button", { class: "small", disabled: !!capWhy("edit"), title: capWhy("edit") || "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
-      m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),
-      // out of the library: the server moves the file to the studio's trash folder
-      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))));
+    const tally = el("span", { class: "lib-tally" }, list.length + (list.length === all_.length ? "" : " of " + all_.length) + " takes");
+    if (!LIBF.sel || !list.some(m => m.path === LIBF.sel)) LIBF.sel = list.length ? list[0].path : null;  // a kind or a search that hides it moves the panel on
+    const insp = el("aside", { class: "lib-side", "aria-label": "Selected take" }, libInspect(all_.find(m => m.path === LIBF.sel)));
+    const pick = m => { LIBF.sel = m.path; releaseMedia(insp); insp.replaceChildren(...libInspect(m)); for (const t of grid.children) t.classList.toggle("on", t.dataset.path === m.path); };
+    const shown = new Set(list.map(m => m.path)), selecting = !!LIBF.select;
+    const tile = m => el("div", { class: "lib-tile" + (m.path === LIBF.sel ? " on" : "") + (m.kind === "audio" ? " sound" : ""), "data-path": m.path, title: capText(m.path) || m.path, style: shown.has(m.path) ? null : "display:none" },
+      el("button", { type: "button", class: "lib-pic", "aria-label": "Show " + m.path.split("/").pop(), onclick: () => pick(m) },
+        m.kind === "audio" ? el("span", { class: "lib-wave", "aria-hidden": "true" }, icon("sound", "ic"), el("small", {}, libKindName(m))) : media(m.path, m.kind === "video" ? { controls: false, muted: true, preload: "metadata", src: file(m.path) + "#t=0.5" } : {}),
+        el("span", { class: "lib-badge" }, m.kind === "video" ? "CLIP" : m.kind === "image" ? "IMG" : "AUDIO")),
+      selecting && m.kind !== "audio" ? el("input", { type: "checkbox", class: "lib-check", "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }) : null,
+      el("span", { class: "lib-name" }, m.title || m.path.split("/").pop()), m.failed ? el("span", { class: "lib-flag" }, "failed check") : null);
+    const grid = el("div", { class: "lib-grid" }, kindList.map(tile));
     if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
-    put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
-      typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
-      el("div", { class: "row", style: "margin-top:10px" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span"),
-        bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,
-        bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
-        bin && bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
-          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
-      capBar.results, grid); })
+    put(box,
+      el("div", { class: "lib-bar" },
+        el("div", { class: "seg-ctl", role: "group", "aria-label": "Kind" }, Object.entries(kinds).filter(([k]) => k === "all" || n(k)).map(([k, t]) => el("button", { type: "button", class: LIBF.kind === k ? "on" : "", "aria-pressed": LIBF.kind === k ? "true" : "false", onclick: () => { LIBF.kind = k; render(); } }, t, el("small", {}, String(n(k)))))),
+        find, capBar.box, el("span", { class: "su-grow" }),
+        el("button", { type: "button", class: "small" + (selecting ? " on" : ""), "aria-pressed": selecting ? "true" : "false", onclick: () => { LIBF.select = !selecting; if (selecting) LIBPICK.clear(); render(); } }, selecting ? "Done" : "Select")),
+      selecting ? el("div", { class: "lib-selbar" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span", { class: "note m-flat" }, "Ticked takes can be deleted together or sent to Finish.")) : null,
+      actPanel(), typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
+      capBar.results,
+      el("div", { class: "lib-body" }, el("div", { class: "lib-left" }, grid, all_.length ? null : el("div", { class: "note" }, "Nothing rendered yet. Your takes will line up here.")), insp),
+      el("div", { class: "lib-foot" }, tally, bin ? el("span", { id: "trashline" }, " · Trash: " + (bin.files ? count(bin.files, "file") + ", " + sizeText(bin.bytes) : "empty")) : null, el("span", { class: "su-grow" }),
+        bin && bin.last ? el("button", { class: "small ghost", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
+        bin && bin.files ? el("button", { class: "small ghost", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
+          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null)); })
   .catch(e => put(box, el("div", { class: "note" }, e.message)));
-  return head ? el("div", {}, head, box) : box; }
+  return box; }
 
 /* ---------- Tutorial ---------- */
 // lessons per tab, one step on screen at a time; a step can point at the control it describes ("go"), and the coach bar then follows into that tab
@@ -1360,7 +1403,7 @@ function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [.
 function render() {
   if (!S) { $("#view").replaceChildren(el("div", { class: "note", role: "status" }, "Loading Studio...")); return; }
   const back = keepScroll(); renderShell(); releaseMedia($("#view"));
-  const unavailable = capWhy(({ Voice: "voice", Music: "music", "Motion Previs": "motion", Finish: "finish", Director: "video", "Night shift": "video", Looks: "looks", Models: "models", Updates: "updates", Sparks: "workers" })[tab]);
+  const unavailable = capWhy(({ Voice: "voice", Music: "music", "Motion Previs": "motion", Finish: "finish", Director: "video", "Night shift": "video", Looks: "looks", Models: "models", Updates: "updates", Sparks: "workers", "Quick Edit": "edit" })[tab]);
   $("#view").replaceChildren(unavailable ? el("div", {}, pageHead("Feature availability", tab, unavailable),
     tab === "Finish" && typeof featureBadge === "function" ? featureBadge("finish") : null,
     el("button", { class: "primary", onclick: () => go("Home") }, "Back to supported tools")) : { Home: viewHome, Apps: typeof viewApps === "function" ? viewApps : () => el("div", { class: "note" }, "Apps is not in this build."), Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), "Quick Edit": viewQuick, Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Graphics: viewGraphics, Finish: viewFinish, "Cast & Places": viewCast, Director: viewDirector, "Motion graphics": viewGraphics, "Night shift": viewNight, Library: viewLibrary,
@@ -1373,7 +1416,7 @@ function render() {
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
   // links can preset the Create form: ?goes=image, ?engine=h3&res=720p&up=1&step=4 ...
   for (const [k, v] of new URLSearchParams(location.search)) if (k in C && k !== "mode") C[k] = k === "up" ? v === "1" : (k === "step" || k === "count" ? Number(v) : v);
-  S = await api("/api/state"); await loadLoras(); if (typeof settingsLoad === "function") await settingsLoad().catch(() => {}); if (!S.turbo) C.engine = "fasth3"; sync(); for (const h of ["#gohome", "#mhome"]) $(h).onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = platName(); if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Imagination Studio · " + platName(); $("#ver").textContent = "Studio " + S.version; shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
+  S = await api("/api/state"); await loadLoras(); if (typeof settingsLoad === "function") await settingsLoad().catch(() => {}); if (!S.turbo) C.engine = "fasth3"; sync(); for (const h of ["#gohome", "#mhome"]) $(h).onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = platName(); if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Imagination Studio · " + platName(); shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
   // ?motionref opens the create wizard on the motion reference stored by the Motion Previs tab
   if (new URLSearchParams(location.search).has("motionref")) { try { const r = (await api("/api/motion/handoff")).reference; if (r) useMotionReference(r, await api("/api/motion/packs/" + r.pack).catch(() => null)); } catch {} } })();
 </script>

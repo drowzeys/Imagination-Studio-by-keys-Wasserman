@@ -44,9 +44,9 @@ DEFAULTS = {
     "hermes_command": "",
 }
 CHOICES = {
-    # the studio's dark as shipped, or the same on true black (OLED screens)
-    ("appearance", "theme"): ("studio", "oled"),
-    ("appearance", "type_size"): ("comfortable", "large", "largest"),
+    # dark ("studio", as shipped), light, the dark on true black (OLED screens), or the computer's own light or dark
+    ("appearance", "theme"): ("studio", "light", "oled", "system"),
+    ("appearance", "type_size"): ("compact", "comfortable", "large", "largest"),  # Small, Default, Large, Largest
     ("appearance", "accent"): ("amber", "cobalt"),
     ("appearance", "motion"): ("system", "reduce"),
     ("presets", "recipe"): ("quick", "sharp", "final", "custom"),
