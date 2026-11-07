@@ -52,7 +52,7 @@ def test_a_partial_change_is_merged_kept_and_read_back(fresh):
         assert oct(fresh.stat().st_mode & 0o777) == "0o600"
     assert client.get("/api/settings").json()["settings"] == now
     client.post("/api/settings", json={"layout": {"hidden": ["looks", "looks", "learn"], "order": ["sound", "story"]}})
-    assert settings.load()["layout"] == {"hidden": ["looks", "learn"], "order": ["sound", "story"]}
+    assert settings.load()["layout"] == {"hidden": ["looks", "learn"], "order": ["sound", "story"], "simple": True}  # a new studio's first save keeps it simple
     assert settings.load()["appearance"]["type_size"] == "largest"  # the earlier change stays
 
 
@@ -126,7 +126,10 @@ def test_a_hand_edited_file_with_bad_values_falls_back_to_the_defaults(fresh):
     assert now["appearance"]["type_size"] == "comfortable" and now["appearance"]["glow"] is False
     assert now["layout"]["hidden"] == [] and "stray" not in now
     fresh.write_text("{ cut off")
-    assert settings.load() == settings.DEFAULTS
+    unreadable = settings.load()
+    assert unreadable["layout"]["simple"] is False  # a file that cannot be read is not taken for a new studio
+    unreadable["layout"]["simple"] = True
+    assert unreadable == settings.DEFAULTS
 
 
 def test_the_delivery_sound_rate_reaches_the_jobs_the_app_launches(fresh, monkeypatch):
@@ -157,3 +160,14 @@ def test_every_text_size_is_kept(fresh):
         reply = client.post("/api/settings", json={"appearance": {"type_size": size}})
         assert reply.status_code == 200 and reply.json()["settings"]["appearance"]["type_size"] == size, size
     assert client.post("/api/settings", json={"appearance": {"type_size": "huge"}}).status_code == 400
+
+
+def test_a_new_studio_is_simple_and_one_with_older_settings_keeps_every_room(fresh):
+    assert settings.load()["layout"]["simple"] is True  # no settings.json yet: a new studio
+    fresh.write_text(json.dumps({"appearance": {"theme": "light"}, "layout": {"hidden": ["looks"]}}))
+    assert settings.load()["layout"]["simple"] is False  # saved before the switch existed: every room, as before
+    reply = client.post("/api/settings", json={"layout": {"simple": True}})
+    assert reply.status_code == 200 and settings.load()["layout"] == {"hidden": ["looks"], "order": [], "simple": True}
+    assert client.post("/api/settings", json={"layout": {"simple": "yes"}}).status_code == 400
+    client.post("/api/settings", json={"layout": {"simple": False}})
+    assert settings.load()["layout"]["simple"] is False and settings.load()["layout"]["hidden"] == ["looks"]  # the owner's own layout comes back

@@ -74,7 +74,10 @@ const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe 
   voice: ["Voice", "fish", "Drama 3", "Write the line as it is said. A [direction] in brackets sets the voice."],
   song: ["Song", "music3", "Music 3", "A style (genre, tempo, mood), or lyrics with [Verse] and [Chorus] tags."],
   yue: ["Song", "yue", "YuE2", "A style (genre, tempo, mood), or lyrics with [Verse] and [Chorus] tags."] };
-const HC_RECIPES = () => ({ quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K" });
+// the recipe and the size it delivers on this machine (recipeParams in settings.js)
+const hcRecipeSize = id => { const r = typeof recipeParams === "function" ? recipeParams(id) : null, p = r && S && S.presets && S.presets[r.preset];
+  return p && p.size ? " · " + p.size.join(" × ") : ""; };
+const HC_RECIPES = () => ({ quick: "Draft" + hcRecipeSize("quick"), ...(S && S.sharp ? { sharp: "Sharp Spec" + hcRecipeSize("sharp") } : {}), final: "Final" + hcRecipeSize("final") });
 const hcKind = mode => ({ clip: "video", picture: "scout", flux: "flux", voice: "voice", song: "music", yue: "music" })[mode];
 // FLUX3 Klein and YuE2 have a chip only where they are installed; where YuE2 is the only song engine ready, Music 3 has none
 const hcModels = () => typeof imageModels === "function" ? imageModels()
@@ -87,7 +90,14 @@ const hcSongEngines = () => (S && S.music && S.music.engines) || null;
 const hcYue = () => { const e = hcSongEngines(); return !!(e && e.yue2 && (e.yue2.installed || e.yue2.available)); };
 const hcHas = id => id === "flux" ? !!hcFluxModel() : id === "yue" ? hcYue() : id !== "song" || !hcYue() || !hcSongEngines().music3 || !!hcSongEngines().music3.available;
 // Settings says the kind of take; the picture model and song engine it presets choose that kind's chip
-const hcMode = () => {
+// the simple studio (settings.js simpleOn): the composer makes clips and pictures; voice and songs are in their rooms, one ⌘K away
+const hcSimple = () => typeof simpleOn === "function" && simpleOn();
+const HC_SIMPLE = ["clip", "picture", "flux"];
+// one Picture chip in the simple studio: the model Settings › Presets names (FLUX3-K where that is it), else Qwen
+const hcPictureChip = () => /^flux/.test(homePrefs().presets.image_model || "") && hcHas("flux") ? "flux" : "picture";
+const hcShown = id => hcHas(id) && (!hcSimple() || id === "clip" || id === hcPictureChip());
+const hcMode = () => { const m = hcModeAny(); return !hcSimple() ? m : m === "picture" || m === "flux" ? hcPictureChip() : HC_SIMPLE.includes(m) ? m : "clip"; };
+const hcModeAny = () => {
   if (S && S.platform === "windows") { if (["picture", "flux"].includes(HC.mode)) return HC.mode;
     const mode = HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
     return (typeof capWhy === "function" ? capWhy : () => "")(hcKind(mode)) && mode !== "picture" ? "picture" : mode; }
@@ -168,14 +178,19 @@ async function hcRequest(mode, text, seed, retake, model = hcModel(mode)) {
   const lyrics = /\[(intro|verse|pre-chorus|chorus|bridge|instrumental|outro)\]/i.test(text);
   const chosen = hcSongEngines() ? { engine: mode === "yue" ? "yue2" : "music3" } : {};
   return ["/api/music/takes", lyrics ? { caption: "A warm, cinematic song with a clear lead vocal.", lyrics: text, seconds: 60, seed, ...chosen } : { caption: text, lyrics: "", seconds: 60, seed, ...chosen }]; }
+// a retake is the request that made the take, sent again with only its seed moved on: the recipe, length, picture model
+// and first frame it was made with stay, whatever the bar says now
+const hcReseed = (body, seed) => { const copy = JSON.parse(JSON.stringify(body)); if (copy.params) copy.params.seed = seed; else copy.seed = seed; return copy; };
 async function hcGenerate(again) {
   const mode = again ? again.mode : hcMode(), text = (again ? again.text : HC.text).trim();
   if (!text) return toast("Say what you want to make first");
   if (HC.busy) return; HC.busy = true; render();
-  try { const [path, body] = await hcRequest(mode, text, again ? again.seed + 1 : hcSeed(), !!again, again?.image_model || hcModel(mode));
+  try { // a retake replays its own request, but the model it names is checked again as Generate checks it (Windows' catalog)
+    const why = hcWhy(mode, again?.request?.[1]?.params?.image_model || again?.image_model || hcModel(mode)); if (why) throw new Error(why);
+    const [path, body] = again && again.request ? [again.request[0], hcReseed(again.request[1], again.seed + 1)] : await hcRequest(mode, text, again ? again.seed + 1 : hcSeed(), !!again, again?.image_model || hcModel(mode));
     const job = await api(path, body), seed = (body.params ? body.params.seed : body.seed) ?? 1;
-    HC.made.unshift({ id: job.id, mode, text, seed, image_model: body.params?.image_model, title: job.title || hcTitle(text) }); HC.made = HC.made.slice(0, 12);
-    HC.image = null; toast("Queued: " + (job.title || hcTitle(text))); if (typeof poll === "function") await poll(); }
+    HC.made.unshift({ id: job.id, mode, text, seed, image_model: body.params?.image_model, title: job.title || hcTitle(text), request: [path, JSON.parse(JSON.stringify(body))] }); HC.made = HC.made.slice(0, 12);
+    if (!again) HC.image = null; toast("Queued: " + (job.title || hcTitle(text))); if (typeof poll === "function") await poll(); }
   catch (e) { toast(e.message, 6000); }
   HC.busy = false; render(); }
 // the full form for this kind of take, with the words carried over
@@ -188,11 +203,17 @@ function hcFromSuite(p) { HC.text = p.prompt || ""; HC.mode = "clip"; HC.image =
   if (p.seconds) { const have = Object.keys((S && S.durations) || {}).map(Number); HC.seconds = have.length ? have.reduce((a, b) => Math.abs(b - p.seconds) < Math.abs(a - p.seconds) ? b : a) : Math.round(p.seconds); }
   render(); }
 function hcAgent() { const text = HC.text.trim(); if (typeof AG !== "undefined") { AG.prompt = text; AG.draft = text; } if (typeof window !== "undefined") window.AGENT_DRAFT = text; go("Agent"); }
+// what follows a picture: a clip that opens on it, or Quick Edit with it loaded
+const hcPictureActs = path => [el("button", { class: "small", title: "A clip that opens on this picture", onclick: () => startCreate({ image: path, goes: "video", start: "own" }, 1) }, "Animate"),
+  typeof qkOpen === "function" ? el("button", { class: "small", title: "Change something in this picture (Quick Edit)", onclick: () => qkOpen(path) }, "Edit") : null];
 function hcMade() { if (!HC.made.length) return null;
   return el("div", { class: "cmp-made" }, el("span", { class: "eyebrow" }, "Just made"), el("div", { class: "strip2" }, HC.made.map(m => { const j = jobs.find(x => x.id === m.id) || { status: "queued" };
-    const out = (j.outputs || []).find(o => !/sheet\.jpg$/.test(o));
-    return el("div", { class: "tile", "data-made": m.id }, out ? media(out, /\.(mp4|mov)$/i.test(out) ? { controls: true, muted: true, playsinline: true } : {}) : el("div", { class: "cmp-wait" }, el("span", { class: "pill " + j.status }, j.status)),
+    const out = (j.outputs || []).find(o => !/sheet\.jpg$/.test(o)), clip = out && /\.(mp4|mov)$/i.test(out);
+    const shown = out ? media(out, clip ? { controls: true, muted: true, playsinline: true } : {}) : null;
+    return el("div", { class: "tile", "data-made": m.id }, shown || el("div", { class: "cmp-wait" }, el("span", { class: "pill " + j.status }, j.status)),
       el("div", { class: "cap" }, el("span", {}, m.title), out ? el("button", { class: "small", onclick: () => go("Library") }, "Open") : null,
+        out && /\.(png|jpe?g|webp)$/i.test(out) ? hcPictureActs(out) : null, clip && typeof qkFrameButton === "function" ? qkFrameButton(out, shown) : null,
+        clip && m.request && typeof betterButton === "function" ? betterButton(m.request[1], (job, ask) => { HC.made.unshift({ ...m, id: job.id, title: job.title || ask.title, request: ["/api/jobs", ask] }); HC.made = HC.made.slice(0, 12); }) : null,
         el("button", { class: "small", disabled: !["done", "failed", "cancelled"].includes(j.status), onclick: () => hcGenerate(m) }, "Retake"))); }))); }
 function homeComposer() {
   const mode = hcMode(), [, , , hint] = HC_MODES[mode];
@@ -204,7 +225,7 @@ function homeComposer() {
   const recipes = HC_RECIPES(), ids = Object.keys(recipes), rec = hcRecipe();
   return el("div", { class: "cmp-wrap" }, el("section", { class: "composer", id: "composer" },
     el("div", { class: "cmp-head" },
-      el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).filter(([id]) => hcHas(id)).map(([id, [label, mk, model]]) =>
+      el("div", { class: "cmp-modes", role: "tablist", "aria-label": "What to make" }, Object.entries(HC_MODES).filter(([id]) => hcShown(id)).map(([id, [label, mk, model]]) =>
         el("button", { type: "button", role: "tab", "data-mode": id, title: hcWhy(id) || label + " · " + model, disabled: !!hcWhy(id), "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
           el("b", {}, label), S && S.platform === "windows" && ["picture", "flux"].includes(id)
             ? hcModels().find(m => m.id === hcModel(id))?.label || hcModel(id) : typeof mark === "function" ? mark(mk, model) : model)))),
@@ -227,8 +248,8 @@ function homeComposer() {
       el("button", { type: "button", class: "primary cmp-go", title: hcWhy(mode), disabled: HC.busy || !!hcWhy(mode), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵"))),
     hcMade()),
     el("div", { class: "cmp-alt" }, el("span", { class: "cmp-hint" }, hint), el("span", { class: "su-grow" }),
-      el("button", { type: "button", class: "ghost small cmp-agent", onclick: hcAgent }, "Ask your agent instead"),
-      typeof suitePromptPicker === "function" ? el("button", { type: "button", class: "ghost small cmp-suite", onclick: () => suitePromptPicker(hcFromSuite) }, "From the suite") : null,
+      hcSimple() ? null : el("button", { type: "button", class: "ghost small cmp-agent", onclick: hcAgent }, "Ask your agent instead"),
+      typeof suitePromptPicker === "function" && !hcSimple() ? el("button", { type: "button", class: "ghost small cmp-suite", onclick: () => suitePromptPicker(hcFromSuite) }, "From the suite") : null,
       el("a", { href: "#Create", class: "cmp-more", onclick: e => { if (e.preventDefault) e.preventDefault(); hcMore(); } }, "More options →"))); }
 
 // Home, right of the composer: what is rendering now and what is next, then this machine in one card
@@ -252,17 +273,26 @@ function viewHome() {
   const main = el("div", { class: "home-main" },
     el("h1", { class: "home-ask" }, "What are we making?"),
     typeof connectNudge === "function" ? connectNudge("home") : null, homeComposer());
-  const starts = STARTS().filter(s => startShown(look, s.id));
+  const simple = hcSimple();
+  // the simple studio's Home: the box, what was just made and the recent takes; the rest is in its rooms
+  if (!simple) { let off = false; try { off = localStorage.getItem("simple-invite-off") === "1"; } catch {}
+    if (!off && typeof simpleSet === "function") put(main, el("div", { class: "note simple-invite" }, el("b", {}, "Too much here? "), "The simple studio shows only Home, Video, Image and Library; every other room stays one ⌘K away. ",
+      el("button", { type: "button", class: "small", onclick: () => simpleSet(true) }, "Try it"), " ",
+      el("button", { type: "button", class: "small ghost", onclick: () => { try { localStorage.setItem("simple-invite-off", "1"); } catch {} render(); } }, "Not now"))); }
+  const starts = simple ? [] : STARTS().filter(s => startShown(look, s.id));
   if (starts.length) put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Start something"), el("span", { class: "note" }, "Each opens the full form with sensible settings.")),
     el("div", { class: "starts" }, starts.map(s => el("button", { type: "button", class: "start", "data-start": s.id, title: s.one, onclick: s.run }, icon(s.sign || "video", "ic"), el("span", { class: "t" }, el("b", {}, s.title), el("small", {}, s.one))))));
   put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Recent takes"), el("a", { href: "#Library", onclick: e => { if (e.preventDefault) e.preventDefault(); go("Library"); } }, "Open Library →")), recent);
   api("/api/library").then(list => { SHELL.libCache = list; const pick = list.filter(m => m.kind !== "audio").slice(0, 8);
     recent.replaceChildren(...(pick.length ? pick.map(m => el("div", { class: "take" }, el("div", { class: "pic" }, media(m.path, m.kind === "video" ? { controls: false, muted: true, loop: true, playsinline: true, preload: "metadata", src: file(m.path) + "#t=0.5", onmouseenter: e => e.target.play().catch(() => {}), onmouseleave: e => e.target.pause() } : {})),
       el("div", { class: "cap" }, el("span", {}, m.path.split("/").pop()), m.kind === "video" ? el("button", { class: "small ghost", onclick: () => addToTimeline(m.path) }, "+ timeline")
-        : el("button", { class: "small ghost", onclick: () => startCreate({ image: m.path, goes: "video", start: "own" }, 1) }, "Animate"))))
+        : [el("button", { class: "small ghost", onclick: () => startCreate({ image: m.path, goes: "video", start: "own" }, 1) }, "Animate"),
+          typeof qkOpen === "function" ? el("button", { class: "small ghost", title: "Change something in this picture (Quick Edit)", onclick: () => qkOpen(m.path) }, "Edit") : null])))
       : [el("div", { class: "note" }, "Nothing rendered yet. Your takes will line up here.")])); }).catch(() => recent.replaceChildren(el("div", { class: "note" }, "The Library could not be read.")));
-  if (typeof nightPanel === "function") put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Night shift"), el("span", { class: "note" }, "A batch rendered while you sleep, with dailies in the morning.")), nightPanel());
-  put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Wasserman's Filmmaker Suite"), el("a", { href: "#Import", onclick: e => { if (e.preventDefault) e.preventDefault(); go("Import"); } }, "The whole suite, built in →")),
+  if (simple) put(main, el("p", { class: "note home-simple" }, "Voice, music, film, motion graphics and the other rooms: Search (⌘K), or ",
+    el("button", { type: "button", class: "small ghost", onclick: () => simpleSet(false) }, "show all tools"), "."));
+  if (typeof nightPanel === "function" && !simple) put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Night shift"), el("span", { class: "note" }, "A batch rendered while you sleep, with dailies in the morning.")), nightPanel());
+  if (!simple) put(main, el("div", { class: "sectionhead" }, el("h2", {}, "Wasserman's Filmmaker Suite"), el("a", { href: "#Import", onclick: e => { if (e.preventDefault) e.preventDefault(); go("Import"); } }, "The whole suite, built in →")),
     el("div", { class: "suiteRow" }, SUITE_APPS.map(([n, s]) => el("button", { class: "app", type: "button", title: s, onclick: () => go("Import") },
       el("img", { src: "art/suite/" + SUITE_SLUG[n] + ".webp", alt: "", width: 32, height: 32, loading: "lazy" }), el("b", {}, n)))));
   put(main, el("p", { class: "home-foot" }, "Imagination Studio by keys+Wasserman · ", el("span", { class: "home-links" }, HOME_LINKS.map(([label, url]) => el("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, label)))));

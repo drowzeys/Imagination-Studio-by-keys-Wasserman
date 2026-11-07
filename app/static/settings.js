@@ -4,7 +4,8 @@
 // the look is also kept in this browser so the next load paints with it before the server answers.
 const SET_DEFAULTS = {
   appearance: { theme: "studio", type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], start_off: [] },
-  layout: { hidden: [], order: [] },
+  // simple is the server's to say (app/settings.py: on for a new studio); until it answers, nothing is hidden
+  layout: { hidden: [], order: [], simple: false },
   presets: { recipe: "quick", image_model: "qwen", seconds: 5, qa_gate: true, audio_rate: "keep", seed: "fixed", mode: "clip", captions_auto: true, music_engine: "auto" },
   hermes_profile: "", hermes_command: "" };
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false },
@@ -62,11 +63,17 @@ const prefSeed = () => prefs().presets.seed === "random" ? 1 + Math.floor(Math.r
 function prefsToCreate() { if (typeof C === "undefined" || (typeof location !== "undefined" && location.search && location.search.length > 1)) return;
   const p = prefs().presets; C.imageModel = ""; C.seconds = p.seconds;
   if (p.recipe !== "custom") { const r = recipeParams(p.recipe); Object.assign(C, { engine: r.engine, passes: r.passes, res: r.res, up: r.up, steps: "" }); if (r.seed) C.seed = r.seed; }
-  if (p.seed === "random") C.seed = prefSeed(); if (typeof sync === "function") sync(); }
+  // a recipe that fixes its own seed (the Sharp Spec's 42) keeps it; Settings' random seed is for the others
+  if (p.seed === "random" && !(p.recipe !== "custom" && recipeParams(p.recipe).seed)) C.seed = prefSeed(); if (typeof sync === "function") sync(); }
 // the sidebar's rooms in the user's order, without the hidden ones (Machine and Settings always stay)
+// the simple studio: Home, Video, Image and Library (Machine and Settings always); every other room stays one ⌘K away
+const SIMPLE_ROOMS = ["video", "image", "library"];
+const simpleOn = () => !!prefs().layout.simple;
+function simpleSet(on) { return settingsSave({ layout: { simple: !!on } }, true).then(() => toast(on ? "Simple studio: Home, Video, Image and Library. Everything else is in Search (⌘K)." : "Every room is in the sidebar again.")); }
 function roomsShown(list) { const lay = prefs().layout, order = lay.order || [];
+  if (lay.simple) list = list.filter(r => ALWAYS_ROOMS.includes(r.id) || SIMPLE_ROOMS.includes(r.id));
   const rank = r => { const i = order.indexOf(r.id); return i < 0 ? 1000 + list.indexOf(r) : i; };
-  return list.filter(r => ALWAYS_ROOMS.includes(r.id) || !(lay.hidden || []).includes(r.id)).sort((a, b) => rank(a) - rank(b)); }
+  return list.filter(r => ALWAYS_ROOMS.includes(r.id) || lay.simple || !(lay.hidden || []).includes(r.id)).sort((a, b) => rank(a) - rank(b)); }
 
 /* ---------- the parts every section is made of ---------- */
 const setSeg = (value, options, pick, label) => el("div", { class: "seg-ctl", role: "radiogroup", "aria-label": label || "" },
@@ -107,7 +114,9 @@ function setLayout() { const lay = prefs().layout, hidden = new Set(lay.hidden |
     const at = peers.indexOf(id), to = at + by; if (to < 0 || to >= peers.length) return;
     const other = peers[to], i = list.indexOf(id), j = list.indexOf(other); list[i] = other; list[j] = id; settingsSave({ layout: { order: list } }, true); };
   const flip = id => { const next = new Set(hidden); next.has(id) ? next.delete(id) : next.add(id); settingsSave({ layout: { hidden: [...next] } }, true); };
-  return [setPanel("Studio layout", "Show or hide each room in the sidebar, and put them in your order. A hidden room stays one ⌘K away; Home, Machine and Settings always stay.",
+  return [setPanel("Simple studio", "Only what makes and changes pictures and clips: Home, Video, Image and Library, with Machine and Settings. Every other room stays one ⌘K away, and your own layout below comes back when it is off.",
+    setRow("Simple studio", lay.simple ? "On: Home, Video, Image and Library" : "Off: every room you have not hidden", setSwitch(!!lay.simple, on => simpleSet(on), "Simple studio"))),
+    setPanel("Studio layout", "Show or hide each room in the sidebar, and put them in your order. A hidden room stays one ⌘K away; Home, Machine and Settings always stay." + (lay.simple ? " The simple studio is on: this layout shows when it is off." : ""),
     groups.map(g => { const rooms = full().filter(r => r.group === g.id); if (!rooms.length) return null;
       return el("div", { class: "st-group" }, el("div", { class: "eyebrow" }, g.name || g.label || "Agent"),
         rooms.map((r, i) => { const always = ALWAYS_ROOMS.includes(r.id), shown = always || !hidden.has(r.id);
@@ -126,7 +135,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
   const yue = !!(S && S.music && S.music.engines && S.music.engines.yue2 && S.music.engines.yue2.installed);
   const secs = el("select", { "aria-label": "Default clip length", onchange: e => put1({ seconds: Number(e.target.value) }) }, (lengths.length ? lengths : [5]).map(n => el("option", { value: n, selected: Number(p.seconds) === n }, n + " s")));
   return [setPanel("Presets & preferences", "What a new take starts from: the Home composer and the Create wizard open with these.",
-    setRow("Render recipe", "For clips from Home and a new Create", setSeg(p.recipe, { quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K", custom: "Custom" }, v => put1({ recipe: v }), "Render recipe")),
+    setRow("Render recipe", "For clips from Home and a new Create", setSeg(p.recipe, { quick: "Draft", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final", custom: "Custom" }, v => put1({ recipe: v }), "Render recipe")),
     setRow("Picture model", "For stills and scouts", model),
     setRow("Clip length", "A clip's seconds; the exact frames are shown before it is queued", secs),
     setRow("Home starts on", "The composer's first chip", setSeg(p.mode, { clip: "Clip", picture: "Picture", voice: "Voice", song: "Song" }, v => put1({ mode: v }), "Home starts on")),
@@ -134,7 +143,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
     setRow("Describe new clips automatically", "When nothing is rendering, the local model looks at new clips and pictures so the Library can search by what is in them", setSwitch(p.captions_auto !== false, v => put1({ captions_auto: v }), "Describe new clips automatically")),
     setRow("Delivery sound", (typeof cardFace === "function" && cardFace() ? "On this GPU" : "On a DGX Spark") + " a clip's sound is 32 kHz; 48 kHz stereo re-encodes only the sound", setSeg(p.audio_rate, { keep: "Keep 32 kHz", "48000": "48 kHz stereo" }, v => put1({ audio_rate: v }), "Delivery sound")),
     setRow("Song engine", "For the Music tab: best here is YuE2 where it is installed (Linux, NVIDIA) and MiniMax Music 3 on a Mac; each song can still choose", setSeg(p.music_engine === "yue2" && !yue ? "auto" : p.music_engine || "auto", { auto: "Best here", ...(yue ? { yue2: "YuE2" } : {}), music3: "MiniMax Music 3" }, v => put1({ music_engine: v }), "Song engine")),
-    setRow("Seed", "Fixed repeats a take; random gives each a new one", setSeg(p.seed, { fixed: "Fixed", random: "Random" }, v => put1({ seed: v }), "Seed")),
+    setRow("Seed", "Fixed: Render again repeats a take, Another take moves the seed on. Random: every take a new seed", setSeg(p.seed, { fixed: "Fixed", random: "Random" }, v => put1({ seed: v }), "Seed")),
     setRow("Renders go to", "The studio folder, set when the studio starts (STUDIO_HOME)", el("code", { class: "st-path" }, (S && S.home) || "the studio folder")))]; }
 
 /* ---------- 4. Connections ---------- */
