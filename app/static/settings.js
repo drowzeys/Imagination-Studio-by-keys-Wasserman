@@ -4,12 +4,13 @@
 // the look is also kept in this browser so the next load paints with it before the server answers.
 const SET_DEFAULTS = {
   appearance: { theme: "studio", type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], start_off: [] },
-  layout: { hidden: [], order: [] },
+  // simple is the server's to say (app/settings.py: on for a new studio); until it answers, nothing is hidden
+  layout: { hidden: [], order: [], simple: false },
   presets: { recipe: "quick", image_model: "qwen", seconds: 5, qa_gate: true, audio_rate: "keep", seed: "fixed", mode: "clip", captions_auto: true, music_engine: "auto" },
   hermes_profile: "", hermes_command: "" };
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false },
   agents: { name: "", endpoint: "", model: "", nearby: null, finding: false, adding: false, said: {}, testing: {} }, about: null };
-const SET_SECTIONS = [["appearance", "Appearance", "theme, type, glow, accent"], ["layout", "Studio layout", "what the sidebar shows"],
+const SET_SECTIONS = [["appearance", "Appearance", "theme, type, accent"], ["layout", "Studio layout", "what the sidebar shows"],
   ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"], ["access", "Access key", "sign in your phone, a new key"], ["notify", "Notifications", "a night shift done, on your phone"],
   ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to five DGX Sparks for a job"],
   ["brains", "Brains & tools", "your agents, another computer, MCP tools"], ["updates", "Updates", "the version and the branch it follows"], ["about", "About", "version, credits, licences"]];
@@ -21,15 +22,31 @@ const ALWAYS_ROOMS = ["machine", "settings"];
 function prefs() { const d = SET.data || {}, out = {};
   for (const k of Object.keys(SET_DEFAULTS)) out[k] = typeof SET_DEFAULTS[k] === "object" && !Array.isArray(SET_DEFAULTS[k]) ? { ...SET_DEFAULTS[k], ...(d[k] || {}) } : (d[k] ?? SET_DEFAULTS[k]);
   return out; }
-// the look on <html>: a type size class, glow and poster off, the accent, reduced motion
+// the look on <html>: the theme, a type size class, the accent, reduced motion (glow and poster are kept for old saves)
 function prefsApply(look) { const a = { ...SET_DEFAULTS.appearance, ...(look || prefs().appearance) }, root = typeof document !== "undefined" && document.documentElement;
   if (!root || !root.classList) return a;
-  for (const c of ["theme-oled", "type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
-  if (a.theme === "oled") root.classList.add("theme-oled");
+  for (const c of ["theme-light", "theme-oled", "type-compact", "type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
+  const shown = themeShown(a.theme);
+  if (shown === "light") root.classList.add("theme-light"); if (shown === "oled") root.classList.add("theme-oled");
+  const meta = typeof document.querySelector === "function" && document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", shown === "light" ? "#FAFAF9" : shown === "oled" ? "#000000" : "#0C0C0E");
+  themeButton(shown);
   if (a.type_size !== "comfortable") root.classList.add("type-" + a.type_size);
   if (!a.glow) root.classList.add("no-glow"); if (!a.poster) root.classList.add("no-poster");
   if (a.accent === "cobalt") root.classList.add("accent-cobalt"); if (a.motion === "reduce") root.classList.add("motion-reduce");
   return a; }
+// the theme on screen: "system" follows the computer's light or dark, and changes with it while the page is open
+const themeDark = () => typeof window !== "undefined" && window.matchMedia ? !window.matchMedia("(prefers-color-scheme: light)").matches : true;
+function themeShown(theme) { return theme === "system" ? (themeDark() ? "studio" : "light") : theme || "studio"; }
+try { window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (prefs().appearance.theme === "system") prefsApply(); }); } catch {}
+// the top bar's switch: light when dark is showing, dark (or OLED, if that was the dark chosen before) when light is
+function themeButton(shown) { const b = typeof document !== "undefined" && document.getElementById && document.getElementById("themebtn"); if (!b) return;
+  const light = shown === "light"; if (typeof ICON !== "undefined") b.innerHTML = ICON[light ? "moon" : "sun"]; b.title = light ? "Switch to dark" : "Switch to light";
+  b.setAttribute("aria-label", b.title); }
+function themeFlip() { const a = prefs().appearance, light = themeShown(a.theme) === "light";
+  let dark = "studio"; try { dark = localStorage.getItem("studio-dark") || "studio"; } catch {}
+  if (!light) { try { localStorage.setItem("studio-dark", themeShown(a.theme)); } catch {} }
+  return settingsSave({ appearance: { theme: light ? dark : "light" } }, true); }
 function prefsMirror() { try { localStorage.setItem("studio-look", JSON.stringify(prefs().appearance)); } catch {} }
 // once, when the page opens: the saved settings, the look applied, and the Create wizard's defaults set from the presets
 async function settingsLoad() { try { const r = await api("/api/settings"); SET.data = r.settings || null; } catch { SET.data = SET.data || null; }
@@ -46,16 +63,29 @@ const prefSeed = () => prefs().presets.seed === "random" ? 1 + Math.floor(Math.r
 function prefsToCreate() { if (typeof C === "undefined" || (typeof location !== "undefined" && location.search && location.search.length > 1)) return;
   const p = prefs().presets; C.imageModel = ""; C.seconds = p.seconds;
   if (p.recipe !== "custom") { const r = recipeParams(p.recipe); Object.assign(C, { engine: r.engine, passes: r.passes, res: r.res, up: r.up, steps: "" }); if (r.seed) C.seed = r.seed; }
-  if (p.seed === "random") C.seed = prefSeed(); if (typeof sync === "function") sync(); }
+  // a recipe that fixes its own seed (the Sharp Spec's 42) keeps it; Settings' random seed is for the others
+  if (p.seed === "random" && !(p.recipe !== "custom" && recipeParams(p.recipe).seed)) C.seed = prefSeed(); if (typeof sync === "function") sync(); }
 // the sidebar's rooms in the user's order, without the hidden ones (Machine and Settings always stay)
+// the simple studio: Home, Video, Image and Library (Machine and Settings always); every other room stays one ⌘K away
+const SIMPLE_ROOMS = ["video", "image", "library"];
+const simpleOn = () => !!prefs().layout.simple;
+function simpleSet(on) { return settingsSave({ layout: { simple: !!on } }, true).then(() => toast(on ? "Simple studio: Home, Video, Image and Library. Everything else is in Search (⌘K)." : "Every room is in the sidebar again.")); }
 function roomsShown(list) { const lay = prefs().layout, order = lay.order || [];
+  if (lay.simple) list = list.filter(r => ALWAYS_ROOMS.includes(r.id) || SIMPLE_ROOMS.includes(r.id));
   const rank = r => { const i = order.indexOf(r.id); return i < 0 ? 1000 + list.indexOf(r) : i; };
-  return list.filter(r => ALWAYS_ROOMS.includes(r.id) || !(lay.hidden || []).includes(r.id)).sort((a, b) => rank(a) - rank(b)); }
+  return list.filter(r => ALWAYS_ROOMS.includes(r.id) || lay.simple || !(lay.hidden || []).includes(r.id)).sort((a, b) => rank(a) - rank(b)); }
 
 /* ---------- the parts every section is made of ---------- */
 const setSeg = (value, options, pick, label) => el("div", { class: "seg-ctl", role: "radiogroup", "aria-label": label || "" },
   Object.entries(options).map(([k, t]) => el("button", { type: "button", role: "radio", "aria-checked": value === k ? "true" : "false", class: value === k ? "on" : "", onclick: () => { if (value !== k) pick(k); } }, t)));
 const setSwitch = (on, flip, label) => el("button", { type: "button", role: "switch", class: "st-switch" + (on ? " on" : ""), "aria-checked": on ? "true" : "false", "aria-label": label, onclick: () => flip(!on) }, el("i"));
+// the themes as cards, each with a small picture of the studio in it: the sidebar, a title, a panel and the one accent
+const SET_THEMES = [["system", "Match the computer", "Light by day, dark at night"], ["light", "Light", "Off-white, white panels"], ["studio", "Dark", "Graphite"], ["oled", "Dark (OLED)", "True black for OLED screens"]];
+const setThemes = (value, pick) => el("div", { class: "st-themes", role: "radiogroup", "aria-label": "Theme" }, SET_THEMES.map(([k, title, line]) =>
+  el("button", { type: "button", role: "radio", "aria-checked": value === k ? "true" : "false", class: "st-theme" + (value === k ? " on" : ""), "data-theme": k, onclick: () => pick(k) },
+    el("span", { class: "st-mini mini-" + k, "aria-hidden": "true" }, el("i", { class: "m-side" }, el("i", { class: "m-logo" }), el("i", { class: "m-bar" }), el("i", { class: "m-bar s" }), el("i", { class: "m-bar" })),
+      el("i", { class: "m-main" }, el("i", { class: "m-title" }), el("i", { class: "m-panel" }), el("i", { class: "m-go" })), k === "system" ? el("i", { class: "m-half" }) : null),
+    el("span", { class: "st-tname" }, el("b", {}, title), el("small", {}, line)))));
 const setRow = (title, one, control) => el("div", { class: "st-row" }, el("div", { class: "st-what" }, el("b", {}, title), one ? el("span", {}, one) : null), el("div", { class: "st-ctl" }, control));
 const setPanel = (title, line, ...kids) => el("section", { class: "panel st-panel" }, el("div", { class: "st-ph" }, el("h2", {}, title), line ? el("p", { class: "note m-flat" }, line) : null), ...kids);
 
@@ -63,13 +93,12 @@ const setPanel = (title, line, ...kids) => el("section", { class: "panel st-pane
 const START_NAMES = { clip: "A clip with sound", scout: "Scout, then animate", still: "A still", sharp: "Sharp Spec", long: "A long take", voice: "A voice line", song: "A song", sfx: "Sound effects & foley", looks: "Looks", previs: "Previs", nodes: "Nodes", agent: "Ask your agent" };
 function setAppearance() { const a = prefs().appearance, put1 = patch => settingsSave({ appearance: patch }, true);
   return [setPanel("Appearance", "Applied as you choose, on this screen and every other one that opens the studio.",
-    setRow("Theme", "The studio's dark, or the same on true black, for OLED screens", setSeg(a.theme || "studio", { studio: "Studio", oled: "Dark (OLED)" }, v => put1({ theme: v }), "Theme")),
-    setRow("Type size", "Text and controls in the work area", setSeg(a.type_size, { comfortable: "Comfortable", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Type size")),
-    setRow("Glowing pills", "The soft amber glow on the active place and the machine chip", setSwitch(a.glow, v => put1({ glow: v }), "Glowing pills")),
-    setRow("Poster on Home", "The key art beside the greeting", setSwitch(a.poster, v => put1({ poster: v }), "Poster on Home")),
-    setRow("Accent", "The colour of the one primary button and the active place",
-      setSeg(a.accent, { amber: "Amber", cobalt: "Cobalt" }, v => put1({ accent: v }), "Accent")),
-    setRow("Motion", "The breathing tally lights and hover moves", setSeg(a.motion, { system: "Follow the system", reduce: "Always reduce" }, v => put1({ motion: v }), "Motion"))),
+    el("div", { class: "st-themes-wrap" }, el("div", { class: "st-what" }, el("b", {}, "Theme"), el("span", {}, "The sun and moon in the top bar switch between light and dark.")), setThemes(a.theme || "studio", v => put1({ theme: v }))),
+    setRow("Text size", "The whole studio: the sidebar, every room and the queue", setSeg(a.type_size, { compact: "Small", comfortable: "Default", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Text size")),
+    setRow("Accent", "The one colour for the main button, what is selected and progress",
+      el("div", { class: "st-accents", role: "radiogroup", "aria-label": "Accent" }, [["amber", "Amber"], ["cobalt", "Cobalt"]].map(([k, t]) =>
+        el("button", { type: "button", role: "radio", "aria-checked": a.accent === k ? "true" : "false", class: "st-accent" + (a.accent === k ? " on" : ""), onclick: () => put1({ accent: k }) }, el("span", { class: "sw sw-" + k, "aria-hidden": "true" }), t)))),
+    setRow("Motion", "The pulsing rendering dot and the panels that slide", setSeg(a.motion, { system: "Follow the system", reduce: "Always reduce" }, v => put1({ motion: v }), "Motion"))),
   setPanel("Start cards on Home", "Which ways in sit under the composer. Six fill one row.",
     el("div", { class: "chips st-chips" }, Object.entries(START_NAMES).map(([id, name]) => { const off = a.start_off || [], on = typeof startShown === "function" ? startShown(a, id) : a.start_cards.includes(id);
       return el("button", { type: "button", class: "toggle" + (on ? " on" : ""), "aria-pressed": on ? "true" : "false",
@@ -85,7 +114,9 @@ function setLayout() { const lay = prefs().layout, hidden = new Set(lay.hidden |
     const at = peers.indexOf(id), to = at + by; if (to < 0 || to >= peers.length) return;
     const other = peers[to], i = list.indexOf(id), j = list.indexOf(other); list[i] = other; list[j] = id; settingsSave({ layout: { order: list } }, true); };
   const flip = id => { const next = new Set(hidden); next.has(id) ? next.delete(id) : next.add(id); settingsSave({ layout: { hidden: [...next] } }, true); };
-  return [setPanel("Studio layout", "Show or hide each room in the sidebar, and put them in your order. A hidden room stays one ⌘K away; Home, Machine and Settings always stay.",
+  return [setPanel("Simple studio", "Only what makes and changes pictures and clips: Home, Video, Image and Library, with Machine and Settings. Every other room stays one ⌘K away, and your own layout below comes back when it is off.",
+    setRow("Simple studio", lay.simple ? "On: Home, Video, Image and Library" : "Off: every room you have not hidden", setSwitch(!!lay.simple, on => simpleSet(on), "Simple studio"))),
+    setPanel("Studio layout", "Show or hide each room in the sidebar, and put them in your order. A hidden room stays one ⌘K away; Home, Machine and Settings always stay." + (lay.simple ? " The simple studio is on: this layout shows when it is off." : ""),
     groups.map(g => { const rooms = full().filter(r => r.group === g.id); if (!rooms.length) return null;
       return el("div", { class: "st-group" }, el("div", { class: "eyebrow" }, g.name || g.label || "Agent"),
         rooms.map((r, i) => { const always = ALWAYS_ROOMS.includes(r.id), shown = always || !hidden.has(r.id);
@@ -104,7 +135,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
   const yue = !!(S && S.music && S.music.engines && S.music.engines.yue2 && S.music.engines.yue2.installed);
   const secs = el("select", { "aria-label": "Default clip length", onchange: e => put1({ seconds: Number(e.target.value) }) }, (lengths.length ? lengths : [5]).map(n => el("option", { value: n, selected: Number(p.seconds) === n }, n + " s")));
   return [setPanel("Presets & preferences", "What a new take starts from: the Home composer and the Create wizard open with these.",
-    setRow("Render recipe", "For clips from Home and a new Create", setSeg(p.recipe, { quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K", custom: "Custom" }, v => put1({ recipe: v }), "Render recipe")),
+    setRow("Render recipe", "For clips from Home and a new Create", setSeg(p.recipe, { quick: "Draft", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final", custom: "Custom" }, v => put1({ recipe: v }), "Render recipe")),
     setRow("Picture model", "For stills and scouts", model),
     setRow("Clip length", "A clip's seconds; the exact frames are shown before it is queued", secs),
     setRow("Home starts on", "The composer's first chip", setSeg(p.mode, { clip: "Clip", picture: "Picture", voice: "Voice", song: "Song" }, v => put1({ mode: v }), "Home starts on")),
@@ -112,7 +143,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
     setRow("Describe new clips automatically", "When nothing is rendering, the local model looks at new clips and pictures so the Library can search by what is in them", setSwitch(p.captions_auto !== false, v => put1({ captions_auto: v }), "Describe new clips automatically")),
     setRow("Delivery sound", (typeof cardFace === "function" && cardFace() ? "On this GPU" : "On a DGX Spark") + " a clip's sound is 32 kHz; 48 kHz stereo re-encodes only the sound", setSeg(p.audio_rate, { keep: "Keep 32 kHz", "48000": "48 kHz stereo" }, v => put1({ audio_rate: v }), "Delivery sound")),
     setRow("Song engine", "For the Music tab: best here is YuE2 where it is installed (Linux, NVIDIA) and MiniMax Music 3 on a Mac; each song can still choose", setSeg(p.music_engine === "yue2" && !yue ? "auto" : p.music_engine || "auto", { auto: "Best here", ...(yue ? { yue2: "YuE2" } : {}), music3: "MiniMax Music 3" }, v => put1({ music_engine: v }), "Song engine")),
-    setRow("Seed", "Fixed repeats a take; random gives each a new one", setSeg(p.seed, { fixed: "Fixed", random: "Random" }, v => put1({ seed: v }), "Seed")),
+    setRow("Seed", "Fixed: Render again repeats a take, Another take moves the seed on. Random: every take a new seed", setSeg(p.seed, { fixed: "Fixed", random: "Random" }, v => put1({ seed: v }), "Seed")),
     setRow("Renders go to", "The studio folder, set when the studio starts (STUDIO_HOME)", el("code", { class: "st-path" }, (S && S.home) || "the studio folder")))]; }
 
 /* ---------- 4. Connections ---------- */

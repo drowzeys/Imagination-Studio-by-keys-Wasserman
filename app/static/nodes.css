@@ -1,7 +1,7 @@
 /* Nodes (nodes.js): the canvas, its cards, ports and links, in the studio's tokens. Hairlines, a catch-light and a
    soft drop for depth, amber for the one action, cobalt for what is selected, green for what is done. A card's head
    is 38px and each port row 26px under a 1px border: nodes.js draws the links to those numbers (ND_HEAD, ND_ROW). */
-.nodes { display:flex; flex-direction:column; min-height:calc(100vh - var(--head) - var(--bay) - 64px); }
+.nodes { display:flex; flex-direction:column; min-height:calc(var(--vh, 100vh) - var(--head) - var(--bay) - 64px); }
 .nodes .pagehead { margin-bottom:18px; }
 .nd-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
 .nd-bar .fill { flex:1; }

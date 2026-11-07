@@ -2451,10 +2451,11 @@ def public(job: dict) -> dict:
 
 @app.get("/api/state")
 def state() -> dict:
+    # start: the canvas a first frame is put on (scouts are made at it), which the page fits a picture to
     local_windows = WINDOWS or WIN32
     selected_mode = windows_runtime.mode() if local_windows else None
     choices = windows_runtime.image_options(selected_mode) if local_windows else []
-    out = {"presets": {k: {"label": v[0], "size": v[1]} for k, v in PRESETS.items()},
+    out = {"presets": {k: {"label": v[0], "size": v[1], "start": SCOUT_SIZES.get(k, v[1])} for k, v in PRESETS.items()},
             "qualities": {k: v[0] for k, v in QUALITIES.items()}, "durations": DURATIONS, "long": LONG,
             "home": str(HOME), "pack": str(PACK), "version": (PACK / "VERSION").read_text().strip(),
             "zig": zig_ready() and not local_windows, "turbo": turbo_ready() and not SPARK and not local_windows,
@@ -3042,6 +3043,33 @@ def take_frame(body: dict) -> dict:
         raise HTTPException(400, "no frame could be read there")
     if not target.is_file():
         raise HTTPException(400, "no frame could be read there")
+    return {"path": relative(target)}
+
+
+@app.post("/api/fit")
+def fit_picture(body: dict) -> dict:
+    """A picture cut about its centre to a clip's shape (``width`` x ``height``), saved beside the uploads. A first frame
+    is stretched onto the clip's canvas (scripts/video.sh); this is the centre crop the renderer already gives a second
+    keyframe, offered on the page in one click when a picture's shape is not the clip's. Nothing is drawn or scaled."""
+
+    source = inside(str(body.get("path") or ""))
+    if not source.is_file() or source.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+        raise HTTPException(400, "a picture in the studio's folder is fitted (png, jpg or webp)")
+    width, height = body.get("width"), body.get("height")
+    if any(isinstance(v, bool) or not isinstance(v, int) or not 16 <= v <= 4096 for v in (width, height)):
+        raise HTTPException(400, "width and height are the clip's sides, whole numbers from 16 to 4096")
+    if not media_tools()["ffmpeg"]:
+        raise HTTPException(400, f"fitting a picture needs ffmpeg, which is not installed on this machine: {FFMPEG_HOW}")
+    target = HOME / "uploads" / f"{source.stem[:40]}_fit{width}x{height}_{uuid.uuid4().hex[:6]}.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    crop = f"crop=w='min(iw,ih*{width}/{height})':h='min(ih,iw*{height}/{width})'"
+    try:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(source), "-vf", crop, "-frames:v", "1", str(target)],
+                       check=True, env=environment({}), timeout=60, capture_output=True)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        raise HTTPException(400, "the picture could not be read")
+    if not target.is_file():
+        raise HTTPException(400, "the picture could not be read")
     return {"path": relative(target)}
 
 

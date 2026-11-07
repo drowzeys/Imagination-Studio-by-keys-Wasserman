@@ -14,6 +14,13 @@ async function qkTake(file) { if (!qkPicture(file)) return toast("Paste or drop 
   const data = new FormData(); data.append("file", file, file.name || ("pasted." + ((file.type || "image/png").split("/")[1] || "png").replace("jpeg", "jpg")));
   try { const r = await fetch("/api/upload", { method: "POST", body: data }); const j = await r.json(); if (!j.path) throw new Error(j.error || "upload failed");
     QK.image = /\.(mp4|mov)$/i.test(j.path) ? (await api("/api/frame", { path: j.path, at: "first" })).path : j.path; QK.picking = false; render(); } catch (e) { toast(e.message); } }
+// Edit on any picture in the studio: Quick Edit opens with it loaded, ready for the words
+function qkOpen(path) { QK.image = path; QK.prompt = ""; QK.picking = false; if (typeof go === "function") go("Quick Edit"); else { tab = "Quick Edit"; render(); } }
+// Edit this frame: a still of the frame a clip is showing (its player's time, else the first) opened in Quick Edit. The
+// clip itself is not changed; the edited still can open a new clip (Make a clip of it)
+async function qkFrame(path, player) { const t = player && Number.isFinite(player.currentTime) ? player.currentTime : 0, at = t > 0.05 ? Math.round(t * 100) / 100 : "first";
+  try { const r = await api("/api/frame", { path, at }); qkOpen(r.path); toast("A still of " + (at === "first" ? "the first frame" : at + " s") + " to edit: the clip itself is not changed"); } catch (e) { toast(e.message); } }
+const qkFrameButton = (path, player, cls) => el("button", { class: cls || "small", type: "button", title: "Edit a still of the frame the clip is showing (pause where you want it); the clip itself is not changed", onclick: () => qkFrame(path, typeof player === "function" ? player() : player) }, "Edit this frame");
 // ⌘V / Ctrl+V anywhere on the page while Quick Edit is open: a picture on the clipboard becomes the picture to edit
 function qkPaste(e) { if (tab !== "Quick Edit" || !e.clipboardData) return; const f = [...(e.clipboardData.files || [])].find(qkPicture); if (!f) return; e.preventDefault(); qkTake(f); }
 if (typeof document !== "undefined" && typeof document.addEventListener === "function") document.addEventListener("paste", qkPaste);
@@ -64,6 +71,8 @@ function viewQuick() { const body = el("div", { class: "quick" }), st = QK.state
     put(body, !QK.lib ? el("div", { class: "note" }, "Looking in the Library…") : stills.length ? el("div", { class: "grid", style: "margin-top:12px" }, stills.map(m => el("div", { class: "tile" + (QK.image === m.path ? " on" : ""), style: "cursor:pointer", title: m.path, onclick: () => { QK.image = m.path; QK.picking = false; render(); } }, media(m.path))))
       : el("div", { class: "note" }, "No pictures in the Library yet.")); }
   const m = qkModels().find(x => x.id === QK.model) || {};
-  put(body, el("div", { class: "note" }, "Describe the result, not the steps: what you do not mention is meant to stay. ", m.label ? m.label + " runs " + (steps[m.id] || "") + " with its own best settings; " : "", "there is nothing else to set. Results go to the Library; for LoRAs, camera angles or several pictures use Create › Edit a picture."),
+  put(body, el("div", { class: "note" }, "Describe the result, not the steps: what you do not mention is meant to stay. ", m.label ? m.label + " runs " + (steps[m.id] || "") + " with its own best settings; " : "", "there is nothing else to set. Results go to the Library. ",
+    typeof edOpen === "function" ? el("button", { type: "button", class: "small ghost", id: "quickmore", title: "Create › Edit a picture, with this picture, these words and this model: for LoRAs, camera angles or several pictures",
+      onclick: () => { Object.assign(ED, { prompt: QK.prompt, model: qkModel(), more: [], job: null, size: "source", base: false, loras: [], seed: Math.floor(Math.random() * 2147483647) || 1 }); edOpen(QK.image); } }, "More tools: LoRAs, angles, several pictures →") : "For LoRAs, camera angles or several pictures use Create › Edit a picture."),
     QK.turns.length ? el("div", { class: "qturns" }, el("h3", {}, "This session"), QK.turns.map(qkTurn)) : null);
   return el("section", { class: "card" }, body); }
