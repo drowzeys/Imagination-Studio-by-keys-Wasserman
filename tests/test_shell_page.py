@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ["shell.js", "captions.js", "home.js", "engines.js", "machine.js", "agent.js", "suite.js", "suitelinks.js", "updates.js", "settings.js", "sound.js",
-         "slate.js", "director.js", "nightshift.js", "looks.js", "train.js", "finish.js", "graphics.js", "roughcut.js", "rooms.js", "quick.js"]
+         "slate.js", "director.js", "nightshift.js", "looks.js", "train.js", "finish.js", "graphics.js", "roughcut.js", "rooms.js", "quick.js", "voice.js"]
 HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
 globalThis.S = { platform: "spark", platform_label: "DGX SPARK · NVIDIA GB10 · H3-CUDA", presets: { small: { size: [864, 480] }, p720: { size: [1280, 720] }, sharp: { size: [1376, 768] } },
@@ -33,7 +33,7 @@ globalThis.lorasOf = () => []; globalThis.refCount = () => 0; globalThis.framesO
 globalThis.mmss = s => Math.round(s) + " s"; globalThis.count = (n, w) => n + " " + w + (n === 1 ? "" : "s"); globalThis.file = p => "/files/" + p;
 globalThis.media = p => el("img", { src: p }); globalThis.addToTimeline = () => {}; globalThis.ensureProject = async () => project; globalThis.imageModel = () => "qwen";
 globalThis.stillParams = params => params;
-globalThis.bayOpenCalls = 0;
+globalThis.bayOpenCalls = 0; globalThis.lengthPicker = () => el("select", {});
 const text = node => node == null || node === false ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join(" ") : [node.attrs && node.attrs.placeholder, node.attrs && node.attrs.title, text(node.kids)].filter(Boolean).join(" ");
 globalThis.text = text;
 globalThis.el = (tag, attrs = {}, ...kids) => { const n = { tag, attrs, kids: kids.flat(), value: attrs.value || "", addEventListener() {}, classList: { add() {}, remove() {}, toggle() {} } };
@@ -195,12 +195,13 @@ def test_each_engine_opens_on_a_landing_whose_cards_open_the_views():
 
 
 def test_the_composer_offers_flux_and_yue_only_where_they_are_installed():
-    out = run("""const chips = () => homeComposer().kids[0].kids.map(n => n.attrs["data-mode"]);
-      const logos = () => homeComposer().kids[0].kids.map(n => find(n, k => k.tag === "img").attrs.src);
+    out = run("""const modes = () => find(homeComposer(), n => n.attrs && n.attrs.class === "cmp-modes");
+      const chips = () => modes().kids.map(n => n.attrs["data-mode"]);
+      const logos = () => modes().kids.map(n => find(n, k => k.tag === "img").attrs.src);
       out.bare = chips();
       S.image_models = [{ id: "qwen", label: "Qwen 2.1 Turbo" }, { id: "flux3k-fast", label: "FLUX3-K Fast" }, { id: "flux3k-full", label: "FLUX3-K Full" }];
       S.music = { available: true, engine: "yue2", engines: { yue2: { installed: true, available: true }, music3: { available: true } } };
-      out.chips = chips(); out.logos = logos(); out.words = text(homeComposer().kids[0]);
+      out.chips = chips(); out.logos = logos(); out.words = text(modes());
       out.flux = (await hcRequest("flux", "a lens", 1))[1].params.image_model;
       out.qwen = (await hcRequest("picture", "a lens", 1))[1].params.image_model;
       out.yue = (await hcRequest("yue", "slow blues", 1))[1].engine;
@@ -314,7 +315,7 @@ def test_the_stage_offers_every_recipe_and_the_take_sheet_sets_one():
     for words in ("A clip with sound", "Scout, then animate", "A still", "Sharp Spec", "A long take", "A voice line", "Song", "Ask your agent", "ScriptBreak", "Blockout", "Start something", "Recent takes"):
         assert words in out["home"], words
     assert out["voice"] == "Voice"
-    assert "Take sheet" in out["sheet"] and "Final 720p" in out["sheet"] and "Go to Render" in out["sheet"]
+    assert "This clip" in out["sheet"] and "Final 720p" in out["sheet"] and "Render clip" in out["sheet"] and "Describe the shot first." in out["sheet"]
     assert out["quick"] == ["4", "480p"]  # a Spark without the 2x decoder finishes at 720p
 
 
@@ -421,11 +422,27 @@ def test_a_brain_that_is_not_set_up_is_greyed_and_links_to_brains_and_tools():
     assert "agent/t1/out.png" in out["log"] and "/data/studio" not in out["log"]
 
 
-def test_the_tally_lights_breathe_in_css_and_stop_when_motion_is_reduced():
+def test_the_console_look_has_no_glow_three_themes_and_stops_motion_when_asked():
     css = (ROOT / "app" / "static" / "studio.css").read_text()
-    for name in ("tally-glow", "tally-led", "tally-pill", "tally-sheen"):
-        assert "@keyframes " + name + " {" in css, name
+    for gone in ("tally-glow", "tally-led", "tally-pill", "tally-sheen", "drop-shadow(", "grid-texture"):
+        assert gone not in css, gone
+    assert "@keyframes tally {" in css  # the one pulse left: the dot of what is rendering
+    for theme in ("html.theme-light {", "html.theme-oled {", "html.accent-cobalt {", "html.theme-light.accent-cobalt {"):
+        assert theme in css, theme
     assert "@media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important;" in css
+    assert "html.motion-reduce *, html.motion-reduce *::before, html.motion-reduce *::after { animation:none !important;" in css
+
+
+def test_the_theme_follows_the_setting_the_computer_and_the_top_bar_switch():
+    out = run("""const cls = new Set(); document.documentElement = { classList: { add: c => cls.add(c), remove: c => cls.delete(c), contains: c => cls.has(c) } };
+      SET.data = { appearance: { theme: "light" } }; prefsApply(); out.light = [...cls];
+      SET.data = { appearance: { theme: "oled" } }; prefsApply(); out.oled = [...cls];
+      out.system = themeShown("system"); out.dark = themeShown("studio");
+      SET.data = { appearance: { theme: "studio" } }; await themeFlip(); out.flip = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];""")
+    assert "theme-light" in out["light"] and "theme-oled" not in out["light"]
+    assert "theme-oled" in out["oled"] and "theme-light" not in out["oled"]
+    assert out["system"] in ("studio", "light") and out["dark"] == "studio"
+    assert out["flip"] == {"appearance": {"theme": "light"}}
 
 
 
@@ -472,7 +489,10 @@ def test_settings_shows_its_five_sections_and_the_look_saves():
     assert out["prefs"]["type_size"] == "large" and out["prefs"]["glow"] is False and out["prefs"]["start_cards"] == ["clip"]
     for words in ("Appearance", "Studio layout", "Presets & preferences", "Connections", "Models & weights", "Sparks", "Brains & tools", "Updates", "About"):
         assert any(words in r for r in out["rail"]), words
-    assert "Type size" in out["pages"]["appearance"] and "Poster on Home" in out["pages"]["appearance"] and "Cobalt" in out["pages"]["appearance"]
+    assert "Text size" in out["pages"]["appearance"] and "Small" in out["pages"]["appearance"] and "Default" in out["pages"]["appearance"] and "Cobalt" in out["pages"]["appearance"]
+    for theme in ("Match the computer", "Light", "Dark", "Dark (OLED)"):  # the four themes of the Console look
+        assert theme in out["pages"]["appearance"], theme
+    assert "Poster on Home" not in out["pages"]["appearance"] and "Glowing pills" not in out["pages"]["appearance"]
     assert "Settings" in out["pages"]["layout"] and "stays" in out["pages"]["layout"] and "⌘K" in out["pages"]["layout"]
     assert "Render recipe" in out["pages"]["presets"] and "48 kHz stereo" in out["pages"]["presets"] and "QA gate" in out["pages"]["presets"]
     c = out["pages"]["connections"]
@@ -784,7 +804,7 @@ def test_upstream_flux_and_yue_chips_cannot_bypass_windows_limits():
         music: { available: false, why: "Music is unqualified" } };
       S.music = { available: false, engine: "yue2", engines: { yue2: { installed: true, available: true }, music3: { available: false } } };
       HC.mode = "yue"; out.mode = hcMode(); out.model = hcPictureModel();
-      const chips = homeComposer().kids[0].kids;
+      const chips = find(homeComposer(), n => n.attrs && n.attrs.class === "cmp-modes").kids;
       out.fluxHidden = !chips.some(n => n.attrs["data-mode"] === "flux");
       out.yueDisabled = chips.find(n => n.attrs["data-mode"] === "yue").attrs.disabled;
       out.errors = [];
@@ -1171,3 +1191,65 @@ def test_home_ignores_inflight_memory_answer_for_an_obsolete_worker_state():
     assert out["pendingRequests"] == 1 and out["requests"] == 2
     assert "Obsolete head refusal" not in out["between"] and "Obsolete head refusal" not in out["after"]
     assert "about 18 s on Ready GPU" in out["after"]
+
+
+def test_render_builds_the_prompt_from_the_fields_unless_it_was_edited():
+    # viewCreate itself lives in index.html; the side panel and the Render it shares with the page are shell.js
+    out = run("""answers["/api/compose"] = { prompt: "integrated_multimodal_description: [Shot 1] A wet street at night." };
+      answers["/api/jobs"] = { id: "c1", title: "A woman walks" };
+      Object.assign(globalThis, { noFrame: () => true, lastOf: () => null, lengthOf: () => ({ frames: 124 }), extras: () => ({}), refMedia: () => false, motionFields: () => null, loraWants: () => [], prefs: () => ({ presets: { qa_gate: true } }) });
+      Object.assign(C, { goes: "video", start: "text", scene: "", action: "", camera: "", soundscape: "", prompt: "", promptEdited: false, preset: "small", quality: "fh8" });
+      out.blocked = createNotReady(); out.sheet = text(takeSheet());
+      C.scene = "A wet street at night"; C.action = "A woman walks to the lamp"; out.ready = createNotReady();
+      await createQueue(); out.job = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1]; out.composed = calls.filter(c => c[0] === "/api/compose").length;
+      C.prompt = "my own prompt"; C.promptEdited = true; await createQueue(); out.edited = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1].params.prompt;
+      out.composedAfter = calls.filter(c => c[0] === "/api/compose").length;""")
+    assert out["blocked"] == "Describe the shot first." and "Describe the shot first." in out["sheet"] and out["ready"] is None
+    assert out["composed"] == 1 and out["job"]["kind"] == "video" and out["job"]["params"]["prompt"].startswith("integrated") and out["job"]["params"]["frames"] == 124
+    assert out["edited"] == "my own prompt" and out["composedAfter"] == 1  # an edited prompt is sent as it is, not rebuilt
+
+
+
+def test_render_shows_what_the_prompt_forbids_before_it_queues():
+    # AGENTS.md: the page shows app/negation.py's list before the job is queued; the prompt is never rewritten
+    out = run("""answers["/api/jobs"] = { id: "c2", title: "Street" };
+      Object.assign(globalThis, { noFrame: () => true, lastOf: () => null, lengthOf: () => ({ frames: 124 }), extras: () => ({}), refMedia: () => false, motionFields: () => null, loraWants: () => [], prefs: () => ({ presets: { qa_gate: true } }),
+        negShow: async () => { C.negations = /no rain/.test(C.prompt) ? ["rain"] : []; C.negFor = C.prompt; } });
+      Object.assign(C, { goes: "video", start: "text", scene: "A wet street", action: "A woman walks, no rain", camera: "", prompt: "A street, no rain.", promptEdited: true, preset: "small", quality: "fh8", negSeen: null });
+      await createQueue(); out.first = calls.filter(c => c[0] === "/api/jobs").length;
+      await createQueue(); out.second = calls.filter(c => c[0] === "/api/jobs").length; out.sent = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1].params.prompt;""")
+    assert out["first"] == 0 and out["second"] == 1 and out["sent"] == "A street, no rain."
+
+def test_the_voice_script_edits_as_lines_and_keeps_drama3s_speaker_tags():
+    out = run("""const ex = VO_EXAMPLE; out.lines = voParse(ex).map(l => [l.sp, l.text]); out.back = voJoin(voParse(ex)) === ex;
+      out.plain = voJoin(voParse(["Hello there.", "Second line."].join(String.fromCharCode(10))));
+      const two = voParse("Hello there."); two.push({ sp: 1, text: "Hi.", bare: false }); out.mixed = voJoin(two);
+      out.words = voWords("<|speaker:0|> [whispering] Did you hear that?");
+      globalThis.bind = (o, k, n) => { n.value = o[k]; return n; }; globalThis.clearButton = () => []; globalThis.jobCard = () => null; globalThis.refMeta = async () => ({});
+      S.voice = { available: true, reference_seconds: [5, 30] }; VO.text = ex; VO.takes = []; const page = viewVoice(); out.page = text(page);""")
+    assert out["lines"][0] == [0, "[whispering] Did you hear that noise downstairs?"] and out["lines"][1][0] == 1 and out["back"]
+    assert out["plain"] == "Hello there.\nSecond line."  # one speaker without tags stays as typed
+    assert out["mixed"] == "<|speaker:0|> Hello there.\n<|speaker:1|> Hi."  # a second speaker tags every line
+    assert out["words"] == 4
+    for words in ("Script", "Speak it", "Cast", "Clone a voice", "I have the speaker's consent to clone this voice", "Built with Fish Audio."):
+        assert words in out["page"], words
+
+
+def test_the_theme_cards_and_accent_swatches_save_what_is_picked():
+    out = run("""SET.data = { appearance: { theme: "studio", accent: "amber" } }; SET.section = "appearance";
+      const page = viewSettings(); const card = k => find(page, n => n.attrs && n.attrs["data-theme"] === k);
+      out.on = ["system", "light", "studio", "oled"].map(k => card(k).attrs["aria-checked"]);
+      await card("oled").attrs.onclick(); out.theme = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];
+      await button(page, "Cobalt").attrs.onclick(); out.accent = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];""")
+    assert out["on"] == ["false", "false", "true", "false"]
+    assert out["theme"] == {"appearance": {"theme": "oled"}} and out["accent"] == {"appearance": {"accent": "cobalt"}}
+
+
+def test_text_size_scales_the_whole_studio_and_corrects_window_heights():
+    css = (ROOT / "app" / "static" / "studio.css").read_text()
+    assert ":root { zoom:1.1; --vh:calc(100vh / 1.1); }" in css  # Default: a step over the drawn size
+    assert "html.type-compact { zoom:1; --vh:100vh; }" in css  # Small: the drawn size
+    for size, zoom in (("large", "1.2"), ("largest", "1.35")):
+        assert "html.type-" + size + " { zoom:" + zoom + "; --vh:calc(100vh / " + zoom + "); }" in css, size
+    assert "#view, html.type-large aside#bay" not in css  # no longer the work area alone
+    assert "max-height:calc(100vh" not in css  # every height from the window goes through --vh

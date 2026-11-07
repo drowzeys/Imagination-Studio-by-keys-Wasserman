@@ -69,7 +69,7 @@ for (const name of ["machine.js","engines.js","home.js","apps.js","sound.js"])
   vm.runInThisContext(fs.readFileSync(require("node:path").join(process.argv[1],"app","static",name),"utf8"));
 const source = fs.readFileSync(require("node:path").join(process.argv[1],"app","static","index.html"),"utf8");
 vm.runInThisContext(source.slice(source.indexOf("const IMAGE_LABELS ="),source.indexOf("// A number of passes")));
-vm.runInThisContext(source.slice(source.indexOf("const STEPS ="),source.indexOf("/* ---------- Production")));
+vm.runInThisContext(source.slice(source.indexOf("/* ---------- Create ---------- */"),source.indexOf("/* ---------- Production")));
 """
 
 

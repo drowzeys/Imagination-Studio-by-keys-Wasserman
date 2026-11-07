@@ -143,3 +143,17 @@ def test_the_nodes_routes_are_wired_in():
     if (ROOT / "app" / "nodes.py").exists():
         reply = client.get("/api/nodes/graphs")
         assert reply.status_code == 200 and "templates" in reply.json()
+
+
+def test_every_theme_of_the_console_look_is_kept_and_an_unknown_one_is_refused(fresh):
+    for theme in ("studio", "light", "oled", "system"):
+        reply = client.post("/api/settings", json={"appearance": {"theme": theme}})
+        assert reply.status_code == 200 and reply.json()["settings"]["appearance"]["theme"] == theme, theme
+    assert client.post("/api/settings", json={"appearance": {"theme": "sepia"}}).status_code == 400
+
+
+def test_every_text_size_is_kept(fresh):
+    for size in ("compact", "comfortable", "large", "largest"):
+        reply = client.post("/api/settings", json={"appearance": {"type_size": size}})
+        assert reply.status_code == 200 and reply.json()["settings"]["appearance"]["type_size"] == size, size
+    assert client.post("/api/settings", json={"appearance": {"type_size": "huge"}}).status_code == 400
