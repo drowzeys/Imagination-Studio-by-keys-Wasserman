@@ -191,6 +191,69 @@ def test_this_computer_by_its_local_name_through_loopback_needs_no_key(keyed, mo
     assert here.get("/api/state", headers={"host": "other-mac.local:7870"}).status_code == 403  # not this computer's name
 
 
+def test_a_trusted_tailnet_needs_no_key_only_when_the_owner_asks(keyed, monkeypatch):
+    """STUDIO_TRUST_TAILNET=1: a device straight on a Tailscale address, and this computer's own browser under its
+    one-word name over loopback, pass. `tailscale serve` and `funnel` (loopback, with proxy headers), the LAN and a
+    loopback client under another name are still asked. Unset, nothing changes."""
+
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    monkeypatch.setattr(server, "network_addresses", lambda: ["192.168.1.10"])
+    monkeypatch.setitem(server.OWN, "labels", {"studio-spark"})
+    monkeypatch.setitem(server.OWN, "tailnet", "tail1234.ts.net")
+    peer = TestClient(server.app, client=("100.101.102.103", 50000))
+    peer6 = TestClient(server.app, client=("fd7a:115c:a1e0::1", 50000))
+    here = TestClient(server.app, client=("127.0.0.1", 50000))
+    lan = TestClient(server.app, client=("192.168.1.50", 50000))
+    served = {"host": "studio-spark.tail1234.ts.net", "x-forwarded-for": "100.101.102.103", "x-forwarded-proto": "https",
+              "tailscale-user-login": "you@example.invalid"}
+    funnel = {"host": "studio-spark.tail1234.ts.net", "x-forwarded-for": "203.0.113.9", "tailscale-funnel-request": "?1"}
+
+    monkeypatch.delenv("STUDIO_TRUST_TAILNET", raising=False)  # the default: every one of these is asked
+    assert peer.get("/api/state", headers={"host": "100.64.0.10:7870"}).status_code == 401
+    assert here.get("/api/state", headers={"host": "studio-spark:7870"}).status_code == 401
+
+    monkeypatch.setenv("STUDIO_TRUST_TAILNET", "1")
+    for host in ("100.64.0.10:7870", "studio-spark:7870", "studio-spark.tail1234.ts.net:7870"):
+        assert peer.get("/api/state", headers={"host": host}).status_code == 200, host
+    assert peer.get("/api/key", headers={"host": "100.64.0.10:7870"}).json() == {"needed": False, "signed_in": True, "local": False}
+    assert peer6.get("/api/state", headers={"host": "[fd7a:115c:a1e0::10]:7870"}).status_code == 200
+    assert TestClient(server.app, client=("::ffff:100.101.102.103", 50000)).get(
+        "/api/state", headers={"host": "100.64.0.10:7870"}).status_code == 200
+    assert here.get("/api/state", headers={"host": "studio-spark:7870"}).status_code == 200
+    assert here.get("/api/state", headers=served).status_code == 401  # tailscale serve: a proxy, still asked
+    assert here.get("/api/state", headers=funnel).status_code == 401  # tailscale funnel: the internet
+    assert here.get("/api/state", headers={"host": "studio-spark:7870", "x-forwarded-for": "203.0.113.9"}).status_code == 401
+    assert here.get("/api/state", headers={"host": "studio-spark.tail1234.ts.net"}).status_code == 401
+    assert lan.get("/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 401
+    assert peer.get("/api/state", headers={"host": "evil.example:7870"}).status_code == 403  # DNS rebinding: refused first
+    assert not access.on_tailnet("100.128.0.1") and not access.on_tailnet("192.168.1.50") and not access.on_tailnet("")
+
+
+def test_the_owners_own_networks_need_no_key_only_when_named(keyed, monkeypatch):
+    """STUDIO_TRUST_NETWORKS=192.168.1.0/24: a device on that LAN passes; another network, a proxy here and an unset
+    setting are asked. A public network or a typo (0.0.0.0/0) is never taken."""
+
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    monkeypatch.setattr(server, "network_addresses", lambda: ["192.168.1.10"])
+    monkeypatch.delenv("STUDIO_TRUST_TAILNET", raising=False)
+    lan = TestClient(server.app, client=("192.168.1.50", 50000))
+    other = TestClient(server.app, client=("10.0.0.7", 50000))
+    monkeypatch.delenv("STUDIO_TRUST_NETWORKS", raising=False)
+    assert lan.get("/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 401
+    monkeypatch.setenv("STUDIO_TRUST_NETWORKS", "192.168.1.0/24, not-a-network")
+    assert lan.get("/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 200
+    assert lan.get("/api/key", headers={"host": "192.168.1.10:7870"}).json() == {"needed": False, "signed_in": True, "local": False}
+    assert TestClient(server.app, client=("::ffff:192.168.1.50", 50000)).get(
+        "/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 200
+    assert other.get("/api/state", headers={"host": "192.168.1.10:7870"}).status_code == 401
+    assert lan.get("/api/state", headers={"host": "evil.example:7870"}).status_code == 403  # DNS rebinding: refused first
+    for wide in ("0.0.0.0/0", "8.8.8.0/24", "::/0", "127.0.0.0/8"):
+        monkeypatch.setenv("STUDIO_TRUST_NETWORKS", wide)
+        assert access.trusted_networks() == [], wide
+    monkeypatch.setenv("STUDIO_TRUST_NETWORKS", "100.64.0.0/10,fd00::/8")
+    assert len(access.trusted_networks()) == 2
+
+
 def test_the_settings_panel_shares_the_key_and_makes_a_new_one(keyed, monkeypatch, tmp_path):
     monkeypatch.setattr(server, "HOME", tmp_path)
     away = TestClient(server.app, client=("192.168.1.50", 50000))

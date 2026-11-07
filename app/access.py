@@ -9,10 +9,12 @@ key, ``<studio folder>/access-key`` (made once, mode 0600, kept across restarts 
 - the header ``X-Studio-Key`` (or ``Authorization: Bearer``), from a tool on another machine.
 
 ``scripts/studio-key.sh`` prints the key and the addresses. ``STUDIO_ACCESS_KEY=off`` turns the check off (the tests
-do); Settings → Access key, or deleting the file and restarting, makes a new key and signs every device out."""
+do); ``STUDIO_TRUST_TAILNET=1`` lets the owner's own tailnet in without it, and ``STUDIO_TRUST_NETWORKS`` the owner's
+own private networks (``tailnet`` below); Settings → Access key, or deleting the file and restarting, makes a new key and signs every device out."""
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import os
 import secrets
 from pathlib import Path
@@ -137,6 +139,77 @@ def local(client_host: str | None, host_header: str, own_addresses=(), own_names
         return True
     label, _, rest = name.partition(".")
     return (rest == "local" or (rest == "" and not loopback)) and label in {one.lower() for one in own_names if one}
+
+
+# ---------- a trusted tailnet: no key, only when the owner asks (STUDIO_TRUST_TAILNET=1) ----------
+# Off by default, and then nothing below runs. On, it lets in (1) a device that reaches the studio straight on a
+# Tailscale address (WireGuard ties every tailnet address to one authenticated device, so the client address is the
+# device's own), including this computer opening its own Tailscale address, and (2) this computer's own browser under
+# its one-word name over loopback (the name resolves to 127.0.0.1 here), but only when the request carries no proxy
+# header: `tailscale serve` and `tailscale funnel` connect from loopback too and forward the request with
+# X-Forwarded-* and Tailscale-* headers, and those stay asked (a funnel request comes from the internet).
+# STUDIO_TRUST_NETWORKS (trusted_networks) adds the owner's own private networks, such as the home LAN: a device
+# connecting from one of them needs no key either. Unset, nothing of it runs.
+TAILNET_NETWORKS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded", "x-real-ip")
+
+
+def trust_tailnet() -> bool:
+    return os.environ.get("STUDIO_TRUST_TAILNET", "").strip().lower() in ("1", "on", "yes", "true")
+
+
+def trusted_networks() -> list:
+    """STUDIO_TRUST_NETWORKS (comma-separated, e.g. 192.168.1.0/24): the owner's own networks whose devices need no
+    key. Only private networks count (RFC 1918, unique local IPv6, Tailscale's range): a public one, or a typo such as
+    0.0.0.0/0, is left out, so the setting can never open the studio to the internet."""
+
+    found = []
+    for one in os.environ.get("STUDIO_TRUST_NETWORKS", "").split(","):
+        try:
+            network = ipaddress.ip_network(one.strip(), strict=False)
+        except ValueError:
+            continue
+        if network.is_private and not network.is_loopback and network.prefixlen >= (8 if network.version == 4 else 7) \
+                or any(network.subnet_of(tail) for tail in TAILNET_NETWORKS if tail.version == network.version):
+            found.append(network)
+    return found
+
+
+def in_networks(address: str | None, networks) -> bool:
+    try:
+        ip = ipaddress.ip_address((address or "").strip())
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return any(ip.version == network.version and ip in network for network in networks)
+
+
+def on_tailnet(address: str | None) -> bool:
+    return in_networks(address, TAILNET_NETWORKS)
+
+
+def proxied(headers: dict) -> bool:
+    """Whether a request (headers in lower case) was passed on by a proxy, such as `tailscale serve` or `funnel`."""
+
+    return any(name in headers for name in PROXY_HEADERS) or any(name.startswith("tailscale-") for name in headers)
+
+
+def tailnet(client_host: str | None, host_header: str, headers: dict, own_names=()) -> bool:
+    """Whether STUDIO_TRUST_TAILNET or STUDIO_TRUST_NETWORKS lets this request in without the key (see above)."""
+
+    if in_networks(client_host, trusted_networks()):
+        return True
+    if not trust_tailnet():
+        return False
+    if on_tailnet(client_host):
+        return True
+    if client_host not in LOOPBACK_CLIENTS or proxied(headers):
+        return False
+    name = host_header.strip().lower()
+    name = name[1:].split("]", 1)[0] if name.startswith("[") else name.rsplit(":", 1)[0] if name.count(":") == 1 else name
+    name = name.rstrip(".")
+    return "." not in name and name in {one.lower() for one in own_names if one}
 
 
 def matches(given: str | None, key: str) -> bool:
