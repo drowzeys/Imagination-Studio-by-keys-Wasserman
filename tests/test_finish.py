@@ -348,26 +348,32 @@ def test_on_windows_the_cut_is_rendered_as_prores_and_encoded_here(studio, tmp_p
     assert real_windows_render(finish.Host({"work": str(tmp_path), "host": "mac"}, print)) is False   # over ssh: as there
 
 
-def test_on_windows_premiere_converts_on_the_mac(studio, tmp_path, monkeypatch):
+def test_on_windows_premiere_needs_the_converter_built_with_the_path_fix(studio, tmp_path, monkeypatch):
+    # the converter's Windows release refuses Premiere projects that link an After Effects composition
+    # (mirage-hq/Tesseract-Converter#6); setup-windows-finish.ps1 builds it with that fixed and records the build
     (HOME / "exports" / "f3.tsrct").write_bytes(b"project")
-    conv = tmp_path / "tsrct-conv"
+    folder = tmp_path / "converter"
+    folder.mkdir()
+    conv = folder / "tsrct-conv"
     conv.write_text(f"#!{sys.executable}\n" + r'''
-import json, sys
-print(json.dumps({"causes": ["convert x", "AEP artifact is not a bounded portable local path"], "type": "error",
-                  "message": "convert x: AEP artifact is not a bounded portable local path"}), file=sys.stderr)
-sys.exit(1)
+import json, os, sys
+args = sys.argv[1:]
+out = args[args.index("--output") + 1]
+os.makedirs(out)
+open(out + "/project.prproj", "w").write("prproj")
+print(json.dumps({"artifactStatus": "published", "diagnostics": []}))
 ''')
     conv.chmod(0o755)
     monkeypatch.setattr(finish, "ready", lambda fresh=False: {"ok": True, "where": "here", "converter": {"ok": True, "path": str(conv), "where": "here"}})
     monkeypatch.setattr(finish.sys, "platform", "win32")
-    monkeypatch.setattr(finish, "remote_host", lambda: "")
     said = refused(finish.convert, "f3", "premiere")
-    assert "Tesseract Converter for Windows" in said and "remote computer" in said
-    monkeypatch.setattr(finish, "remote_host", lambda: "mac.local")
-    monkeypatch.setattr(finish, "probe_remote", lambda host: {"conv": "/Users/me/.local/bin/tsrct-conv", "os": "Darwin arm64"})
-    assert finish.premiere_converter(str(conv)) == ("/Users/me/.local/bin/tsrct-conv", "mac.local")
-    monkeypatch.setattr(finish, "probe_remote", lambda host: {"error": "no route"})
-    assert finish.premiere_converter(str(conv)) == (str(conv), "")
+    assert "setup-windows-finish.ps1" in said and "After Effects project" in said
+    assert finish.converter_fixed(str(conv)) is False
+    (folder / "studio-build.json").write_text(json.dumps({"version": finish.CONVERTER_VERSION, "fix": finish.CONVERTER_FIX}))
+    assert finish.converter_fixed(str(conv)) is True
+    assert finish.convert("f3", "premiere")["path"] == "exports/f3-premiere.zip"
+    (folder / "studio-build.json").write_text(json.dumps({"version": "0.2.1", "fix": finish.CONVERTER_FIX}))
+    assert finish.converter_fixed(str(conv)) is False      # a build of another release is rebuilt
 
 
 def test_readiness_route_says_what_it_needs(monkeypatch):

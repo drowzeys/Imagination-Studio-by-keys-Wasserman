@@ -202,6 +202,8 @@ def ready(fresh: bool = False, local_only: bool = False) -> dict:
     conv, conv_version = first_working(converter_places()) if runs_here() else (None, None)
     if conv:
         out["converter"] = {"ok": True, "version": conv_version, "path": conv, "where": "here"}
+        if sys.platform == "win32":
+            out["converter"]["premiere"] = converter_fixed(conv)
     if not out["path"] and host:
         found = probe_remote(host)
         if found.get("error"):
@@ -953,28 +955,27 @@ def converter_where(state: dict) -> tuple[str, str]:
     return conv["path"], where[4:] if where.startswith("ssh:") else ""
 
 
-# Tesseract Converter's Windows build (0.3.0, and 0.4.0) refuses every Premiere package that links an After Effects
-# composition, which is most of them (titles, captions, and any clip scaled to the canvas go through one): it checks
-# each linked path written with "/" against the same path rebuilt with Windows' "\\" (apps/tesseract-conv/src/hybrid/
-# package.rs, scoped_aep_inputs). The After Effects conversion alone, and the macOS and Linux builds, are not affected.
+# Tesseract Converter's Windows release (0.3.0, and 0.4.0's source) refuses every Premiere package that links an After
+# Effects composition, which is most of them (titles, captions, and any clip scaled to the canvas go through one): it
+# checks each linked path written with "/" against the same path rebuilt with Windows' "\\" (apps/tesseract-conv/src/
+# hybrid/package.rs, scoped_aep_inputs; mirage-hq/Tesseract-Converter#6). scripts\\setup-windows-finish.ps1 builds the
+# converter from the release's source with that check fixed, and records CONVERTER_FIX in converter\\studio-build.json.
+CONVERTER_FIX = "windows-aep-path"
 WINDOWS_AEP_PATH = "AEP artifact is not a bounded portable local path"
-WINDOWS_PREMIERE = ("Tesseract Converter for Windows cannot write this Premiere Pro project: it refuses Premiere projects that link "
-                    "an After Effects composition (titles, captions and resized clips need one). Set a Mac with the "
-                    "converter as the remote computer in Settings > Connections (Brains & tools) and the Studio converts "
-                    "there, or take the After Effects project or the FCPXML.")
+WINDOWS_PREMIERE = ("This is Tesseract Converter's own Windows release, which cannot write a Premiere Pro project that links an "
+                    "After Effects composition (titles, captions and resized clips need one). Run "
+                    "`powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-finish.ps1`: it builds the converter "
+                    "with that fixed (about 3 minutes). The After Effects project and the FCPXML work meanwhile.")
 
 
-def premiere_converter(conv: str) -> tuple[str, str]:
-    """On Windows, the converter for a Premiere project: the remote computer's when one is set and has it (its build
-    is not affected by WINDOWS_AEP_PATH), else this computer's own."""
+def converter_fixed(path: str) -> bool:
+    """Whether a converter on Windows is the Studio's build with the path fix (setup-windows-finish.ps1's record)."""
 
-    host = remote_host()
-    if not host:
-        return conv, ""
-    found = probe_remote(host)
-    if found.get("conv") and (found.get("os", "").startswith("Darwin") or "x86_64" in found.get("os", "")):
-        return found["conv"], host
-    return conv, ""
+    try:
+        record = json.loads((Path(path).parent / "studio-build.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(record, dict) and record.get("fix") == CONVERTER_FIX and record.get("version") == CONVERTER_VERSION
 
 
 def convert(job_id: str, to: str) -> dict:
@@ -1001,8 +1002,8 @@ def convert(job_id: str, to: str) -> dict:
     if (to == "premiere" and fps in PREMIERE_RATES) or to == "aftereffects":
         args += ["--fps", str(fps)]
     conv, host = converter_where(ready())
-    if to == "premiere" and not host and sys.platform == "win32":
-        conv, host = premiere_converter(conv)
+    if to == "premiere" and not host and sys.platform == "win32" and not converter_fixed(conv):
+        raise bad(WINDOWS_PREMIERE)
     with tempfile.TemporaryDirectory() as scratch:
         out = Path(scratch) / f"{job_id}-{to}"
         if host:

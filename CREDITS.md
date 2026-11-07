@@ -432,8 +432,13 @@ family) for Windows. The Library's actions, Character Swap and foley run their a
 on a DGX Spark (**MATLOWAI**'s H3 Contact Sheet, **dntpi / Sandpies**' H3 Video Upsampler, **Akatz Labs**' H3 Relay,
 **kijai**'s ComfyUI-MMAudio, with **Meta**'s SAM 3.1), and Looks -> Train a LoRA runs **kohya-ss**'s **musubi-tuner**
 in a venv of its own on Windows on Arm (its own Pillow fallback where opencv-python has no ARM64 wheel; **PyAV**,
-**bitsandbytes** and NVIDIA's PyTorch for Windows on Arm beside it). Finish runs **Mirage**'s **Tesseract** and
-**Tesseract Converter** from their windows-x86_64 releases through **Microsoft**'s x64 emulation in Windows 11 on Arm.
+**bitsandbytes** and NVIDIA's PyTorch for Windows on Arm beside it). Finish runs **Mirage**'s **Tesseract** from its
+windows-x86_64 release through **Microsoft**'s x64 emulation in Windows 11 on Arm, and builds **Tesseract Converter**
+natively for Windows on Arm from its MIT source at the release's commit, with one fix to its Windows path check
+(mirage-hq/Tesseract-Converter#6), with the **Rust** project's toolchain (rustup, cargo), **LLVM**'s libclang for
+**bindgen**, and the **ffmpeg-next** bindings (zmwangx and the ffmpeg-next contributors) against BtbN's pinned **FFmpeg**
+LGPL shared build, whose DLLs ship beside it under the LGPL. Foley's **tiktoken** (OpenAI) is built with the same Rust
+toolchain where it has no Windows ARM64 wheel.
 
 ## Windows ARM64 CUDA feasibility checks: NVIDIA and the PyTorch contributors
 
@@ -490,7 +495,8 @@ built from the file's header, that the studio now makes itself.
 - **Kijai**, **DeepBeepMeep**, **ddalcu** — the ComfyUI conversions, pruned checkpoints and MLX quants that the
   wider H3 ecosystem (and Phosphene's install) relies on.
 - **FFmpeg**; **BtbN and the FFmpeg-Builds contributors**, whose pinned native Windows ARM64 GPL build supplies
-  FFmpeg and ffprobe for the Windows preview. **VideoLAN and the x264 contributors** supply its H.264 encoder.
+  FFmpeg and ffprobe for the Windows preview, and whose LGPL shared build of the same release is what Tesseract
+  Converter links on Windows. **VideoLAN and the x264 contributors** supply its H.264 encoder.
 - **OpenAI** — **Whisper**, and **SYSTRAN** — **faster-whisper**: the QA gate's and Voice's check of the spoken words.
 - **yt-dlp** contributors — Motion Previs reading a shot from a link.
 - **PyTorch**; **Hugging Face** — **diffusers**, **transformers** and **huggingface_hub**; **Patrick Kidger** and

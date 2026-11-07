@@ -330,12 +330,16 @@ clip used by the actions is a FastH3 render of a generated scene (a man in a red
   (`windows-cuda-setup.py train`, 180 s) and bitsandbytes' 8-bit AdamW runs a step on the GPU; the Studio then refuses
   each with the command that installs the missing part. Measured on a DGX Spark they hold 28-53 GB (remove, swap) and
   about 55 GB (a LoRA run), inside the native pool's 113 GB.
-- Tesseract Converter's Windows build (0.3.0, and 0.4.0's source) makes the After Effects project but refuses a
-  Premiere Pro one that links an After Effects composition ("AEP artifact is not a bounded portable local path", with
-  relative paths too): it checks each linked path written with `/` against the same path rebuilt with `\`
-  (`apps/tesseract-conv/src/hybrid/package.rs`). Titles, captions and any clip scaled to the canvas need that link, so
-  on Windows the Studio converts a Premiere project on the Mac set as the remote computer, and says so when none is
-  set. Resolve's FCPXML and EDL, written by the Studio itself, come with every finish.
+- Tesseract Converter's Windows release (0.3.0, and 0.4.0's source) makes the After Effects project but refuses a
+  Premiere Pro one that links an After Effects composition ("AEP artifact is not a bounded portable local path"): it
+  checks each linked path written with `/` against the same path rebuilt with `\`
+  (`apps/tesseract-conv/src/hybrid/package.rs`; [mirage-hq/Tesseract-Converter#6](https://github.com/mirage-hq/Tesseract-Converter/issues/6)).
+  Titles, captions and any clip scaled to the canvas need that link. `setup-windows-finish.ps1` therefore builds the
+  converter natively for Windows on Arm from the release's commit with that comparison made on `/` both sides, against
+  BtbN's FFmpeg 8.1 LGPL shared build (Rust, LLVM's libclang and the ARM64 compiler, installed when missing); on this
+  laptop the build took 166 s. Its Premiere package for a finish with a title and a Foley take has the same ten files,
+  sizes and relative references as the Mac's. If the build fails, the release is installed and the Studio says how to
+  build the fix. Resolve's FCPXML and EDL, written by the Studio itself, come with every finish.
 - Tesseract's own MP4 export on Windows (0.4.0, x64 emulation) hands the encoder frames out of step: in a finish of a
   title, a Foley take and a render (1080p24, 11 s), 170 of 177 clip frames differed from the same project rendered on
   a Mac, some repeated, the title's fade-out was held, and the MP4 was H.264 Constrained Baseline at 3.6 Mbit/s. Its

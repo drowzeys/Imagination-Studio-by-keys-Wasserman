@@ -91,9 +91,10 @@ computer hears (`pip install faster-whisper`); without one they are left out, ne
   converter leaves out or approximates some features, and its After Effects projects are experimental: the zip's
   README lists what it said. Every cut starts and ends on a whole frame (at 24 fps, on 125 ms steps, the shortest
   whole-millisecond step that is whole frames: 40 ms at 25 fps, 100 at 30, 50 at 60), which Premiere needs. On Windows,
-  the converter's own build cannot write a Premiere project that links an After Effects composition (titles, captions
-  and resized clips need one), so the Studio converts on the Mac set as the remote computer when there is one; without
-  it, take the After Effects project or the FCPXML.
+  `scripts\setup-windows-finish.ps1` builds the converter from its source with a fix to its Windows path check
+  ([mirage-hq/Tesseract-Converter#6](https://github.com/mirage-hq/Tesseract-Converter/issues/6)): the converter's own
+  Windows release cannot write a Premiere project that links an After Effects composition, which titles, captions and
+  resized clips need.
 
 Everything lands in `~/ImaginationStudio/exports/`. `POST /api/jobs {kind: "finish", params: {project | clips[{path,
 in, out}], song?, voice?, title?: {text, subtitle}, captions?, mix: dialogue|balanced|music, size: 720p|1080p|4k,
