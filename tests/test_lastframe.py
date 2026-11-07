@@ -82,6 +82,23 @@ def test_frame_from_a_clip():
     assert client.post("/api/frame", json={"path": "../../etc/passwd", "at": "last"}).status_code in (400, 403)
 
 
+
+def test_a_picture_is_cut_about_its_centre_to_the_clips_shape():
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        return
+    square = HOME / "uploads" / "square.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=600x600", "-frames:v", "1", str(square)], check=True)
+    reply = client.post("/api/fit", json={"path": "uploads/square.png", "width": 1280, "height": 720})
+    assert reply.status_code == 200, reply.text
+    made = HOME / reply.json()["path"]
+    size = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(made)],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    assert size in ("600,337", "600,338") and made.parent == HOME / "uploads"  # the full width, 16:9, nothing scaled
+    assert client.post("/api/fit", json={"path": "uploads/square.png", "width": "1280", "height": 720}).status_code == 400
+    assert client.post("/api/fit", json={"path": "renders/bars.mp4", "width": 1280, "height": 720}).status_code == 400
+    assert client.post("/api/fit", json={"path": "../../etc/passwd", "width": 1280, "height": 720}).status_code in (400, 403)
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):

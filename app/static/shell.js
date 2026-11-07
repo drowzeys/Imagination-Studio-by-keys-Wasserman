@@ -99,7 +99,12 @@ function goBack() { const h = SHELL.history; while (h.length && (h[h.length - 1]
   if (state && state.from === prev && typeof history.back === "function") return history.back();
   h.pop(); go(prev, { back: true }); }
 function goHome() { if (tab !== "Home") go("Home"); }
-function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
+// the simple studio opens Video and Image on Create itself (their overview stays the first tab); the other rooms on their first tab
+function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (!r) return;
+  if ((id === "video" || id === "image") && typeof simpleOn === "function" && simpleOn() && typeof C !== "undefined" && TABS.includes("Create")) {
+    if (C.goes !== id) { C.goes = id; C.step = 0; if (id === "video" && !C.start) C.start = "text"; if (typeof sync === "function") sync(); C.prompt = ""; }
+    return go("Create"); }
+  go(r.tabs[0]); }
 function capWhy(kind) { if (!kind || !S || S.platform !== "windows") return "";
   const c = (S.capabilities || {})[kind];
   return c && c.available ? "" : c && c.why || "This action is not qualified in the Windows preview."; }
@@ -120,6 +125,10 @@ function renderShell() {
       // About has a button of its own under Settings: the credits, licences and links (Settings → About)
       if (r.id === "settings") nav.push(el("button", { class: aboutOn() ? "on" : "", "data-room": "about", "data-group": "vaults", type: "button", title: "About: credits, licences and links",
         "aria-current": aboutOn() ? "page" : false, onclick: () => { if (typeof goSettings === "function") goSettings("about"); else go("Settings"); } }, icon("about", "ic"), el("span", { class: "lbl" }, "About"))); } }
+  // the simple studio's switch, at the foot of the rooms: one control, two states (Settings › Studio layout reads the same key)
+  if (typeof simpleOn === "function") { const on = simpleOn();
+    nav.push(el("button", { class: "simplebtn", "data-room": "simple", type: "button", title: on ? "Show every room in the sidebar (voice, music, film, motion graphics and the rest)" : "Only Home, Video, Image and Library in the sidebar; every room stays one ⌘K away",
+      onclick: () => simpleSet(!on) }, icon(on ? "more" : "home", "ic"), el("span", { class: "lbl" }, on ? "All tools" : "Simple studio"))); }
   // phones only (studio.css): the bar keeps the engines and folds the vaults, search and updates into More
   nav.push(el("button", { class: "more" + (now && (now.group !== "engines" || now.fold) ? " on" : ""), "data-room": "more", type: "button", title: "More: the Agent, the Studio Vaults, search and updates", "aria-haspopup": "dialog", onclick: moreOpen },
     icon("more", "ic"), el("span", { class: "lbl" }, "More")));
@@ -131,6 +140,7 @@ function renderShell() {
   const tabs = now && now.tabs.length > 1 ? now.tabs : [];
   $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", "aria-current": t === tab ? "page" : false, onclick: () => go(t) }, TAB_NAMES[t] || t)));
   document.body.classList.toggle("quiet", SHELL.lastTab === tab); SHELL.lastTab = tab;
+  document.body.classList.toggle("simple", typeof simpleOn === "function" && simpleOn());  // a phone's bar keeps Library then (studio.css)
 }
 const SHELL = { lastTab: null, tel: null, history: [], samples: [], es: null, telAt: 0, libCache: null, telWait: 2000, telPoll: null, telDog: null };
 // the More sheet on phones: the Studio Vaults, ⌘K search and Updates, which the bottom bar has no room for
@@ -145,7 +155,8 @@ function moreOpen() { if ($("#moresheet")) return moreClose(); const now = tab =
       shown(ROOMS.filter(r => r.fold)).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
       el("div", { class: "grp" }, "Studio Vaults"),
       shown(ROOMS.filter(r => r.group === "vaults")).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r, r.key ? "⌥" + r.key : null)),
-      el("div", { class: "grp" }, "Studio"), row("search", "Search", "takes, settings and actions", palOpen, false, "⌘K"),
+      el("div", { class: "grp" }, "Studio"), row("search", "Search", "takes, settings, actions and every room", palOpen, false, "⌘K"),
+      typeof simpleOn === "function" ? row(simpleOn() ? "more" : "home", simpleOn() ? "All tools" : "Simple studio", simpleOn() ? "every room in the bar again: voice, music, film and the rest" : "only Home, Video, Image and Library", () => simpleSet(!simpleOn()), false) : null,
       row("update", "Updates", fresh ? "an update is ready to install" : (S && S.version ? "Studio " + S.version + " · " : "") + "check for a new version", () => go("Updates"), tab === "Updates")));
   document.body.append(sheet); const first = sheet.querySelector && sheet.querySelector("button"); if (first) first.focus(); return sheet; }
 function moreClose() { const s = $("#moresheet"); if (s) s.remove(); }
@@ -369,11 +380,12 @@ function shellStart() {
   telStart(); }
 
 /* ---------- "This clip", beside Create: recipes in plain words, the length, the take at a glance, one Render button ---------- */
-function takeRecipes() { const final = UPSCALED["720p"] && S.presets[UPSCALED["720p"][0]] ? { res: "720p", up: true, label: "Final " + UPSCALED["720p"][1].replace(/^\d+x\d+ ?/, "").replace(/[()]/g, "") || "Final" } : { res: "720p", up: false, label: "Final 720p" };
+// the names say what they are for; the size each one delivers is printed beside it, the same on every machine
+function takeRecipes() { const final = UPSCALED["720p"] && S.presets[UPSCALED["720p"][0]] ? { res: "720p", up: true, label: "Final" } : { res: "720p", up: false, label: "Final" };
   return [
-    { id: "quick", title: "Quick look", says: "4 passes · 864 × 480", on: () => C.engine === "fasth3" && C.passes === "4" && C.res === "480p" && !C.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "4", res: "480p", up: false, steps: "" }); changed(); } },
+    { id: "quick", title: "Draft", says: "4 passes · 864 × 480", on: () => C.engine === "fasth3" && C.passes === "4" && C.res === "480p" && !C.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "4", res: "480p", up: false, steps: "" }); changed(); } },
     S.sharp ? { id: "sharp", title: "Sharp Spec", says: "Sam's locked recipe · 1376 × 768", on: sharpOn, set: sharpCreate } : null,
-    { id: "final", title: final.label, says: "8 passes · " + (final.up ? UPSCALED["720p"][1] : "1280 × 720"), on: () => C.engine === "fasth3" && C.passes === "8" && C.res === "720p" && !!C.up === final.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "8", res: "720p", up: final.up, steps: "" }); changed(); } },
+    { id: "final", title: final.label, says: "8 passes · " + (final.up ? UPSCALED["720p"][1].replace(/^(\d+)x(\d+).*/, "$1 × $2") : "1280 × 720"), on: () => C.engine === "fasth3" && C.passes === "8" && C.res === "720p" && !!C.up === final.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "8", res: "720p", up: final.up, steps: "" }); changed(); } },
   ].filter(Boolean); }
 function takeSheet() {
   const video = C.goes === "video", est = el("span", { class: "c1-eta" });
@@ -414,7 +426,10 @@ function createReadyPaint() { if (typeof document === "undefined" || !document.q
 async function composeCreate() { const r = await api("/api/compose", { fields: { ...C, motion: isRef() ? motionFields() : null }, first_frame: !noFrame(), last_frame: !!lastOf(), ...lengthOf(C), references: isRef() ? Math.max(C.refs.length, refMedia() ? 0 : 1) : 0, referenced: isRef(), loras: isRef() ? lorasOf(C) : [] });
   C.prompt = r.prompt; return r.prompt; }
 // Render, from the page or the side panel: the prompt is rebuilt from the fields unless it was edited by hand
-async function createQueue() { try {
+// one take at a time from every Render button (the side panel, the page, Another take, a scout's Animate this): a second
+// press while the first is still being composed and queued must not queue a second clip
+async function createQueue() { if (C.queuing) return; C.queuing = true; try { return await createQueueNow(); } finally { C.queuing = false; } }
+async function createQueueNow() { try {
   const why = createNotReady(); if (why) return toast(why); if (loraWants().length) return toast("A Look needs something first: see Render");
   if (!C.promptEdited || !String(C.prompt || "").trim()) await composeCreate();
   // what the prompt forbids by name is shown before the clip is queued (app/negation.py; the model has no negative
@@ -422,10 +437,32 @@ async function createQueue() { try {
   if (C.negFor !== C.prompt && typeof negShow === "function") await negShow(null);
   if (C.negations && C.negations.length && C.negSeen !== C.prompt) { C.negSeen = C.prompt; render();
     return toast("This prompt forbids something by name, which the video model does not follow: see the note at Render. Press Render again to queue it as written.", 8000); }
+  // Settings' seed: fixed repeats a take when Render is pressed again (Another take moves it on), random gives every
+  // take a new one, drawn here when it is queued (not once when the page opens). "Same seed every take" and the Sharp
+  // Spec (whose seed is part of the recipe) keep it either way.
+  if (!C.sameSeed && C.seedUsed === Number(C.seed) && !(typeof sharpOn === "function" && sharpOn()) && typeof prefs === "function" && prefs().presets.seed === "random" && typeof prefSeed === "function") C.seed = prefSeed();
   const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}), ...(C.silent ? { silent: true } : {}) };
   const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
     : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
-  C.job = j.id; toast("Queued: " + j.title); await poll(); render(); } catch (e) { toast(e.message); } }
+  C.asked = { id: j.id, body: JSON.parse(JSON.stringify(isLong() ? {} : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C) } })) };
+  C.job = j.id; C.seedUsed = Number(C.seed); toast("Queued: " + j.title + " · seed " + C.seed); await poll(); render(); } catch (e) { toast(e.message); } }
+// Higher quality: the request that made a single clip, sent again with the Final recipe (its size and passes) and
+// everything else as it was, the seed too. A new render: the motion may differ. Not for reference clips (their passes
+// are their own), long takes, or a take that already was Final. null when it does not apply
+function betterAsk(body) { if (!body || body.kind !== "video" || !body.params || typeof recipeParams !== "function") return null;
+  const p = body.params, r = recipeParams("final");
+  // a custom size is the user's own shape: Final's size would change it, so it is not offered there
+  if (p.preset === "custom" || p.references || p.reference_videos || p.reference_audios || (p.preset === r.preset && p.quality === r.quality)) return null;
+  const out = JSON.parse(JSON.stringify(body)); delete out.params.width; delete out.params.height; delete out.params.steps; delete out.params.retake;
+  Object.assign(out.params, { preset: r.preset, quality: r.quality }); out.title = "Final: " + String(body.title || "Clip").replace(/^Final: /, "");
+  return out; }
+async function betterQueue(body, after) { const ask = betterAsk(body); if (!ask || C.betterBusy) return; C.betterBusy = true;
+  try { const j = await api("/api/jobs", ask); toast("Queued: " + j.title + " (a new render at the Final recipe; the motion may differ)"); if (after) after(j, ask); await poll(); }
+  catch (e) { toast(e.message, 6000); } finally { C.betterBusy = false; render(); } }
+const betterButton = (body, after) => betterAsk(body) ? el("button", { class: "small", type: "button", title: "The same words, picture, length and seed at the Final recipe: a new render, so the motion may differ (Upscale keeps the take itself)", onclick: () => betterQueue(body, after) }, "Higher quality") : null;
+// Another take: queued at once with the next seed (the shot check's own retake rule), or the same one when asked for
+// (the next seed wins over Settings' random seed here: a retake follows on from the take it repeats)
+function createAgain() { if (C.queuing) return; if (!C.sameSeed) C.seed = (Number(C.seed) || 0) + 1; return createQueue(); }
 // what the prompt goes to, as one small control over Create: the Image and Video rooms open it already set
 function intentBar() { const opts = { video: "Video with sound", image: "Image", edit: "Edit a picture" };
   let marks = [mark("minimax"), S && S.platform === "spark" ? mark("comfy") : null, mark("tensorfold")], selected = "", backend = "";

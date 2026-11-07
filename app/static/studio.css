@@ -101,6 +101,9 @@ nav#rooms button .live { position:absolute; left:22px; top:6px; width:6px; heigh
 .machinepill:hover:not(:disabled) { border-color:var(--line2); background:var(--panel); }
 .machinepill .meter { display:none; }
 #plat { color:var(--text); overflow:hidden; text-overflow:ellipsis; }
+/* the simple studio's switch: quiet, under the rooms */
+nav#rooms button.simplebtn { margin-top:10px; color:var(--faint); border-top:1px solid var(--line2); border-radius:0; padding-top:12px; }
+nav#rooms button.simplebtn:hover { color:var(--text); }
 #plat:empty { display:none; }
 .machinepill .txt { color:var(--faint); margin-left:auto; font:400 12px var(--mono); }
 .machinepill.warn::after { content:""; position:absolute; top:6px; right:6px; width:6px; height:6px; border-radius:50%; background:var(--warn); }
@@ -621,6 +624,8 @@ aside#bay .pill.running::before { animation:tally 1.2s ease-in-out infinite; }
   nav#rooms { flex-direction:row; overflow:hidden; padding:6px 6px; gap:2px; align-items:stretch; }
   nav#rooms .grp, nav#rooms button[data-group="vaults"], nav#rooms button[data-group="agent"], nav#rooms button[data-group="apps"] { display:none; }
   nav#rooms button[data-fold="more"] { display:none; }  /* the engines' rooms of their own are in More */
+  nav#rooms button.simplebtn { display:none; }  /* the switch is a row of More on a phone */
+  body.simple nav#rooms button[data-room="library"] { display:flex; }  /* the simple studio's bar: Video, Image, Library, More */
   nav#rooms button, nav#rooms button.more { display:flex; flex:1 1 0; min-width:0; width:auto; height:48px; flex-direction:column; gap:4px; justify-content:center; padding:0; font-size:11.5px; }
   nav#rooms button .lbl { display:block; flex:none; }
   nav#rooms button.on { background:transparent; color:var(--text); }

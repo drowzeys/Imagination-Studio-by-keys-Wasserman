@@ -311,11 +311,11 @@ def test_the_stage_offers_every_recipe_and_the_take_sheet_sets_one():
       const home = viewHome(); out.home = text(home);
       button(home, "A voice line").attrs.onclick(); out.voice = tab;
       const sheet = takeSheet(); out.sheet = text(sheet);
-      button(sheet, "Quick look").attrs.onclick(); out.quick = [C.passes, C.res];""")
+      button(sheet, "Draft").attrs.onclick(); out.quick = [C.passes, C.res];""")
     for words in ("A clip with sound", "Scout, then animate", "A still", "Sharp Spec", "A long take", "A voice line", "Song", "Ask your agent", "ScriptBreak", "Blockout", "Start something", "Recent takes"):
         assert words in out["home"], words
     assert out["voice"] == "Voice"
-    assert "This clip" in out["sheet"] and "Final 720p" in out["sheet"] and "Render clip" in out["sheet"] and "Describe the shot first." in out["sheet"]
+    assert "This clip" in out["sheet"] and "Final" in out["sheet"] and "8 passes · 1280 × 720" in out["sheet"] and "Render clip" in out["sheet"] and "Describe the shot first." in out["sheet"]
     assert out["quick"] == ["4", "480p"]  # a Spark without the 2x decoder finishes at 720p
 
 
@@ -542,7 +542,7 @@ def test_the_home_composer_queues_each_kind_and_carries_the_words():
       HC.mode = "clip"; HC.text = "A lighthouse at dusk"; hcMore(); out.more = [tab, C.prompt, C.goes];
       HC.text = "Plan a short"; hcAgent(); out.agent = [tab, AG.prompt];""")
     assert "What do you want to make?" in out["page"] and "Clip with sound" in out["page"] and "MiniMax H3" in out["page"] and "Drama 3" in out["page"] and "Music 3" in out["page"]
-    assert "Ask your agent instead" in out["page"] and "More options" in out["page"] and "Quick look" in out["page"]
+    assert "Ask your agent instead" in out["page"] and "More options" in out["page"] and "Draft · 864 × 480" in out["page"]
     assert out["primaries"] == 1  # Generate is the one primary on Home
     assert out["clip"]["kind"] == "video" and out["clip"]["params"]["preset"] == "small" and out["clip"]["params"]["quality"] == "fh4" and out["clip"]["params"]["prompt"].startswith("integrated")
     assert out["picture"]["kind"] == "scout" and out["picture"]["params"]["count"] == 1 and out["picture"]["params"]["preset"] == "2k"
@@ -1253,3 +1253,96 @@ def test_text_size_scales_the_whole_studio_and_corrects_window_heights():
         assert "html.type-" + size + " { zoom:" + zoom + "; --vh:calc(100vh / " + zoom + "); }" in css, size
     assert "#view, html.type-large aside#bay" not in css  # no longer the work area alone
     assert "max-height:calc(100vh" not in css  # every height from the window goes through --vh
+
+
+def test_a_home_retake_sends_the_same_request_again_with_the_next_seed():
+    out = run("""answers["/api/library"] = []; answers["/api/compose"] = { prompt: "integrated_multimodal_description: [Shot 1] A lighthouse." };
+      answers["/api/jobs"] = { id: "j1", title: "A lighthouse" };
+      HC.mode = "clip"; HC.text = "A lighthouse at dusk"; HC.image = "uploads/first.png"; HC.recipe = "quick"; HC.seconds = 5;
+      await hcGenerate(); out.first = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1];
+      // the bar changes after the take: the retake still sends what made it
+      HC.recipe = "final"; HC.seconds = 10; HC.text = "Something else";
+      jobs = [{ id: "j1", status: "done", outputs: ["clips/a.mp4"] }];
+      await hcGenerate(HC.made[0]); out.again = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1];""")
+    first, again = out["first"], out["again"]
+    assert first["params"]["image"] == "uploads/first.png"
+    assert again["params"]["seed"] == first["params"]["seed"] + 1
+    again["params"]["seed"] = first["params"]["seed"]
+    assert again == first  # recipe, length, words and first frame as they were
+
+
+def test_home_pictures_offer_animate_and_edit():
+    out = run("""answers["/api/library"] = [];
+      HC.made = [{ id: "p1", mode: "picture", text: "A gull", seed: 3, title: "A gull" }];
+      jobs = [{ id: "p1", status: "done", outputs: ["scouts/p1/s1.png", "scouts/p1/sheet.jpg"] }];
+      const made = hcMade(); out.made = text(made);
+      button(made, "Edit").attrs.onclick(); out.edit = [tab, QK.image];
+      button(made, "Animate").attrs.onclick(); out.animate = [tab, C.image, C.start, C.goes];""")
+    assert "Animate" in out["made"] and "Edit" in out["made"]
+    assert out["edit"] == ["Quick Edit", "scouts/p1/s1.png"]
+    assert out["animate"] == ["Create", "scouts/p1/s1.png", "own", "video"]
+
+
+def test_a_clip_just_made_on_home_offers_edit_this_frame():
+    out = run("""answers["/api/library"] = [];
+      HC.made = [{ id: "v1", mode: "clip", text: "A gull", seed: 3, title: "A gull" }];
+      jobs = [{ id: "v1", status: "done", outputs: ["clips/v1.mp4"] }];
+      out.made = text(hcMade());""")
+    assert "Edit this frame" in out["made"] and "Retake" in out["made"]
+
+
+def test_create_draws_a_new_seed_for_another_take_unless_asked_for_the_same():
+    out = run("""answers["/api/compose"] = { prompt: "integrated_multimodal_description: [Shot 1] A lighthouse." }; answers["/api/jobs"] = { id: "c1", title: "A lighthouse" };
+      globalThis.noFrame = () => true; globalThis.lastOf = () => null; globalThis.extras = () => ({}); globalThis.lengthOf = () => ({ seconds: 5 }); globalThis.loraWants = () => [];
+      Object.assign(C, { scene: "A lighthouse", action: "", camera: "", soundscape: "", prompt: "", promptEdited: false, preset: "small", quality: "fh4", seed: 7 });
+      const seeds = () => calls.filter(c => c[0] === "/api/jobs").map(c => c[1].params.seed);
+      await createQueue(); await createAgain(); await createAgain();
+      C.sameSeed = true; await createAgain(); await createQueue();
+      C.sameSeed = false; await createQueue();  // Settings' fixed seed: Render again repeats the take
+      out.fixed = seeds();
+      // Settings' random seed: a seed that already made a take is replaced when Render is pressed again
+      calls.length = 0; C.sameSeed = false; SET.data = { presets: { seed: "random" } }; C.seed = 5; await createQueue(); await createQueue();
+      out.random = seeds();""")
+    assert out["fixed"] == [7, 8, 9, 9, 9, 9]
+    assert out["random"][0] == 5 and out["random"][1] != 5
+
+
+def test_the_simple_studio_shows_the_rooms_that_make_pictures_and_clips():
+    out = run("""answers["/api/library"] = []; answers["/api/settings"] = { settings: { layout: { hidden: ["library"], order: [], simple: true } } };
+      SET.data = { layout: { hidden: ["library"], order: [], simple: true }, presets: { mode: "voice" } };
+      out.rooms = roomsShown(ROOMS).map(r => r.id);
+      const home = viewHome(); out.home = text(home); out.mode = hcMode();
+      out.kinds = find(home, n => n.attrs && n.attrs.class === "cmp-modes").kids.map(b => b.attrs["data-mode"]);
+      await button(home, "show all tools").attrs.onclick(); out.saved = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];
+      SET.data = { layout: { hidden: ["library"], order: [], simple: false } };
+      out.full = roomsShown(ROOMS).map(r => r.id); out.fullHome = text(viewHome());""")
+    assert out["rooms"] == ["video", "image", "library", "machine", "settings"]
+    assert out["mode"] == "clip" and set(out["kinds"]) <= {"clip", "picture", "flux"}  # voice and song are in their rooms
+    for gone in ("Start something", "Night shift", "Wasserman's Filmmaker Suite", "Ask your agent instead"):
+        assert gone not in out["home"], gone
+    assert "What do you want to make?" in out["home"] and "Recent takes" in out["home"] and "Search (⌘K)" in out["home"]
+    assert out["saved"] == {"layout": {"simple": False}}
+    assert "library" not in out["full"] and "sound" in out["full"]  # the owner's own layout comes back
+    assert "Too much here?" in out["fullHome"] and "Start something" in out["fullHome"]
+
+
+def test_the_simple_studio_opens_video_and_image_on_create():
+    out = run("""SET.data = { layout: { hidden: [], order: [], simple: true } };
+      tab = "Home"; goRoom("image"); out.image = [tab, C.goes]; goRoom("video"); out.video = [tab, C.goes];
+      SET.data = { layout: { simple: false } }; goRoom("image"); out.full = tab;""")
+    assert out["image"] == ["Create", "image"] and out["video"] == ["Create", "video"]
+    assert out["full"] == "Image"  # every room: the overview first, as before
+
+
+def test_higher_quality_sends_the_same_take_at_the_final_recipe():
+    out = run("""answers["/api/jobs"] = { id: "f1", title: "Final: A gull" };
+      const body = { kind: "video", title: "A gull", params: { prompt: "p", image: "scouts/a.png", preset: "small", quality: "fh4", seed: 9, seconds: 5, width: 864, height: 480, steps: 6, retake: true } };
+      out.ask = betterAsk(body);
+      out.none = [betterAsk({ ...body, params: { ...body.params, preset: "custom" } }), betterAsk({ ...body, params: { ...body.params, preset: "p720", quality: "fh8" } }), betterAsk({ ...body, params: { ...body.params, references: ["a.png"] } }), betterAsk({ kind: "long", params: {} })];
+      let got = null; await betterQueue(body, (j, ask) => { got = [j.id, ask.params.preset]; }); out.got = got;
+      out.sent = calls.filter(c => c[0] === "/api/jobs").length;""")
+    ask = out["ask"]
+    assert ask["params"] == {"prompt": "p", "image": "scouts/a.png", "preset": "p720", "quality": "fh8", "seed": 9, "seconds": 5}  # Final on a Spark; the rest as it was
+    assert ask["title"] == "Final: A gull"
+    assert out["none"] == [None, None, None, None]  # a custom size, already Final, a reference clip, a long take
+    assert out["got"] == ["f1", "p720"] and out["sent"] == 1
