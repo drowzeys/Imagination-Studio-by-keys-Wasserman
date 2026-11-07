@@ -66,6 +66,15 @@ by you only) and survives restarts and updates; *Make a new key* there signs eve
 `bash scripts/studio-key.sh` prints the same from a terminal. A clip read from another machine's app (Slate's
 *Import a take*) needs that app's key beside its address.
 
+**Your own tailnet without the key (opt-in).** Start the studio with `STUDIO_TRUST_TAILNET=1` (beside
+`HOST=0.0.0.0`) and a device that opens it straight on a Tailscale address (`http://100.x.y.z:7870` or its MagicDNS
+name) is let in without the key, as is this computer's own browser under its one-word name. Everything on your
+tailnet then gets in, shared devices included: limit who reaches this computer with Tailscale's access controls. The
+LAN still takes the key, and so do `tailscale serve` and `tailscale funnel` (a funnel is the public internet). Off by
+default. To let your home network in as well, add `STUDIO_TRUST_NETWORKS=192.168.1.0/24` (your LAN's range,
+comma-separated for more): every device on it then opens the studio without the key, so use it only on a network
+where you trust everyone. Only private ranges are taken; a public one, or `0.0.0.0/0`, is ignored.
+
 On the phone:
 
 - **Bottom bar**: Story, Image, Video, Previs, Sound and Edit, one tap each. **More** opens the Agent, the Library,
