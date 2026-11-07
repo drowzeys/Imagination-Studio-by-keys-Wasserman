@@ -42,6 +42,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $Comfy 'main.py'))) {
 }
 if (-not $Verify) {
     Write-Host 'Installing pinned ComfyUI-MMAudio dependencies in the isolated foley runtime; the baseline GPU environment is untouched.'
+    # tiktoken has no Windows ARM64 wheel: pip builds it from source, with Rust
+    . (Join-Path $PSScriptRoot 'windows-rust.ps1')
+    Write-Host "  Rust: $(Initialize-StudioRust)"
     & $Python -X utf8 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('soxr') else 1)"
     if ($LASTEXITCODE -ne 0) {
         $Compiler = Initialize-StudioArm64Compiler

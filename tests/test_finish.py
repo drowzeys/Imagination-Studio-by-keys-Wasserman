@@ -141,11 +141,33 @@ def test_a_timeline_becomes_the_project_tesseract_is_told(studio):
     assert kinds.count("createFxTextLayer") == 2 and "groupFxCompositionLayers" in kinds
     group = next(a for a in batch if a["type"] == "groupFxCompositionLayers")
     assert set(group["layerIds"]) == {10, 11, 12, 13}
-    fade = next(a for a in batch if a["type"] == "setFxPropertyKeyframes" and a["property"]["layerId"] == group["groupLayerId"])
+    keyed = {(a["property"]["layerId"], a["property"]["propertyType"]): a for a in batch if a["type"] == "setFxPropertyKeyframes"}
+    fade = keyed[(group["groupLayerId"], "opacity")]
     assert [k["value"]["value"] for k in fade["keyframes"]] == [0, 100, 100, 0]
+    # the card and the line, shapes, are never keyed themselves: the Premiere converter refuses a keyed shape inside a
+    # keyed group
+    assert not any(layer in (10, 12) for layer, _ in keyed)
+    assert (11, "positionY") in keyed and (13, "opacity") in keyed
     duck = next(a for a in batch if a["type"] == "setFxPropertyAnimator")
     assert duck["property"] == {"layerId": finish.SONG_ID, "propertyType": "volume"}
     assert "[4.000,5.500]" in duck["animator"]["layerTimeJsCode"]
+
+
+def test_every_cut_sits_on_whole_frames(studio):
+    assert [finish.grid(fps) for fps in (24, 25, 30, 60)] == [125, 40, 100, 50]
+    # a Foley take 3.738 s long (its sound outlasts its 89 frames) and a cut from 0.3 s: on 24 fps, whole frames in ms
+    plan = {"fps": 24, "title": {"text": "T"}, "clips": [{"start": 0.0, "length": 3.738, "seconds": 3.738},
+                                                         {"start": 0.3, "length": 2.0, "seconds": 5.0}]}
+    place = finish.timeline(plan, [3708, 5000])
+    assert place["lead"] == 3500 and place["step"] == 125
+    assert [(s["at"], s["start"], s["length"]) for s in place["shots"]] == [(3500, 0, 3625), (7125, 375, 2000)]
+    assert place["total"] == 9125
+    for shot in place["shots"]:
+        for ms in (shot["at"], shot["start"], shot["length"]):
+            assert ms * 24 % 1000 == 0
+        assert shot["start"] + shot["length"] <= shot["intrinsic"]
+    # 25 fps: the title scene itself moves to the next frame edge
+    assert finish.timeline({**plan, "fps": 25}, [3708, 5000])["lead"] == 3520
 
 
 def test_the_song_dips_under_the_dialogue_by_the_mix():
@@ -295,6 +317,63 @@ print(json.dumps({"artifactStatus": "published", "diagnostics": [{"kind": "warni
     assert "f1-premiere/media/000-clip.mp4" in names and "f1-premiere/README.txt" in names
     assert told[told.index("--to") + 1] == "premiere" and told[told.index("--fps") + 1] == "24"
     assert client.post("/api/finish/f1/convert", json={"to": "premiere"}).json().get("kept")   # made once, then kept
+
+
+def test_on_windows_the_cut_is_rendered_as_prores_and_encoded_here(studio, tmp_path, monkeypatch):
+    # Tesseract's Windows MP4 export hands the encoder frames out of step; its ProRes is frame-exact
+    tool, log = stand_in(tmp_path)
+    ff = tmp_path / "ffmpeg"
+    ff.write_text(f"#!{sys.executable}\n" + f"import json, sys\nopen({str(tmp_path / 'ff.json')!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+                  "open(sys.argv[-1], 'wb').write(b'h264')\n")
+    ff.chmod(0o755)
+    real_which = shutil.which
+    monkeypatch.setattr(finish.shutil, "which", lambda name, *a, **k: str(ff) if name == "ffmpeg" else real_which(name, *a, **k))
+    real_windows_render = finish.windows_render
+    monkeypatch.setattr(finish, "windows_render", lambda host: True)
+    for title in (None, {"text": "Night Drive"}):
+        work = tmp_path / ("titled" if title else "plain")
+        work.mkdir()
+        plan = {"work": str(work), "host": "", "tsrct": str(tool), "size": "1080p", "fps": 24, "title": title,
+                "clips": [{"start": 0.0, "length": 2.0, "seconds": 2.0}]}
+        finish.render(finish.Host(plan, print), plan, "p.tsrct", print)
+        export = calls(log)[-1]
+        assert export[export.index("--output") + 1] == "cut.mov" and export[export.index("--format") + 1] == "prores"
+        told = json.loads((tmp_path / "ff.json").read_text())
+        assert told[told.index("-i") + 1] == "cut.mov" and told[-1] == "cut.mp4" and told[told.index("-c:v") + 1] == "libx264"
+        graph = told[told.index("-filter_complex") + 1] if title else told[told.index("-vf") + 1]
+        assert "color_trc=bt709" in graph
+        # with a title, the scene's fade to black over its last 0.6 s is drawn here: 3.5 s at 24 fps
+        assert ("fade=t=out:st=2.900:d=0.58" in graph) == bool(title)
+        assert (work / "cut.mp4").read_bytes() == b"h264" and not (work / "cut.mov").exists()
+    assert real_windows_render(finish.Host({"work": str(tmp_path), "host": "mac"}, print)) is False   # over ssh: as there
+
+
+def test_on_windows_premiere_needs_the_converter_built_with_the_path_fix(studio, tmp_path, monkeypatch):
+    # the converter's Windows release refuses Premiere projects that link an After Effects composition
+    # (mirage-hq/Tesseract-Converter#6); setup-windows-finish.ps1 builds it with that fixed and records the build
+    (HOME / "exports" / "f3.tsrct").write_bytes(b"project")
+    folder = tmp_path / "converter"
+    folder.mkdir()
+    conv = folder / "tsrct-conv"
+    conv.write_text(f"#!{sys.executable}\n" + r'''
+import json, os, sys
+args = sys.argv[1:]
+out = args[args.index("--output") + 1]
+os.makedirs(out)
+open(out + "/project.prproj", "w").write("prproj")
+print(json.dumps({"artifactStatus": "published", "diagnostics": []}))
+''')
+    conv.chmod(0o755)
+    monkeypatch.setattr(finish, "ready", lambda fresh=False: {"ok": True, "where": "here", "converter": {"ok": True, "path": str(conv), "where": "here"}})
+    monkeypatch.setattr(finish.sys, "platform", "win32")
+    said = refused(finish.convert, "f3", "premiere")
+    assert "setup-windows-finish.ps1" in said and "After Effects project" in said
+    assert finish.converter_fixed(str(conv)) is False
+    (folder / "studio-build.json").write_text(json.dumps({"version": finish.CONVERTER_VERSION, "fix": finish.CONVERTER_FIX}))
+    assert finish.converter_fixed(str(conv)) is True
+    assert finish.convert("f3", "premiere")["path"] == "exports/f3-premiere.zip"
+    (folder / "studio-build.json").write_text(json.dumps({"version": "0.2.1", "fix": finish.CONVERTER_FIX}))
+    assert finish.converter_fixed(str(conv)) is False      # a build of another release is rebuilt
 
 
 def test_readiness_route_says_what_it_needs(monkeypatch):

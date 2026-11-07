@@ -26,6 +26,7 @@ The job's runner is this file run as a script (``python3 app/finish.py run <plan
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shlex
@@ -201,6 +202,8 @@ def ready(fresh: bool = False, local_only: bool = False) -> dict:
     conv, conv_version = first_working(converter_places()) if runs_here() else (None, None)
     if conv:
         out["converter"] = {"ok": True, "version": conv_version, "path": conv, "where": "here"}
+        if sys.platform == "win32":
+            out["converter"]["premiere"] = converter_fixed(conv)
     if not out["path"] and host:
         found = probe_remote(host)
         if found.get("error"):
@@ -379,19 +382,37 @@ def build(params: dict, job_id: str, local_only: bool = False) -> tuple[list[str
 
 # ---------- the Tesseract project (what tsrct is told) ----------
 
-def timeline(plan: dict, durations: list[int] | None = None) -> dict:
-    """Where everything sits, in milliseconds: {lead (the title scene), shots [{at, start, length, intrinsic}], total}.
-    ``durations`` are the clips' lengths as Tesseract imported them; each cut stays inside its file."""
+def grid(fps: int) -> int:
+    """The shortest step, in whole milliseconds (the project's unit), that is a whole number of frames at ``fps``: 125 ms
+    (3 frames) at 24 fps, 40 at 25, 100 at 30, 50 at 60. Every cut, place and sound span sits on it, so each starts and
+    ends on a frame edge: the Premiere converter takes only frame-aligned ranges."""
 
-    lead = TITLE_MS if plan.get("title") else 0
+    return 1000 // math.gcd(1000, int(fps or 24))
+
+
+def down(ms: float, step: int) -> int:
+    return int(ms // step) * step
+
+
+def up(ms: float, step: int) -> int:
+    return -int(-ms // step) * step
+
+
+def timeline(plan: dict, durations: list[int] | None = None) -> dict:
+    """Where everything sits, in milliseconds: {lead (the title scene), shots [{at, start, length, intrinsic}], total,
+    step}. ``durations`` are the clips' lengths as Tesseract imported them; each cut stays inside its file, and starts,
+    lasts and is placed on whole frames (``grid``)."""
+
+    step = grid(plan.get("fps") or 24)
+    lead = up(TITLE_MS, step) if plan.get("title") else 0
     at, shots = lead, []
     for index, clip in enumerate(plan["clips"]):
         intrinsic = int((durations or [])[index] if durations and index < len(durations) else round(clip["seconds"] * 1000))
-        start = min(int(round(clip["start"] * 1000)), max(intrinsic - 100, 0))
-        length = max(40, min(int(round(clip["length"] * 1000)), intrinsic - start))
+        start = min(up(clip["start"] * 1000, step), max(down(intrinsic - 100, step), 0))
+        length = max(step, min(down(clip["length"] * 1000, step), down(intrinsic - start, step)))
         shots.append({"at": at, "start": start, "length": length, "intrinsic": intrinsic})
         at += length
-    return {"lead": lead, "shots": shots, "total": at}
+    return {"lead": lead, "shots": shots, "total": at, "step": step}
 
 
 def windowed(at: int, length: int, offset: int) -> dict:
@@ -436,13 +457,13 @@ def document(base: dict, plan: dict, durations: list[int], sizes: list | None = 
         layers.append(layer)
     if plan.get("voice"):
         voice_ms = int(round((plan["voice"].get("seconds") or 0) * 1000)) or place["total"]
-        length = max(40, min(voice_ms, place["total"] - place["lead"]))
+        length = max(place["step"], down(min(voice_ms, place["total"] - place["lead"]), place["step"]))
         layers.append({"type": "Audio", "id": VOICE_ID, "name": "Narration", "playback": windowed(place["lead"], length, 0),
                        "sourceRange": {"start": 0, "duration": length}, "sourceIntrinsicDuration": voice_ms,
                        "source": {"assetId": "voice"}, "volume": 1.0, "captionsEnabled": False})
     if plan.get("song"):
         song_ms = int(round((plan["song"].get("seconds") or 0) * 1000)) or place["total"]
-        length = max(40, min(song_ms, place["total"]))
+        length = max(place["step"], down(min(song_ms, place["total"]), place["step"]))
         bed = 10 ** (MIXES[plan["mix"]][0] / 20)
         layers.append({"type": "Audio", "id": SONG_ID, "name": "Music", "playback": windowed(0, length, 0),
                        "sourceRange": {"start": 0, "duration": length}, "sourceIntrinsicDuration": song_ms,
@@ -528,16 +549,17 @@ def actions(plan: dict, durations: list[int], fonts: dict, spans: list, captions
                                   [box_w, size * 1.2], [x, line_y + size * 0.35], 0, lead))
         out.append({"type": "groupFxCompositionLayers", "compositionId": "main", "layerIds": members, "groupLayerId": ids["scene"],
                     "name": "Title scene", "transform": dict(IDENTITY)})
+        # the scene fades in and out as one; the title rises and the subtitle comes in after it. The card and the line
+        # (shapes) are never keyed themselves: the Premiere converter refuses a keyed shape inside a keyed group
         out.append(keys(ids["scene"], "opacity", [(0, 0), (600, 100), (lead - 600, 100), (lead - 20, 0)]))
         out.append(keys(ids["title"], "positionY", [(0, round(y + size * 0.25, 1)), (1100, round(y, 1))]))
-        out.append(keys(ids["line"], "opacity", [(0, 0), (500, 0), (1200, 100)]))
         if title.get("subtitle"):
             out.append(keys(ids["subtitle"], "opacity", [(0, 0), (700, 0), (1500, 100)]))
     if captions:
         size = small * 0.045
         box_w, x, y = width * 0.8, width * 0.1, height * (0.8 if width > height else 0.74)
         for index, line in enumerate(captions[:400]):
-            start, end = int(line["start"] * 1000), int(line["end"] * 1000)
+            start, end = up(line["start"] * 1000, place["step"]), down(line["end"] * 1000, place["step"])
             start, end = max(start, place["lead"]), min(end, place["total"])
             if end - start < 200:
                 continue
@@ -850,11 +872,49 @@ def put_up(host: Host, local: Path, name: str) -> None:
         raise Stop(f"could not copy {name} to {host.remote}: " + sent.stderr.strip()[-300:])
 
 
+def windows_render(host: Host) -> bool:
+    """Whether Tesseract renders on Windows here (its x86_64 build; on Windows on Arm through x64 emulation). Its MP4
+    export there hands the encoder frames out of step with the clock: in a 1080p24 cut measured on an RTX Spark (an
+    N1X), 170 of 177 clip frames differed from the same project rendered on a Mac, some repeated, and the MP4 was
+    H.264 Constrained Baseline at about half the Mac's bitrate. Its ProRes export matched the Mac's on every one of them,
+    so on Windows the cut is rendered as ProRes and encoded to MP4 here, by the Studio's own FFmpeg (``to_mp4``)."""
+
+    return not host.remote and sys.platform == "win32"
+
+
+def to_mp4(host: Host, plan: dict, say) -> None:
+    """cut.mov (ProRes 4444, from ``windows_render``) as cut.mp4: H.264 High, tagged BT.709, the sound as rendered.
+    With a title, the title scene's fade to black over its last 0.6 s is drawn here: Tesseract's Windows build renders
+    its fade-in but holds the scene through the fade-out (measured on an N1X, in MP4 and ProRes alike), while the scene
+    over its black card fades to plain black, as on a Mac."""
+
+    tool = shutil.which("ffmpeg")
+    if not tool:
+        raise Stop("FFmpeg is not on this computer's PATH: start the Studio with scripts\\app.ps1, which puts its own there")
+    say("[tensorfold] finish: encoding the cut")
+    tags = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,format=yuv420p"
+    picture = ["-vf", tags]
+    if plan.get("title"):
+        lead = timeline(plan)["lead"] / 1000
+        picture = ["-filter_complex",
+                   f"[0:v:0]split[t][r];[t]trim=end={lead:.3f},setpts=PTS-STARTPTS,fade=t=out:st={lead - 0.6:.3f}:d=0.58[a];"
+                   f"[r]trim=start={lead:.3f},setpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=1:a=0,{tags}[v]",
+                   "-map", "[v]"]
+    done = subprocess.run([tool, "-v", "error", "-y", "-i", "cut.mov", *picture, *([] if plan.get("title") else ["-map", "0:v:0"]),
+                           "-map", "0:a?", "-c:v", "libx264", "-profile:v", "high", "-preset", "medium", "-crf", "18",
+                           "-c:a", "copy", "-movflags", "+faststart", "cut.mp4"],
+                          cwd=host.work, capture_output=True, text=True, timeout=3600, stdin=subprocess.DEVNULL)
+    if done.returncode:
+        raise Stop("FFmpeg could not encode the cut: " + done.stderr.strip()[-400:])
+    (host.work / "cut.mov").unlink(missing_ok=True)
+
+
 def render(host: Host, plan: dict, project: str, say) -> None:
     """``tsrct export --json``, its progress (NDJSON on standard error) said as ``[tensorfold] step n/m`` lines."""
 
-    args = [plan["tsrct"], "export", "--project", project, "--output", "cut.mp4", "--resolution", plan["size"],
-            "--fps", str(plan["fps"]), "--json"]
+    prores = windows_render(host)
+    args = [plan["tsrct"], "export", "--project", project, "--output", "cut.mov" if prores else "cut.mp4",
+            "--resolution", plan["size"], "--fps", str(plan["fps"]), "--json"] + (["--format", "prores"] if prores else [])
     if plan.get("linux") and plan.get("ffmpeg"):  # the Linux bundle has no H.264 encoder of its own
         args += ["--encoder-backend", "external-ffmpeg-command", "--ffmpeg-path", plan["ffmpeg"]]
     process = host.popen(args)
@@ -878,6 +938,8 @@ def render(host: Host, plan: dict, project: str, say) -> None:
         except (ValueError, AttributeError):
             pass
         raise Stop("Tesseract could not render the cut: " + str(why)[-500:])
+    if prores:
+        to_mp4(host, plan, say)
 
 
 # ---------- Premiere Pro and After Effects ----------
@@ -891,6 +953,29 @@ def converter_where(state: dict) -> tuple[str, str]:
                   + ". Resolve needs nothing more: use FCPXML or the zip.")
     where = conv.get("where", "here")
     return conv["path"], where[4:] if where.startswith("ssh:") else ""
+
+
+# Tesseract Converter's Windows release (0.3.0, and 0.4.0's source) refuses every Premiere package that links an After
+# Effects composition, which is most of them (titles, captions, and any clip scaled to the canvas go through one): it
+# checks each linked path written with "/" against the same path rebuilt with Windows' "\\" (apps/tesseract-conv/src/
+# hybrid/package.rs, scoped_aep_inputs; mirage-hq/Tesseract-Converter#6). scripts\\setup-windows-finish.ps1 builds the
+# converter from the release's source with that check fixed, and records CONVERTER_FIX in converter\\studio-build.json.
+CONVERTER_FIX = "windows-aep-path"
+WINDOWS_AEP_PATH = "AEP artifact is not a bounded portable local path"
+WINDOWS_PREMIERE = ("This is Tesseract Converter's own Windows release, which cannot write a Premiere Pro project that links an "
+                    "After Effects composition (titles, captions and resized clips need one). Run "
+                    "`powershell -ExecutionPolicy Bypass -File scripts\\setup-windows-finish.ps1`: it builds the converter "
+                    "with that fixed (about 3 minutes). The After Effects project and the FCPXML work meanwhile.")
+
+
+def converter_fixed(path: str) -> bool:
+    """Whether a converter on Windows is the Studio's build with the path fix (setup-windows-finish.ps1's record)."""
+
+    try:
+        record = json.loads((Path(path).parent / "studio-build.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(record, dict) and record.get("fix") == CONVERTER_FIX and record.get("version") == CONVERTER_VERSION
 
 
 def convert(job_id: str, to: str) -> dict:
@@ -917,6 +1002,8 @@ def convert(job_id: str, to: str) -> dict:
     if (to == "premiere" and fps in PREMIERE_RATES) or to == "aftereffects":
         args += ["--fps", str(fps)]
     conv, host = converter_where(ready())
+    if to == "premiere" and not host and sys.platform == "win32" and not converter_fixed(conv):
+        raise bad(WINDOWS_PREMIERE)
     with tempfile.TemporaryDirectory() as scratch:
         out = Path(scratch) / f"{job_id}-{to}"
         if host:
@@ -943,7 +1030,10 @@ def convert(job_id: str, to: str) -> dict:
             args[1], args[5] = str(source), str(out)
             done = subprocess.run([conv, *args], capture_output=True, text=True, timeout=1800)
         if done.returncode:
-            raise bad(f"the {label} project could not be made: " + conversion_error(done.stderr, done.stdout))
+            said = conversion_error(done.stderr, done.stdout)
+            if WINDOWS_AEP_PATH in said:
+                raise bad(WINDOWS_PREMIERE)
+            raise bad(f"the {label} project could not be made: " + said)
         notes = conversion_notes(done.stdout)
         if not out.is_dir():
             raise bad(f"the converter wrote no {label} project")

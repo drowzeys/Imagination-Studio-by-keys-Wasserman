@@ -330,9 +330,22 @@ clip used by the actions is a FastH3 render of a generated scene (a man in a red
   (`windows-cuda-setup.py train`, 180 s) and bitsandbytes' 8-bit AdamW runs a step on the GPU; the Studio then refuses
   each with the command that installs the missing part. Measured on a DGX Spark they hold 28-53 GB (remove, swap) and
   about 55 GB (a LoRA run), inside the native pool's 113 GB.
-- Tesseract Converter 0.3.0's Windows build makes the After Effects project but refuses the Premiere Pro one ("AEP
-  artifact is not a bounded portable local path", with relative paths too): a limit of that build, not of the Studio.
-  Resolve's FCPXML and EDL, written by the Studio itself, come with every finish.
+- Tesseract Converter's Windows release (0.3.0, and 0.4.0's source) makes the After Effects project but refuses a
+  Premiere Pro one that links an After Effects composition ("AEP artifact is not a bounded portable local path"): it
+  checks each linked path written with `/` against the same path rebuilt with `\`
+  (`apps/tesseract-conv/src/hybrid/package.rs`; [mirage-hq/Tesseract-Converter#6](https://github.com/mirage-hq/Tesseract-Converter/issues/6)).
+  Titles, captions and any clip scaled to the canvas need that link. `setup-windows-finish.ps1` therefore builds the
+  converter natively for Windows on Arm from the release's commit with that comparison made on `/` both sides, against
+  BtbN's FFmpeg 8.1 LGPL shared build (Rust, LLVM's libclang and the ARM64 compiler, installed when missing); on this
+  laptop the build took 166 s. Its Premiere package for a finish with a title and a Foley take has the same ten files,
+  sizes and relative references as the Mac's. If the build fails, the release is installed and the Studio says how to
+  build the fix. Resolve's FCPXML and EDL, written by the Studio itself, come with every finish.
+- Tesseract's own MP4 export on Windows (0.4.0, x64 emulation) hands the encoder frames out of step: in a finish of a
+  title, a Foley take and a render (1080p24, 11 s), 170 of 177 clip frames differed from the same project rendered on
+  a Mac, some repeated, the title's fade-out was held, and the MP4 was H.264 Constrained Baseline at 3.6 Mbit/s. Its
+  ProRes export matched the Mac's on every clip frame (the fade-out is still held), so on Windows the Studio renders
+  ProRes and encodes the MP4 itself with its FFmpeg (H.264 High, BT.709, 7.6 Mbit/s), drawing the title's fade to black
+  there. That finish takes 62 s instead of 9 s; without a title, 46 s for 7.4 s.
 - The installer, end to end: `-ToolchainOnly` into an empty folder fetched and checked NVIDIA's eight CUDA 13.4.1
   archives (0.79 GB) in 62.9 s, and that toolchain built `tf_h3.dll` and `music3-generate.exe` from an empty cache in
   78.5 s; a full run with the toolchain present (every part above, the models already there) took 284 s, the four
