@@ -35,6 +35,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import memory_guard  # noqa: E402  (what a clip needs and whether this machine has it, beside this file)
 import progress_file  # noqa: E402  (SPARK_PROGRESS_FILE: a clip's progress for a governor, off by default)
+import job_preview  # noqa: E402  (STUDIO_PREVIEW_FILE: a job's live preview for the app's API, off by default)
 import gpus  # noqa: E402  (two or more cards: each stage of a workflow placed on its card)
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
 # On a Mac the same graphs run on a ComfyUI of their own (mac/comfy.sh, scripts/setup-comfy.sh): the Library actions
@@ -283,10 +284,13 @@ async def run(workflow: dict, sampler: str, named: dict | None = None, stages: l
     client = uuid.uuid4().hex
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(URL.replace("http", "ws", 1) + f"/ws?clientId={client}", max_msg_size=0) as ws:
-            prompt_id = call("/prompt", {"prompt": workflow, "client_id": client})["prompt_id"]
+            prompt_id = call("/prompt", {"prompt": workflow, "client_id": client, **job_preview.extra_data()})["prompt_id"]
             print(f"[tensorfold] comfy prompt {prompt_id}", flush=True)  # what the app's Cancel stops (server.stop_comfy)
             stages, running, since, said = [] if stages is None else stages, None, time.time(), {}
             async for message in ws:
+                if message.type == aiohttp.WSMsgType.BINARY:
+                    job_preview.take(message.data, prompt_id)  # STUDIO_PREVIEW_FILE: the newest pass's picture
+                    continue
                 if message.type != aiohttp.WSMsgType.TEXT:
                     continue
                 event = json.loads(message.data)
@@ -915,7 +919,9 @@ def video(args) -> None:
         # the 50 blocks of every pass on TensorFold's CUDA family, int8 on the tensor cores, with FastH3's own sparse
         # attention; ComfyUI keeps the text encoder, the sampler and the decoders
         w["22"] = {"class_type": "TensorFoldH3Blocks",
-                   "inputs": {"model": model, "unet_name": FASTH3["bf16"], "sparsity": sparsity}}
+                   "inputs": {"model": model, "unet_name": FASTH3["bf16"], "sparsity": sparsity,
+                              # a live preview of the clip's middle frame, not of its first (the keyframe, held)
+                              **({"preview_frame": "middle"} if job_preview.wanted() else {})}}
         model = ["22", 0]
     elif sparsity > 0:
         # ComfyUI's compiled block-sparse kernel with FastVideo's selection: 3D video cubes, the top share kept per
