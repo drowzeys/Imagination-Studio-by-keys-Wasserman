@@ -9,7 +9,7 @@ const SET_DEFAULTS = {
   hermes_profile: "", hermes_command: "" };
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false },
   agents: { name: "", endpoint: "", model: "", nearby: null, finding: false, adding: false, said: {}, testing: {} }, about: null };
-const SET_SECTIONS = [["appearance", "Appearance", "theme, type, glow, accent"], ["layout", "Studio layout", "what the sidebar shows"],
+const SET_SECTIONS = [["appearance", "Appearance", "theme, type, accent"], ["layout", "Studio layout", "what the sidebar shows"],
   ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"], ["access", "Access key", "sign in your phone, a new key"], ["notify", "Notifications", "a night shift done, on your phone"],
   ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to five DGX Sparks for a job"],
   ["brains", "Brains & tools", "your agents, another computer, MCP tools"], ["updates", "Updates", "the version and the branch it follows"], ["about", "About", "version, credits, licences"]];
@@ -21,15 +21,31 @@ const ALWAYS_ROOMS = ["machine", "settings"];
 function prefs() { const d = SET.data || {}, out = {};
   for (const k of Object.keys(SET_DEFAULTS)) out[k] = typeof SET_DEFAULTS[k] === "object" && !Array.isArray(SET_DEFAULTS[k]) ? { ...SET_DEFAULTS[k], ...(d[k] || {}) } : (d[k] ?? SET_DEFAULTS[k]);
   return out; }
-// the look on <html>: a type size class, glow and poster off, the accent, reduced motion
+// the look on <html>: the theme, a type size class, the accent, reduced motion (glow and poster are kept for old saves)
 function prefsApply(look) { const a = { ...SET_DEFAULTS.appearance, ...(look || prefs().appearance) }, root = typeof document !== "undefined" && document.documentElement;
   if (!root || !root.classList) return a;
-  for (const c of ["theme-oled", "type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
-  if (a.theme === "oled") root.classList.add("theme-oled");
+  for (const c of ["theme-light", "theme-oled", "type-compact", "type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
+  const shown = themeShown(a.theme);
+  if (shown === "light") root.classList.add("theme-light"); if (shown === "oled") root.classList.add("theme-oled");
+  const meta = typeof document.querySelector === "function" && document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", shown === "light" ? "#FAFAF9" : shown === "oled" ? "#000000" : "#0C0C0E");
+  themeButton(shown);
   if (a.type_size !== "comfortable") root.classList.add("type-" + a.type_size);
   if (!a.glow) root.classList.add("no-glow"); if (!a.poster) root.classList.add("no-poster");
   if (a.accent === "cobalt") root.classList.add("accent-cobalt"); if (a.motion === "reduce") root.classList.add("motion-reduce");
   return a; }
+// the theme on screen: "system" follows the computer's light or dark, and changes with it while the page is open
+const themeDark = () => typeof window !== "undefined" && window.matchMedia ? !window.matchMedia("(prefers-color-scheme: light)").matches : true;
+function themeShown(theme) { return theme === "system" ? (themeDark() ? "studio" : "light") : theme || "studio"; }
+try { window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (prefs().appearance.theme === "system") prefsApply(); }); } catch {}
+// the top bar's switch: light when dark is showing, dark (or OLED, if that was the dark chosen before) when light is
+function themeButton(shown) { const b = typeof document !== "undefined" && document.getElementById && document.getElementById("themebtn"); if (!b) return;
+  const light = shown === "light"; if (typeof ICON !== "undefined") b.innerHTML = ICON[light ? "moon" : "sun"]; b.title = light ? "Switch to dark" : "Switch to light";
+  b.setAttribute("aria-label", b.title); }
+function themeFlip() { const a = prefs().appearance, light = themeShown(a.theme) === "light";
+  let dark = "studio"; try { dark = localStorage.getItem("studio-dark") || "studio"; } catch {}
+  if (!light) { try { localStorage.setItem("studio-dark", themeShown(a.theme)); } catch {} }
+  return settingsSave({ appearance: { theme: light ? dark : "light" } }, true); }
 function prefsMirror() { try { localStorage.setItem("studio-look", JSON.stringify(prefs().appearance)); } catch {} }
 // once, when the page opens: the saved settings, the look applied, and the Create wizard's defaults set from the presets
 async function settingsLoad() { try { const r = await api("/api/settings"); SET.data = r.settings || null; } catch { SET.data = SET.data || null; }
@@ -56,6 +72,13 @@ function roomsShown(list) { const lay = prefs().layout, order = lay.order || [];
 const setSeg = (value, options, pick, label) => el("div", { class: "seg-ctl", role: "radiogroup", "aria-label": label || "" },
   Object.entries(options).map(([k, t]) => el("button", { type: "button", role: "radio", "aria-checked": value === k ? "true" : "false", class: value === k ? "on" : "", onclick: () => { if (value !== k) pick(k); } }, t)));
 const setSwitch = (on, flip, label) => el("button", { type: "button", role: "switch", class: "st-switch" + (on ? " on" : ""), "aria-checked": on ? "true" : "false", "aria-label": label, onclick: () => flip(!on) }, el("i"));
+// the themes as cards, each with a small picture of the studio in it: the sidebar, a title, a panel and the one accent
+const SET_THEMES = [["system", "Match the computer", "Light by day, dark at night"], ["light", "Light", "Off-white, white panels"], ["studio", "Dark", "Graphite"], ["oled", "Dark (OLED)", "True black for OLED screens"]];
+const setThemes = (value, pick) => el("div", { class: "st-themes", role: "radiogroup", "aria-label": "Theme" }, SET_THEMES.map(([k, title, line]) =>
+  el("button", { type: "button", role: "radio", "aria-checked": value === k ? "true" : "false", class: "st-theme" + (value === k ? " on" : ""), "data-theme": k, onclick: () => pick(k) },
+    el("span", { class: "st-mini mini-" + k, "aria-hidden": "true" }, el("i", { class: "m-side" }, el("i", { class: "m-logo" }), el("i", { class: "m-bar" }), el("i", { class: "m-bar s" }), el("i", { class: "m-bar" })),
+      el("i", { class: "m-main" }, el("i", { class: "m-title" }), el("i", { class: "m-panel" }), el("i", { class: "m-go" })), k === "system" ? el("i", { class: "m-half" }) : null),
+    el("span", { class: "st-tname" }, el("b", {}, title), el("small", {}, line)))));
 const setRow = (title, one, control) => el("div", { class: "st-row" }, el("div", { class: "st-what" }, el("b", {}, title), one ? el("span", {}, one) : null), el("div", { class: "st-ctl" }, control));
 const setPanel = (title, line, ...kids) => el("section", { class: "panel st-panel" }, el("div", { class: "st-ph" }, el("h2", {}, title), line ? el("p", { class: "note m-flat" }, line) : null), ...kids);
 
@@ -63,13 +86,12 @@ const setPanel = (title, line, ...kids) => el("section", { class: "panel st-pane
 const START_NAMES = { clip: "A clip with sound", scout: "Scout, then animate", still: "A still", sharp: "Sharp Spec", long: "A long take", voice: "A voice line", song: "A song", sfx: "Sound effects & foley", looks: "Looks", previs: "Previs", nodes: "Nodes", agent: "Ask your agent" };
 function setAppearance() { const a = prefs().appearance, put1 = patch => settingsSave({ appearance: patch }, true);
   return [setPanel("Appearance", "Applied as you choose, on this screen and every other one that opens the studio.",
-    setRow("Theme", "The studio's dark, or the same on true black, for OLED screens", setSeg(a.theme || "studio", { studio: "Studio", oled: "Dark (OLED)" }, v => put1({ theme: v }), "Theme")),
-    setRow("Type size", "Text and controls in the work area", setSeg(a.type_size, { comfortable: "Comfortable", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Type size")),
-    setRow("Glowing pills", "The soft amber glow on the active place and the machine chip", setSwitch(a.glow, v => put1({ glow: v }), "Glowing pills")),
-    setRow("Poster on Home", "The key art beside the greeting", setSwitch(a.poster, v => put1({ poster: v }), "Poster on Home")),
-    setRow("Accent", "The colour of the one primary button and the active place",
-      setSeg(a.accent, { amber: "Amber", cobalt: "Cobalt" }, v => put1({ accent: v }), "Accent")),
-    setRow("Motion", "The breathing tally lights and hover moves", setSeg(a.motion, { system: "Follow the system", reduce: "Always reduce" }, v => put1({ motion: v }), "Motion"))),
+    el("div", { class: "st-themes-wrap" }, el("div", { class: "st-what" }, el("b", {}, "Theme"), el("span", {}, "The sun and moon in the top bar switch between light and dark.")), setThemes(a.theme || "studio", v => put1({ theme: v }))),
+    setRow("Text size", "The whole studio: the sidebar, every room and the queue", setSeg(a.type_size, { compact: "Small", comfortable: "Default", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Text size")),
+    setRow("Accent", "The one colour for the main button, what is selected and progress",
+      el("div", { class: "st-accents", role: "radiogroup", "aria-label": "Accent" }, [["amber", "Amber"], ["cobalt", "Cobalt"]].map(([k, t]) =>
+        el("button", { type: "button", role: "radio", "aria-checked": a.accent === k ? "true" : "false", class: "st-accent" + (a.accent === k ? " on" : ""), onclick: () => put1({ accent: k }) }, el("span", { class: "sw sw-" + k, "aria-hidden": "true" }), t)))),
+    setRow("Motion", "The pulsing rendering dot and the panels that slide", setSeg(a.motion, { system: "Follow the system", reduce: "Always reduce" }, v => put1({ motion: v }), "Motion"))),
   setPanel("Start cards on Home", "Which ways in sit under the composer. Six fill one row.",
     el("div", { class: "chips st-chips" }, Object.entries(START_NAMES).map(([id, name]) => { const off = a.start_off || [], on = typeof startShown === "function" ? startShown(a, id) : a.start_cards.includes(id);
       return el("button", { type: "button", class: "toggle" + (on ? " on" : ""), "aria-pressed": on ? "true" : "false",
