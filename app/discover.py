@@ -519,7 +519,7 @@ def mac_picture_video_needs() -> list[dict]:
              optional=True, check=lambda p: "" if is_binary(p) else "not a program", download="oneshot-setup.sh"),
     ]
     adapters = prefix() / "adapters"
-    for nid, label, name, digest in (("h3-turbo-adapter", "MiniMax H3 Turbo adapter (LightX2V)", setup.get("H3_ADAPTER_NAME"), setup.get("H3_ADAPTER_SHA256")),
+    for nid, label, name, digest in (("h3-turbo-adapter", "MiniMax H3 Turbo adapter (LightX2V)", setup.get("H3_ADAPTER_NAME"), ""),
                                      ("ref2va-turbo", "Ref2VA Turbo adapter (4 passes)", server.get("REF2VA_ADAPTER") or setup.get("REF_ADAPTER_NAME"), ""),
                                      ("h3-x2-decoder", "MiniMax H3 2x video decoder", setup.get("X2_NAME"), setup.get("X2_SHA256"))):
         if name:

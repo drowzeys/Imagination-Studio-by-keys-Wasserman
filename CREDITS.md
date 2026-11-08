@@ -315,8 +315,8 @@ gave us measured points to compare against.
 family is adapted from it: the transformer module tree, the packed sequence and rotary positions, the two sigma
 schedules, the video decoder with its tiling and clip chunking, and the adapter layout handling. Its notes on
 bfloat16 adapter merging, QKV row order and SwiGLU half order saved days. This pack still runs its text
-encoder, audio decoder and MP4 writer directly, and downloads the runner-layout Turbo adapter asset that
-Phosphene publishes. (Apache-2.0.)
+encoder, audio decoder and MP4 writer directly. The runner layout the Turbo adapter is converted into at install
+is Phosphene's. (Apache-2.0.)
 
 ## The engine: Ash Hart
 
