@@ -387,6 +387,19 @@ def test_managed_workers_cannot_self_update(history, tmp_path, monkeypatch):
         manager.set_automatic(True)
 
 
+def test_the_launchers_own_pid_file_still_updates_itself(history, tmp_path, monkeypatch):
+    # Windows (scripts/app.ps1) gives the launcher's server a PID file for its stop script and tray: still managed
+    _, clone = history
+    monkeypatch.setenv("STUDIO_UPDATE_SESSION", "test-session")
+    monkeypatch.setenv("STUDIO_PIDFILE", "C:/StudioData/studio.pid")
+    monkeypatch.setenv("STUDIO_LAUNCHER_PIDFILE", "C:/StudioData/studio.pid")
+    manager = updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False)
+    assert manager.managed()
+    manager.set_automatic(True)
+    monkeypatch.setenv("STUDIO_PIDFILE", "/worker/app.pid")  # any other PID file is a worker's
+    assert not manager.managed()
+
+
 def test_automatic_updates_wait_for_idle_and_respect_opt_out(history, tmp_path, monkeypatch):
     upstream, clone = history
     publish(upstream)

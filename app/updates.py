@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -20,6 +21,7 @@ from urllib.parse import quote, urlsplit
 from fastapi import APIRouter, HTTPException, Request
 
 INTERVAL = 6 * 60 * 60
+LAUNCH_SCRIPT = "scripts\\app.ps1" if sys.platform == "win32" else "scripts/app.sh"  # each starts app/launcher.py
 GIT_TIMEOUT = 45
 
 
@@ -121,7 +123,8 @@ def inspect(pack: Path, fetch: bool = False) -> dict:
 
 
 def _inspect(pack: Path, fetch: bool, known: dict) -> dict:
-    if git(pack, "rev-parse", "--show-toplevel") != str(pack.resolve()):
+    # compared as paths: Git for Windows writes a drive path with forward slashes, Python with backslashes
+    if Path(git(pack, "rev-parse", "--show-toplevel")).resolve() != pack.resolve():
         raise UpdateError("This folder is not a Git installation. Install a Git copy to use updates.")
     known["source"] = source = repository(git(pack, "config", "--get", "remote.origin.url"))
     known["current"] = current = git(pack, "rev-parse", "HEAD")
@@ -159,9 +162,13 @@ def _inspect(pack: Path, fetch: bool, known: dict) -> dict:
     except UpdateError as error:
         raise UpdateError("This installation has its own commits. Updates will keep them; merge them manually first.") from error
     changed = git(pack, "diff", "--name-only", current, target).splitlines()
-    if any(name == "requirements.lock" or name.startswith(("scripts/setup-", "oneshot-setup")) for name in changed):
+    lock = ("requirements.lock", "app/requirements-windows.txt") if sys.platform == "win32" else ("requirements.lock",)
+    if any(name in lock or name.startswith(("scripts/setup-", "oneshot-setup")) for name in changed):
         raise UpdateError("This update also changes installation dependencies: in the studio's folder run "
-                          "`git pull && bash oneshot-setup.sh --upgrade`, then restart the studio.")
+                          + ("`git pull`, rerun the PowerShell setup of each changed scripts\\setup-windows-*.ps1 (and "
+                             "`scripts\\app.ps1 -Install` for a changed app\\requirements-windows.txt), then restart the studio."
+                             if sys.platform == "win32" else
+                             "`git pull && bash oneshot-setup.sh --upgrade`, then restart the studio."))
     try:
         version = git(pack, "show", target + ":VERSION", timeout=10)[:80]
     except UpdateError:
@@ -279,7 +286,10 @@ class Manager:
             return False
 
     def managed(self) -> bool:
-        return bool(os.environ.get("STUDIO_UPDATE_SESSION")) and not os.environ.get("STUDIO_PIDFILE")
+        # A PID file marks a worker started by another Studio (it updates through Sparks), unless it is the PID file
+        # this launcher gave its own child (scripts/app.ps1 on Windows, for its stop script and tray).
+        pidfile = os.environ.get("STUDIO_PIDFILE")
+        return bool(os.environ.get("STUDIO_UPDATE_SESSION")) and (not pidfile or pidfile == os.environ.get("STUDIO_LAUNCHER_PIDFILE"))
 
     def status(self) -> dict:
         with self.mutex:
@@ -339,7 +349,7 @@ class Manager:
         with self.mutex:
             if enabled:
                 if not self.managed():
-                    raise UpdateError("Open Studio with scripts/app.sh to enable automatic updates. Managed workers update through Sparks.")
+                    raise UpdateError("Open Studio with " + LAUNCH_SCRIPT + " to enable automatic updates. Managed workers update through Sparks.")
                 inspect(self.pack)
             write_json(self.settings_path, {"automatic": enabled})
         return self.status()
@@ -351,7 +361,7 @@ class Manager:
             if self.info.get("checking") or not self.info.get("available"):
                 raise UpdateError("Check for updates before installing.")
             if not self.managed() or self.restart is None:
-                raise UpdateError("Open Studio with scripts/app.sh to install updates. Managed workers update through Sparks.")
+                raise UpdateError("Open Studio with " + LAUNCH_SCRIPT + " to install updates. Managed workers update through Sparks.")
             # The scheduler rechecks the toggle under the same mutex as settings writes.
             if automatic and not self.automatic():
                 return self.status()
