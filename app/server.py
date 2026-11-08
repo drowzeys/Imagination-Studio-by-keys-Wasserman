@@ -632,7 +632,7 @@ WINDOWS_WRITES = re.compile(
     r"suite/import|suite/imports/[A-Za-z0-9_-]+/(?:slate|attach|motion)|"
     r"brains/(?:settings|test|(?:copilot|local)/(?:verify|default))|agent/(?:tasks(?:/[A-Za-z0-9_-]+/cancel)?|"
     r"threads(?:/[A-Za-z0-9_-]+(?:/(?:messages|cancel))?)?)|"
-    r"music/beats|windows/stills/unload|windows/features/check|feature-checks/(?:check|mode)|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
+    r"music/beats|memory/release|windows/stills/unload|windows/features/check|feature-checks/(?:check|mode)|nodes/(?:graphs(?:/[A-Za-z0-9_-]+)?|check))\Z"
 )
 
 
@@ -1472,13 +1472,20 @@ def bolt_room_mb(resident_gb: float) -> int | None:
     return int(room)
 
 
+def mac_peak_gb(job: dict) -> float:
+    """A job's peak on a Mac, measured on an M5 Ultra (bolt.MAC_PEAK_GB)."""
+
+    kind, params = job["kind"], job["params"]
+    turbo = params.get("quality") == "turbo" or params.get("engine") == "turbo" or bool(params.get("references"))
+    return bolt.MAC_PEAK_GB["turbo"] if turbo and kind in ("video", "studio", "long") else bolt.MAC_PEAK_GB.get(kind, bolt.MAC_PEAK_UNKNOWN_GB)
+
+
 def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
     """Whether a job of this machine's queue fits with NVIDIA Nemotron 3.5 Bolt resident beside it (``resident_gb``
     held by it), from the measured peaks: (fits, the figures said in the job's log), or None when the job's kind has no
     measured peak here (Bolt then goes). On a DGX Spark the memory guard's estimate (clips, songs, sound; Drama 3's
     NEED_GB); on a Mac the peaks measured on an M5 Ultra (bolt.MAC_PEAK_GB) against what vm_stat counts as available."""
 
-    kind, params = job["kind"], job["params"]
     if not SPARK:
         free = voice.mem_available_gb()
         if free < 0:
@@ -1486,14 +1493,41 @@ def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
         one = bolt.engine()
         # loaded, the available memory already lacks what it took, but not its mapped weights (counted as available)
         have = free - getattr(one, "uncounted_gb", 0.0) if one.loaded() else free - resident_gb
-        turbo = params.get("quality") == "turbo" or params.get("engine") == "turbo" or bool(params.get("references"))
-        peak = bolt.MAC_PEAK_GB["turbo"] if turbo and kind in ("video", "studio", "long") else bolt.MAC_PEAK_GB.get(kind, bolt.MAC_PEAK_UNKNOWN_GB)
+        peak = mac_peak_gb(job)
         left, floor = have - peak, one.guard_gb
         return left >= floor, (f"{have:.0f} GB available with Bolt resident, the job's measured peak about {peak:.0f} GB, "
                                f"{left:.0f} GB left against a floor of {floor:g}")
     room = bolt_room_mb(resident_gb)
     if room is None:
         return None
+    said = job_fit(job, room)
+    if said is None:
+        return None
+    need, have, floor = said["need_mb"], said["available_mb"], said["floor_mb"]
+    return bool(said["fits"]), (f"{have / 1000:.0f} GB for the job with Bolt resident, the job's estimated peak about "
+                                f"{need / 1000:.0f} GB, the floor {floor / 1000:.0f} GB")
+
+
+def job_fit(job: dict, room: int | None = None) -> dict | None:
+    """Whether a job of this machine's queue fits the memory it has now, from the measured peaks: {"fits", "need_mb",
+    "available_mb", "floor_mb"}, or None when its kind has no measured peak here. ``room`` is what the job has (MB);
+    by default the memory guard's room with what Bolt holds taken out when it stays loaded (bolt_room_mb). On a DGX
+    Spark or a card the memory guard's estimates; on a Mac the peaks measured on an M5 Ultra against vm_stat's
+    available memory and Bolt's 8 GB floor. memory_manager.admit asks this before the job loads anything."""
+
+    kind, params = job["kind"], job["params"]
+    if not SPARK:
+        free = voice.mem_available_gb()
+        if free < 0 or kind not in bolt.MAC_PEAK_GB:
+            return None
+        if kind == "voice" and voice_loaded() or kind == "music" and music_loaded():
+            return None  # its engine is loaded already: what it takes is gone from the available memory
+        peak, floor = mac_peak_gb(job), float(os.environ.get("BOLT_GUARD_GB", 8))
+        return {"fits": free - peak >= floor, "need_mb": int(peak * 1024), "available_mb": int(free * 1024), "floor_mb": int(floor * 1024)}
+    if room is None:
+        room = bolt_room_mb(0.0)
+        if room is None:
+            return None
     # On a card the floor is the 2 GB margin, once. bolt_room_mb is that room after the margin, so the voice
     # branch adds the margin back and compares it once (memory_guard.card_pool, which holds it to the RAM too).
     # A Spark keeps a tenth of its RAM, and so does a card with STUDIO_ROOM_MB (its budget is the RAM).
@@ -1532,9 +1566,7 @@ def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
     if said.get("route") is None and said.get("need_mb") is None:
         return None
     need, have = said.get("need_mb") or 0, said.get("available_mb") or room
-    floor = said.get("floor_mb") or floor
-    return bool(said.get("fits")), (f"{have / 1000:.0f} GB for the job with Bolt resident, the job's estimated peak about "
-                                    f"{need / 1000:.0f} GB, the floor {floor / 1000:.0f} GB")
+    return {"fits": bool(said.get("fits")), "need_mb": need, "available_mb": have, "floor_mb": said.get("floor_mb") or floor}
 
 
 def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | None = None, available_mb: int | None = None) -> dict:
@@ -2357,6 +2389,14 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             job["log"] += bolt.admit(job, lambda resident: bolt_need(job, resident))
         if job["kind"] in train.KINDS and worker is None:  # a LoRA run holds about 55 GB for hours: ComfyUI's models go first
             job["log"] += train_free(job)
+        # the memory manager (memory_manager.py): a job whose measured peak still does not fit gives back the Studio's
+        # other idle modules, then waits for other programs' memory, then is refused naming them, never started to OOM
+        # On a Mac vm_stat's available memory leaves out what macOS can still reclaim by compressing, so there it
+        # unloads and warns but does not wait or refuse unless STUDIO_MEMORY_GUARD=strict says so.
+        if job["kind"] not in memory_manager.GPU_FREE and worker is None and not job.get("remote"):
+            lenient = sys.platform == "darwin" and os.environ.get("STUDIO_MEMORY_GUARD", "").strip().lower() != "strict"
+            job["log"] += memory_manager.admit(job, lambda: job_fit(job), wait_s=0 if lenient else None,
+                                               mode="warn" if lenient else None, stopped=stopping.is_set)
         if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
             source = inside(params["first_frame_from"])
             if not source.is_file():
@@ -3635,6 +3675,89 @@ def bolt_unload(request: Request) -> dict:
         return bolt.unload()
     except RuntimeError as error:
         raise HTTPException(409, str(error))
+import memory_manager  # noqa: E402  (the Studio's modules given back before and during a render, beside this file)
+
+
+def voice_loaded() -> bool:
+    one = voice._backend
+    return bool(one is not None and hasattr(one, "loaded") and one.loaded())
+
+
+def music_loaded() -> bool:
+    return any(one.loaded() for one in music.loaded_engines())
+
+
+def gained_mb(before_mb: int | None) -> int:
+    """What a module took since it loaded: the memory there was then less what there is now (0 when unknown)."""
+
+    now = memory_manager.reading()["available_mb"]
+    return max(0, before_mb - now) if before_mb and now is not None else 0
+
+
+def comfy_loaded() -> bool:
+    """The Studio's own ComfyUI (spark/comfy.sh, comfy_win.py, mac/comfy.sh) is up, and may hold models."""
+
+    if WINDOWS:
+        return False
+    if sys.platform == "darwin":
+        return voice.comfy_up(int(os.environ.get("MAC_COMFY_PORT", 8191)))
+    if WINCUDA or LOCAL_GPU_CHILD:
+        return voice.comfy_up()
+    return bool(memory_guard.server_pid())
+
+
+def comfy_held_mb() -> int:
+    pid = memory_guard.server_pid() if SPARK and not WINCUDA else None
+    if not pid:
+        return 0
+    family = memory_guard.family(pid)
+    return sum(row["mb"] for row in memory_manager._processes() if row["pid"] in family)
+
+
+def bolt_loaded() -> bool:
+    one = bolt._engine
+    return bool(one is not None and not isinstance(one, bolt.External) and one.loaded())
+
+
+# MODULE ORDER (memory_manager.py): the voice engine, the song engines, the Studio's ComfyUI, then the Bolt brain
+memory_manager.register(memory_manager.Module("voice", "Fish Audio Drama 3", voice_loaded, voice.release,
+                                              held_mb=lambda: gained_mb(voice.room_mb())))
+memory_manager.register(memory_manager.Module("music", "the song engine", music_loaded, music.release,
+                                              held_mb=lambda: gained_mb(music.room_mb())))
+memory_manager.register(memory_manager.Module("comfy", "ComfyUI and its cached models", comfy_loaded,
+                                              lambda why: (stop_session_comfy(), not comfy_loaded())[1], held_mb=comfy_held_mb))
+memory_manager.register(memory_manager.Module("bolt", bolt.NAME, bolt_loaded, bolt.release, held_mb=bolt.held_mb,
+                                              busy=lambda: bool(bolt.summary().get("in_flight"))))
+memory_manager.attach_log(HOME)
+MEMORY_WATCH = memory_manager.Watch(lambda: list(jobs.values()))
+
+
+@app.get("/api/memory")
+def memory_state() -> dict:
+    """This machine's memory for a person or their agent: available, the floor, the headroom over it, the Studio's
+    modules (loaded, idle, about how much each holds), the largest other programs and what the manager did. An agent
+    reads ``headroom_mb`` before it starts a model server of its own (STUDIO-AGENT.md)."""
+
+    return memory_manager.state(list(jobs.values()))
+
+
+@app.post("/api/memory/release")
+def memory_release(body: dict | None = None) -> dict:
+    """Give back the Studio's idle modules now: every one, or ``modules`` (voice, music, comfy, bolt). A module the
+    running job uses is never touched, nor Bolt while it answers; programs the Studio did not start are never stopped."""
+
+    body = body or {}
+    names = body.get("modules")
+    if names is not None and (not isinstance(names, list) or not all(isinstance(n, str) for n in names)):
+        raise HTTPException(400, "modules is a list of names: voice, music, comfy, bolt")
+    why = str(body.get("why") or "asked through /api/memory/release")[:200]
+    done = memory_manager.release_idle(why, memory_manager.running_kinds(list(jobs.values())), names=names)
+    return {"released": done, **memory_manager.state(list(jobs.values()))}
+
+
+if hasattr(app.router, "on_startup") and not LOCAL_GPU_CHILD:
+    app.router.on_startup.append(MEMORY_WATCH.start)
+    app.router.on_shutdown.append(MEMORY_WATCH.stop.set)
 import motion  # noqa: E402  (Motion Previs: a Python port of Sam Wasserman's Motion Previs Studio analysis, beside this file)
 app.include_router(motion.attach(HOME, PACK, SPARK))
 import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Library actions, beside this file)

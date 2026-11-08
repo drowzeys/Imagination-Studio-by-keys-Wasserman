@@ -74,6 +74,9 @@
 #                                             # MIT. Part of every install; --no-finish leaves it out
 #   bash oneshot-setup-spark.sh --yes         # the plain install without the checklist a terminal shows first (every part
 #                                             # ticked there; Enter installs them all); any other flag also leaves it out
+#   bash oneshot-setup-spark.sh --no-memguard # leave out the machine memory guard (scripts/memguard.py: a systemd user unit that
+#                                             # has the Studio give memory back before the OOM killer; docs/memory-guard.md)
+#   bash oneshot-setup-spark.sh --memguard-stop-foreign  # let that guard stop your own model servers under the floor (off by default)
 #   bash oneshot-setup-spark.sh --verify      # check an existing install, download nothing
 #   bash oneshot-setup-spark.sh --upgrade     # after `git pull`: move an existing install to this version (environment, ComfyUI pin,
 #                                             # engine, Motion Previs environment, and each part already installed), fetch no
@@ -120,12 +123,13 @@ fi
 # written down in this repo to copy, and the resolver keeps them beside the torch pinned here.
 TORCH_PIN=(torch==2.14.1 torchvision==0.29.1)  # requirements.lock; scripts/setup-comfy.sh pins the same pair
 STUDIO_PIN=(huggingface_hub==1.33.0 fastapi==0.142.2 uvicorn==0.54.0 python-multipart==0.0.32 pillow==12.3.0)  # requirements.lock
-IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0
+IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0; MEMGUARD=1; MEMGUARD_FOREIGN=0
 for arg in "$@"; do
   case "$arg" in
     --ref2va) REF2VA=1;; --swap) SWAP=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --all) SWAP=1; REF2VA=1; H3_BASE=1; IMAGE_EDIT=1; FLUX3=1; MOSS=1; MUSIC=1; YUE2=1; SOUND=1; BOLT=1; VOICE=1; MOTION=1; TRAIN=1; GRAPHICS=1; FINISH=1;;  # every feature
     --no-workflows) WORKFLOWS=0;;
+    --no-memguard) MEMGUARD=0;; --memguard-stop-foreign) MEMGUARD_FOREIGN=1;;  # the machine memory guard (scripts/memguard.py)
     --yes|-y) ;;  # the plain install without the checklist
     --loras) LORAS=all;; --loras=*) LORAS="${arg#--loras=}";; --no-loras) LORAS=none;; --lora-bundle=*) LORA_BUNDLE="${arg#--lora-bundle=}";;
     *) echo "unknown option $arg" >&2; exit 2;;
@@ -659,6 +663,28 @@ if [ "$FINISH" = 1 ]; then
   PREFIX="$PREFIX" bash "$HERE/scripts/setup-finish.sh" $([ "$VERIFY" = 1 ] && echo --verify) | sed 's/^/  /' \
     || echo "  ! Finish is not fully set up (above): bash oneshot-setup-spark.sh --finish tries again"
 elif [ "$VERIFY" = 1 ]; then echo "  - Finish is not installed (--finish adds it)"; fi
+
+# The machine memory guard (scripts/memguard.py, docs/memory-guard.md): a per-user service that has the Studio give memory
+# back before the kernel's OOM killer or a hang, stops the person's own model servers only when they opted in, and
+# cancels a render only as the last resort. It also places STUDIO-AGENT.md (renders go through the Studio) where agents
+# read it. --no-memguard leaves it out; --upgrade refreshes it only where it is installed; uninstall undoes all of it.
+if [ "$MEMGUARD" = 1 ] && command -v python3 >/dev/null; then
+  if [ "$VERIFY" = 1 ]; then
+    python3 "$HERE/scripts/memguard.py" status 2>&1 | grep -E "^(installed|thresholds)" | sed 's/^/  memory guard /' || true
+  elif [ "$UPGRADE" = 1 ] && ! python3 "$HERE/scripts/memguard.py" status 2>/dev/null | grep -q "^installed: yes"; then
+    echo "  - the memory guard is not installed (left so): python3 $HERE/scripts/memguard.py install adds it"
+  else
+    say "Memory guard: has the Studio give memory back before the OOM killer or a hang (--no-memguard leaves it out)"
+    if [ "$MEMGUARD_FOREIGN" = 1 ]; then
+      echo "  Opted in (--memguard-stop-foreign): under the memory floor it MAY STOP your own model servers (vLLM, Ollama, llama.cpp, LM Studio...)."
+    else
+      echo "  It unloads the Studio's idle modules and never stops your own programs (--memguard-stop-foreign allows that)."
+    fi
+    python3 "$HERE/scripts/memguard.py" install --python "$(command -v python3)" $([ "$MEMGUARD_FOREIGN" = 1 ] && echo --stop-foreign) 2>&1 | sed 's/^/  /' \
+      || echo "  ! the memory guard is not installed (above): python3 scripts/memguard.py install"
+    echo "  Agents (Claude Code, Codex, Hermes...): every render goes through the Studio; read $HERE/STUDIO-AGENT.md"
+  fi
+fi
 
 [ "$VERIFY" = 1 ] || cp "$HERE/VERSION" "$PREFIX/VERSION"
 if [ "$UPGRADE" = 1 ]; then

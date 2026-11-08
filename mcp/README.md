@@ -106,6 +106,8 @@ from an agent on your Mac, run the server there over ssh, so nothing is opened t
 | `make_graphics` | `template`, `data`, `size?`, `title?` | Queues a motion graphic rendered to .mp4 on this machine (HyperFrames): `title`, `lower-third`, `kinetic`, `captions`, `slideshow`, `music-video` or `explainer`. |
 | `check_clip` | `path`, `prompt?` | Runs the QA gate on a clip (sound, identity, sharpness); its job's `qa` is the report. |
 | `motion_previs` | `clip`, `start?`, `end?`, `mode?`, `title?` | Motion Previs: analyses a 2 to 15 s range of a clip into a production pack; its job's `pack` is the pack. |
+| `memory_status` | — | This machine's memory as the Studio sees it: `headroom_mb` over the floor it keeps free, its loaded and idle modules, the largest other programs (GPU programs first), and what it unloaded, waited for or refused. Read it before starting a model server of your own. |
+| `release_memory` | `modules?` (`voice`, `music`, `comfy`, `bolt`) | Has the Studio unload its idle modules now. The running job's module and a brain that is answering are never touched. |
 | `cancel_job` | `id` | Cancels a queued or running job (a render or a Motion Previs analysis). |
 | `list_projects` | — | The Editor's projects (timelines), newest first. |
 | `add_to_timeline` | `path`, `project?`, `in?`, `out?` | Puts a finished clip at the end of an Editor timeline (the newest, or a new one, when no project is given). |
@@ -129,6 +131,10 @@ from an agent on your Mac, run the server there over ssh, so nothing is opened t
 | `training_status` | `id` | A training run, by job id or LoRA id: status, step, last checkpoint, and whether the LoRA is installed. |
 | `night_shift` | `film`, `shots?`, `start?`, `name?` | Plans a night shift: the film's shots without a good take (or the ones named) rendered one after another, starting when the queue is idle, now, or at a time like `23:00`; a reel, the dailies package and notes are made when it is done. |
 | `upload_file` | `path` | Copies a file from the agent's machine into the Library (pictures, video, sound) and returns its path. |
+
+**Render only through these tools (or the Studio's API), never with the render scripts or a ComfyUI of your own:** only the
+Studio's queue checks a job's memory peak, unloads its idle modules to make room and keeps a floor under the render
+([STUDIO-AGENT.md](../STUDIO-AGENT.md)). Do not start a model server of your own while a job renders.
 
 Jobs run one at a time, in the order queued. A queued job returns at once with its `id`; follow it with `wait_for_jobs`
 (or poll `job_status`) until it is `done`, then use its `outputs`. Clip lengths are brought to the nearest the model takes (up to 15 seconds); sizes the

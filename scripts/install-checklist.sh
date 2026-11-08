@@ -98,7 +98,7 @@ checklist_wanted() {
   local arg
   for arg in "$@"; do
     case "$arg" in
-      --app|--no-render|--fasth3|--lora-bundle=*) ;;  # not a choice of parts: the list is still shown
+      --app|--no-render|--fasth3|--lora-bundle=*|--no-memguard|--memguard-stop-foreign) ;;  # not a choice of parts: the list is still shown
       *) return 1;;  # a feature flag, --all, --image-only, --yes, --verify, --upgrade: today's install, no list
     esac
   done
