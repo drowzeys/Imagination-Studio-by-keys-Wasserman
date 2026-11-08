@@ -3,14 +3,13 @@
 // tools it connects to, and what it is. Kept by the server in the studio folder's settings.json (app/settings.py);
 // the look is also kept in this browser so the next load paints with it before the server answers.
 const SET_DEFAULTS = {
-  appearance: { theme: "studio", type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], start_off: [] },
-  // simple is the server's to say (app/settings.py: on for a new studio); until it answers, nothing is hidden
-  layout: { hidden: [], order: [], simple: false },
+  appearance: { type_size: "comfortable", glow: true, poster: true, accent: "amber", motion: "system", start_cards: ["clip", "scout", "still", "sharp", "long", "voice"], start_off: [] },
+  layout: { hidden: [], order: [] },
   presets: { recipe: "quick", image_model: "qwen", seconds: 5, qa_gate: true, audio_rate: "keep", seed: "fixed", mode: "clip", captions_auto: true, music_engine: "auto" },
   hermes_profile: "", hermes_command: "" };
 const SET = { data: null, loaded: false, section: "appearance", saving: false, local: { endpoint: null, found: null, finding: false, said: null, testing: false },
   agents: { name: "", endpoint: "", model: "", nearby: null, finding: false, adding: false, said: {}, testing: {} }, about: null };
-const SET_SECTIONS = [["appearance", "Appearance", "theme, type, accent"], ["layout", "Studio layout", "what the sidebar shows"],
+const SET_SECTIONS = [["appearance", "Appearance", "type, glow, poster, accent"], ["layout", "Studio layout", "what the sidebar shows"],
   ["presets", "Presets & preferences", "what a new take starts from"], ["connections", "Connections", "subscriptions, local models, tools"], ["access", "Access key", "sign in your phone, a new key"], ["notify", "Notifications", "a night shift done, on your phone"],
   ["models", "Models & weights", "what the studio needs, found and linked"], ["sparks", "Sparks", "one to five DGX Sparks for a job"],
   ["brains", "Brains & tools", "your agents, another computer, MCP tools"], ["updates", "Updates", "the version and the branch it follows"], ["about", "About", "version, credits, licences"]];
@@ -22,31 +21,14 @@ const ALWAYS_ROOMS = ["machine", "settings"];
 function prefs() { const d = SET.data || {}, out = {};
   for (const k of Object.keys(SET_DEFAULTS)) out[k] = typeof SET_DEFAULTS[k] === "object" && !Array.isArray(SET_DEFAULTS[k]) ? { ...SET_DEFAULTS[k], ...(d[k] || {}) } : (d[k] ?? SET_DEFAULTS[k]);
   return out; }
-// the look on <html>: the theme, a type size class, the accent, reduced motion (glow and poster are kept for old saves)
+// the look on <html>: a type size class, glow and poster off, the accent, reduced motion
 function prefsApply(look) { const a = { ...SET_DEFAULTS.appearance, ...(look || prefs().appearance) }, root = typeof document !== "undefined" && document.documentElement;
   if (!root || !root.classList) return a;
-  for (const c of ["theme-light", "theme-oled", "type-compact", "type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
-  const shown = themeShown(a.theme);
-  if (shown === "light") root.classList.add("theme-light"); if (shown === "oled") root.classList.add("theme-oled");
-  const meta = typeof document.querySelector === "function" && document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", shown === "light" ? "#FAFAF9" : shown === "oled" ? "#000000" : "#0C0C0E");
-  themeButton(shown);
+  for (const c of ["type-large", "type-largest", "no-glow", "no-poster", "accent-cobalt", "motion-reduce"]) root.classList.remove(c);
   if (a.type_size !== "comfortable") root.classList.add("type-" + a.type_size);
   if (!a.glow) root.classList.add("no-glow"); if (!a.poster) root.classList.add("no-poster");
   if (a.accent === "cobalt") root.classList.add("accent-cobalt"); if (a.motion === "reduce") root.classList.add("motion-reduce");
   return a; }
-// the theme on screen: "system" follows the computer's light or dark, and changes with it while the page is open
-const themeDark = () => typeof window !== "undefined" && window.matchMedia ? !window.matchMedia("(prefers-color-scheme: light)").matches : true;
-function themeShown(theme) { return theme === "system" ? (themeDark() ? "studio" : "light") : theme || "studio"; }
-try { window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (prefs().appearance.theme === "system") prefsApply(); }); } catch {}
-// the top bar's switch: light when dark is showing, dark (or OLED, if that was the dark chosen before) when light is
-function themeButton(shown) { const b = typeof document !== "undefined" && document.getElementById && document.getElementById("themebtn"); if (!b) return;
-  const light = shown === "light"; if (typeof ICON !== "undefined") b.innerHTML = ICON[light ? "moon" : "sun"]; b.title = light ? "Switch to dark" : "Switch to light";
-  b.setAttribute("aria-label", b.title); }
-function themeFlip() { const a = prefs().appearance, light = themeShown(a.theme) === "light";
-  let dark = "studio"; try { dark = localStorage.getItem("studio-dark") || "studio"; } catch {}
-  if (!light) { try { localStorage.setItem("studio-dark", themeShown(a.theme)); } catch {} }
-  return settingsSave({ appearance: { theme: light ? dark : "light" } }, true); }
 function prefsMirror() { try { localStorage.setItem("studio-look", JSON.stringify(prefs().appearance)); } catch {} }
 // once, when the page opens: the saved settings, the look applied, and the Create wizard's defaults set from the presets
 async function settingsLoad() { try { const r = await api("/api/settings"); SET.data = r.settings || null; } catch { SET.data = SET.data || null; }
@@ -61,31 +43,18 @@ function recipeParams(id) { const up = typeof UPSCALED !== "undefined" && UPSCAL
   return { engine: "fasth3", passes: "4", res: "480p", up: false, preset: "small", quality: "fh4" }; }
 const prefSeed = () => prefs().presets.seed === "random" ? 1 + Math.floor(Math.random() * 99999) : (typeof C !== "undefined" && Number(C.seed)) || 1;
 function prefsToCreate() { if (typeof C === "undefined" || (typeof location !== "undefined" && location.search && location.search.length > 1)) return;
-  const p = prefs().presets; C.imageModel = ""; C.seconds = p.seconds;
+  const p = prefs().presets; C.imageModel = p.image_model; C.seconds = p.seconds;
   if (p.recipe !== "custom") { const r = recipeParams(p.recipe); Object.assign(C, { engine: r.engine, passes: r.passes, res: r.res, up: r.up, steps: "" }); if (r.seed) C.seed = r.seed; }
-  // a recipe that fixes its own seed (the Sharp Spec's 42) keeps it; Settings' random seed is for the others
-  if (p.seed === "random" && !(p.recipe !== "custom" && recipeParams(p.recipe).seed)) C.seed = prefSeed(); if (typeof sync === "function") sync(); }
+  if (p.seed === "random") C.seed = prefSeed(); if (typeof sync === "function") sync(); }
 // the sidebar's rooms in the user's order, without the hidden ones (Machine and Settings always stay)
-// the simple studio: Home, Video, Image and Library (Machine and Settings always); every other room stays one ⌘K away
-const SIMPLE_ROOMS = ["video", "image", "library"];
-const simpleOn = () => !!prefs().layout.simple;
-function simpleSet(on) { return settingsSave({ layout: { simple: !!on } }, true).then(() => toast(on ? "Simple studio: Home, Video, Image and Library. Everything else is in Search (⌘K)." : "Every room is in the sidebar again.")); }
 function roomsShown(list) { const lay = prefs().layout, order = lay.order || [];
-  if (lay.simple) list = list.filter(r => ALWAYS_ROOMS.includes(r.id) || SIMPLE_ROOMS.includes(r.id));
   const rank = r => { const i = order.indexOf(r.id); return i < 0 ? 1000 + list.indexOf(r) : i; };
-  return list.filter(r => ALWAYS_ROOMS.includes(r.id) || lay.simple || !(lay.hidden || []).includes(r.id)).sort((a, b) => rank(a) - rank(b)); }
+  return list.filter(r => ALWAYS_ROOMS.includes(r.id) || !(lay.hidden || []).includes(r.id)).sort((a, b) => rank(a) - rank(b)); }
 
 /* ---------- the parts every section is made of ---------- */
 const setSeg = (value, options, pick, label) => el("div", { class: "seg-ctl", role: "radiogroup", "aria-label": label || "" },
   Object.entries(options).map(([k, t]) => el("button", { type: "button", role: "radio", "aria-checked": value === k ? "true" : "false", class: value === k ? "on" : "", onclick: () => { if (value !== k) pick(k); } }, t)));
 const setSwitch = (on, flip, label) => el("button", { type: "button", role: "switch", class: "st-switch" + (on ? " on" : ""), "aria-checked": on ? "true" : "false", "aria-label": label, onclick: () => flip(!on) }, el("i"));
-// the themes as cards, each with a small picture of the studio in it: the sidebar, a title, a panel and the one accent
-const SET_THEMES = [["system", "Match the computer", "Light by day, dark at night"], ["light", "Light", "Off-white, white panels"], ["studio", "Dark", "Graphite"], ["oled", "Dark (OLED)", "True black for OLED screens"]];
-const setThemes = (value, pick) => el("div", { class: "st-themes", role: "radiogroup", "aria-label": "Theme" }, SET_THEMES.map(([k, title, line]) =>
-  el("button", { type: "button", role: "radio", "aria-checked": value === k ? "true" : "false", class: "st-theme" + (value === k ? " on" : ""), "data-theme": k, onclick: () => pick(k) },
-    el("span", { class: "st-mini mini-" + k, "aria-hidden": "true" }, el("i", { class: "m-side" }, el("i", { class: "m-logo" }), el("i", { class: "m-bar" }), el("i", { class: "m-bar s" }), el("i", { class: "m-bar" })),
-      el("i", { class: "m-main" }, el("i", { class: "m-title" }), el("i", { class: "m-panel" }), el("i", { class: "m-go" })), k === "system" ? el("i", { class: "m-half" }) : null),
-    el("span", { class: "st-tname" }, el("b", {}, title), el("small", {}, line)))));
 const setRow = (title, one, control) => el("div", { class: "st-row" }, el("div", { class: "st-what" }, el("b", {}, title), one ? el("span", {}, one) : null), el("div", { class: "st-ctl" }, control));
 const setPanel = (title, line, ...kids) => el("section", { class: "panel st-panel" }, el("div", { class: "st-ph" }, el("h2", {}, title), line ? el("p", { class: "note m-flat" }, line) : null), ...kids);
 
@@ -93,12 +62,12 @@ const setPanel = (title, line, ...kids) => el("section", { class: "panel st-pane
 const START_NAMES = { clip: "A clip with sound", scout: "Scout, then animate", still: "A still", sharp: "Sharp Spec", long: "A long take", voice: "A voice line", song: "A song", sfx: "Sound effects & foley", looks: "Looks", previs: "Previs", nodes: "Nodes", agent: "Ask your agent" };
 function setAppearance() { const a = prefs().appearance, put1 = patch => settingsSave({ appearance: patch }, true);
   return [setPanel("Appearance", "Applied as you choose, on this screen and every other one that opens the studio.",
-    el("div", { class: "st-themes-wrap" }, el("div", { class: "st-what" }, el("b", {}, "Theme"), el("span", {}, "The sun and moon in the top bar switch between light and dark.")), setThemes(a.theme || "studio", v => put1({ theme: v }))),
-    setRow("Text size", "The whole studio: the sidebar, every room and the queue", setSeg(a.type_size, { compact: "Small", comfortable: "Default", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Text size")),
-    setRow("Accent", "The one colour for the main button, what is selected and progress",
-      el("div", { class: "st-accents", role: "radiogroup", "aria-label": "Accent" }, [["amber", "Amber"], ["cobalt", "Cobalt"]].map(([k, t]) =>
-        el("button", { type: "button", role: "radio", "aria-checked": a.accent === k ? "true" : "false", class: "st-accent" + (a.accent === k ? " on" : ""), onclick: () => put1({ accent: k }) }, el("span", { class: "sw sw-" + k, "aria-hidden": "true" }), t)))),
-    setRow("Motion", "The pulsing rendering dot and the panels that slide", setSeg(a.motion, { system: "Follow the system", reduce: "Always reduce" }, v => put1({ motion: v }), "Motion"))),
+    setRow("Type size", "Text and controls in the work area", setSeg(a.type_size, { comfortable: "Comfortable", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Type size")),
+    setRow("Glowing pills", "The soft amber glow on the active place and the machine chip", setSwitch(a.glow, v => put1({ glow: v }), "Glowing pills")),
+    setRow("Poster on Home", "The key art beside the greeting", setSwitch(a.poster, v => put1({ poster: v }), "Poster on Home")),
+    setRow("Accent", "The colour of the one primary button and the active place",
+      setSeg(a.accent, { amber: "Amber", cobalt: "Cobalt" }, v => put1({ accent: v }), "Accent")),
+    setRow("Motion", "The breathing tally lights and hover moves", setSeg(a.motion, { system: "Follow the system", reduce: "Always reduce" }, v => put1({ motion: v }), "Motion"))),
   setPanel("Start cards on Home", "Which ways in sit under the composer. Six fill one row.",
     el("div", { class: "chips st-chips" }, Object.entries(START_NAMES).map(([id, name]) => { const off = a.start_off || [], on = typeof startShown === "function" ? startShown(a, id) : a.start_cards.includes(id);
       return el("button", { type: "button", class: "toggle" + (on ? " on" : ""), "aria-pressed": on ? "true" : "false",
@@ -114,9 +83,7 @@ function setLayout() { const lay = prefs().layout, hidden = new Set(lay.hidden |
     const at = peers.indexOf(id), to = at + by; if (to < 0 || to >= peers.length) return;
     const other = peers[to], i = list.indexOf(id), j = list.indexOf(other); list[i] = other; list[j] = id; settingsSave({ layout: { order: list } }, true); };
   const flip = id => { const next = new Set(hidden); next.has(id) ? next.delete(id) : next.add(id); settingsSave({ layout: { hidden: [...next] } }, true); };
-  return [setPanel("Simple studio", "Only what makes and changes pictures and clips: Home, Video, Image and Library, with Machine and Settings. Every other room stays one ⌘K away, and your own layout below comes back when it is off.",
-    setRow("Simple studio", lay.simple ? "On: Home, Video, Image and Library" : "Off: every room you have not hidden", setSwitch(!!lay.simple, on => simpleSet(on), "Simple studio"))),
-    setPanel("Studio layout", "Show or hide each room in the sidebar, and put them in your order. A hidden room stays one ⌘K away; Home, Machine and Settings always stay." + (lay.simple ? " The simple studio is on: this layout shows when it is off." : ""),
+  return [setPanel("Studio layout", "Show or hide each room in the sidebar, and put them in your order. A hidden room stays one ⌘K away; Home, Machine and Settings always stay.",
     groups.map(g => { const rooms = full().filter(r => r.group === g.id); if (!rooms.length) return null;
       return el("div", { class: "st-group" }, el("div", { class: "eyebrow" }, g.name || g.label || "Agent"),
         rooms.map((r, i) => { const always = ALWAYS_ROOMS.includes(r.id), shown = always || !hidden.has(r.id);
@@ -135,7 +102,7 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
   const yue = !!(S && S.music && S.music.engines && S.music.engines.yue2 && S.music.engines.yue2.installed);
   const secs = el("select", { "aria-label": "Default clip length", onchange: e => put1({ seconds: Number(e.target.value) }) }, (lengths.length ? lengths : [5]).map(n => el("option", { value: n, selected: Number(p.seconds) === n }, n + " s")));
   return [setPanel("Presets & preferences", "What a new take starts from: the Home composer and the Create wizard open with these.",
-    setRow("Render recipe", "For clips from Home and a new Create", setSeg(p.recipe, { quick: "Draft", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final", custom: "Custom" }, v => put1({ recipe: v }), "Render recipe")),
+    setRow("Render recipe", "For clips from Home and a new Create", setSeg(p.recipe, { quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K", custom: "Custom" }, v => put1({ recipe: v }), "Render recipe")),
     setRow("Picture model", "For stills and scouts", model),
     setRow("Clip length", "A clip's seconds; the exact frames are shown before it is queued", secs),
     setRow("Home starts on", "The composer's first chip", setSeg(p.mode, { clip: "Clip", picture: "Picture", voice: "Voice", song: "Song" }, v => put1({ mode: v }), "Home starts on")),
@@ -143,15 +110,13 @@ function setPresets() { const p = prefs().presets, put1 = patch => settingsSave(
     setRow("Describe new clips automatically", "When nothing is rendering, the local model looks at new clips and pictures so the Library can search by what is in them", setSwitch(p.captions_auto !== false, v => put1({ captions_auto: v }), "Describe new clips automatically")),
     setRow("Delivery sound", (typeof cardFace === "function" && cardFace() ? "On this GPU" : "On a DGX Spark") + " a clip's sound is 32 kHz; 48 kHz stereo re-encodes only the sound", setSeg(p.audio_rate, { keep: "Keep 32 kHz", "48000": "48 kHz stereo" }, v => put1({ audio_rate: v }), "Delivery sound")),
     setRow("Song engine", "For the Music tab: best here is YuE2 where it is installed (Linux, NVIDIA) and MiniMax Music 3 on a Mac; each song can still choose", setSeg(p.music_engine === "yue2" && !yue ? "auto" : p.music_engine || "auto", { auto: "Best here", ...(yue ? { yue2: "YuE2" } : {}), music3: "MiniMax Music 3" }, v => put1({ music_engine: v }), "Song engine")),
-    setRow("Seed", "Fixed: Render again repeats a take, Another take moves the seed on. Random: every take a new seed", setSeg(p.seed, { fixed: "Fixed", random: "Random" }, v => put1({ seed: v }), "Seed")),
+    setRow("Seed", "Fixed repeats a take; random gives each a new one", setSeg(p.seed, { fixed: "Fixed", random: "Random" }, v => put1({ seed: v }), "Seed")),
     setRow("Renders go to", "The studio folder, set when the studio starts (STUDIO_HOME)", el("code", { class: "st-path" }, (S && S.home) || "the studio folder")))]; }
 
 /* ---------- 4. Connections ---------- */
 const LOCAL_PRESETS = [["Studio engine · Bolt", "studio:bolt"], ["Ollama", "http://127.0.0.1:11434/v1"], ["LM Studio", "http://127.0.0.1:1234/v1"], ["vLLM", "http://127.0.0.1:8000/v1"], ["llama.cpp", "http://127.0.0.1:8080/v1"], ["Hermes proxy", ""]];
 // the Local models card: on Settings → Connections and at the top of Machine → Brains & tools
 function localModelsCard() {
-  const windows = S && S.ui_only;
-  const comfy = windows && S.windows_stills && S.windows_stills.backend;
   const b = (typeof BR !== "undefined" && BR.data && BR.data.backends || []).find(x => x.id === "local"), set = typeof BR !== "undefined" && BR.data && BR.data.settings || {};
   const L = SET.local; if (L.endpoint === null) L.endpoint = set.local_endpoint || "";
   const found = L.found || (b ? { found: b.found, endpoint: b.endpoint, models: b.models || [] } : null);
@@ -165,9 +130,8 @@ function localModelsCard() {
     el("div", { class: "st-lh" }, el("span", { class: "logo" }, icon("machine")), el("div", { class: "m-min" }, el("h2", {}, "Local models welcome"),
       el("p", { class: "st-line" }, "Any local model works here — nothing leaves your machine.")),
       el("span", { class: "tag2 " + (found && found.found ? "ok" : "") }, found ? (found.found ? "answering" : "not answering") : "not looked yet")),
-    el("div", { class: "note m-flat" }, windows ? "A small loopback server supports text-only Slate writing. Start scripts\\brain.ps1 in a separate terminal, save its address here and test it. Copilot remains the Studio-tool agent; local vision and rendering are not enabled."
-      : "An OpenAI-compatible server on this computer or your network can be the brain for Slate, the QA look and the Agent room's conversation. Pick one to fill its usual address, or type your own."),
-    el("div", { class: "chips" }, (windows ? [["Qwen3-4B · llama.cpp", "http://127.0.0.1:8080/v1"]] : LOCAL_PRESETS).map(([name, url]) => el("button", { type: "button", class: "toggle" + (url && L.endpoint === url ? " on" : ""),
+    el("div", { class: "note m-flat" }, "An OpenAI-compatible server on this computer or your network can be the brain for Slate, the QA look and the Agent room's conversation. Pick one to fill its usual address, or type your own."),
+    el("div", { class: "chips" }, LOCAL_PRESETS.map(([name, url]) => el("button", { type: "button", class: "toggle" + (url && L.endpoint === url ? " on" : ""),
       title: url || "Run `hermes proxy start` in a terminal; `hermes proxy status` shows the address to type here",
       onclick: () => { if (!url) { toast("Run `hermes proxy start`, then type the address `hermes proxy status` shows", 6000); return; } L.endpoint = url; L.found = null; render(); } }, name))),
     el("div", { class: "st-lrow" }, field1, el("button", { type: "button", class: "small", disabled: L.finding, onclick: find1 }, L.finding ? "Looking…" : "Find"),
@@ -179,12 +143,7 @@ function localModelsCard() {
     // a name set here that the server no longer runs: the studio asks for, and shows, the model it does run
     b && b.set_missing && b.endpoint === (found && found.endpoint) ? el("div", { class: "note m-flat" }, "Set to " + b.set_model + ", which this server no longer runs: the studio uses " + b.model + ". ",
       el("button", { type: "button", class: "small", onclick: () => save1({ local_model: "" }) }, "Follow what the server runs")) : null,
-    L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null,
-    comfy ? el("div", { class: "group" }, el("h3", {}, "Image and sound backend · ComfyUI"),
-      el("div", { class: "note" }, comfy.why || (comfy.loaded ? "Models kept warm between jobs, under the memory guard." : comfy.running ? "ComfyUI is running." : "ComfyUI starts with the first image job.")),
-      el("button", { class: "small", disabled: comfy.busy || !(comfy.running || comfy.why), onclick: async () => {
-        try { S.windows_stills.backend = await api("/api/windows/stills/unload", {}); toast("ComfyUI unloaded"); render(); } catch (e) { toast(e.message); }
-      } }, "Unload ComfyUI")) : null); }
+    L.said ? el("div", { class: "note m-flat " + (L.said.ok ? "vt-ok" : "vt-bad") }, L.said.ok ? "Answered “" + String(L.said.text || "").slice(0, 40) + "”" : L.said.error) : null); }
 // More local agents: every other model server (a GLM, a DeepSeek, an Ollama) as a brain of its own, beside Bolt
 function localAgentsCard() {
   const d = typeof BR !== "undefined" && BR.data || {}, A = SET.agents, mine = (d.backends || []).filter(b => b.local_agent);
@@ -318,23 +277,21 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
     el("ul", { class: "st-credits" }, ["Keys (drowzeys): the studio itself, its TensorFold families and int8 kernels, and its Mac and DGX Spark engines",
       "Sam Wasserman and Wasserman Productions: helped design and build the studio in collaboration with Keys; Wasserman's Filmmaker Suite (ScriptBreak, Cork Board, Master Canvas, Storyboard Reference Studio, Blockout, Motion Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the studio's art; More local agents and the memory guard's cold-load fix",
       "August Sturm: the RTX Pro 6000 build, run on the card; quitting the app stops its ComfyUI",
-      "David Low (davidlowjw): two GPUs in one machine, one render split over both cards, and his TensorFold fork studio-two-gpus (Apache-2.0) for the exchange",
       "BTankut: bug reports from a film made in Slate, with causes and fixes (export trims and size, the shot check button, Regenerate); the NVIDIA driver's memory pools on a DGX Spark",
       "drgw5b7gzv-ship-it and gsp-agent: the Qwen-Image-2.1-Turbo text encoder on a fresh Mac install, reported, diagnosed and worked around",
-      "Qwen team: Qwen-Image-2.1 and Qwen3-4B (optional Windows writing brain)", "Stability AI: SD-Turbo (optional Windows storyboard drafts); SDXL-Turbo (evaluated, not qualified on Windows)", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Multimodal Art Projection (m-a-p) and the YuE2 authors: YuE2 (songs), with the Qwen team's qwen.tiktoken read by OpenAI's tiktoken", "Built with Fish Audio: Fish Audio Drama 3",
-      "Stability AI: Stable Audio Open · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio · KEUM Myungchul: python-soxr (sound effects and foley)",
-      "Ash Hart and the TensorFold contributors: TensorFold (the music engines and both Bolt engines on the 1.1.8 release; on native Windows the 1.2.2 release's int8 H3 blocks (tf_h3.dll) and Bolt lane (tensorfold-native.exe, bolt.dll), Fish Audio Drama 3 (drama3-generate.exe) and MiniMax Music 3 (music3-generate.exe))",
-      "The native Windows CUDA tier: NVIDIA: CUDA Toolkit 13.4 for Windows on Arm (redistributable archives) · Microsoft: Visual Studio 2022 Build Tools (MSVC ARM64, Windows SDK), winget, job objects, Windows Forms, PowerShell and Windows Subsystem for Linux (Native/WSL2 tray), the x64 emulation of Windows 11 on Arm (Tesseract's windows-x86_64 build) · the Zig Software Foundation: Zig 0.17 · Git for Windows · TensorFold 1.2.2 on Windows: the Fish Audio Drama 3 and MiniMax Music 3 engines · kohya-ss: musubi-tuner on Windows on Arm, with PyAV and bitsandbytes",
-      "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine); native Windows ARM64 CUDA wheels for PyTorch, TorchVision and TorchAudio (PyTorch contributors) · MiaAI-Lab (with ChriZzn): the Bolt TensorFold recipe for the DGX Spark, its libbolt and LiLiCorr drafter runtime",
+      "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Multimodal Art Projection (m-a-p) and the YuE2 authors: YuE2 (songs), with the Qwen team's qwen.tiktoken read by OpenAI's tiktoken", "Built with Fish Audio: Fish Audio Drama 3",
+      "Stability AI: Stable Audio Open · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio (sound effects and foley)",
+      "Ash Hart and the TensorFold contributors: TensorFold (the music engines and both Bolt engines on the 1.1.8 release)",
+      "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine) · MiaAI-Lab (with ChriZzn): the Bolt TensorFold recipe for the DGX Spark, its libbolt and LiLiCorr drafter runtime",
       "antirez: h3.c · RobZombAI: H3MLX · mrbizarro: minimax-h3-mlx (Phosphene) · Filip Strand and the mflux contributors · felix-ab: flux3-mlx",
-      "comfyanonymous, Comfy Org and the ComfyUI contributors: ComfyUI, its audio nodes and checkpoint helpers used by the Windows calibration, and Comfy Org's MOSS-Image and MiniMax-Music-3 files · Apple: MLX · mlx-vlm · Qwen team: Qwen3-VL · VisualInference",
+      "comfyanonymous, Comfy Org and the ComfyUI contributors: ComfyUI, and Comfy Org's MOSS-Image and MiniMax-Music-3 files · Apple: MLX · mlx-vlm · Qwen team: Qwen3-VL · VisualInference",
       "NVIDIA Research: Sol · FastVideo (Hao AI Lab): FastH3 · LightX2V (ModelTC) · larryvrh · TaoLiveAIGC · Viggle · speach1sdef178 · rookiestar28 · ddalcu · Kijai · DeepBeepMeep",
-      "The Library's actions: MulticoreWare: x265 (keys-HDR LORA, the HDR finish) · hi_personality (the clip the HDR finish's look was measured from) · MATLOWAI (H3 Contact Sheet) · dntpi / Sandpies (H3 Video Upsampler) · LBH-123-AI · bbaudio-2025 · Alissonerdx · Akatz Labs (H3 Relay, Person Remover, Character Swap LoRA and workflow) · Meta: SAM 3.1 · Comfy Org: Openjutsu (the idea of Character Swap)",
-      "Motion Previs: Sam Wasserman's Motion Previs Studio · Google: MediaPipe · Lihe Yang et al.: Depth Anything (Xenova's ONNX conversion) · OpenCV · Microsoft: ONNX Runtime and Win32 memory-pressure/job-object APIs · NVIDIA: NVML/CUDA budget queries",
+      "The Library's actions: MATLOWAI (H3 Contact Sheet) · dntpi / Sandpies (H3 Video Upsampler) · LBH-123-AI · bbaudio-2025 · Alissonerdx · Akatz Labs (H3 Relay, Person Remover, Character Swap LoRA and workflow) · Meta: SAM 3.1 · Comfy Org: Openjutsu (the idea of Character Swap)",
+      "Motion Previs: Sam Wasserman's Motion Previs Studio · Google: MediaPipe · Lihe Yang et al.: Depth Anything (Xenova's ONNX conversion) · OpenCV · Microsoft: ONNX Runtime",
       "MMAudio's models: Apple DFN5B CLIP · Synchformer (Iashin et al.) · NVIDIA BigVGAN v2 · Google: T5 · the SGLang-Omni team and Descript: Fish's codec on a Spark",
-      "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), GitHub Copilot CLI (GitHub), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, SGLang (the SGLang team and LMSYS), llama.cpp (Georgi Gerganov and the ggml contributors); Blender (Blender Foundation) and blender-mcp (Siddharth Ahuja)",
-      "OpenAI Whisper, faster-whisper (SYSTRAN, Mobius Labs), yt-dlp, FFmpeg; BtbN and the FFmpeg-Builds contributors (native Windows ARM64 build); VideoLAN and the x264 contributors; PyTorch, Hugging Face diffusers, transformers and huggingface_hub, torchsde, FastAPI, Starlette and Uvicorn (Encode), aiohttp (aio-libs), xgrammar (MLC-AI), Zig, BusyBox, uv, NumPy, Pillow, PyAV",
-      "Motion graphics, training and finishing: HeyGen (HyperFrames) · GreenSock (GSAP) · Microsoft (Playwright, installed Edge on Windows) · Google and Puppeteer contributors (Puppeteer) · Node.js · kohya-ss (musubi-tuner) · ostris · bitsandbytes (Tim Dettmers) · Mirage (Tesseract, Tesseract Converter) · the Rust project (rustup, cargo) · LLVM (libclang) · zmwangx and the ffmpeg-next contributors · DejaVu fonts",
+      "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, SGLang (the SGLang team and LMSYS), llama.cpp (Georgi Gerganov and the ggml contributors); Blender (Blender Foundation) and blender-mcp (Siddharth Ahuja)",
+      "OpenAI Whisper, faster-whisper (SYSTRAN, Mobius Labs), yt-dlp, FFmpeg, PyTorch, Hugging Face diffusers, transformers and huggingface_hub, torchsde, FastAPI, Starlette and Uvicorn (Encode), xgrammar (MLC-AI), Zig, BusyBox, uv, NumPy, Pillow, PyAV",
+      "Motion graphics, training and finishing: HeyGen (HyperFrames) · GreenSock (GSAP) · Microsoft (Playwright) · Node.js · kohya-ss (musubi-tuner) · ostris · bitsandbytes (Tim Dettmers) · Mirage (Tesseract, Tesseract Converter) · DejaVu fonts",
       "Geist and Instrument Serif · LobeHub and Simple Icons: the agents' marks · @itxabdullaa: the Black Mirror test prompt",
       "The community LoRA authors, by name on each card in Looks and in CREDITS.md · every one of them, with what was used and its licence, under Every credit below"].map(t => el("li", {}, t)))),
   setFullCredits(),
@@ -344,7 +301,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "FLUX3-K: FLUX Kommunity License", "MOSS-Image: Apache 2.0 (commercial use allowed)", "Fish Audio Drama 3: Fish Audio Community License v1.0; a hosted voice service needs Fish's own licence",
       "NVIDIA Nemotron 3.5 Bolt: OpenMDW License 1.1 (commercial use allowed; a copy keeps the licence and NVIDIA's notices) · its DGX Spark engine: MiaAI-Lab's recipe, MIT, on TensorFold",
       "Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue)", "MMAudio's weights: CC-BY-NC 4.0, non-commercial",
-      "HyperFrames: Apache 2.0 · GSAP: its no-charge Standard License (not open source) · musubi-tuner: Apache 2.0 · bitsandbytes: MIT · Tesseract: Mirage's own terms (free below US$1 million of yearly revenue, not for redistribution, usage counts on by default) · Tesseract Converter: MIT (built on Windows on Arm with one fix, beside FFmpeg's LGPL DLLs) · Rust, LLVM, ffmpeg-next: MIT/Apache 2.0, Apache 2.0 with LLVM exceptions, WTFPL",
+      "HyperFrames: Apache 2.0 · GSAP: its no-charge Standard License (not open source) · musubi-tuner: Apache 2.0 · bitsandbytes: MIT · Tesseract: Mirage's own terms (free below US$1 million of yearly revenue, not for redistribution, usage counts on by default) · Tesseract Converter: MIT",
       "Wasserman's Filmmaker Suite: each app under its own licence, Apache-2.0 (Master Canvas: MIT); the studio ships none of their code but the Slate workflow and the Motion Previs port, each with its NOTICE"].map(t => el("li", {}, t))))]; }
 
 function setEmbedded(section) { const [name, data] = SET_VIEWS[section], view = typeof globalThis[name] === "function" ? globalThis[name] : null;

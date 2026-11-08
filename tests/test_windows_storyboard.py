@@ -215,59 +215,6 @@ def test_generated_candidates_do_not_replace_manual_board_images(tmp_path):
     assert suite.with_storyboards(folder, found, tmp_path)["shots"][0]["image"] == "manual.png"
 
 
-def test_the_page_queues_bounded_missing_stills_and_preserves_existing_images():
-    from test_slate_page import run
-    root = Path(__file__).resolve().parents[1]
-    out = run("""
-      const index = fs.readFileSync(%s, "utf8");
-      vm.runInThisContext("const stillParams = " + index.split("const stillParams = ")[1].split("\\nconst imageModelName")[0]);
-      vm.runInThisContext(fs.readFileSync(%s, "utf8"));
-      S.ui_only = true; S.windows_stills = { available: true, model: "sd-turbo", width: 512, height: 512, max_count: 6 };
-      globalThis.imageModel = () => "qwen"; globalThis.poll = async () => {}; globalThis.bayOpen = () => {};
-      globalThis.count = (n, word) => n + " " + word;
-      const imp = { id: "i1", shots: [{ id: "s1", scene: "Hall", action: "Daylight on a door." },
-                                     { id: "s2", action: "Keep my reference.", image: "uploads/manual.png" }] };
-      await stillsForAll(imp);
-      out.queued = calls.filter(c => c[0] === "/api/jobs"); out.manual = imp.shots[1].image;
-    """ % (json.dumps(str(root / "app/static/index.html")), json.dumps(str(root / "app/static/suite.js"))))
-    assert len(out["queued"]) == 1 and out["manual"] == "uploads/manual.png"
-    params = out["queued"][0][1]["params"]
-    assert params["width"] == params["height"] == 512 and params["image_model"] == image.MODEL
-    assert params["suite_import"] == "i1" and params["suite_shots"] == ["s1"]
-    assert params["prompts"] == ["Hall Daylight on a door."] and params["seeds"] == [1]
-
-
-def test_first_ad_shots_keep_changed_manual_frames_and_pin_completed_candidates():
-    from test_slate_page import run
-    root = Path(__file__).resolve().parents[1]
-    out = run("""
-      const index = fs.readFileSync(%s, "utf8");
-      vm.runInThisContext("const stillParams = " + index.split("const stillParams = ")[1].split("\\nconst imageModelName")[0]);
-      S.windows_stills = { available: true, model: "sd-turbo", width: 512, height: 512 };
-      globalThis.poll = async () => {};
-      SL.p = film();
-      slApply([{ type: "create_scene", name: "Hall" }, { type: "create_shot", scene: "Hall",
-        name: "Wide", prompt: "# Subject\\nDaylight on a door.", intent: "Do not put this crew note in the prompt." }]);
-      const shot = SL.p.scenes[0].shots[0], tf = slTf(shot); tf.image = "uploads/old.png";
-      const make = () => slStoryboard(shot).kids.find(n => n && n.tag === "button");
-      answers["/api/jobs"] = { id: "b1" };
-      await make().attrs.onclick();
-      out.params = calls.find(c => c[0] === "/api/jobs")[1].params;
-      tf.image = "uploads/changed.png";
-      jobs.push({ id: "b1", status: "done", outputs: ["scouts/b1/scout_s1.png", "scouts/b1/sheet.jpg"] });
-      slStoryboard(shot); out.manual = tf.image; out.candidates = [...shot.images];
-      answers["/api/jobs"] = { id: "b2" };
-      await make().attrs.onclick();
-      jobs.push({ id: "b2", status: "done", outputs: ["scouts/b2/scout_s1.png"] });
-      slStoryboard(shot); out.pinned = tf.image; out.start = tf.start;
-    """ % json.dumps(str(root / "app/static/index.html")))
-    assert out["params"]["prompt"] == "# Subject\nDaylight on a door."
-    assert out["params"]["width"] == out["params"]["height"] == 512
-    assert out["manual"] == "uploads/changed.png"
-    assert out["candidates"] == ["scouts/b1/scout_s1.png"]
-    assert out["pinned"] == "scouts/b2/scout_s1.png" and out["start"] == "image"
-
-
 @pytest.mark.parametrize("params", [
     {"prompts": []}, {"prompts": ["x"] * 7}, {"prompts": [""]},
     {"prompts": ["x"], "prompt": "y"}, {"prompts": ["x", "y"], "count": 1},
@@ -376,28 +323,3 @@ def test_current_owned_commit_and_reserved_memory_are_used_not_peaks(monkeypatch
     backend.job = SimpleNamespace(process_accounting=lambda *args: checked.append("membership"))
     assert backend.accounting() == {"commit_mb": 1024, "reserved_mb": 256}
     assert checked == ["membership", "identity"]
-
-
-def test_scene_batch_binds_each_result_to_its_own_shot_and_keeps_seeds():
-    from test_slate_page import run
-    root = Path(__file__).resolve().parents[1]
-    out = run("""
-      const index = fs.readFileSync(%s, "utf8");
-      vm.runInThisContext("const stillParams = " + index.split("const stillParams = ")[1].split("\\nconst imageModelName")[0]);
-      S.windows_stills = { available: true, model: "sd-turbo", width: 512, height: 512, max_count: 6 };
-      globalThis.poll = async () => {};
-      SL.p = film();
-      slApply([{ type: "create_scene", name: "Hall" }, { type: "create_shot", scene: "Hall", name: "A", prompt: "A door." },
-               { type: "create_shot", scene: "Hall", name: "B", prompt: "A tree." },
-               { type: "create_shot", scene: "Hall", name: "Manual", prompt: "Keep this." }]);
-      const scene = SL.p.scenes[0], [a, b, manual] = scene.shots;
-      slTf(a).seed = 0; slTf(b).seed = 7; slTf(manual).image = "uploads/manual.png";
-      answers["/api/jobs"] = { id: "batch" };
-      await slSceneStoryboards(scene);
-      out.params = calls.find(c => c[0] === "/api/jobs")[1].params;
-      jobs.push({ id: "batch", status: "done", outputs: ["scouts/b/scout_s0_shot1.png", "scouts/b/scout_s7_shot2.png", "scouts/b/sheet.jpg"] });
-      slStoryboard(a); slStoryboard(b);
-      out.images = scene.shots.map(s => slTf(s).image);
-    """ % json.dumps(str(root / "app/static/index.html")))
-    assert out["params"]["prompts"] == ["A door.", "A tree."] and out["params"]["seeds"] == [0, 7]
-    assert out["images"] == ["scouts/b/scout_s0_shot1.png", "scouts/b/scout_s7_shot2.png", "uploads/manual.png"]

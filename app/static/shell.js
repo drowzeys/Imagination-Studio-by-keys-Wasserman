@@ -8,7 +8,7 @@ const ROOMS = [
   // every tool as a one-click app (apps.js), above the engines
   { id: "apps", group: "apps", name: "Apps", key: "", tabs: ["Apps"], says: "every tool as a one-click app" },
   { id: "video", group: "engines", name: "Video", key: "1", tabs: ["Video", "Create"], says: "clips with sound, long takes, references" },
-  { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create", "Quick Edit"], says: "stills, scouts, edit a picture, Quick Edit" },
+  { id: "image", group: "engines", name: "Image", key: "2", tabs: ["Image", "Create"], says: "stills, scouts, edit a picture" },
   { id: "sound", group: "engines", name: "Sound", key: "3", tabs: ["Sound", "Voice", "Music", "Foley"], says: "voices, score and sound effects" },
   { id: "story", group: "engines", name: "Story", key: "4", tabs: ["Story", "Production"], says: "the film: board, Wasserman Slate, First AD" },
   // a room of its own for a part that also sits inside a bigger page; `fold`: in the More sheet on a phone, not the bar
@@ -27,7 +27,7 @@ const ROOMS = [
   { id: "learn", group: "vaults", name: "Learn", key: "", tabs: ["Tutorial"], says: "lessons, step by step" },
   { id: "settings", group: "vaults", name: "Settings", key: ",", tabs: ["Settings"], says: "looks, layout, presets and connections" },
 ];
-const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", "Quick Edit": "Quick Edit", Previs: "Overview", "Motion Previs": "Motion Previs",
+const TAB_NAMES = { Home: "Home", Story: "Overview", Production: "Film", Image: "Overview", Video: "Overview", Create: "Create", Previs: "Overview", "Motion Previs": "Motion Previs",
   Agent: "Ask your agent", Sound: "Overview", Voice: "Voice", Music: "Music", Foley: "Sound effects", Edit: "Overview", Editor: "Timeline", Graphics: "Graphics", Finish: "Finish",
   Apps: "Apps", "Cast & Places": "Cast & Places", Director: "Director", "Motion graphics": "Motion graphics", "Night shift": "Night shift", Library: "Library", Looks: "Looks", Import: "Bring in & send out",
   Machine: "Telemetry", Models: "Models & weights", Sparks: "Sparks", Brains: "Brains & tools", Updates: "Updates", Tutorial: "Learn", Nodes: "Nodes", Settings: "Settings" };
@@ -71,9 +71,6 @@ const ICON = {
   train: KIT("M24 8L28 20L40 24L28 28L24 40L20 28L8 24L20 20Z M42 34L44 40L50 42L44 44L42 50L40 44L34 42L40 40Z"),
   apps: KIT("M8 8H24V24H8Z M32 8H48V24H32Z M8 32H24V48H8Z M32 32H48V48H32Z"),
   more: SVG('<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>'),
-  // the top bar's light or dark switch: the sun shows in the dark, the moon in the light
-  sun: SVG('<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>'),
-  moon: SVG('<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'),
 };
 const icon = (name, cls) => { const n = el("span", { class: cls || "ico" }); n.innerHTML = ICON[name] || ICON.home; return n; };
 // the marks of the models and tools the Studio runs (app/static/brand, THIRD-PARTY-MARKS.md): identification only
@@ -99,15 +96,7 @@ function goBack() { const h = SHELL.history; while (h.length && (h[h.length - 1]
   if (state && state.from === prev && typeof history.back === "function") return history.back();
   h.pop(); go(prev, { back: true }); }
 function goHome() { if (tab !== "Home") go("Home"); }
-// the simple studio opens Video and Image on Create itself (their overview stays the first tab); the other rooms on their first tab
-function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (!r) return;
-  if ((id === "video" || id === "image") && typeof simpleOn === "function" && simpleOn() && typeof C !== "undefined" && TABS.includes("Create")) {
-    if (C.goes !== id) { C.goes = id; C.step = 0; if (id === "video" && !C.start) C.start = "text"; if (typeof sync === "function") sync(); C.prompt = ""; }
-    return go("Create"); }
-  go(r.tabs[0]); }
-function capWhy(kind) { if (!kind || !S || S.platform !== "windows") return "";
-  const c = (S.capabilities || {})[kind];
-  return c && c.available ? "" : c && c.why || "This action is not qualified in the Windows preview."; }
+function goRoom(id) { const r = ROOMS.find(x => x.id === id); if (r) go(r.tabs[0]); }
 
 const shown = list => typeof roomsShown === "function" ? roomsShown(list) : list;
 const aboutOn = () => tab === "Settings" && typeof SET !== "undefined" && SET.section === "about";
@@ -119,16 +108,12 @@ function renderShell() {
   for (const g of GROUPS) { const rooms = shown(ROOMS.filter(x => x.group === g.id)); if (!rooms.length) continue;
     if (g.name) nav.push(el("div", { class: "grp g-" + g.id, role: "presentation" }, g.name));
     for (const r of rooms) { const b = el("button", { class: now === r && !(r.id === "settings" && aboutOn()) ? "on" : "", "data-room": r.id, "data-group": r.group, "data-fold": r.fold ? "more" : false, title: r.name + ": " + r.says + (r.key ? " (⌥" + r.key + ")" : ""), "aria-current": now === r ? "page" : false, onclick: () => goRoom(r.id) },
-      icon(r.id, "ic"), el("span", { class: "lbl" }, r.short || r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
+      icon(r.id, "ic"), el("span", { class: "lbl" + (r.name.length > 18 ? " long" : "") }, r.name), r.key ? el("span", { class: "kbd" }, "⌥" + r.key) : null);
       if (r.id === "video" && live && now !== r) b.prepend(el("span", { class: "live", "aria-label": "rendering" }));
       nav.push(b);
       // About has a button of its own under Settings: the credits, licences and links (Settings → About)
       if (r.id === "settings") nav.push(el("button", { class: aboutOn() ? "on" : "", "data-room": "about", "data-group": "vaults", type: "button", title: "About: credits, licences and links",
         "aria-current": aboutOn() ? "page" : false, onclick: () => { if (typeof goSettings === "function") goSettings("about"); else go("Settings"); } }, icon("about", "ic"), el("span", { class: "lbl" }, "About"))); } }
-  // the simple studio's switch, at the foot of the rooms: one control, two states (Settings › Studio layout reads the same key)
-  if (typeof simpleOn === "function") { const on = simpleOn();
-    nav.push(el("button", { class: "simplebtn", "data-room": "simple", type: "button", title: on ? "Show every room in the sidebar (voice, music, film, motion graphics and the rest)" : "Only Home, Video, Image and Library in the sidebar; every room stays one ⌘K away",
-      onclick: () => simpleSet(!on) }, icon(on ? "more" : "home", "ic"), el("span", { class: "lbl" }, on ? "All tools" : "Simple studio"))); }
   // phones only (studio.css): the bar keeps the engines and folds the vaults, search and updates into More
   nav.push(el("button", { class: "more" + (now && (now.group !== "engines" || now.fold) ? " on" : ""), "data-room": "more", type: "button", title: "More: the Agent, the Studio Vaults, search and updates", "aria-haspopup": "dialog", onclick: moreOpen },
     icon("more", "ic"), el("span", { class: "lbl" }, "More")));
@@ -140,7 +125,6 @@ function renderShell() {
   const tabs = now && now.tabs.length > 1 ? now.tabs : [];
   $("#subtabs").replaceChildren(...tabs.map(t => el("button", { class: t === tab ? "on" : "", "aria-current": t === tab ? "page" : false, onclick: () => go(t) }, TAB_NAMES[t] || t)));
   document.body.classList.toggle("quiet", SHELL.lastTab === tab); SHELL.lastTab = tab;
-  document.body.classList.toggle("simple", typeof simpleOn === "function" && simpleOn());  // a phone's bar keeps Library then (studio.css)
 }
 const SHELL = { lastTab: null, tel: null, history: [], samples: [], es: null, telAt: 0, libCache: null, telWait: 2000, telPoll: null, telDog: null };
 // the More sheet on phones: the Studio Vaults, ⌘K search and Updates, which the bottom bar has no room for
@@ -155,8 +139,7 @@ function moreOpen() { if ($("#moresheet")) return moreClose(); const now = tab =
       shown(ROOMS.filter(r => r.fold)).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r)),
       el("div", { class: "grp" }, "Studio Vaults"),
       shown(ROOMS.filter(r => r.group === "vaults")).map(r => row(r.id, r.name, r.says, () => goRoom(r.id), now === r, r.key ? "⌥" + r.key : null)),
-      el("div", { class: "grp" }, "Studio"), row("search", "Search", "takes, settings, actions and every room", palOpen, false, "⌘K"),
-      typeof simpleOn === "function" ? row(simpleOn() ? "more" : "home", simpleOn() ? "All tools" : "Simple studio", simpleOn() ? "every room in the bar again: voice, music, film and the rest" : "only Home, Video, Image and Library", () => simpleSet(!simpleOn()), false) : null,
+      el("div", { class: "grp" }, "Studio"), row("search", "Search", "takes, settings and actions", palOpen, false, "⌘K"),
       row("update", "Updates", fresh ? "an update is ready to install" : (S && S.version ? "Studio " + S.version + " · " : "") + "check for a new version", () => go("Updates"), tab === "Updates")));
   document.body.append(sheet); const first = sheet.querySelector && sheet.querySelector("button"); if (first) first.focus(); return sheet; }
 function moreClose() { const s = $("#moresheet"); if (s) s.remove(); }
@@ -176,9 +159,9 @@ function jobShare(job) { const p = job.progress, elapsed = job.elapsed != null ?
 function bayUpdate() { const sum = $("#baysum"); if (!sum) return;
   const running = jobs.filter(j => j.status === "running"), queued = jobs.filter(j => j.status === "queued"), done = jobs.filter(j => j.status === "done").length, failed = jobs.filter(j => j.status === "failed").length;
   const lanes = running.map(j => { const { share, left } = jobShare(j);
-    return el("div", { class: "lane r", title: j.title }, el("span", { class: "onair" }, "Rendering"), j.spark ? el("span", { class: "tcode" }, typeof spkLabel === "function" ? spkLabel(j.spark) : j.spark) : null, el("b", {}, j.title),
+    return el("div", { class: "lane r", title: j.title }, el("span", { class: "onair" }, "ROLLING"), j.spark ? el("span", { class: "tcode" }, typeof spkLabel === "function" ? spkLabel(j.spark) : j.spark) : null, el("b", {}, j.title),
       el("span", { class: "mini" }, el("i", { style: "width:" + share + "%" })), el("span", { class: "tcode" }, left == null ? share + "%" : left > 5 ? mmss(left) : "almost")); });
-  if (!lanes.length) lanes.push(el("div", { class: "lane" }, el("span", { class: "dotl" + (queued.length ? " t" : "") }), el("span", { class: "tcode" }, queued.length ? "Next up: " + queued[0].title : "Ready")));
+  if (!lanes.length) lanes.push(el("div", { class: "lane" }, el("span", { class: "dotl" + (queued.length ? " t" : "") }), el("span", { class: "tcode" }, queued.length ? "Next up: " + queued[0].title : "Ready. Nothing rolling.")));
   sum.replaceChildren(...lanes);
   $("#baycount").replaceChildren(...[queued.length ? queued.length + " queued" : "", done ? done + " done" : "", failed ? failed + " failed" : ""].filter(Boolean).map(t => el("span", {}, t)));
   renderRoomsLive(running.length > 0); }
@@ -195,7 +178,7 @@ const platName = () => {
   if (S.platform !== "spark") return S.platform_label || "";
   const label = S.platform_label || "";
   if (!label || label.startsWith("DGX SPARK")) return "DGX Spark";
-  const raw = (label.split(" · ")[1] || "").replace(/^(\d+×\s*)?NVIDIA\s+/, "$1");  // paired cards: "2× RTX PRO 5000"
+  const raw = (label.split(" · ")[1] || "").replace(/^NVIDIA\s+/, "");
   const card = raw.split(/\s+(?:BLACKWELL|ADA|AMPERE|MAX-Q|WORKSTATION)\b/)[0].trim();
   if (!card) return "DGX Spark";
   return S.gpu_index ? card + " · " + S.gpu_index : card;
@@ -245,8 +228,7 @@ function telApply(t) { SHELL.tel = t; SHELL.telAt = Date.now();
   $("#mtxt").textContent = gpu != null ? gpu + "% GPU" : t.memory ? Math.round(t.memory.available_mb / 1024) + " GB free" : "";
   const gb = mb => (mb / 1024).toFixed(mb >= 102400 ? 0 : 1);
   const say = [(S && S.platform_label) || platName(), busy ? "rolling" : "ready", "GPU " + (gpu == null ? "n/a" : gpu + "%" + (t.gpu && t.gpu.temp_c != null ? " at " + t.gpu.temp_c + "°C" : "")),
-    t.gpu && t.gpu.cards ? t.gpu.cards.map(c => "GPU " + c.index + " " + (c.util_pct == null ? "n/a" : c.util_pct + "%") + (c.temp_c != null ? " at " + c.temp_c + "°C" : "")).join(", ") : "",
-    card ? "memory " + gb(card.used_mb) + " of " + gb(card.total_mb) + " GB (" + used + "%)" + (card.cards ? " over " + card.cards + " cards" : "") : (t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : ""),
+    card ? "memory " + gb(card.used_mb) + " of " + gb(card.total_mb) + " GB (" + used + "%)" : (t.memory ? "memory " + gb(t.memory.total_mb - t.memory.available_mb) + " of " + gb(t.memory.total_mb) + " GB (" + used + "%)" : ""),
     // a card's memory is the memory clause above; this second clause is only where the page still leads with RAM
     !card && t.memory && t.memory.card ? "card " + gb(t.memory.card.used_mb) + " of " + gb(t.memory.card.total_mb) + " GB" : "",
     // the Studio's Bolt brain (app/bolt.py) while it holds memory
@@ -350,14 +332,9 @@ function palClose() { const p = $("#palette"); if (p) { p.remove(); releaseMedia
 // ⌥1 to ⌥9 and ⌥0: the rooms that carry a key, in the sidebar's order
 const roomForKey = d => ROOMS.find(r => r.key === d) || null;
 function shellStart() {
-  if (S && S.platform_note) {
-    const warning = $("#warnbar");
-    warning.textContent = [S.platform_note, S.ffmpeg_note].filter(Boolean).join(" ");
-    warning.classList.remove("hide");
-  }
+  const up = $("#studio-updates-open"); up.replaceChildren(icon("update", "ic"), el("span", { class: "t" }, "Updates")); up.onclick = () => go("Updates");
   $("#helpbtn").innerHTML = ICON.learn; $("#baychev").innerHTML = ICON.chev;
   $("#helpbtn").onclick = () => go("Tutorial");
-  const th = $("#themebtn"); if (th) th.onclick = () => { if (typeof themeFlip === "function") themeFlip(); };
   const back = $("#backbtn"), home = $("#homebtn");
   if (back) { back.replaceChildren(icon("back", "ic"), el("span", { class: "t" }, "Back")); back.onclick = goBack; }
   if (home) { home.replaceChildren(icon("home", "ic"), el("span", { class: "t" }, "Home")); home.onclick = goHome; } $("#kbtn").onclick = palOpen; $("#mpill").onclick = () => go("Machine");
@@ -379,113 +356,39 @@ function shellStart() {
   if (typeof updatesWatch === "function") updatesWatch();
   telStart(); }
 
-/* ---------- "This clip", beside Create: recipes in plain words, the length, the take at a glance, one Render button ---------- */
-// the names say what they are for; the size each one delivers is printed beside it, the same on every machine
-function takeRecipes() { const final = UPSCALED["720p"] && S.presets[UPSCALED["720p"][0]] ? { res: "720p", up: true, label: "Final" } : { res: "720p", up: false, label: "Final" };
+/* ---------- the take sheet beside Create: recipes in plain words, the setup at a glance, one Roll button ---------- */
+const STEP_NAMES = ["Intent", "First frame", "Words and sound", "Prompt", "Render"];
+function takeRecipes() { const final = UPSCALED["720p"] && S.presets[UPSCALED["720p"][0]] ? { res: "720p", up: true, label: "Final " + UPSCALED["720p"][1].replace(/^\d+x\d+ ?/, "").replace(/[()]/g, "") || "Final" } : { res: "720p", up: false, label: "Final 720p" };
   return [
-    { id: "quick", title: "Draft", says: "4 passes · 864 × 480", on: () => C.engine === "fasth3" && C.passes === "4" && C.res === "480p" && !C.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "4", res: "480p", up: false, steps: "" }); changed(); } },
+    { id: "quick", title: "Quick look", says: "4 passes · 864 × 480", on: () => C.engine === "fasth3" && C.passes === "4" && C.res === "480p" && !C.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "4", res: "480p", up: false, steps: "" }); changed(); } },
     S.sharp ? { id: "sharp", title: "Sharp Spec", says: "Sam's locked recipe · 1376 × 768", on: sharpOn, set: sharpCreate } : null,
-    { id: "final", title: final.label, says: "8 passes · " + (final.up ? UPSCALED["720p"][1].replace(/^(\d+)x(\d+).*/, "$1 × $2") : "1280 × 720"), on: () => C.engine === "fasth3" && C.passes === "8" && C.res === "720p" && !!C.up === final.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "8", res: "720p", up: final.up, steps: "" }); changed(); } },
+    { id: "final", title: final.label, says: "8 passes · " + (final.up ? UPSCALED["720p"][1] : "1280 × 720"), on: () => C.engine === "fasth3" && C.passes === "8" && C.res === "720p" && !!C.up === final.up && !customOn(), set: () => { Object.assign(C, { engine: "fasth3", passes: "8", res: "720p", up: final.up, steps: "" }); changed(); } },
   ].filter(Boolean); }
 function takeSheet() {
-  const video = C.goes === "video", est = el("span", { class: "c1-eta" });
-  const row = (k, v) => el("div", { class: "kv c1-row" }, el("span", {}, k), el("b", {}, v));
+  const video = C.goes === "video", est = el("div", { class: "note", style: "margin:0" });
+  const row = (k, v) => el("div", { class: "kv", style: "padding:9px 0;border-bottom:1px solid var(--line)" }, el("span", {}, k), el("b", { style: "text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:62%" }, v));
   const out = output() || { label: "" }, size = out.size ? out.size.join(" × ") : "";
   const startWord = { text: "text only", scout: "a scout image", own: "your picture", refs: "references" }[C.start];
-  if (video) showEstimate(C, est);
-  const why = video && typeof createNotReady === "function" ? createNotReady() : null;
-  return el("aside", { class: "panel c1-side", "aria-label": "This clip" },
-    el("div", { class: "c1-sidehead" }, el("b", {}, video ? "This clip" : "These pictures")),
-    video && !isRef() ? el("div", { class: "c1-group" }, el("span", { class: "eyebrow" }, "Recipe"),
-      el("div", { class: "c1-recipes" }, takeRecipes().map(r => el("button", { type: "button", class: "recipe-row" + (r.on() ? " on" : ""), "aria-pressed": r.on() ? "true" : "false", onclick: r.set }, el("b", {}, r.title), el("span", {}, r.says))))) : null,
-    video ? el("div", { class: "c1-group" }, el("span", { class: "eyebrow" }, "Length"),
-      lengthPicker(C, () => render(), isRef() ? {} : Object.fromEntries(Object.entries(S.long).map(([k, v]) => [k, v + " · " + Math.ceil(k / 15) + " clips chained"])))) : null,
-    el("div", { class: "c1-rows" },
-      video ? row("Starts from", startWord) : null, video ? row("Engine", isRef() ? "MiniMax H3 Ref2VA" : C.engine === "fasth3" ? "FastH3 · " + (customOn() ? C.steps : C.passes) + " passes" : "MiniMax H3") : null,
-      video ? row("Size", size || out.label) : row("Size", C.imageSize.replace("x", " × ")), video ? null : row("Count", String(C.count || 1)),
+  const roll = () => { if (C.step !== 4) { C.step = 4; render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; } const b = $("#view section.card button.hot"); if (b && !b.disabled) b.click(); else toast("Finish the steps marked on the left first"); };
+  if (video && !isLong()) showEstimate(C, est);
+  return el("div", { class: "panel stack", style: "position:sticky;top:calc(var(--head) + var(--sub) + 18px);gap:16px" },
+    el("div", { class: "kv" }, el("span", { class: "eyebrow" }, "Take sheet"), el("span", {}, "step " + (C.step + 1) + " of 5 · " + STEP_NAMES[C.step])),
+    video && !isRef() ? el("div", { class: "stack", style: "gap:8px" }, takeRecipes().map(r => el("button", { class: "recipe-row" + (r.on() ? " on" : ""), onclick: r.set }, el("b", {}, r.title), el("span", {}, r.says)))) : null,
+    el("div", {}, row("Making", video ? (isLong() ? "a long take" : "a clip with sound") : C.goes === "image" ? "stills" : "a picture edit"),
+      video ? row("Starts from", startWord) : null, video ? row("Engine", (C.engine === "fasth3" ? "FastH3 · " + (customOn() ? C.steps : C.passes) + " passes" : "MiniMax H3")) : null,
+      video ? row("Size", size || out.label) : row("Size", C.imageSize.replace("x", " × ")), video ? row("Length", isLong() ? (S.long[C.seconds] || C.seconds + " s") : exact(framesOf(C))) : null,
       row("Seed", String(C.seed)), lorasOf(C).length ? row("Looks", lorasOf(C).length + " LoRA" + (lorasOf(C).length > 1 ? "s" : "")) : null,
       isRef() ? row("References", refCount() + " of " + (S.reference_total || 12)) : null),
-    video ? el("div", { class: "c1-foot" },
-      el("div", { class: "kv" }, el("span", {}, "Estimate"), est),
-      el("button", { class: "hot c1-go", type: "button", disabled: !!why, title: why || "Queue this clip", onclick: () => typeof createQueue === "function" && createQueue() }, isLong() ? "Render long take" : "Render clip"),
-      el("span", { class: "c1-why" }, why || "Goes to the queue" + (jobs.some(j => j.status === "running" || j.status === "queued") ? ", behind " + jobs.filter(j => j.status === "running" || j.status === "queued").length + " job" + (jobs.filter(j => j.status === "running" || j.status === "queued").length === 1 ? "" : "s") : ""))) : null);
+    est,
+    video ? el("button", { class: "hot", style: "width:100%", onclick: roll }, C.step === 4 ? "Roll this take" : "Go to Render →") : null,
+    el("div", { class: "note", style: "margin:0;font-size:13.5px" }, "The full controls stay on the left. A recipe only sets engine, passes and size."));
 }
-// what keeps a clip from being queued, in words; null when it can go
-function createNotReady() {
-  const prompt = String(C.prompt || "").trim(), words = C.promptEdited ? prompt : [C.scene, C.action, C.camera, C.soundscape, ...(C.dialogue || []).map(d => d.text)].some(t => String(t || "").trim()) || prompt;
-  if (!words) return "Describe the shot first.";
-  if (isRef() && !(C.refs.length + C.refVideos.length)) return S.ref_media ? "Add a reference picture or video above." : "Add a reference picture above.";
-  if (!isRef() && !noFrame() && !C.image) return "Pick or upload a first frame above.";
-  return null; }
-// Render's state, painted in place while typing: the two Render buttons, the reason under the side one and the page's note
-function createReadyPaint() { if (typeof document === "undefined" || !document.querySelectorAll) return; const why = createNotReady();
-  for (const b of document.querySelectorAll(".c1-go, .c1-render button.hot")) { b.disabled = !!why; b.title = why || "Queue this clip"; }
-  const say = document.querySelector(".c1-why"); if (say) say.textContent = why || "Goes to the queue";
-  const note = document.querySelector(".c1-notready"); if (note) { note.textContent = why || ""; note.style.display = why ? "" : "none"; } }
-// the prompt the model receives, built from the fields (MiniMax H3's three-part format, app/server.py compose)
-async function composeCreate() { const r = await api("/api/compose", { fields: { ...C, motion: isRef() ? motionFields() : null }, first_frame: !noFrame(), last_frame: !!lastOf(), ...lengthOf(C), references: isRef() ? Math.max(C.refs.length, refMedia() ? 0 : 1) : 0, referenced: isRef(), loras: isRef() ? lorasOf(C) : [] });
-  C.prompt = r.prompt; return r.prompt; }
-// Render, from the page or the side panel: the prompt is rebuilt from the fields unless it was edited by hand
-// one take at a time from every Render button (the side panel, the page, Another take, a scout's Animate this): a second
-// press while the first is still being composed and queued must not queue a second clip
-async function createQueue() { if (C.queuing) return; C.queuing = true; try { return await createQueueNow(); } finally { C.queuing = false; } }
-async function createQueueNow() { try {
-  const why = createNotReady(); if (why) return toast(why); if (loraWants().length) return toast("A Look needs something first: see Render");
-  if (!C.promptEdited || !String(C.prompt || "").trim()) await composeCreate();
-  // what the prompt forbids by name is shown before the clip is queued (app/negation.py; the model has no negative
-  // prompt): the first press shows the list, the next one queues the prompt as written
-  if (C.negFor !== C.prompt && typeof negShow === "function") await negShow(null);
-  if (C.negations && C.negations.length && C.negSeen !== C.prompt) { C.negSeen = C.prompt; render();
-    return toast("This prompt forbids something by name, which the video model does not follow: see the note at Render. Press Render again to queue it as written.", 8000); }
-  // Settings' seed: fixed repeats a take when Render is pressed again (Another take moves it on), random gives every
-  // take a new one, drawn here when it is queued (not once when the page opens). "Same seed every take" and the Sharp
-  // Spec (whose seed is part of the recipe) keep it either way.
-  if (!C.sameSeed && C.seedUsed === Number(C.seed) && !(typeof sharpOn === "function" && sharpOn()) && typeof prefs === "function" && prefs().presets.seed === "random" && typeof prefSeed === "function") C.seed = prefSeed();
-  const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}), ...(C.silent ? { silent: true } : {}) };
-  const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
-    : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
-  C.asked = { id: j.id, body: JSON.parse(JSON.stringify(isLong() ? {} : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C) } })) };
-  C.job = j.id; C.seedUsed = Number(C.seed); toast("Queued: " + j.title + " · seed " + C.seed); await poll(); render(); } catch (e) { toast(e.message); } }
-// Higher quality: the request that made a single clip, sent again with the Final recipe (its size and passes) and
-// everything else as it was, the seed too. A new render: the motion may differ. Not for reference clips (their passes
-// are their own), long takes, or a take that already was Final. null when it does not apply
-function betterAsk(body) { if (!body || body.kind !== "video" || !body.params || typeof recipeParams !== "function") return null;
-  const p = body.params, r = recipeParams("final");
-  // a custom size is the user's own shape: Final's size would change it, so it is not offered there
-  if (p.preset === "custom" || p.references || p.reference_videos || p.reference_audios || (p.preset === r.preset && p.quality === r.quality)) return null;
-  const out = JSON.parse(JSON.stringify(body)); delete out.params.width; delete out.params.height; delete out.params.steps; delete out.params.retake;
-  Object.assign(out.params, { preset: r.preset, quality: r.quality }); out.title = "Final: " + String(body.title || "Clip").replace(/^Final: /, "");
-  return out; }
-async function betterQueue(body, after) { const ask = betterAsk(body); if (!ask || C.betterBusy) return; C.betterBusy = true;
-  try { const j = await api("/api/jobs", ask); toast("Queued: " + j.title + " (a new render at the Final recipe; the motion may differ)"); if (after) after(j, ask); await poll(); }
-  catch (e) { toast(e.message, 6000); } finally { C.betterBusy = false; render(); } }
-const betterButton = (body, after) => betterAsk(body) ? el("button", { class: "small", type: "button", title: "The same words, picture, length and seed at the Final recipe: a new render, so the motion may differ (Upscale keeps the take itself)", onclick: () => betterQueue(body, after) }, "Higher quality") : null;
-// Another take: queued at once with the next seed (the shot check's own retake rule), or the same one when asked for
-// (the next seed wins over Settings' random seed here: a retake follows on from the take it repeats)
-function createAgain() { if (C.queuing) return; if (!C.sameSeed) C.seed = (Number(C.seed) || 0) + 1; return createQueue(); }
 // what the prompt goes to, as one small control over Create: the Image and Video rooms open it already set
 function intentBar() { const opts = { video: "Video with sound", image: "Image", edit: "Edit a picture" };
-  let marks = [mark("minimax"), S && S.platform === "spark" ? mark("comfy") : null, mark("tensorfold")], selected = "", backend = "";
-  if (C.goes !== "video") {
-    const editing = C.goes === "edit" && typeof edModel === "function";
-    const rows = typeof imageModels === "function" ? imageModels()
-      : S && (S.image_model_options || S.windows_runtime?.image_models || S.image_models) || [];
-    const models = rows.map(m => typeof m === "string" ? { id: m } : m);
-    if (editing || C.imageModel || models.length || typeof imageModelName === "function" || S?.windows_stills?.available) {
-      selected = editing ? edModel() : C.imageModel || (typeof imageModel === "function" && typeof imageModelName === "function" ? imageModel()
-        : models.find(m => m.available !== false)?.id || S?.windows_stills?.model || "qwen");
-      const model = { ...models.find(m => m.id === selected),
-        ...(editing && typeof edModels === "function" ? edModels().find(m => m.id === selected) : {}) };
-      const label = model.label || model.title || (!editing && typeof imageModelName === "function" ? imageModelName(selected)
-        : selected === "sd-turbo" ? "SD-Turbo" : selected === "qwen" ? "Qwen 2.1" : selected);
-      backend = model.backend || (selected === "sd-turbo" ? "bounded" : "");
-      marks = [/^(qwen|flux)/.test(selected) ? mark(/^flux/.test(selected) ? "flux" : "qwen", label) : el("span", {}, label),
-        backend ? el("span", { class: "tag2" }, backend + " backend") : null];
-    } else marks = [mark("qwen", "Qwen 2.1"), mark("flux")];
-  }
+  const marks = C.goes === "video" ? [mark("minimax"), S && S.platform === "spark" ? mark("comfy") : null, mark("tensorfold")] : [mark("qwen", "Qwen 2.1"), mark("flux")];
   return el("div", { class: "createbar" }, el("span", { class: "eyebrow" }, "The prompt goes to"),
     el("div", { class: "seg-ctl", role: "tablist", "aria-label": "The prompt goes to" }, Object.entries(opts).map(([k, label]) => el("button", { type: "button", role: "tab", "aria-selected": C.goes === k ? "true" : "false", class: C.goes === k ? "on" : "",
       onclick: () => { if (C.goes === k) return; C.goes = k; C.step = 0; changed(); } }, label))),
-    el("div", { class: "marks", ...(selected ? { "data-image-model": selected, "data-image-backend": backend || false } : {}) }, marks)); }
+    el("div", { class: "marks" }, marks)); }
 function createLayout(node) { const bar = intentBar(); if (C.goes === "edit") return el("div", {}, bar, node);
-  return el("div", {}, bar, el("div", { class: "c1-layout" }, node, takeSheet())); }
+  return el("div", {}, bar, el("div", { class: "split", style: "grid-template-columns:minmax(0,1fr) 330px" }, node, takeSheet())); }

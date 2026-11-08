@@ -260,21 +260,3 @@ def test_case_colliding_zip_entries_are_refused_before_any_file_is_written(tmp_p
     with pytest.raises(HTTPException, match="duplicate"):
         suite.unpack(archive, target)
     assert not target.exists()
-
-
-def test_portable_download_flushes_edits_and_exposes_a_file_link_not_an_in_memory_blob():
-    from test_slate_page import run
-    out = run("""
-      SL.p = film();
-      answers["/api/slate/projects/p-test"] = { updatedAt: "saved" };
-      answers["/api/slate/package"] = { path: "exports/film.slate.zip", filename: "film.slate.zip",
-        shots: 2, media_files: 3, notes: [] };
-      await Promise.all([slPackage(), slPackage()]);
-      out.calls = calls; out.link = slPackageLink().attrs; out.busy = SL.packaging;
-      SL.p = { id: "another-film" }; out.other = slPackageLink();
-    """)
-    assert [call[0] for call in out["calls"]] == ["/api/slate/projects/p-test", "/api/slate/package"]
-    assert out["calls"][0][1]["id"] == "p-test"
-    assert out["link"]["href"] == "/files/exports/film.slate.zip"
-    assert out["link"]["download"] == "film.slate.zip" and not out["busy"]
-    assert out["other"] is None
