@@ -1,5 +1,7 @@
 # Super easy pictures and clips
 
+> **Not in the Studio since 4.4.1.** This plan was built in 4.4.0 (#220) and taken out with the rest of the 4.4.0 screens, at Wasserman's request. It stays here as a record.
+
 **Mission:** make it super easy to create and change pictures and videos. Fewer steps, and fewer settings the user
 has to set.
 
