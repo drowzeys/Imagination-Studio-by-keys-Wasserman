@@ -2397,6 +2397,8 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             lenient = sys.platform == "darwin" and os.environ.get("STUDIO_MEMORY_GUARD", "").strip().lower() != "strict"
             job["log"] += memory_manager.admit(job, lambda: job_fit(job), wait_s=0 if lenient else None,
                                                mode="warn" if lenient else None, stopped=stopping.is_set)
+            # the thermal gate (memory_manager.thermal_admit): a GPU job waits for the machine to cool first
+            job["log"] += memory_manager.thermal_admit(job, stopped=stopping.is_set)
         if params.get("first_frame_from"):  # continuity: open on the last frame of an earlier clip
             source = inside(params["first_frame_from"])
             if not source.is_file():
@@ -3729,7 +3731,37 @@ memory_manager.register(memory_manager.Module("comfy", "ComfyUI and its cached m
 memory_manager.register(memory_manager.Module("bolt", bolt.NAME, bolt_loaded, bolt.release, held_mb=bolt.held_mb,
                                               busy=lambda: bool(bolt.summary().get("in_flight"))))
 memory_manager.attach_log(HOME)
-MEMORY_WATCH = memory_manager.Watch(lambda: list(jobs.values()))
+THERMAL_RETRIES: dict = {}  # a job queued again after a thermal stop -> the job it repeats (it is not repeated twice)
+
+
+def thermal_stop(job: dict, why: str) -> None:
+    """The watch's live thermal stop (memory_manager.ThermalStop): the render is cancelled as Cancel does it, its
+    reason in its error and log, and queued again once: the new job waits at the thermal gate until the machine has
+    cooled. A job that was itself such a repeat is not queued a third time."""
+
+    try:
+        cancel(job["id"])
+    except HTTPException as error:
+        job["log"] += f"[studio] heat: the render could not be stopped ({error.detail})\n"
+        return
+    said = f"Stopped to protect the machine: {why}."
+    again = None
+    if job["id"] not in THERMAL_RETRIES:
+        try:
+            again = queue_job({"kind": job["kind"], "title": job.get("title") or job["kind"], "params": dict(job["params"])})
+            THERMAL_RETRIES[again["id"]] = job["id"]
+            said += f" It is queued again as {again['id']}, which starts once the machine has cooled."
+        except (HTTPException, ValueError, TypeError, KeyError, RuntimeError) as error:
+            said += f" It could not be queued again ({getattr(error, 'detail', error)}): queue it once the machine is cool."
+    else:
+        said += " It was already a repeat after a thermal stop, so it is not queued again: let the machine cool first."
+    with lock:
+        job["error"] = said
+        job["log"] += f"[studio] heat: {said}\n"
+    memory_manager.note("requeued (heat)" if again else "not requeued (heat)", job=job["id"], again=again and again["id"])
+
+
+MEMORY_WATCH = memory_manager.Watch(lambda: list(jobs.values()), on_hot=thermal_stop)
 
 
 @app.get("/api/memory")
