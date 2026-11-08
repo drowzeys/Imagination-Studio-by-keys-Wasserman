@@ -1893,6 +1893,21 @@ STAGE = re.compile(r"\[tensorfold\] stage (\d+)/(\d+) (.+)$")  # a job of severa
 RAN_ON = re.compile(r"\[tensorfold\] engine: (\w+)")
 
 
+PREVIEW_KINDS = ("video", "studio", "long", "scout", "edit")
+
+
+def preview_file(job: dict) -> Path | None:
+    """Where a job's live preview is kept (spark/job_preview.py), or None when it has none: a picture or clip job of a
+    DGX Spark that asks for one (``"preview": true`` in its params), or every such job with ``STUDIO_PREVIEWS=1``. An
+    app that drives the Studio over its API (a page of its own) shows it; the Studio's page does not ask."""
+
+    if not SPARK or job.get("kind") not in PREVIEW_KINDS:
+        return None
+    if not (job.get("params") or {}).get("preview") and os.environ.get("STUDIO_PREVIEWS") != "1":
+        return None
+    return HOME / "previews" / f"{job['id']}.jpg"
+
+
 def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     """Run one script for ``job``, following its progress; False when cancelled."""
 
@@ -1904,6 +1919,9 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
     job_key = uuid.uuid4().hex if managed else None
     if job_key:
         child_env["STUDIO_GPU_JOB_KEY"] = job_key
+    seen = preview_file(job)
+    if seen is not None:  # spark/job_preview.py: the newest pass's picture, for the job's record (public)
+        child_env["STUDIO_PREVIEW_FILE"] = str(seen)
     local_windows = WINDOWS or WIN32
     bounded_job = local_windows and windows_runtime.bounded(job["kind"], job["params"])
     with lock:  # cancellation must see either no launch, or the published owned process
@@ -2416,6 +2434,9 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
         if job["status"] != "cancelled":
             job["status"], job["error"] = "failed", str(getattr(error, "detail", error))
     finally:
+        seen = preview_file(job)
+        if seen is not None:
+            seen.unlink(missing_ok=True)  # a preview is the job's while it runs only
         if job["status"] != "queued":
             job["finished"] = time.time()
             if (WINDOWS or WIN32) and job["kind"] == "qualification" and job["status"] in ("failed", "cancelled"):
@@ -2454,6 +2475,12 @@ def public(job: dict) -> dict:
     out["elapsed"] = (job.get("finished") or time.time()) - job["started"] if job.get("started") else None
     out["log"] = job["log"][-3000:]
     out["params"] = {k: v for k, v in job["params"].items() if k != "clips"}
+    seen = preview_file(job) if job.get("status") == "running" else None
+    try:
+        out["preview_at"] = seen.stat().st_mtime if seen is not None else None
+        out["preview"] = relative(seen) if seen is not None else None  # the newest pass's picture, under /files/
+    except OSError:
+        out["preview"] = out["preview_at"] = None
     return out
 
 

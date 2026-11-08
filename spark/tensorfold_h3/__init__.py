@@ -14,6 +14,7 @@ Environment: TF_H3_LIB (the library; default beside this file), TF_H3_CHECK=1 (f
 ComfyUI's own blocks and log how close the engine is), TF_H3_PROFILE=1 (log where a pass's time went).
 """
 
+import copy
 import ctypes
 import logging
 import math
@@ -766,6 +767,30 @@ def passthrough(args, extra):
     return {"img": args["img"]}
 
 
+def preview_at(model, frame: str) -> None:
+    """ComfyUI's latent2rgb preview of a video shows latent frame 0 (for a clip from a keyframe, the keyframe itself):
+    the latent format's ``latent_rgb_factors_reshape`` hook, which the previewer applies before it takes frame 0, gives
+    it the ``frame`` asked for instead. Only the preview reads that hook; on a copy of the format, so the sampling and
+    the decoders are unchanged."""
+
+    def pick(x0):
+        if getattr(x0, "ndim", 0) != 5 or x0.shape[2] < 2:
+            return x0
+        at = {"last": x0.shape[2] - 1}.get(frame, x0.shape[2] // 2)
+        return x0[:, :, at:at + 1]
+
+    base = model.model
+    own = getattr(base.latent_format, "_studio_preview_of", None)  # a format this node set before: its original
+    if frame == "first":
+        if own is not None:
+            base.latent_format = own  # a model ComfyUI kept loaded from a previewed clip shows frame 0 again
+        return
+    fmt = copy.copy(own or base.latent_format)
+    fmt.latent_rgb_factors_reshape = pick
+    fmt._studio_preview_of = own or base.latent_format
+    base.latent_format = fmt
+
+
 class TensorFoldH3Blocks:
     @classmethod
     def INPUT_TYPES(cls):
@@ -774,13 +799,16 @@ class TensorFoldH3Blocks:
             "unet_name": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The FastH3 bf16 checkpoint the model was loaded from."}),
             "sparsity": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 0.99, "step": 0.05,
                                    "tooltip": "FastH3's sparse attention: the share of video tiles a tile leaves out. 0 is dense."}),
+        }, "optional": {
+            "preview_frame": (["first", "middle", "last"], {"default": "first",
+                              "tooltip": "Which latent frame ComfyUI's live preview shows (the sampling is unchanged)."}),
         }}
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = "model/patch"
 
-    def patch(self, model, unet_name, sparsity):
+    def patch(self, model, unet_name, sparsity, preview_frame="first"):
         diffusion_model = model.get_model_object("diffusion_model")
         if not isinstance(diffusion_model, MiniMaxH3Model):
             raise ValueError("TensorFold H3 needs a MiniMax H3 / FastH3 model")
@@ -806,6 +834,7 @@ class TensorFoldH3Blocks:
             state.passes = 0
 
         m.add_callback_with_key(comfy.patcher_extension.CallbacksMP.ON_CLEANUP, "tensorfold_h3", reset)
+        preview_at(m, preview_frame)
         return (m,)
 
 
