@@ -1,6 +1,6 @@
 """Sound effects and foley (app/sound.py, sound_generate.py): python3 -m pytest tests/test_sound.py.
-Nothing real runs: the sound environment's python is a stand-in that writes a short WAV and the take file the real
-runner writes, so the job, its checks, the takes list and the Library are tested end to end."""
+Nothing real runs: the standalone Open/MMAudio worker is replaced by a Python stand-in that writes a short WAV
+and take file, so the job, its checks, the takes list and the Library are tested end to end on any host platform."""
 import json
 import os
 import subprocess
@@ -32,8 +32,8 @@ with wave.open(out, "wb") as w:
 if kind == "foley":
     open(get("--clip-out"), "wb").write(open(get("--video"), "rb").read())
 home = os.path.realpath(get("--home"))
-rel = lambda p: os.path.relpath(os.path.realpath(p), home) if p else p
-json.dump({"id": out.rsplit("/", 1)[-1][:-4], "kind": kind, "prompt": get("--prompt", ""), "seed": int(get("--seed")), "path": rel(out),
+rel = lambda p: os.path.relpath(os.path.realpath(p), home).replace("\\", "/") if p else p
+json.dump({"id": os.path.basename(out)[:-4], "kind": kind, "prompt": get("--prompt", ""), "seed": int(get("--seed")), "path": rel(out),
            "clip": rel(get("--clip-out")), "source": rel(get("--video")), "created": time.time(), "seconds": 0.1,
            "argv": args}, open(get("--take"), "w"))
 print("[sound] done")
@@ -42,21 +42,25 @@ print("[sound] done")
 
 @pytest.fixture
 def ready(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SPARK", False)
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", False)
+    monkeypatch.setattr(sound, "WINDOWS", False)
+    monkeypatch.setattr(sound, "WINCUDA", False)
     models = tmp_path / "models"
     (models / "stable-audio-open-1.0").mkdir(parents=True)
     (models / "stable-audio-open-1.0" / "model_index.json").write_text("{}")
     (models / "mmaudio" / "weights").mkdir(parents=True)
     (models / "mmaudio" / "weights" / "mmaudio_large_44k_v2.pth").write_bytes(b"w")
-    stand_in = tmp_path / "python"
-    stand_in.write_text(f"#!/bin/sh\nexec {sys.executable} {tmp_path / 'runner.py'} \"$@\"\n")
-    stand_in.chmod(0o755)
     (tmp_path / "runner.py").write_text(RUNNER)
-    monkeypatch.setenv("SOUND_PYTHON", str(stand_in))
+    monkeypatch.setenv("SOUND_PYTHON", sys.executable)
     monkeypatch.setenv("SOUND_MODELS", str(models))
     router, build, title, source = sound.attach(server.HOME, ROOT, False, server.inside, server.relative)
     monkeypatch.setattr(server, "sound_build", build)
 
-    def run(job, command, env, label=""):  # the command as it is (another test file swaps the server's runner for its own)
+    def run(job, command, env, label=""):
+        assert command[:2] == [sys.executable, str(ROOT / "sound_generate.py")]
+        command = [sys.executable, str(tmp_path / "runner.py"), *command[1:]]
         done = subprocess.run(command, env={**os.environ, **{k: str(v) for k, v in env.items()}}, capture_output=True, text=True, timeout=120)
         job["log"] += done.stdout + done.stderr
         if done.returncode:
@@ -77,7 +81,10 @@ def finish(job_id, seconds=30):
 
 
 def test_a_sound_effect_is_queued_made_and_listed_with_its_words(ready):
-    job = client.post("/api/jobs", json={"kind": "sfx", "params": {"prompt": "a door  slams in a stone hall", "seconds": 4, "seed": 7}}).json()
+    answer = client.post("/api/jobs", json={"kind": "sfx", "params": {
+        "sound_model": sound.SFX_MODEL, "prompt": "a door  slams in a stone hall", "seconds": 4, "seed": 7}})
+    assert answer.status_code == 200, answer.text
+    job = answer.json()
     assert job["title"] == "Sound effect: a door slams in a stone hall"
     done = finish(job["id"])
     assert done["status"] == "done", done.get("error") or done.get("log")
@@ -111,6 +118,8 @@ def test_each_setting_is_checked_before_the_job_is_queued(ready):
            ("foley", {"video": "../etc/passwd"}, ""), ("sfx", {"prompt": "x" * 700}, "600 characters"),
            ("sfx", {"prompt": "rain", "seed": True}, "seed is a number")]
     for kind, params, words in bad:
+        if kind == "sfx":
+            params = {"sound_model": sound.SFX_MODEL, **params}
         answer = client.post("/api/jobs", json={"kind": kind, "params": params})
         assert answer.status_code in (400, 403), (kind, params, answer.text)
         assert words in answer.json()["error"], (kind, params, answer.json())

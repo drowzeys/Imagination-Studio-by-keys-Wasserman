@@ -23,6 +23,8 @@ import windows_runtime
 
 @pytest.fixture
 def ready(enabled, monkeypatch):
+    monkeypatch.setattr(sound, "WINDOWS", True)
+    monkeypatch.setattr(sound, "WINCUDA", False)
     monkeypatch.setattr(audio, "prerequisites", lambda: "")
     monkeypatch.setattr(audio, "status", lambda: {"installed": True, "qualified": True, "available": True, "why": ""})
     monkeypatch.setattr(audio, "check_room", lambda: None)
