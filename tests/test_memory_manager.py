@@ -33,6 +33,7 @@ class Machine:
 @pytest.fixture
 def machine(monkeypatch):
     box = Machine(40_000)
+    monkeypatch.setenv("STUDIO_MEMORY_MANAGER", "on")  # off for the rest of the suite (conftest.py)
     monkeypatch.setattr(mm, "reading", box.reading)
     monkeypatch.setattr(mm, "_modules", [])
     monkeypatch.setattr(mm, "foreign", lambda top=5, rows=None, own=None: [])
@@ -180,6 +181,13 @@ def test_the_routes(machine, monkeypatch):
     answer = client.post("/api/memory/release", json={"modules": ["music", "bolt"]}).json()
     assert [r["module"] for r in answer["released"]] == ["music"] and log == ["music"]
     assert client.post("/api/memory/release", json={"modules": "all"}).status_code == 400
+
+
+def test_off_admits_everything_and_the_watch_rests(machine, monkeypatch):
+    monkeypatch.setenv("STUDIO_MEMORY_MANAGER", "off")
+    machine.available = 1_000
+    assert mm.admit({"id": "j", "kind": "video", "status": "running"}, fits_with(machine, 50_000), mode="strict") == ""
+    assert mm.Watch(lambda: []).tick() == []
 
 
 def test_the_server_registers_its_modules_in_order_and_admits_before_a_job_loads():

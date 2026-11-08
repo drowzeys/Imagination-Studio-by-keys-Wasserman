@@ -45,6 +45,13 @@ STALL_SOME_PCT = 10.0  # /proc/pressure/memory "some avg10": tasks waiting on me
 GPU_FREE = {"export", "soundtrack", "finish", "graphics", "hlg", "beats"}  # ffmpeg and the like: no model loaded
 
 _modules: list = []
+
+
+def enabled() -> bool:
+    """STUDIO_MEMORY_MANAGER=off turns off the admission and the watch (GET /api/memory and an asked-for release still
+    work): the test suite runs so, since its stand-in engines must not wait on the CI machine's real memory."""
+
+    return os.environ.get("STUDIO_MEMORY_MANAGER", "on").strip().lower() not in ("off", "0", "no", "false")
 events: collections.deque = collections.deque(maxlen=50)
 _log: dict = {"path": None}
 _mutex = threading.Lock()
@@ -365,6 +372,8 @@ def admit(job: dict, fit, wait_s: float | None = None, mode: str | None = None, 
     is refused (RuntimeError naming the largest of them), or, under STUDIO_MEMORY_GUARD=warn, run with a warning.
     Returns what the job's log says."""
 
+    if not enabled():
+        return ""
     said = fit()
     if not said or said.get("fits") is not False:
         return ""
@@ -432,6 +441,8 @@ class Watch:
         self.thread: threading.Thread | None = None
 
     def tick(self) -> list[dict]:
+        if not enabled():
+            return []
         now = reading()
         available, floor = now["available_mb"], now["floor_mb"]
         if available is None or not floor or not pressed(available, floor):

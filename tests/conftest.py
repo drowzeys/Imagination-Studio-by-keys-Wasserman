@@ -41,6 +41,9 @@ os.environ.setdefault("BOLT_BACKEND", "external")
 # nor run on this machine's native Windows CUDA install (app/windows_cuda.py, an N1X laptop's cuda-tier.json): the suite
 # tests the Windows preview tier as CI's Windows runner has it; tests/test_windows_cuda.py drives the native tier itself
 os.environ.setdefault("STUDIO_WINDOWS_TIER", "preview")
+# nor hold a job for this machine's real memory (app/memory_manager.py): a small CI runner has 16 GB, and the stand-in
+# engines take none; tests/test_memory_manager.py turns it on and sets the memory it sees
+os.environ.setdefault("STUDIO_MEMORY_MANAGER", "off")
 # nor ask for the studio's access key (app/access.py): tests/test_access.py turns it on for its own requests
 os.environ.setdefault("STUDIO_ACCESS_KEY", "off")
 
