@@ -59,6 +59,7 @@ const ICON = {
   update: SVG('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>'),
   search: SVG('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>'),
   queue: SVG('<path d="M4 6h16M4 12h16M4 18h10"/>'),
+  trash: SVG('<path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/>'),
   chev: SVG('<path d="M6 15l6-6 6 6"/>'),
   go: SVG('<path d="M9 6l6 6-6 6"/>'),
   back: SVG('<path d="M15 6l-6 6 6 6"/>'),
@@ -73,6 +74,8 @@ const ICON = {
   more: SVG('<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>'),
 };
 const icon = (name, cls) => { const n = el("span", { class: cls || "ico" }); n.innerHTML = ICON[name] || ICON.home; return n; };
+const trashButton = (label, onclick, title = "Delete: move this file to trash") => el("button",
+  { type: "button", class: "small ghost trash-button", "aria-label": label, title, onclick }, icon("trash"));
 // the marks of the models and tools the Studio runs (app/static/brand, THIRD-PARTY-MARKS.md): identification only
 const MARKS = { qwen: ["brand/qwen.svg", "Qwen"], flux: ["brand/bfl-white.svg", "FLUX3-K"], minimax: ["brand/minimax.svg", "MiniMax H3"], music3: ["brand/minimax.svg", "MiniMax-Music3"], yue: ["brand/yue.png", "YuE2"],
   fish: ["brand/fish-audio.svg", "Fish Audio Drama 3"], comfy: ["brand/comfyui.svg", "ComfyUI"], tensorfold: ["brand/tensorfold.webp", "TensorFold"],

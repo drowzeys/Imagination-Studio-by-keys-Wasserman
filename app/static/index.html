@@ -140,11 +140,19 @@ const clearButton = (key, label = "Clear", title = "Empty the text fields of thi
 const PICK = new Set(), LIBPICK = new Set();
 const sizeText = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? Math.round(b / 1e6) + " MB" : Math.max(1, Math.round(b / 1e3)) + " kB";
 const count = (n, word) => n + " " + word + (n === 1 ? "" : "s");
-async function restoreLast() { try { const r = await api("/api/trash/restore", {}); toast("Put back " + count(r.files, "file") + (r.jobs ? " and " + count(r.jobs, "job card") : "") + (r.missing.length ? " · " + r.missing.length + " could not be put back" : "")); } catch (e) { toast(e.message); } await poll(); render(); }
+async function refreshMedia() {
+  if (typeof SHELL !== "undefined") SHELL.libCache = null;
+  if (typeof VO !== "undefined") VO.takes = null;
+  if (typeof MU !== "undefined") MU.takes = null;
+  if (typeof SFX !== "undefined") { SFX.takes = null; SFX.clips = null; if (tab === "Foley") await sfxLoad(); }
+}
+async function restoreLast() { try { const r = await api("/api/trash/restore", {}); await refreshMedia(); toast("Put back " + count(r.files, "file") + (r.jobs ? " and " + count(r.jobs, "job card") : "") + (r.missing.length ? " · " + r.missing.length + " could not be put back" : "")); } catch (e) { toast(e.message); } await poll(); render(); }
 async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are moved to the trash folder inside " + S.home + ", not erased. “Restore last deletion” in the Library puts them back.")) return;
-  try { const r = await api("/api/clear", body); PICK.clear(); LIBPICK.clear();
+  try { const r = await api("/api/clear", body); PICK.clear(); LIBPICK.clear(); await refreshMedia();
     toast(el("span", {}, (r.jobs ? count(r.jobs, "job") + " and " : "") + count(r.files, "file") + " moved to the trash" + (r.skipped.length ? " · " + r.skipped.length + " kept: " + r.skipped[0].why : "") + " ",
-      r.files || r.jobs ? el("button", { class: "small", onclick: e => { e.target.closest(".toast").remove(); restoreLast(); } }, "Undo") : null), 12000);
+      r.files || r.jobs ? el("button", { class: "small", onclick: e => { e.target.closest(".toast").remove(); restoreLast(); } }, "Undo") : null,
+      " ", el("a", { href: "#Library", title: "Open the Library's Trash panel and folder location",
+        onclick: e => { e.preventDefault(); go("Library"); } }, "View trash")), 12000);
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Home", project = null;
@@ -890,18 +898,35 @@ function viewEditor() {
 
 /* ---------- Library ---------- */
 const LIBF = { kind: "all", q: "" };
-// a voice line, a song or a sound effect: its player, its words, and where it goes next (kept in Voice and Music, not deleted here)
+// a voice line, a song or a sound effect: its player, its words, and where it goes next
 const LIB_SOUND = { voice: ["Voice line", "Voice"], music: ["Song", "Music"], sfx: ["Sound effect", null] };
-function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
+function libSelect(path, picked) { return el("label", { class: "lib-select" },
+  el("input", { type: "checkbox", title: "Select " + path, "aria-label": "Select " + path, checked: LIBPICK.has(path), style: "width:auto;flex:none",
+    onchange: e => { if (e.target.checked) LIBPICK.add(path); else LIBPICK.delete(path); picked(); } }), "Select"); }
+function libSoundTile(m, shown, picked) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
   return el("div", { class: "tile lib-sound", "data-path": m.path, "data-sound": m.sound || "sfx", style: shown ? null : "display:none" },
-    el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
+    el("div", { class: "lib-sound-top" }, el("div", { class: "lib-sound-heading" }, el("span", { class: "eyebrow" }, what), libSelect(m.path, picked)),
+      el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
     el("div", { class: "cap" }, el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
     el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
       el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
-      room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null)); }
+      room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null,
+      trashButton("Delete " + m.path, () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?")))); }
 function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
   const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
-  Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
+  Promise.all([api("/api/library"), api("/api/trash").catch(e => ({ error: e.message }))]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
+    put(box, el("section", { class: "panel", id: "library-trash", "aria-label": "Trash", style: "margin-bottom:12px" },
+      el("h3", {}, "Trash"),
+      bin.error ? el("div", { class: "note vt-bad" }, bin.error) : el("div", {},
+        el("div", { class: "note" }, "Deleted files stay in this folder until you empty the trash:",
+          el("code", { style: "display:block;overflow-wrap:anywhere" }, bin.folder)),
+        el("div", { class: "row" },
+          el("span", { class: "note fit", id: "trashline" }, bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "Trash is empty"),
+          el("span"),
+          el("button", { class: "fit small", onclick: () => copyText(bin.folder, "Trash folder") }, "Copy folder path"),
+          bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
+          bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
+            try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null))));
     // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
     // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
     const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
@@ -914,14 +939,15 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
     find.addEventListener("input", () => { clearTimeout(wait); wait = setTimeout(apply, 150); }); find.addEventListener("change", apply);
     find.addEventListener("keydown", e => { if (e.key === "Enter") apply(); });
     put(box, el("div", { class: "row", style: "align-items:center;margin-bottom:6px" }, el("div", { class: "chips fit" }, Object.entries(kinds).map(([k, t]) => el("button", { class: "small" + (LIBF.kind === k ? " on" : ""), onclick: () => { LIBF.kind = k; render(); } }, t + " · " + n(k)))), el("span"), el("div", { class: "fit" }, find), capBar.box));
-    const many = el("button", { class: "fit", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
+    const many = el("button", { class: "fit small trash-bulk", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
     // Select all takes what is shown: the search's matches while searching, else the listing
-    const pool = () => { const f = capBar.found ? capBar.found() : []; return f.length ? f : list.filter(m => m.kind !== "audio").map(m => m.path); };
+    const pool = () => { const f = capBar.found ? capBar.found() : []; return f.length ? f : list.map(m => m.path); };
     const all = el("button", { class: "fit", onclick: () => { const them = pool(), every = them.length && them.every(p => LIBPICK.has(p)); LIBPICK.clear(); if (!every) for (const p of them) LIBPICK.add(p); render(); } }, "Select all");
-    const show = () => { const them = pool(); many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
+    const show = () => { const them = pool(); many.replaceChildren(icon("trash"), "Delete selected (" + LIBPICK.size + ")"); many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
+    put(box, el("div", { class: "row", style: "margin:10px 0" }, all, many, typeof finLibButton === "function" ? finLibButton() : null));
     const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
-    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
-    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
+    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path), show) :
+    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, libSelect(m.path, show),
       el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
       m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? " · s" + m.seed : "")) : null,
       m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
@@ -932,15 +958,10 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
       m.kind === "video" ? null : el("button", { class: "small", title: "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
       m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),
       // out of the library: the server moves the file to the studio's trash folder
-      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))));
+      trashButton("Delete " + m.path, () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?"))))));
     if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
-    put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
+    put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick Select on cards, then Delete selected above, or use Select all for the current filter. The red trash icon deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
       typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
-      el("div", { class: "row", style: "margin-top:10px" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span"),
-        bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,
-        bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
-        bin && bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
-          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
       capBar.results, grid); })
   .catch(e => put(box, el("div", { class: "note" }, e.message)));
   return head ? el("div", {}, head, box) : box; }

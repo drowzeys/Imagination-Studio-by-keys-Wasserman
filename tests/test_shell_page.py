@@ -66,6 +66,236 @@ def run(code: str) -> dict:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
+def sound_delete_setup():
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    helpers = page[page.index("const PICK = new Set()"):page.index("\nlet S = null")]
+    return helpers + "\nglobalThis.clearOut = clearOut;\n" + """
+      S.home = "studio"; tab = "Foley"; globalThis.confirm = () => true;
+      globalThis.toast = t => toasts.push(t);
+      const state = { kinds: { sfx: { ready: true }, foley: { ready: true } } };
+      SFX.state = state; SFX.clips = [];
+      answers["/api/sound/state"] = state; answers["/api/library"] = [];
+    """
+
+
+@pytest.mark.parametrize("kind", ["sfx", "foley"])
+def test_sound_card_delete_refreshes_and_undo_restores(kind):
+    out = run(sound_delete_setup() + f"""
+      const take = {{ id: "take1", kind: {json.dumps(kind)}, prompt: "a door shuts",
+        path: "sound/{kind}/take1.wav", clip: "sound/foley/take1.mp4", source: "renders/source.mp4" }};
+      SFX.takes = [take]; SFX.video = "renders\\\\source.mp4";
+      SHELL.libCache = [take];
+      answers["/api/library"] = [{{ kind: "video", path: take.source }}];
+      answers["/api/sound/takes"] = [];
+      answers["/api/clear"] = {{ files: 2, jobs: 0, skipped: [] }};
+      const del = button(sfxTake(take), "Delete");
+      out.label = del.attrs["aria-label"]; await del.attrs.onclick();
+      out.deleted = SFX.takes.length; out.source = SFX.video; out.cache = SHELL.libCache;
+      out.deleteCall = calls.find(c => c[0] === "/api/clear");
+      out.message = text(toasts[0]);
+      answers["/api/sound/takes"] = [take];
+      answers["/api/trash/restore"] = {{ files: 2, jobs: 0, missing: [] }};
+      await button(toasts[0], "Undo").attrs.onclick({{ target: {{ closest: () => ({{ remove() {{}} }}) }} }});
+      await new Promise(resolve => setImmediate(resolve));
+      out.restored = SFX.takes.map(t => t.id);
+      out.restoreCalled = calls.some(c => c[0] === "/api/trash/restore");
+    """)
+    paths = [f"sound/{kind}/take1.wav"]
+    if kind == "foley":
+        paths.append("sound/foley/take1.mp4")
+    assert out["deleteCall"] == ["/api/clear", {"paths": paths, "films": True}]
+    assert out["label"] == "Delete a door shuts"
+    assert out["deleted"] == 0 and out["cache"] is None
+    assert out["source"] == "renders\\source.mp4"
+    assert "Undo" in out["message"]
+    assert out["restored"] == ["take1"] and out["restoreCalled"]
+
+
+def test_library_delete_invalidates_sound_cache_for_the_next_visit():
+    out = run(sound_delete_setup() + """
+      tab = "Library"; SFX.takes = [{ id: "gone" }]; SFX.video = "sound/foley/gone.mp4";
+      answers["/api/clear"] = { files: 1, jobs: 0, skipped: [] };
+      answers["/api/sound/takes"] = [];
+      await clearOut({ paths: ["sound/sfx/gone.wav"], films: true }, "Delete?");
+      out.invalidated = SFX.takes === null && SFX.clips === null;
+      out.notLoadedYet = !calls.some(c => c[0] === "/api/sound/takes");
+      tab = "Foley"; viewFoley();
+      await new Promise(resolve => setImmediate(resolve));
+      out.loaded = SFX.takes.length === 0;
+      out.selection = SFX.video;
+    """)
+    assert out["invalidated"] and out["notLoadedYet"] and out["loaded"]
+    assert out["selection"] == ""
+
+
+def test_delete_message_links_to_the_library_trash():
+    out = run(sound_delete_setup() + """
+      answers["/api/clear"] = { files: 2, jobs: 0, skipped: [] };
+      answers["/api/sound/takes"] = [];
+      await clearOut({ paths: ["sound/sfx/take1.wav"], films: true }, "Delete?");
+      const link = find(toasts[0], n => n.tag === "a");
+      out.label = text(link.kids); out.href = link.attrs.href;
+      out.undo = !!button(toasts[0], "Undo");
+      let prevented = false;
+      link.attrs.onclick({ preventDefault() { prevented = true; } });
+      out.prevented = prevented; out.tab = tab;
+    """)
+    assert out["label"] == "View trash" and out["href"] == "#Library"
+    assert out["undo"] and out["prevented"] and out["tab"] == "Library"
+
+
+def library_view_setup():
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    view = page[page.index("const LIB_SOUND ="):page.index("\n/* ---------- Tutorial")]
+    return sound_delete_setup() + view + """
+      tab = "Library"; globalThis.ART = { ready: new Set() }; globalThis.LIBF = { q: "", kind: "all" };
+      globalThis.ACT = { state: {} }; globalThis.actPanel = () => null; CAP.map = {};
+      globalThis.capSearch = () => ({ box: null, results: null });
+      globalThis.rcLibrary = () => null; globalThis.finLibPanel = () => null; globalThis.finLibButton = () => null;
+      globalThis.relHome = p => p;
+      globalThis.LORAS = []; globalThis.capText = () => ""; globalThis.actButtons = () => null; globalThis.capButton = () => null;
+      answers["/api/trash"] = { files: 0, bytes: 0, folder: "studio/trash", last: null };
+    """
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_library_trash_panel_shows_its_folder_and_controls(unavailable):
+    out = run(library_view_setup() + f"""
+      Object.defineProperty(globalThis, "navigator", {{ configurable: true,
+        value: {{ clipboard: {{ async writeText(p) {{ out.copied = p; }} }} }} }});
+      answers["/api/trash"] = {str(unavailable).lower()} ? new Error("trash could not be loaded")
+        : {{ files: 2, bytes: 4096, folder: "studio/trash", last: {{ files: 2 }} }};
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const panel = find(root, n => n.attrs.id === "library-trash");
+      out.firstPanel = root.kids.find(n => n && n.tag === "section") === panel;
+      out.panel = text(panel);
+      if (!{str(unavailable).lower()}) {{
+        await button(panel, "Copy folder path").attrs.onclick();
+        out.restore = !!button(panel, "Restore last deletion");
+        globalThis.confirm = () => false;
+        await button(panel, "Empty trash").attrs.onclick();
+        out.cancelled = !calls.some(c => c[0] === "/api/trash?confirm=erase");
+      }}
+    """)
+    assert out["firstPanel"]
+    if unavailable:
+        assert "trash could not be loaded" in out["panel"]
+        assert "Trash is empty" not in out["panel"]
+    else:
+        assert "Trash" in out["panel"] and "studio/trash" in out["panel"]
+        assert out["copied"] == "studio/trash" and out["restore"] and out["cancelled"]
+
+
+@pytest.mark.parametrize("kind", ["all", "sfx", "voice", "music", "video", "image"])
+def test_library_select_all_and_bulk_delete_include_filtered_audio(kind):
+    out = run(library_view_setup() + f"""
+      const items = [
+        {{ path: "sound/sfx/one.wav", kind: "audio", sound: "sfx" }},
+        {{ path: "voice/one.wav", kind: "audio", sound: "voice" }},
+        {{ path: "music/one.wav", kind: "audio", sound: "music" }},
+        {{ path: "renders/one.mp4", kind: "video" }},
+        {{ path: "renders/one.png", kind: "image" }}
+      ];
+      LIBF.kind = {json.dumps(kind)}; answers["/api/library"] = items;
+      let root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      button(root, "Select all").attrs.onclick();
+      out.selected = [...LIBPICK];
+      root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const many = button(root, "Delete selected");
+      out.label = text(many.kids); out.enabled = !many.disabled;
+      globalThis.VO = {{ takes: [{{ id: "one" }}] }}; globalThis.MU = {{ takes: [{{ id: "one" }}] }};
+      answers["/api/clear"] = {{ files: LIBPICK.size, jobs: 0, skipped: [] }};
+      await many.attrs.onclick();
+      out.deleteCall = calls.find(c => c[0] === "/api/clear");
+      out.cachesCleared = VO.takes === null && MU.takes === null;
+    """)
+    paths = {
+        "sfx": "sound/sfx/one.wav", "voice": "voice/one.wav", "music": "music/one.wav",
+        "video": "renders/one.mp4", "image": "renders/one.png",
+    }
+    expected = list(paths.values()) if kind == "all" else [paths[kind]]
+    assert out["selected"] == expected
+    assert out["label"].strip() == f"Delete selected ({len(expected)})" and out["enabled"]
+    assert out["deleteCall"] == ["/api/clear", {"paths": expected, "films": True}]
+    assert out["cachesCleared"]
+
+
+@pytest.mark.parametrize("kind", ["sfx", "voice", "music"])
+def test_library_audio_cards_have_select_and_the_same_trash_icon_as_sound(kind):
+    path = "sound/sfx/one.wav" if kind == "sfx" else f"{kind}/one.wav"
+    out = run(library_view_setup() + f"""
+      const take = {{ id: "one", kind: "sfx", path: "sound/sfx/one.wav" }};
+      const item = {{ kind: "audio", sound: {json.dumps(kind)}, path: {json.dumps(path)} }};
+      let updates = 0; const card = libSoundTile(item, true, () => updates++);
+      const checkbox = find(card, n => n.tag === "input" && n.attrs.type === "checkbox");
+      checkbox.attrs.onchange({{ target: {{ checked: true }} }}); out.selected = LIBPICK.has(item.path);
+      checkbox.attrs.onchange({{ target: {{ checked: false }} }}); out.unselected = !LIBPICK.has(item.path);
+      out.updates = updates; out.selectLabel = checkbox.attrs["aria-label"];
+      const del = button(card, "Delete");
+      out.deleteLabel = del.attrs["aria-label"]; out.deleteClass = del.attrs.class;
+      out.libraryIcon = find(del, n => n.tag === "span").innerHTML;
+      out.soundIcon = find(button(sfxTake(take), "Delete"), n => n.tag === "span").innerHTML;
+      answers["/api/clear"] = {{ files: 1, jobs: 0, skipped: [] }};
+      await del.attrs.onclick(); out.deleteCall = calls.find(c => c[0] === "/api/clear");
+    """)
+    assert out["selected"] and out["unselected"] and out["updates"] == 2
+    assert out["selectLabel"] == f"Select {path}" and out["deleteLabel"] == f"Delete {path}"
+    assert "trash-button" in out["deleteClass"]
+    assert out["libraryIcon"] == out["soundIcon"] and 'M4 6h16' in out["soundIcon"]
+    assert out["deleteCall"] == ["/api/clear", {"paths": [path], "films": True}]
+
+
+def test_sound_actions_are_compact_and_foley_uses_a_more_menu():
+    out = run("""
+      const take = { id: "take1", kind: "sfx", path: "sound/sfx/take1.wav" };
+      const sound = sfxTake(take);
+      const row = find(sound, n => (n.attrs.class || "").includes("sfx-take-actions"));
+      out.actions = row.kids.filter(n => n && n.tag === "button").map(n =>
+        (n.attrs.class || "").includes("trash-button") ? n.attrs["aria-label"] : text(n.kids));
+      out.referenceLabel = button(row, "reference").attrs["aria-label"];
+      const foley = sfxTake({ ...take, kind: "foley", clip: "sound/foley/take1.mp4" });
+      const menu = find(foley, n => n.tag === "details");
+      out.menuLabel = find(menu, n => n.tag === "summary").attrs["aria-label"];
+      out.menuActions = ["+ timeline", "reference", "again", "Delete"].map(label => !!button(menu, label));
+    """)
+    assert out["actions"] == ["reference", "again", "Delete take1"]
+    assert out["referenceLabel"] == "Use as reference sound"
+    assert out["menuLabel"] == "Foley take actions"
+    assert all(out["menuActions"])
+
+
+def test_sound_card_delete_cancel_errors_and_busy_files():
+    out = run(sound_delete_setup() + """
+      const take = { id: "take1", kind: "sfx", path: "sound/sfx/take1.wav", prompt: "a door shuts" };
+      SFX.takes = [take];
+      globalThis.confirm = () => false;
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.cancelCalls = calls.length; out.cancelTakes = SFX.takes.length;
+      globalThis.confirm = () => true;
+      answers["/api/clear"] = new Error("trash is unavailable");
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.errorTakes = SFX.takes.length; out.error = toasts[0];
+      answers["/api/clear"] = { files: 0, jobs: 0, skipped: [{ why: "a queued job uses it" }] };
+      answers["/api/sound/takes"] = [take];
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.busyTakes = SFX.takes.length; out.busy = text(toasts[1]);
+      out.busyUndo = !!button(toasts[1], "Undo");
+      answers["/api/clear"] = { files: 2, jobs: 0, skipped: [] };
+      answers["/api/sound/takes"] = new Error("could not refresh sound takes");
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.refreshError = text(viewFoley());
+      answers["/api/sound/takes"] = [];
+      await button(viewFoley(), "Retry").attrs.onclick();
+      out.retried = SFX.takeError === "";
+    """)
+    assert out["cancelCalls"] == 0 and out["cancelTakes"] == 1
+    assert out["errorTakes"] == 1 and out["error"] == "trash is unavailable"
+    assert out["busyTakes"] == 1 and "a queued job uses it" in out["busy"]
+    assert out["busyUndo"] is False
+    assert "could not refresh sound takes" in out["refreshError"] and "Retry" in out["refreshError"]
+    assert out["retried"]
+
+
 def test_the_memory_guard_fold_refuses_on_a_card_and_still_stops_a_spark():
     out = run("""document.createElementNS = () => ({ setAttribute() {}, append() {}, style: {} });
       answers["/api/storage"] = { buckets: [], free_gb: 10, total_gb: 20, used_pct: 50, computing: false };
