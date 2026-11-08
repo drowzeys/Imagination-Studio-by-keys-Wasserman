@@ -197,7 +197,7 @@ Or all at once, with no picking: `TWOK=1 bash scripts/studio.sh "the picture" "w
 | Image model | `Qwen/Qwen-Image-2.1-Turbo`: 7B transformer (32 blocks, bfloat16), 64-channel VAE, Qwen3-VL text encoder; 8 steps on the schedule saved with the checkpoint |
 | Image adapter (installs from before 2.3) | `Viggle/Qwen-Image-2.1-viggle-turbo`, v0.3, rank 256, 6 steps on its trained nodes, on `Qwen/Qwen-Image-2.1` |
 | Video model | `MiniMaxAI/MiniMax-H3`, `FL2VA` partition: 33B transformer, Qwen3-VL text encoder, video and audio VAEs |
-| Video adapter | lightx2v MiniMax H3 Turbo v1.0, runner layout as published by Phosphene |
+| Video adapter | LightX2V MiniMax H3 Turbo v1.0 (FL2VA 4-step), converted at install into Phosphene's runner layout |
 | 2x video decoder | `speach1sdef178/MiniMax-H3-X2-Detail-VAE`, `MiniMax-H3-X2-Detail-v1.safetensors` (decoder only; its reference-detail branch is not used) |
 | Borrowed at run time | mflux @ `add5164e`: Qwen-Image prompt encoder. minimax-h3-mlx @ `79190205`: H3 text encoder, first-frame encoder, audio decoder, MP4 writer |
 | MLX | 0.32.3 |

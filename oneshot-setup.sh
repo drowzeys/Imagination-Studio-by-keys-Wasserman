@@ -135,8 +135,11 @@ ZIG_ENGINE_SHA256="ed44690f0b67fa85a873341a60c3cd77d6a79150a0fd769eed5aa91304548
 MFLUX_REPO="https://github.com/mflux-community/mflux.git"
 MFLUX_COMMIT="add5164e62c07cbcc9aec7a95c2e19c75605880c"
 H3_ADAPTER_NAME="lightx2v_v1.0_768p_ourlayout.safetensors"
-H3_ADAPTER_URL="https://github.com/mrbizarro/Phosphene/releases/download/weights-ltx25-v1/$H3_ADAPTER_NAME"
-H3_ADAPTER_SHA256="d51d626fe0845da7e5845a47c323cf3f29086d44d24cb1a4b980882488746197"
+# LightX2V's 4-step FL2VA adapter, rewritten at install into the layout --lora reads (the copy Phosphene published is
+# gone, #225; the conversion gives the same 416 tensors bit for bit, only the file's metadata differs)
+H3_ADAPTER_REPO="lightx2v/Minimax-h3-Turbo"
+H3_ADAPTER_SOURCE="minimax_h3_fl2v_turbo_4step_v1.0_768p_bf16.safetensors"
+H3_ADAPTER_SOURCE_SHA256="1bdabc2e9fce20b1db563b96bcf6e46adcad4c1964f423676436bf266cc7416c"
 # LightX2V's 4-step adapter for the Ref2VA transformer, rewritten at install into the layout --lora reads
 REF_ADAPTER_REPO="lightx2v/Minimax-h3-Turbo"
 REF_ADAPTER_SOURCE="minimax_h3_ref2v_turbo_4step_v0.1_bf16.safetensors"
@@ -458,13 +461,14 @@ if [ "$VIDEO" = 1 ]; then
   fi
 
   if [ "$TURBO" = 1 ]; then
-    step "Video Turbo adapter (lightx2v v1.0, runner layout, 1.96 GB)"
+    step "Video Turbo adapter (LightX2V v1.0, 1.4 GB, converted to the runner layout)"
     H3_ADAPTER="$PREFIX/adapters/$H3_ADAPTER_NAME"
     [ -f "$H3_ADAPTER" ] || elsewhere "$H3_ADAPTER"
     if [ ! -f "$H3_ADAPTER" ] && ! absent "no video Turbo adapter at $H3_ADAPTER"; then
-      curl -L --fail --retry 3 -C - -o "$H3_ADAPTER.partial" "$H3_ADAPTER_URL"
-      echo "$H3_ADAPTER_SHA256  $H3_ADAPTER.partial" | shasum -a 256 -c - >/dev/null || die "video Turbo adapter checksum mismatch"
-      mv "$H3_ADAPTER.partial" "$H3_ADAPTER"
+      "$PREFIX/venv/bin/hf" download "$H3_ADAPTER_REPO" "$H3_ADAPTER_SOURCE" --local-dir "$PREFIX/adapters/h3-fl2v" >/dev/null
+      echo "$H3_ADAPTER_SOURCE_SHA256  $PREFIX/adapters/h3-fl2v/$H3_ADAPTER_SOURCE" | shasum -a 256 -c - >/dev/null || die "video Turbo adapter checksum mismatch"
+      "$PREFIX/venv/bin/python" "$HERE/scripts/convert-h3-adapter.py" "$PREFIX/adapters/h3-fl2v/$H3_ADAPTER_SOURCE" "$H3_ADAPTER.partial.safetensors" | sed 's/^/  /'
+      mv "$H3_ADAPTER.partial.safetensors" "$H3_ADAPTER"; rm -f "$PREFIX/adapters/h3-fl2v/$H3_ADAPTER_SOURCE"
     fi
     [ ! -f "$H3_ADAPTER" ] || ok "$H3_ADAPTER_NAME"
   fi
