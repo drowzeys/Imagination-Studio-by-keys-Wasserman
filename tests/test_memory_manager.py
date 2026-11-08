@@ -196,3 +196,14 @@ def test_the_server_registers_its_modules_in_order_and_admits_before_a_job_loads
     assert order == sorted(order)
     assert "memory_manager.admit(job, lambda: job_fit(job)" in source and "lenient" in source
     assert source.index("memory_manager.admit(job") > source.index('job["log"] += bolt.admit(job')
+
+
+def test_a_local_job_named_by_this_machine_still_keeps_its_module():
+    """A job rendering here carries this machine's own name in "spark" (app/sparks.py): only "remote" (a worker's
+    address) means elsewhere. Read the other way, the watch could unload the ComfyUI a local render runs on."""
+
+    import socket
+
+    jobs = [{"id": "a", "kind": "video", "status": "running", "spark": socket.gethostname(), "remote": None},
+            {"id": "b", "kind": "voice", "status": "running", "spark": "spark-b", "remote": "10.0.0.9"}]
+    assert mm.running_kinds(jobs) == {"comfy"}
