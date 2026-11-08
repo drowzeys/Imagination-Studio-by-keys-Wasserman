@@ -5,8 +5,6 @@ const SFX = { state: null, takes: null, mode: "foley", clips: null, video: "", p
 const SFX_MODES = { foley: ["Foley for a clip", "MMAudio watches the clip and makes its sound: steps on the footfalls, the door when it shuts."],
   sfx: ["A sound effect", "Stable Audio Open makes a sound from words: up to 47 seconds, 44.1 kHz stereo."] };
 async function sfxLoad() { try { SFX.state = await api("/api/sound/state"); } catch (e) { SFX.state = { error: e.message }; }
-  if (SFX.state.windows && !SFX.windowsDefaults) { if (!SFX.state.kinds.foley.ready) SFX.mode = "sfx";
-    if (SFX.state.kinds.sfx.bounded ?? SFX.state.windows) SFX.seconds = 5; SFX.windowsDefaults = true; }
   try { SFX.takes = await api("/api/sound/takes"); } catch { SFX.takes = []; }
   if (SFX.clips === null) { try { SFX.clips = (await api("/api/library")).filter(m => m.kind === "video"); } catch { SFX.clips = []; } }
   if (tab === "Foley") render(); }
@@ -19,7 +17,7 @@ async function sfxMake() { const m = SFX.mode;
   if (m === "foley" && !SFX.video) return toast("Pick the clip to make its sound");
   if (m === "sfx" && !SFX.prompt.trim()) return toast("Say what is heard first");
   const params = m === "foley" ? { video: SFX.video, prompt: SFX.prompt.trim(), negative: SFX.negative.trim(), keep_sound: SFX.keep, foley_db: Number(SFX.db), seed: Number(SFX.seed) || 1 }
-    : { prompt: SFX.prompt.trim(), negative: SFX.negative.trim(), seconds: Number(SFX.seconds), seed: Number(SFX.seed) };
+    : { prompt: SFX.prompt.trim(), negative: SFX.negative.trim(), seconds: Number(SFX.seconds), seed: Number(SFX.seed) || 1 };
   SFX.busy = true; render();
   try { const job = await api("/api/jobs", { kind: m, params }); toast("Queued: " + (job.title || SFX_MODES[m][0])); if (typeof poll === "function") await poll(); sfxWatch(); }
   catch (e) { toast(e.message, 7000); }
@@ -32,9 +30,9 @@ function sfxTake(t) { const clip = t.clip && t.kind === "foley";
     el("div", { class: "cap" }, el("span", { class: "note m-flat" }, (t.seconds ? Number(t.seconds).toFixed(1) + " s · " : "") + "seed " + t.seed + (t.elapsed ? " · made in " + Math.round(t.elapsed) + " s" : ""))),
     el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
       clip ? el("button", { class: "small", onclick: () => addToTimeline(t.clip) }, "+ timeline") : null,
-      el("button", { class: "small", disabled: !(S && S.ref_media), title: "Use this sound as a reference (<Audio N>) for a new clip (requires a qualified reference-video route)", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1;
+      el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1;
         if (!C.refAudios.includes(t.path)) { C.refAudios.push(t.path); C.audio_notes.push(""); } go("Create"); toast("Added as reference sound"); } }, "reference sound"),
-      el("button", { class: "small", onclick: () => { SFX.seed = Number(t.seed ?? 1) + 1; SFX.prompt = t.prompt || ""; SFX.mode = t.kind; if (t.kind === "foley" && t.source) SFX.video = t.source; render(); } }, "again"))); }
+      el("button", { class: "small", onclick: () => { SFX.seed = (Number(t.seed) || 1) + 1; SFX.prompt = t.prompt || ""; SFX.mode = t.kind; if (t.kind === "foley" && t.source) SFX.video = t.source; render(); } }, "again"))); }
 function viewFoley() {
   if (!SFX.state) sfxLoad(); if (sfxLive()) sfxWatch();
   const art = typeof ART !== "undefined" && ART.ready.has("start-sfx") && typeof artSlot === "function";
@@ -44,9 +42,7 @@ function viewFoley() {
     : typeof pageHead === "function" ? pageHead("Sound", "Sound effects", "Foley for a clip, or a sound effect from words. Made on this machine.") : el("h1", { class: "display" }, "Sound effects");
   if (!SFX.state) return el("div", {}, head, el("div", { class: "note" }, "Looking…"));
   if (SFX.state.error) return el("div", {}, head, el("div", { class: "note" }, SFX.state.error));
-  const k = SFX.state.kinds[SFX.mode], m = SFX.mode, bounded = k.bounded ?? !!SFX.state.windows;
-  const seconds = k.seconds || SFX.state.seconds?.[m] || (bounded ? m === "sfx" ? [5, 5] : [1, 5] : [1, 47]);
-  if (m === "sfx") SFX.seconds = Math.min(seconds[1], Math.max(seconds[0], Number(SFX.seconds) || seconds[0]));
+  const k = SFX.state.kinds[SFX.mode], m = SFX.mode;
   const area = (key, rows, placeholder) => { const n = el("textarea", { rows, placeholder, "aria-label": placeholder }); n.value = SFX[key]; n.addEventListener("input", () => { SFX[key] = n.value; }); return n; };
   const num = (key, attrs) => el("input", { type: "number", value: SFX[key], ...attrs, oninput: e => { SFX[key] = e.target.value; } });
   const clips = SFX.clips || [];
@@ -58,27 +54,23 @@ function viewFoley() {
       el("div", { class: "chips" }, ...[[true, "Under the clip's own sound"], [false, "In place of it"]].map(([v, label]) => el("button", { type: "button", class: "small" + (SFX.keep === v ? " on" : ""), onclick: () => { SFX.keep = v; render(); } }, label))),
       SFX.keep ? field("Foley level under the clip's sound (dB)", num("db", { min: -30, max: 0, step: 1 })) : null]
     : [field("What is heard", area("prompt", 3, "a heavy wooden door slams shut in a stone hall, short reverb")),
-      field(seconds[0] === seconds[1] ? "Seconds (fixed recipe: " + seconds[0] + ")" : "Seconds (" + seconds[0] + " to " + seconds[1] + ")",
-        num("seconds", { min: seconds[0], max: seconds[1], step: .5, disabled: seconds[0] === seconds[1] }))];
+      field("Seconds (1 to 47)", num("seconds", { min: 1, max: 47, step: 0.5 }))];
   return el("div", { class: "sfx" }, head,
     el("div", { class: "sfx-cards", role: "radiogroup", "aria-label": "What to make" }, Object.entries(SFX_MODES).map(([id, [name, one]]) => {
-      const state = SFX.state.kinds[id], ready = state.ready, limited = state.bounded ?? !!SFX.state.windows;
+      const ready = SFX.state.kinds[id].ready;
       return el("button", { type: "button", class: "sfx-card" + (m === id ? " on" : ""), role: "radio", "aria-checked": m === id ? "true" : "false", onclick: () => { SFX.mode = id; render(); } },
-        el("b", {}, name), el("span", { class: "sfx-state", title: state.why || "" }, el("span", { class: "dotl" + (ready ? (m === id ? " t" : "") : " o") }),
-          ready ? "Ready" : state.installed === false ? "Not installed" : SFX.state.windows ? "Unavailable — see requirements" : "Not installed"),
-        el("span", { class: "sfx-one" }, limited && id === "sfx" ? "Five-second stereo sound effects, 100 passes, CFG 7. Made locally." : one)); })),
+        el("b", {}, name), el("span", { class: "sfx-state" }, el("span", { class: "dotl" + (ready ? (m === id ? " t" : "") : " o") }), ready ? "Ready" : "Not installed"),
+        el("span", { class: "sfx-one" }, one)); })),
     el("section", { class: "panel stack", style: "margin-top:14px" },
       !k.ready ? el("div", { class: "note vt-bad" }, k.why) : null,
-      SFX.state.windows && typeof featureBadge === "function" ? featureBadge(m) : null,
-      bounded && m === "foley" ? el("div", { class: "note" }, "Windows recipe: clips of " + seconds[0] + "-" + seconds[1] + " seconds at 24 fps, 25 passes, CFG 4.5. Runs alone in an owned ComfyUI; other Studio image/sound models are unloaded first.") : null,
       // the install command where installing is what is missing (on a Spark a kind may also wait for its memory measurement)
-      !k.ready && !SFX.state.windows && (!SFX.state.spark || /--sound/.test(k.why || "")) ? (() => {
+      !k.ready && (!SFX.state.spark || /--sound/.test(k.why || "")) ? (() => {
         const cmd = SFX.state.spark ? "bash oneshot-setup-spark.sh --sound" : "bash scripts/setup-sound.sh";
         return el("div", { class: "signin-cmd" }, el("code", {}, cmd), el("button", { type: "button", class: "small", onclick: () => copyText(cmd, "Command") }, "Copy"));
       })() : null,
       ...form,
       el("details", { class: "fold" }, el("summary", {}, "More: what is not heard, the seed"),
-        field("What is not heard", area("negative", 2, m === "foley" ? "music, speech" : "low quality, distortion")), field("Seed", num("seed", { min: SFX.state.windows ? 0 : 1, step: 1 }))),
+        field("What is not heard", area("negative", 2, m === "foley" ? "music, speech" : "low quality, distortion")), field("Seed", num("seed", { min: 1, step: 1 }))),
       el("div", { class: "row" }, el("button", { class: "primary fit", disabled: SFX.busy || !k.ready, onclick: sfxMake }, SFX.busy ? "Queuing…" : m === "foley" ? "Make the foley" : "Make the sound"),
         el("span", { class: "note m-flat" }, k.licence))),
     el("div", { class: "sectionhead" }, el("h2", {}, "Made here"), el("button", { class: "small", onclick: () => { if (typeof LIBF !== "undefined") LIBF.kind = "sfx"; go("Library"); } }, "In the Library")),

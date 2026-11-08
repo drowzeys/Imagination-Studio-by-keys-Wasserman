@@ -1,6 +1,6 @@
 "use strict";
 // Machine room: live telemetry of this machine (GPU, unified memory against the guard's floor, temperature, power),
-// what holds the GPU, the renderer, and where the disk went. Qualification runs only on an explicit button press.
+// what holds the GPU, the renderer, and where the disk went. Read only: nothing here stops, frees or deletes anything.
 const SVGNS = "http://www.w3.org/2000/svg";
 const svg = (tag, attrs = {}, ...kids) => { const n = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); kids.forEach(k => n.append(k)); return n; };
 const RING = 2 * Math.PI * 56;
@@ -21,377 +21,18 @@ function sparkline(id, tone) { return el("div", { class: "stack m-sparkbox" }, s
   svg("path", { d: "", class: "area" }), svg("path", { d: "", class: "line", "vector-effect": "non-scaling-stroke" }))); }
 function sparkSet(id, values, max) { const s = document.querySelector('[data-spark="' + id + '"]'); if (!s) return; const [line, area] = sparkPath(values, 600, 64, max); const p = s.querySelectorAll("path"); p[0].setAttribute("d", area); p[1].setAttribute("d", line); }
 const M = { storage: null, loading: false, history: null };
-const WFC = { data: null, error: "", timer: null, loading: false, changingMode: false, focus: null, selected: null, open: false, groups: {}, scopes: {} };
-function openFeatureCheck(kind) { WFC.focus = kind; WFC.selected = kind; WFC.open = true; go("Machine"); }
-function featureBadge(kind, options = {}) {
-  const c = options.state || S && S.capabilities && S.capabilities[kind];
-  const checks = S && S.feature_checks;
-  if (!checks || !checks.supported || checks.mode?.enabled === false || !checks.features?.[kind] || !c) return null;
-  const ready = c.qualified ?? c.available, label = ready ? "Qualified" : c.installed === false && kind !== "foley" ? "Setup required" : options.unqualified || "Not qualified";
-  return el("button", { type: "button", class: "tag2 feature-link fit " + (ready ? "ok" : "warn"),
-    "aria-label": label + ": " + checks.features[kind],
-    title: ready ? "View saved qualification evidence and limits." : "Open this feature's checks and setup",
-    onclick: () => openFeatureCheck(kind) }, label, ready ? "" : " →");
-}
-const wfcGB = mb => mb == null ? "unknown" : (mb / 1024).toFixed(1) + " GiB";
-const featureCheckApi = tail => (S && S.feature_checks && S.feature_checks.url || "/api/feature-checks") + (tail || "");
-async function wfcSetMode(enabled) {
-  if (WFC.changingMode) return;
-  WFC.changingMode = true; wfcDraw();
-  try {
-    const result = await api(featureCheckApi("/mode"), { enabled });
-    if (WFC.data && result.mode) WFC.data.mode = result.mode;
-    S = await api("/api/state");
-    if (typeof ACT !== "undefined") ACT.state = null;
-    if (typeof SWAP !== "undefined") SWAP.state = null;
-    if (typeof FIN !== "undefined") FIN.state = null;
-    if (typeof SFX !== "undefined") SFX.state = null;
-    await wfcLoad();
-  } catch (e) { toast(e.message, 7000); }
-  WFC.changingMode = false;
-  render(); wfcDraw();
-}
-function wfcModeControl(data = WFC.data) {
-  const mode = data?.mode || (S && S.feature_checks?.mode);
-  if (!mode) return null;
-  const on = mode.enabled !== false;
-  const toggle = setSwitch(on, wfcSetMode, "Qualification gating and badges");
-  toggle.disabled = !!(WFC.changingMode || WFC.loading || mode.required || mode.can_disable === false);
-  toggle.title = mode.required ? mode.reason || "Qualification is required on this machine." : "Change qualification";
-  const description = mode.required
-    ? mode.physical_total_mb == null ? mode.reason || "Installed memory is unknown; qualification stays on."
-      : "Required below 128 GiB; this machine has " + wfcGB(mode.physical_total_mb) + "."
-    : on ? "Unverified features need a saved pass; badges are shown." : "Features do not need a saved pass; badges are hidden.";
-  return el("div", { class: "stack" },
-    setRow("Qualification", description, el("div", { style: "display:flex;align-items:center;gap:8px" },
-      el("span", { class: "tag2" + (on ? " ok" : "") }, on ? mode.required ? "On · required" : "On" : "Off"), toggle)),
-    el("details", { class: "fold" }, el("summary", {}, "About qualification"),
-      el("div", { class: "note m-flat" }, "Feature checks remain available in either mode, one at a time, only when you choose to run them. Memory guards, prerequisites and recipe limits always apply. Update matching below is separate.")));
-}
-function featureCheckGroups(cards, rooms = typeof ROOMS !== "undefined" ? ROOMS : []) {
-  const keys = [...new Set(cards.map(card => card.group || "other"))];
-  const rank = key => { const at = rooms.findIndex(room => room.id === key); return at < 0 ? rooms.length : at; };
-  keys.sort((a, b) => rank(a) - rank(b));
-  return keys.map(key => ({ id: key, title: rooms.find(room => room.id === key)?.name || (key === "other" ? "Other features" : key),
-    cards: cards.filter(card => (card.group || "other") === key) }));
-}
-function wfcSummary(cards) {
-  const credit = card => {
-    if (card.installed === false) return 0;
-    const levels = card.qualification_levels;
-    return levels?.length ? levels.filter(level => level.qualified).length / levels.length : card.qualified ? 1 : 0;
-  };
-  const score = cards.reduce((sum, card) => sum + credit(card), 0);
-  const complete = cards.length > 0 && cards.every(card => credit(card) === 1);
-  const missing = cards.filter(card => card.installed === false).length;
-  const shown = Number(score.toFixed(2));
-  return el("span", { class: "qualification-summary", "data-qualified-total": cards.length },
-    el("span", { class: "tag2" + (complete ? " ok" : ""),
-      title: "Each feature counts as one point. Its recipes share that point equally; missing features remain in the total." },
-      complete ? "✓ All features qualified" : shown + "/" + cards.length + " features qualified"),
-    missing ? el("span", { class: "dsc-state missing" }, missing + " not on this machine") : null);
-}
-const wfcBusy = card => card.job && ["queued", "running"].includes(card.job.status);
-const wfcTime = value => { const time = typeof value === "number" ? value * 1000 : Date.parse(value || ""); return Number.isFinite(time) ? time : 0; };
-function wfcAttempt(card) {
-  const saved = card.attempt || {}, job = card.job;
-  const candidates = [saved, job && ["failed", "cancelled"].includes(job.status) ? job : null]
-    .filter(a => a && (a.error || a.state === "cancelled" || a.status === "cancelled"));
-  candidates.sort((a, b) => wfcTime(b.finished || b.started || b.created) - wfcTime(a.finished || a.started || a.created));
-  if (!candidates.length) return null;
-  const attempt = candidates[0];
-  let message = attempt.error || "The check was cancelled.";
-  if (typeof message === "string") {
-    try { const parsed = JSON.parse(message); if (parsed && typeof parsed.error === "string") message = parsed.error; }
-    catch (e) { if (!(e instanceof SyntaxError)) throw e; }
-  }
-  const time = wfcTime(attempt.finished || attempt.started || attempt.created);
-  return { message: String(message), when: time ? new Date(time).toLocaleString() : "Time not recorded",
-    state: attempt.state || attempt.status || "failed" };
-}
-function wfcObserved(card) {
-  const failed = card.attempt?.ok === false && card.attempt?.observations;
-  const observed = failed || (card.evidence?.results || []).find(result => result.measurements);
-  if (!observed) return null;
-  const measured = observed.measurements || {}, minima = measured.minima || {};
-  const values = [["Peak job commitment", observed.peak_job_commit_mb],
-    ["Lowest host available", minima.host_available_mb], ["Lowest commit headroom", minima.host_commit_headroom_mb],
-    ["Lowest dedicated GPU free", minima.dedicated_gpu_free_mb]]
-    .filter(([, value]) => Number.isFinite(value)).map(([label, value]) => label + ": " + wfcGB(value));
-  if (measured.samples != null) values.unshift(measured.samples + " samples");
-  if (observed.measurement_error) values.push("Readings incomplete: " + observed.measurement_error);
-  if (!values.length) return null;
-  return el("div", { class: "note m-flat", "data-check-observations": card.id },
-    (failed ? "Last failed check observed (not qualified): " : "Saved check observed: ") + values.join(" · ")
-    + ". Observations are not minimum RAM requirements.");
-}
-function wfcHistory(card) {
-  const attempt = wfcAttempt(card); if (!attempt) return null;
-  return el("details", { class: "fold", "data-check-history": card.id },
-    el("summary", {}, "Previous check attempt"),
-    el("div", { class: "note m-flat" }, attempt.when + " · " + attempt.message),
-    el("div", { class: "note m-flat" }, card.qualified
-      ? "This attempt did not replace your saved qualification. The feature remains qualified."
-      : "This attempt did not establish a qualification."));
-}
-function wfcAdmission(card, memory) {
-  if (!card.qualified || !card.check_available) return null;
-  if (card.requirements) {
-    const pools = memory.pools || {};
-    if (memory.error || !card.requirements.length || card.requirements.some(r => pools[r.pool]?.available_mb == null))
-      return el("div", { class: "note" }, "Current memory availability could not be established. Admission is checked when you run a job.");
-    const unknown = card.requirements.some(r => r.required_mb == null);
-    const busy = memory.low_memory || card.requirements.some(r => r.required_mb != null && pools[r.pool].available_mb < r.required_mb + (r.reserve_mb || 0));
-    return el("div", { class: "note" + (busy ? " warn" : "") }, busy
-      ? "Memory is currently busy: a new job may be refused until enough memory is free. Your saved qualification is unchanged."
-      : unknown ? "Some expected memory requirements remain unknown. Check-time admission runs after other Studio models are unloaded."
-      : "Memory headroom is available now; admission is checked again when you run a job.");
-  }
-  if (memory.error || memory.host_free_mb == null || memory.commit_free_mb == null)
-    return el("div", { class: "note" }, "Current memory availability could not be established. Admission is checked when you run a job.");
-  const busy = memory.low_memory || memory.host_free_mb < (memory.required_host_mb || card.memory.required_headroom_mb)
-    || memory.commit_free_mb < card.memory.required_headroom_mb;
-  return el("div", { class: "note" + (busy ? " warn" : "") }, busy
-    ? "Memory is currently busy: a new job may be refused until enough memory is free. Your saved qualification is unchanged."
-    : "Memory headroom is available now; admission is checked again when you run a job.");
-}
-let WFC_JOB_SIGNATURE = null;
-async function wfcObserveJobs(currentJobs) {
-  if (!S?.feature_checks?.supported || WFC.loading) return;
-  const checks = currentJobs.filter(job => job.kind === "qualification");
-  const signature = checks.map(job => job.id + ":" + job.status).sort().join("|");
-  const changed = signature !== WFC_JOB_SIGNATURE;
-  WFC_JOB_SIGNATURE = signature;
-  if (checks.some(job => ["queued", "running"].includes(job.status)) || changed && (checks.length || WFC.data))
-    await wfcLoad();
-}
-async function wfcLoad() {
-  if (WFC.loading) return;
-  WFC.loading = true;
-  const wasBusy = WFC.data && WFC.data.features.some(wfcBusy);
-  try {
-    WFC.data = await api(featureCheckApi()); WFC.error = "";
-    if (S?.feature_checks && WFC.data.mode) S.feature_checks.mode = WFC.data.mode;
-    if (wasBusy && !WFC.data.features.some(wfcBusy)) {
-      S = await api("/api/state");
-      if (typeof ACT !== "undefined") ACT.state = null;
-      if (typeof FIN !== "undefined") FIN.state = null;
-      if (typeof SFX !== "undefined") SFX.state = null;
-    }
-  } catch (e) { WFC.error = e.message; }
-  WFC.loading = false;
-  wfcDraw();
-  clearTimeout(WFC.timer);
-  if (document.querySelector("#feature-check-section")?.open && WFC.data && WFC.data.features.some(wfcBusy))
-    WFC.timer = setTimeout(wfcLoad, 2000);
-}
-async function wfcCheck(card) {
-  const selected = card.qualification_levels?.length ? WFC.scopes[card.id] || wfcNextSelection(card) : null;
-  const recipe = selected?.startsWith("group:") ? { group: selected.slice(6) } : selected ? { scope: selected } : {};
-  try { await api(featureCheckApi("/check"), { feature: card.id, ...recipe }); toast("Queued: check " + card.title); }
-  catch (e) { toast(e.message, 7000); }
-  await wfcLoad();
-}
-function wfcNextSelection(card) {
-  const group = card.qualification_groups?.find(group => group.remaining?.length);
-  return group ? "group:" + group.id : card.next_scope || "basic";
-}
-function wfcCheckDetails(card, ...content) {
-  return card.qualification_levels?.length ? el("details", { class: "fold qualification-details" },
-    el("summary", {}, "Runtime, memory and check details"), ...content,
-    el("div", { class: "note m-flat" }, "Groups skip valid passes and save each recipe. Memory, backend, timeout or cleanup failures stop the group; ordinary output errors do not. Existing passes are kept.")) : content;
-}
-function wfcRecipePicker(card, active) {
-  const selected = WFC.scopes[card.id] || wfcNextSelection(card);
-  const choose = value => { WFC.scopes[card.id] = value; wfcDraw(); };
-  const mark = (passed, outcome) => el("span", { class: "qualification-mark" + (passed ? " passed" : outcome === "failed" ? " failed" : outcome === "partial" ? " partial" : ""),
-    "aria-hidden": "true" }, passed ? "✓" : outcome === "failed" ? "×" : outcome === "partial" ? "◐" : "○");
-  const groups = card.qualification_groups || [], levels = card.qualification_levels || [];
-  return el("div", { class: "qualification-recipes" },
-    groups.length ? el("div", { class: "qualification-group-grid", role: "radiogroup", "aria-label": "Check groups: " + card.title },
-      groups.map(group => {
-        const complete = group.remaining.length === 0, value = "group:" + group.id;
-        const members = levels.filter(level => group.scopes?.includes(level.id));
-        const passed = members.filter(level => level.qualified).length;
-        const failed = members.filter(level => !level.qualified && level.outcome === "failed").length;
-        const progress = members.length ? passed + "/" + members.length + " passed" : "";
-        const status = complete ? "Passed · nothing to check"
-          : [progress, failed ? failed + " failed" : "", group.remaining.length + " recipes remaining"].filter(Boolean).join(" · ");
-        return el("button", { type: "button", class: "qualification-group" + (selected === value ? " selected" : ""),
-          role: "radio", "aria-checked": selected === value, disabled: active, onclick: () => choose(value) },
-          mark(complete, failed ? "failed" : passed ? "partial" : ""), el("span", {}, el("b", {}, group.title),
-            el("small", {}, status)));
-      })) : null,
-    el("details", { class: "fold qualification-individuals", open: !groups.length || !selected.startsWith("group:") },
-      el("summary", {}, "Individual recipes", el("span", { class: "tag2" },
-        levels.filter(level => level.qualified).length + "/" + levels.length + " passed")),
-      el("div", { class: "qualification-recipe-list", role: "radiogroup", "aria-label": "Individual recipes: " + card.title },
-        levels.map(level => {
-          const results = level.evidence?.results || [];
-          return el("div", { class: "qualification-recipe-row", "data-qualification-recipe": level.id },
-            el("button", { type: "button", role: "radio", "aria-checked": selected === level.id,
-              class: "qualification-recipe" + (selected === level.id ? " selected" : ""), disabled: active,
-              onclick: () => choose(level.id) },
-              mark(level.qualified, level.outcome), el("span", {}, el("b", {}, level.title),
-                el("small", {}, level.width + " × " + level.height + " · " + level.count + " image(s) · "
-                  + (level.qualified ? "Passed" : level.outcome === "failed" ? "Failed"
-                    : level.outcome === "cancelled" ? "Cancelled" : "Not checked")))),
-            level.qualified ? el("details", { class: "qualification-result" },
-              el("summary", {}, "Measurements"),
-              el("div", { class: "note m-flat" }, level.evidence?.checked_at
-                ? "Checked " + new Date(level.evidence.checked_at).toLocaleString() : "Saved pass"),
-              results.map(result => el("div", { class: "stack" },
-                el("div", { class: "note m-flat" }, "Elapsed: " + result.elapsed_s + " s"),
-                wfcObserved({ id: card.id + "-" + level.id, evidence: { results: [result] } })))) :
-              level.attempt?.error ? el("details", { class: "qualification-result" },
-                el("summary", {}, "Failure details"),
-                el("div", { class: "note m-flat" }, level.attempt.error),
-                wfcObserved({ id: card.id + "-" + level.id, attempt: { ...level.attempt, ok: false } })) : null);
-        }))),
-    el("div", { class: "note m-flat qualification-selection" }, "Selected: "
-      + (selected.startsWith("group:") ? groups.find(group => "group:" + group.id === selected)?.title
-        : levels.find(level => level.id === selected)?.title)));
-}
-function wfcDraw() {
-  const box = document.querySelector("#feature-checks"); if (!box) return;
-  const requestedFocus = WFC.focus;
-  const focusedCard = requestedFocus || box.querySelector("[data-feature-check]:focus")?.dataset.featureCheck;
-  const data = WFC.data, memory = data && data.memory || {};
-  const head = el("div", { class: "row" },
-    el("button", { class: "small", onclick: () => goSettings("models") }, "Models & weights"),
-    el("button", { class: "small", disabled: WFC.loading, onclick: wfcLoad }, "Refresh status"),
-    data ? el("button", { class: "small", onclick: async () => {
-      try { const report = await api(featureCheckApi("/report"));
-        const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
-        const a = document.createElement("a"); a.href = url; a.download = "feature-check-report.json"; a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } catch (e) { toast(e.message); }
-    } }, "Download saved report") : null);
-  box.replaceChildren(...[head,
-    wfcModeControl(data),
-    el("div", { class: "note m-flat" }, "Optional, one feature at a time. Base workflows stay available. Saved passes are reused; opening this page never runs a test."),
-    WFC.error ? el("div", { class: "note vt-bad" }, WFC.error) : null,
-    data ? el("div", { class: "note m-flat" }, data.policy === "strict"
-      ? "Strict update matching is enabled: runtime changes can require a new check."
-      : "Balanced updates: routine changes retain your saved qualification; compatibility breaks require a new check.") : null,
-    data ? el("div", { class: "note" }, memory.error || Object.values(memory.pools || {}).map(pool => pool.label + " available: " + wfcGB(pool.available_mb)).join(" · ")
-      + ". Memory pools may overlap; do not add them.") : el("div", { class: "note" }, "Reading saved results…")].filter(Boolean));
-  if (!data) return;
-  const total = document.querySelector("#feature-check-summary");
-  if (total) total.replaceChildren(wfcSummary(data.features));
-  for (const group of featureCheckGroups(data.features)) {
-    if (requestedFocus && group.cards.some(card => card.id === requestedFocus)) WFC.groups[group.id] = true;
-    const groupBody = el("div", { class: "stack", style: "margin-top:12px" });
-    const groupBox = el("details", { class: "feature-check-group", "data-check-group": group.id, open: !!WFC.groups[group.id],
-      ontoggle: e => { if (e.currentTarget.isConnected) WFC.groups[group.id] = e.currentTarget.open; } },
-      el("summary", {}, typeof icon === "function" && group.id !== "other" ? icon(group.id) : null,
-        el("b", {}, group.title), wfcSummary(group.cards)),
-      groupBody);
-    put(box, groupBox);
-    for (const card of group.cards) {
-    const active = wfcBusy(card), evidence = card.evidence || {}, results = evidence.results || [];
-    const budgets = card.memory || {};
-    const lastAttempt = wfcAttempt(card), failed = !card.qualified && !active && lastAttempt;
-    const required = (card.requirements || []).map(r => wfcGB(r.required_mb) + " " + r.pool + " (" + (r.basis || "unknown")
-      + (r.reserve_mb ? ", reserve " + wfcGB(r.reserve_mb) : "") + ")").join(" · ");
-    const peak = results.length ? Math.max(...results.map(r => r.peak_job_commit_mb || 0)) : null;
-    const job = card.job;
-    put(groupBody, el("section", { class: "panel stack" + (WFC.selected === card.id ? " feature-target" : ""),
-      tabindex: -1, "data-feature-check": card.id },
-      el("div", { class: "row" }, el("h3", {}, card.title),
-        el("span", { class: "tag2 " + (card.qualified ? "ok" : "") },
-          active ? "Check " + job.status : card.qualified ? "Qualified" : failed
-            ? lastAttempt.state === "cancelled" ? "Check cancelled" : "Check failed"
-            : (card.state || (card.installed === false ? "Install needed" : "Verification needed")).replaceAll("_", " "))),
-      el("div", { class: "note m-flat" }, card.scope || "Use the settings qualified by this check."),
-      wfcCheckDetails(card, card.backend || card.quality || card.measurement_source ? el("div", { class: "note m-flat" },
-        [card.backend ? "Backend: " + card.backend : "", card.quality ? "Quality: " + card.quality : "",
-          card.measurement_source ? "Measurement source: " + card.measurement_source
-            : card.backend === "native" && S?.platform === "windows" ? "Windows measurement: unknown" : ""].filter(Boolean).join(" · ")) : null,
-      card.qualified && card.runtime_updated ? el("div", { class: "note m-flat" },
-        "Runtime changed since this check. Earlier evidence is retained; rerunning is optional unless compatibility changes.") : null,
-      el("div", { class: "note m-flat" }, (budgets.minimum_label || "Minimum installed RAM not established")
-        + (budgets.lowest_tested_ram_mb != null ? ". Lowest tested machine: " + wfcGB(budgets.lowest_tested_ram_mb) : "")
-        + ((card.requirements || []).some(r => r.required_mb != null) ? ". Required headroom: " + required : "")
-        + (budgets.basis ? ". " + budgets.basis : "")
-        + (budgets.job_commit_cap_mb != null ? ". Job cap: " + wfcGB(budgets.job_commit_cap_mb) : "") + "."),
-      wfcAdmission(card, memory)),
-      typeof dscModelInfo === "function" ? dscModelInfo(card) : null,
-      el("div", { class: "note m-flat" }, evidence.checked_at ? (evidence.time_basis === "receipt_mtime" ? "Saved evidence updated: " : "Saved live check: ") + new Date(evidence.checked_at).toLocaleString()
-        + (card.qualification_levels?.length ? "" : " · peak job commitment " + wfcGB(peak)
-          + (evidence.matches ? " · matches this runtime/hardware." : " · stale for this runtime/hardware."))
-        : "No saved live pass on this machine."),
-      card.attempt?.ok === false || !card.qualification_levels?.length ? wfcObserved(card) : null,
-      failed || card.why ? el("div", { class: "note" }, failed ? lastAttempt.message : card.why) : null,
-      card.next_step ? el("div", { class: "note" }, card.next_step) : null,
-      wfcHistory(card),
-      card.qualification_levels?.length ? wfcRecipePicker(card, active) : null,
-      el("div", { class: "row" },
-        card.check_available ? el("button", { class: "small", disabled: !card.installed || active, onclick: () => wfcCheck(card) },
-          active ? "Check " + job.status : card.qualification_levels?.length ? "Check selected recipes" : evidence.checked_at ? "Rerun check" : "Check this feature")
-          : el("span", { class: "note m-flat" }, "Individual verification is not implemented yet."),
-        card.available ? el("button", { class: "small", onclick: () => {
-          if (card.open_query && typeof AP !== "undefined") { AP.cat = card.open_category || "all"; AP.q = card.open_query; }
-          if (card.open_mode && typeof SFX !== "undefined") SFX.mode = card.open_mode;
-          if (card.open_model && typeof C !== "undefined") {
-            C.imageModel = card.open_model; C.goes = "image"; C.step = 0;
-            if (typeof sync === "function") sync();
-          }
-          go(card.open_tab);
-        } }, card.open_label) : null,
-        active ? el("button", { class: "small", onclick: async () => {
-          try { await api("/api/jobs/" + job.id + "/cancel", {}); await wfcLoad(); } catch (e) { toast(e.message); }
-        } }, "Cancel check") : null,
-        !card.installed && card.setup && typeof dscInstall === "function"
-          ? dscInstall(null, { id: card.id, runtime_fit: card.runtime_fit,
-              install: { how: "command", shown: card.setup } }) : null)));
-    }
-  }
-  if (focusedCard) {
-    const target = box.querySelector('[data-feature-check="' + focusedCard + '"]');
-    if (target) {
-      if (requestedFocus) target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.focus({ preventScroll: true }); WFC.focus = null;
-    }
-  }
-}
-function featureChecksPanel() {
-  const body = el("div", { id: "feature-checks", class: "stack", style: "margin-top:14px" });
-  const section = el("details", { id: "feature-check-section", class: "panel m-gap", open: WFC.open,
-    ontoggle: e => {
-      if (!e.currentTarget.isConnected) return;
-      WFC.open = e.currentTarget.open;
-      if (WFC.open) { wfcDraw(); wfcLoad(); }
-      else { clearTimeout(WFC.timer); WFC.timer = null; }
-    } },
-    el("summary", {}, el("b", {}, "Feature checks"),
-      el("span", { id: "feature-check-summary" }, WFC.data ? wfcSummary(WFC.data.features) :
-        el("span", { class: "note m-flat" }, "Optional checks and saved results"))), body);
-  setTimeout(() => { wfcDraw(); wfcLoad(); }, 0);
-  return section;
-}
-function featureChecksSection() {
-  if (!S.feature_checks) return el("details", { class: "panel m-gap" },
-    el("summary", {}, el("b", {}, "Feature checks")),
-    el("div", { class: "note" }, "Studio is still running older code. Restart it to load Feature checks; your saved results are unchanged."));
-  return S.feature_checks.supported ? featureChecksPanel() : null;
-}
 function machineLive(t) {
   if (!t) return; const g = t.gpu || {}, mem = t.memory || {}, card = typeof cardMem === "function" ? cardMem(t) : null;
   const used = card ? card.used_mb / card.total_mb : (mem.total_mb ? 1 - mem.available_mb / mem.total_mb : 0);
   ringSet("gpu", (g.util_pct || 0) / 100, g.util_pct == null ? "–" : g.util_pct + "%", g.util_pct > 60 ? "var(--amber)" : "var(--green)");
   ringSet("mem", used, Math.round(used * 100) + "%", used > .85 ? "var(--red)" : used > .65 ? "var(--amber)" : "var(--blue)");
   ringSet("temp", (g.temp_c || 0) / 100, g.temp_c == null ? "–" : g.temp_c + "°", g.temp_c > 85 ? "var(--red)" : g.temp_c > 70 ? "var(--amber)" : "var(--green)");
-  ringSet("power", (g.power_w || 0) / (240 * Math.max(1, (g.cards || []).length)), g.power_w == null ? "–" : Math.round(g.power_w) + "W", "var(--blue)");
+  ringSet("power", (g.power_w || 0) / 240, g.power_w == null ? "–" : Math.round(g.power_w) + "W", "var(--blue)");
   const foot = (k, s) => { const n = document.querySelector('[data-foot="' + k + '"]'); if (n) n.textContent = s; };
-  const many = g.cards && g.cards.length > 1 ? g.cards : null;  // paired cards (STUDIO_GPUS)
-  foot("gpu", many ? many.length + "× " + (g.name || "GPU").replace(/^NVIDIA\s+/, "") + " · " + many.map(c => "GPU " + c.index + " " + (c.util_pct == null ? "–" : c.util_pct + "%")).join(" · ")
-    : (g.name || "GPU") + (g.clock_mhz ? " · " + g.clock_mhz + " MHz" : ""));
+  foot("gpu", (g.name || "GPU") + (g.clock_mhz ? " · " + g.clock_mhz + " MHz" : ""));
   foot("mem", card ? Math.round(card.used_mb / 1024) + " of " + Math.round(card.total_mb / 1024) + " GB" : (mem.total_mb ? Math.round((mem.total_mb - mem.available_mb) / 1024) + " of " + Math.round(mem.total_mb / 1024) + " GB" + (mem.floor_mb ? " · guard floor " + Math.round(mem.floor_mb / 1024) + " GB" : "") : "–"));
   const noGpu = !t.gpu; if (noGpu) foot("gpu", "no GPU readings on this machine");
-  foot("temp", noGpu ? "reported on a DGX Spark" : g.temp_c > 85 ? "hot: renders may slow" : many ? "hottest card · " + many.map(c => c.temp_c == null ? "–" : c.temp_c + "°").join(" / ") : "GPU temperature");
-  foot("power", noGpu ? "reported on a DGX Spark" : many ? "all " + many.length + " cards · " + many.map(c => c.power_w == null ? "–" : Math.round(c.power_w) + " W").join(" / ") : "power draw");
-  if (many && card) foot("mem", Math.round(card.used_mb / 1024) + " of " + Math.round(card.total_mb / 1024) + " GB · " + many.map(c => c.used_mb == null ? "–" : (c.used_mb / 1024).toFixed(1)).join(" / ") + " GB");
+  foot("temp", noGpu ? "reported on a DGX Spark" : g.temp_c > 85 ? "hot: renders may slow" : "GPU temperature"); foot("power", noGpu ? "reported on a DGX Spark" : "power draw");
   // Server history is the RAM percent. On a card the chart is the card, from the live samples only, so the two are not mixed.
   const hist = (card ? SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem })) : [...(M.history || []), ...SHELL.samples.map(s => ({ gpu: s.gpu, mem: s.mem }))]).slice(-300);
   sparkSet("gpu", hist.map(s => s.gpu), 100); sparkSet("mem", hist.map(s => s.mem), 100);
@@ -427,10 +68,9 @@ function storagePanel() {
 async function loadStorage(draw) { M.loading = true; try { M.storage = await api("/api/storage"); } catch { M.storage = null; } M.loading = false; draw();
   if (M.storage && M.storage.computing) setTimeout(() => { if (document.querySelector("#storage")) loadStorage(draw); }, 2500); }
 function viewMachine() {
-  if (!S) return el("div", { class: "note" }, "Loading machine status…");
   const wrap = el("div");
   const where = typeof cardFace === "function" && cardFace() ? "GPU" : S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : "This machine";
-  put(wrap, pageHead("Studio Vault", "Machine", where + ": live readings. Feature checks run only when requested."),
+  put(wrap, pageHead("Studio Vault", "Machine", where + ": live readings. Read only, nothing here changes the machine."),
     S.platform_label ? el("div", { class: "m-plat" }, S.platform_label) : null,
     el("div", { id: "machwarn", class: "stack m-warns" }),
     el("div", { class: "gauges" },
@@ -438,7 +78,6 @@ function viewMachine() {
       el("div", { class: "gauge" }, ring("mem", "Memory", "var(--blue)"), el("div", { class: "foot", "data-foot": "mem" }, "–")),
       el("div", { class: "gauge" }, ring("temp", "Temp", "var(--green)"), el("div", { class: "foot", "data-foot": "temp" }, "–")),
       el("div", { class: "gauge" }, ring("power", "Power", "var(--blue)"), el("div", { class: "foot", "data-foot": "power" }, "–"))),
-    featureChecksSection(),
     typeof spkMachinesPanel === "function" ? el("div", { class: "panel m-gap" }, spkMachinesPanel()) : null,
     el("div", { class: "split m-gap" },
       el("div", { class: "stack" },
@@ -597,7 +236,7 @@ function qrSvg(text, px) { const m = qrMatrix(text); if (!m) return null; const 
    Find it (install it when it is missing), sign in (the CLI's own flow: the page opens in a new tab, with the code, a QR
    code and Copy link), check it answers, make it the default. CN.data[id] is GET /api/brains/{id}/connect. */
 const CN = { open: null, data: {}, plan: {}, install: {}, verifying: {}, tried: {}, timer: null, win: null, tick: 0, link: null, linkHost: null, linkSaid: null, linkBusy: false, linkOpen: false };
-const CN_ORDER = ["claude", "codex", "copilot", "hermes", "gemini", "grok"];
+const CN_ORDER = ["claude", "codex", "hermes", "gemini", "grok"];
 const cnRedraw = () => { if (typing()) return; if (CN.sheet) cnSheetDraw(); else if (["Brains", "Settings", "Home", "Agent"].includes(tab)) render(); };
 const cnWhere = b => b && b.where && b.where !== "here" ? b.where.replace(/^ssh:/, "") : "";
 const cnHere = () => typeof location === "undefined" || ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
@@ -610,7 +249,6 @@ function brainWord(b) { if (!b || b.kind !== "cli") return [b && b.found ? "Read
   if (st.state === "broken" || st.state === "missing") return ["Cannot start", "connect", "Fix it"];
   if (st.state === "keychain") return ["Signed in elsewhere", "connect", "Allow over SSH"];
   if (st.state === "signed_in" || ok) return ["Ready", def ? null : "default", "Make default"];
-  if (b.id === "copilot" && st.state === "unknown") return ["Not checked", "connect", "Check"];
   return ["Not signed in", "connect", "Connect"]; }
 // the Connect button's click: a tab is opened now (a click may open one, a timer may not) and pointed at the sign-in page later
 function cnPrepareTab(b) { const st = BR.status[b.id];
@@ -730,24 +368,18 @@ function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : 
   else if (st.state === "keychain") steps.push(["signin", "Allow it over SSH", "wait", st.detail, el("div", { class: "note m-flat" }, "macOS keeps Claude Code’s sign-in in that Mac’s Keychain, which an SSH session cannot open. Allow over SSH signs in once more and keeps a sign-in token only on that Mac, in your own folder, readable only by you."),
     el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Allow over SSH"))]);
   else if (st.state === "broken") steps.push(["signin", "Sign in", "failed", st.detail, st.hint ? el("div", { class: "note m-flat" }, st.hint) : null, el("button", { type: "button", class: "small", onclick: () => cnInstall(b.id) }, "Update " + b.label)]);
-  else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait",
-    b.id === "copilot" ? "Copilot CLI cannot report its sign-in status. If you already signed in, press Check below. Otherwise run this in a terminal" + (where ? " on " + where : "") + ", then press Check:"
-      : b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
+  else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait", b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
     el("div", { class: "signin-cmd" }, el("code", {}, b.signin_command || ""), el("button", { type: "button", class: "small", onclick: () => copyText(b.signin_command || "", "Command") }, "Copy"))]);
   else if (b.id === "hermes") steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Which account should Hermes use? It signs in there, then picks a model that account has.",
     el("div", { class: "chips" }, HERMES_PROVIDERS.map(([provider, label]) => el("button", { type: "button", class: "small", onclick: () => { CN.hermesProvider = provider; cnPrepareTab(b); cnSignin(b.id, { provider }); } }, label)))]);
   else steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Not signed in yet.", el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Sign in"))]);
   // c. one real answer
-  const v = d.verify, signed = st.state === "signed_in",
-    canCheck = found && (signed || b.id === "copilot" && st.state === "unknown");
+  const v = d.verify, signed = st.state === "signed_in";
   if (CN.verifying[b.id]) steps.push(["verify", "Check it answers", "running", "Asking " + b.label + " to say ok (one short answer, a minute at most)…"]);
   else if (v && v.ok) steps.push(["verify", "Check it answers", "done", "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s"]);
-  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" },
-      terminalLogin = b.id === "copilot" && fix.action === "signin",
-      act = terminalLogin ? () => cnVerify(b.id) : { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action],
-      label = terminalLogin ? "Check again after copilot login" : fix.label;
-    steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, label)) : el("div", { class: "note m-flat" }, label)]); }
-  else steps.push(["verify", "Check it answers", canCheck ? "wait" : "todo", canCheck ? "" : "After it is signed in.", canCheck ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
+  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" }, act = { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action];
+    steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, fix.label)) : el("div", { class: "note m-flat" }, fix.label)]); }
+  else steps.push(["verify", "Check it answers", signed ? "wait" : "todo", signed ? "" : "After it is signed in.", signed ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
   // d. the default
   const names = d.harness ? "your default brain and the Agent room's" : "your default brain";
   if (d.default) steps.push(["default", "Make it your default", "done", "It is " + (d.harness && !d.agent_default ? "your default brain" : names) + "."]);
@@ -837,18 +469,14 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
   for (const b of clis) if (b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(cnRedraw, () => {});
   if (clis.some(b => b.found && (!BR.status[b.id] || BR.status[b.id].state === "asking"))) return null;  // not yet known: nothing flashes up
   if (clis.some(b => BR.status[b.id] && BR.status[b.id].state === "signed_in")) return null;
-  const selected = BR.data.settings && BR.data.settings.agent || BR.data.default;
-  if (clis.some(b => b.id === "copilot" && b.id === selected && b.found && !b.error && BR.status[b.id].state === "unknown")) return null;
-  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.id === selected && b.found) || order.find(b => b.found) || order[0];
+  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found) || order[0];
   const locals = (BR.data.backends || []).filter(b => (b.id === "local" || b.local_agent) && b.found && !b.error);  // the local brain and each local agent added
   if (!pick) return null;
-  const unchecked = pick.id === "copilot" && pick.found && BR.status[pick.id] && BR.status[pick.id].state === "unknown";
   return el("section", { class: "panel cn-nudge", "data-card": "connect", "data-where": where },
-    el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, unchecked ? "Installed" : "One click"), el("h2", {}, unchecked ? "Check your agent" : "Connect your agent"),
-      el("p", { class: "note m-flat" }, unchecked ? "Copilot CLI keeps its terminal sign-in separately. Studio has not checked it this session; an optional Check makes a small CLI request."
-        : "Claude Code, Codex, Copilot, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
+    el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, "One click"), el("h2", {}, "Connect your agent"),
+      el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
-    el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), (unchecked ? "Check " : "Connect ") + pick.label),
+    el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
       order.length > 1 || locals.length ? el("span", { class: "cn-or" }, "or") : null,
       order.filter(b => b !== pick).map(b => el("button", { type: "button", class: "small cn-alt", onclick: () => connectGo(b) }, brainMarkOf(b.id, b) ? mark(brainMarkOf(b.id, b), "") : null, b.label)),
       locals.map(b => el("button", { type: "button", class: "small cn-alt" + (BR.data.default === b.id ? " on" : ""), "aria-pressed": BR.data.default === b.id ? "true" : "false", onclick: () => cnUseLocal(b) },
@@ -899,9 +527,9 @@ function viewBrains() {
     el("details", { class: "fold m-fold", open: CN.linkOpen || false }, el("summary", {}, "Set the other computer by hand"),
       el("div", { class: "panel stack" },
       el("div", { class: "note m-flat" }, "Studio runs the CLI there over SSH, with key login only. A DGX Spark usually has no Claude or Codex sign-in of its own: name the Mac (or any machine) where you are signed in."),
-      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "copilot", "gemini", "grok", "hermes"].filter(id => !["hermes", "copilot"].includes(id) || (d.backends || []).some(b => b.id === id)).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
+      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "gemini", "grok", "hermes"].filter(id => id !== "hermes" || (d.backends || []).some(b => b.id === "hermes")).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
         el("input", { type: "checkbox", checked: (remote.backends || []).includes(id), class: "hide", onchange: e => { const list = new Set(remote.backends || []); e.target.checked ? list.add(id) : list.delete(id); remote.backends = [...list]; e.target.parentNode.classList.toggle("on", e.target.checked); } }),
-        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", copilot: "GitHub Copilot CLI", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
+        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
       el("div", {}, el("button", { class: "primary", onclick: () => save({ remote: { host: host.value.trim(), backends: remote.backends || [], studio_host: studioHost.value.trim() } }) }, "Save"))))));
   const tools = BR.tools;
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Tools your agent can use"), el("button", { class: "small", onclick: () => go("Agent") }, "Ask your agent →")),

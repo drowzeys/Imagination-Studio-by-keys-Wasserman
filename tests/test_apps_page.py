@@ -44,16 +44,6 @@ def test_every_category_has_apps_and_ids_are_unique():
     assert {"swap", "angles", "speech", "upscale", "captions", "director", "suite-blockout"} <= set(out["ids"])
 
 
-def test_upstream_hdr_app_stays_disabled_on_windows_even_if_ffmpeg_is_present():
-    out = run("""
-      S.platform = "windows"; S.capabilities = { hlg: { available: false, why: "HDR finish is unqualified on Windows" } };
-      ACT.state.hlg = { ready: true };
-      out.windows = apActReady("hlg");
-      S.platform = "spark"; out.native = apActReady("hlg");
-    """)
-    assert out["windows"] == "HDR finish is unqualified on Windows" and out["native"] == ""
-
-
 def test_a_lora_app_uses_installs_or_says_why():
     out = run("""const v = viewApps();
       card(v, "camera").attrs.onclick(); out.used = [tab, C.goes, C.loras.map(l => l.id)];

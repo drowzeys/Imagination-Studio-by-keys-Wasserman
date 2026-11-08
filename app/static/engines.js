@@ -12,15 +12,10 @@ function artSlot(name, cls = "", sign = "image") { const box = el("div", { class
   if (ART.ready.has(name)) box.append(el("img", { src: "art/" + name + ".webp", alt: "", loading: "lazy", decoding: "async" }));
   return box; }
 // a picture card: the picture, one label, one line, a chevron
-function withFeatureBadge(card, feature, attrs = {}) {
-  const badge = feature && typeof featureBadge === "function" ? featureBadge(feature) : null;
-  return badge ? el("div", { class: "feature-app", "data-feature-card": feature, ...attrs }, card, badge) : card;
-}
-function pcard({ art, sign, title, one, run, k, off, src, data, feature }) {  // data: the card's data-* attributes
+function pcard({ art, sign, title, one, run, k, off, src, data }) {  // data: the card's data-* attributes
   const pic = src ? el("div", { class: "art" }, el("img", { src, alt: "", loading: "lazy" })) : artSlot(art, "", sign);
-  const card = el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "", ...(data || {}) }, pic, k ? el("span", { class: "k" }, k) : null,
-    el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, one) : null), icon("go", "go")));
-  return withFeatureBadge(card, feature); }
+  return el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "", ...(data || {}) }, pic, k ? el("span", { class: "k" }, k) : null,
+    el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, off || one) : null), icon("go", "go"))); }
 // a vault page's head with its cover, like an engine's; without a ready cover it is the plain head
 function vaultHead(id, title, line, right) {
   if (!ART.ready.has("vault-" + id)) return pageHead("Studio Vault", title, line, right);
@@ -38,13 +33,12 @@ const ENGINE_PAGES = {
       { art: "act-story-board", sign: "story", title: "Film board", one: "Segments in order, one prompt each", run: () => slateMode("board") },
       { art: "act-story-slate", sign: "story", title: "Wasserman Slate", one: "Bible, studios and shots for a whole film", run: () => slateMode("slate") },
       { art: "act-story-firstad", sign: "story", title: "First AD", one: "Say what you are making; it lays out scenes and shots", run: () => slateMode("slate", "ad") },
-      { art: "act-story-import", sign: "suite", title: "Bring in a script", one: "Fountain or suite exports; convert Final Draft to Fountain first", run: () => go("Import") }] }),
+      { art: "act-story-import", sign: "suite", title: "Bring in a script", one: "ScriptBreak, Fountain or Final Draft", run: () => go("Import") }] }),
   image: () => ({ line: "Stills, scouts and picture edits on Qwen 2.1 or FLUX3-K, at any size the models take.", marks: [mark("qwen", "Qwen 2.1"), mark("flux")],
     primary: ["Make a still", () => startCreate({ goes: "image" })], cards: [
       { art: "start-still", sign: "image", title: "A still", one: "One picture or several, any size", run: () => startCreate({ goes: "image" }) },
       { art: "act-image-scouts", sign: "image", title: "Scouts", one: "Six candidates in one load; pick one", run: () => startCreate({ goes: "image", count: 6 }) },
       { art: "act-image-edit", sign: "image", title: "Edit a picture", one: "Change it in words, or move the camera", run: () => startCreate({ goes: "edit" }) },
-      { art: "act-image-quick", sign: "image", title: "Quick Edit", one: "Paste a picture, say what changes, go", run: () => go("Quick Edit") },
       { art: "act-image-looks", sign: "looks", title: "Looks", one: "LoRA styles for pictures and clips", run: () => go("Looks") }] }),
   video: () => ({ line: "Clips with sound on MiniMax H3 and FastH3, up to 15 seconds; longer ones as chained takes.",
     marks: [mark("minimax"), mark("tensorfold"), S && S.platform === "spark" ? mark("comfy") : null],
@@ -73,36 +67,11 @@ const ENGINE_PAGES = {
       { art: "act-edit-library", sign: "library", title: "Library", one: "Every take on this machine", run: () => go("Library") }] }),
 };
 function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_PAGES[id]();
-  const win = S && S.platform === "windows", imageKind = typeof imageFeature === "function" ? imageFeature() : "scout",
-    primary = { image: imageKind, video: "video" }[id];
-  if (win) {
-    if (id === "image") { const model = typeof imageModelName === "function" && typeof imageModel === "function" ? imageModel() : "sd-turbo",
-      draft = model === "sd-turbo", name = typeof imageModelName === "function" ? imageModelName() : "SD-Turbo";
-      e.line = draft ? "SD-Turbo storyboard drafts: 512 × 512, one pass, up to six sequential pictures."
-        : name + ": full-model pictures at the selected size. Each model has its own installation, memory and verification requirements.";
-      e.marks = /^(qwen|flux)/.test(model) ? [mark(/^flux/.test(model) ? "flux" : "qwen", name)] : [];
-      e.cards[0].one = draft ? "One 512 × 512 storyboard draft" : "A still with " + name;
-      e.cards[1].one = draft ? "Up to six sequential drafts, with individual seeds" : "Candidates with " + name + "; individual seeds"; }
-    if (id === "video") e.line = (typeof capWhy === "function" ? capWhy : () => "")("video");
-    if (id === "previs") { e.line = "Copilot CLI can plan with This Studio tools. Motion analysis and Blender automation remain unqualified."; e.marks = [];
-      e.cards[1].one = "Copilot CLI with This Studio tools"; }
-    if (id === "sound") { e.line = "Stable Audio Open sound effects and MMAudio foley. Each backend has its own recipe, installation and verification requirements.";
-      const effect = () => { SFX.mode = "sfx"; go("Foley"); };
-      e.marks = []; e.primary = ["Make a sound effect", effect]; e.cards[2].one = "Sound effects from words; limits follow the selected backend"; e.cards[2].run = effect; }
-    const kinds = { "act-image-edit": "edit", "act-image-looks": "looks", "act-previs-motion": "motion", "start-voice": "voice", "start-song": "music", "start-sfx": "sfx" };
-    e.cards = e.cards.map((c, i) => {
-      const feature = id === "video" ? "video" : id === "image" && i < 2 ? imageKind : kinds[c.art];
-      return { ...c, feature, off: (id === "image" && i < 2 && typeof imageModelWhy === "function" ? imageModelWhy()
-        : (typeof capWhy === "function" ? capWhy : () => "")(feature)) || c.off };
-    });
-  }
-  const why = id === "image" && win && typeof imageModelWhy === "function" ? imageModelWhy()
-    : (typeof capWhy === "function" ? capWhy : () => "")(id === "sound" && win ? "sfx" : primary);
   return el("div", {},
     el("div", { class: "enghead" }, artSlot("engine-" + id, "", id),
       el("div", { class: "stack" }, el("span", { class: "eyebrow engmark" }, el("img", { src: "brand/module-" + id + ".svg", alt: "", width: 22, height: 22 }), "Creative Engine"), el("h1", { class: "display" }, r.name), el("p", { class: "sub", style: "margin:0" }, e.line),
         e.marks.filter(Boolean).length ? el("div", { class: "marks" }, e.marks) : null,
-        el("div", { class: "acts" }, el("button", { class: "primary", title: why, disabled: !!why, onclick: e.primary[1] }, e.primary[0])))),
+        el("div", { class: "acts" }, el("button", { class: "primary", onclick: e.primary[1] }, e.primary[0])))),
     el("div", { class: "cards" + (e.cards.length >= 4 ? " c4" : e.cards.length === 3 ? " c3" : "") }, e.cards.map(pcard))); }
 const viewStory = () => engineLanding("story"), viewImage = () => engineLanding("image"), viewVideo = () => engineLanding("video"),
   viewPrevis = () => engineLanding("previs"), viewSound = () => engineLanding("sound"), viewEditHub = () => engineLanding("edit");

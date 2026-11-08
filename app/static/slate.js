@@ -41,16 +41,6 @@ const slBlankShot = name => { const d = SL.p.defaults; return { id: slId("shot")
 const slKeep = (shot, label) => { if (!shot.prompt.trim()) return; shot.history.unshift({ id: slId("v"), savedAt: slNow(), label, prompt: shot.prompt }); shot.history = shot.history.slice(0, 50); };
 const slSetPrompt = (shot, text, label) => { slKeep(shot, label); shot.prompt = text.trim(); shot.updatedAt = slNow(); slTf(shot).h3Auto = true; };
 const slDown = (name, text, type = "text/plain") => { const a = el("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name }); document.body.append(a); a.click(); a.remove(); };
-async function slPackage() { const project = SL.p; if (!project || SL.packaging) return;
-  SL.packaging = true; slCancel(); render();
-  try { await slPut(project); const result = await api("/api/slate/package", { project: project.id });
-    SL.package = { ...result, project: project.id };
-    toast("Portable ZIP ready: " + result.shots + " shots, " + result.media_files + " media files. " + (result.notes || []).join(" "), 9000);
-  } catch (e) { toast("Portable export: " + e.message); } finally { SL.packaging = false; render(); } }
-const slPackageLink = () => SL.package && SL.p && SL.package.project === SL.p.id ? el("a", {
-  class: "fit tag2", href: file(SL.package.path), download: SL.package.filename,
-  title: "Snapshot of the film when Prepare was clicked. Prepare again after edits. " + (SL.package.notes || []).join(" "),
-}, "Download prepared ZIP") : null;
 const slArea = (obj, key, attrs = {}, after) => bind(obj, key, el("textarea", { style: "min-height:60px", ...attrs }), () => { slSave(); if (after) after(); });
 const slIn = (obj, key, attrs = {}, after) => bind(obj, key, el("input", attrs), () => { slSave(); if (after) after(); });
 const slPick = (obj, key, options, after) => { if (obj[key] == null) obj[key] = ""; const n = select(obj, key, options, () => { if (obj[key] === "") obj[key] = null; slSave(); if (after) after(); }); if (obj[key] === "") obj[key] = null; return n; };
@@ -103,9 +93,9 @@ async function slBrain(task, prompt, { tier = "top", json = false, system = SL_S
   SL.busy = ""; if (!r.ok) { toast("Brain: " + (r.error || "no answer")); render(); return null; } return r; }
 // A film on "auto" (every new one) asks the Studio's own brain, which /api/slate/brain names as `default`.
 const slLocalAgent = id => ((SL.brain || {}).localAgents || []).find(a => a.id === id);
-const slBrainUsed = d => ["claude", "codex", "copilot", "gemini", "grok", "hermes", "local"].includes(d.brain) || slLocalAgent(d.brain) ? d.brain : ((SL.brain || {}).default || "claude");
+const slBrainUsed = d => ["claude", "codex", "gemini", "grok", "hermes", "local"].includes(d.brain) || slLocalAgent(d.brain) ? d.brain : ((SL.brain || {}).default || "claude");
 const slBrainName = id => slLocalAgent(id) ? slLocalAgent(id).label + " (local)" : id === "local" && SL.brain && SL.brain.localLabel && SL.brain.localLabel !== "Local model server" ? SL.brain.localLabel
-  : { claude: "Claude Code", codex: "Codex", copilot: "GitHub Copilot CLI", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes", local: "Local model" }[id] || id;
+  : { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes", local: "Local model" }[id] || id;
 const SL_TRANSFORMS = { structure: ["Structure", "standard", "Reorganize this prompt into the sectioned format. Preserve every concrete detail; move each to its correct section; do not invent new content beyond minimal connective phrasing."],
   tighten: ["Tighten", "standard", "Shorten this prompt by roughly a third. Remove redundancy and weak modifiers first. Keep every concrete visual fact. Keep the section structure."],
   enrich: ["Enrich", "top", "Deepen this prompt with specific, professional cinematographic detail — lens behavior, light quality, texture, atmosphere — without changing its intent or subject. Stay disciplined: enrich, do not pad."],
@@ -374,7 +364,7 @@ function slPinDone(sheet, slot, keep) { const tf = sheet.tf || {}, job = tf[slot
   return job; }
 function slPictures(kind, sheet) { const cast = kind === "cast", images = sheet.images || [];
   const up = el("input", { type: "file", accept: "image/*", multiple: true, onchange: async () => { for (const one of up.files) { const data = new FormData(); data.append("file", one); const j = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (j.path) (sheet.images = sheet.images || []).push(j.path); else toast(j.error || "upload failed"); } slDraw(); } });
-  const queue = async (slot, kind, title, params) => { try { const j = await api("/api/jobs", { kind, title, params: kind === "scout" ? stillParams(params) : params }); sheet.tf = { ...sheet.tf, [slot]: j.id }; await poll(); slDraw(); } catch (e) { toast(e.message); } };
+  const queue = async (slot, kind, title, params) => { try { const j = await api("/api/jobs", { kind, title, params }); sheet.tf = { ...sheet.tf, [slot]: j.id }; await poll(); slDraw(); } catch (e) { toast(e.message); } };
   const job = cast && sheet.tf && jobs.find(j => j.id === sheet.tf.job), turn = cast ? slPinDone(sheet, "turn", p => /turn_(sheet|view\d)\.png$/.test(p)) : null, plate = cast ? null : slPinDone(sheet, "plate", p => !p.endsWith("sheet.jpg"));
   const going = j => j && ["queued", "running"].includes(j.status);
   return el("div", {}, el("h3", {}, cast ? "Continuity stills" : "Plates"),
@@ -513,49 +503,15 @@ function slShots() { const p = SL.p, scene = slScene(), shot = slShot(); if (sce
   const main = el("div"); if (!scene) put(main, el("div", { class: "note" }, "No scenes yet. Add one here, or open First AD and say what you are making: it lays out scenes and shots for you."));
   else { put(main, el("div", { class: "row" }, field("Scene", slIn(scene, "name")), field("Synopsis", slIn(scene, "synopsis", { placeholder: "What happens in this scene, in a sentence or two." })),
       el("button", { class: "small fit", onclick: () => { if (confirm("Remove the scene " + scene.name + " and its " + scene.shots.length + " shots?")) { p.scenes.splice(p.scenes.indexOf(scene), 1); SL.sceneId = null; slDraw(); } } }, "Remove scene")),
-    S.windows_stills && S.windows_stills.available ? el("button", { class: "fit", disabled: !!SL.storyboardBusy,
-      title: "Missing stills only, up to six shots per batch. Each shot keeps its seed. Stop cancels that batch.",
-      onclick: () => slSceneStoryboards(scene) }, "Fill missing scene storyboards") : null,
     slFold("coverage", "✦ Coverage · one scene description becomes a set of shots", () => el("div", {}, field("The scene to cover", bind(SL.cover, "text", el("textarea", { style: "min-height:60px", placeholder: scene.synopsis || "Two detectives argue in a parked car while rain hammers the roof; one of them finally gets out." }))),
       el("div", { class: "row" }, field("Coverage plan", select(SL.cover, "plan", { ...Object.fromEntries(SL.data.plans.map(c => [c.id, c.group + " · " + c.label + " (" + c.shots.length + " shots)"])), custom: "Call your own coverage" }, render)),
         SL.cover.plan === "custom" ? field("Your coverage, in plain English", bind(SL.cover, "ask", el("input", { placeholder: "three tight singles and one slow push-in on the windshield" }))) : null, el("button", { class: "primary fit", disabled: !!SL.busy, onclick: () => slCoverage(scene) }, "✦ Lay out the shots")),
       SL.cover.plan !== "custom" ? el("div", { class: "note" }, (SL.data.plans.find(c => c.id === SL.cover.plan) || {}).description || "") : null)));
     if (shot) put(main, el("div", { class: "row", style: "margin-top:6px" }, el("h3", { style: "margin:14px 0 0" }, scene.name + " · " + shot.name), el("span"), el("button", { class: "small fit", disabled: scene.shots.indexOf(shot) === 0, onclick: () => { const i = scene.shots.indexOf(shot); scene.shots.splice(i - 1, 0, scene.shots.splice(i, 1)[0]); slDraw(); } }, "↑ Earlier"),
         el("button", { class: "small fit", onclick: () => { const copy = JSON.parse(JSON.stringify(shot)); Object.assign(copy, { id: slId("shot"), name: shot.name + " (copy)", takes: [], history: [] }); scene.shots.splice(scene.shots.indexOf(shot) + 1, 0, copy); SL.shotId = copy.id; slDraw(); } }, "Duplicate"),
-        el("button", { class: "small fit", onclick: () => { if (confirm("Remove " + shot.name + "?")) { scene.shots.splice(scene.shots.indexOf(shot), 1); SL.shotId = null; slDraw(); } } }, "Remove shot")),
-        S.windows_stills && S.windows_stills.available ? slStoryboard(shot) : null, slWorkspace(scene, shot));
+        el("button", { class: "small fit", onclick: () => { if (confirm("Remove " + shot.name + "?")) { scene.shots.splice(scene.shots.indexOf(shot), 1); SL.shotId = null; slDraw(); } } }, "Remove shot")), slWorkspace(scene, shot));
     else put(main, el("div", { class: "note" }, "This scene has no shots. Add one on the left, or open Coverage above.")); }
   return el("div", { class: "cols" }, nav, main); }
-
-function slStoryboard(shot) { const tf = slTf(shot), job = jobs.find(j => j.id === tf.storyboardJob);
-  if (job && job.status === "done" && tf.storyboardPinned !== job.id) {
-    const path = (job.outputs || []).filter(p => p.endsWith(".png"))[tf.storyboardIndex || 0];
-    if (path) { (shot.images = shot.images || []).push(path);
-      if ((tf.image || "") === (tf.storyboardBefore || "")) { tf.image = path; tf.start = "image"; delete SL.plan[shot.id]; }
-      tf.storyboardPinned = job.id; slSave(); }
-  }
-  return el("div", { class: "group" }, el("label", {}, "Storyboard draft · 512 × 512 square"),
-    el("div", { class: "note" }, "SD-Turbo: a planning still, not a promise of matching faces or a rendered clip."),
-    tf.image ? media(tf.image) : null,
-    el("button", { class: "fit", disabled: !(shot.prompt || "").trim() || !!(job && ["queued", "running"].includes(job.status)),
-      onclick: async () => { try { const made = await api("/api/jobs", { kind: "scout", title: "Storyboard: " + shot.name,
-        params: stillParams({ prompt: shot.prompt, count: 1, seed: tf.seed ?? 1 }) });
-        tf.storyboardJob = made.id; tf.storyboardIndex = 0; tf.storyboardBefore = tf.image || ""; await poll(); slDraw(); } catch (e) { toast(e.message); } } }, "Make storyboard still"),
-    job && job.status !== "done" ? jobCard(job) : null); }
-
-async function slSceneStoryboards(scene) { SL.storyboardBusy = true; render();
-  const missing = scene.shots.filter(shot => { const tf = slTf(shot), job = jobs.find(j => j.id === tf.storyboardJob);
-    return !tf.image && (shot.prompt || "").trim() && !(job && ["queued", "running"].includes(job.status)); });
-  const limit = S.windows_stills.max_count;
-  try { if (!Number.isInteger(limit) || limit < 1) throw new Error("The backend has no valid storyboard batch limit.");
-    if (!missing.length) toast("This scene has no missing, unqueued storyboard stills with prompts.");
-    for (let at = 0; at < missing.length; at += limit) { const batch = missing.slice(at, at + limit);
-    const made = await api("/api/jobs", { kind: "scout", title: "Storyboard: " + scene.name, params: stillParams({
-      prompts: batch.map(s => s.prompt), seeds: batch.map(s => slTf(s).seed ?? 1) }) });
-    batch.forEach((shot, i) => { const tf = slTf(shot); tf.storyboardJob = made.id; tf.storyboardIndex = i; tf.storyboardBefore = tf.image || ""; });
-    slSave();
-  } await poll(); } catch (e) { toast(e.message); } finally { SL.storyboardBusy = false; slDraw(); }
-}
 // the bible and the dialogue choices: the Bible tab and the Cast & Places room (rooms.js) both show them
 function slBibleChoices() { const film = slFilm(); if (!film.bible) film.bible = "off"; if (!film.dialogue) film.dialogue = slDialogue(); const again = () => { SL.plan = {}; slDraw(); };
   return [el("div", { class: "row" }, field("The bible in shots", slPick(film, "bible", { auto: "Used automatically: the cast's and the place's pictures and LoRAs", off: "Off: only what each shot sets" }, again))),
@@ -580,15 +536,14 @@ function slBible() { const p = SL.p, d = p.defaults, film = slFilm(), b = SL.bra
       S.ref2va ? field("Cast stills (reference) passes", slPick(film, "refPasses", S.ref2va_turbo ? { 20: "20 passes · the model as released", 4: "Turbo 4 passes · about 2.5x faster" } : { 20: "20 passes" })) : null),
     loraHub(film, slSave, slDraw),
     el("h3", {}, "Faces, places and voices"), slBibleChoices(),
-    el("h3", {}, "The brain"), el("div", { class: "note" }, "The brain writes and rewrites prompts. It is your own sign-in or your own local model: no API keys. On this machine: Claude Code " + (b.claude ? "✓" : "not found") + " · Codex " + (b.codex ? "✓" : "not found") + " · Copilot CLI " + (b.copilot ? "✓" : "not found") + " · local server " + (b.local ? "✓ " + (b.localLabel && b.localLabel !== "Local model server" ? b.localLabel + " at " : "") + b.endpoint : "none answering") + "."),
-    typeof connectOpen === "function" ? el("div", { class: "chips" }, [["claude", "Claude Code"], ["codex", "Codex"], ["copilot", "GitHub Copilot CLI"]].map(([id, name]) => el("button", { class: "small" + (d.brain === id && !b[id] ? " on" : ""),
+    el("h3", {}, "The brain"), el("div", { class: "note" }, "The brain writes and rewrites prompts. It is your own sign-in or your own local model: no API keys. On this machine: Claude Code " + (b.claude ? "✓" : "not found") + " · Codex " + (b.codex ? "✓" : "not found") + " · local server " + (b.local ? "✓ " + (b.localLabel && b.localLabel !== "Local model server" ? b.localLabel + " at " : "") + b.endpoint : "none answering") + "."),
+    typeof connectOpen === "function" ? el("div", { class: "chips" }, [["claude", "Claude Code"], ["codex", "Codex"]].map(([id, name]) => el("button", { class: "small" + (d.brain === id && !b[id] ? " on" : ""),
       title: "Connect " + name + ": the studio installs it if needed, signs you in and checks it answers", onclick: () => connectOpen(id) }, (b[id] ? "Check " : "Connect ") + name)),
       el("button", { class: "small", onclick: () => { if (typeof goSettings === "function") goSettings("connections"); } }, "A local model")) : null,
-    el("div", { class: "row" }, field("Brain", slPick(d, "brain", { auto: "Automatic: the Studio's brain" + (b.default ? " (" + slBrainName(b.default) + ")" : ""), claude: "Claude Code", codex: "Codex", copilot: "GitHub Copilot CLI", local: "Local model (Ollama, LM Studio, vLLM, llama.cpp)", ...Object.fromEntries((b.localAgents || []).map(a => [a.id, a.label + " (local agent)"])) }, render)),
+    el("div", { class: "row" }, field("Brain", slPick(d, "brain", { auto: "Automatic: the Studio's brain" + (b.default ? " (" + slBrainName(b.default) + ")" : ""), claude: "Claude Code", codex: "Codex", local: "Local model (Ollama, LM Studio, vLLM, llama.cpp)", ...Object.fromEntries((b.localAgents || []).map(a => [a.id, a.label + " (local agent)"])) }, render)),
       d.brain === "local" ? field("Server address (empty: auto-detect)", slIn(d, "localEndpoint", { placeholder: "http://localhost:11434/v1" })) : null, d.brain === "local" ? field("Model (empty: the first one loaded)", slIn(d, "localModel", { placeholder: (b.models || [])[0] || "" })) : null,
       el("button", { class: "fit", disabled: !!SL.busy, onclick: async () => { const r = await slBrain("Brain test", "Reply with exactly: SLATE-OK", { tier: "fast", system: "You are a connectivity test. Reply with exactly what is asked." }); SL.test = r ? "The brain answered in " + (r.elapsedMs / 1000).toFixed(1) + " s: " + r.text.slice(0, 80) : "No answer: the reason is in the message at the bottom left."; render(); } }, "Test the brain")), SL.test ? el("div", { class: "note" }, SL.test) : null,
     el("h3", {}, "Project file"), el("div", { class: "row" }, el("button", { class: "fit", onclick: () => slDown(p.name.replace(/[^\w-]+/g, "_") + ".project.json", JSON.stringify(p, null, 1), "application/json") }, "Download project.json (opens in Slate)"),
-      el("button", { class: "fit", disabled: !!SL.packaging, onclick: slPackage }, SL.packaging ? "Packaging..." : "Prepare portable ZIP (with media)"), slPackageLink(),
       el("button", { class: "fit", onclick: async () => { if (!confirm("Remove the film " + p.name + "? It is moved to the studio's trash folder.")) return; slCancel(); await api("/api/slate/projects/" + p.id, undefined, "DELETE"); SL.p = null; SL.metas = null; render(); } }, "Remove this film"), el("span"))); }
 // Deliver: the scene's takes, then a rough cut on the beat (roughcut.js) when that module is loaded
 function slDeliver() { const core = slDeliverCore(); if (!SL.p || !slScene()) return core;
@@ -608,8 +563,7 @@ function slDeliverCore() { const p = SL.p, scene = slScene(); if (!scene) return
         best ? el("video", { src: file(best), controls: true, preload: "metadata", style: "width:100%;max-width:420px;border-radius:8px;margin-top:8px" }) : null,
         best ? slFeedback(scene, s, s.takes.find(t => t.mediaPath === best)) : null); }),
     el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "primary fit", disabled: !p.scenes.some(sc => sc.shots.some(slBest)), onclick: slToEditor }, "Send the film's takes to the Editor"), el("button", { class: "fit", disabled: !!SL.busy || scene.shots.length < 2, onclick: () => slContinuity(scene) }, "✦ Continuity check"),
-      el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".md", slMarkdown(scene), "text/markdown") }, "Shot list (Markdown)"), el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".csv", slCsv(scene), "text/csv") }, "Shot list (CSV)"),
-      el("button", { class: "fit", disabled: !!SL.packaging, onclick: slPackage }, SL.packaging ? "Packaging..." : "Prepare portable ZIP (whole film)"), slPackageLink(), el("span")),
+      el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".md", slMarkdown(scene), "text/markdown") }, "Shot list (Markdown)"), el("button", { class: "fit", onclick: () => slDown(scene.name.replace(/[^\w-]+/g, "_") + ".csv", slCsv(scene), "text/csv") }, "Shot list (CSV)"), el("span")),
     issues ? el("div", { class: issues.length ? "tip" : "eg" }, el("b", {}, "Continuity"), issues.length ? issues.map(x => el("div", { style: "margin-top:6px" }, (x.severity === "error" ? "✗ " : "• ") + (x.shots || []).join(", ") + ": " + x.issue, el("div", { class: "note", style: "margin:0" }, "Fix: " + x.fix))) : "Clean: no mismatches found.") : null); }
 function slADView() { const log = SL.p.copilot || [], say = el("textarea", { style: "min-height:64px", placeholder: "A 30 second noir teaser: a detective, a rainy alley, one line of dialogue. Three shots.", onkeydown: e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) go(); } });
   const go = () => { const text = say.value.trim(); if (text && !SL.busy) slAD(text); };

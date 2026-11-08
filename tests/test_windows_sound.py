@@ -124,21 +124,3 @@ def test_model_switch_does_not_hide_unrelated_cleanup_failures():
     backend.temporary = SimpleNamespace(cleanup=cleanup)
     with pytest.raises(PermissionError):
         backend.close()
-
-
-def test_the_sound_page_uses_measured_limits_without_linux_install_commands():
-    from test_shell_page import run
-    out = run("""
-      S.ref_media = false;
-      answers["/api/sound/state"] = { windows: true, spark: false, seconds: { sfx: [5,5], foley: [1,15] },
-        kinds: { sfx: { ready: true, licence: "Stability AI Community License" }, foley: { ready: false, why: "Foley is unqualified" } } };
-      answers["/api/sound/takes"] = [];
-      await sfxLoad(); const page = viewFoley(); out.text = text(page); out.mode = SFX.mode; out.seconds = SFX.seconds;
-      out.duration = find(page, n => n.tag === "input" && n.attrs.max === 5).attrs.disabled;
-      SFX.prompt = "Rain."; SFX.seed = 0; await sfxMake();
-      out.params = calls.find(c => c[0] === "/api/jobs")[1].params;
-      SFX.mode = "foley"; out.foley = text(viewFoley());
-    """)
-    assert out["mode"] == "sfx" and out["seconds"] == 5 and out["duration"]
-    assert out["params"]["seconds"] == 5 and out["params"]["seed"] == 0
-    assert "bash scripts/setup-sound.sh" not in out["foley"]

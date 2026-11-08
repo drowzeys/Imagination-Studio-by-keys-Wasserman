@@ -696,7 +696,7 @@ def test_a_clip_gets_swap_the_character_and_its_panel_queues_one_job():
       SWAP.state = { ready: false, why: "Character Swap runs on a DGX Spark or another CUDA machine with MiniMax H3 Ref2VA, not on a Mac." };
       out.mac = text(actPanel());
     """)
-    assert got["video"] == ["Upscale", "keys-HDR LORA", "Remove a person", "Restyle", "Extend", "Fix", "Swap the character"] and got["image"] == ["Turnaround"]
+    assert got["video"] == ["Upscale", "Remove a person", "Restyle", "Extend", "Fix", "Swap the character"] and got["image"] == ["Turnaround"]
     assert got["id"] == "actpanel" and "Character Swap" in got["panel"] and "Swap the character" in got["panel"]
     assert "largest person" in got["panel"] and "Put the character in the first frame first" in got["panel"] and "FLUX3-K Fast" in got["panel"]
     assert "not licensed for use in the EU, the UK, South Korea or the US" in got["panel"]

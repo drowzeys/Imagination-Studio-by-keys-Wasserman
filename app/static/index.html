@@ -4,40 +4,38 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Imagination Studio by keys+Wasserman · powered by TensorFold · built with integrated Fish Audio Drama 3</title>
-<meta name="theme-color" content="#0C0C0E">
+<meta name="theme-color" content="#080D16">
 <link rel="icon" href="brand/favicon.ico" sizes="any">
 <link rel="icon" href="brand/app-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
 <link rel="manifest" href="site.webmanifest">
 <link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/instrument-serif.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="studio.css">
 <link rel="stylesheet" href="nodes.css">
 <script>
-// Settings → Appearance, kept in this browser by settings.js: applied before the first paint (prefsApply does the same
-// afterwards). The theme: dark ("studio"), light, OLED, or the computer's own setting ("system")
-try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = document.documentElement.classList,
-    th = a && a.theme || "studio", sys = th === "system" && window.matchMedia ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "studio") : th;
-  if (sys === "light") c.add("theme-light"); if (sys === "oled") c.add("theme-oled");
-  if (a) { if (["compact", "large", "largest"].includes(a.type_size)) c.add("type-" + a.type_size);
-    if (a.accent === "cobalt") c.add("accent-cobalt"); if (a.motion === "reduce") c.add("motion-reduce"); }
-  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute("content", sys === "light" ? "#FAFAF9" : sys === "oled" ? "#000000" : "#0C0C0E"); } catch (e) {}
+// Settings → Appearance, kept in this browser by settings.js: applied before the first paint
+try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = document.documentElement.classList;
+  if (a) { if (a.type_size === "large" || a.type_size === "largest") c.add("type-" + a.type_size); if (a.glow === false) c.add("no-glow"); if (a.poster === false) c.add("no-poster");
+    if (a.accent === "cobalt") c.add("accent-cobalt"); if (a.motion === "reduce") c.add("motion-reduce"); } } catch (e) {}
 </script>
 </head>
 <body>
 <aside id="side" aria-label="Studio">
-  <a class="brand" id="gohome" href="#Home" title="Home: start something, see what is rolling" aria-label="Imagination Studio by keys+Wasserman: Home"><svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><rect x="0.5" y="0.5" width="25" height="25" rx="7"/><circle class="ring" cx="13" cy="13" r="6"/><circle class="dot" cx="13" cy="13" r="1.8"/></svg><span class="names"><b>Imagination Studio</b><span>keys+Wasserman</span></span></a>
-  <button class="kbtn" id="kbtn" type="button" title="Search or run anything (⌘K)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M21 21l-5-5"/></svg><span>Search or run</span><kbd>⌘K</kbd></button>
+  <a class="brand" id="gohome" href="#Home" title="Home: start something, see what is rolling" aria-label="Imagination Studio: Home"><img class="ribbon" src="brand/film-ribbon.webp" alt="" width="230" height="92"><img class="title" src="brand/ribbon-title-only-color.svg" alt="Imagination Studio" width="240" height="83"><span class="byline"><span class="by">by</span><img class="creator" src="brand/keys-wasserman-neon.svg" alt="keys+Wasserman" width="206" height="24"></span></a>
   <nav id="rooms" aria-label="Rooms"></nav>
   <div class="sidefoot">
     <button class="machinepill" id="mpill" type="button" title="Machine"><span class="dotl" id="mdot"></span><span id="plat"></span><span class="txt" id="mtxt"></span><span class="meter" aria-hidden="true"><i id="mgpu"></i><i id="mmem"></i></span></button>
+    <div class="verline"><span id="ver"></span><button id="studio-updates-open" type="button" title="Updates" aria-label="Updates"></button></div>
+    <div class="credit"><span class="pby">Powered by</span><span class="tf"><img class="sym" src="brand/tensorfold-symbol.webp" alt="TensorFold symbol" width="36" height="22"><img class="wm" src="brand/tensorfold-wordmark.webp" alt="TensorFold" width="104" height="17"></span><span class="for">for NVIDIA Sparks or Apple Silicon</span></div>
   </div>
 </aside>
 <header id="top">
-  <a class="mhome" href="#Home" id="mhome" aria-label="Imagination Studio: Home"><svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><rect x="0.5" y="0.5" width="25" height="25" rx="7"/><circle class="ring" cx="13" cy="13" r="6"/><circle class="dot" cx="13" cy="13" r="1.8"/></svg><span class="hlogo">Imagination Studio</span></a>
+  <a class="mhome" href="#Home" id="mhome" aria-label="Imagination Studio: Home"><img class="mark" src="brand/aperture-mark-color.svg" alt="Imagination Studio aperture mark" width="24" height="24"><img class="hlogo" src="brand/ribbon-horizontal-color.svg" alt="Imagination Studio" width="280" height="26"></a>
   <button class="navpill" id="backbtn" type="button" aria-label="Back" disabled></button><button class="navpill" id="homebtn" type="button" aria-label="Home" title="Home (⌥H)"></button>
   <span id="roomname"></span><div id="subtabs"></div><span class="fill"></span>
+  <button class="kbtn" id="kbtn" type="button" title="Search or run anything (⌘K)"><span>Search or run</span><kbd>⌘K</kbd></button>
   <button id="helpbtn" class="iconbtn" type="button" title="Learn" aria-label="Learn"></button>
-  <button id="themebtn" class="iconbtn" type="button" title="Light or dark" aria-label="Switch to the light theme"></button>
 </header>
 <div id="warnbar" class="hide" role="status"></div>
 <main>
@@ -70,7 +68,6 @@ try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = d
 <script src="train.js"></script>
 <script src="finish.js"></script>
 <script src="edit.js"></script>
-<script src="quick.js"></script>
 <script src="sparks.js"></script>
 <script src="voice.js"></script>
 <script src="music.js"></script>
@@ -151,9 +148,9 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Home", project = null;
-const TABS = ["Home", "Apps", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Quick Edit", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Models", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
+const TABS = ["Home", "Apps", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Models", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
-  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", imagePromptEdited: false, image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, silent: false, negations: [], negFor: null };
+  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
 const field = (labelText, node) => el("div", {}, el("label", {}, labelText), node);
 const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"; if (isBox) node.checked = !!obj[key]; else node.value = obj[key] ?? "";
@@ -234,9 +231,7 @@ function lastFramePanel() { const set = p => { C.lastImage = p; C.prompt = ""; }
       C.lastImage ? el("button", { class: "fit", onclick: () => { set(null); render(); } }, "No last frame") : null),
     clipFrames(set, "From a clip in the Library"),
     el("div", { class: "row", style: "margin-top:8px;align-items:flex-end" }, field("Or make one from a prompt (" + imageModelName() + ")", bind(L, "prompt", el("input", { placeholder: "the picture the clip ends on" }))),
-      el("button", { class: "fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try {
-        if (imageModelWhy()) throw new Error(imageModelWhy());
-        const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: stillParams({ prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) }) }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
+      el("button", { class: "fit", onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try { const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: { prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
       scout ? el("span", { class: "pill " + scout.status }, scout.status) : null));
   if (L.lib) { const grid = el("div", { class: "grid", style: "margin-top:10px" }); box.append(grid);
     api("/api/library").then(list => list.filter(m => m.kind === "image").slice(0, 24).forEach(m => grid.append(el("div", { class: "tile" + (C.lastImage === m.path ? " on" : ""), onclick: () => { set(m.path); L.lib = false; render(); } }, media(m.path), el("div", { class: "cap" }, m.path.split("/").pop().slice(-26)))))).catch(() => {}); }
@@ -282,81 +277,14 @@ const output = () => C.preset === "custom" ? { label: "Custom " + C.cw + "x" + C
 const extras = () => ({ ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}), ...(String(C.steps).trim() ? { steps: Number(C.steps) } : {}), ...(lorasOf(C).length ? { loras: lorasOf(C) } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) });
 function changed() { sync(); C.prompt = ""; render(); }
 // one decision shown as cards: options are value -> [title, detail]
-// A selected model is never replaced by another backend. The catalog can include blocked models for inspection.
-const IMAGE_LABELS = { "sd-turbo": "SD-Turbo", qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full",
-  "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image" };
-const imageModels = () => {
-  const available = (S.image_models || []).map(m => typeof m === "string" ? m : m.id);
-  const catalog = S.image_model_options || S.windows_runtime?.image_models;
-  const models = catalog?.length ? catalog : S.image_models?.length ? S.image_models
-    : S.windows_stills?.available ? [{ id: "sd-turbo" }] : [{ id: "qwen" }];
-  return models.map(value => { const m = typeof value === "string" ? { id: value } : value;
-    return { ...m, label: m.label || m.title || IMAGE_LABELS[m.id] || m.id,
-      available: m.available ?? (catalog?.length ? available.includes(m.id) : true) }; });
-};
-const defaultImageModel = () => {
-  const models = imageModels(), preferred = typeof prefs === "function" ? prefs().presets?.image_model || "qwen" : "qwen";
-  return models.find(m => m.id === preferred && m.available)?.id || models.find(m => m.available)?.id || models[0].id;
-};
-const imageModel = () => C.imageModel || defaultImageModel();
-const imageIsDraft = (id = imageModel()) => id === "sd-turbo";
-const imageCheckedRecipe = (id = imageModel()) => {
-  const model = imageModels().find(m => m.id === id);
-  return model?.qualification_required && model?.qualified ? model.verified_recipe || null : null;
-};
-const imageCheckedScopes = (id = imageModel()) => {
-  const model = imageModels().find(m => m.id === id), checked = imageCheckedRecipe(id);
-  return checked ? model.verified_scopes?.length ? model.verified_scopes : [checked] : [];
-};
-const imageFeature = (id = imageModel()) => S.platform === "windows" && !imageIsDraft(id)
-  ? imageModels().find(m => m.id === id)?.feature || id : "scout";
-const imageModelWhy = (id = imageModel()) => {
-  const m = imageModels().find(m => m.id === id);
-  if (!m) return "This selected model is not offered by this runtime. Choose a model explicitly.";
-  if (m.available === false) return m.why || m.label + " is unavailable. See Feature checks for installation, verification and memory requirements.";
-  const feature = imageFeature(id);
-  return S.platform === "windows" && !imageIsDraft(id) && !S.capabilities?.[feature] ? ""
-    : typeof capWhy === "function" ? capWhy(feature) : "";
-};
-const stillParams = params => {
-  const hasCatalog = Array.isArray(S.image_model_options) || Array.isArray(S.windows_runtime?.image_models) || !!S.image_models?.length;
-  const legacyDraft = !hasCatalog && S.windows_stills?.available;
-  const id = params.image_model || (legacyDraft ? S.windows_stills.model || "sd-turbo"
-    : typeof imageModel === "function" ? imageModel() : null);
-  const checked = typeof imageCheckedRecipe === "function" ? imageCheckedRecipe(id) : null;
-  if (checked) {
-    const scopes = imageCheckedScopes(id), count = Number(params.count ?? 1);
-    if (params.width && params.height && !scopes.some(scope => scope.width === Number(params.width)
-      && scope.height === Number(params.height) && count >= 1 && count <= scope.count))
-      throw new Error("That size/count has not been verified. Choose a checked recipe or check the next level in Machine.");
-    return { ...params, image_model: id };
-  }
-  if (id !== "sd-turbo") return id ? { ...params, image_model: id } : params;
-  const { preset, ...rest } = params;
-  return { ...rest, width: 512, height: 512,
-    ...(!params.prompts ? { count: Math.min(6, Math.max(1, Number(params.count) || 1)) } : {}), image_model: id };
-};
-const imageModelName = (id = imageModel()) => imageModels().find(m => m.id === id)?.label || IMAGE_LABELS[id] || id;
-const imageModelPick = after => {
-  const descriptions = { "sd-turbo": "Quick storyboard drafts", qwen: "Fast Qwen stills", "qwen-full": "Qwen base model",
-    "flux3k-fast": "Distilled FLUX3-K", "flux3k-full": "FLUX3-K base model", "moss-image": "Prompt-to-picture" };
-  return el("div", {}, el("label", {}, "Picture model"),
-    el("div", { class: "picture-models", role: "radiogroup", "aria-label": "Picture model" },
-      imageModels().map(m => {
-        const label = IMAGE_LABELS[m.id] || m.label, feature = imageFeature(m.id);
-        const badge = S.platform === "windows" && typeof featureBadge === "function"
-          ? featureBadge(feature, { state: m, unqualified: "Unverified" }) : null;
-        return el("div", { class: "picture-model-option", "data-picture-model": m.id },
-          el("button", { type: "button", role: "radio", "aria-checked": String(m.id === imageModel()),
-            class: "picture-model-card" + (m.id === imageModel() ? " on" : "") + (badge ? " has-badge" : ""),
-            onclick: () => { C.imageModel = m.id; (after || render)(); } },
-            el("b", {}, /^(qwen|flux)/.test(m.id) ? mark(/^flux/.test(m.id) ? "flux" : "qwen", label) : label),
-            el("span", { class: "note m-flat" }, descriptions[m.id] || "Picture model")),
-          badge);
-      })),
-    S.platform === "windows" && typeof openFeatureCheck === "function" ? el("button", { type: "button", class: "small",
-      onclick: () => openFeatureCheck(imageFeature()) }, "Feature checks and model requirements") : null);
-};
+// The picture model a prompt goes to (server.py IMAGE_MODELS): Qwen 2.1 Turbo on every install, FLUX3-K Fast and Full
+// where oneshot-setup --flux3 put them, MOSS-Image on a DGX Spark with --moss. Only installed ones are offered; a choice
+// that is not installed falls back to Qwen.
+const imageModels = () => (S.image_models && S.image_models.length ? S.image_models : [{ id: "qwen", label: "Qwen 2.1 Turbo", note: "" }]);
+const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : "qwen");
+const imageModelName = () => imageModels().find(m => m.id === imageModel()).label;
+const imageModelPick = after => imageModels().length < 2 ? null : el("div", {}, el("label", {}, "Picture model"),
+  choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), after || render, true));
 const choice = (obj, key, options, after, tight) => el("div", { class: "choice" + (tight ? " tight" : ""), role: "radiogroup" }, Object.entries(options).map(([v, [title, sub]]) =>
   el("button", { type: "button", role: "radio", "aria-checked": String(obj[key]) === v ? "true" : "false", class: String(obj[key]) === v ? "on" : "", onclick: () => { obj[key] = v; if (after) after(); } }, el("b", {}, title), sub ? el("span", {}, sub) : null)));
 // A number of passes of your own is the Custom card of each passes chooser, right after its 20-pass card. C.steps
@@ -676,151 +604,59 @@ function useMotionReference(ref, pack) {
 }
 
 /* ---------- Create ---------- */
-// Change something in the first frame, where it is: Quick Edit's job (a new seed, the picture's own size, the model's own
-// settings) on C.image; the result is offered with "Use this version", and the picture it replaced comes back with Undo
-const FX = { prompt: "", job: null, from: null, busy: false, undo: null };
-function frameChange() { const undo = FX.undo && FX.undo !== C.image && FX.undoFor === C.image
-    ? el("div", { class: "row", style: "margin-top:6px" }, el("button", { class: "small ghost", onclick: () => { C.image = FX.undo; FX.undo = null; C.prompt = ""; render(); } }, "Undo: back to the picture before"), el("span")) : null;
-  if (typeof qkModel !== "function" || (typeof capWhy === "function" && capWhy("edit"))) return undo;
-  if (typeof QK !== "undefined" && !QK.state && !FX.loading && typeof qkLoad === "function") { FX.loading = true; const done = () => { FX.loading = false; if (tab === "Create") render(); }; qkLoad().then(done, done); }
-  if (!(QK.state && QK.state.ready)) return undo;
-  const job = FX.job && jobs.find(j => j.id === FX.job), made = job && job.status === "done" && (job.outputs || [])[0];
-  const active = job && !["done", "failed", "cancelled"].includes(job.status);
-  const go = async () => { const prompt = FX.prompt.trim(), from = C.image; if (!prompt) return toast("Say what changes in the picture"); if (FX.busy || active) return; FX.busy = true; render();
-    try { const j = await api("/api/jobs", { kind: "edit", title: "Quick edit: " + prompt.slice(0, 40), params: { image: from, prompt, seed: Math.floor(Math.random() * 2147483647) || 1, size: "source", image_model: qkModel() } });
-      Object.assign(FX, { job: j.id, from }); await poll(); } catch (e) { toast(e.message); } finally { FX.busy = false; render(); } };
-  const box = el("div", { class: "row framechange", style: "margin-top:8px;align-items:flex-end" },
-    field("Change something in it (" + ((qkModels().find(m => m.id === qkModel()) || {}).label || "picture model") + ")", bind(FX, "prompt", el("input", { placeholder: "the sky at sunset, everything else the same", onkeydown: e => { if (e.key === "Enter") { e.preventDefault(); go(); } } }))),
-    el("button", { class: "fit", disabled: FX.busy || active, onclick: go }, "Change it"));
-  const out = [box];
-  if (job && job.status !== "done") out.push(el("div", { class: "note" }, el("span", { class: "pill " + job.status }, job.status), job.status === "failed" ? " " + String(job.error || "").slice(0, 200) : " the edit is on its way"));
-  if (made && FX.from === C.image && made !== C.image) out.push(el("div", { class: "row", style: "margin-top:8px;align-items:flex-end" },
-    el("div", { class: "fit", style: "width:220px" }, media(made, { style: "width:100%;border-radius:8px" })),
-    el("button", { class: "fit primary", onclick: () => { FX.undo = C.image; FX.undoFor = made; C.image = made; C.prompt = ""; render(); } }, "Use this version"), el("span")));
-  if (undo) out.push(undo);
-  return out; }
-// a reference's tag put where the cursor is: in the scene, action or camera box last typed in (else the action box).
-// The words around it are the user's own and stay as typed; nothing else is written into them
-const REFCARET = { node: null };
-if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("focusin", e => { const t = e.target;
-  if (t && t.getAttribute && t.getAttribute("data-ref")) REFCARET.node = t; });
-function refInsert(tag) { let n = REFCARET.node; if (!n || !n.isConnected) n = document.querySelector('[data-ref="action"]') || document.querySelector("[data-ref]");
-  if (!n) return toast("Click in the words where " + tag + " goes first");
-  const at = Number.isFinite(n.selectionStart) ? n.selectionStart : n.value.length, end = Number.isFinite(n.selectionEnd) ? n.selectionEnd : at;
-  const before = n.value.slice(0, at), pad = before && !/\s$/.test(before) ? " " : "";
-  n.value = before + pad + tag + n.value.slice(end); const caret = (before + pad + tag).length;
-  n.focus(); if (n.setSelectionRange) n.setSelectionRange(caret, caret); n.dispatchEvent(new Event("input", { bubbles: true })); C.prompt = ""; }
-const refChip = tag => el("button", { type: "button", class: "small ghost refchip", title: "Put " + tag + " where the cursor is in the scene, action or camera", onmousedown: e => e.preventDefault(), onclick: e => { e.stopPropagation(); refInsert(tag); } }, "Insert");
-// A first frame is stretched onto the canvas the clip starts from (the preset's start, scouts' size). When the picture's
-// shape is more than 2 % off, the page says how and offers the renderer's own centre crop (/api/fit) in one click
-const SHAPES = {};
-function pictureShape(path) { if (SHAPES[path] || typeof Image === "undefined") return SHAPES[path] || null;
-  SHAPES[path] = "loading"; const img = new Image(); img.onload = () => { SHAPES[path] = [img.naturalWidth, img.naturalHeight]; if (tab === "Create") render(); };
-  img.onerror = () => { SHAPES[path] = null; }; img.src = file(path); return null; }
-function shapeNote() { const canvas = C.preset === "custom" ? [Number(C.cw), Number(C.ch)] : ((S.presets[C.preset] || {}).start || (output() || {}).size);
-  const shape = C.image && pictureShape(C.image);
-  if (!canvas || !Array.isArray(shape)) return el("div", { class: "note" }, "The picture is fitted to the clip's canvas by stretching, so a picture of the clip's shape works best.");
-  const [w, h] = shape, [cw, ch] = canvas, off = Math.abs((w / h) / (cw / ch) - 1);
-  if (off <= 0.02) return el("div", { class: "note" }, "The picture has the clip's shape (" + w + " × " + h + " for a " + cw + " × " + ch + " start).");
-  const fit = async () => { if (C.fitting) return; C.fitting = true; render();
-    try { const r = await api("/api/fit", { path: C.image, width: cw, height: ch }); FX.undo = C.image; FX.undoFor = r.path; C.image = r.path; C.prompt = ""; toast("Cut about its centre to the clip's shape: Undo is under the picture"); }
-    catch (e) { toast(e.message); } finally { C.fitting = false; render(); } };
-  return el("div", { class: "note shape-off", style: "color:var(--warn)" }, "This picture is " + w + " × " + h + "; the clip starts at " + cw + " × " + ch + ", so it would be stretched " + Math.round(off * 100) + " %. ",
-    el("button", { class: "small", disabled: !!C.fitting, title: "Keep the middle of the picture at the clip's shape (nothing is scaled or redrawn); the rest is cut off", onclick: fit }, "Crop it to fit"),
-    w < h ? " A portrait picture loses most of its height: a 16:9 picture works better." : ""); }
-// Several actions in one shot follow better at 20 passes (AGENTS.md; FastH3's "for prompts with several actions"): a
-// suggestion with one click under the action, never a change made for the user. Counted from the sentences and "then"s
-const actionCount = t => String(t || "").split(/(?<=[.!?])\s+|\bthen\b|;|,\s/i).filter(x => /[a-z]{2}/i.test(x)).length;
-const passesHintOn = () => C.engine === "fasth3" && !isRef() && !customOn() && C.passes !== "20" && actionCount(C.action) >= 3;
-function passesHint() { const n = el("div", { class: "note passes-hint", style: passesHintOn() ? "" : "display:none" }, "Several actions in this shot: 20 passes follow them better (about twice the time of 8). ",
-  el("button", { type: "button", class: "small", onclick: () => { C.passes = "20"; C.steps = ""; changed(); } }, "Use 20 passes")); PASSHINT.node = n; return n; }
-const PASSHINT = { node: null };
-const passesHintPaint = () => { if (PASSHINT.node && PASSHINT.node.style) PASSHINT.node.style.display = passesHintOn() ? "" : "none"; };
-// which picture model did better for this kind of picture in docs/picture-shootout.md, when it is installed and not the
-// one chosen: a hint with one click; the choice stays the user's
-const SHOOTOUT = [[/\b(portrait|face|headshot|close-?up of (a|her|his)|poster|title card|lettering|logo)\b|"[^"]{2,}"/i, "qwen-full", "faces, portraits and posters"],
-  [/\b(crowd|crowded|market|busy street|watercolou?r|illustration|painting|drawn|hands?|fingers|piano)\b/i, "flux3k-full", "crowded scenes, illustration and hands"]];
-function modelHint() { const text = C.scene || "", have = imageModels().filter(m => m.available !== false).map(m => m.id), now = imageModel();
-  const hit = SHOOTOUT.find(([re, id]) => re.test(text) && have.includes(id) && id !== now); if (!hit) return null;
-  const m = imageModels().find(x => x.id === hit[1]);
-  return el("div", { class: "note model-hint" }, "For " + hit[2] + ", " + m.label + " did better in the studio's picture shootout (slower). ",
-    el("button", { type: "button", class: "small", onclick: () => { C.imageModel = hit[1]; render(); } }, "Use " + m.label)); }
-// the scout step's picture prompt box and Make scouts, kept so typing can update them without a redraw
-const SCOUT_UI = { area: null, make: null, queuing: false, paint() { if (SCOUT_UI.make) SCOUT_UI.make.disabled = !String(C.imagePrompt || "").trim() || (typeof imageModelWhy === "function" && !!imageModelWhy()); } };
-const sceneTyped = () => { if (C.mode === "scout" && !C.imagePromptEdited) { C.imagePrompt = C.scene; if (SCOUT_UI.area) SCOUT_UI.area.value = C.scene; } SCOUT_UI.paint(); };
-const C_TEXT = { scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", imagePromptEdited: false, prompt: "", beats: "" }, C_NOTES = { subjects: "refs", video_subjects: "refVideos", audio_notes: "refAudios" };
+const STEPS = ["1. Intent / Mode", "2. First frame", "3. Words / Sound", "4. Review prompt", "5. Render"];
+const C_TEXT = { scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", prompt: "", beats: "" }, C_NOTES = { subjects: "refs", video_subjects: "refVideos", audio_notes: "refAudios" };
 function clearAllCreate() { const keys = [...Object.keys(C_TEXT), ...Object.keys(C_NOTES)], was = JSON.parse(JSON.stringify(Object.fromEntries(keys.map(k => [k, C[k]]))));
   const empty = { ...JSON.parse(JSON.stringify(C_TEXT)), ...Object.fromEntries(Object.entries(C_NOTES).map(([k, of]) => [k, C[of].map(() => "")])) };
   if (JSON.stringify(was) === JSON.stringify(empty)) return toast("Nothing to clear here");
   Object.assign(C, empty); CLEARED = { key: "create-all", model: () => Object.assign(C, was) }; render(); undoToast("Every prompt field of this clip is empty."); }
 function viewCreate() {
   const body = el("div");
+  const steps = el("div", { class: "steps" }, STEPS.map((name, i) => el("button", { class: i === C.step ? "on" : "", onclick: () => { C.step = i; render(); } }, i === 1 && isRef() ? "2. " + refWord() : name)));
+  const next = el("div", { class: "row", style: "margin-top:14px" }, el("button", { class: "fit", disabled: C.step === 0, onclick: () => { C.step--; render(); } }, "Back"),
+    el("span"), C.step === 3 && C.mode !== "image" ? null : clearButton("create-" + C.step, "Clear this step"), el("button", { class: "small fit", title: "Empty every prompt field of this clip: scene, action, camera, lines, sound, and the composed prompt. Pictures, clips and settings stay.", onclick: clearAllCreate }, "Clear all"),
+    C.step < 4 ? el("button", { class: "primary fit", onclick: () => { C.step++; render(); } }, "Next") : null);
   body.setAttribute("data-clear", "create-" + C.step);
   sync();
   const goes = null;  // what the prompt goes to is chosen over the form (intentBar in shell.js)
-  const picture = field(C.goes === "image" ? "Describe the picture: the subject, the place, the light" : "Describe the scene / condition where it takes place", bind(C, "scene", el("textarea", { "data-ref": "scene", placeholder: isRef() ? "The woman with red hair sits at a wooden desk in a small radio studio at night, medium close-up, a warm lamp on the left." : "A middle-aged baker in a cream shirt and green apron behind a wooden counter in a small bakery at dawn, warm window light from the left…" }), sceneTyped));
+  const picture = field("Describe the scene / condition where it takes place", bind(C, "scene", el("textarea", { placeholder: isRef() ? "The woman with red hair sits at a wooden desk in a small radio studio at night, medium close-up, a warm lamp on the left." : "A middle-aged baker in a cream shirt and green apron behind a wooden counter in a small bakery at dawn, warm window light from the left…" })));
   if (C.mode === "edit") return viewEdit(goes);  // a picture re-drawn by the image model (edit.js)
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
-    const checked = imageCheckedRecipe(), scopes = imageCheckedScopes(), draft = imageIsDraft();
-    if (checked && C.verifiedImageModel !== imageModel()) {
-      C.count = 1; C.verifiedImageModel = imageModel();
-    }
-    const allowedSizes = Object.fromEntries(scopes.map(scope => [scope.width + "x" + scope.height,
-      [scope.title || "Verified size", scope.width + " × " + scope.height]]));
-    const size = draft ? "512x512" : checked ? allowedSizes[C.imageSize] ? C.imageSize : Object.keys(allowedSizes).at(-1)
-      : C.imageSize === "512x512" ? "1344x768" : C.imageSize;
-    if (checked) C.imageSize = size;
-    if (draft && Number(C.count) > 6) C.count = 6;
-    const [w, h] = size.split("x").map(Number);
-    const maxCount = checked ? Math.max(...scopes.filter(scope => scope.width === w && scope.height === h).map(scope => scope.count)) : draft ? 6 : 12;
-    const qualification = typeof featureBadge === "function" ? featureBadge(imageFeature()) : null;
-    const title = el("h2", {}, "The picture");
-    put(body, qualification ? el("div", { class: "row" }, title, qualification) : title, goes, picture, imageModelPick(), modelHint(),
-      el("label", {}, "Size"), choice(draft ? { imageSize: size } : C, "imageSize", draft ? { "512x512": ["Storyboard draft", "512 × 512 square"] } : checked ? allowedSizes
-        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] },
-        () => { if (checked) C.count = 1; render(); }, true),
+    const [w, h] = C.imageSize.split("x").map(Number);
+    put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
+      el("label", {}, "Size"), choice(C, "imageSize", { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
       el("div", { class: "row" },
-        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: maxCount }))),
+        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
-      el("div", { class: "note" }, (imageModel() === "sd-turbo" ? "SD-Turbo makes square storyboard drafts, one step and one image at a time; it does not guarantee matching faces across shots"
-        : /^qwen/.test(imageModel()) ? "Qwen makes the picture at the selected size after the model loads"
-        : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written" + (S.platform === "windows" ? "" : ", about 45 s an image at 1344 × 768 once loaded") + "; put the words to be lettered in quotes"
-        : S.platform === "windows" ? "FLUX3-K writes a full scene description from your prompt first, then makes each image. Feature checks show this backend's memory requirements and measurement source"
+      el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
+        : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
-      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
-        if (imageModelWhy()) throw new Error(imageModelWhy());
-        const ask = { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: stillParams({ prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() }) };
-        const j = await api("/api/jobs", ask); C.imageAsk = JSON.parse(JSON.stringify(ask));
+      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
+        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() } });
         C.imageJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make image"), el("span")));
-    // More like these: the request that made these pictures again, on the seeds after theirs (the words and size as they were)
-    const more = async () => { if (C.imageBusy) return; C.imageBusy = true; try { const ask = JSON.parse(JSON.stringify(C.imageAsk)); ask.params.seed = (Number(ask.params.seed) || 0) + (Number(ask.params.count) || 1);
-      if (imageModelWhy(ask.params.image_model)) throw new Error(imageModelWhy(ask.params.image_model)); ask.params = stillParams(ask.params);
-      const j = await api("/api/jobs", ask); C.imageAsk = ask; C.seed = ask.params.seed; C.imageJob = j.id; await poll(); } catch (e) { toast(e.message); } finally { C.imageBusy = false; render(); } };
     if (made) { put(body, el("h3", {}, "Images"), jobCard(made));
       if (made.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, made.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
         el("div", { class: "tile" }, media(p), el("div", { class: "cap" }, el("a", { href: file(p), download: "" }, "Download"),
-          el("a", { href: "#", title: "A clip that opens on this picture", onclick: e => { e.preventDefault(); C.image = p; C.goes = "video"; C.start = "own"; C.step = 1; changed(); } }, "animate"),
-          typeof qkOpen === "function" ? el("a", { href: "#", title: "Change something in this picture (Quick Edit)", onclick: e => { e.preventDefault(); qkOpen(p); } }, "edit") : null)))),
-        C.imageAsk ? el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "fit", title: "The same words and size on the next seeds", disabled: !!C.imageBusy, onclick: more }, "More like these"), el("span")) : null); }
+          el("a", { href: "#", onclick: e => { e.preventDefault(); C.image = p; C.goes = "video"; C.start = "own"; C.step = 1; changed(); } }, "animate this")))))); }
     return el("section", { class: "card" }, body);
   }
-  const step0 = body => {
+  if (C.step === 0) {
     const est = el("span", { class: "eta" });
     put(body, el("h2", {}, "The shot"), goes,
-      el("label", {}, "The clip starts from"), choice(C, "start", { text: ["Text only", "no first frame"], scout: ["Pictures to choose from", "make a few with " + imageModelName() + ", pick one"], own: ["Your own image", "upload a picture"],
+      el("label", {}, "The clip starts from"), choice(C, "start", { text: ["Text only", "no first frame"], scout: ["A scout image", "make several with " + imageModels().map(m => m.label).join(" or ") + ", pick one"], own: ["Your own image", "upload a picture"],
         ...(S.ref2va ? { refs: S.ref_media ? ["References", "pictures, videos or audio: keep a face, a motion or a voice"] : ["Reference pictures", "keep a face or a thing, in a new scene"] } : {}) }, changed),
-      picture,
-      field("What happens to the characters inside the scene / clip", bind(C, "action", el("textarea", { "data-ref": "action", placeholder: "He lifts the loaf with both hands, sets it down, looks at the camera and smiles." }), () => passesHintPaint())),
-      passesHint(),
-      field("Camera (optional)", bind(C, "camera", el("input", { "data-ref": "camera", placeholder: "The camera slowly pushes in throughout the single continuous shot." }))),
+      isRef() ? el("div", { class: "note", style: "margin:8px 0" }, "You add them on the next screen: ", el("a", { href: "#", onclick: e => { e.preventDefault(); C.step = 1; render(); } }, "2. " + refWord()), ".") : null,
+      videoControls(() => { render(); }), summary(est), picture,
+      field("What happens to the characters inside the scene / clip", bind(C, "action", el("textarea", { placeholder: "He lifts the loaf with both hands, sets it down, looks at the camera and smiles." }))),
+      field("Camera (optional)", bind(C, "camera", el("input", { placeholder: "The camera slowly pushes in throughout the single continuous shot." }))),
       isLong() ? field("Story beats (optional): one line per 15 s clip, in order; the last line holds for the rest", bind(C, "beats", el("textarea", { placeholder: "He rides down the chute.\nHe stops at the river and looks back.\nHe wades across carrying the bike." }))) : null,
       isLong() ? el("div", { class: "note" }, "The model makes at most 15 s at a time, so this is rendered as " + Math.ceil(C.seconds / 15) + " clips, each opening on the last frame of the one before, then joined. Finished clips appear in the queue as they land. Expect the look to drift over many clips; beats help it stay on a story.") : null);
-  };
-  const step1 = body => {
+    showEstimate(C, est);
+  } else if (C.step === 1) {
     if (isRef()) {
-      for (const path of [...C.refVideos, ...C.refAudios]) if (!REF_META[path]) refMeta(path).then(() => { if (tab === "Create") render(); });
+      for (const path of [...C.refVideos, ...C.refAudios]) if (!REF_META[path]) refMeta(path).then(() => { if (tab === "Create" && C.step === 1) render(); });
       const send = async one => { const data = new FormData(); data.append("file", one); const r = await fetch("/api/upload", { method: "POST", body: data }); const j = await r.json().catch(() => ({})); if (!j.path) throw new Error(j.detail || j.error || "upload failed"); return j.path; };
       const add = el("input", { type: "file", accept: "image/*", multiple: true, onchange: async () => { REF_SAID.pictures = "";
         for (const one of add.files) { try { const full = refFull("pictures", C.refs); if (full) throw new Error(full); const path = await send(one); C.refs.push(path); C.subjects.push(""); } catch (e) { REF_SAID.pictures = one.name + ": " + e.message; break; } }
@@ -842,14 +678,14 @@ function viewCreate() {
       put(body, el("h2", {}, refWord()), el("div", { class: "note" }, "Up to " + S.reference_limit + " pictures of who or what must look the same in the clip. They are not frames of it: the scene comes from the prompt, which names them <Picture 1>, <Picture 2>, … in this order. A clear, front-facing picture works best; any aspect ratio." + (S.ref_media ? " At most " + S.reference_total + " references of all kinds." : "")),
         field("Add pictures", add), said("pictures"),
         C.refs.length ? el("div", { class: "grid", style: "margin-top:10px" }, C.refs.map((p, i) => el("div", { class: "tile on" }, media(p),
-          el("div", { class: "cap" }, "<Picture " + (i + 1) + ">", refChip("<Picture " + (i + 1) + ">"), drop(C.refs, C.subjects, i)),
+          el("div", { class: "cap" }, "<Picture " + (i + 1) + ">", drop(C.refs, C.subjects, i)),
           bind(C.subjects, i, el("input", { placeholder: "who or what this is: the woman with red hair" }), () => { C.prompt = ""; })))) : null,
         S.ref_media ? [
           el("h3", { style: "margin-top:18px" }, "Reference videos"),
           el("div", { class: "note" }, "Up to " + S.reference_video_limit + " clips (mp4 or mov), each 2 to 15 seconds and 15 seconds in all: <Video 1>, <Video 2>, … A video carries a subject and how it moves. It is read up to the clip's own length. Every second of it adds work to each pass: a 5 second reference about " + (S.platform === "spark" ? "doubles" : "triples") + " the time of a 5 second clip."),
           field("Add videos", uploader("video/mp4,video/quicktime,.mp4,.mov", C.refVideos, C.video_subjects, "videos")), said("videos"),
           C.refVideos.length ? el("div", { class: "grid", style: "margin-top:10px" }, C.refVideos.map((p, i) => el("div", { class: "tile on" }, media(p),
-            el("div", { class: "cap" }, el("span", {}, "<Video " + (i + 1) + ">" + length(p) + (i === 0 && C.motion && C.motion.layer !== C.motion.made ? " · sent as its " + MOTION_LAYERS[C.motion.layer][0].toLowerCase() + " layer" : "") + (C.video_sound ? " · its sound is <Audio " + (i + 1) + ">" : "")), refChip("<Video " + (i + 1) + ">"), drop(C.refVideos, C.video_subjects, i)),
+            el("div", { class: "cap" }, el("span", {}, "<Video " + (i + 1) + ">" + length(p) + (i === 0 && C.motion && C.motion.layer !== C.motion.made ? " · sent as its " + MOTION_LAYERS[C.motion.layer][0].toLowerCase() + " layer" : "") + (C.video_sound ? " · its sound is <Audio " + (i + 1) + ">" : "")), drop(C.refVideos, C.video_subjects, i)),
             bind(C.video_subjects, i, el("input", { placeholder: "who or what it shows (empty: only the motion is used)" }), () => { C.prompt = ""; })))) : null,
           C.refVideos.length ? el("label", { class: "check" + (quiet.length ? " off" : "") }, el("input", { type: "checkbox", checked: C.video_sound && !quiet.length, disabled: quiet.length > 0, onchange: e => { C.video_sound = e.target.checked; C.prompt = ""; render(); } }),
             el("span", {}, "Use the videos' own sound as a reference too. " + (quiet.length ? "Off: " + quiet.map(k => "<Video " + k + ">").join(" and ") + (quiet.length > 1 ? " have" : " has") + " no sound."
@@ -859,47 +695,32 @@ function viewCreate() {
           el("div", { class: "note" }, "Up to " + S.reference_audio_limit + " sound clips (wav, mp3, m4a, aac, flac, ogg), each 2 to 15 seconds and 15 seconds in all. Only beside a picture or a video: the model does not take sound alone. A clip longer than the video is cut to its length. " + AUDIO_SAYS),
           field("Add audio", uploader("audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg", C.refAudios, C.audio_notes, "audios")), said("audios"),
           C.refAudios.length ? el("div", { class: "grid", style: "margin-top:10px" }, C.refAudios.map((p, i) => el("div", { class: "tile on" }, el("audio", { src: file(p), controls: true, preload: "metadata", style: "width:100%" }),
-            el("div", { class: "cap" }, el("span", {}, audioName(i) + length(p)), refChip(audioName(i)), drop(C.refAudios, C.audio_notes, i)),
+            el("div", { class: "cap" }, el("span", {}, audioName(i) + length(p)), drop(C.refAudios, C.audio_notes, i)),
             bind(C.audio_notes, i, el("input", { placeholder: "what it is: the voice timbre reference for the woman's voice" }), () => { C.prompt = ""; })))) : null,
           C.refAudios.length && !C.refs.length && !C.refVideos.length ? el("div", { class: "note", style: "color:var(--warn)" }, "Add a picture or a video too: audio cannot be the only reference.") : null ] : null);
-    } else if (noFrame()) put(body, el("details", { class: "fold", open: !!lastOf(), ontoggle: e => { C.openLast = e.target.open; } }, el("summary", {}, "End on a picture (optional)"),
-      el("div", { class: "note" }, "A clip from text can end on a picture: it then arrives at it. To open on a picture instead, choose it under “The clip starts from”."), lastFramePanel()));
+    } else if (noFrame()) put(body, el("h2", {}, "First frame"), el("div", { class: "note" }, "Text to video has no first frame. Change “The clip starts from” in step 1 to start from an image. A last frame alone works too: the clip then arrives at that picture."), lastFramePanel());
     else {
       const up = el("input", { type: "file", accept: "image/*", onchange: async () => { const data = new FormData(); data.append("file", up.files[0]);
         const r = await fetch("/api/upload", { method: "POST", body: data }); const j = await r.json(); if (j.path) { C.image = j.path; render(); } else toast(j.error || "upload failed"); } });
       put(body, el("h2", {}, "First frame"));
       if (C.mode === "scout") {
-        // the picture prompt is the scene's words until it is edited by hand (sceneTyped keeps it in step while typing)
-        if (!C.imagePromptEdited) C.imagePrompt = C.scene;
+        if (!C.imagePrompt) C.imagePrompt = C.scene;
         const scout = C.scoutJob && jobs.find(j => j.id === C.scoutJob);
-        const area = bind(C, "imagePrompt", el("textarea"), () => { C.imagePromptEdited = C.imagePrompt !== C.scene; SCOUT_UI.paint(); });
-        const make = el("button", { class: "primary fit", disabled: !C.imagePrompt.trim() || !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try { if (imageModelWhy()) throw new Error(imageModelWhy()); const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
-              params: stillParams({ prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) }) }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts");
-        Object.assign(SCOUT_UI, { area, make });
-        put(body, imageModelPick(), field("Image prompt (" + imageModelName() + ")" + (C.imagePromptEdited ? "" : ": the scene's words until you change them"), area),
-          el("div", { class: "row" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: imageIsDraft() ? 6 : 12 }))),
-            make, el("span")),
-          scout ? el("div", { class: "note" }, "Scout job: ", el("span", { class: "pill " + scout.status }, scout.status)) : el("div", { class: "note" },
-            imageIsDraft() ? "Up to six sequential 512 × 512 storyboard drafts; the video route must separately accept this first frame."
-              : "Scouts use the selected model and the size the video model starts from."));
-        // each scout: click to choose it, Animate this to queue the clip on it at once, Use as end to end the clip on it
-        const stop = (e, f) => { if (e && e.stopPropagation) e.stopPropagation(); f(); };
+        put(body, imageModelPick(), field("Image prompt (" + imageModelName() + ")", bind(C, "imagePrompt", el("textarea"))),
+          el("div", { class: "row" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
+            el("button", { class: "primary fit", disabled: !C.imagePrompt.trim(), onclick: async () => { try { const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
+              params: { prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
+          scout ? el("div", { class: "note" }, "Scout job: ", el("span", { class: "pill " + scout.status }, scout.status)) : el("div", { class: "note" }, "Six scouts take about half a minute. They are made at the size the video model starts from."));
         if (scout && scout.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, scout.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
-          el("div", { class: "tile" + (C.image === p ? " on" : ""), onclick: () => { C.image = p; render(); } }, media(p), el("div", { class: "cap" }, p.split("/").pop(), C.image === p ? "✓ selected" : C.lastImage === p ? "✓ end" : "pick"),
-            el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end" },
-              el("button", { class: "small", title: "Queue the clip now, opening on this picture, with the recipe and length on the right", disabled: !!SCOUT_UI.queuing, onclick: e => stop(e, async () => {
-                if (SCOUT_UI.queuing || C.queuing) return; SCOUT_UI.queuing = true; C.image = p; if (C.lastImage === p) C.lastImage = null; C.prompt = ""; try { await createQueue(); } finally { SCOUT_UI.queuing = false; render(); } }) }, "Animate this"),
-              el("button", { class: "small ghost", title: "The clip ends on this picture (its last frame)", onclick: e => stop(e, () => { C.lastImage = C.lastImage === p ? null : p; C.prompt = ""; render(); }) }, C.lastImage === p ? "Not the end" : "Use as end"))))));
+          el("div", { class: "tile" + (C.image === p ? " on" : ""), onclick: () => { C.image = p; render(); } }, media(p), el("div", { class: "cap" }, p.split("/").pop(), C.image === p ? "✓ selected" : "pick")))));
       } else put(body, field("Upload an image", up), clipFrames(p => { C.image = p; C.prompt = ""; }, "Or continue from a clip in the Library"));
       if (C.mode !== "scout" && C.image && C.image.startsWith("scouts/")) put(body, el("div", { class: "note" }, "Using the image you chose to animate."));
-      if (C.image) put(body, el("h3", {}, "Selected first frame"), el("div", { style: "max-width:420px" }, media(C.image, { style: "width:100%;border-radius:8px" })), frameChange(),
-        shapeNote());
-      // the end frame is optional: folded, as for a clip from text, and open while one is chosen
-      put(body, el("details", { class: "fold", open: !!lastOf() || !!C.openLast, ontoggle: e => { C.openLast = e.target.open; } }, el("summary", {}, "End on a picture (optional)" + (C.lastImage ? ": chosen" : "")), lastFramePanel()));
+      if (C.image) put(body, el("h3", {}, "Selected first frame"), el("div", { style: "max-width:420px" }, media(C.image, { style: "width:100%;border-radius:8px" })),
+        el("div", { class: "note" }, "The image is stretched onto the clip's canvas, so match its aspect ratio (16:9 for the presets here)."));
+      put(body, lastFramePanel());
     }
-  };
-  const step2 = body => {
-    put(body, el("h2", {}, "Lines and sound"), el("div", { class: "note" }, "Spoken or sung lines are written into the prompt exactly. Leave empty for a clip with no speech."),
+  } else if (C.step === 2) {
+    put(body, el("h2", {}, "Words and sound"), el("div", { class: "note" }, "Spoken or sung lines are written into the prompt exactly. Leave empty for a clip with no speech."),
       C.dialogue.map((line, i) => el("div", { class: "seg" }, el("div", { class: "row" }, field("Voice", bind(line, "voice", el("input", { placeholder: "a calm, slightly raspy male voice" }))),
         keep(el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Language"), bind(line, "language", el("input")))),
         isRef() && refPeople() > 1 ? el("div", { class: "fit", style: "width:140px" }, el("label", {}, "Speaker"), select(line, "subject", Object.fromEntries(Array.from({ length: refPeople() }, (_, k) => [k + 1, "<Subject " + (k + 1) + ">"])), () => { C.prompt = ""; })) : null,
@@ -907,71 +728,43 @@ function viewCreate() {
         el("button", { class: "small fit", onclick: () => { C.dialogue.splice(i, 1); render(); } }, "Remove")), field("Line", bind(line, "text", el("textarea", { style: "min-height:54px" }))))),
       el("button", { onclick: () => { C.dialogue.push({ voice: "", language: "English", text: "", sung: false }); render(); } }, "+ Add a line"),
       field("Soundscape", bind(C, "soundscape", el("textarea", { placeholder: "Quiet bakery room tone and a low oven hum. A light ceramic tap as the loaf is set down." }))),
-      field("Music (N/A for none)", bind(C, "music", el("input", { "data-clear-to": "N/A" }))),
-      // the model always makes a sound track and takes no negative prompt: the app mutes it after the render (hush)
-      el("label", { class: "check", style: "margin-top:10px", title: "MiniMax H3 always makes sound, and asking it for silence is not enough. Ticked, the clip's sound track is muted after the render; the clip keeps a silent track." },
-        bind(C, "silent", el("input", { type: "checkbox" })), el("span", {}, "No sound: deliver the clip silent")));
-  };
-  const step3 = body => {
-    const area = bind(C, "prompt", el("textarea", { style: "min-height:260px;font-family:var(--mono);font-size:13px" }), () => { C.promptEdited = true; });
-    const again = async () => { C.promptEdited = false; await composeCreate(); area.value = C.prompt; negShow(warned); };
+      field("Music (N/A for none)", bind(C, "music", el("input", { "data-clear-to": "N/A" }))));
+  } else if (C.step === 3) {
+    const area = bind(C, "prompt", el("textarea", { style: "min-height:260px;font-family:ui-monospace,monospace;font-size:13.5px" }));
+    const again = async () => { const r = await api("/api/compose", { fields: { ...C, motion: isRef() ? motionFields() : null }, first_frame: !noFrame(), last_frame: !!lastOf(), ...lengthOf(C), references: isRef() ? Math.max(C.refs.length, refMedia() ? 0 : 1) : 0, referenced: isRef(), loras: isRef() ? lorasOf(C) : [] }); C.prompt = r.prompt; area.value = r.prompt; negShow(warned); };
     const warned = el("div"); area.addEventListener("change", () => negShow(warned));
-    if (!C.prompt || !C.promptEdited) again(); else negShow(warned);
-    put(body, el("div", { class: "note m-flat" }, "What the video model receives, in MiniMax H3's own three-part format. It is rebuilt from the fields above when you render, unless you edit it here; “Rebuild” drops your edits."), area, warned,
-      el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit small", onclick: again }, "Rebuild from the fields above"), el("span")));
-  };
-  const step4 = body => {
-    const job = C.job && jobs.find(j => j.id === C.job), wants = loraWants(), why = createNotReady();
-    put(body, el("h2", {}, "Render"),
+    if (!C.prompt) again(); else negShow(warned);
+    put(body, el("h2", {}, "Review the prompt"), el("div", { class: "note" }, "This is what the video model receives, in MiniMax H3's own three-part format. Edit it freely; “Rebuild” discards edits."), area, warned,
+      el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: again }, "Rebuild from steps 1–3"), el("span")));
+  } else {
+    const est = el("div", { class: "note" }); showEstimate(C, est);
+    const job = C.job && jobs.find(j => j.id === C.job);
+    const wants = loraWants();
+    const ready = C.prompt.trim() && (isRef() ? C.refs.length + C.refVideos.length > 0 : noFrame() || C.image) && !wants.length;
+    put(body, el("h2", {}, "Render"), el("div", { class: "note" }, output().label + (String(C.steps).trim() && !isRef() ? " · " + C.steps + " passes (custom)" : "") + " · " + (isRef() ? "MiniMax H3 Ref2VA, " + refPassText() + ", " + [[C.refs.length, "picture"], [C.refVideos.length, "video"], [C.refAudios.length, "audio clip"]].filter(k => k[0]).map(k => k[0] + " reference " + k[1] + (k[0] === 1 ? "" : "s")).join(", ") + (motionFields() ? ", motion: " + MOTION_MODES[C.motion.mode][0].toLowerCase() + " from the " + MOTION_LAYERS[C.motion.layer][0].toLowerCase() + (C.motion.layer === "reference" ? "" : " layer") : "") : S.qualities[C.quality]) + " · " + (isLong() ? S.long[C.seconds] : exact(framesOf(C))) + (lastOf() ? " · ends on the last frame" : "") + " · seed " + C.seed), est,
       wants.map(w => el("div", { class: "note lorawant", style: "color:var(--warn)" }, el("b", {}, w.name + " needs: "), w.text + " ", el("button", { type: "button", class: "small", onclick: w.go }, w.label))),
-      el("div", { class: "note c1-notready", style: "color:var(--warn)" + (why && !wants.length ? "" : ";display:none") }, why || ""),
+      !ready ? el("div", { class: "note", style: "color:var(--warn)" }, C.prompt.trim() ? (isRef() ? (S.ref_media ? "Add a reference picture or video in step 2." : "Add a reference picture in step 2.") : "Pick or upload a first frame in step 2.") : "Open step 4 once to build the prompt.") : null,
       negNote(),
-      // the retake, the seed and the Sparks: folded, with what they are now (most takes need none of them)
-      el("details", { class: "fold c1-renderopts", open: !!C.openRenderOpts, ontoggle: e => { C.openRenderOpts = e.target.open; } },
-        el("summary", {}, "Render options", el("span", { class: "c1-sum" }, (C.sameSeed || !(typeof prefs === "function" && prefs().presets.seed === "random") ? "seed " + C.seed + (C.sameSeed ? " every take" : "; Another take moves it on") : "a new seed each take") + (C.retake && !isLong() ? " · retake if the shot check fails" : ""))),
-      isLong() ? null : el("label", { class: "check", title: "After the render the app looks at the clip (app/shot.py): does it open on its first frame and end on its last, and is there a cut inside it. The verdict is shown beside the clip either way." },
-        bind(C, "retake", el("input", { type: "checkbox" })), el("span", {}, "If the shot check fails (a keyframe not held, or a cut inside the shot), render it once more at the next seed. That is a second full render.")),
-      el("label", { class: "check", title: "On: every take of this setup uses the seed shown, Another take too. Off: Another take moves the seed on, and with Settings' random seed every take gets a new one." },
-        bind(C, "sameSeed", el("input", { type: "checkbox" }), () => render()), el("span", {}, "Same seed every take (seed " + C.seed + ")")),
+      isLong() ? null : el("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px", title: "After the render the app looks at the clip (app/shot.py): does it open on its first frame and end on its last, and is there a cut inside it. The verdict is shown beside the clip either way." },
+        bind(C, "retake", el("input", { type: "checkbox", style: "width:auto" })), "If the shot check fails (a keyframe not held, or a cut inside the shot), render it once more at the next seed. That is a second full render."),
       // how many Sparks this job may use, and what that means for it, before it is queued (sparks.js)
       el("div", { style: "margin-top:10px" }, sparksPick({ kind: isLong() ? "long" : "video", clips: 1, params: { loras: lorasOf(C), ...(isRef() ? { references: C.refs, reference_videos: C.refVideos, reference_audios: C.refAudios, ref_turbo: C.refPasses === "4" } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) } })),
-      ),
-      el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "hot fit", disabled: !!why, onclick: createQueue }, "Render clip"),
-        // a new clip with the same settings, or with the words cleared
-        C.job ? el("button", { class: "fit", title: C.sameSeed ? "Queue the same setup again with the same seed" : "Queue the same setup again with the next seed", onclick: () => createAgain() }, C.sameSeed ? "Another take, same seed" : "Another take, new seed") : null,
-        el("button", { class: "fit ghost", onclick: () => { Object.assign(FX, { prompt: "", job: null, from: null, undo: null, undoFor: null }); Object.assign(C, { step: 0, job: null, prompt: "", promptEdited: false, scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", imagePromptEdited: false, image: null, lastImage: null, scoutJob: null, beats: "", refs: [], subjects: [], refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null }); MA.job = null; Object.assign(REF_SAID, { pictures: "", videos: "", audios: "" }); render(); } }, "Start a new clip"), el("span")));
+      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !ready, onclick: async () => { try {
+        const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
+        const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
+          : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
+        C.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Queue this clip"),
+        // the way back to step 1 once a clip is queued: with the same settings, or with the words cleared
+        el("button", { class: "fit", onclick: () => { C.step = 0; C.job = null; render(); } }, "Back to the start, keep this setup"),
+        el("button", { class: "fit", onclick: () => { Object.assign(C, { step: 0, job: null, prompt: "", scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, lastImage: null, scoutJob: null, beats: "", refs: [], subjects: [], refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null }); MA.job = null; Object.assign(REF_SAID, { pictures: "", videos: "", audios: "" }); render(); } }, "Start a new clip"), el("span")));
     if (job) { put(body, el("h3", {}, "This clip"), jobCard(job));
-      const out0 = job.status === "done" && (job.outputs || [])[0], player = out0 ? el("video", { class: "main", src: file(out0), controls: true }) : null, clip = { kind: "video", path: out0 };
-      // what follows a clip, under it: a frame to edit, carry it on, a new look, one change, larger
-      const nextActs = job.kind !== "video" || !out0 ? null : el("div", { class: "row next-acts", style: "margin-top:8px" },
-        typeof qkFrameButton === "function" ? qkFrameButton(clip.path, player) : null,
-        typeof betterButton === "function" && C.asked && C.asked.id === job.id ? betterButton(C.asked.body, (j, ask) => { C.job = j.id; C.asked = { id: j.id, body: ask }; }) : null,
-        typeof revButtons === "function" ? revButtons(clip) : null,
-        typeof actOf === "function" && actOf("upscale").ready ? el("button", { class: "small", title: "Make this clip larger and sharper (the Library's Upscale): the take itself is kept", onclick: () => actOpen("upscale", clip.path) }, "Upscale") : null, el("span"));
-      if (job.status === "done") put(body, player, nextActs,
+      if (job.status === "done") put(body, el("video", { class: "main", src: file(job.outputs[0]), controls: true }),
         el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: () => addToTimeline(job.outputs[0]) }, "Add to the editor timeline"), el("a", { class: "fit", href: file(job.outputs[0]), download: "" }, "Download"),
           job.kind === "long" ? el("button", { class: "fit", title: "Opens the Music tab with this video chosen: pick a song there and press “Use as soundtrack”", onclick: () => { MU.under = job.outputs[0]; MU.videos = null; tab = "Music"; history.replaceState(null, "", "#Music"); render(); toast("This video is chosen: open “Use as soundtrack” under a song"); } }, "Lay a song under it") : el("span"))); }
-  };
-  // one page: the shot, its first frame or references, the lines and sound, the engine and the prompt folded, then Render.
-  // The side panel (takeSheet in shell.js) holds the recipes, the length, the take at a glance and the same Render.
-  const sec = (cls, fill) => { const n = el("section", { class: "c1-sec" + (cls ? " " + cls : "") }); fill(n); return n; };
-  const est = el("span", { class: "eta" });
-  const engine = el("details", { class: "c1-sec c1-fold", open: !!C.openEngine, ontoggle: e => { C.openEngine = e.target.open; } },
-    el("summary", {}, el("b", {}, "Engine, size and length"), el("span", { class: "c1-sum" }, (isRef() ? "MiniMax H3 Ref2VA" : C.engine === "fasth3" ? "FastH3 · " + (customOn() ? C.steps : C.passes) + " passes" : "MiniMax H3") + " · " + (output().size || []).join(" × ") + " · " + (isLong() ? S.long[C.seconds] : exact(framesOf(C))))),
-    videoControls(() => { render(); }), summary(est));
-  showEstimate(C, est);
-  const reviewBox = el("div");
-  const review = el("details", { class: "c1-sec c1-fold", open: !!C.openReview, ontoggle: e => { C.openReview = e.target.open; if (e.target.open && !reviewBox.firstChild) step3(reviewBox); } },
-    el("summary", {}, el("b", {}, "Review the full prompt"), el("span", { class: "c1-sum" }, C.promptEdited ? "edited by hand" : "built from the fields above")), reviewBox);
-  if (C.openReview) step3(reviewBox);
-  const page = el("div", { class: "create1", "data-clear": "create-all" },
-    el("div", { class: "c1-head" }, el("div", {}, el("h1", {}, isLong() ? "A long take" : "A clip with sound"), el("p", { class: "note m-flat" }, "Describe the shot. Everything else has a sensible default on the right.")),
-      el("button", { class: "small ghost", title: "Empty every prompt field of this clip: scene, action, camera, lines, sound, and the composed prompt. Pictures, clips and settings stay.", onclick: clearAllCreate }, "Clear all")),
-    sec("", step0), sec("c1-frame", step1), sec("", step2), engine, review, sec("c1-render", step4));
-  // typing does not redraw the page: Render and its reason follow the words as they change
-  page.addEventListener("input", () => { if (typeof createReadyPaint === "function") createReadyPaint(); });
-  return page;
+  }
+  return el("section", { class: "card" }, steps, body, next);
 }
+
 /* ---------- Production ---------- */
 async function ensureProject() { if (project) return project; const list = await api("/api/projects"); project = list.length ? await api("/api/projects/" + list[0].id) : await api("/api/projects", { name: "Project 1" }); return project; }
 const saveProject = () => api("/api/projects/" + project.id, project, "PUT").catch(e => toast(e.message));
@@ -1096,114 +889,61 @@ function viewEditor() {
 }
 
 /* ---------- Library ---------- */
-// The Library shows a page of tiles at a time (Show more adds the next); its players fetch their file only once the
-// tile comes near the screen. A player per take, each loading at once, had every clip of the 400 newest downloading on
-// each redraw: the browser's few connections to the studio queued behind them and the page stalled.
-const LIB_PAGE = 60;
-const LIBF = { kind: "all", q: "", limit: LIB_PAGE };
-const LIBSEEN = { io: null };
-function libMedia(path, attrs = {}) { if (!LIBSEEN.io || !/\.(mp4|mov)$/i.test(path)) return media(path, /\.(mp4|mov)$/i.test(path) ? attrs : { loading: "lazy", ...attrs });
-  const { src, ...rest } = attrs, m = el("video", { preload: "metadata", ...rest, "data-src": src || file(path) });
-  LIBSEEN.io.observe(m); return m; }
-// a fresh watcher per Library draw, the last one's let go so the tiles of an old draw are not kept
-function libWatch() { if (LIBSEEN.io) LIBSEEN.io.disconnect(); LIBSEEN.io = typeof IntersectionObserver === "function" ? new IntersectionObserver(seen => {
-  for (const e of seen) if (e.isIntersecting) { const m = e.target; LIBSEEN.io.unobserve(m); if (m.dataset.src) { m.src = m.dataset.src; delete m.dataset.src; } } }, { rootMargin: "600px 0px" }) : null; }
+const LIBF = { kind: "all", q: "" };
 // a voice line, a song or a sound effect: its player, its words, and where it goes next (kept in Voice and Music, not deleted here)
 const LIB_SOUND = { voice: ["Voice line", "Voice"], music: ["Song", "Music"], sfx: ["Sound effect", null] };
-// the Library: a toolbar (kind, find, search what is in the clips), the grid of takes, and the selected take in a side panel
-// with what can be done with it. Select switches the grid to ticking several for a bulk delete or Finish.
-const LIBJOB = path => jobs.find(j => (j.outputs || []).includes(path)) || null;
-const libWhen = t => { if (!t) return ""; const d = new Date(t * 1000), now = new Date(), day = 864e5;
-  const same = d.toDateString() === now.toDateString(), yest = new Date(now - day).toDateString() === d.toDateString();
-  return same ? "today, " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : yest ? "yesterday" : d.toLocaleDateString([], { month: "short", day: "numeric" }); };
-const libKindName = m => m.kind === "video" ? "Clip" : m.kind === "image" ? "Picture" : (LIB_SOUND[m.sound] || LIB_SOUND.sfx)[0];
-// the selected take: its preview, what made it, then what can be done with it
-function libInspect(m) {
-  if (!m) return [el("div", { class: "lib-empty" }, el("b", {}, "Nothing selected"), el("span", { class: "note m-flat" }, "Click a take to see it here, with what made it and what to do with it next."))];
-  const j = LIBJOB(m.path), pr = j && j.params || {}, name = m.path.split("/").pop();
-  const row = (k, v) => v ? [el("dt", {}, k), el("dd", {}, v)] : [];
-  const toCreate = set => { Object.assign(C, { prompt: "", goes: "video", ...set }); C.step = 0; tab = "Create"; history.replaceState(null, "", "#Create"); render(); };
-  const preview = media(m.path, m.kind === "video" ? { controls: true, preload: "metadata", playsinline: true } : {});
-  const main = m.kind === "video"
-    ? [el("button", { class: "primary", disabled: !!capWhy("frame"), title: capWhy("frame") || (S.platform === "windows" ? "Extract the last frame into the Library" : "Start a new clip on this clip's last frame"), onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); if (S.platform === "windows") { toast("Last frame extracted"); render(); return; } toCreate({ image: r.path, start: "own" }); } catch (e) { toast(e.message); } } }, S.platform === "windows" ? "Extract last frame" : "Continue from its end"),
-       typeof qkFrameButton === "function" && !capWhy("edit") ? qkFrameButton(m.path, preview, "") : null,
-       typeof actOpen === "function" && !capWhy("video") ? el("button", { title: "Carry this clip on from its last frame, and join the two", onclick: () => actOpen("extend", m.path) }, "Extend") : null,
-       el("button", { onclick: () => addToTimeline(m.path) }, "Add to the timeline")]
-    : m.kind === "image"
-    ? [el("button", { class: "primary", disabled: !!capWhy("video"), title: capWhy("video") || "Open a new clip on this picture", onclick: () => toCreate({ image: m.path, start: "own" }) }, "Animate"),
-       el("button", { disabled: !!capWhy("edit"), title: capWhy("edit") || "Change something in this picture: say it in words (Quick Edit; More tools there for LoRAs, angles and several pictures)", onclick: () => typeof qkOpen === "function" ? qkOpen(m.path) : edOpen(m.path) }, "Edit"),
-       el("button", { disabled: !!capWhy("video"), title: capWhy("video") || "End a new clip on this picture", onclick: () => { C.lastImage = m.path; toCreate({ start: C.start === "refs" ? "text" : C.start }); } }, "End a clip on it"),
-       LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? el("button", { title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "New angle") : null]
-    : [el("button", { class: "primary", disabled: !!capWhy("video"), title: capWhy("video") || "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } toCreate({ start: "refs" }); toast("Added as reference sound"); } }, "Use as reference sound"),
-       (LIB_SOUND[m.sound] || LIB_SOUND.sfx)[1] ? el("button", { onclick: () => go((LIB_SOUND[m.sound] || LIB_SOUND.sfx)[1]) }, "Open in " + (LIB_SOUND[m.sound] || LIB_SOUND.sfx)[1]) : null];
-  const more = m.kind === "audio" ? [] : [actButtons(m), capButton(m)].flat().filter(Boolean);
-  return [
-    el("div", { class: "lib-preview" }, preview),
-    el("div", { class: "lib-title" }, el("b", { title: m.path }, j && j.title || name), el("span", {}, libKindName(m) + " · " + libWhen(m.modified) + (m.failed ? " · failed its check" : ""))),
-    el("div", { class: "lib-main" }, main),
-    pr.prompt ? el("div", { class: "lib-prompt" }, el("span", { class: "eyebrow" }, "Prompt"), el("p", {}, pr.prompt)) : null,
-    el("dl", { class: "lib-facts" },
-      row("Made by", j ? ({ video: "Clip with sound", long: "Long take", scout: "Pictures", edit: "Picture edit" }[j.kind] || j.kind) + (pr.image_model ? " · " + pr.image_model : pr.quality ? " · " + ((S.qualities || {})[pr.quality] || pr.quality) : "") : ""),
-      row("Size", pr.width && pr.height ? pr.width + " × " + pr.height : (S.presets && S.presets[pr.preset] && S.presets[pr.preset].size ? S.presets[pr.preset].size.join(" × ") : "")),
-      row("Length", pr.frames ? (typeof exact === "function" ? exact(pr.frames) : pr.frames + " frames") : pr.seconds ? pr.seconds + " s" : ""),
-      row("Seed", pr.seed != null ? String(pr.seed) : m.seed != null ? String(m.seed) : ""),
-      row("Rendered on", m.spark ? (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) : ""),
-      row("Folder", m.folder || m.path.split("/").slice(0, -1).join("/")), row("File", sizeText(m.size || 0))),
-    more.length ? el("details", { class: "lib-more fold" }, el("summary", {}, "More actions"), el("div", { class: "chips" }, more)) : null,
-    el("div", { class: "lib-links" },
-      el("a", { href: file(m.path), download: "" }, "Download"),
-      el("a", { href: "#", onclick: e => { e.preventDefault(); navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, "Copy path"),
-      el("span", { class: "su-grow" }),
-      el("a", { href: "#", class: "lib-del", title: "Moves the file to the trash folder", onclick: e => { e.preventDefault(); clearOut({ paths: [m.path], films: true }, "Delete " + name + "?"); } }, "Delete"))]; }
-function viewLibrary() { const box = el("section", { class: "lib" });
+function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
+  return el("div", { class: "tile lib-sound", "data-path": m.path, "data-sound": m.sound || "sfx", style: shown ? null : "display:none" },
+    el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
+    el("div", { class: "cap" }, el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
+    el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
+      el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
+      room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null)); }
+function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
+  const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
   Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
-    // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect; words filter in place as they are typed
+    // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
+    // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
     const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
     const hits = () => { const words = LIBF.q.trim().toLowerCase().split(/\s+/).filter(Boolean); return kindList.filter(m => words.every(w => (m.path + " " + (m.spark || "") + (m.failed ? " failed check" : "")).toLowerCase().includes(w))); };
-    let list = hits(); libWatch(); const capBar = capSearch(() => pager, () => show()); if (!CAP.map) capLoad().then(() => { if (tab === "Library") render(); });
-    const kinds = { all: "All", video: "Clips", image: "Pictures", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
-    const find = el("input", { type: "search", class: "lib-find", placeholder: "Find by name or folder", title: "Words in the file name or folder, a Spark's name, or \"failed\"", value: LIBF.q, "aria-label": "Find in the Library" });
-    // the tiles shown: the first LIBF.limit of the matches; Show more adds a page
-    const paint = () => { const on = new Set(list.slice(0, LIBF.limit).map(m => m.path)), rest = list.length - on.size;
-      for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none";
-      more.textContent = "Show " + Math.min(LIB_PAGE, rest) + " more (" + rest + " not shown)"; more.style.display = rest > 0 ? "" : "none"; };
-    let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; LIBF.limit = LIB_PAGE; list = hits(); paint(); tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length) + " takes"; show(); };
+    let list = hits(); const capBar = capSearch(() => grid, () => show()); if (!CAP.map) capLoad().then(() => { if (tab === "Library") render(); });
+    const kinds = { all: "Everything", video: "Clips", image: "Stills", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
+    const find = el("input", { type: "search", placeholder: "Find by name, folder, Spark or \"failed\"", value: LIBF.q, style: "max-width:320px", "aria-label": "Find in the Library" });
+    let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits(); const on = new Set(list.map(m => m.path));
+      for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none"; tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
     find.addEventListener("input", () => { clearTimeout(wait); wait = setTimeout(apply, 150); }); find.addEventListener("change", apply);
     find.addEventListener("keydown", e => { if (e.key === "Enter") apply(); });
-    const many = el("button", { class: "small", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
-    // Select all takes what is shown: the search's matches while searching, else the pages of the listing on screen
-    const pool = () => { const f = capBar.found ? capBar.found() : []; return f.length ? f : list.slice(0, LIBF.limit).filter(m => m.kind !== "audio").map(m => m.path); };
-    const all = el("button", { class: "small", onclick: () => { const them = pool(), every = them.length && them.every(p => LIBPICK.has(p)); LIBPICK.clear(); if (!every) for (const p of them) LIBPICK.add(p); render(); } }, "Select all");
+    put(box, el("div", { class: "row", style: "align-items:center;margin-bottom:6px" }, el("div", { class: "chips fit" }, Object.entries(kinds).map(([k, t]) => el("button", { class: "small" + (LIBF.kind === k ? " on" : ""), onclick: () => { LIBF.kind = k; render(); } }, t + " · " + n(k)))), el("span"), el("div", { class: "fit" }, find), capBar.box));
+    const many = el("button", { class: "fit", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
+    // Select all takes what is shown: the search's matches while searching, else the listing
+    const pool = () => { const f = capBar.found ? capBar.found() : []; return f.length ? f : list.filter(m => m.kind !== "audio").map(m => m.path); };
+    const all = el("button", { class: "fit", onclick: () => { const them = pool(), every = them.length && them.every(p => LIBPICK.has(p)); LIBPICK.clear(); if (!every) for (const p of them) LIBPICK.add(p); render(); } }, "Select all");
     const show = () => { const them = pool(); many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
-    const tally = el("span", { class: "lib-tally" }, list.length + (list.length === all_.length ? "" : " of " + all_.length) + " takes");
-    if (!LIBF.sel || !list.some(m => m.path === LIBF.sel)) LIBF.sel = list.length ? list[0].path : null;  // a kind or a search that hides it moves the panel on
-    const insp = el("aside", { class: "lib-side", "aria-label": "Selected take" }, libInspect(all_.find(m => m.path === LIBF.sel)));
-    const pick = m => { LIBF.sel = m.path; releaseMedia(insp); insp.replaceChildren(...libInspect(m)); for (const t of grid.children) t.classList.toggle("on", t.dataset.path === m.path); };
-    const shown = new Set(list.slice(0, LIBF.limit).map(m => m.path)), selecting = !!LIBF.select;
-    const tile = m => el("div", { class: "lib-tile" + (m.path === LIBF.sel ? " on" : "") + (m.kind === "audio" ? " sound" : ""), "data-path": m.path, title: capText(m.path) || m.path, style: shown.has(m.path) ? null : "display:none" },
-      el("button", { type: "button", class: "lib-pic", "aria-label": "Show " + m.path.split("/").pop(), onclick: () => pick(m) },
-        m.kind === "audio" ? el("span", { class: "lib-wave", "aria-hidden": "true" }, icon("sound", "ic"), el("small", {}, libKindName(m))) : libMedia(m.path, m.kind === "video" ? { controls: false, muted: true, preload: "metadata", src: file(m.path) + "#t=0.5" } : {}),
-        el("span", { class: "lib-badge" }, m.kind === "video" ? "CLIP" : m.kind === "image" ? "IMG" : "AUDIO")),
-      selecting && m.kind !== "audio" ? el("input", { type: "checkbox", class: "lib-check", "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }) : null,
-      el("span", { class: "lib-name" }, m.title || m.path.split("/").pop()), m.failed ? el("span", { class: "lib-flag" }, "failed check") : null);
-    const grid = el("div", { class: "lib-grid" }, kindList.map(tile));
-    const more = el("button", { type: "button", class: "small lib-more-tiles", onclick: () => { LIBF.limit += LIB_PAGE; paint(); show(); } }), pager = el("div", {}, grid, el("div", { class: "row", style: "margin-top:10px;justify-content:center" }, more)); paint();
+    const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
+    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
+    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
+      el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
+      m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? " · s" + m.seed : "")) : null,
+      m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
+      // the buttons on a row of their own: a long file name no longer pushes them out of the tile
+      el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" }, actButtons(m), capButton(m),
+      m.kind === "video" ? el("button", { class: "small", title: "Start a new clip on this clip's last frame", onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); C.image = r.path; C.prompt = ""; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } catch (e) { toast(e.message); } } }, "continue") : el("button", { class: "small", title: "End a new clip on this picture", onclick: () => { C.lastImage = m.path; C.prompt = ""; C.goes = "video"; if (C.start === "refs") C.start = "text"; C.step = 1; tab = "Create"; render(); } }, "last frame"),
+      m.kind === "video" ? el("button", { class: "small", onclick: () => addToTimeline(m.path) }, "+ timeline") : el("button", { class: "small", onclick: () => { C.image = m.path; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } }, "use"),
+      m.kind === "video" ? null : el("button", { class: "small", title: "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
+      m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),
+      // out of the library: the server moves the file to the studio's trash folder
+      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))));
     if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
-    put(box,
-      el("div", { class: "lib-bar" },
-        el("div", { class: "seg-ctl", role: "group", "aria-label": "Kind" }, Object.entries(kinds).filter(([k]) => k === "all" || n(k)).map(([k, t]) => el("button", { type: "button", class: LIBF.kind === k ? "on" : "", "aria-pressed": LIBF.kind === k ? "true" : "false", onclick: () => { LIBF.kind = k; LIBF.limit = LIB_PAGE; render(); } }, t, el("small", {}, String(n(k)))))),
-        find, capBar.box, el("span", { class: "su-grow" }),
-        el("button", { type: "button", class: "small" + (selecting ? " on" : ""), "aria-pressed": selecting ? "true" : "false", onclick: () => { LIBF.select = !selecting; if (selecting) LIBPICK.clear(); render(); } }, selecting ? "Done" : "Select")),
-      selecting ? el("div", { class: "lib-selbar" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span", { class: "note m-flat" }, "Ticked takes can be deleted together or sent to Finish.")) : null,
-      actPanel(), typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
-      capBar.results,
-      el("div", { class: "lib-body" }, el("div", { class: "lib-left" }, pager, all_.length ? null : el("div", { class: "note" }, "Nothing rendered yet. Your takes will line up here.")), insp),
-      el("div", { class: "lib-foot" }, tally, bin ? el("span", { id: "trashline" }, " · Trash: " + (bin.files ? count(bin.files, "file") + ", " + sizeText(bin.bytes) : "empty")) : null, el("span", { class: "su-grow" }),
-        bin && bin.last ? el("button", { class: "small ghost", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
-        bin && bin.files ? el("button", { class: "small ghost", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
-          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null)); })
+    put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
+      typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
+      el("div", { class: "row", style: "margin-top:10px" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span"),
+        bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,
+        bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
+        bin && bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
+          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
+      capBar.results, grid); })
   .catch(e => put(box, el("div", { class: "note" }, e.message)));
-  return box; }
+  return head ? el("div", {}, head, box) : box; }
 
 /* ---------- Tutorial ---------- */
 // lessons per tab, one step on screen at a time; a step can point at the control it describes ("go"), and the coach bar then follows into that tab
@@ -1374,7 +1114,6 @@ function lessons() {
     { id: "actions", track: "Library", title: "Library actions", sub: "turn a picture round, enlarge a clip, take a person out", steps: [
       { t: "Turn a picture round", d: ["Under a picture, “Turnaround” makes five views of its subject, turning from where it faces now. They are made together, so the character stays the same in all five.", "Each view is a picture of its own in the Library: “first frame” starts a clip on it, “reference” adds it to a reference clip's pictures. 512 is the fastest size; 1024 is the one to keep."], tip: "“The turn” goes furthest round. “The look” turns less and stays closer to your picture.", go: on("Library", "Turnaround") },
       { t: "Make a clip larger", d: ["Under a clip, “Upscale” makes it larger and sharper: the picture is enlarged, then drawn over once, lightly, with the clip itself as the guide. Mouths, motion and the clip's own sound stay as they were.", "2 megapixels is about 1920 × 1080. “Light” is the tested re-draw; “None” only enlarges."], go: on("Library", "Upscale") },
-      { t: "Finish a clip in HDR", d: ["Under a clip, “keys-HDR LORA” (the HDR finish) grades it very bright and contrasty and writes real HDR (HLG, 10-bit) with an SDR copy beside it. It takes no model and adds no detail, and only an HDR screen shows the master's full range. Finish a joined film as one clip, so that the look does not jump at the cuts."] },
       { t: "Take a person out", d: ["Under a clip, “Remove a person” takes one person out and draws the background again. Say who in a few words (“man in a gray shirt”), then press “1. Find the person”: the person comes back painted green. Check hands, hair and shadow before the long render.", "“2. Remove the person” then works through the clip in overlapping pieces. It needs a first frame without the person: the app builds one from the clip, or you load your own edit of the first frame."], tip: "Best on a short, continuous shot. The whole picture is drawn again, so small details elsewhere can change. The clip's own sound still holds the removed person's voice: tick “No sound” to leave it out.", go: on("Library", "Remove a person") } ] },
     { id: "swap", track: "Library", title: "Character Swap", sub: "a picture's character in place of the person in a part of a clip", steps: [
       { t: "Open Character Swap", d: ["Under a clip in the Library, “Swap the character” opens a panel beside the clip. It puts the character in one picture in place of the person in a 5 to 15 second part of the clip: the scene, the performance and the clip's own sound stay.", "It runs on a DGX Spark or another CUDA machine with MiniMax H3 Ref2VA (bash oneshot-setup-spark.sh --swap, 2.1 GB beside Ref2VA). On a Mac the panel says it is not available."], go: on("Library", "Swap the character") },
@@ -1491,7 +1230,7 @@ function jobTools() { const done = jobs.filter(j => ["done", "cancelled"].includ
     el("button", { class: "small", disabled: !PICK.size, title: "The selected takes with their prompt, seed, model and LoRAs, packed for Circle Take", onclick: () => location.assign("/api/export/dailies.zip?jobs=" + [...PICK].join(",")) }, "Dailies for Circle Take (" + PICK.size + ")"),
     el("button", { class: "small", disabled: !failed, title: "Take every failed job out of this list", onclick: () => clearOut({ failed: true }, "Clear the " + count(failed, "failed job") + " from the queue list?") }, "Clear failed (" + failed + ")"),
     el("button", { class: "small", disabled: !done, title: "Every finished or cancelled job leaves this list and its clips, stills and check sheets go to the trash folder. A clip that is in a film (a project's timeline, a Slate take) stays.", onclick: () => clearOut({ finished: true }, "Delete all " + count(done, "finished job") + " and the files they made?\nA clip that is in a film (a project's timeline or a Slate take) stays where it is.") }, "Delete all finished (" + done + ")")] : [])); }
-let lastSig = "", lastDone = "";
+let lastSig = "";
 // A pointer held down (a click or a tap under way): the page is not rebuilt under it, or the click is lost (#54)
 let HELD = false;
 for (const [on, held] of [["pointerdown", true], ["pointerup", false], ["pointercancel", false]]) document.addEventListener(on, () => { HELD = held; }, true);
@@ -1511,26 +1250,17 @@ function queueDraw(box) { const shown = jobs.slice(0, 30), was = CARDS.size ? [.
   CARDS.clear(); for (const [id, one] of next) CARDS.set(id, one); }
 async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   if (HELD) return;  // the next poll draws it, once the pointer is up
-  if (typeof wfcObserveJobs === "function") await wfcObserveJobs(jobs);
   jobTools(); queueDraw($("#jobs")); bayUpdate();
   // a timeline changed from another window or device shows here without a reload
   if (project && tab === "Editor" && !busyHere()) { try { const fresh = await api("/api/projects/" + project.id);
     if (JSON.stringify(fresh.timeline) !== JSON.stringify(project.timeline)) { project = fresh; render(); } } catch {} }
-  // The Library is drawn again only when a take is new or gone (a job done, or one deleted): a job queued, started or
-  // cancelled changes none of its files, and each draw built every tile again
-  const sig = jobs.map(j => j.id + j.status).join(), done = jobs.filter(j => j.status === "done").map(j => j.id).join();
-  if (sig !== lastSig && !busyHere()) { const had = lastSig, hadDone = lastDone; lastSig = sig; lastDone = done; if (had && (tab !== "Library" || done !== hadDone)) render(); } }
+  const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig && !busyHere()) { const had = lastSig; lastSig = sig; if (had) render(); } }
 
 // A redraw keeps where the page and its scrolling strips were (the Editor timeline, #54): marked with data-keep-scroll
 function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [...document.querySelectorAll("[data-keep-scroll]")].map(n => [n.dataset.keepScroll, n.scrollLeft, n.scrollTop]);
   return () => { for (const [key, left, top] of strips) { const n = document.querySelector(`[data-keep-scroll="${key}"]`); if (n) { n.scrollLeft = left; n.scrollTop = top; } } window.scrollTo(...at); }; }
-function render() {
-  if (!S) { $("#view").replaceChildren(el("div", { class: "note", role: "status" }, "Loading Studio...")); return; }
-  const back = keepScroll(); renderShell(); releaseMedia($("#view"));
-  const unavailable = capWhy(({ Voice: "voice", Music: "music", "Motion Previs": "motion", Finish: "finish", Director: "video", "Night shift": "video", Looks: "looks", Models: "models", Updates: "updates", Sparks: "workers", "Quick Edit": "edit" })[tab]);
-  $("#view").replaceChildren(unavailable ? el("div", {}, pageHead("Feature availability", tab, unavailable),
-    tab === "Finish" && typeof featureBadge === "function" ? featureBadge("finish") : null,
-    el("button", { class: "primary", onclick: () => go("Home") }, "Back to supported tools")) : { Home: viewHome, Apps: typeof viewApps === "function" ? viewApps : () => el("div", { class: "note" }, "Apps is not in this build."), Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), "Quick Edit": viewQuick, Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Graphics: viewGraphics, Finish: viewFinish, "Cast & Places": viewCast, Director: viewDirector, "Motion graphics": viewGraphics, "Night shift": viewNight, Library: viewLibrary,
+function render() { const back = keepScroll(); renderShell(); releaseMedia($("#view"));
+  $("#view").replaceChildren({ Home: viewHome, Apps: typeof viewApps === "function" ? viewApps : () => el("div", { class: "note" }, "Apps is not in this build."), Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Graphics: viewGraphics, Finish: viewFinish, "Cast & Places": viewCast, Director: viewDirector, "Motion graphics": viewGraphics, "Night shift": viewNight, Library: viewLibrary,
     Machine: viewMachine, Models: () => typeof viewDiscover === "function" ? viewDiscover() : el("div", { class: "note" }, "Models & weights is not in this build."), Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial, Settings: viewSettings,
     // Nodes is its own module (nodes.js): a page without it says so quietly
     Nodes: typeof viewNodes === "function" ? viewNodes : () => el("div", { class: "panel" }, el("h2", {}, "Nodes"), el("div", { class: "note m-flat" }, "The node canvas is not part of this install yet.")) }[tab]()); coach(); bayUpdate();
@@ -1540,7 +1270,7 @@ function render() {
 (async () => { const want = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(want)) tab = want; actLoad();
   // links can preset the Create form: ?goes=image, ?engine=h3&res=720p&up=1&step=4 ...
   for (const [k, v] of new URLSearchParams(location.search)) if (k in C && k !== "mode") C[k] = k === "up" ? v === "1" : (k === "step" || k === "count" ? Number(v) : v);
-  S = await api("/api/state"); await loadLoras(); if (typeof settingsLoad === "function") await settingsLoad().catch(() => {}); if (!S.turbo) C.engine = "fasth3"; sync(); for (const h of ["#gohome", "#mhome"]) $(h).onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = platName(); if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Imagination Studio · " + platName(); shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
+  S = await api("/api/state"); await loadLoras(); if (typeof settingsLoad === "function") await settingsLoad().catch(() => {}); if (!S.turbo) C.engine = "fasth3"; sync(); for (const h of ["#gohome", "#mhome"]) $(h).onclick = e => { e.preventDefault(); T.coach = false; go("Home"); }; $("#plat").textContent = platName(); if (S.ffmpeg_note) { $("#warnbar").textContent = S.ffmpeg_note; $("#warnbar").classList.remove("hide"); } document.body.dataset.platform = S.platform; document.title = "Imagination Studio · " + platName(); $("#ver").textContent = "Studio " + S.version; shellStart(); $("#home").textContent = S.home; await poll(); render(); setInterval(poll, 2000);
   // ?motionref opens the create wizard on the motion reference stored by the Motion Previs tab
   if (new URLSearchParams(location.search).has("motionref")) { try { const r = (await api("/api/motion/handoff")).reference; if (r) useMotionReference(r, await api("/api/motion/packs/" + r.pack).catch(() => null)); } catch {} } })();
 </script>

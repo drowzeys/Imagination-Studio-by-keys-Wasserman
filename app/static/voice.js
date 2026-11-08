@@ -3,12 +3,11 @@
    Text to speech on this machine with TensorFold's port of Fish Audio Drama 3: speaker tags and [directions] in the
    text, an optional voice to clone (with the speaker's consent), one take per job in the render queue. A take can go to
    the create wizard as reference audio (<Audio N>) for MiniMax H3 Ref2VA. Nothing is sent to Fish Audio. */
-const VO = { takes: null, text: "", ref: null, refText: "", consent: false, seed: 1, temperature: 1.0, top_p: 0.9, top_k: 30, job: null, busy: false, cutting: "", player: null, stream: true, view: "lines", names: {} };
+const VO = { takes: null, text: "", ref: null, refText: "", consent: false, seed: 1, temperature: 1.0, top_p: 0.9, top_k: 30, job: null, busy: false, cutting: "", player: null, stream: true };
 // one turn a line: on one line Drama 3 drops later turns far more often (the app also breaks the lines itself, voice.py dialogue)
 const VO_EXAMPLE = "<|speaker:0|> [whispering] Did you hear that noise downstairs?\n<|speaker:1|> [sighs] It's probably just the cat. Go back to sleep.\n<|speaker:0|> Cats don't knock on doors.";
 const voOn = () => !!(S && S.voice && S.voice.available);
 const voActive = () => VO.job && ["queued", "running"].includes(VO.job.status);
-const voBounded = () => !!(S.voice?.qualification_required && S.voice?.qualified && S.voice?.verified_recipe);
 // the CUDA engine's take plays while it is made (GET /api/voice/takes/{id}/live): one player a take, kept across redraws
 function voLive(job) {
   if (!(S.voice && S.voice.live) || !job || job.status !== "running" || (job.params && job.params.live === false)) return null;
@@ -50,100 +49,60 @@ async function voRender() {
   if (VO.ref && !VO.consent) return toast("Tick the consent box to clone this voice, or take the clip out");
   // the queue takes a moment to answer: a second click before it does must not make a second take
   if (VO.busy) return; VO.busy = true; render();
-  try { VO.job = await api("/api/voice/takes", { text: VO.text, seed: VO.seed, temperature: VO.temperature, top_p: VO.top_p, top_k: VO.top_k,
-    live: voBounded() ? false : VO.stream, ...(voBounded() ? { asr: false } : {}),
+  try { VO.job = await api("/api/voice/takes", { text: VO.text, seed: VO.seed, temperature: VO.temperature, top_p: VO.top_p, top_k: VO.top_k, live: VO.stream,
     ...(VO.ref ? { ref_audio: VO.ref, ref_text: VO.refText, consent: VO.consent } : {}) }); } catch (e) { VO.busy = false; return toast(e.message); }
   VO.busy = false; await poll(); render(); }
-function voTake(t) {
-  return el("div", { class: "vo-take" },
-    el("div", { class: "vo-take-top" }, el("b", {}, t.title || "Voice take"), el("span", { class: "vo-when" }, new Date(t.created * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
-      t.asr && t.asr.score != null ? el("span", { class: "vo-score" + (t.asr.score >= 98 ? " ok" : ""), title: t.asr.heard ? "Whisper heard: " + t.asr.heard : "" }, t.asr.found + " of " + t.asr.words + " words") : null),
-    el("audio", { src: file(t.path), controls: true, preload: "metadata" }),
-    el("div", { class: "note m-flat vo-meta", title: t.asr && t.asr.heard ? "Whisper heard: " + t.asr.heard : "" }, voLine(t)),
-    el("div", { class: "vo-text" }, t.text.length > 300 ? t.text.slice(0, 300) + "…" : t.text),
-    el("div", { class: "chips" },
-      el("a", { href: "/api/voice/takes/" + encodeURIComponent(t.id) + "/audio", download: "drama3-" + t.id + ".wav", class: "vo-dl" }, "Download WAV"),
-      el("button", { class: "small", disabled: VO.cutting === t.path, title: "Opens Create with this take as a reference audio clip (2 to 15 s; a longer take is cut to its first 15 s)", onclick: () => voUseAsRef(t.path, t.duration) }, VO.cutting === t.path ? "Cutting…" : "Use as Ref2VA voice reference"),
-      el("button", { class: "small", title: "Clone this take's voice for the next take: the same speaker across lines", disabled: !voOn() || (t.duration || 0) < 2, onclick: () => { VO.ref = t.path; VO.refText = t.reference ? "" : t.text.replace(/<\|speaker:\d+\|>|\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim(); VO.consent = false; render(); toast("Tick the consent box to use this voice"); } }, "Clone this voice"),
-      el("button", { class: "small", title: "Put this take's text and settings back in the form", onclick: () => { Object.assign(VO, { text: t.text, seed: t.seed + 1, temperature: t.temperature, top_p: t.top_p, top_k: t.top_k }); window.scrollTo(0, 0); render(); } }, "Again, next seed"))); }
-// the script as lines, one turn each, and back: "<|speaker:N|> words" is what Drama 3 reads (text without a tag is speaker 0)
-function voParse(text) { const out = [];
-  for (const raw of String(text || "").split("\n")) { if (!raw.trim()) continue; const m = raw.match(/^\s*<\|speaker:(\d+)\|>\s*(.*)$/);
-    out.push(m ? { sp: Number(m[1]), text: m[2] } : { sp: out.length ? out[out.length - 1].sp : 0, text: raw.trim(), bare: true }); }
-  return out; }
-function voJoin(lines) { const many = lines.some(l => l.sp !== 0);
-  return lines.filter(l => l.text.trim() || l.keep).map(l => (many || !l.bare ? "<|speaker:" + l.sp + "|> " : "") + l.text.trim()).join("\n"); }
-const voName = sp => (VO.names[sp] || "").trim() || "Speaker " + (sp + 1);
-const voWords = t => String(t || "").replace(/<\|speaker:\d+\|>|\[[^\]]*\]/g, " ").split(/\s+/).filter(Boolean).length;
-// the line editor: a speaker per line (a select over the names given on the right) and its words
-function voLines(st) { const lines = voParse(VO.text); if (!lines.length) lines.push({ sp: 0, text: "", keep: true });
-  const save = () => { VO.text = voJoin(lines); if (typeof voCount === "function") voCount(); };
-  const speakers = Math.max(2, ...lines.map(l => l.sp + 1)), opts = Array.from({ length: Math.min(16, speakers + 1) }, (_, k) => k);
-  return el("div", { class: "vo-lines" }, lines.map((l, i) => el("div", { class: "vo-line" },
-    el("select", { class: "vo-who vo-sp" + (l.sp % 4), "aria-label": "Who says line " + (i + 1), disabled: !st.available, onchange: e => { l.sp = Number(e.target.value); l.bare = false; save(); render(); } },
-      opts.map(k => el("option", { value: k, selected: k === l.sp }, voName(k)))),
-    (() => { const t = el("textarea", { rows: 1, class: "vo-said", "aria-label": "Line " + (i + 1), disabled: !st.available, placeholder: i ? "The next line" : "What is said. [whispering], [sighs] or a description in brackets steers the delivery." });
-      t.value = l.text; t.addEventListener("input", () => { l.text = t.value; save(); }); return t; })(),
-    el("button", { class: "small ghost vo-x", type: "button", "aria-label": "Remove line " + (i + 1), disabled: !st.available || lines.length < 2, onclick: () => { lines.splice(i, 1); save(); render(); } }, "×"))),
-    el("div", { class: "vo-add" }, el("button", { class: "small", type: "button", disabled: !st.available, onclick: () => { const last = lines[lines.length - 1]; lines.push({ sp: lines.length > 1 ? lines[lines.length - 2].sp : (last.sp ? 0 : 1), text: "", keep: true, bare: false }); VO.text = voJoin(lines); render(); } }, "+ Add a line"),
-      el("span", { class: "note m-flat" }, "One turn per line: on one line Drama 3 often drops the later turns."))); }
-function viewVoice() {
-  if (VO.takes === null) { VO.takes = []; voLoad(); }
-  const st = S.voice || { available: false, why: "This app does not know Drama 3.", defaults: {} };
-  const bounded = voBounded();  // a verified recipe only (short plain speech, one speaker): no lines, cast or cloning
-  if (VO.job) { const fresh = jobs.find(j => j.id === VO.job.id); if (fresh) { if (fresh.status === "done" && VO.job.status !== "done") voLoad(); VO.job = fresh; } }
-  const count = el("span", { class: "note m-flat" });
-  globalThis.voCount = () => { const w = voWords(VO.text), n = voParse(VO.text).filter(l => l.text.trim()).length; count.textContent = n ? n + (n === 1 ? " line · " : " lines · ") + w + " words · about " + Math.max(1, Math.round(w / 2.6)) + " s of speech" : "Nothing written yet"; };
-  voCount();
-  const raw = el("textarea", { class: "vo-raw", disabled: !st.available, maxlength: bounded ? 120 : st.text_limit, placeholder: bounded ? "A short plain sentence, one speaker." : "What is said. <|speaker:0|> … <|speaker:15|> switch voices; [whispering], [sighs], [laughs] or a description in brackets steer the delivery." });
-  bind(VO, "text", raw, () => voCount());
-  const script = el("section", { class: "vo-script", "data-clear": "voice" },
-    el("div", { class: "vo-scripthead" }, el("b", {}, "Script"),
-      bounded ? null : el("div", { class: "seg-ctl", role: "group", "aria-label": "Edit as" }, [["lines", "Lines"], ["text", "Text"]].map(([k, t]) => el("button", { type: "button", class: VO.view === k ? "on" : "", "aria-pressed": VO.view === k ? "true" : "false", onclick: () => { VO.view = k; render(); } }, t))),
-      el("span", { class: "su-grow" }),
-      bounded ? null : el("a", { href: "#", onclick: e => { e.preventDefault(); VO.text = VO_EXAMPLE; render(); } }, "Two-speaker example"), ...clearButton("voice")),
-    bounded ? [raw, el("div", { class: "note" }, "Verified: short plain speech, up to 20 words / 120 characters. Cloning, multiple speakers, streaming and transcription are not checked.")]
-    : VO.view === "text" ? [raw, el("div", { class: "note" }, "Speaker tags ", el("code", {}, "<|speaker:0|>"), " to ", el("code", {}, "<|speaker:15|>"), " switch voices (text without one is speaker 0). Long text is split at sentence ends and keeps one voice.")] : voLines(st));
-  const go = el("div", { class: "vo-go" }, count, el("span", { class: "su-grow" }),
-    st.available && st.checks && !bounded ? el("label", { class: "check m-flat", title: "Sent audio cannot be taken back: played as it is made, a part with missing words is reported, not drawn again" },
-      el("input", { type: "checkbox", checked: VO.stream, onchange: e => { VO.stream = e.target.checked; } }), el("span", {}, "Play while it is made")) : null,
-    el("button", { class: "hot", disabled: !st.available || voActive() || VO.busy || (VO.ref && !VO.consent), onclick: voRender }, VO.busy || voActive() ? "Speaking…" : "Speak it"));
-  const lines = voParse(VO.text), used = [...new Set([0, ...lines.map(l => l.sp)])].sort((a, b) => a - b);
-  const num = (key, attrs) => bind(VO, key, el("input", { type: "number", disabled: !st.available, ...attrs }));
-  const side = el("aside", { class: "vo-side", "aria-label": "Voices" },
-    bounded ? null : el("div", { class: "vo-card" }, el("div", { class: "vo-cardhead" }, el("b", {}, "Cast")),
-      used.map(sp => el("div", { class: "vo-cast" }, el("span", { class: "vo-dot vo-sp" + (sp % 4), "aria-hidden": "true" }, voName(sp).slice(0, 1).toUpperCase()),
-        (() => { const n = el("input", { value: VO.names[sp] || "", placeholder: "Speaker " + (sp + 1), "aria-label": "Name of speaker " + (sp + 1) }); n.addEventListener("change", () => { VO.names[sp] = n.value; render(); }); return n; })(),
-        el("span", { class: "vo-tag" }, "<|speaker:" + sp + "|>"))),
-      el("div", { class: "note m-flat vo-pad" }, "Names are for you; the model hears the speaker number. Describe a voice in a [direction] on its first line, or clone one below.")),
-    bounded ? null : el("div", { class: "vo-card" }, el("div", { class: "vo-cardhead" }, el("b", {}, "Clone a voice"), el("span", { class: "note m-flat" }, "optional")), el("div", { class: "vo-pad" }, voClone())),
-    el("details", { class: "vo-card vo-fold" }, el("summary", {}, el("b", {}, "Sampling"), el("span", { class: "note m-flat" }, "seed " + VO.seed + " · temperature " + VO.temperature)),
-      el("div", { class: "vo-pad vo-nums" }, el("label", {}, "Seed", num("seed", { min: 0, step: 1 })), el("label", { title: "Fish's default 1.0" }, "Temperature", num("temperature", { min: 0.1, max: 2, step: 0.05 })),
-        el("label", { title: "Fish's default 0.9" }, "Top-p", num("top_p", { min: 0.1, max: 1, step: 0.05 })), el("label", { title: "Fish's default 30" }, "Top-k", num("top_k", { min: 1, max: 200, step: 1 })),
-        el("button", { class: "small", disabled: !st.available, title: "Fish's sampling: temperature 1.0, top-p 0.9, top-k 30", onclick: () => { Object.assign(VO, { temperature: 1.0, top_p: 0.9, top_k: 30 }); render(); } }, "Fish defaults"))),
-    el("div", { class: "vo-credit" }, typeof mark === "function" ? mark("fish", "") : null, el("span", {}, el("b", {}, "Built with Fish Audio."), " " + (st.licence || "") + " Nothing is sent to Fish Audio: " + (typeof measuredLabel === "function" ? measuredLabel(st.label || "TensorFold") : (st.label || "TensorFold")) + ".")),
-    st.available ? el("div", { class: "note m-flat vo-speed" }, voSpeed(st)) : null);
-  const main = el("div", { class: "vo-main" },
-    el("div", { class: "vo-head" }, el("h1", {}, "Voice"), el("span", { class: "note m-flat" }, bounded ? "Fish Audio Drama 3 · on this machine · short plain speech" : "Fish Audio Drama 3 · on this machine · several speakers, directions, a cloned voice")),
-    st.available ? null : el("div", { class: "tip" }, el("b", {}, "Not available here. "), st.why || ""),
-    script, go,
-    VO.job && VO.job.status === "failed" ? el("div", { class: "tip" }, el("b", {}, "The take failed. "), VO.job.error || "") : VO.job && voActive() ? jobCard(VO.job) : null,
-    VO.job ? voLive(VO.job) : null,
-    el("div", { class: "sectionhead" }, el("h2", {}, "Takes"), el("span", { class: "note" }, VO.takes.length ? VO.takes.length + (VO.takes.length === 1 ? " take" : " takes") : "")),
-    VO.takes.length ? el("div", { class: "vo-takes" }, VO.takes.slice(0, 40).map(voTake)) : el("div", { class: "note" }, "No takes yet."));
-  return el("div", { class: "vo" }, main, side); }
-// a voice to clone: a clip of one speaker and what it says, used only with the speaker's consent (keep the box)
-function voClone() {
-  const up = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg", disabled: !voOn(), "aria-label": "A recording of the voice to clone", onchange: async () => { if (!up.files[0]) return; const data = new FormData(); data.append("file", up.files[0]);
+function voReference() {
+  const up = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg", disabled: !voOn(), onchange: async () => { if (!up.files[0]) return; const data = new FormData(); data.append("file", up.files[0]);
     try { const j = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (!j.path) throw new Error(j.error || "upload failed");
       const m = await refMeta(j.path), lim = S.voice.reference_seconds;
       if (m.duration && (m.duration < lim[0] - 0.05 || m.duration > lim[1] + 0.05)) return toast("A voice to clone is " + lim[0] + " to " + lim[1] + " seconds of speech, and this clip is " + m.duration.toFixed(1) + " s");
       VO.ref = j.path; VO.consent = false; render(); } catch (e) { toast(e.message); } } });
-  return el("div", { class: "vo-clone" }, el("div", { class: "note m-flat" }, "A clean recording of one speaker, about 10 to 30 seconds. The take sounds like it; it is not an exact copy."),
-    VO.ref ? [el("audio", { src: file(VO.ref), controls: true, preload: "metadata" }),
-      field("What the clip says (left empty, Whisper writes it)", bind(VO, "refText", el("textarea", { rows: 2, placeholder: "the exact words of the recording" }))),
-      el("button", { class: "small", onclick: () => { VO.ref = null; VO.refText = ""; VO.consent = false; render(); } }, "Take it out")] : up,
-    el("label", { class: "check" }, el("input", { type: "checkbox", checked: VO.consent, disabled: !VO.ref, onchange: e => { VO.consent = e.target.checked; render(); } }), el("span", {}, "I have the speaker's consent to clone this voice"))); }
+  return el("div", { class: "group" }, el("h3", {}, "Voice to clone (optional)"),
+    el("div", { class: "note" }, "A clean recording of one speaker, about 10 to 30 seconds, and what it says. Without one, Drama 3 makes a voice of its own (describe it in a [direction], e.g. “[a deep, gravelly man in his fifties, slow and patient]”). Clone a real person's voice only with their consent."),
+    VO.ref ? el("div", {}, el("div", { class: "row", style: "align-items:center;margin-top:8px" }, el("audio", { src: file(VO.ref), controls: true, preload: "metadata", style: "width:100%" }),
+        el("button", { class: "small fit", onclick: () => { VO.ref = null; VO.refText = ""; VO.consent = false; render(); } }, "Take it out")),
+      field("What the clip says (left empty, Whisper writes it)", bind(VO, "refText", el("textarea", { style: "min-height:52px", placeholder: "the exact words of the recording" }))),
+      el("label", { class: "check" }, el("input", { type: "checkbox", checked: VO.consent, onchange: e => { VO.consent = e.target.checked; render(); } }), el("span", {}, "I have the speaker's consent to clone this voice")))
+      : field("Add a clip", up)); }
+function voTake(t) {
+  return el("div", { class: "seg", style: "margin-top:10px" }, el("div", { class: "seghead" }, el("b", {}, t.title || "Voice take"), el("span", { style: "flex:1" }), el("span", { class: "note", style: "margin:0" }, new Date(t.created * 1000).toLocaleString())),
+    el("audio", { src: file(t.path), controls: true, preload: "metadata", style: "width:100%;margin-top:6px" }),
+    el("div", { class: "note", title: t.asr && t.asr.heard ? "Whisper heard: " + t.asr.heard : "" }, voLine(t)),
+    el("div", { class: "note", style: "white-space:pre-wrap" }, t.text.length > 300 ? t.text.slice(0, 300) + "…" : t.text),
+    el("div", { class: "row", style: "margin-top:8px;flex-wrap:wrap;gap:6px" },
+      el("a", { class: "fit", href: "/api/voice/takes/" + encodeURIComponent(t.id) + "/audio", download: "drama3-" + t.id + ".wav" }, el("button", { class: "small", type: "button" }, "Download WAV")),
+      el("button", { class: "small fit", disabled: VO.cutting === t.path, title: "Opens the create wizard with this take as a reference audio clip (2 to 15 s; a longer take is cut to its first 15 s)", onclick: () => voUseAsRef(t.path, t.duration) }, VO.cutting === t.path ? "Cutting…" : "Use as Ref2VA voice reference"),
+      el("button", { class: "small fit", title: "Clone this take's voice for the next take: the same speaker across lines", disabled: !voOn() || (t.duration || 0) < 2, onclick: () => { VO.ref = t.path; VO.refText = t.reference ? "" : t.text.replace(/<\|speaker:\d+\|>|\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim(); VO.consent = false; window.scrollTo(0, 0); render(); } }, "Clone this voice"),
+      el("button", { class: "small fit", title: "Put this take's text and settings back in the form", onclick: () => { Object.assign(VO, { text: t.text, seed: t.seed + 1, temperature: t.temperature, top_p: t.top_p, top_k: t.top_k }); window.scrollTo(0, 0); render(); } }, "Again, next seed"))); }
+function viewVoice() {
+  const box = el("section", { class: "card" }, el("h2", {}, "Voice · Fish Audio Drama 3"));
+  if (VO.takes === null) { VO.takes = []; voLoad(); }
+  const st = S.voice || { available: false, why: "This app does not know Drama 3.", defaults: {} };
+  if (VO.job) { const fresh = jobs.find(j => j.id === VO.job.id); if (fresh) { if (fresh.status === "done" && VO.job.status !== "done") voLoad(); VO.job = fresh; } }
+  put(box, el("div", { class: "note", style: "margin-top:-4px" }, "Speech from text with Fish Audio Drama 3, on this machine: several speakers, directions for the delivery, a voice cloned from a clip. A take can go to a MiniMax H3 reference clip as its voice (", el("b", {}, "Use as Ref2VA voice reference"), ")."),
+    el("div", { class: "note vt-credit" }, typeof mark === "function" ? mark("fish", "") : null, el("b", {}, "Built with Fish Audio."), " " + (st.licence || "") + " Nothing is sent to Fish Audio: " + (typeof measuredLabel === "function" ? measuredLabel(st.label || "TensorFold") : (st.label || "TensorFold")) + "."));
+  if (!st.available) put(box, el("div", { class: "tip" }, el("b", {}, "Not available here. "), st.why || ""));
+  const text = el("textarea", { style: "min-height:130px", disabled: !st.available, placeholder: "What is said. <|speaker:0|> … <|speaker:15|> switch voices; [whispering], [sighs], [laughs] or a description in brackets steer the delivery." });
+  bind(VO, "text", text);
+  const num = (key, attrs) => bind(VO, key, el("input", { type: "number", disabled: !st.available, ...attrs }));
+  put(box, el("div", { class: "group", "data-clear": "voice" }, el("h3", {}, "What is said"), text,
+    el("div", { class: "note" }, "Speaker tags ", el("code", {}, "<|speaker:0|>"), " to ", el("code", {}, "<|speaker:15|>"), " switch voices (text without one is speaker 0). Directions in brackets steer the delivery: ", el("code", {}, "[whispering]"), ", ", el("code", {}, "[sighs]"), ", ", el("code", {}, "[laughs]"),
+      ", or a description of the voice. Long text is split at sentence ends and keeps one voice. ", el("a", { href: "#", onclick: e => { e.preventDefault(); VO.text = VO_EXAMPLE; render(); } }, "Two-speaker example")),
+    el("div", { class: "row", style: "margin-top:8px" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Seed"), num("seed", { min: 0, step: 1 })),
+      el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 1.0" }, "Temperature"), num("temperature", { min: 0.1, max: 2, step: 0.05 })),
+      el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 0.9" }, "Top-p"), num("top_p", { min: 0.1, max: 1, step: 0.05 })),
+      el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 30" }, "Top-k"), num("top_k", { min: 1, max: 200, step: 1 })),
+      el("button", { class: "small fit", disabled: !st.available, title: "Fish's sampling: temperature 1.0, top-p 0.9, top-k 30", onclick: () => { Object.assign(VO, { temperature: 1.0, top_p: 0.9, top_k: 30 }); render(); } }, "Fish defaults"), ...clearButton("voice"))),
+    voReference());
+  put(box, el("div", { class: "row", style: "margin-top:16px;align-items:center" }, el("div", { class: "fit" }, el("button", { class: "hot", disabled: !st.available || voActive() || VO.busy || (VO.ref && !VO.consent), onclick: voRender }, VO.busy || voActive() ? "Rendering…" : "Render the take")),
+    el("div", { class: "note", style: "margin:0" }, st.available ? voSpeed(st) : "")));
+  if (st.available && st.checks) put(box, el("label", { class: "check", title: "Sent audio cannot be taken back: played as it is made, a part with missing words is reported, not drawn again" },
+    el("input", { type: "checkbox", checked: VO.stream, onchange: e => { VO.stream = e.target.checked; } }), el("span", {}, "Play while it is made (off: a part with missing words is drawn again before you hear it)")));
+  if (VO.job) put(box, VO.job.status === "failed" ? el("div", { class: "tip" }, el("b", {}, "The take failed. "), VO.job.error || "") : voActive() ? jobCard(VO.job) : null);
+  if (VO.job) put(box, voLive(VO.job));
+  put(box, el("h3", { style: "margin-top:22px" }, "Takes"), VO.takes.length ? VO.takes.slice(0, 40).map(voTake) : el("div", { class: "note" }, "No takes yet."));
+  return box; }
 
 /* Slate, Sound tab: a voice sheet's cast voice (POST /api/voice/sheet). The sheet's description goes in as a [direction]
    ahead of its sample line; the take is kept on the sheet (sheet.drama) and, ticked, goes into shots that open on cast

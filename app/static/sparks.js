@@ -26,38 +26,23 @@ const spkCount = (d, n) => {
   if (onCard()) { const others = n - 1; return spkHere(d) + " and " + others + (spkLocalFleet(d) ? " worker" : " Spark") + (others === 1 ? "" : "s"); }
   return n + " of " + d.available + " available " + (spkLocalFleet(d) ? "workers" : "Sparks");
 };
-// What the page is laid out from: a change redraws the whole page. Live readings are not in it (a card's load,
-// temperature, power and memory; a machine's free memory): they move on every poll, and a redraw every 4 s restarted
-// a clip playing in the Library (#186). spkMachinesDraw and spkReadingsDraw write them in place instead.
-const spkWorkerSig = w => w && [w.address, w.kind, w.name, w.label, w.state, w.says, w.working, w.enabled, w.owned, w.why, w.job, w.guard, w.usable, w.can];
-const spkSig = d => !d ? "" : JSON.stringify([d.limit, d.available, d.default, d.names, d.placement,
-  d.local_gpus && [d.local_gpus.supported, d.local_gpus.limit, d.local_gpus.head_id, d.local_gpus.managed, d.local_gpus.unavailable,
-    (d.local_gpus.devices || []).map(g => [g.id, g.index, g.name, g.total_mb, g.display_active, g.head, g.reason, spkWorkerSig(g.worker)])],
-  d.workers.map(spkWorkerSig), d.this && [d.this.label, d.this.job, d.this.state, d.this.guard]]);
-// The room each machine has: a change drops the plans (asked again on the next draw), without redrawing the page.
-const spkRoom = d => !d ? "" : JSON.stringify([d.this && d.this.memory_gb, (d.workers || []).map(w => w.memory_gb),
-  ((d.local_gpus || {}).devices || []).map(g => g.free_mb)]);
+const spkSig = d => !d ? "" : JSON.stringify([d.limit, d.available, d.default, d.names, d.placement, d.local_gpus, d.workers.map(w => [w.address, w.kind, w.name, w.label, w.state, w.working, w.enabled, w.why, w.job, w.memory_gb, w.guard, w.usable]), d.this && [d.this.label, d.this.job, d.this.state, d.this.memory_gb, d.this.guard]]);
 function spkReconcile(first = false) {
   const d = SPK.data; let n = SPK.n;
   if (first) { try { n = Number(localStorage.getItem("sparks")); } catch {} n = n || d.default; }
   const next = d.supported ? Math.max(1, Math.min(Number(n) || d.default || 1, d.limit || 5)) : 1;
   if (next !== SPK.n) { SPK.n = next; try { localStorage.setItem("sparks", String(next)); } catch {} }
 }
-async function spkLoad(draw) { const was = spkSig(SPK.data), room = spkRoom(SPK.data), before = SPK.n; try { const first = !SPK.data; SPK.data = await api("/api/sparks"); spkReconcile(first);
+async function spkLoad(draw) { const was = spkSig(SPK.data), before = SPK.n; try { const first = !SPK.data; SPK.data = await api("/api/sparks"); spkReconcile(first);
   } catch { return; }
   if (SPK.data.supported && !(SPK.ticks++ % 5)) api("/api/sparks/takes").then(t => { SPK.takes = t; }, () => {});
   spkMachinesDraw();  // each machine's own readings move every few seconds: drawn in place, not by redrawing the whole page
-  spkReadingsDraw();  // and so do the Sparks tab's GPU and memory lines
-  if (spkRoom(SPK.data) !== room) SPK.plans = {};
   if (spkSig(SPK.data) === was && SPK.n === before) return; SPK.plans = {}; spkQueue();
   if (draw && typeof tab !== "undefined" && !document.activeElement.matches("input,textarea,select")) render(); }
-function spkSet(n) { const can = SPK.data && SPK.data.supported;
-  if (!can && SPK.data && SPK.data.note && typeof toast === "function") toast(SPK.data.note);  // Windows: why it stays one
-  SPK.n = can ? Math.max(1, Math.min(Number(n) || 1, spkLimit())) : 1; SPK.plans = {};
+function spkSet(n) { SPK.n = SPK.data && SPK.data.supported ? Math.max(1, Math.min(Number(n) || 1, spkLimit())) : 1; SPK.plans = {};
   try { localStorage.setItem("sparks", String(SPK.n)); } catch {} api("/api/sparks", { sparks: SPK.n }).catch(() => {}); spkQueue(); render(); }
 // What the number will do for this job, asked of the app (POST /api/sparks/plan) and said under the chooser
-async function spkPlan(node, what) { if (SPK.data && !SPK.data.supported) { node.replaceChildren(SPK.data.note); return; }
-  const body = { sparks: SPK.n, kind: what.kind || "video", params: what.params || {}, clips: what.clips || 1, seconds: what.seconds || 0, ...(what.placement !== undefined ? { placement: what.placement } : {}) }, key = JSON.stringify(body);
+async function spkPlan(node, what) { const body = { sparks: SPK.n, kind: what.kind || "video", params: what.params || {}, clips: what.clips || 1, seconds: what.seconds || 0, ...(what.placement !== undefined ? { placement: what.placement } : {}) }, key = JSON.stringify(body);
   let r = SPK.plans[key]; if (!r) { try { r = SPK.plans[key] = await api("/api/sparks/plan", body); } catch { return; } }
   node.replaceChildren(...spkSays(r)); }
 function spkSays(r) { if (!r.supported) return [r.says];
@@ -119,15 +104,12 @@ function spkMachine(m) { const s = m.status, g = s && s.gpu, mem = s && s.memory
       el("span", { class: "pill " + (busy ? "running" : m.state === "ready" || m.head ? "done" : m.state === "new" || m.state === "stopped" ? "queued" : "failed") }, busy ? "rendering" : m.head ? "idle" : says)),
     el("div", { class: "note", style: "margin-top:2px" }, [m.host && m.host !== m.label ? m.host : null, m.version ? "Studio " + m.version : null].filter(Boolean).join(" · ")),
     el("div", { class: "kv", style: "margin-top:8px" }, el("span", {}, "Doing"), el("b", { style: "text-align:right;white-space:normal" }, what)),
-    live && g && g.cards && g.cards.length > 1 ? el("div", {}, g.cards.map(c => spkMeter("GPU " + c.index,
-        (c.util_pct != null ? c.util_pct + "%" : "–") + (c.power_w != null ? " · " + Math.round(c.power_w) + " W" : "") + (c.temp_c != null ? " · " + Math.round(c.temp_c) + " °C" : "")
-        + (c.total_mb ? " · " + spkGB(c.used_mb) + " of " + spkGB(c.total_mb) : ""), c.util_pct, spkTone(c.util_pct, 95, 60))))
-    : live && g ? spkMeter("GPU", (g.util_pct != null ? g.util_pct + "%" : "–") + (g.power_w != null ? " · " + Math.round(g.power_w) + " W" : ""), g.util_pct, spkTone(g.util_pct, 95, 60))
+    live && g ? spkMeter("GPU", (g.util_pct != null ? g.util_pct + "%" : "–") + (g.power_w != null ? " · " + Math.round(g.power_w) + " W" : ""), g.util_pct, spkTone(g.util_pct, 95, 60))
       : el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "GPU"), el("b", {}, live ? "no GPU reading on this machine" : "not reported")),
     el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Temperature"), el("b", {}, g && g.temp_c != null ? Math.round(g.temp_c) + " °C" : "not reported")),
     live && mem && mem.total_mb ? spkMeter(mem.unified ? "Memory (the GPU shares it)" : "RAM", spkGB(mem.used_mb) + " used · " + spkGB(mem.free_mb) + " free of " + spkGB(mem.total_mb), mem.used_pct)
       : m.memory_gb != null ? el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Memory"), el("b", {}, m.memory_gb + " GB free")) : el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Memory"), el("b", {}, "not reported")),
-    live && card && card.total_mb ? spkMeter(card.cards ? "GPU memory (" + card.cards + " cards)" : "GPU memory", spkGB(card.used_mb) + " used · " + spkGB(card.free_mb) + " free of " + spkGB(card.total_mb), 100 * card.used_mb / card.total_mb) : null,
+    live && card && card.total_mb ? spkMeter("GPU memory", spkGB(card.used_mb) + " used · " + spkGB(card.free_mb) + " free of " + spkGB(card.total_mb), 100 * card.used_mb / card.total_mb) : null,
     live && disk && disk.free_gb != null ? spkMeter("Disk", spkFree(disk.free_gb) + " free of " + spkFree(disk.total_gb), disk.used_pct, spkTone(disk.used_pct, 90, 80))
       : m.disk_gb != null ? el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Disk"), el("b", {}, m.disk_gb + " GB free")) : null,
     live && s.cpu && s.cpu.load1 != null ? el("div", { class: "kv", style: "margin-top:7px" }, el("span", {}, "Processor"), el("b", {}, "load " + s.cpu.load1 + " on " + (s.cpu.cores || "?") + " cores")) : null,
@@ -166,19 +148,6 @@ function spkPlacement(d) {
     el("div", { class: "note" }, "New video clips only. Waiting keeps a clip on your chosen renderer, even when it is busy or stopped; it will not render elsewhere. Automatic uses the queue's worker count."));
 }
 const spkMetric = (value, unit) => value != null && Number.isFinite(Number(value)) ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 }) + unit : "unavailable";
-// the Sparks tab's live lines: drawn with the page, then rewritten in place by spkReadingsDraw after every poll
-const spkVram = g => "VRAM: " + spkMetric(g.used_mb, " MiB") + " used · " + spkMetric(g.free_mb, " MiB") + " free · " + spkMetric(g.total_mb, " MiB") + " total";
-const spkGpuLine = g => "GPU utilization: " + spkMetric(g.util_pct, "%") + " · Temperature: " + spkMetric(g.temp_c, " °C") + " · Power: " + spkMetric(g.power_w, " W") + " · Display: " + (g.display_active == null ? "unavailable" : g.display_active ? "active" : "inactive");
-const spkWorkerNote = w => [w.version ? "Studio " + w.version : null, w.guard ? "memory guard" : w.state === "ready" || w.state === "busy" ? null : w.version ? "memory guard not confirmed" : null, w.memory_gb != null ? w.memory_gb + " GB of memory available" : null,
-  w.disk_gb != null ? w.disk_gb + " GB of disk free" : null, w.job ? "rendering job " + w.job : null].filter(Boolean).join(" · ");
-const spkHeadNote = t => ["Studio " + t.version, t.guard !== false ? "memory guard" : null, t.memory_gb != null ? t.memory_gb + " GB of memory available" : null, t.disk_gb != null ? t.disk_gb + " GB of disk free" : null].filter(Boolean).join(" · ");
-function spkReading(key) {
-  const d = SPK.data || {}, cut = key.indexOf(":"), kind = key.slice(0, cut), id = key.slice(cut + 1);
-  const g = ((d.local_gpus || {}).devices || []).find(x => x.id === id), w = (d.workers || []).find(x => x.address === id);
-  return kind === "vram" ? g && spkVram(g) : kind === "gpu" ? g && spkGpuLine(g) : kind === "worker" ? w && spkWorkerNote(w) : kind === "head" ? d.this && spkHeadNote(d.this) : null;
-}
-function spkReadingsDraw() { if (typeof document === "undefined" || !document.querySelectorAll) return;
-  for (const node of document.querySelectorAll("[data-spk-reading]")) { const said = spkReading(node.getAttribute("data-spk-reading") || ""); if (said != null && node.textContent !== said) node.textContent = said; } }
 function spkLocal(d) {
   const local = d.local_gpus;
   if (!local || !local.supported && !(local.devices || []).some(g => g.worker)) return null;
@@ -207,8 +176,8 @@ function spkLocal(d) {
         } }, "Start") : null,
         !head && active ? el("button", { class: "small", disabled: busy, title: "Stop only this Studio-owned worker; external GPU processes are left alone", onclick: () => confirm("Stop the local worker on " + g.name + "?") && spkDo("/api/sparks/local", { gpu: g.id, action: "stop" }) }, "Stop") : null,
         !head && w && !owned && !busy ? el("button", { class: "small", title: "Remove this non-running worker from the configured list; the GPU stays detected", onclick: () => spkDo("/api/sparks/workers/" + encodeURIComponent(w.address), undefined, "DELETE") }, "Remove") : null),
-        el("div", { class: "note", "data-spk-reading": "vram:" + g.id }, spkVram(g)),
-        el("div", { class: "note", "data-spk-reading": "gpu:" + g.id }, spkGpuLine(g)),
+        el("div", { class: "note" }, "VRAM: " + spkMetric(g.used_mb, " MiB") + " used · " + spkMetric(g.free_mb, " MiB") + " free · " + spkMetric(g.total_mb, " MiB") + " total"),
+        el("div", { class: "note" }, "GPU utilization: " + spkMetric(g.util_pct, "%") + " · Temperature: " + spkMetric(g.temp_c, " °C") + " · Power: " + spkMetric(g.power_w, " W") + " · Display: " + (g.display_active == null ? "unavailable" : g.display_active ? "active" : "inactive")),
         job ? el("div", { class: "note" }, "Job: " + job) : null,
         w && w.can ? el("div", { class: "note" }, "Renders: " + spkHas(w.can)) : null,
         reason || (w && w.why) ? el("div", { class: "note", style: "color:var(--warn)" }, reason || w.why) : null);
@@ -231,7 +200,8 @@ function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}
       el("button", { class: "small", disabled: !!w.working, title: "Send " + here + "'s Studio code to it (rsync over ssh, as you), start its app on its own 127.0.0.1, and check it again. Models are not sent.", onclick: () => spkDo("/api/sparks/workers/" + a(w.address) + "/update", {}) }, "Update and start"),
       el("button", { class: "small", disabled: !!w.working, title: "Stop its Studio app and its ComfyUI server: its memory is free again", onclick: () => confirm("Stop the Studio app on " + (w.label || w.name) + " and free its memory?") && spkDo("/api/sparks/workers/" + a(w.address) + "/stop", {}) }, "Stop"),
       el("button", { class: "small", title: "Take this Spark off the list (what runs on it is left as it is)", onclick: () => confirm("Remove " + (w.label || w.name) + " from the list?") && spkDo("/api/sparks/workers/" + a(w.address), undefined, "DELETE") }, "Remove")),
-    el("div", { class: "note", "data-spk-reading": "worker:" + w.address }, spkWorkerNote(w)),
+    el("div", { class: "note" }, [w.version ? "Studio " + w.version : null, w.guard ? "memory guard" : w.state === "ready" || w.state === "busy" ? null : w.version ? "memory guard not confirmed" : null, w.memory_gb != null ? w.memory_gb + " GB of memory available" : null,
+      w.disk_gb != null ? w.disk_gb + " GB of disk free" : null, w.job ? "rendering job " + w.job : null].filter(Boolean).join(" · ")),
     w.can ? el("div", { class: "note" }, "Renders: " + spkHas(w.can)) : null,
     w.why || (w.unusable && w.state === "ready") ? el("div", { class: "note", style: "color:var(--warn)" }, w.why || w.unusable) : null);
   put(box, local, spkPlacement(d), el("div", { class: "note" }, (onCard() ? "A job may use this GPU, configured local GPU workers, and the DGX Sparks you add. Choose how many here, in the queue, or where you queue a job: " + here + " counts as one. Several clips render one per worker, side by side; one clip renders on one GPU. " : "A job may use more than one DGX Spark. Choose how many here, in the queue, or where you queue a job: " + here + " counts as one. Several clips render one per Spark, side by side; one clip renders on one Spark. ") + "Each remote Spark runs its own copy of this Studio, closed to the network: this app reaches it through an ssh tunnel it opens itself, so you need a key login to it as the user who runs this app."
@@ -240,7 +210,7 @@ function viewSparks() { const box = el("section", { class: "card" }, el("h2", {}
     spkMachinesPanel(),
     el("h3", {}, here[0].toUpperCase() + here.slice(1) + " and " + (d.listed - 1) + " other" + (d.listed === 2 ? "" : "s") + " · " + d.available + " available"),
     d.local_gpus && d.local_gpus.supported ? null : el("div", { class: "seg" }, el("div", { class: "seghead" }, spkDot(d.this.state), el("b", {}, d.this.label || d.this.name), el("span", { class: "note" }, here + (d.this.label && d.this.label !== d.this.name ? " · " + d.this.name : "")), el("span", { class: "pill " + (d.this.job ? "running" : "done") }, d.this.job ? "rendering" : "idle")),
-      el("div", { class: "note", "data-spk-reading": "head:" }, spkHeadNote(d.this)), el("div", { class: "note" }, "Renders: " + spkHas(d.this.can))),
+      el("div", { class: "note" }, ["Studio " + d.this.version, d.this.guard !== false ? "memory guard" : null, d.this.memory_gb != null ? d.this.memory_gb + " GB of memory available" : null, d.this.disk_gb != null ? d.this.disk_gb + " GB of disk free" : null].filter(Boolean).join(" · ")), el("div", { class: "note" }, "Renders: " + spkHas(d.this.can))),
     d.workers.filter(w => w.kind !== "local").map(row),
     el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "fit", disabled: !d.workers.some(w => w.kind !== "local"), onclick: () => spkDo("/api/sparks/check", {}) }, "Check all"), el("span")),
     el("h3", {}, "Add a Spark"),

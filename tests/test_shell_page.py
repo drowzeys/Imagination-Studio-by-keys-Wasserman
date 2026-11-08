@@ -11,12 +11,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ["shell.js", "captions.js", "home.js", "engines.js", "machine.js", "agent.js", "suite.js", "suitelinks.js", "updates.js", "settings.js", "sound.js",
-         "slate.js", "director.js", "nightshift.js", "looks.js", "train.js", "finish.js", "graphics.js", "roughcut.js", "rooms.js", "quick.js", "voice.js"]
+         "slate.js", "director.js", "nightshift.js", "looks.js", "train.js", "finish.js", "graphics.js", "roughcut.js", "rooms.js"]
 HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
 globalThis.S = { platform: "spark", platform_label: "DGX SPARK · NVIDIA GB10 · H3-CUDA", presets: { small: { size: [864, 480] }, p720: { size: [1280, 720] }, sharp: { size: [1376, 768] } },
   sharp: { seed: 42, seconds: [8, 10], quality: "fh8" }, long: { 30: "30 s" }, ref2va: true, ref_media: true, reference_total: 12, sparks: { supported: true } };
-globalThis.TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Quick Edit", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
+globalThis.TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
 globalThis.tab = "Home"; globalThis.renders = 0; globalThis.render = () => { renders++; };
 globalThis.toasts = []; globalThis.toast = t => toasts.push(String(t));
 globalThis.calls = []; globalThis.answers = {};
@@ -32,8 +32,7 @@ globalThis.sharpOn = () => false; globalThis.sharpCreate = () => { C.res = "shar
 globalThis.lorasOf = () => []; globalThis.refCount = () => 0; globalThis.framesOf = () => 124; globalThis.exact = f => f + " frames"; globalThis.showEstimate = () => {};
 globalThis.mmss = s => Math.round(s) + " s"; globalThis.count = (n, w) => n + " " + w + (n === 1 ? "" : "s"); globalThis.file = p => "/files/" + p;
 globalThis.media = p => el("img", { src: p }); globalThis.addToTimeline = () => {}; globalThis.ensureProject = async () => project; globalThis.imageModel = () => "qwen";
-globalThis.stillParams = params => params;
-globalThis.bayOpenCalls = 0; globalThis.lengthPicker = () => el("select", {});
+globalThis.bayOpenCalls = 0;
 const text = node => node == null || node === false ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join(" ") : [node.attrs && node.attrs.placeholder, node.attrs && node.attrs.title, text(node.kids)].filter(Boolean).join(" ");
 globalThis.text = text;
 globalThis.el = (tag, attrs = {}, ...kids) => { const n = { tag, attrs, kids: kids.flat(), value: attrs.value || "", addEventListener() {}, classList: { add() {}, remove() {}, toggle() {} } };
@@ -175,7 +174,7 @@ def test_each_engine_opens_on_a_landing_whose_cards_open_the_views():
     out = run("""const landings = { Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub };
       out.pages = Object.fromEntries(Object.entries(landings).map(([k, f]) => [k, text(f())]));
       const click = (f, words) => { const b = button(f(), words); b.attrs.onclick(); return [tab, C.goes, C.start]; };
-      out.still = click(viewImage, "A still"); out.edit = click(viewImage, "Edit a picture"); out.quick = click(viewImage, "Quick Edit")[0]; out.clip = click(viewVideo, "A clip with sound");
+      out.still = click(viewImage, "A still"); out.edit = click(viewImage, "Edit a picture"); out.clip = click(viewVideo, "A clip with sound");
       out.refs = click(viewVideo, "References"); out.voice = click(viewSound, "A voice line")[0]; out.song = click(viewSound, "A song")[0];
       out.motion = click(viewPrevis, "Motion Previs")[0]; out.timeline = click(viewEditHub, "Timeline")[0];
       button(viewStory(), "Wasserman Slate").attrs.onclick(); out.slate = [tab, SL.mode];
@@ -187,35 +186,10 @@ def test_each_engine_opens_on_a_landing_whose_cards_open_the_views():
     assert "Fish Audio Drama 3" in out["pages"]["Sound"] and "MiniMax-Music3" in out["pages"]["Sound"]
     assert out["still"] == ["Create", "image", "text"] and out["edit"][:2] == ["Create", "edit"] and out["clip"] == ["Create", "video", "text"]
     assert out["refs"] == ["Create", "video", "refs"]
-    assert out["quick"] == "Quick Edit"  # the Image room's one-box edit (quick.js)
     assert (out["voice"], out["song"], out["motion"], out["timeline"]) == ("Voice", "Music", "Motion Previs", "Editor")
     assert out["slate"] == ["Production", "slate"] and out["board"] == ["Production", "board"]
     assert [out["land_" + k] for k in ("story", "image", "video", "previs", "sound", "edit")] == ["Story", "Image", "Video", "Previs", "Sound", "Edit"]
     assert out["art"] == "slot" and not out["img"]  # no art is ready in the manifest: a plain panel, never a broken image
-
-
-def test_the_composer_offers_flux_and_yue_only_where_they_are_installed():
-    out = run("""const modes = () => find(homeComposer(), n => n.attrs && n.attrs.class === "cmp-modes");
-      const chips = () => modes().kids.map(n => n.attrs["data-mode"]);
-      const logos = () => modes().kids.map(n => find(n, k => k.tag === "img").attrs.src);
-      out.bare = chips();
-      S.image_models = [{ id: "qwen", label: "Qwen 2.1 Turbo" }, { id: "flux3k-fast", label: "FLUX3-K Fast" }, { id: "flux3k-full", label: "FLUX3-K Full" }];
-      S.music = { available: true, engine: "yue2", engines: { yue2: { installed: true, available: true }, music3: { available: true } } };
-      out.chips = chips(); out.logos = logos(); out.words = text(modes());
-      out.flux = (await hcRequest("flux", "a lens", 1))[1].params.image_model;
-      out.qwen = (await hcRequest("picture", "a lens", 1))[1].params.image_model;
-      out.yue = (await hcRequest("yue", "slow blues", 1))[1].engine;
-      out.music3 = (await hcRequest("song", "[Verse] words", 1))[1].engine;
-      HC.mode = "flux"; hcMore(); out.more = [tab, C.goes, C.imageModel];
-      globalThis.MU = {}; HC.mode = "yue"; hcMore(); out.moreSong = [tab, MU.engine];
-      HC.mode = null; S.music.engines.music3.available = false; out.onlyYue = chips();""")
-    assert out["bare"] == ["clip", "picture", "voice", "song"]
-    assert out["chips"] == ["clip", "picture", "flux", "voice", "song", "yue"]
-    assert "brand/bfl-white.svg" in out["logos"] and "brand/yue.png" in out["logos"]
-    assert "FLUX3 Klein" in out["words"] and "YuE2" in out["words"] and "Music 3" in out["words"]
-    assert (out["flux"], out["qwen"], out["yue"], out["music3"]) == ("flux3k-fast", "qwen", "yue2", "music3")
-    assert out["more"] == ["Create", "image", "flux3k-fast"] and out["moreSong"] == ["Music", "yue2"]
-    assert "song" not in out["onlyYue"] and "yue" in out["onlyYue"]
 
 
 def test_create_carries_what_the_prompt_goes_to_as_one_small_control():
@@ -224,52 +198,6 @@ def test_create_carries_what_the_prompt_goes_to_as_one_small_control():
       button(bar, "Video with sound").attrs.onclick(); out.goes = [C.goes, C.step];""")
     assert "The prompt goes to" in out["bar"] and "Qwen 2.1" in out["bar"] and "FLUX3-K" in out["bar"]
     assert out["on"] == ["Image"] and out["goes"] == ["video", 0]
-
-
-def test_create_branding_follows_selected_model_and_backend_without_borrowed_logos():
-    out = run("""
-      S.platform = "windows"; C.goes = "image";
-      S.image_models = ["sd-turbo", "qwen", "flux3k-full", "moss-image"];
-      S.image_model_options = [
-        {id:"sd-turbo",label:"SD-Turbo storyboard drafts",backend:"bounded",available:true},
-        {id:"qwen",label:"Qwen-Image 2.1 Turbo",backend:"native",available:true},
-        {id:"flux3k-full",title:"FLUX3-K Full",backend:"native",available:false},
-        {id:"moss-image",label:"MOSS-Image",backend:"native",available:true}];
-      const snapshot = () => { const bar = intentBar(), marks = find(bar,n=>n.attrs?.class==="marks"), logos=[];
-        find(marks,n=>{if(n.tag==="img") logos.push(n.attrs.src);return false;});
-        return {text:text(marks),model:marks.attrs["data-image-model"],backend:marks.attrs["data-image-backend"],
-          logos};
-      };
-      out.models = {};
-      for (const id of S.image_models) { C.imageModel=id; out.models[id]=snapshot(); }
-      delete S.image_model_options;
-      S.image_models=[{id:"qwen",label:"Legacy Qwen label"},{id:"flux3k-full",label:"Legacy FLUX label"}];
-      C.imageModel="flux3k-full"; out.legacy=snapshot();
-      delete S.image_models; S.windows_stills={available:true,model:"sd-turbo"};
-      C.imageModel=""; out.oldDraft=snapshot();
-      C.imageModel="qwen-full"; out.missing=snapshot();
-      S.windows_runtime={image_models:[{id:"moss-image",label:"MOSS runtime label",backend:"native",available:true}]};
-      C.imageModel="moss-image"; out.alias=snapshot();
-      globalThis.edModel=()=>"flux3k-full";
-      globalThis.edModels=()=>[{id:"flux3k-full",label:"FLUX3-K Full edit",backend:"native"}];
-      C.goes="edit"; C.imageModel="sd-turbo"; out.edit=snapshot();
-      C.goes="video"; out.video=text(intentBar()); out.calls=calls;
-    """)
-    draft = out["models"]["sd-turbo"]
-    assert draft["model"] == "sd-turbo" and draft["backend"] == "bounded" and draft["logos"] == []
-    assert "SD-Turbo storyboard drafts" in draft["text"] and "bounded backend" in draft["text"]
-    assert "Qwen" not in draft["text"] and "FLUX" not in draft["text"]
-    assert out["models"]["qwen"]["logos"] == ["brand/qwen.svg"]
-    assert "Qwen-Image 2.1 Turbo" in out["models"]["qwen"]["text"] and "native backend" in out["models"]["qwen"]["text"]
-    assert out["models"]["flux3k-full"]["logos"] == ["brand/bfl-white.svg"]
-    assert "FLUX3-K Full" in out["models"]["flux3k-full"]["text"]
-    assert out["models"]["moss-image"]["logos"] == [] and "MOSS-Image" in out["models"]["moss-image"]["text"]
-    assert out["legacy"]["model"] == "flux3k-full" and "Legacy FLUX label" in out["legacy"]["text"]
-    assert out["oldDraft"]["model"] == "sd-turbo" and out["oldDraft"]["logos"] == []
-    assert out["missing"]["model"] == "qwen-full" and "qwen-full" in out["missing"]["text"]
-    assert out["alias"]["model"] == "moss-image" and "MOSS runtime label" in out["alias"]["text"]
-    assert out["edit"]["model"] == "flux3k-full" and "FLUX3-K Full edit" in out["edit"]["text"]
-    assert "MiniMax H3" in out["video"] and out["calls"] == []
 
 
 def test_the_updates_panel_shows_the_followed_branch_and_the_latest_release():
@@ -311,11 +239,11 @@ def test_the_stage_offers_every_recipe_and_the_take_sheet_sets_one():
       const home = viewHome(); out.home = text(home);
       button(home, "A voice line").attrs.onclick(); out.voice = tab;
       const sheet = takeSheet(); out.sheet = text(sheet);
-      button(sheet, "Draft").attrs.onclick(); out.quick = [C.passes, C.res];""")
+      button(sheet, "Quick look").attrs.onclick(); out.quick = [C.passes, C.res];""")
     for words in ("A clip with sound", "Scout, then animate", "A still", "Sharp Spec", "A long take", "A voice line", "Song", "Ask your agent", "ScriptBreak", "Blockout", "Start something", "Recent takes"):
         assert words in out["home"], words
     assert out["voice"] == "Voice"
-    assert "This clip" in out["sheet"] and "Final" in out["sheet"] and "8 passes · 1280 × 720" in out["sheet"] and "Render clip" in out["sheet"] and "Describe the shot first." in out["sheet"]
+    assert "Take sheet" in out["sheet"] and "Final 720p" in out["sheet"] and "Go to Render" in out["sheet"]
     assert out["quick"] == ["4", "480p"]  # a Spark without the 2x decoder finishes at 720p
 
 
@@ -422,27 +350,11 @@ def test_a_brain_that_is_not_set_up_is_greyed_and_links_to_brains_and_tools():
     assert "agent/t1/out.png" in out["log"] and "/data/studio" not in out["log"]
 
 
-def test_the_console_look_has_no_glow_three_themes_and_stops_motion_when_asked():
+def test_the_tally_lights_breathe_in_css_and_stop_when_motion_is_reduced():
     css = (ROOT / "app" / "static" / "studio.css").read_text()
-    for gone in ("tally-glow", "tally-led", "tally-pill", "tally-sheen", "drop-shadow(", "grid-texture"):
-        assert gone not in css, gone
-    assert "@keyframes tally {" in css  # the one pulse left: the dot of what is rendering
-    for theme in ("html.theme-light {", "html.theme-oled {", "html.accent-cobalt {", "html.theme-light.accent-cobalt {"):
-        assert theme in css, theme
+    for name in ("tally-glow", "tally-led", "tally-pill", "tally-sheen"):
+        assert "@keyframes " + name + " {" in css, name
     assert "@media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important;" in css
-    assert "html.motion-reduce *, html.motion-reduce *::before, html.motion-reduce *::after { animation:none !important;" in css
-
-
-def test_the_theme_follows_the_setting_the_computer_and_the_top_bar_switch():
-    out = run("""const cls = new Set(); document.documentElement = { classList: { add: c => cls.add(c), remove: c => cls.delete(c), contains: c => cls.has(c) } };
-      SET.data = { appearance: { theme: "light" } }; prefsApply(); out.light = [...cls];
-      SET.data = { appearance: { theme: "oled" } }; prefsApply(); out.oled = [...cls];
-      out.system = themeShown("system"); out.dark = themeShown("studio");
-      SET.data = { appearance: { theme: "studio" } }; await themeFlip(); out.flip = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];""")
-    assert "theme-light" in out["light"] and "theme-oled" not in out["light"]
-    assert "theme-oled" in out["oled"] and "theme-light" not in out["oled"]
-    assert out["system"] in ("studio", "light") and out["dark"] == "studio"
-    assert out["flip"] == {"appearance": {"theme": "light"}}
 
 
 
@@ -489,10 +401,7 @@ def test_settings_shows_its_five_sections_and_the_look_saves():
     assert out["prefs"]["type_size"] == "large" and out["prefs"]["glow"] is False and out["prefs"]["start_cards"] == ["clip"]
     for words in ("Appearance", "Studio layout", "Presets & preferences", "Connections", "Models & weights", "Sparks", "Brains & tools", "Updates", "About"):
         assert any(words in r for r in out["rail"]), words
-    assert "Text size" in out["pages"]["appearance"] and "Small" in out["pages"]["appearance"] and "Default" in out["pages"]["appearance"] and "Cobalt" in out["pages"]["appearance"]
-    for theme in ("Match the computer", "Light", "Dark", "Dark (OLED)"):  # the four themes of the Console look
-        assert theme in out["pages"]["appearance"], theme
-    assert "Poster on Home" not in out["pages"]["appearance"] and "Glowing pills" not in out["pages"]["appearance"]
+    assert "Type size" in out["pages"]["appearance"] and "Poster on Home" in out["pages"]["appearance"] and "Cobalt" in out["pages"]["appearance"]
     assert "Settings" in out["pages"]["layout"] and "stays" in out["pages"]["layout"] and "⌘K" in out["pages"]["layout"]
     assert "Render recipe" in out["pages"]["presets"] and "48 kHz stereo" in out["pages"]["presets"] and "QA gate" in out["pages"]["presets"]
     c = out["pages"]["connections"]
@@ -542,7 +451,7 @@ def test_the_home_composer_queues_each_kind_and_carries_the_words():
       HC.mode = "clip"; HC.text = "A lighthouse at dusk"; hcMore(); out.more = [tab, C.prompt, C.goes];
       HC.text = "Plan a short"; hcAgent(); out.agent = [tab, AG.prompt];""")
     assert "What do you want to make?" in out["page"] and "Clip with sound" in out["page"] and "MiniMax H3" in out["page"] and "Drama 3" in out["page"] and "Music 3" in out["page"]
-    assert "Ask your agent instead" in out["page"] and "More options" in out["page"] and "Draft · 864 × 480" in out["page"]
+    assert "Ask your agent instead" in out["page"] and "More options" in out["page"] and "Quick look" in out["page"]
     assert out["primaries"] == 1  # Generate is the one primary on Home
     assert out["clip"]["kind"] == "video" and out["clip"]["params"]["preset"] == "small" and out["clip"]["params"]["quality"] == "fh4" and out["clip"]["params"]["prompt"].startswith("integrated")
     assert out["picture"]["kind"] == "scout" and out["picture"]["params"]["count"] == 1 and out["picture"]["params"]["preset"] == "2k"
@@ -617,49 +526,6 @@ def test_connect_ticks_find_signin_verify_and_default_by_itself():
     assert out["code"] == {"code": "pasted#code"}
     assert out["verified"] and out["madeDefault"] and out["default"] == "claude"
     assert out["s2"] == {"find": "done", "signin": "done", "verify": "done", "default": "done"} and "Answered “ok” in 2.1 s" in out["done"] and "is ready" in out["done"]
-
-
-def test_copilot_terminal_login_can_be_checked_while_auth_status_is_unknown():
-    out = run(CONNECT + """
-      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
-        signin_flow: "terminal", signin_command: "copilot login" };
-      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
-      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "unknown" }, default_ready: true });
-      await connectStart(b); await settle();
-      out.word = brainWord(b)[0]; out.initial = steps("copilot"); out.instructions = text(panel("copilot"));
-      out.automaticChecks = calls.filter(c => c[0] === "/api/brains/copilot/verify").length;
-      answers["/api/brains/copilot/verify"] = { ok: true, text: "ok", elapsedMs: 120 };
-      await button(panel("copilot"), "Check").attrs.onclick();
-      out.checked = CN.data.copilot.verify.ok;
-      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "signed_in" },
-        verify: CN.data.copilot.verify, default_ready: true });
-      await cnLoad("copilot");
-      out.finished = steps("copilot"); out.readyWord = brainWord(b)[0];
-      out.signinRequests = calls.filter(c => c[0] === "/api/brains/copilot/signin").length;
-    """)
-    assert out["word"] == "Not checked" and out["initial"]["verify"] == "wait"
-    assert "If you already signed in, press Check" in out["instructions"]
-    assert out["automaticChecks"] == 0 and out["signinRequests"] == 0
-    assert out["checked"] and out["readyWord"] == "Ready"
-    assert out["finished"]["signin"] == out["finished"]["verify"] == "done"
-
-
-def test_copilot_failed_login_offers_check_after_terminal_login_not_an_app_signin():
-    out = run(CONNECT + """
-      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
-        signin_flow: "terminal", signin_command: "copilot login" };
-      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
-      CN.open = "copilot"; CN.data.copilot = base("copilot", { signin: { state: "unknown" },
-        verify: { ok: false, error: "Run copilot login, then Check again.", fix: { action: "signin", label: "Sign in again" } } });
-      answers["/api/brains/copilot/verify"] = { ok: false, error: "Still not signed in." };
-      await button(panel("copilot"), "Check again after copilot login").attrs.onclick();
-      out.verify = calls.some(c => c[0] === "/api/brains/copilot/verify");
-      out.signin = calls.some(c => c[0] === "/api/brains/copilot/signin");
-      CN.data.copilot = base("copilot", { find: { found: false }, signin: { state: "unknown" } });
-      out.missingCheck = !!button(panel("copilot"), "Check");
-    """)
-    assert out["verify"] and not out["signin"]
-    assert not out["missingCheck"]
 
 
 def test_connect_installs_a_missing_cli_shows_a_device_code_and_the_fix_for_a_failed_answer():
@@ -748,72 +614,6 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
     assert "Connect your agent" in out["home"] and out["primary"].endswith("Connect Codex")  # the one that is installed first
     assert out["went"][:3] == ["Home", "codex", "codex"] and out["went"][3] == 1  # Connect opens over the page: nothing to go and find
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
-
-
-def test_selected_copilot_is_not_asked_to_reconnect_after_server_restart():
-    out = run(CONNECT + """
-      const copilot = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here", signin_flow: "terminal" };
-      BR.data = { default: "copilot", settings: { agent: "copilot" }, backends: [copilot] };
-      BR.status = { copilot: { state: "unknown" } };
-      out.home = connectNudge("home"); out.agent = connectNudge("agent");
-      out.verifications = calls.filter(c => /\\/verify$/.test(c[0])).length;
-      out.word = brainWord(copilot)[0];
-      BR.data.default = "claude"; BR.data.settings.agent = "claude";
-      const card = connectNudge("home");
-      out.unselected = text(card); out.primary = text(find(card, n => n.tag === "button" && n.attrs.class === "primary"));
-      BR.data.default = "copilot"; BR.data.settings.agent = "copilot";
-      BR.status.copilot = { state: "signed_out" };
-      out.signedOut = text(connectNudge("home"));
-      BR.status.copilot = { state: "broken" };
-      out.broken = !!connectNudge("home");""")
-    assert out["home"] is None and out["agent"] is None
-    assert out["verifications"] == 0 and out["word"] == "Not checked"
-    assert "Check your agent" in out["unselected"] and "terminal sign-in separately" in out["unselected"]
-    assert out["primary"].endswith("Check GitHub Copilot CLI")
-    assert "Connect your agent" in out["signedOut"] and out["broken"]
-
-
-def test_windows_home_and_engine_cards_honor_the_qualified_capabilities():
-    out = run("""
-      S.platform = "windows"; S.capabilities = { scout: { available: true }, sfx: { available: true }, graphics: { available: true },
-        video: { available: false, why: "Video not qualified on Windows" }, edit: { available: false, why: "Picture edits not qualified" } };
-      HC.mode = "clip"; out.mode = hcMode(); out.cards = STARTS().map(c => [c.id, !!c.off]);
-      out.blocked = 0; try { await hcRequest("clip", "A test", 0); } catch (e) { out.blocked = e.message; }
-      out.sent = calls.length;
-      out.video = text(viewVideo()); out.videoButton = !!find(viewVideo(), n => n.tag === "button" && n.attrs.class === "primary").attrs.disabled;
-      out.image = text(viewImage()); out.sound = text(viewSound());
-      const description = capButton({ path: "uploads/test.png", kind: "image" });
-      CAP.map = {}; out.descriptionDisabled = !!capButton({ path: "uploads/test.png", kind: "image" }).attrs.disabled;
-      S.platform = "mac"; HC.mode = "clip"; out.mac = hcMode(); out.macImage = text(viewImage());""")
-    assert out["mode"] == "picture" and out["blocked"] == "Video not qualified on Windows" and out["sent"] == 0
-    cards = dict(out["cards"])
-    assert cards["clip"] and cards["voice"] and cards["song"]
-    assert not any(cards[c] for c in ("still", "sfx", "graphics", "film", "script", "agent"))
-    assert out["videoButton"] and "Video not qualified" in out["video"]
-    assert "512" in out["image"] and "Qwen 2.1 or" not in out["image"]
-    assert "Stable Audio Open" in out["sound"] and "Each backend has its own recipe" in out["sound"]
-    assert out["descriptionDisabled"]
-    assert out["mac"] == "clip" and "Qwen 2.1" in out["macImage"]
-
-
-def test_upstream_flux_and_yue_chips_cannot_bypass_windows_limits():
-    out = run("""
-      S.platform = "windows";
-      S.image_models = [{ id: "sd-turbo", label: "SD-Turbo" }];
-      S.capabilities = { scout: { available: true }, flux: { available: false, why: "FLUX is unqualified" },
-        music: { available: false, why: "Music is unqualified" } };
-      S.music = { available: false, engine: "yue2", engines: { yue2: { installed: true, available: true }, music3: { available: false } } };
-      HC.mode = "yue"; out.mode = hcMode(); out.model = hcPictureModel();
-      const chips = find(homeComposer(), n => n.attrs && n.attrs.class === "cmp-modes").kids;
-      out.fluxHidden = !chips.some(n => n.attrs["data-mode"] === "flux");
-      out.yueDisabled = chips.find(n => n.attrs["data-mode"] === "yue").attrs.disabled;
-      out.errors = [];
-      for (const mode of ["flux", "yue"]) { try { await hcRequest(mode, "A test", 0); } catch (e) { out.errors.push(e.message); } }
-      out.requests = calls.length;
-    """)
-    assert out["mode"] == "picture" and out["model"] == "sd-turbo"
-    assert out["fluxHidden"] and out["yueDisabled"]
-    assert out["errors"] == ["FLUX is unqualified", "Music is unqualified"] and out["requests"] == 0
 
 
 def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account():
@@ -1191,158 +991,3 @@ def test_home_ignores_inflight_memory_answer_for_an_obsolete_worker_state():
     assert out["pendingRequests"] == 1 and out["requests"] == 2
     assert "Obsolete head refusal" not in out["between"] and "Obsolete head refusal" not in out["after"]
     assert "about 18 s on Ready GPU" in out["after"]
-
-
-def test_render_builds_the_prompt_from_the_fields_unless_it_was_edited():
-    # viewCreate itself lives in index.html; the side panel and the Render it shares with the page are shell.js
-    out = run("""answers["/api/compose"] = { prompt: "integrated_multimodal_description: [Shot 1] A wet street at night." };
-      answers["/api/jobs"] = { id: "c1", title: "A woman walks" };
-      Object.assign(globalThis, { noFrame: () => true, lastOf: () => null, lengthOf: () => ({ frames: 124 }), extras: () => ({}), refMedia: () => false, motionFields: () => null, loraWants: () => [], prefs: () => ({ presets: { qa_gate: true } }) });
-      Object.assign(C, { goes: "video", start: "text", scene: "", action: "", camera: "", soundscape: "", prompt: "", promptEdited: false, preset: "small", quality: "fh8" });
-      out.blocked = createNotReady(); out.sheet = text(takeSheet());
-      C.scene = "A wet street at night"; C.action = "A woman walks to the lamp"; out.ready = createNotReady();
-      await createQueue(); out.job = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1]; out.composed = calls.filter(c => c[0] === "/api/compose").length;
-      C.prompt = "my own prompt"; C.promptEdited = true; await createQueue(); out.edited = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1].params.prompt;
-      out.composedAfter = calls.filter(c => c[0] === "/api/compose").length;""")
-    assert out["blocked"] == "Describe the shot first." and "Describe the shot first." in out["sheet"] and out["ready"] is None
-    assert out["composed"] == 1 and out["job"]["kind"] == "video" and out["job"]["params"]["prompt"].startswith("integrated") and out["job"]["params"]["frames"] == 124
-    assert out["edited"] == "my own prompt" and out["composedAfter"] == 1  # an edited prompt is sent as it is, not rebuilt
-
-
-
-def test_render_shows_what_the_prompt_forbids_before_it_queues():
-    # AGENTS.md: the page shows app/negation.py's list before the job is queued; the prompt is never rewritten
-    out = run("""answers["/api/jobs"] = { id: "c2", title: "Street" };
-      Object.assign(globalThis, { noFrame: () => true, lastOf: () => null, lengthOf: () => ({ frames: 124 }), extras: () => ({}), refMedia: () => false, motionFields: () => null, loraWants: () => [], prefs: () => ({ presets: { qa_gate: true } }),
-        negShow: async () => { C.negations = /no rain/.test(C.prompt) ? ["rain"] : []; C.negFor = C.prompt; } });
-      Object.assign(C, { goes: "video", start: "text", scene: "A wet street", action: "A woman walks, no rain", camera: "", prompt: "A street, no rain.", promptEdited: true, preset: "small", quality: "fh8", negSeen: null });
-      await createQueue(); out.first = calls.filter(c => c[0] === "/api/jobs").length;
-      await createQueue(); out.second = calls.filter(c => c[0] === "/api/jobs").length; out.sent = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1].params.prompt;""")
-    assert out["first"] == 0 and out["second"] == 1 and out["sent"] == "A street, no rain."
-
-def test_the_voice_script_edits_as_lines_and_keeps_drama3s_speaker_tags():
-    out = run("""const ex = VO_EXAMPLE; out.lines = voParse(ex).map(l => [l.sp, l.text]); out.back = voJoin(voParse(ex)) === ex;
-      out.plain = voJoin(voParse(["Hello there.", "Second line."].join(String.fromCharCode(10))));
-      const two = voParse("Hello there."); two.push({ sp: 1, text: "Hi.", bare: false }); out.mixed = voJoin(two);
-      out.words = voWords("<|speaker:0|> [whispering] Did you hear that?");
-      globalThis.bind = (o, k, n) => { n.value = o[k]; return n; }; globalThis.clearButton = () => []; globalThis.jobCard = () => null; globalThis.refMeta = async () => ({});
-      S.voice = { available: true, reference_seconds: [5, 30] }; VO.text = ex; VO.takes = []; const page = viewVoice(); out.page = text(page);""")
-    assert out["lines"][0] == [0, "[whispering] Did you hear that noise downstairs?"] and out["lines"][1][0] == 1 and out["back"]
-    assert out["plain"] == "Hello there.\nSecond line."  # one speaker without tags stays as typed
-    assert out["mixed"] == "<|speaker:0|> Hello there.\n<|speaker:1|> Hi."  # a second speaker tags every line
-    assert out["words"] == 4
-    for words in ("Script", "Speak it", "Cast", "Clone a voice", "I have the speaker's consent to clone this voice", "Built with Fish Audio."):
-        assert words in out["page"], words
-
-
-def test_the_theme_cards_and_accent_swatches_save_what_is_picked():
-    out = run("""SET.data = { appearance: { theme: "studio", accent: "amber" } }; SET.section = "appearance";
-      const page = viewSettings(); const card = k => find(page, n => n.attrs && n.attrs["data-theme"] === k);
-      out.on = ["system", "light", "studio", "oled"].map(k => card(k).attrs["aria-checked"]);
-      await card("oled").attrs.onclick(); out.theme = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];
-      await button(page, "Cobalt").attrs.onclick(); out.accent = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];""")
-    assert out["on"] == ["false", "false", "true", "false"]
-    assert out["theme"] == {"appearance": {"theme": "oled"}} and out["accent"] == {"appearance": {"accent": "cobalt"}}
-
-
-def test_text_size_scales_the_whole_studio_and_corrects_window_heights():
-    css = (ROOT / "app" / "static" / "studio.css").read_text()
-    assert ":root { zoom:1.1; --vh:calc(100vh / 1.1); }" in css  # Default: a step over the drawn size
-    assert "html.type-compact { zoom:1; --vh:100vh; }" in css  # Small: the drawn size
-    for size, zoom in (("large", "1.2"), ("largest", "1.35")):
-        assert "html.type-" + size + " { zoom:" + zoom + "; --vh:calc(100vh / " + zoom + "); }" in css, size
-    assert "#view, html.type-large aside#bay" not in css  # no longer the work area alone
-    assert "max-height:calc(100vh" not in css  # every height from the window goes through --vh
-
-
-def test_a_home_retake_sends_the_same_request_again_with_the_next_seed():
-    out = run("""answers["/api/library"] = []; answers["/api/compose"] = { prompt: "integrated_multimodal_description: [Shot 1] A lighthouse." };
-      answers["/api/jobs"] = { id: "j1", title: "A lighthouse" };
-      HC.mode = "clip"; HC.text = "A lighthouse at dusk"; HC.image = "uploads/first.png"; HC.recipe = "quick"; HC.seconds = 5;
-      await hcGenerate(); out.first = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1];
-      // the bar changes after the take: the retake still sends what made it
-      HC.recipe = "final"; HC.seconds = 10; HC.text = "Something else";
-      jobs = [{ id: "j1", status: "done", outputs: ["clips/a.mp4"] }];
-      await hcGenerate(HC.made[0]); out.again = calls.filter(c => c[0] === "/api/jobs").slice(-1)[0][1];""")
-    first, again = out["first"], out["again"]
-    assert first["params"]["image"] == "uploads/first.png"
-    assert again["params"]["seed"] == first["params"]["seed"] + 1
-    again["params"]["seed"] = first["params"]["seed"]
-    assert again == first  # recipe, length, words and first frame as they were
-
-
-def test_home_pictures_offer_animate_and_edit():
-    out = run("""answers["/api/library"] = [];
-      HC.made = [{ id: "p1", mode: "picture", text: "A gull", seed: 3, title: "A gull" }];
-      jobs = [{ id: "p1", status: "done", outputs: ["scouts/p1/s1.png", "scouts/p1/sheet.jpg"] }];
-      const made = hcMade(); out.made = text(made);
-      button(made, "Edit").attrs.onclick(); out.edit = [tab, QK.image];
-      button(made, "Animate").attrs.onclick(); out.animate = [tab, C.image, C.start, C.goes];""")
-    assert "Animate" in out["made"] and "Edit" in out["made"]
-    assert out["edit"] == ["Quick Edit", "scouts/p1/s1.png"]
-    assert out["animate"] == ["Create", "scouts/p1/s1.png", "own", "video"]
-
-
-def test_a_clip_just_made_on_home_offers_edit_this_frame():
-    out = run("""answers["/api/library"] = [];
-      HC.made = [{ id: "v1", mode: "clip", text: "A gull", seed: 3, title: "A gull" }];
-      jobs = [{ id: "v1", status: "done", outputs: ["clips/v1.mp4"] }];
-      out.made = text(hcMade());""")
-    assert "Edit this frame" in out["made"] and "Retake" in out["made"]
-
-
-def test_create_draws_a_new_seed_for_another_take_unless_asked_for_the_same():
-    out = run("""answers["/api/compose"] = { prompt: "integrated_multimodal_description: [Shot 1] A lighthouse." }; answers["/api/jobs"] = { id: "c1", title: "A lighthouse" };
-      globalThis.noFrame = () => true; globalThis.lastOf = () => null; globalThis.extras = () => ({}); globalThis.lengthOf = () => ({ seconds: 5 }); globalThis.loraWants = () => [];
-      Object.assign(C, { scene: "A lighthouse", action: "", camera: "", soundscape: "", prompt: "", promptEdited: false, preset: "small", quality: "fh4", seed: 7 });
-      const seeds = () => calls.filter(c => c[0] === "/api/jobs").map(c => c[1].params.seed);
-      await createQueue(); await createAgain(); await createAgain();
-      C.sameSeed = true; await createAgain(); await createQueue();
-      C.sameSeed = false; await createQueue();  // Settings' fixed seed: Render again repeats the take
-      out.fixed = seeds();
-      // Settings' random seed: a seed that already made a take is replaced when Render is pressed again
-      calls.length = 0; C.sameSeed = false; SET.data = { presets: { seed: "random" } }; C.seed = 5; await createQueue(); await createQueue();
-      out.random = seeds();""")
-    assert out["fixed"] == [7, 8, 9, 9, 9, 9]
-    assert out["random"][0] == 5 and out["random"][1] != 5
-
-
-def test_the_simple_studio_shows_the_rooms_that_make_pictures_and_clips():
-    out = run("""answers["/api/library"] = []; answers["/api/settings"] = { settings: { layout: { hidden: ["library"], order: [], simple: true } } };
-      SET.data = { layout: { hidden: ["library"], order: [], simple: true }, presets: { mode: "voice" } };
-      out.rooms = roomsShown(ROOMS).map(r => r.id);
-      const home = viewHome(); out.home = text(home); out.mode = hcMode();
-      out.kinds = find(home, n => n.attrs && n.attrs.class === "cmp-modes").kids.map(b => b.attrs["data-mode"]);
-      await button(home, "show all tools").attrs.onclick(); out.saved = calls.filter(c => c[0] === "/api/settings" && c[1]).slice(-1)[0][1];
-      SET.data = { layout: { hidden: ["library"], order: [], simple: false } };
-      out.full = roomsShown(ROOMS).map(r => r.id); out.fullHome = text(viewHome());""")
-    assert out["rooms"] == ["video", "image", "library", "machine", "settings"]
-    assert out["mode"] == "clip" and set(out["kinds"]) <= {"clip", "picture", "flux"}  # voice and song are in their rooms
-    for gone in ("Start something", "Night shift", "Wasserman's Filmmaker Suite", "Ask your agent instead"):
-        assert gone not in out["home"], gone
-    assert "What do you want to make?" in out["home"] and "Recent takes" in out["home"] and "Search (⌘K)" in out["home"]
-    assert out["saved"] == {"layout": {"simple": False}}
-    assert "library" not in out["full"] and "sound" in out["full"]  # the owner's own layout comes back
-    assert "Too much here?" in out["fullHome"] and "Start something" in out["fullHome"]
-
-
-def test_the_simple_studio_opens_video_and_image_on_create():
-    out = run("""SET.data = { layout: { hidden: [], order: [], simple: true } };
-      tab = "Home"; goRoom("image"); out.image = [tab, C.goes]; goRoom("video"); out.video = [tab, C.goes];
-      SET.data = { layout: { simple: false } }; goRoom("image"); out.full = tab;""")
-    assert out["image"] == ["Create", "image"] and out["video"] == ["Create", "video"]
-    assert out["full"] == "Image"  # every room: the overview first, as before
-
-
-def test_higher_quality_sends_the_same_take_at_the_final_recipe():
-    out = run("""answers["/api/jobs"] = { id: "f1", title: "Final: A gull" };
-      const body = { kind: "video", title: "A gull", params: { prompt: "p", image: "scouts/a.png", preset: "small", quality: "fh4", seed: 9, seconds: 5, width: 864, height: 480, steps: 6, retake: true } };
-      out.ask = betterAsk(body);
-      out.none = [betterAsk({ ...body, params: { ...body.params, preset: "custom" } }), betterAsk({ ...body, params: { ...body.params, preset: "p720", quality: "fh8" } }), betterAsk({ ...body, params: { ...body.params, references: ["a.png"] } }), betterAsk({ kind: "long", params: {} })];
-      let got = null; await betterQueue(body, (j, ask) => { got = [j.id, ask.params.preset]; }); out.got = got;
-      out.sent = calls.filter(c => c[0] === "/api/jobs").length;""")
-    ask = out["ask"]
-    assert ask["params"] == {"prompt": "p", "image": "scouts/a.png", "preset": "p720", "quality": "fh8", "seed": 9, "seconds": 5}  # Final on a Spark; the rest as it was
-    assert ask["title"] == "Final: A gull"
-    assert out["none"] == [None, None, None, None]  # a custom size, already Final, a reference clip, a long take
-    assert out["got"] == ["f1", "p720"] and out["sent"] == 1
