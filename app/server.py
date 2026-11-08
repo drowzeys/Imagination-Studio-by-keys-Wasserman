@@ -2867,7 +2867,10 @@ def queue_job(body: dict) -> dict:
             if windows_audio3.selected(body["params"]):
                 if body.get("placement") is not None or body.get("sparks") not in (None, 1):
                     raise HTTPException(400, "Stable Audio 3 runs on this machine only.")
-                params = windows_audio3.parameters(body["params"])
+                try:
+                    params = windows_audio3.parameters(body["params"])
+                except ValueError as error:
+                    raise HTTPException(400, str(error)) from None
                 if body.get("title") is not None and not isinstance(body["title"], str):
                     raise HTTPException(400, "title is text")
                 return enqueue("sfx", body.get("title") or sound_title("sfx", params), params)

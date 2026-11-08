@@ -492,6 +492,7 @@ In **Machine > Feature checks**, run **Stable Audio 3 Small SFX** explicitly, th
 feature check. Files in place do not count as a passed check; automatic cache removal is unavailable.
 negative prompts are unavailable at this guidance setting. The check renders the one- and five-second endpoints,
 checks the waveform and records measured memory. It does **not** judge whether the sound matches the prompt.
+Unsupported API settings are refused before queueing with the specific validation reason.
 Try several unlocked seeds and compare by ear. API selection is
 `{kind: "sfx", params: {sound_model: "stable-audio-3-small-sfx", prompt: "...", seconds: 5}}`;
 Omitting `sound_model` selects Small SFX on Windows and Spark, Stable Audio Open on Mac. To replay legacy effects,

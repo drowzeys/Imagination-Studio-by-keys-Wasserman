@@ -75,6 +75,28 @@ def test_small_sfx_keeps_words_and_uses_its_own_recipe():
                      "seed": 0, "negative": "", "steps": 8, "cfg": 1.0}
 
 
+@pytest.mark.parametrize("explicit_model", [False, True])
+@pytest.mark.parametrize("change,reason", [
+    ({"prompt": ""}, "Say what is heard in at most 600 characters."),
+    ({"prompt": "x" * 601}, "Say what is heard in at most 600 characters."),
+    ({"seconds": 0}, "Stable Audio 3's initial recipe is 1 to 5 seconds."),
+    ({"seconds": 6}, "Stable Audio 3's initial recipe is 1 to 5 seconds."),
+    ({"seconds": True}, "Stable Audio 3's initial recipe is 1 to 5 seconds."),
+    ({"steps": 9}, "Stable Audio 3 Small SFX uses eight passes and CFG 1."),
+    ({"cfg": 7}, "Stable Audio 3 Small SFX uses eight passes and CFG 1."),
+    ({"negative": "music"}, "Small SFX uses CFG 1; negative prompts are not supported by this recipe."),
+    ({"video": "clip.mp4"}, "Stable Audio 3 takes a prompt, seconds, seed and its fixed eight-pass recipe only."),
+])
+def test_api_preserves_small_sfx_validation_reason_before_enqueue(ready, monkeypatch, explicit_model, change, reason):
+    monkeypatch.setattr(server, "enqueue", lambda *args: pytest.fail("Invalid settings must not queue a job"))
+    params = {"prompt": "Rain.", "seed": 7, **change}
+    if explicit_model:
+        params["sound_model"] = audio.MODEL
+    answer = ready.post("/api/jobs", json={"kind": "sfx", "params": params})
+    assert answer.status_code == 400
+    assert answer.json()["error"] == reason
+
+
 def test_isolated_worker_reaches_identity_without_web_or_gpu_imports(tmp_path):
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({"sound_model": audio.MODEL, "prompt": "Door.", "seed": 0,
@@ -156,6 +178,23 @@ def test_browser_uses_platform_default_only_before_user_selects_a_model():
       SFX.model = "stable-audio-open-1.0"; await sfxLoad(); out.selected = SFX.model;
     """)
     assert result == {"initial": audio.MODEL, "selected": sound.SFX_MODEL}
+
+
+@pytest.mark.parametrize("windows,spark,backend", [
+    (True, True, "Isolated native CUDA."),
+    (True, False, "Isolated native CUDA."),
+    (False, True, "Guarded ComfyUI CUDA."),
+])
+def test_browser_small_sfx_names_its_actual_backend(windows, spark, backend):
+    result = run(f"""
+      SFX.state = {{windows:{json.dumps(windows)},spark:{json.dumps(spark)},
+        kinds:{{sfx:{{ready:true,seconds:[1,5],negative:false}},foley:{{ready:false}}}}}};
+      SFX.model = "stable-audio-3-small-sfx"; SFX.mode = "sfx"; SFX.takes = [];
+      out.text = text(viewFoley());
+    """)
+    assert backend in result["text"]
+    other = "Guarded ComfyUI CUDA." if windows else "Isolated native CUDA."
+    assert other not in result["text"]
 
 
 def test_take_uses_new_runner_not_the_legacy_comfy_route(ready, tmp_path, monkeypatch):
