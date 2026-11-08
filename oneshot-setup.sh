@@ -43,6 +43,9 @@
 #                                       # takes some groups, --lora-bundle=PATH installs from a bundle on disk with no other network)
 #   bash oneshot-setup.sh --yes         # the plain install above without the checklist a terminal shows first (every part
 #                                       # ticked there; Enter installs them all); any other flag also leaves the list out
+#   bash oneshot-setup.sh --no-memguard # leave out the machine memory guard (scripts/memguard.py: a launchd agent that has the
+#                                       # Studio give memory back before macOS runs out; docs/memory-guard.md); with
+#                                       # --memguard-stop-foreign it may also stop your own model servers (off by default)
 #   bash oneshot-setup.sh --verify      # check an existing install, no downloads, no render
 #   bash oneshot-setup.sh --upgrade     # after `git pull`: move an existing install to this version (engine, scripts, Motion
 #                                       # Previs environment, motion graphics and Finish where they are installed), fetch no
@@ -84,7 +87,7 @@ if [ "$(uname -s)" = Linux ]; then
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --all|--yes|-y|--image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--sound|--graphics|--no-graphics|--finish|--no-finish|--train|--ref2va|--image-edit|--h3-base|--yue2|--swap|--loras|--loras=*|--no-loras|--lora-bundle=*) SPARK_ARGS+=("$arg");;
+      --all|--yes|-y|--image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--sound|--graphics|--no-graphics|--finish|--no-finish|--train|--ref2va|--image-edit|--h3-base|--yue2|--swap|--loras|--loras=*|--no-loras|--lora-bundle=*|--no-memguard|--memguard-stop-foreign) SPARK_ARGS+=("$arg");;
       --upscale|--remove)
         if [ "$ON_CARD" = 1 ]; then echo "note: on this GPU $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"
         else echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"; fi
@@ -148,7 +151,7 @@ REF_ADAPTER_NAME="lightx2v_ref2v_4step_v0.1_ourlayout.safetensors"
 X2_REPO="speach1sdef178/MiniMax-H3-X2-Detail-VAE"
 X2_NAME="MiniMax-H3-X2-Detail-v1.safetensors"
 X2_SHA256="2296840f4acedcaa976688e7d7b97f7bf570b136e400385d3f46224011897aac"
-ALL=0; MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; BOLT=0; GRAPHICS=""; FINISH=""; TRAIN=0; COMFY_ARGS=()
+ALL=0; MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; BOLT=0; GRAPHICS=""; FINISH=""; TRAIN=0; COMFY_ARGS=(); MEMGUARD=1; MEMGUARD_FOREIGN=0
 for arg in "$@"; do
   case "$arg" in
     --all) ALL=1;;  # every feature this Mac's memory runs (chosen after the preflight reads the chip and the memory)
@@ -169,6 +172,7 @@ for arg in "$@"; do
     --yue2|--swap) echo "  $arg: YuE2 and Character Swap run on Linux with an NVIDIA GPU (oneshot-setup-spark.sh $arg): left out on this Mac";;
     --upscale|--remove|--moss) COMFY_ARGS+=("$arg");;
     --image-edit) IMAGE_EDIT=1;;
+    --no-memguard) MEMGUARD=0;; --memguard-stop-foreign) MEMGUARD_FOREIGN=1;;  # the machine memory guard (scripts/memguard.py)
     --app) APP=1;;
     --verify|--no-render) MODE="$arg";;
     --upgrade) UPGRADE=1; MODE="--no-render"; MOTION=1;;
@@ -566,6 +570,27 @@ if [ "$FINISH" = 1 ]; then  # Finish: Tesseract, its converter and two fonts in 
     || echo "  ! Finish is not fully set up: bash scripts/setup-finish.sh"
 elif [ "$MODE" = "--verify" ]; then echo "  - Finish is not installed (--finish adds it)"; fi
 
+# The machine memory guard (scripts/memguard.py, docs/memory-guard.md): a per-user service that has the Studio give memory
+# back before the kernel's OOM killer or a hang, stops the person's own model servers only when they opted in, and
+# cancels a render only as the last resort. It also places STUDIO-AGENT.md (renders go through the Studio) where agents
+# read it. --no-memguard leaves it out; --upgrade refreshes it only where it is installed; uninstall undoes all of it.
+if [ "$MEMGUARD" = 1 ] && command -v python3 >/dev/null; then
+  if [ "$MODE" = "--verify" ]; then
+    python3 "$HERE/scripts/memguard.py" status 2>&1 | grep -E "^(installed|thresholds)" | sed 's/^/  memory guard /' || true
+  elif [ "$UPGRADE" = 1 ] && ! python3 "$HERE/scripts/memguard.py" status 2>/dev/null | grep -q "^installed: yes"; then
+    echo "  - the memory guard is not installed (left so): python3 $HERE/scripts/memguard.py install adds it"
+  else
+    step "Memory guard: has the Studio give memory back before the OOM killer or a hang (--no-memguard leaves it out)"
+    if [ "$MEMGUARD_FOREIGN" = 1 ]; then
+      echo "  Opted in (--memguard-stop-foreign): under the memory floor it MAY STOP your own model servers (vLLM, Ollama, llama.cpp, LM Studio...)."
+    else
+      echo "  It unloads the Studio's idle modules and never stops your own programs (--memguard-stop-foreign allows that)."
+    fi
+    python3 "$HERE/scripts/memguard.py" install --python "$(command -v python3)" $([ "$MEMGUARD_FOREIGN" = 1 ] && echo --stop-foreign) 2>&1 | sed 's/^/  /' \
+      || echo "  ! the memory guard is not installed (above): python3 scripts/memguard.py install"
+    echo "  Agents (Claude Code, Codex, Hermes...): every render goes through the Studio; read $HERE/STUDIO-AGENT.md"
+  fi
+fi
 [ "$MODE" = "--verify" ] || cp "$HERE/VERSION" "$PREFIX/VERSION"
 export PREFIX H3_MODEL_DIR QWEN_MODEL_DIR FASTH3_DIR
 if [ "$APP" = 1 ] && [ "$MODE" != "--verify" ]; then

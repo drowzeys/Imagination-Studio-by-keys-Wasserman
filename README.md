@@ -129,6 +129,22 @@ Projects, renders and uploads are kept under **`~/ImaginationStudio`**, or `STUD
 Native Windows environments and models normally live under **`%LOCALAPPDATA%\ImaginationStudio`**.
 Back up projects and media before changing installations; model files and Python environments are separate.
 
+### Agents, renders and memory
+
+Every render and processing task runs through Imagination Studio: its page, its job API or its MCP tools
+([mcp/README.md](mcp/README.md)), never the render scripts or a separate ComfyUI started beside it. Only the Studio's
+queue checks a job's measured memory peak, unloads its own idle modules (voice, songs, ComfyUI's cached models, the
+Bolt brain) to make room, waits and then refuses, naming them, when other programs hold the memory, and keeps a floor
+under the render. Agents (Claude Code, Codex, Hermes...) read [STUDIO-AGENT.md](STUDIO-AGENT.md): check
+`GET /api/memory` before starting a model server of their own, ask `POST /api/memory/release` for room, and never run
+a big model beside a render. **Machine → The memory guard** shows the same and has **Release idle modules**.
+
+The one-shot setups also install a per-user machine memory guard (`scripts/memguard.py`: systemd user unit, launchd
+agent or a Windows logon task) that has the Studio give memory back before the OOM killer or a hang, and cancels a
+render only as the last resort. It never stops your own programs unless you opt in (`--memguard-stop-foreign`,
+`-MemoryGuardStopForeign` on Windows). `--no-memguard` (`-NoMemoryGuard`) leaves it out;
+`python3 scripts/memguard.py uninstall` removes it. [More](docs/memory-guard.md)
+
 ### Updates
 
 Save work and stop through the tray/app launcher before updating. In a clean Git clone, pull the branch you

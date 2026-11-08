@@ -67,6 +67,18 @@ function storagePanel() {
   draw(); loadStorage(draw); return box; }
 async function loadStorage(draw) { M.loading = true; try { M.storage = await api("/api/storage"); } catch { M.storage = null; } M.loading = false; draw();
   if (M.storage && M.storage.computing) setTimeout(() => { if (document.querySelector("#storage")) loadStorage(draw); }, 2500); }
+// The memory manager (app/memory_manager.py): what the Studio has loaded, the largest other programs, Release idle modules
+function memPanel() {
+  const box = el("div", { class: "stack m-mem", id: "memmods" });
+  const draw = (m) => { box.replaceChildren(); if (!m) return put(box, el("div", { class: "note m-flat" }, "Reading the Studio's modules…"));
+    const loaded = (m.modules || []).filter(x => x.loaded), idle = loaded.filter(x => x.idle);
+    put(box,
+      el("div", { class: "kv m-row" }, el("span", {}, "Studio modules loaded"), el("b", {}, loaded.length ? loaded.map(x => x.label + (x.held_mb ? " " + gbOf(x.held_mb / 1024) : "")).join(" · ") : "none")),
+      m.others && m.others.length ? el("div", { class: "kv m-row" }, el("span", {}, "Largest other programs"), el("b", {}, m.others.slice(0, 3).map(o => o.name + " " + gbOf(o.mb / 1024)).join(" · "))) : null,
+      el("div", { class: "note m-flat" }, "Before a render the Studio unloads its idle modules when the render needs the room, and waits, then refuses, when other programs hold it. It never stops programs it did not start."),
+      el("div", { class: "m-acts" }, el("button", { class: "small", disabled: !idle.length || M.memBusy, title: idle.length ? "Unload " + idle.map(x => x.label).join(", ") : "Nothing idle to unload",
+        onclick: async () => { M.memBusy = true; draw(m); try { const r = await api("/api/memory/release", {}); toast(r.released.length ? "Unloaded: " + r.released.map(x => x.label).join(", ") : "Nothing was idle"); draw(r); } catch (e) { toast(e.message, 6000); draw(m); } M.memBusy = false; } }, "Release idle modules"))); };
+  draw(null); api("/api/memory").then(draw).catch(() => box.replaceChildren()); return box; }
 function viewMachine() {
   const wrap = el("div");
   const where = typeof cardFace === "function" && cardFace() ? "GPU" : S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : "This machine";
@@ -85,7 +97,7 @@ function viewMachine() {
           el("div", { class: "kv" }, el("h2", { class: "m-flat" }, where === "GPU" ? "GPU memory" : "Unified memory"), el("span", {}, "% used")), sparkline("mem", "blue")),
         storagePanel()),
       el("div", { class: "panel" }, el("h2", {}, "Right now"), el("div", { id: "machstatus" }, el("div", { class: "note" }, "Waiting for the first reading…")),
-        el("details", { class: "fold" }, el("summary", {}, "The memory guard"), el("div", { class: "note m-flat" }, where === "GPU" ? "The memory guard checks every clip before it is queued and again before a model loads, and refuses a clip that would leave the GPU under its floor. These readouts show what it sees; they do not change it." : "The memory guard checks every clip before it is queued and again before a model loads, and stops the renderer if memory falls under its floor. These readouts show what it sees; they do not change it.")))));
+        el("details", { class: "fold" }, el("summary", {}, "The memory guard"), el("div", { class: "note m-flat" }, where === "GPU" ? "The memory guard checks every clip before it is queued and again before a model loads, and refuses a clip that would leave the GPU under its floor. These readouts show what it sees; they do not change it." : "The memory guard checks every clip before it is queued and again before a model loads, and stops the renderer if memory falls under its floor. These readouts show what it sees; they do not change it."), memPanel()))));
   api("/api/telemetry/history").then(h => { M.history = (h.samples || []).map(s => ({ gpu: s.gpu, mem: s.mem })); if (SHELL.tel) machineLive(SHELL.tel); }).catch(() => {});
   setTimeout(() => { if (SHELL.tel) machineLive(SHELL.tel); }, 0);
   return wrap;

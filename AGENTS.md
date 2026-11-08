@@ -23,6 +23,19 @@ On a **DGX Spark** (Linux, CUDA) the same `bash oneshot-setup.sh` installs the C
 the same flags as on a Mac ([Install flags](docs/installation.md#install-flags)) plus `--train`; there is no `--turbo`, no `--app` and no 2x
 decoder there. Upgrade an install with `git pull && bash oneshot-setup.sh --upgrade`, then restart the app. `bash spark/comfy.sh stop` frees the models' memory after rendering.
 
+## Rendering on a person's machine: always through the Studio
+
+**Every render or processing task goes through Imagination Studio** (its queue: the page, `POST /api/jobs` or the MCP
+tools in `mcp/studio-mcp.py`), never the render scripts run by hand, a second ComfyUI, or the models loaded in a
+session of your own. Only the queue checks the job's memory peak, unloads the Studio's idle modules to fit it, waits
+and then refuses, naming them, when other programs hold the memory, and keeps a floor under the render: a Spark was
+OOM-rebooted by a ComfyUI run outside it, and another hung for 50 minutes with an agent's LLM server beside a render.
+Before you start a model server of your own, read `GET /api/memory` (`headroom_mb`, `others`; MCP `memory_status`),
+ask for room with `POST /api/memory/release` (MCP `release_memory`), and never run a big model while a job renders.
+Details for agents: [STUDIO-AGENT.md](STUDIO-AGENT.md) (also installed as a Claude Code skill by the one-shot setup).
+The one-shot setup installs the machine memory guard (`scripts/memguard.py`, [docs/memory-guard.md](docs/memory-guard.md));
+tell the person it is there and that `--memguard-stop-foreign` lets it stop their own model servers (off by default).
+
 ## Install for a person and build the one-click app
 
 Do these in order on the person's Mac, and report each result plainly.

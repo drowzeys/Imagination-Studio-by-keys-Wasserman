@@ -290,6 +290,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "Motion Previs: Sam Wasserman's Motion Previs Studio · Google: MediaPipe · Lihe Yang et al.: Depth Anything (Xenova's ONNX conversion) · OpenCV · Microsoft: ONNX Runtime",
       "MMAudio's models: Apple DFN5B CLIP · Synchformer (Iashin et al.) · NVIDIA BigVGAN v2 · Google: T5 · the SGLang-Omni team and Descript: Fish's codec on a Spark",
       "The agents you connect: Claude Code (Anthropic), Codex (OpenAI), Gemini CLI (Google), Grok CLI (xAI), Hermes Agent (Nous Research); Ollama, LM Studio, vLLM, SGLang (the SGLang team and LMSYS), llama.cpp (Georgi Gerganov and the ggml contributors); Blender (Blender Foundation) and blender-mcp (Siddharth Ahuja)",
+      "The memory guard's idea: earlyoom (Jakob Unterwurzacher) and systemd-oomd, with the kernel's PSI (Johannes Weiner)",
       "OpenAI Whisper, faster-whisper (SYSTRAN, Mobius Labs), yt-dlp, FFmpeg, PyTorch, Hugging Face diffusers, transformers and huggingface_hub, torchsde, FastAPI, Starlette and Uvicorn (Encode), xgrammar (MLC-AI), Zig, BusyBox, uv, NumPy, Pillow, PyAV",
       "Motion graphics, training and finishing: HeyGen (HyperFrames) · GreenSock (GSAP) · Microsoft (Playwright) · Node.js · kohya-ss (musubi-tuner) · ostris · bitsandbytes (Tim Dettmers) · Mirage (Tesseract, Tesseract Converter) · DejaVu fonts",
       "Geist and Instrument Serif · LobeHub and Simple Icons: the agents' marks · @itxabdullaa: the Black Mirror test prompt",

@@ -19,7 +19,9 @@
        the notification tray and pins Start to the taskbar;
     5. keeps the laptop awake for renders: no sleep or hibernate plugged in (and on battery with -NeverSleepOnBattery),
        the lid does nothing, the Wi-Fi adapter is never powered down;
-    6. optionally starts the Studio at sign-in (-StartAtLogon) and opens SSH for another machine (-EnableSsh).
+    6. installs the machine memory guard (scripts\memguard.py, a logon task; -NoMemoryGuard leaves it out,
+       -MemoryGuardStopForeign lets it stop your own model servers under the memory floor);
+    7. optionally starts the Studio at sign-in (-StartAtLogon) and opens SSH for another machine (-EnableSsh).
   Running it again updates the Studio and resumes an unfinished install; what is already set is left as it is.
 
   The N1X's memory is split by its firmware: about 98 GB for the GPU and about 30 GB for Windows (an HP OmniBook X with
@@ -56,7 +58,9 @@ param(
   [switch]$NoBolt,                   # no Bolt brain (its engine build and NVIDIA's 25 GB of checkpoints)
   [switch]$NoVoice,                  # no Fish Audio Drama 3 (its engine build and the 70 GB checkpoint)
   [switch]$AllowUnverifiedImageModel, # accept matching shared image test failures before download
-  [switch]$AllowInsufficientModel    # accept known insufficient capacity or matching shared test failures
+  [switch]$AllowInsufficientModel,   # accept known insufficient capacity or matching shared test failures
+  [switch]$NoMemoryGuard,            # no machine memory guard (scripts\memguard.py; docs\memory-guard.md)
+  [switch]$MemoryGuardStopForeign    # let that guard stop your own model servers under the memory floor (off by default)
 )
 $ErrorActionPreference = "Continue"   # native tools (git, winget, powercfg) report through exit codes, checked where it matters
 $ProgressPreference = "SilentlyContinue"
@@ -195,6 +199,26 @@ if (-not $NoPower) {
     ForEach-Object { Disable-NetAdapterPowerManagement -Name $_.Name -NoRestart -ErrorAction SilentlyContinue }
   Ok "no sleep or hibernate on AC, lid does nothing, Windows on Best performance"
   Warn "for the DGX Spark's speed set the maker's own mode too (HP: myHP > Performance), plugged in: docs/rtx-spark-n1x.md"
+}
+
+# ---------- 5b. the machine memory guard ----------
+# scripts\memguard.py (docs\memory-guard.md): a logon task that has the Studio give memory back before Windows runs out
+# of memory or commit, stops your own model servers only with -MemoryGuardStopForeign, and cancels a render only as the
+# last resort. It also places STUDIO-AGENT.md (every render goes through the Studio) where agents read it.
+if (-not $NoMemoryGuard) {
+  Say "Memory guard (-NoMemoryGuard leaves it out)"
+  $guardPy = Join-Path $env:LOCALAPPDATA 'ImaginationStudio\ui-venv\Scripts\python.exe'
+  if (-not (Test-Path $guardPy)) { $guardPy = (Get-Command python -ErrorAction SilentlyContinue).Source }
+  if ($guardPy) {
+    if ($MemoryGuardStopForeign) { Warn "opted in: under the memory floor it MAY STOP your own model servers (Ollama, llama.cpp, LM Studio...)" }
+    else { Ok "it unloads the Studio's idle modules and never stops your own programs (-MemoryGuardStopForeign allows that)" }
+    $guardArgs = @((Join-Path $StudioDir 'scripts\memguard.py'), 'install', '--python', $guardPy)
+    if ($MemoryGuardStopForeign) { $guardArgs += '--stop-foreign' }
+    & $guardPy @guardArgs
+    if ($LASTEXITCODE -eq 0) { Ok "memory guard installed (Task Scheduler: $('Imagination Studio Memory Guard'); undo: $guardPy $StudioDir\scripts\memguard.py uninstall)" }
+    else { Warn "the memory guard is not installed (above): $guardPy $StudioDir\scripts\memguard.py install" }
+  } else { Warn "no Python found for the memory guard: run scripts\memguard.py install once the Studio is set up" }
+  Ok "agents (Claude Code, Codex, Hermes...): every render goes through the Studio; read $StudioDir\STUDIO-AGENT.md"
 }
 
 # ---------- 6. optional: start at sign-in, SSH ----------

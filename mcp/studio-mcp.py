@@ -194,6 +194,15 @@ TOOLS = [
                                  "end": {"type": "number", "description": "seconds (default: the clip's end, at most 15 s after start)"},
                                  "mode": {"type": "string", "enum": ["full-scene", "camera-only", "actor-motion", "object-motion"]},
                                  "title": {"type": "string"}}, ("clip",))},
+    {"name": "memory_status", "description": "This machine's memory as the Studio sees it: available, the floor kept free, headroom_mb "
+                                             "(available less the floor), the Studio's loaded modules and which are idle, the largest "
+                                             "other programs. Read it before starting a model server or script of your own: never start "
+                                             "one while a job renders, nor when it would leave the headroom under the next job's need.",
+     "inputSchema": text_schema({})},
+    {"name": "release_memory", "description": "Ask the Studio to unload its idle modules now (voice, music, comfy, bolt; all idle ones "
+                                              "by default). The running job's module and a brain that is answering are never touched.",
+     "inputSchema": text_schema({"modules": {"type": "array", "items": {"type": "string", "enum": ["voice", "music", "comfy", "bolt"]},
+                                             "description": "only these (default: every idle one)"}})},
     {"name": "cancel_job", "description": "Cancel a queued or running job (one queued by mistake).",
      "inputSchema": text_schema({"id": {"type": "string"}}, ("id",))},
     {"name": "list_projects", "description": "The Editor's projects (timelines), newest first.",
@@ -548,6 +557,15 @@ def run(name: str, args: dict):
             end = min(length, start + 15) if length else start + 5
         body = {"source": clip, "start": start, "end": end, **{k: args[k] for k in ("mode", "title") if args.get(k)}}
         return job_summary(call("POST", "/api/motion/jobs", body))
+    if name == "memory_status":
+        said = call("GET", "/api/memory")
+        return {k: said.get(k) for k in ("available_mb", "total_mb", "floor_mb", "headroom_mb", "releasable_mb", "modules", "others", "guard", "events")}
+    if name == "release_memory":
+        body = {"why": "an agent asked (release_memory)"}
+        if args.get("modules"):
+            body["modules"] = list(args["modules"])
+        said = call("POST", "/api/memory/release", body)
+        return {k: said.get(k) for k in ("released", "available_mb", "headroom_mb", "modules", "others")}
     if name == "cancel_job":
         quoted = urllib.request.quote(str(args["id"]), safe="")
         try:
@@ -754,7 +772,7 @@ def answer(message: dict):
             state = {}
         if not isinstance(state, dict) or state.get("platform") != "windows":
             return {"tools": TOOLS}
-        allowed = {"studio_state", "list_library", "search_library", "cancel_job", "list_projects", "add_to_timeline",
+        allowed = {"studio_state", "memory_status", "release_memory", "list_library", "search_library", "cancel_job", "list_projects", "add_to_timeline",
                    "job_status", "wait_for_jobs", "list_jobs", "slate_films", "slate_film", "slate_new_film",
                    "slate_add_scene", "slate_add_shot", "suite_imports", "suite_attach", "upload_file"}
         for name, kind in {"queue_still": "scout", "queue_sound": "sfx", "make_graphics": "graphics", "export_timeline": "export", "music_beats": "beats"}.items():

@@ -502,6 +502,10 @@ built from the file's header, that the studio now makes itself.
 - **PyTorch**; **Hugging Face** — **diffusers**, **transformers** and **huggingface_hub**; **Patrick Kidger** and
   **Xuechen Li** — **torchsde**.
 - **Comfy Org** — **ComfyUI**, which every render on a DGX Spark runs through.
+- **Jakob Unterwurzacher** — **earlyoom**, and the **systemd** contributors — **systemd-oomd**: the idea of acting on
+  memory pressure in user space before the kernel's OOM killer, which the machine memory guard
+  (`scripts/memguard.py`) follows; **Johannes Weiner** — the kernel's pressure stall information (PSI) it reads.
+  No code of theirs is included.
 - **Sebastián Ramírez** — **FastAPI**; **Encode** — **Starlette** and **Uvicorn**: the web app.
 - **The Geist Project Authors** — **Geist** and **Geist Mono**; **The Instrument Serif Project Authors** — **Instrument
   Serif** (SIL Open Font License, `app/static/fonts/`).
