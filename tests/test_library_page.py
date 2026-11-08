@@ -40,19 +40,22 @@ globalThis.WATCHED = []; globalThis.IntersectionObserver = class { constructor(f
 globalThis.seen = nodes => { const io = WATCHED[WATCHED.length - 1]; io.fn(nodes.filter(n => io.on.has(n)).map(target => ({ target, isIntersecting: true }))); };
 globalThis.LIBPICK = new Set(); globalThis.LORAS = []; globalThis.ACT = { state: {}, open: null }; globalThis.actButtons = () => [];
 globalThis.actPanel = () => null; CAP.map = {};
+// the page's own helpers the Library's side panel reads (the selected take's facts and buttons)
+for (const [k, v] of Object.entries({ sizeText: b => b + " B", icon: () => el("span"), releaseMedia: () => {}, capButton: () => null, jobs: [] })) if (typeof globalThis[k] === "undefined") globalThis[k] = v;
 // 150 takes, newest first: clips and stills in turn
 globalThis.TAKES = Array.from({ length: 150 }, (_, i) => ({ path: (i % 2 ? "scouts/s" : "renders/r") + i + (i % 2 ? ".png" : ".mp4"), kind: i % 2 ? "image" : "video", modified: 1000 - i }));
 answers["/api/library"] = TAKES; answers["/api/trash"] = { files: 0 };
 const tick = () => new Promise(r => setTimeout(r, 20));
 const draw = async () => { const box = viewLibrary(); await tick(); return box; };
 // the Library's grid of tiles (the caption search keeps a grid of its own, hidden until it is searching)
-const grid = box => find(box, n => n.attrs && n.attrs.class === "grid" && n.attrs.style === "margin-top:10px");
+const grid = box => find(box, n => n.attrs && n.attrs.class === "lib-grid");
 const shown = box => grid(box).children.filter(t => t.style.display !== "none").map(t => t.dataset.path);
 const more = box => find(box, n => n.tag === "button" && /^Show \d+ more/.test(n.textContent || ""));
 const moreText = box => { const b = more(box); return b.style.display === "none" ? null : b.textContent; };
 const search = box => find(box, n => n.attrs && n.attrs["aria-label"] === "Find in the Library");
+// the grid's players (the side panel's preview of the selected take is one player, fetched at once)
 const players = box => { const out = []; const walk = n => { if (!n || typeof n !== "object") return; if (Array.isArray(n)) return n.forEach(walk);
-  if (n.tag === "video" || n.tag === "audio") out.push(n); walk(n.kids); }; walk(box); return out; };
+  if (n.tag === "video" || n.tag === "audio") out.push(n); walk(n.kids); }; walk(grid(box)); return out; };
 """
 
 
@@ -84,7 +87,7 @@ def test_a_search_or_a_kind_starts_again_at_the_first_page():
       const words = search(box); words.value = "renders"; words.on.change();
       out.search = [LIBF.limit, shown(box).length, shown(box).every(p => p.startsWith("renders/")), moreText(box)];
       words.value = ""; words.on.change(); LIBF.limit = 120;
-      button(box, "Stills").attrs.onclick();
+      button(box, "Pictures").attrs.onclick();
       out.kind = [LIBF.kind, LIBF.limit]; box = await draw(); out.stills = [grid(box).children.length, shown(box).length, moreText(box)];""")
     assert out["search"] == [60, 60, True, "Show 15 more (15 not shown)"]  # 75 clips match, the first 60 shown
     assert out["kind"] == ["image", 60]
@@ -92,7 +95,7 @@ def test_a_search_or_a_kind_starts_again_at_the_first_page():
 
 
 def test_select_all_takes_only_the_tiles_on_screen():
-    out = run("""LIBF.limit = LIB_PAGE; const box = await draw();
+    out = run("""LIBF.limit = LIB_PAGE; LIBF.select = true; const box = await draw();
       button(box, "Select all").attrs.onclick(); out.first = [...LIBPICK];
       LIBPICK.clear(); more(box).attrs.onclick(); button(box, "Select all").attrs.onclick(); out.second = LIBPICK.size;""")
     assert len(out["first"]) == 60 and "renders/r60.mp4" not in out["first"]  # Delete selected never reaches unseen files
@@ -108,7 +111,7 @@ def test_a_player_fetches_its_file_only_once_its_tile_comes_near_the_screen():
       const first = WATCHED[WATCHED.length - 1]; await draw(); out.oldLetGo = first.gone === true && WATCHED.length === 2;""")
     assert out["players"] == 75 and out["withSrc"] == 0 and out["waiting"] == 75  # no clip is fetched on a draw
     assert out["preload"] == "metadata"
-    assert out["after"] == ["/files/renders/r0.mp4", "/files/renders/r2.mp4", "/files/renders/r4.mp4"]
+    assert out["after"] == ["/files/renders/r0.mp4#t=0.5", "/files/renders/r2.mp4#t=0.5", "/files/renders/r4.mp4#t=0.5"]  # a tile shows the clip at 0.5 s
     assert out["left"] == 72 and out["again"] == 3
     assert out["oldLetGo"]  # each draw has its own watcher; the last one's tiles are not kept
 
