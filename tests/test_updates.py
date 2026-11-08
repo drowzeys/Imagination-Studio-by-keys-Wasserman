@@ -391,8 +391,8 @@ def test_the_launchers_own_pid_file_still_updates_itself(history, tmp_path, monk
     # Windows (scripts/app.ps1) gives the launcher's server a PID file for its stop script and tray: still managed
     _, clone = history
     monkeypatch.setenv("STUDIO_UPDATE_SESSION", "test-session")
-    monkeypatch.setenv("STUDIO_PIDFILE", "C:/Users/someone/AppData/Local/ImaginationStudio/studio.pid")
-    monkeypatch.setenv("STUDIO_LAUNCHER_PIDFILE", "C:/Users/someone/AppData/Local/ImaginationStudio/studio.pid")
+    monkeypatch.setenv("STUDIO_PIDFILE", "C:/StudioData/studio.pid")
+    monkeypatch.setenv("STUDIO_LAUNCHER_PIDFILE", "C:/StudioData/studio.pid")
     manager = updates.Manager(clone, tmp_path / "home", threading.Lock(), lambda: False)
     assert manager.managed()
     manager.set_automatic(True)

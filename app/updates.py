@@ -123,7 +123,7 @@ def inspect(pack: Path, fetch: bool = False) -> dict:
 
 
 def _inspect(pack: Path, fetch: bool, known: dict) -> dict:
-    # compared as paths: Git for Windows answers C:/Users/..., Python's path is C:\Users\...
+    # compared as paths: Git for Windows writes a drive path with forward slashes, Python with backslashes
     if Path(git(pack, "rev-parse", "--show-toplevel")).resolve() != pack.resolve():
         raise UpdateError("This folder is not a Git installation. Install a Git copy to use updates.")
     known["source"] = source = repository(git(pack, "config", "--get", "remote.origin.url"))
