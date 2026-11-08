@@ -33,6 +33,12 @@ never under 8 GB. What it does, in this order, each with a cooldown, and every a
      cancelled through the Studio's API (POST /api/jobs/<id>/cancel), so the machine itself survives. --no-cancel
      leaves even that to the kernel.
 
+Heat (Linux and Windows; a Mac is left to the app's gate): every 2 s nvidia-smi's GPU temperature and clock event
+reasons, and Linux's hottest thermal zone. At 88 °C or more it logs (once a minute). When the GPU has stayed at the stop
+line (STUDIO_THERMAL_STOP_C, 90 °C) for 20 s, or under hardware thermal slowdown (reasons 0x8 or 0x40) for 10 + 20 s,
+which is past the moment the app's own thermal stop acts, it cancels the render as its last resort (--no-cancel: never;
+--no-thermal or STUDIO_THERMAL_GATE=off: no heat watch at all).
+
     python3 scripts/memguard.py status                     # thresholds, a reading now, installed or not, the last log lines
     python3 scripts/memguard.py install [--stop-foreign] [--dry-run]   # systemd user unit / launchd agent / logon task
     python3 scripts/memguard.py uninstall [--dry-run]      # everything install made, gone
@@ -57,6 +63,7 @@ import os
 import re
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -386,7 +393,9 @@ class Studio:
     def renders(self) -> list[dict]:
         jobs = self.call("GET", "/api/jobs")
         jobs = jobs.get("jobs", []) if isinstance(jobs, dict) else jobs or []
-        return [j for j in jobs if j.get("status") == "running" and not j.get("remote") and not j.get("spark")]
+        # "spark" names the machine a job renders on: this one's own name (app/sparks.py Hub.name) for a local job
+        here = socket.gethostname()
+        return [j for j in jobs if j.get("status") == "running" and j.get("spark") in (None, "", here)]
 
     def cancel(self, job_id: str) -> None:
         self.call("POST", f"/api/jobs/{job_id}/cancel", {})
@@ -458,6 +467,111 @@ def act(actions: list[str], now: dict, limits: dict, studio: Studio, say) -> Non
             say(f"{action}: {said}: the Studio did not answer at {studio.url} ({error})")
 
 
+# ---------- heat ----------
+# DGX Spark .3 hung hard twice during back-to-back clips with memory fine: the GPU at 88 to 89 °C on every clip, the
+# hottest ACPI zone at 96.6 °C, the throttle growing clip after clip. The app stops such a render itself (its live
+# thermal stop, app/memory_manager.py ThermalStop, at once at 90 °C or after 10 s of hardware thermal slowdown) and
+# queues it again; this guard is the backstop when the app has not: the same condition held HEAT_GRACE_S longer.
+HW_THERMAL = 0x08 | 0x40
+HEAT_LOG_C = 88.0
+HEAT_GRACE_S = 20.0
+
+
+def heat_limits() -> dict:
+    def number(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name) or default)
+        except ValueError:
+            return default
+    return {"stop_c": number("STUDIO_THERMAL_STOP_C", 90), "throttle_s": number("STUDIO_THERMAL_THROTTLE_S", 10),
+            "log_c": number("STUDIO_THERMAL_REFUSE_C", HEAT_LOG_C)}
+
+
+def parse_smi_heat(text: str) -> tuple:
+    hottest, reasons = None, None
+    for row in text.splitlines():
+        parts = [part.strip() for part in row.split(",")]
+        if len(parts) < 2:
+            continue
+        try:
+            hottest = max(hottest or -1.0, float(parts[0]))
+        except ValueError:
+            pass
+        try:
+            reasons = (reasons or 0) | int(parts[1], 16)
+        except ValueError:
+            pass
+    return hottest, reasons
+
+
+def heat_reading() -> dict:
+    """{"gpu_c", "reasons", "zone_c"}: nvidia-smi's hottest GPU and its clock event reasons (Linux and Windows), and
+    Linux's hottest thermal zone. A Mac is left to the app's own gate (macOS's thermal state)."""
+
+    out = {"gpu_c": None, "reasons": None, "zone_c": None}
+    if sys.platform == "darwin":
+        return out
+    for field in ("clocks_event_reasons.active", "clocks_throttle_reasons.active"):
+        try:
+            done = subprocess.run(["nvidia-smi", f"--query-gpu=temperature.gpu,{field}", "--format=csv,noheader,nounits"],
+                                  capture_output=True, text=True, timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            break
+        if done.returncode == 0:
+            out["gpu_c"], out["reasons"] = parse_smi_heat(done.stdout)
+            break
+    if sys.platform.startswith("linux"):
+        temps = []
+        for zone in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
+            try:
+                temps.append(int(zone.read_text().strip()) / 1000)
+            except (OSError, ValueError):
+                pass
+        temps = [t for t in temps if 1 <= t <= 150]
+        out["zone_c"] = max(temps) if temps else None
+    return out
+
+
+def heat_decide(now: dict, memo: dict, at: float, limits: dict, cancel: bool) -> list[str]:
+    """"heat_log" at 88 °C or more (once a minute); "heat_cancel" (the last resort) when the GPU has been at the stop
+    line, or slowed by its hardware thermal limit, for HEAT_GRACE_S longer than the app's own stop waits."""
+
+    gpu, reasons = now.get("gpu_c"), now.get("reasons")
+    hot = gpu is not None and gpu >= limits["stop_c"]
+    throttled = reasons is not None and bool(reasons & HW_THERMAL)
+    for key, on in (("hot_since", hot), ("throttle_since", throttled)):
+        memo[key] = (at if memo.get(key) is None else memo[key]) if on else None
+    actions = []
+    peak = max([t for t in (gpu, now.get("zone_c")) if t is not None], default=None)
+    if peak is not None and peak >= limits["log_c"] and at - memo.get("heat_log", -1e9) >= 60:
+        memo["heat_log"] = at
+        actions.append("heat_log")
+    late = ((memo["hot_since"] is not None and at - memo["hot_since"] >= HEAT_GRACE_S)
+            or (memo["throttle_since"] is not None and at - memo["throttle_since"] >= limits["throttle_s"] + HEAT_GRACE_S))
+    if late and cancel and at - memo.get("heat_cancel", -1e9) >= 60:
+        memo["heat_cancel"] = at
+        actions.append("heat_cancel")
+    return actions
+
+
+def heat_act(actions: list[str], now: dict, studio, say) -> None:
+    said = (f"GPU {now.get('gpu_c')} °C, clock event reasons {now['reasons']:#x}" if now.get("reasons") is not None
+            else f"GPU {now.get('gpu_c')} °C") + (f", hottest zone {now['zone_c']:.0f} °C" if now.get("zone_c") is not None else "")
+    for action in actions:
+        if action == "heat_log":
+            say(f"heat: {said}: hot (the Studio's own stop acts at the GPU's stop line or after sustained hardware slowdown)")
+            continue
+        try:
+            renders = studio.renders()
+            for job in renders:
+                studio.cancel(job["id"])
+                say(f"heat_cancel: {said}: LAST RESORT, cancelled the render {job['id']} ({job.get('kind')}) so the machine does not hang")
+            if not renders:
+                say(f"heat_cancel: {said}: no render of the Studio's runs here; nothing to cancel")
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            say(f"heat_cancel: {said}: the Studio did not answer at {studio.url} ({error})")
+
+
 def run(args) -> int:
     say = Log(state_dir() / "memguard.log")
     studio = Studio(args.url)
@@ -475,9 +589,17 @@ def run(args) -> int:
         except (OSError, AttributeError):
             pass
     memo: dict = {}
+    heat_memo: dict = {"read": -1e9}
+    heat_on = not args.no_thermal and os.environ.get("STUDIO_THERMAL_GATE", "on").strip().lower() not in ("off", "0", "no", "false")
     seen: list = []  # (time, available) over the last second, for the rate of the fall
     while True:
         now, at = reading(), time.monotonic()
+        if heat_on and at - heat_memo["read"] >= 2.0:  # nvidia-smi every 2 s, not at the memory poll's pace
+            heat_memo["read"] = at
+            hot = heat_reading()
+            found = heat_decide(hot, heat_memo, at, heat_limits(), not args.no_cancel)
+            if found:
+                heat_act(found, hot, studio, say)
         if now.get("available_mb") is not None:
             seen.append((at, now["available_mb"]))
         while seen and at - seen[0][0] > 1.0:
@@ -629,6 +751,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-foreign", action="store_true", default=os.environ.get("STUDIO_MEMGUARD_STOP_FOREIGN") == "1",
                         help="under the floor, stop the largest of the person's own model servers (off by default)")
     parser.add_argument("--no-cancel", action="store_true", help="never cancel a render, even as the last resort")
+    parser.add_argument("--no-thermal", action="store_true", help="no thermal backstop (STUDIO_THERMAL_GATE=off does the same)")
     parser.add_argument("--floor-mb", type=int, default=0)
     parser.add_argument("--poll", type=float, default=0.0)
     parser.add_argument("--once", action="store_true", help="run: one reading and its actions, then exit")

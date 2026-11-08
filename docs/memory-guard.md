@@ -32,6 +32,36 @@ the floor, as before. Everything done is listed by `GET /api/memory` (`events`) 
 `~/ImaginationStudio/logs/memory.log`. **Machine → The memory guard** shows the loaded modules, the largest other
 programs and a **Release idle modules** button.
 
+## Heat: the thermal gate and the live thermal stop
+
+Memory is not the only way a render takes a machine down. DGX Spark .3 hung hard twice during back-to-back clips with
+41.7 GB available and no memory stall: the GPU stood at 88 to 89 °C on every clip and the hottest ACPI zone at
+96.6 °C, and the throttle grew clip after clip (software slowdown 18, 31, 37 s; hardware slowdown 3, 5, 8 s; clock
+event reasons 0x20, 0x48, 0x68). With 60 s between clips it cooled to 60 to 70 °C and stayed flat.
+
+- **The gate** (`memory_manager.thermal_admit`, after the memory admission): a GPU job waits, polling every 2 s,
+  until the GPU is at most 70 °C and the hottest thermal zone at most 85 °C; its progress says
+  `Cooling the GPU: 78 °C → 70 °C`. After 300 s it starts anyway with a warning, unless the hottest reading is still
+  88 °C or more: then it is refused with the reason.
+- **The live stop** (the app's watch, every 2 s while a GPU job runs here): at 90 °C, or after 10 s of the GPU's
+  hardware thermal slowdown (clock event reasons 0x8 or 0x40; software slowdown, 0x20, alone does not count), the
+  render is cancelled as Cancel does it, the reason in its error, and queued again once: the repeat waits at the gate.
+  A repeat that overheats too is not queued a third time.
+- **The machine guard's backstop** (`scripts/memguard.py`, Linux and Windows): at 88 °C or more it logs; when the
+  same condition has held 20 s past the app's own stop (90 °C for 20 s, hardware slowdown for 30 s), it cancels the
+  render through the Studio's API as its last resort. `--no-thermal` leaves heat out.
+
+| Platform | Read |
+|---|---|
+| DGX Spark, CUDA Linux | nvidia-smi `temperature.gpu` and `clocks_event_reasons.active` (`clocks_throttle_reasons.active` on older drivers), and the hottest of `/sys/class/thermal` |
+| Windows (RTX Spark N1X) | nvidia-smi, the same two fields |
+| macOS | the thermal state macOS reports (`NSProcessInfo.thermalState`, read with `osascript`, no sudo): the gate waits at "serious" and refuses at "critical"; the live stop acts at "critical". A Mac's GPU temperature needs sudo, so there is no °C line there |
+
+Settings: `STUDIO_THERMAL_GATE=off|on` (on by default where something is readable), `STUDIO_THERMAL_GPU_C` (70),
+`STUDIO_THERMAL_ZONE_C` (85), `STUDIO_THERMAL_REFUSE_C` (88), `STUDIO_THERMAL_STOP_C` (90),
+`STUDIO_THERMAL_THROTTLE_S` (10), `STUDIO_THERMAL_WAIT_S` (300), `STUDIO_THERMAL_POLL_S` (2). `GET /api/memory` has the
+readings under `thermal`; what the gate and the stop did is in its `events` and in `logs/memory.log`.
+
 ## 3. The whole machine (`scripts/memguard.py`, installed by the one-shot setup)
 
 A small per-user watchdog that reads the machine's memory every half second (a tenth of a second near the floor,

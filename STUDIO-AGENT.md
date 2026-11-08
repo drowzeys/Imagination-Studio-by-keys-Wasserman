@@ -50,7 +50,22 @@ curl -s -X POST http://127.0.0.1:7870/api/memory/release -H 'Content-Type: appli
 ComfyUI and its cached models), `bolt` (the Bolt brain). The module a running job uses is never unloaded, and nothing
 the Studio did not start is ever stopped by it: your processes are yours to stop.
 
-## 4. The machine guard
+## 4. Heat: leave cooling gaps, never bypass the gate
+
+Back-to-back clips heat a GPU until it throttles and, on a DGX Spark, hangs (88 to 89 °C on every clip, growing
+throttle, two hard hangs; with a minute between clips it stayed at 60 to 70 °C). So the Studio holds every GPU job
+until the machine has cooled: its progress says `Cooling the GPU: 78 °C → 70 °C` (or the hottest thermal zone, or a
+Mac's thermal state), for up to five minutes. A render that reaches 90 °C, or stays under the GPU's hardware thermal
+slowdown for 10 s, is stopped and queued again once.
+
+- Queue a batch and let the queue pace it; when you queue clips one by one, leave a cooling gap (a minute) between
+  them, and do not start GPU work of your own while a job waits at "Cooling".
+- Do not bypass the gate: never set `STUDIO_THERMAL_GATE=off`, raise the thresholds, or render outside the Studio to
+  get around a wait. A job refused for heat ("still too hot after ... refused at 88 °C") means: let the machine cool,
+  give it air, then queue it again.
+- `GET /api/memory` has `thermal` (the GPU's temperature, the hottest zone, the clock event reasons and the lines).
+
+## 5. The machine guard
 
 The one-shot setup installs `scripts/memguard.py` as a per-user service (systemd user unit, launchd agent or a logon
 task; `python3 scripts/memguard.py status` says whether it is installed). It reads the machine's memory up to ten

@@ -44,6 +44,9 @@ os.environ.setdefault("STUDIO_WINDOWS_TIER", "preview")
 # nor hold a job for this machine's real memory (app/memory_manager.py): a small CI runner has 16 GB, and the stand-in
 # engines take none; tests/test_memory_manager.py turns it on and sets the memory it sees
 os.environ.setdefault("STUDIO_MEMORY_MANAGER", "off")
+# nor wait for this machine to cool (the thermal gate and live stop, app/memory_manager.py): a CI runner's GPU, or none;
+# tests/test_thermal.py turns them on with sensors of its own
+os.environ.setdefault("STUDIO_THERMAL_GATE", "off")
 # nor ask for the studio's access key (app/access.py): tests/test_access.py turns it on for its own requests
 os.environ.setdefault("STUDIO_ACCESS_KEY", "off")
 

@@ -359,7 +359,9 @@ def running_kinds(jobs) -> set:
 
     out: set = set()
     for job in list(jobs):
-        if job.get("status") == "running" and not job.get("remote") and not job.get("spark"):
+        # "remote" is the worker's address for a job handed to another Spark; "spark" names the machine either way
+        # (this one's own name for a local job), so it says nothing about where the job runs
+        if job.get("status") == "running" and not job.get("remote"):
             out |= uses(job.get("kind"))
     return out
 
@@ -419,6 +421,226 @@ def admit(job: dict, fit, wait_s: float | None = None, mode: str | None = None, 
     raise RuntimeError(why)
 
 
+# ---------- heat: the thermal gate and the live thermal stop ----------
+# DGX Spark .3 hung hard twice during back-to-back clips with memory fine (41.7 GB available, no memory stall, no
+# kernel line): the GPU stood at 88 to 89 °C on every clip and the hottest ACPI zone at 96.6 °C, and the throttle grew
+# clip after clip (software slowdown 18, 31, 37 s; hardware 3, 5, 8 s; reasons 0x20, 0x48, 0x68). With 60 s between
+# clips it cooled to 60 to 70 °C and stayed there. So a GPU job waits for the machine to cool before it starts
+# (thermal_admit), and a render that runs too hot is stopped and queued again once (Watch.thermal_tick).
+
+HW_THERMAL = 0x08 | 0x40  # nvidia-smi clocks_event_reasons: hardware slowdown, hardware thermal slowdown
+SW_THERMAL = 0x20         # software thermal slowdown
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name) or default)
+    except ValueError:
+        return default
+
+
+def thermal_limits() -> dict:
+    """The gate's and the stop's lines, °C and seconds: STUDIO_THERMAL_GPU_C (70), STUDIO_THERMAL_ZONE_C (85),
+    STUDIO_THERMAL_REFUSE_C (88), STUDIO_THERMAL_STOP_C (90), STUDIO_THERMAL_WAIT_S (300), STUDIO_THERMAL_POLL_S (2),
+    STUDIO_THERMAL_THROTTLE_S (10)."""
+
+    return {"gpu_c": _env_float("STUDIO_THERMAL_GPU_C", 70), "zone_c": _env_float("STUDIO_THERMAL_ZONE_C", 85),
+            "refuse_c": _env_float("STUDIO_THERMAL_REFUSE_C", 88), "stop_c": _env_float("STUDIO_THERMAL_STOP_C", 90),
+            "wait_s": _env_float("STUDIO_THERMAL_WAIT_S", 300), "poll_s": _env_float("STUDIO_THERMAL_POLL_S", 2),
+            "throttle_s": _env_float("STUDIO_THERMAL_THROTTLE_S", 10)}
+
+
+def thermal_enabled() -> bool:
+    """STUDIO_THERMAL_GATE=off turns the gate and the live stop off (the test suite runs so); on by default where the
+    temperatures can be read."""
+
+    return os.environ.get("STUDIO_THERMAL_GATE", "on").strip().lower() not in ("off", "0", "no", "false")
+
+
+def parse_smi_thermal(text: str) -> tuple[float | None, int | None]:
+    """nvidia-smi's ``temperature.gpu,clocks_event_reasons.active`` rows: the hottest card and the reasons of all, OR'd."""
+
+    hottest, reasons = None, None
+    for row in text.splitlines():
+        parts = [part.strip() for part in row.split(",")]
+        if len(parts) < 2:
+            continue
+        try:
+            temp = float(parts[0])
+            hottest = temp if hottest is None else max(hottest, temp)
+        except ValueError:
+            pass
+        try:
+            reasons = (reasons or 0) | int(parts[1], 16)
+        except ValueError:
+            pass
+    return hottest, reasons
+
+
+def thermal_zones(root: str = "/sys/class/thermal") -> tuple[float | None, str]:
+    """The hottest of Linux's thermal zones (°C) and its type; readings outside 1 to 150 °C are a sensor's nonsense."""
+
+    hottest, name = None, ""
+    try:
+        zones = sorted(os.listdir(root))
+    except OSError:
+        return None, ""
+    for zone in zones:
+        if not zone.startswith("thermal_zone"):
+            continue
+        try:
+            with open(os.path.join(root, zone, "temp")) as handle:
+                temp = int(handle.read().strip()) / 1000
+            with open(os.path.join(root, zone, "type")) as handle:
+                kind = handle.read().strip()
+        except (OSError, ValueError):
+            continue
+        if 1 <= temp <= 150 and (hottest is None or temp > hottest):
+            hottest, name = temp, f"{kind} ({zone})"
+    return hottest, name
+
+
+MAC_STATES = ("nominal", "fair", "serious", "critical")  # NSProcessInfo.thermalState
+
+
+def thermal_reading() -> dict:
+    """{"gpu_c", "zone_c", "zone", "reasons", "mac_state", "source"}: an NVIDIA GPU's temperature and clock event
+    reasons from nvidia-smi (the Studio's card, or the paired cards), Linux's hottest thermal zone, and on a Mac the
+    thermal state macOS reports (NSProcessInfo, read with osascript, no sudo: a Mac has no GPU temperature to read
+    without it). "source" None: nothing readable, the gate is skipped."""
+
+    out = {"gpu_c": None, "zone_c": None, "zone": "", "reasons": None, "mac_state": None, "source": None}
+    if sys.platform == "darwin":
+        try:
+            said = subprocess.run(["osascript", "-l", "JavaScript", "-e",
+                                   'ObjC.import("Foundation"); $.NSProcessInfo.processInfo.thermalState'],
+                                  capture_output=True, text=True, timeout=3).stdout.strip()
+            out.update(mac_state=MAC_STATES[int(said)], source="mac")
+        except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+            pass
+        return out
+    try:
+        argv = _guard().nvidia_argv()
+        for field in ("clocks_event_reasons.active", "clocks_throttle_reasons.active"):  # the older drivers' name
+            done = subprocess.run([*argv, f"--query-gpu=temperature.gpu,{field}", "--format=csv,noheader,nounits"],
+                                  capture_output=True, text=True, timeout=3)
+            if done.returncode == 0:
+                out["gpu_c"], out["reasons"] = parse_smi_thermal(done.stdout)
+                break
+    except (OSError, subprocess.TimeoutExpired, Exception):  # noqa: BLE001 - no nvidia-smi: no GPU line
+        pass
+    if sys.platform.startswith("linux"):
+        out["zone_c"], out["zone"] = thermal_zones()
+    if out["gpu_c"] is not None or out["zone_c"] is not None:
+        out["source"] = "nvidia" if out["gpu_c"] is not None else "zones"
+    return out
+
+
+def too_hot(now: dict, limits: dict) -> str:
+    """Why a GPU job may not start yet ("" when it may): the GPU over its line, the hottest zone over its, a Mac at
+    "serious" or worse."""
+
+    if now.get("mac_state") in ("serious", "critical"):
+        return f"Cooling the Mac: thermal state {now['mac_state']} → fair"
+    if now.get("gpu_c") is not None and now["gpu_c"] > limits["gpu_c"]:
+        return f"Cooling the GPU: {now['gpu_c']:.0f} °C → {limits['gpu_c']:.0f} °C"
+    if now.get("zone_c") is not None and now["zone_c"] > limits["zone_c"]:
+        return f"Cooling the machine: {now['zone'] or 'hottest zone'} {now['zone_c']:.0f} °C → {limits['zone_c']:.0f} °C"
+    return ""
+
+
+def hottest(now: dict) -> float | None:
+    found = [t for t in (now.get("gpu_c"), now.get("zone_c")) if t is not None]
+    return max(found) if found else None
+
+
+def thermal_admit(job: dict, read=None, stopped=lambda: False, limits: dict | None = None) -> str:
+    """Before a GPU job starts (after the memory admission): wait, polling every STUDIO_THERMAL_POLL_S, until the GPU
+    is at most 70 °C and the hottest thermal zone at most 85 °C (a Mac: until its thermal state is under "serious"),
+    the job's progress saying so ("Cooling the GPU: 78 °C → 70 °C"). After STUDIO_THERMAL_WAIT_S (300 s) it starts
+    anyway with a warning, unless the hottest reading is still 88 °C or more (a Mac: "critical"): then it is refused.
+    Returns what the job's log says; nothing to read, or STUDIO_THERMAL_GATE=off: ""."""
+
+    if not thermal_enabled() or job.get("kind") in GPU_FREE:
+        return ""
+    read, limits = read or thermal_reading, limits or thermal_limits()
+    now = read()
+    if now.get("source") is None:
+        return ""
+    why = too_hot(now, limits)
+    if not why:
+        return ""
+    began = time.monotonic()
+    first = why
+    note("cooling", job=job.get("id"), kind=job.get("kind"), why=why)
+    while why and time.monotonic() - began < limits["wait_s"] and not stopped() and job.get("status") not in ("cancelled", "failed", "done"):
+        job["progress"] = {"stage": why, "at": 0, "of": 1}
+        time.sleep(limits["poll_s"])
+        now = read()
+        why = too_hot(now, limits)
+    if (job.get("progress") or {}).get("stage", "").startswith("Cooling"):
+        job.pop("progress", None)
+    waited = time.monotonic() - began
+    if not why:
+        return f"[studio] heat: waited {waited:.0f} s for the machine to cool ({first}); it is cool enough now\n"
+    if job.get("status") in ("cancelled", "failed", "done") or stopped():
+        return ""
+    peak = hottest(now)
+    if now.get("mac_state") == "critical" or (peak is not None and peak >= limits["refuse_c"]):
+        said = (f"The machine is still too hot after {waited:.0f} s of waiting ({why}; the hottest reading "
+                f"{peak:.0f} °C, refused at {limits['refuse_c']:.0f} °C)" if peak is not None else
+                f"The Mac is still too hot after {waited:.0f} s of waiting (thermal state {now.get('mac_state')})")
+        said += (". Rendering now risks the machine hanging, as a DGX Spark did with clips back to back at 88 to 89 °C. "
+                 "Let it cool (give it air, leave a minute between clips) and queue the job again.")
+        note("refused (heat)", job=job.get("id"), kind=job.get("kind"), hottest_c=peak)
+        raise RuntimeError(said)
+    note("started warm", job=job.get("id"), kind=job.get("kind"), why=why)
+    return f"[studio] heat: still warm after {waited:.0f} s ({why}): started anyway, under the live thermal stop\n"
+
+
+class ThermalStop:
+    """The live stop: a render is stopped when the GPU reaches STUDIO_THERMAL_STOP_C (90 °C), when the GPU's hardware
+    thermal slowdown (clock event reasons 0x8 or 0x40) has held for STUDIO_THERMAL_THROTTLE_S (10 s), or (a Mac) when
+    macOS says the thermal state is critical. One action per job: ``act(job, why)`` is called once."""
+
+    def __init__(self, act=None, read=None, clock=time.monotonic) -> None:
+        self.act, self.read, self.clock = act, read or thermal_reading, clock
+        self.since: float | None = None
+        self.acted: set = set()
+
+    def why(self, now: dict, limits: dict) -> str:
+        at = self.clock()
+        reasons = now.get("reasons")
+        if reasons is not None and reasons & HW_THERMAL:
+            self.since = at if self.since is None else self.since
+        else:
+            self.since = None
+        if now.get("gpu_c") is not None and now["gpu_c"] >= limits["stop_c"]:
+            return f"the GPU reached {now['gpu_c']:.0f} °C (the stop is at {limits['stop_c']:.0f} °C)"
+        if self.since is not None and at - self.since >= limits["throttle_s"]:
+            return (f"the GPU has been slowed by its hardware thermal limit for {at - self.since:.0f} s "
+                    f"(clock event reasons {reasons:#x})")
+        if now.get("mac_state") == "critical":
+            return "macOS says the thermal state is critical"
+        return ""
+
+    def tick(self, running: list[dict], limits: dict | None = None) -> str:
+        if not thermal_enabled() or not running:
+            self.since = None
+            return ""
+        why = self.why(self.read(), limits or thermal_limits())
+        if not why:
+            return ""
+        for job in running:
+            if job.get("id") in self.acted:
+                continue
+            self.acted.add(job.get("id"))
+            note("stopped (heat)", job=job.get("id"), kind=job.get("kind"), why=why)
+            if self.act is not None:
+                self.act(job, why)
+        return why
+
+
 # ---------- while the app runs ----------
 
 def pressed(available: int, floor: int) -> bool:
@@ -433,8 +655,10 @@ class Watch:
     COOLDOWN_S), the running job's never; under one floor with nothing of the Studio's left to give, it says who holds
     the memory (the render's own floor watch, spark/memory_guard.py, then stops the render if it must)."""
 
-    def __init__(self, jobs, poll_s: float = POLL_S) -> None:
+    def __init__(self, jobs, poll_s: float = POLL_S, on_hot=None) -> None:
         self.jobs, self.poll_s = jobs, poll_s
+        self.heat = ThermalStop(on_hot)
+        self.heat_at = 0.0
         self.stop = threading.Event()
         self.last = 0.0
         self.warned = 0.0
@@ -464,12 +688,25 @@ class Watch:
 
         return min(self.poll_s, RENDER_POLL_S) if running_kinds(self.jobs()) else self.poll_s
 
+    def thermal_tick(self) -> str:
+        """The live thermal stop, read every STUDIO_THERMAL_POLL_S while a GPU job runs on this machine."""
+
+        running = [job for job in self.jobs() if job.get("status") == "running" and not job.get("remote") and uses(job.get("kind"))]
+        if not running:
+            self.heat.since = None
+            return ""
+        if time.monotonic() - self.heat_at < thermal_limits()["poll_s"]:
+            return ""
+        self.heat_at = time.monotonic()
+        return self.heat.tick(running)
+
     def run(self) -> None:
         while not self.stop.wait(self.interval()):
-            try:
-                self.tick()
-            except Exception as error:  # noqa: BLE001 - the watch never ends over one bad reading
-                note("watch error", error=str(error)[:200])
+            for one in (self.tick, self.thermal_tick):
+                try:
+                    one()
+                except Exception as error:  # noqa: BLE001 - the watch never ends over one bad reading
+                    note("watch error", error=str(error)[:200])
 
     def start(self) -> None:
         if self.thread is None or not self.thread.is_alive():
@@ -488,4 +725,5 @@ def state(jobs=()) -> dict:
     headroom = available - floor if available is not None and floor else None
     return {**now, "headroom_mb": headroom, "releasable_mb": sum(m["held_mb"] for m in listed if m["idle"]),
             "modules": listed, "others": foreign(5), "events": list(events)[-20:],
-            "guard": _guard().guard_mode(), "wait_s": WAIT_S}
+            "guard": _guard().guard_mode(), "wait_s": WAIT_S,
+            "thermal": {**(thermal_reading() if thermal_enabled() else {"source": None}), "gate": thermal_enabled(), **thermal_limits()}}
