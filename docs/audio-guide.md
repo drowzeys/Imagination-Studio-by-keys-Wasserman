@@ -471,6 +471,13 @@ In the Library, tick **Select** on sound, voice, song, picture or clip cards, th
 cards. **Select all** includes sounds and follows the current filter. The small red trash icon deletes one card's
 file; the same icon appears on Sound effects cards. Confirmation and Undo apply to both single and bulk deletions.
 
+The Library groups all media by the file's modification date in your local time: **Past 7 days** (today and the
+six days before), **This month**, **Last month**, then dated months within the past twelve calendar months.
+Older files are grouped by year. Each file appears once, with newer groups first; empty groups are omitted.
+The newest nonempty section opens by default, and your open/closed choices stay while the page is loaded.
+Name/folder search opens matching sections and hides empty ones; clearing it restores your choices.
+**Select all** includes matching files in closed sections too. These are browsing groups, not moved folders.
+
 **On a DGX Spark** (`bash oneshot-setup-spark.sh --sound`, about 11 GB in `$SPARK_MODELS/Sound-Comfy`) both run through
 the studio's ComfyUI server (`spark/comfy.sh`, with its memory guard beside it) as `spark/spark_generate.py sfx` and
 `foley`, never as standalone model code:

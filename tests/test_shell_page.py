@@ -35,7 +35,8 @@ globalThis.media = p => el("img", { src: p }); globalThis.addToTimeline = () => 
 globalThis.bayOpenCalls = 0;
 const text = node => node == null || node === false ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join(" ") : [node.attrs && node.attrs.placeholder, node.attrs && node.attrs.title, text(node.kids)].filter(Boolean).join(" ");
 globalThis.text = text;
-globalThis.el = (tag, attrs = {}, ...kids) => { const n = { tag, attrs, kids: kids.flat(), value: attrs.value || "", addEventListener() {}, classList: { add() {}, remove() {}, toggle() {} } };
+globalThis.el = (tag, attrs = {}, ...kids) => { const n = { tag, attrs, kids: kids.flat(), value: attrs.value || "", style: {}, open: !!attrs.open, events: {},
+  addEventListener(type, handler) { this.events[type] = handler; }, classList: { add() {}, remove() {}, toggle() {} } };
   n.replaceChildren = (...k) => { n.kids = k.flat(); }; n.append = (...k) => n.kids.push(...k.flat()); n.replaceWith = () => {}; return n; };
 globalThis.put = (node, ...kids) => node.kids.push(...kids.flat()); globalThis.field = (label, node) => el("div", {}, label, node);
 const find = (node, test) => !node || typeof node !== "object" ? null : Array.isArray(node) ? node.map(n => find(n, test)).find(Boolean) || null : test(node) ? node : find(node.kids, test);
@@ -146,7 +147,7 @@ def test_delete_message_links_to_the_library_trash():
 
 def library_view_setup():
     page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
-    view = page[page.index("const LIB_SOUND ="):page.index("\n/* ---------- Tutorial")]
+    view = page[page.index("const LIB_DATE_OPEN ="):page.index("\n/* ---------- Tutorial")]
     return sound_delete_setup() + view + """
       tab = "Library"; globalThis.ART = { ready: new Set() }; globalThis.LIBF = { q: "", kind: "all" };
       globalThis.ACT = { state: {} }; globalThis.actPanel = () => null; CAP.map = {};
@@ -156,6 +157,104 @@ def library_view_setup():
       globalThis.LORAS = []; globalThis.capText = () => ""; globalThis.actButtons = () => null; globalThis.capButton = () => null;
       answers["/api/trash"] = { files: 0, bytes: 0, folder: "studio/trash", last: null };
     """
+
+
+@pytest.mark.parametrize("today", ["2026-11-08", "2026-01-03", "2024-03-03"])
+def test_library_date_groups_have_calendar_boundaries_and_unique_members(today):
+    out = run(library_view_setup() + f"""
+      const [year, month, day] = {json.dumps(today)}.split("-").map(Number);
+      const now = new Date(year, month - 1, day, 12);
+      const recent = new Date(year, month - 1, day - 6);
+      const item = (path, date) => ({{ path, modified: date.getTime() / 1000 }});
+      const previousMonth = new Date(year, month - 2, 1);
+      const items = [
+        item("older-year", new Date(year - 2, 0, 1)),
+        item("month-boundary", new Date(year, month - 1, 1)),
+        item("today", now),
+        item("just-before-week", new Date(recent.getTime() - 1000)),
+        item("week-boundary", recent),
+        item("previous-month", previousMonth),
+        item("oldest-month", new Date(year, month - 12, 1)),
+        item("year-boundary", new Date(year, month - 13, 1)),
+        {{ path: "missing-date" }}, {{ path: "invalid-date", modified: "yesterday" }},
+        {{ path: "overflow-date", modified: 1e30 }}
+      ];
+      out.groups = libDateGroups(items, now);
+      out.paths = out.groups.flatMap(g => g.items.map(m => m.path));
+    """)
+    groups = out["groups"]
+    assert groups[0]["key"] == "recent" and groups[0]["label"] == "Past 7 days"
+    assert groups[0]["items"][0]["path"] == "today"
+    for group in groups[:-1]:
+        stamps = [m["modified"] for m in group["items"]]
+        assert stamps == sorted(stamps, reverse=True)
+    by_path = {m["path"]: g["key"] for g in groups for m in g["items"]}
+    assert by_path["week-boundary"] == "recent" and by_path["today"] == "recent"
+    assert by_path["just-before-week"] != "recent"
+    assert by_path["oldest-month"].startswith("month-")
+    assert by_path["year-boundary"].startswith("year-")
+    assert groups[-1]["key"] == "unknown" and groups[-1]["label"] == "Date unavailable"
+    assert len(out["paths"]) == len(set(out["paths"])) == 11
+    if today == "2026-11-08":
+        assert by_path["month-boundary"] == "month-2026-10"
+        assert by_path["previous-month"] == "month-2026-9"
+        assert groups[1]["label"].startswith("This month")
+        assert groups[2]["label"].startswith("Last month")
+    else:
+        assert by_path["month-boundary"] == "recent"
+        assert by_path["previous-month"].startswith("month-")
+
+
+def test_library_date_sections_preserve_search_selection_and_open_choices():
+    out = run(library_view_setup() + """
+      const now = new Date(), older = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      answers["/api/library"] = [
+        { path: "renders/new.mp4", kind: "video", modified: now.getTime() / 1000 },
+        { path: "voice/older.wav", kind: "audio", sound: "voice", modified: older.getTime() / 1000 }
+      ];
+      let root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const recent = find(root, n => n.attrs["data-date-group"] === "recent");
+      const old = find(root, n => (n.attrs["data-date-group"] || "").startsWith("month-"));
+      out.defaults = [recent.open, old.open];
+      out.counts = [recent, old].map(g => find(g, n => n.attrs.class === "lib-date-count").textContent);
+      const originalTile = find(old, n => n.attrs["data-path"] === "voice/older.wav");
+      button(root, "Select all").attrs.onclick();
+      out.all = [...LIBPICK];
+      LIBPICK.clear();
+      const search = find(root, n => n.attrs["aria-label"] === "Find in the Library");
+      search.value = "older"; search.events.change();
+      out.search = [recent.style.display, old.style.display, old.open];
+      out.sameTile = find(old, n => n.attrs["data-path"] === "voice/older.wav") === originalTile;
+      button(root, "Select all").attrs.onclick(); out.filtered = [...LIBPICK];
+      search.value = "no-match"; search.events.change();
+      out.noMatch = text(root).includes("No files match") && recent.style.display === "none" && old.style.display === "none";
+      search.value = ""; search.events.change();
+      out.cleared = [recent.open, old.open];
+      find(old, n => n.tag === "summary").attrs.onclick(); old.open = true;
+      root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      out.remembered = find(root, n => (n.attrs["data-date-group"] || "").startsWith("month-")).open;
+      out.selectedStill = LIBPICK.has("voice/older.wav");
+    """)
+    assert out["defaults"] == [True, False]
+    assert all("1 file" in t for t in out["counts"])
+    assert out["all"] == ["renders/new.mp4", "voice/older.wav"]
+    assert out["search"] == ["none", "", True] and out["sameTile"]
+    assert out["filtered"] == ["voice/older.wav"] and out["noMatch"]
+    assert out["cleared"] == [True, False]
+    assert out["remembered"] and out["selectedStill"]
+
+
+def test_library_opens_newest_nonempty_group_without_recent_media():
+    out = run(library_view_setup() + """
+      const now = new Date();
+      answers["/api/library"] = [
+        { path: "renders/old.mp4", kind: "video", modified: new Date(now.getFullYear() - 2, 0, 1).getTime() / 1000 }
+      ];
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const group = find(root, n => (n.attrs["data-date-group"] || "").startsWith("year-"));
+      out.open = group.open; out.count = find(group, n => n.attrs.class === "lib-date-count").textContent;
+    """)
+    assert out["open"] and out["count"] == "1 file"
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
