@@ -44,11 +44,13 @@ The interface in `app/static/motion.js` follows his app's flow and shares no cod
 
 ## Stable Audio 3 Small SFX and T5Gemma
 
-The optional native Windows sound route installs Stability AI's Stable Audio 3 inference package separately
+The native Windows sound route installs Stability AI's Stable Audio 3 inference package separately
 (MIT, copyright 2026 Stability AI), with a dependency-only patch for the Studio's native Windows CUDA wheels.
 The package's MIT notice is retained in its external source checkout. No upstream source or weights are bundled.
 Stable Audio 3 weights are governed by the Stability AI Community License. Google's T5Gemma encoder is
 governed by the Gemma Terms of Use; setup retains model licence files in its external cache.
+The DGX Spark route uses Comfy-Org's repackaged checkpoint and encoder at a pinned revision, verified by SHA-256.
+Those model terms still apply. It calls externally installed ComfyUI nodes; no GPL ComfyUI source is bundled.
 
 ## MediaPipe (Google)
 

@@ -430,6 +430,13 @@ def spark_comfy_needs() -> list[dict]:
         where[Path(file).name] = f"{folder}/{file}"
         repo_of[Path(file).name] = repo
     out, models = [], spark_models()
+    import spark_audio3
+    for name, (size, digest) in spark_audio3.FILES.items():
+        encoder = name.startswith("text_encoders/")
+        out.append(need("stable-audio-3-t5gemma" if encoder else spark_audio3.MODEL,
+                        "T5Gemma (Stable Audio 3)" if encoder else spark_audio3.TITLE,
+                        "Sound effects (ComfyUI)", models / "Sound-Comfy" / name,
+                        sha256=digest, min_bytes=size, optional=True, download=spark_audio3.SETUP))
     for (name, key), (nid, label, engine, optional) in SPARK_IDS.items():
         value = constants.get(name)
         if isinstance(value, dict):

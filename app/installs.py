@@ -31,7 +31,7 @@ SCRIPTS = {"--music": "scripts/setup-music.sh", "--voice": "scripts/setup-voice.
 ONESHOT_FLAGS = ("--image-edit", "--ref2va", "--turbo", "--image-only")
 # a DGX Spark installs every option through oneshot-setup-spark.sh (the Mac's scripts/setup-*.sh are not its own)
 SPARK = sys.platform.startswith("linux")
-SPARK_FLAGS = ("--ref2va", "--h3-base", "--image-edit", "--flux3", "--moss", "--music", "--bolt", "--sound", "--motion", "--voice",
+SPARK_FLAGS = ("--ref2va", "--h3-base", "--image-edit", "--flux3", "--moss", "--music", "--bolt", "--sound", "--sound-legacy", "--motion", "--voice",
                "--image-only")
 GATED = re.compile(r"GatedRepoError|is gated|gated repo|Access to model .* is restricted|accept (?:its|the) licen[cs]e|401 Client Error|403 Client Error", re.I)
 REPO = re.compile(r"huggingface\.co/(?!api/|settings/|datasets/|spaces/)([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)")

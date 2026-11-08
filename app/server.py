@@ -1519,6 +1519,8 @@ def job_fit(job: dict, room: int | None = None) -> dict | None:
     available memory and Bolt's 8 GB floor. memory_manager.admit asks this before the job loads anything."""
 
     kind, params = job["kind"], job["params"]
+    if kind == "sfx" and windows_audio3.selected(params) and (not SPARK or WINDOWS or WIN32):
+        return None
     if not SPARK:
         free = voice.mem_available_gb()
         if free < 0 or kind not in bolt.MAC_PEAK_GB:
@@ -1548,7 +1550,8 @@ def job_fit(job: dict, room: int | None = None) -> dict | None:
             said = memory_guard.music_check(float(params.get("seconds") or 60), available_mb=room,
                                             route=music.guard_route(params), card=on_card)
         elif kind in sound.KINDS:
-            said = memory_guard.sound_check(kind, float(params.get("seconds") or 10), available_mb=room, card=on_card)
+            route = windows_audio3.MODEL if kind == "sfx" and windows_audio3.selected(params) else kind
+            said = memory_guard.sound_check(route, float(params.get("seconds") or 10), available_mb=room, card=on_card)
             if said.get("need_mb") is None:
                 return None
         elif kind in swap.KINDS:
@@ -1691,7 +1694,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     """(command, environment, output paths) for one job. ``room`` False leaves this machine's memory out of it: the
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
-    if kind == "sfx" and windows_audio3.selected(params):
+    if kind == "sfx" and windows_audio3.selected(params) and (not SPARK or WINDOWS or WIN32):
         if why := windows_audio3.prerequisites():
             raise HTTPException(400, why)
         try:
@@ -2296,7 +2299,9 @@ def local_ram_need(job: dict) -> int | None:
     elif kind == "music":
         room = memory_guard.music_check(float(params.get("seconds") or 60), route=music.guard_route(params))
     elif kind in sound.KINDS:
-        room = memory_guard.sound_check(kind, float(params.get("seconds") or 10))
+        route = windows_audio3.MODEL if kind == "sfx" and windows_audio3.selected(params) else kind
+        seconds = params.get("seconds") or (5 if route == windows_audio3.MODEL else 10)
+        room = memory_guard.sound_check(route, float(seconds))
     elif kind in swap.KINDS:
         room = memory_guard.swap_check(int(params.get("quality") or swap.QUALITY), weights=swap_build.weights())
     elif kind in train.KINDS:
@@ -2800,7 +2805,7 @@ def queue_job(body: dict) -> dict:
     if body.get("kind") in sound.KINDS:
         if body.get("params") is not None and not isinstance(body["params"], dict):
             raise HTTPException(400, "params is an object of the job's settings")
-        body = {**body, "params": sound.parameters(body["kind"], body.get("params") or {})}
+        body = {**body, "params": sound.parameters(body["kind"], body.get("params") or {}, spark=SPARK)}
     if WINDOWS or WIN32:
         if not isinstance(body.get("kind"), str) or not body["kind"]:
             raise HTTPException(400, "choose a job kind")
@@ -3579,7 +3584,7 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
     """A job that is not a clip (a voice take) into the queue: it renders on this machine, one at a time with the rest."""
 
     if kind in sound.KINDS:
-        params = sound.parameters(kind, params)
+        params = sound.parameters(kind, params, spark=SPARK)
     if WINDOWS or WIN32:
         params = windows_runtime.freeze(kind, params)
         if not windows_runtime.bounded(kind, params):

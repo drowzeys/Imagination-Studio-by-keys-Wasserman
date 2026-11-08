@@ -29,6 +29,25 @@ def ready(enabled, monkeypatch):
     return enabled[0]
 
 
+def test_windows_cuda_shared_spark_flag_does_not_select_linux_audio_admission(ready, monkeypatch):
+    import spark_audio3
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(sound, "WINDOWS", True)
+    monkeypatch.setattr(sound, "WINCUDA", True)
+    monkeypatch.setattr(server, "SPARK", True)
+    monkeypatch.setattr(spark_audio3, "prerequisites", lambda: pytest.fail("Windows must not use Linux admission"))
+    monkeypatch.setattr(spark_audio3, "status", lambda: pytest.fail("Windows must not require Spark measurements"))
+    monkeypatch.setattr(audio, "build", lambda *args: (["windows-audio3"], {}, []))
+    router, build, _, _ = sound.attach(server.HOME, server.PACK, True, server.inside, server.relative)
+    assert build("sfx", {"prompt": "Rain."}, "fixture")[0] == ["windows-audio3"]
+    assert server.build("sfx", {"sound_model": audio.MODEL, "prompt": "Rain."}, "fixture")[0] == ["windows-audio3"]
+    app = FastAPI()
+    app.include_router(router)
+    state = TestClient(app).get("/api/sound/state").json()
+    assert state["models"][audio.MODEL]["ready"] and state["models"][audio.MODEL]["setup"] == audio.SETUP
+
+
 def test_seed_resolution_is_random_once_and_preserves_explicit_zero(monkeypatch):
     drawn = []
     monkeypatch.setattr(sound_seed.secrets, "randbits", lambda bits: drawn.append(bits) or 123456)

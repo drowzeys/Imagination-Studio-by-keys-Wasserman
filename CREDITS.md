@@ -245,11 +245,14 @@ OpenAI's **tiktoken** (MIT), installed in YuE2's environment. The pack ships no 
 Community License**: free for research and for a business under US$1 million of yearly revenue; above that,
 Stability's own licence. Its page on Hugging Face is gated.
 
-**Stability AI** also made **Stable Audio 3 Small SFX**, an optional native Windows CUDA sound model.
+**Stability AI** also made **Stable Audio 3 Small SFX**, the default sound model on Windows and DGX Spark.
 Its inference code is MIT; its weights use the Stability AI Community License. The Studio installs the
 upstream inference package at a pinned revision in its own environment, with a dependency-only Windows
 Torch compatibility patch. **Google** made its **T5Gemma** text encoder, governed by the Gemma Terms of Use.
 Neither model's weights nor the inference package's source are distributed in this repository.
+**Comfy-Org** repackaged the Small SFX checkpoint and T5Gemma encoder for ComfyUI. The Spark installs their
+files at a pinned revision with SHA-256 verification and calls ComfyUI's native nodes; no ComfyUI source is copied.
+The Spark route remains refused until its memory estimate is measured on that hardware.
 
 **Ho Kei Cheng, Masato Ishii, Akio Hayakawa, Takashi Shibuya, Alexander Schwing and Yuki Mitsufuji** (University of
 Illinois Urbana-Champaign and Sony AI) made **MMAudio**, the model behind foley for a clip: it watches the frames and

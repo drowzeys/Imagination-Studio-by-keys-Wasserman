@@ -123,9 +123,10 @@ fi
 # written down in this repo to copy, and the resolver keeps them beside the torch pinned here.
 TORCH_PIN=(torch==2.14.1 torchvision==0.29.1)  # requirements.lock; scripts/setup-comfy.sh pins the same pair
 STUDIO_PIN=(huggingface_hub==1.33.0 fastapi==0.142.2 uvicorn==0.54.0 python-multipart==0.0.32 pillow==12.3.0)  # requirements.lock
-IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0; MEMGUARD=1; MEMGUARD_FOREIGN=0
+IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; SOUND_LEGACY=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0; MEMGUARD=1; MEMGUARD_FOREIGN=0
 for arg in "$@"; do
   case "$arg" in
+    --sound-legacy) SOUND=1; SOUND_LEGACY=1;;
     --ref2va) REF2VA=1;; --swap) SWAP=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --all) SWAP=1; REF2VA=1; H3_BASE=1; IMAGE_EDIT=1; FLUX3=1; MOSS=1; MUSIC=1; YUE2=1; SOUND=1; BOLT=1; VOICE=1; MOTION=1; TRAIN=1; GRAPHICS=1; FINISH=1;;  # every feature
     --no-workflows) WORKFLOWS=0;;
@@ -163,6 +164,8 @@ if [ "$UPGRADE" = 1 ]; then
   [ ! -s "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" ] || MUSIC=1
   [ ! -x "${YUE2_HOME:-$PREFIX/yue2}/venv/bin/python" ] || YUE2=1
   [ ! -d "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" ] || SOUND=1
+  [ ! -s "$MODELS/Sound-Comfy/checkpoints/stable_audio_3_small_sfx.safetensors" ] || SOUND=1
+  [ ! -s "$MODELS/Sound-Comfy/stable-audio-open-1.0/model.safetensors" ] || { SOUND=1; SOUND_LEGACY=1; }
   [ ! -s "${BOLT_MODELS:-$MODELS}/Nemotron-3.5-Bolt-24GB/model.safetensors.index.json" ] || BOLT=1
   [ ! -x "$PREFIX/drama3/bin/drama3-generate" ] || VOICE=1
   [ ! -x "$PREFIX/train/venv/bin/python" ] || TRAIN=1
@@ -224,8 +227,8 @@ if [ "$UPGRADE" = 0 ]; then
     checklist_gate_part "$GATE_MODE" --flux3 FLUX3-K "$GATE_CMD" \
       https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-bf16.safetensors || FLUX3=0
   fi
-  if [ "$SOUND" = 1 ] && [ ! -s "$MODELS/Sound-Comfy/stable-audio-open-1.0/model.safetensors" ]; then
-    checklist_gate_part "$GATE_MODE" --sound "Sound effects and foley" "$GATE_CMD" https://huggingface.co/stabilityai/stable-audio-open-1.0/resolve/main/model_index.json || SOUND=0
+  if [ "$SOUND_LEGACY" = 1 ] && [ ! -s "$MODELS/Sound-Comfy/stable-audio-open-1.0/model.safetensors" ]; then
+    checklist_gate_part "$GATE_MODE" --sound-legacy "Optional Stable Audio Open" "$GATE_CMD" https://huggingface.co/stabilityai/stable-audio-open-1.0/resolve/main/model_index.json || SOUND_LEGACY=0
   fi
   if [ "$SWAP" = 1 ] && [ ! -s "$MODELS/MiniMax-H3-Comfy/loras/h3_character_swap_v1.5.safetensors" ]; then
     checklist_gate_part "$GATE_MODE" --swap "Swap the character" "$GATE_CMD" \
@@ -250,7 +253,10 @@ if [ "$IMAGE_ONLY" = 0 ]; then
   [ "$MOSS" = 0 ] || ! missing "$MODELS/MOSS-Image-Comfy/diffusion_models/moss_image_sft_bf16.safetensors" || NEED=$((NEED + 31))
   [ "$MUSIC" = 0 ] || ! missing "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" || NEED=$((NEED + 23))
   [ "$YUE2" = 0 ] || ! missing "${YUE2_WEIGHTS:-${YUE2_HOME:-$PREFIX/yue2}/weights}/YuE2-3B/model.safetensors" || NEED=$((NEED + 14))
-  [ "$SOUND" = 0 ] || ! missing "$MODELS/Sound-Comfy/stable-audio-open-1.0/model.safetensors" || NEED=$((NEED + 12))
+  [ "$SOUND" = 0 ] || ! missing "$MODELS/Sound-Comfy/checkpoints/stable_audio_3_small_sfx.safetensors" || NEED=$((NEED + 3))
+  [ "$SOUND" = 0 ] || ! missing "$MODELS/Sound-Comfy/text_encoders/t5gemma_b_b_ul2.safetensors" || NEED=$((NEED + 2))
+  [ "$SOUND" = 0 ] || ! missing "$MODELS/Sound-Comfy/mmaudio/mmaudio_large_44k_v2_fp16.safetensors" || NEED=$((NEED + 8))
+  [ "$SOUND_LEGACY" = 0 ] || ! missing "$MODELS/Sound-Comfy/stable-audio-open-1.0/model.safetensors" || NEED=$((NEED + 6))
   [ "$BOLT" = 0 ] || ! missing "${BOLT_MODELS:-$MODELS}/Nemotron-3.5-Bolt-24GB/model.safetensors.index.json" || NEED=$((NEED + 26))
   [ "$TRAIN" = 0 ] || ! missing "$MODELS/Train-H3/vae/minimax_h3_video_vae_fp16.safetensors" || NEED=$((NEED + 15))
   [ "$VOICE" = 0 ] || ! missing "${DRAMA3_CUDA_MODEL:-${DRAMA3_CHECKPOINT:-$HOME/models/drama-3}}/config.json" || NEED=$((NEED + 45))
@@ -529,12 +535,15 @@ if [ "$SOUND" = 1 ]; then
   # Sound effects and foley (app/sound.py, spark_generate.py sfx / foley): every render goes through the studio's
   # ComfyUI server and its memory guard, never as standalone model code; a kind renders only once memory_guard.py
   # has its measured estimate (sound_check).
-  say "Sound effects and foley for ComfyUI: Stable Audio Open 1.0, MMAudio large_44k_v2 and its nodes (11 GB) -> $MODELS/Sound-Comfy"
-  [ "$VERIFY" = 1 ] || { echo "  Stable Audio Open 1.0 is under the Stability AI Community License: free under US\$1M yearly revenue, a larger"
-    echo "  business needs Stability's licence. Its Hugging Face repo is gated: accept the licence on"
-    echo "  https://huggingface.co/stabilityai/stable-audio-open-1.0 with your own account and sign in (the studio's Install"
-    echo "  guide, or hf auth login). MMAudio's weights are CC-BY-NC 4.0: non-commercial use only."; }
+  say "Sound effects and foley for ComfyUI: Stable Audio 3 Small SFX, MMAudio large_44k_v2 and its nodes -> $MODELS/Sound-Comfy"
+  [ "$VERIFY" = 1 ] || { echo "  Stable Audio 3: Stability AI Community License (an enterprise licence above US\$1M yearly revenue)."
+    echo "  T5Gemma: Gemma Terms of Use. MMAudio weights: CC-BY-NC 4.0, non-commercial."
+    echo "  Stable Audio Open is optional (--sound-legacy); its Hugging Face gate still applies."; }
   SND="$MODELS/Sound-Comfy"
+  [ -f "$PREFIX/ComfyUI/comfy/text_encoders/sa3.py" ] || die "this ComfyUI lacks Stable Audio 3: run without --verify"
+  AUDIO3_ARGS=()
+  [ "$VERIFY" = 0 ] || AUDIO3_ARGS+=(--verify)
+  "$PY" "$HERE/scripts/setup-spark-audio3.py" --models "$SND" "${AUDIO3_ARGS[@]}" || die "Stable Audio 3 setup failed"
   # kijai's ComfyUI-MMAudio (MIT) at a pinned commit. Its requirements may only ADD packages to the Studio's environment:
   # every package already installed (PyTorch, numpy, ComfyUI's own and the Studio's) is held at its installed version,
   # so the install never moves one of them, and a later --upgrade finds nothing to do. A requirement that would need a
@@ -561,6 +570,7 @@ if [ "$SOUND" = 1 ]; then
   # the vocoder the 44 kHz decoder loads by folder name (kijai's loader would download it at the first foley otherwise)
   fetch nvidia/bigvgan_v2_44khz_128band_512x Sound-Comfy/mmaudio/nvidia/bigvgan_v2_44khz_128band_512x bigvgan_generator.pt config.json
   got "MMAudio large_44k_v2 (fp16 safetensors), its VAE, Synchformer, Apple's DFN5B CLIP and NVIDIA's BigVGAN v2: foley"
+  if [ "$SOUND_LEGACY" = 1 ]; then
   # Stable Audio Open: the checkpoint (DiT and VAE) and its T5-base encoder, from the gated repo with the person's own
   # token (app/hf_gate.py keeps it where hf reads it), linked under the names ComfyUI's loaders list
   SAO_REPO=stabilityai/stable-audio-open-1.0 SAO="$SND/stable-audio-open-1.0"
@@ -584,6 +594,7 @@ if [ "$SOUND" = 1 ]; then
     ln -sfn ../stable-audio-open-1.0/model.safetensors "$SND/checkpoints/stable_audio_open_1.0.safetensors"
     ln -sfn ../stable-audio-open-1.0/text_encoder/model.safetensors "$SND/text_encoders/stable_audio_open_t5_base.safetensors"
     ok "Stable Audio Open 1.0: the checkpoint and its T5-base encoder: sound effects"
+  fi
   fi
   grep -q "Sound-Comfy/mmaudio" "$PREFIX/ComfyUI/extra_model_paths.yaml" 2>/dev/null || die "extra_model_paths.yaml does not list Sound-Comfy: run with --sound, without --verify"
   "$PY" "$HERE/spark/memory_guard.py" sound 2>/dev/null | sed 's/^/  /' || true
@@ -689,7 +700,9 @@ fi
 [ "$VERIFY" = 1 ] || cp "$HERE/VERSION" "$PREFIX/VERSION"
 if [ "$UPGRADE" = 1 ]; then
   say "Upgraded: $INSTALLED -> $(cat "$PREFIX/VERSION"). Checking the install (restart the app to serve the new pages: scripts/app.sh)"
-  exec bash "$HERE/oneshot-setup-cuda.sh" --verify $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$SWAP" = 0 ] || echo --swap) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$MUSIC" = 0 ] || echo --music) $([ "$YUE2" = 0 ] || echo --yue2) $([ "$SOUND" = 0 ] || echo --sound) $([ "$BOLT" = 0 ] || echo --bolt) $([ "$VOICE" = 0 ] || echo --voice) $([ "$TRAIN" = 0 ] || echo --train) $([ "$GRAPHICS" = 0 ] && echo --no-graphics || echo --graphics) $([ "$FINISH" = 0 ] && echo --no-finish || echo --finish)
+  [ "$SOUND_LEGACY" = 0 ] || set -- --sound-legacy
+  [ "$SOUND_LEGACY" = 1 ] || set --
+  exec bash "$HERE/oneshot-setup-cuda.sh" --verify "$@" $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$SWAP" = 0 ] || echo --swap) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$MUSIC" = 0 ] || echo --music) $([ "$YUE2" = 0 ] || echo --yue2) $([ "$SOUND" = 0 ] || echo --sound) $([ "$BOLT" = 0 ] || echo --bolt) $([ "$VOICE" = 0 ] || echo --voice) $([ "$TRAIN" = 0 ] || echo --train) $([ "$GRAPHICS" = 0 ] && echo --no-graphics || echo --graphics) $([ "$FINISH" = 0 ] && echo --no-finish || echo --finish)
 fi
 # The essential LoRA bundle: every preset of the LoRA hub, fetched once from its author's page into one folder laid out
 # by the hub's groups, then installed (oneshot-essential-bundle.sh). --loras=GROUPS takes some groups, --lora-bundle=PATH

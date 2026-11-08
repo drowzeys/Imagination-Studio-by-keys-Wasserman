@@ -150,7 +150,7 @@ def parameters(params: dict) -> dict:
         raise ValueError("Small SFX uses CFG 1; negative prompts are not supported by this recipe.")
     seconds = out.get("seconds", 5)
     if type(seconds) not in (int, float) or not SECONDS[0] <= seconds <= SECONDS[1]:
-        raise ValueError("Stable Audio 3's Windows recipe is 1 to 5 seconds.")
+        raise ValueError("Stable Audio 3's initial recipe is 1 to 5 seconds.")
     for key, value in RECIPE.items():
         if type(out.get(key, value)) not in (int, float) or out.get(key, value) != value:
             raise ValueError("Stable Audio 3 Small SFX uses eight passes and CFG 1.")

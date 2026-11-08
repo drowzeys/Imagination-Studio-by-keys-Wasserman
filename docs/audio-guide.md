@@ -454,8 +454,8 @@ or `oneshot-setup.sh --sound`; about 13 GB of weights in `$PREFIX/sound-models` 
 - **Foley for a clip** (MMAudio large_44k_v2): pick a Library clip; MMAudio watches its frames and makes its sound,
   steps on the footfalls. Words are optional. The result is a WAV and the clip with it, laid under the clip's own
   sound at -6 dB (its speech stays on top; peaks under -1 dBFS) or in place of it. Up to 15 s, the studio's longest clip.
-- **A sound effect**: Windows defaults to **Stable Audio 3 Small SFX**, 1-5 seconds;
-  **Stable Audio Open 1.0** is an optional legacy choice there. Mac and DGX Spark retain Stable Audio Open
+- **A sound effect**: Windows and DGX Spark default to **Stable Audio 3 Small SFX**, 1-5 seconds;
+  **Stable Audio Open 1.0** is an optional legacy choice there. Mac retains Stable Audio Open
   (1 to 47 s of 44.1 kHz stereo; the bounded Windows legacy recipe is five seconds).
 
 Both land in `~/ImaginationStudio/sound/` with a take file each, and in the Library under **Sound effects** (foley
@@ -494,8 +494,8 @@ negative prompts are unavailable at this guidance setting. The check renders the
 checks the waveform and records measured memory. It does **not** judge whether the sound matches the prompt.
 Try several unlocked seeds and compare by ear. API selection is
 `{kind: "sfx", params: {sound_model: "stable-audio-3-small-sfx", prompt: "...", seconds: 5}}`;
-Omitting `sound_model` selects Small SFX on Windows, Stable Audio Open elsewhere. To replay legacy effects
-on Windows, explicitly set `sound_model: "stable-audio-open-1.0"`; older saved takes still restore that model.
+Omitting `sound_model` selects Small SFX on Windows and Spark, Stable Audio Open on Mac. To replay legacy effects,
+explicitly set `sound_model: "stable-audio-open-1.0"`; older saved takes still restore that model.
 Install Open explicitly with `setup-windows-cuda.ps1 -Parts sound-legacy` (or `-LegacySound` alongside other
 parts). It remains selectable; no existing weights or takes are deleted. A missing/unqualified default
 shows its setup/check reason rather than silently switching models.
@@ -511,17 +511,26 @@ Admission still requires 14 GiB dedicated GPU headroom and 18 GiB commit headroo
 **policy bounds, not measured model requirements**; the model's host RAM usage remains unmeasured.
 Existing Windows qualification controls apply:
 gating requires matching local evidence when enabled; disabling gating does not disable limits or live admission.
-Mac and DGX Spark routes remain unavailable for this model until their integration and safety budgets are verified.
+Mac does not support this model. Spark's native ComfyUI integration is described below; it still needs a measured Spark memory budget.
 
 **Licences:** Stable Audio 3's weights use the Stability AI Community License (an enterprise licence is needed
 above US$1 million yearly revenue); its text encoder also carries the Gemma Terms of Use. Do not redistribute
 weights. Stable Audio Open and MMAudio keep their existing licences and settings.
 
-**On a DGX Spark** (`bash oneshot-setup-spark.sh --sound`, about 11 GB in `$SPARK_MODELS/Sound-Comfy`) both run through
+**On a DGX Spark** (`bash oneshot-setup-spark.sh --sound`, about 12 GB with Foley in `$SPARK_MODELS/Sound-Comfy`) both run through
 the studio's ComfyUI server (`spark/comfy.sh`, with its memory guard beside it) as `spark/spark_generate.py sfx` and
 `foley`, never as standalone model code:
 
-- **A sound effect** runs on ComfyUI's own Stable Audio nodes (the checkpoint, its T5-base encoder, the seconds as
+- **Small SFX (default)** uses the existing pinned ComfyUI's native Stable Audio 3 support, Comfy-Org's checkpoint
+  and T5Gemma encoder (3,457,648,943 bytes, 3.22 GiB together) at revision `75aad8836271cb5a5123fb58304fae5d3bb4b0f9`.
+  Setup verifies SHA-256; `--verify --sound` checks without downloading or rendering. The initial distilled recipe
+  uses eight passes, CFG 1, `lcm` / `simple`, no negative prompt, batch one, 1-5 seconds, stereo 44.1 kHz.
+  Native latent lengths are padded and the decoded audio trimmed to the requested duration before levelling.
+  This uses ComfyUI's distilled Stable Audio 3 recipe, not the Windows package's `pingpong` sampler; outputs are
+  not claimed identical. **No Spark memory measurement is available yet:** this model is installed/selectable but
+  cannot queue or render until a guarded worker-Spark measurement establishes its own estimate. Windows
+  measurements and Open's memory estimate are not reused. There is no automatic fallback or unsafe qualification bypass.
+- **Stable Audio Open (optional)** is added with `--sound-legacy`. It runs on ComfyUI's own Stable Audio nodes (the checkpoint, its T5-base encoder, the seconds as
   conditioning, KSampler with dpmpp_3m_sde_gpu on the exponential schedule), the files from Stability's gated repo
   with your own Hugging Face sign-in.
 - **Foley** runs on kijai's ComfyUI-MMAudio (MIT, pinned at `8eaeb72e`) with the Studio's own sampler node
@@ -537,6 +546,32 @@ Each starts from a ComfyUI server with nothing else loaded, as a song does. A ki
 asked before the job is queued and again before anything loads, and a kind with no measurement is refused with that
 reason. The WAV is levelled the way a song is (full level, peaks under -1 dBFS) and foley is laid under the clip by
 the same ffmpeg step as on a Mac.
+
+#### Small SFX: developer check before the PR
+
+An idle **GB10 Linux worker** can test the integration without a production memory estimate:
+
+```bash
+# In this clone on the worker, after the Spark's ComfyUI core is installed.
+export PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
+export SPARK_MODELS="${SPARK_MODELS:-$HOME/spark-studio-models}"
+"$PREFIX/venv/bin/python" scripts/setup-spark-audio3.py --models "$SPARK_MODELS/Sound-Comfy"
+"$PREFIX/venv/bin/python" scripts/check-spark-audio3.py --worker --output outputs/spark-audio3-check
+```
+
+Stop that worker's existing model servers yourself first. The check refuses a busy GPU, a non-GB10/multiple-card
+machine, `vm.panic_on_oom`, or paired/governor configuration. It never stops another server. It runs the actual
+one- and five-second ComfyUI recipe, each cold, on a private loopback port through `spark/comfy.sh`.
+The existing PyTorch calibration launcher is portable despite its Windows filename: it enforces the same **12 GiB
+native CUDA allocator cap** before loading ComfyUI. A second watchdog keeps **25 GB available**, or a larger
+configured floor, limits system-wide available-memory growth to **16 GiB**, and stops the owned server at
+600 seconds. The ordinary Spark guard also stays beside the server; no floor is lowered.
+
+`case-1.wav`, `case-5.wav`, startup logs and `report.json` land in the new output folder. The WAV checks require
+exact duration, 44.1 kHz stereo PCM16, non-silence and peaks under -1 dBFS; listen to both for prompt matching.
+The report records actual system-wide available-memory changes, **not** claimed CUDA allocator peaks. It creates
+no local qualification receipt, shared profile or production estimate. Use the worker results to establish the
+Spark budget before merging; this explicit check does not remove the production admission gate.
 
 **Licences.** Stable Audio Open 1.0: Stability AI Community License (free under US$1 million of yearly revenue); its
 Hugging Face page is gated, so accept the licence there first (the studio's Install guide signs you in to Hugging

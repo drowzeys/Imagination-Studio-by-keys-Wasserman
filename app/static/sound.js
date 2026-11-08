@@ -75,8 +75,8 @@ function viewFoley() {
       const state = id === "sfx" ? sfxModel() : SFX.state.kinds[id], ready = state.ready, limited = state.bounded ?? !!SFX.state.windows;
       return el("button", { type: "button", class: "sfx-card" + (m === id ? " on" : ""), role: "radio", "aria-checked": m === id ? "true" : "false", onclick: () => { SFX.mode = id; render(); } },
         el("b", {}, name), el("span", { class: "sfx-state", title: state.why || "" }, el("span", { class: "dotl" + (ready ? (m === id ? " t" : "") : " o") }),
-          ready ? "Ready" : state.installed === false ? "Not installed" : SFX.state.windows ? "Unavailable — see requirements" : "Not installed"),
-        el("span", { class: "sfx-one" }, id === "sfx" && SFX.model === "stable-audio-3-small-sfx" ? "1-5 seconds, eight passes, CFG 1. Isolated native CUDA."
+          ready ? "Ready" : state.installed === false ? "Not installed" : state.installed === true || SFX.state.windows ? "Unavailable — see requirements" : "Not installed"),
+        el("span", { class: "sfx-one" }, id === "sfx" && SFX.model === "stable-audio-3-small-sfx" ? "1-5 seconds, eight passes, CFG 1. " + (SFX.state.spark ? "Guarded ComfyUI CUDA." : "Isolated native CUDA.")
           : limited && id === "sfx" ? "Five-second stereo sound effects, 100 passes, CFG 7. Made locally." : one)); })),
     el("section", { class: "panel stack", style: "margin-top:14px" },
       !k.ready ? el("div", { class: "note vt-bad" }, k.why) : null,

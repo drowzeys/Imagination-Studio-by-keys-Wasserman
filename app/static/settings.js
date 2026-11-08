@@ -280,7 +280,7 @@ function setAbout() { if (!SET.about && typeof updRequest === "function") { SET.
       "BTankut: bug reports from a film made in Slate, with causes and fixes (export trims and size, the shot check button, Regenerate); the NVIDIA driver's memory pools on a DGX Spark",
       "drgw5b7gzv-ship-it and gsp-agent: the Qwen-Image-2.1-Turbo text encoder on a fresh Mac install, reported, diagnosed and worked around",
       "Qwen team: Qwen-Image-2.1", "Black Forest Labs: FLUX 3 Image Klein (FLUX3-K)", "OpenMOSS: MOSS-Image", "MiniMax: MiniMax H3 and MiniMax-Music3", "Multimodal Art Projection (m-a-p) and the YuE2 authors: YuE2 (songs), with the Qwen team's qwen.tiktoken read by OpenAI's tiktoken", "Built with Fish Audio: Fish Audio Drama 3",
-      "Stability AI: Stable Audio Open and Stable Audio 3 Small SFX · Google: T5Gemma · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio · KEUM Myungchul: python-soxr (sound effects and foley)",
+      "Stability AI: Stable Audio Open and Stable Audio 3 Small SFX · Google: T5Gemma · Comfy-Org: Stable Audio 3 ComfyUI weights · Ho Kei Cheng et al.: MMAudio · kijai: ComfyUI-MMAudio · KEUM Myungchul: python-soxr (sound effects and foley)",
       "Ash Hart and the TensorFold contributors: TensorFold (the music engines and both Bolt engines on the 1.1.8 release)",
       "NVIDIA: Nemotron 3.5 Bolt and its LiLiCorr drafter (the Studio's brain engine) · MiaAI-Lab (with ChriZzn): the Bolt TensorFold recipe for the DGX Spark, its libbolt and LiLiCorr drafter runtime",
       "antirez: h3.c · RobZombAI: H3MLX · mrbizarro: minimax-h3-mlx (Phosphene) · Filip Strand and the mflux contributors · felix-ab: flux3-mlx",

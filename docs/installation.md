@@ -65,7 +65,8 @@ FastH3 video with sound (125 GB), motion graphics, Finish and phone notification
 | `--music` | MiniMax Music 3 (22 GB more) |
 | `--yue2` | YuE2 songs, the Music tab's default engine on Linux with an NVIDIA GPU (about 14 GB more; not on a Mac) |
 | `--bolt` | Nemotron 3.5 Bolt, the studio's brain (about 25 GB more) |
-| `--sound` | Sound effects and foley (11 GB more, gated) |
+| `--sound` | Sound effects and foley: Mac uses Open (11 GB, gated); Spark installs Small SFX and MMAudio (about 12 GB). Small SFX still needs a real Spark memory measurement before rendering |
+| `--sound-legacy` | CUDA build only: additionally install optional Stable Audio Open (about 6 GB, gated); Small SFX and Foley remain installed |
 | `--motion` | Motion Previs analysis (0.5 GB) |
 | `--voice` | Fish Audio Drama 3 (about 41 GB more) |
 | `--train` | Train your own LoRA: musubi-tuner, MiniMax H3's video encoder and a training adapter (an 8 GB environment, its two files, about 6 GB, and, when `--h3-base` has not installed it, that 40 GB transformer; the CUDA build, a DGX Spark or a GPU, not on a Mac) |

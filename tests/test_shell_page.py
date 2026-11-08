@@ -81,6 +81,22 @@ def test_the_memory_guard_fold_refuses_on_a_card_and_still_stops_a_spark():
         assert "leave the GPU" not in out[face]
 
 
+def test_windows_small_sfx_entry_points_preserve_the_upstream_screen():
+    out = run("""
+      globalThis.artSlot = () => null;
+      S.platform = "windows"; SFX.mode = "foley";
+      const start = STARTS().find(c => c.id === "sfx"); out.start = start.one;
+      start.run(); out.startMode = SFX.mode;
+      out.image = text(viewImage()); out.sound = text(viewSound());
+      SFX.mode = "foley"; button(viewSound(), "Make a sound effect").attrs.onclick(); out.soundMode = SFX.mode;
+      S.platform = "mac"; out.macSound = text(viewSound()); out.macStart = STARTS().find(c => c.id === "sfx").one;
+    """)
+    assert "Stable Audio 3 Small SFX" in out["start"] and out["startMode"] == "sfx"
+    assert "Qwen 2.1" in out["image"]
+    assert "Stable Audio 3 Small SFX is the default" in out["sound"] and out["soundMode"] == "sfx"
+    assert "Stable Audio 3" not in out["macSound"] and "Foley" in out["macStart"]
+
+
 def test_the_chip_names_the_card_and_a_spark_stays_a_spark():
     out = run("""out.spark = platName(); out.sparkCard = cardFace();
       S.platform_label = "DGX SPARK · CUDA · H3-CUDA";

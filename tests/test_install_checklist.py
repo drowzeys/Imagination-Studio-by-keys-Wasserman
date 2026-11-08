@@ -213,7 +213,7 @@ def test_no_network_or_no_sign_in_is_not_yet(tmp_path):
 def test_the_cuda_installer_asks_before_downloading_and_the_rtx_entry_no_longer_stops():
     cuda = (ROOT / "oneshot-setup-cuda.sh").read_text()
     assert cuda.index("checklist_gate_part \"$GATE_MODE\" --flux3") < cuda.index("say \"Environment:")
-    assert "|| FLUX3=0" in cuda and "|| SOUND=0" in cuda and "trap checklist_said_later EXIT" in cuda
+    assert "|| FLUX3=0" in cuda and "|| SOUND_LEGACY=0" in cuda and "|| SOUND=0" not in cuda and "trap checklist_said_later EXIT" in cuda
     assert "exit 1" not in (ROOT / "oneshot-setup-rtx-6000.sh").read_text()
 
 

@@ -23,8 +23,8 @@ def catalogue() -> dict:
             if route.get("basis") not in ("policy", "unknown"):
                 raise ValueError(f"Invalid runtime requirement basis: {key}.")
     manifests = list(data["downloads"].values()) + [
-        [{**model["download_snapshot"], "folder": key}] for key, model in data["models"].items()
-        if model.get("kind") == "isolated" and "download_snapshot" in model]
+        [{**model[field], "folder": key}] for key, model in data["models"].items()
+        for field in ("download_snapshot", "spark_download_snapshot") if field in model]
     for rows in manifests:
         for row in rows:
             if not row.get("repo") or not row.get("folder") or not isinstance(row.get("files"), list):
@@ -68,9 +68,11 @@ def image_specs() -> dict:
             for key, row in catalogue()["models"].items() if row.get("kind") == "image"}
 
 
-def download_rows(key: str) -> list[dict]:
+def download_rows(key: str, *, platform: str | None = None) -> list[dict]:
     """Selected components, including shared text/decoder files, never another image variant."""
     spec = model(key)
+    if platform == "linux" and spec.get("spark_download_snapshot"):
+        return [spec["spark_download_snapshot"]]
     if spec.get("kind") == "isolated" and spec.get("download_snapshot"):
         return [spec["download_snapshot"]]
     if spec.get("checkpoint_parts"):
@@ -92,10 +94,10 @@ def download_rows(key: str) -> list[dict]:
     return rows
 
 
-def size_info(key: str) -> dict:
+def size_info(key: str, *, platform: str | None = None) -> dict:
     sizes = catalogue().get("file_sizes", {})
     total, known, count = 0, 0, 0
-    for row in download_rows(key):
+    for row in download_rows(key, platform=platform):
         entry = sizes.get(row["repo"] + "@" + row["revision"], {})
         names = row["files"] if row["files"] is not None else entry.get("snapshot_files")
         if names is None:
@@ -109,4 +111,5 @@ def size_info(key: str) -> dict:
                 known += 1
     return {"bytes": total if count and known == count else None, "known_bytes": total,
             "known_files": known, "total_files": count, "basis": "Hugging Face repository file metadata",
-            "checked_at": model(key).get("download_snapshot", {}).get("checked_at", catalogue().get("sizes_checked_at"))}
+            "checked_at": model(key).get("spark_download_snapshot" if platform == "linux" else "download_snapshot", {})
+                .get("checked_at", catalogue().get("sizes_checked_at"))}

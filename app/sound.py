@@ -50,17 +50,17 @@ LICENCES = {"sfx": "Stable Audio Open 1.0 · Stability AI Community License (fre
 SFX_MODEL = "stable-audio-open-1.0"
 
 
-def default_model() -> str:
+def default_model(*, spark: bool = False) -> str:
     import windows_audio3
-    return windows_audio3.MODEL if WINDOWS or WINCUDA else SFX_MODEL
+    return windows_audio3.MODEL if WINDOWS or WINCUDA or spark else SFX_MODEL
 
 
-def parameters(kind: str, params: dict) -> dict:
+def parameters(kind: str, params: dict, *, spark: bool = False) -> dict:
     """Resolve a seed once before enqueueing; replay keeps the recorded concrete seed."""
     import windows_audio3
     out = dict(params)
     if kind == "sfx":
-        out.setdefault("sound_model", default_model())
+        out.setdefault("sound_model", default_model(spark=spark))
         if out["sound_model"] not in (SFX_MODEL, windows_audio3.MODEL):
             raise HTTPException(400, "Choose Stable Audio Open 1.0 or Stable Audio 3 Small SFX.")
     try:
@@ -115,7 +115,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
             gone.insert(0, "the ComfyUI-MMAudio nodes")
         if gone:
             why = (f"Stable Audio Open is not downloaded: its page on Hugging Face is gated, so accept its licence there "
-                   f"(huggingface.co/stabilityai/stable-audio-open-1.0), sign in, then run `{SPARK_INSTALL}`." if kind == "sfx"
+                   f"(huggingface.co/stabilityai/stable-audio-open-1.0), sign in, then run `bash oneshot-setup-spark.sh --sound-legacy`." if kind == "sfx"
                    else f"Foley is not installed ({', '.join(Path(g).name for g in gone)}): run `{SPARK_INSTALL}`.")
             return why
         if not shutil.which("ffmpeg", path=os.environ.get("PATH", "") + ":/usr/bin:/usr/local/bin"):
@@ -176,8 +176,25 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
         """(command, environment, output paths) for one sound job; 400 with the reason when it cannot run."""
 
         import windows_audio3
-        params = parameters(kind, params)
+        params = parameters(kind, params, spark=spark)
         if kind == "sfx" and windows_audio3.selected(params):
+            if spark and not (WINDOWS or WINCUDA):
+                import spark_audio3
+                try:
+                    params = spark_audio3.parameters(params)
+                except ValueError as error:
+                    raise HTTPException(400, str(error)) from None
+                if why := spark_audio3.prerequisites():
+                    raise HTTPException(400, why)
+                fits(spark_audio3.MODEL, params["seconds"])
+                target = home / "sound" / kind / f"{job_id}.wav"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                command = [str(python(kind)), str(pack / "spark/spark_generate.py"), "sfx",
+                           "--sound-model", spark_audio3.MODEL, "--prompt", params["prompt"],
+                           "--seconds", str(params["seconds"]), "--seed", str(params["seed"]),
+                           "--steps", "8", "--cfg", "1", "-o", str(target),
+                           "--take", str(target.with_suffix(".take.json")), "--home", str(home)]
+                return command, {}, [str(target)]
             if why := windows_audio3.prerequisites():
                 raise HTTPException(400, why)
             return windows_audio3.build(params, home, job_id)
@@ -190,6 +207,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
         folder.mkdir(parents=True, exist_ok=True)
         runner = [str(pack / "spark" / "spark_generate.py"), kind] if spark else [str(pack / "sound_generate.py"), kind, "--models", str(models)]
         command = [str(python(kind)), *runner, "--seed", str(seed), "--take", str(folder / f"{job_id}.take.json"), "--home", str(home)]
+        if spark and kind == "sfx":
+            command += ["--sound-model", SFX_MODEL]
         if prompt:
             command += ["--prompt", prompt]
         if negative:
@@ -242,15 +261,19 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
         for kind in KINDS:
             why = missing(kind)
             kinds[kind] = {"ready": not why, "why": why or None, "licence": LICENCES[kind], "bounded": bounded_windows(kind)}
-        new = windows_audio3.status()
+        if spark and not (WINDOWS or WINCUDA):
+            import spark_audio3
+            new = spark_audio3.status()
+        else:
+            new = windows_audio3.status()
         choices = {SFX_MODEL: {**kinds["sfx"], "id": SFX_MODEL,
-                              "label": "Stable Audio Open 1.0 (legacy, optional)" if WINDOWS or WINCUDA else "Stable Audio Open 1.0",
+                              "label": "Stable Audio Open 1.0 (legacy, optional)" if WINDOWS or WINCUDA or spark else "Stable Audio Open 1.0",
                               "seconds": (5, 5) if bounded_windows("sfx") else SFX_SECONDS, "negative": True},
                    windows_audio3.MODEL: {**new, "ready": new["available"], "id": windows_audio3.MODEL,
                                           "label": windows_audio3.TITLE, "seconds": windows_audio3.SECONDS,
                                           "licence": windows_audio3.LICENCE, "negative": False,
-                                          "bounded": True, "setup": windows_audio3.SETUP if WINDOWS or WINCUDA else None}}
-        selected = default_model()
+                                          "bounded": True, "setup": new.get("setup") if spark and not (WINDOWS or WINCUDA) else windows_audio3.SETUP if WINDOWS or WINCUDA else None}}
+        selected = default_model(spark=spark)
         kinds["sfx"] = choices[selected]
         return {"kinds": kinds, "models": choices, "default_model": selected,
                 "seconds": {"sfx": choices[selected]["seconds"],

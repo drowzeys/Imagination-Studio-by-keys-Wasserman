@@ -54,12 +54,14 @@ def test_each_needs_words_become_the_installer_that_does_it(monkeypatch):
 def test_on_a_dgx_spark_every_install_goes_through_its_own_installer(monkeypatch):
     monkeypatch.setattr(installs, "SPARK", True)
     for words, flags in (("oneshot-setup.sh --ref2va (62 GB)", ["--ref2va"]), ("oneshot-setup.sh --music (22 GB)", ["--music"]),
-                         ("bash oneshot-setup-spark.sh --sound", ["--sound"]), ("oneshot-setup-spark.sh --moss --turbo", ["--moss"])):
+                         ("bash oneshot-setup-spark.sh --sound", ["--sound"]),
+                         ("bash oneshot-setup-spark.sh --sound-legacy", ["--sound-legacy"]),
+                         ("oneshot-setup-spark.sh --moss --turbo", ["--moss"])):
         plan = installs.plan_of(item(words))
         assert plan["how"] == "oneshot" and plan["command"][1].endswith("oneshot-setup-spark.sh"), words
         assert plan["command"][2:] == ["--no-render", *flags], words  # the Mac-only --turbo is left out
     built = installs.plan_of(item("bash spark/build-music3.sh"))
-    assert built["how"] == "script" and built["command"][1].endswith("spark/build-music3.sh")
+    assert built["how"] == "script" and Path(built["command"][1]).parts[-2:] == ("spark", "build-music3.sh")
 
 
 def wait():
