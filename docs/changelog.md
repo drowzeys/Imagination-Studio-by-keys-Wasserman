@@ -4,6 +4,19 @@
 
 Historical release notes, retained as written for provenance. Old install commands, requirements and limitations describe their releases, not current support. Start with the [README](../README.md) or [Windows guide](windows.md).
 
+## New in 4.4.1 (2026-11-08)
+
+**The 4.3.1 screens are back**, at Wasserman's request (#226). The page is 4.3.1's again. Everything under it stays
+as it is in 4.4.0: native Windows, the Windows auto-update (#224), Access (#218), Finish and Premiere, keys-HDR,
+two GPUs, the Sparks fixes, `SPARK_PROGRESS_FILE` and job previews. To update, `git pull` and restart. The
+updater does this by itself.
+
+- **Out of the screens:** the Console look and Appearance themes (#219, #197), the simple studio (#220), the Quick Edit
+  tab (#208), the No sound choice (#205), the new Library layout and its paging (#222), and the 4.4.0 additions to the
+  Home composer and the Windows pages.
+- **Kept:** the Windows app icon (the tray and the desktop shortcut use it), and adding clips to the timeline one at
+  a time, so two quick additions both land.
+
 ## New in 4.4.0 (2026-11-07)
 
 **Native Windows**, **the Console look** with **the simple studio**, and **Quick Edit**. The Mac and Spark engines
