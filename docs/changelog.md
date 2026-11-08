@@ -16,6 +16,9 @@ updater does this by itself.
   Home composer and the Windows pages.
 - **Kept:** the Windows app icon (the tray and the desktop shortcut use it), and adding clips to the timeline one at
   a time, so two quick additions both land.
+- **Video Turbo adapter** (#228, fixes #225, reported by deeeed): `oneshot-setup.sh --turbo` failed with a 404 because
+  the Phosphene release copy is gone. It now downloads LightX2V's own file (sha256 pinned) and converts it into the
+  runner layout at install. The tensors are the same as before, bit for bit.
 
 ## New in 4.4.0 (2026-11-07)
 
