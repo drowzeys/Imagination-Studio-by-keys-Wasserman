@@ -4,6 +4,39 @@
 
 Historical release notes, retained as written for provenance. Old install commands, requirements and limitations describe their releases, not current support. Start with the [README](../README.md) or [Windows guide](windows.md).
 
+## New in 4.4.0 (2026-11-07)
+
+**Native Windows**, **the Console look** with **the simple studio**, and **Quick Edit**. The Mac and Spark engines
+are the same as 4.2.1's. To update, `git pull` and restart. On Windows, run the setup again, since 4.4.0 adds its
+own setup scripts.
+
+- **Windows, natively** (#200, #206, #207, #211, #212; ivberg's #198 and #210 carried): the whole Studio runs on
+  Windows on Arm (RTX Spark N1X), with no WSL. It includes ComfyUI, TensorFold 1.2.2 engines, Library actions,
+  Character Swap, foley, Finish, LoRA training and Music 3's own engine. Native video fits within Windows' 30 GB.
+  The WSL version is gone.
+- **The Console look** (#219, MiaAI-Lab; #197): Light, Dark, OLED and Match the computer themes, a Text size
+  setting, and the screens rebuilt.
+- **The simple studio** (#220, MiaAI-Lab): a simpler starting view, with the next actions under every result.
+- **Quick Edit** (#208, MiaAI-Lab): change a picture by saying what to change, in one box.
+- **No sound** (#205, MiaAI-Lab): a clip can be made without sound, from step 3.
+- **Access** (#218, MiaAI-Lab): you can choose to trust your own tailnet and home networks. Off by default.
+- **Library** (#222, nickmontag's #221 carried): players load only when they come near the screen, 60 tiles show
+  per page with Show more, and the page redraws only for a new or deleted take.
+- **Finish** (#216): Premiere export works everywhere (the converter is fixed on Windows), and Windows renders
+  frame-exact.
+- **keys-HDR LORA** (#190): an HLG HDR finish for any clip.
+- **Two GPUs in one machine** (#191, davidlowjw's #184 carried) and **paired cards** in the web UI (#194,
+  davidlowjw's #192 carried).
+- **Sparks:** live readings are drawn in place, so a playing clip no longer restarts every 4 s (#193,
+  davidlowjw, fixes #186). Cancelled clips are no longer sent to workers (#209, newjordan).
+- **For apps that drive the Studio:** `SPARK_PROGRESS_FILE` writes a clip's progress to a file, for a workload
+  governor (#189, benbuschmann's #182, plus a Cancel fix). Job previews give a clip's live preview over the API,
+  opt-in (#217).
+- **Home** (#196, wassermanproductions): FLUX3 Klein and YuE2 chips in the composer.
+- **RTX Spark N1X:** the GPU carve-out is used as the memory pool, and `STUDIO_MEMORY_GUARD=warn` flags instead of
+  refusing (#199). Speed and LLM measurements are in the docs (#202, #203, #204).
+- Fixes: a docs table row (#188, halr9000), and two flaky tests (#180, #181).
+
 ## New in 4.3.1 (2026-10-30)
 
 **One to four local NVIDIA GPUs** on one Linux machine, and a **96 GB** minimum for a Mac's default install. The
