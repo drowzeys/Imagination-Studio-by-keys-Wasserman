@@ -28,6 +28,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from sound_seed import seed_of
 
 import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
 
@@ -46,6 +47,27 @@ SPARK_FILES = {"sfx": ("checkpoints/stable_audio_open_1.0.safetensors", "text_en
                          "mmaudio/nvidia/bigvgan_v2_44khz_128band_512x/bigvgan_generator.pt")}
 LICENCES = {"sfx": "Stable Audio Open 1.0 · Stability AI Community License (free under 1 M USD yearly revenue; a larger business needs Stability's licence)",
             "foley": "MMAudio · its weights are CC-BY-NC 4.0: non-commercial use only"}
+SFX_MODEL = "stable-audio-open-1.0"
+
+
+def default_model() -> str:
+    import windows_audio3
+    return windows_audio3.MODEL if WINDOWS or WINCUDA else SFX_MODEL
+
+
+def parameters(kind: str, params: dict) -> dict:
+    """Resolve a seed once before enqueueing; replay keeps the recorded concrete seed."""
+    import windows_audio3
+    out = dict(params)
+    if kind == "sfx":
+        out.setdefault("sound_model", default_model())
+        if out["sound_model"] not in (SFX_MODEL, windows_audio3.MODEL):
+            raise HTTPException(400, "Choose Stable Audio Open 1.0 or Stable Audio 3 Small SFX.")
+    try:
+        out["seed"] = seed_of(out)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    return out
 
 
 def bounded_windows(kind: str) -> bool:
@@ -153,6 +175,12 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
     def build(kind: str, params: dict, job_id: str) -> tuple[list[str], dict, list[str]]:
         """(command, environment, output paths) for one sound job; 400 with the reason when it cannot run."""
 
+        import windows_audio3
+        params = parameters(kind, params)
+        if kind == "sfx" and windows_audio3.selected(params):
+            if why := windows_audio3.prerequisites():
+                raise HTTPException(400, why)
+            return windows_audio3.build(params, home, job_id)
         why = missing(kind)
         if why:
             raise HTTPException(400, why)
@@ -209,14 +237,25 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
 
     @router.get("/api/sound/state")
     def state() -> dict:
+        import windows_audio3
         kinds = {}
         for kind in KINDS:
             why = missing(kind)
             kinds[kind] = {"ready": not why, "why": why or None, "licence": LICENCES[kind], "bounded": bounded_windows(kind)}
-        return {"kinds": kinds,
-                "seconds": {"sfx": (5, 5) if bounded_windows("sfx") else SFX_SECONDS,
+        new = windows_audio3.status()
+        choices = {SFX_MODEL: {**kinds["sfx"], "id": SFX_MODEL,
+                              "label": "Stable Audio Open 1.0 (legacy, optional)" if WINDOWS or WINCUDA else "Stable Audio Open 1.0",
+                              "seconds": (5, 5) if bounded_windows("sfx") else SFX_SECONDS, "negative": True},
+                   windows_audio3.MODEL: {**new, "ready": new["available"], "id": windows_audio3.MODEL,
+                                          "label": windows_audio3.TITLE, "seconds": windows_audio3.SECONDS,
+                                          "licence": windows_audio3.LICENCE, "negative": False,
+                                          "bounded": True, "setup": windows_audio3.SETUP if WINDOWS or WINCUDA else None}}
+        selected = default_model()
+        kinds["sfx"] = choices[selected]
+        return {"kinds": kinds, "models": choices, "default_model": selected,
+                "seconds": {"sfx": choices[selected]["seconds"],
                             "foley": (1, 5) if bounded_windows("foley") else FOLEY_SECONDS},
-                "spark": spark, "windows": bounded_windows("sfx") or bounded_windows("foley")}
+                "spark": spark, "windows": WINDOWS or WINCUDA}
 
     @router.get("/api/sound/takes")
     def takes() -> list[dict]:

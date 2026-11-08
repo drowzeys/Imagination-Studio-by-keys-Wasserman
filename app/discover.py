@@ -1283,8 +1283,11 @@ def windows_state() -> dict:
                  + [root / folder / target for _, _, _, folder, target, _ in checked])
         if not files:
             continue
+        setup_part = "sound-legacy" if key == "sound" else part
         row("windows-" + key, spec["label"], spec["group"], files[0].parent, files,
-            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {part}", catalog_id=key)
+            rf"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts {setup_part}", catalog_id=key)
+        if key == "sound":
+            items[-1]["optional"] = True
     paths = windows_cuda.paths()
     for nid, label, engine, files, part in (
             ("windows-h3-engine", "TensorFold H3 native engine", "Video", [paths["tf_h3"]], "video"),
@@ -1308,6 +1311,32 @@ def windows_state() -> dict:
         installed=not fish_checkpoint(drama) and bool(weights) and codec.is_file(),
         why="" if weights and codec.is_file() else "Drama 3 needs its complete local checkpoint and converted codec.",
         catalog_id="voice")
+    import windows_audio3
+    audio_root = windows_audio3.models()
+    audio_manifest = {}
+    audio_why = ""
+    try:
+        audio_manifest = windows_audio3.inventory()
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        audio_why = f"Stable Audio 3 model files could not be verified: {error}"
+    row("windows-" + windows_audio3.MODEL, windows_audio3.TITLE + " weights and T5Gemma", "Sound",
+        audio_root, [], windows_audio3.SETUP, installed=bool(audio_manifest), why=audio_why, removable=False)
+    items[-1].update(optional=False, feature=windows_audio3.MODEL, model=windows_audio3.MODEL,
+        model_metadata={"label": windows_audio3.TITLE, "platform": "windows",
+                        "backend": "torch-cuda", "engine": "stable-audio-3", "layout": "huggingface-cache"},
+        requirements_note="Default Windows sound-effects model, isolated CUDA runtime; 1-5 seconds, eight passes, CFG 1. "
+                          "Files in place do not qualify this recipe. Check it in Machine > Feature checks. "
+                          "Cache links are not removed automatically.",
+        recipe_fit=windows_measurements.feature_measurements([windows_audio3.MODEL]))
+    items[-1]["download_size"] = model_catalog.size_info(windows_audio3.MODEL)
+    if audio_manifest:
+        import shared_measurements
+        items[-1]["shared_measurements"] = shared_measurements.references(
+            windows_audio3.MODEL, platform="windows", backend="torch-cuda", engine="stable-audio-3")
+        items[-1]["download_size"] = {
+            "bytes": sum(info["size"] for name, info in audio_manifest["files"].items()
+                         if "snapshots" in Path(name).parts),
+            "basis": "Verified installed Hugging Face snapshot files; bundled T5Gemma included."}
     return {"needs": items, "scanning": False, "progress": {}, "last_scan": None, "installing": {"state": "idle"},
             "tools": {}, "platform": "windows", "inventory_only": True,
             "note": "Current native Windows installation inventory. Installation is separate from recipe qualification. "

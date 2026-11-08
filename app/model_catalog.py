@@ -22,7 +22,10 @@ def catalogue() -> dict:
                 raise ValueError(f"Invalid runtime memory requirement: {key}.")
             if route.get("basis") not in ("policy", "unknown"):
                 raise ValueError(f"Invalid runtime requirement basis: {key}.")
-    for rows in data["downloads"].values():
+    manifests = list(data["downloads"].values()) + [
+        [{**model["download_snapshot"], "folder": key}] for key, model in data["models"].items()
+        if model.get("kind") == "isolated" and "download_snapshot" in model]
+    for rows in manifests:
         for row in rows:
             if not row.get("repo") or not row.get("folder") or not isinstance(row.get("files"), list):
                 raise ValueError("Invalid catalog download manifest.")
@@ -68,6 +71,8 @@ def image_specs() -> dict:
 def download_rows(key: str) -> list[dict]:
     """Selected components, including shared text/decoder files, never another image variant."""
     spec = model(key)
+    if spec.get("kind") == "isolated" and spec.get("download_snapshot"):
+        return [spec["download_snapshot"]]
     if spec.get("checkpoint_parts"):
         return [{"repo": catalogue()["checkpoints"][folder]["repo"],
                  "revision": catalogue()["checkpoints"][folder]["revision"], "files": None}
@@ -104,4 +109,4 @@ def size_info(key: str) -> dict:
                 known += 1
     return {"bytes": total if count and known == count else None, "known_bytes": total,
             "known_files": known, "total_files": count, "basis": "Hugging Face repository file metadata",
-            "checked_at": catalogue().get("sizes_checked_at")}
+            "checked_at": model(key).get("download_snapshot", {}).get("checked_at", catalogue().get("sizes_checked_at"))}

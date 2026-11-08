@@ -454,12 +454,68 @@ or `oneshot-setup.sh --sound`; about 13 GB of weights in `$PREFIX/sound-models` 
 - **Foley for a clip** (MMAudio large_44k_v2): pick a Library clip; MMAudio watches its frames and makes its sound,
   steps on the footfalls. Words are optional. The result is a WAV and the clip with it, laid under the clip's own
   sound at -6 dB (its speech stays on top; peaks under -1 dBFS) or in place of it. Up to 15 s, the studio's longest clip.
-- **A sound effect** (Stable Audio Open 1.0): words to 1 to 47 s of 44.1 kHz stereo.
+- **A sound effect**: Windows defaults to **Stable Audio 3 Small SFX**, 1-5 seconds;
+  **Stable Audio Open 1.0** is an optional legacy choice there. Mac and DGX Spark retain Stable Audio Open
+  (1 to 47 s of 44.1 kHz stereo; the bounded Windows legacy recipe is five seconds).
 
 Both land in `~/ImaginationStudio/sound/` with a take file each, and in the Library under **Sound effects** (foley
 clips under Clips). `POST /api/jobs {kind: "sfx", params: {prompt, seconds, negative?, seed?, steps?, cfg?}}` or
 `{kind: "foley", params: {video, prompt?, negative?, keep_sound?, foley_db?, seed?}}`; `GET /api/sound/state`,
 `GET /api/sound/takes`.
+
+Seeds are random by default, for both sound effects and foley. **Lock seed** retains the displayed seed for
+prompt comparisons or repeats, including seed zero. Every queued job and take records the actual seed.
+**Again** restores the take's prompt, model, duration and seed; unlocked, the next take draws a new seed.
+API clients can omit `seed` (or send `null`) for a random seed, or supply an unsigned 32-bit integer to repeat.
+
+### Stable Audio 3 Small SFX (default native Windows CUDA)
+
+Windows one-shot setup's `sound` part and `setup-windows-cuda.ps1 -Parts sound` install Small SFX in
+its isolated environment, not Stable Audio Open. Sound-only setup needs no H3 toolchain or shared ComfyUI.
+The separate cache remains under `%LOCALAPPDATA%\ImaginationStudio\models\stable-audio-3-small-sfx`.
+You can also install separately with `powershell -ExecutionPolicy Bypass -File scripts\setup-windows-audio3.ps1`.
+`-Verify` checks existing dependencies and cached model checksums without downloads or inference;
+`-DependenciesOnly` omits model downloads. The installer prints the model download size first.
+Accept the Hugging Face gates and sign in yourself. Setup never qualifies or renders automatically.
+
+This uses Stability AI's MIT inference package at `790793b89ddceea612be9ce42ff6830d18f6fa57`,
+in `audio3-gpu-venv`, separate from the UI, shared GPU and Foley environments. A dependency-only patch
+replaces upstream's Torch/torchaudio 2.7.1 pins with Studio's native CUDA wheels; no inference code is patched.
+This combination requires local testing; installed packages do not establish quality or hardware qualification.
+Weights and the bundled Google T5Gemma encoder use a separate offline cache; both come from Stability AI's
+Small SFX repository. The Google repository's separate gate is not needed. Setup records the downloaded revision
+and checksums. No weights are downloaded during a render.
+
+In **Machine > Feature checks**, run **Stable Audio 3 Small SFX** explicitly, then choose it under
+**Sound effects > Sound model**. Its initial recipe is **1-5 seconds, eight passes, CFG 1**, stereo 44.1 kHz;
+**Machine > Models & weights** lists its separate cache and bundled T5Gemma, with a link to the model's
+feature check. Files in place do not count as a passed check; automatic cache removal is unavailable.
+negative prompts are unavailable at this guidance setting. The check renders the one- and five-second endpoints,
+checks the waveform and records measured memory. It does **not** judge whether the sound matches the prompt.
+Try several unlocked seeds and compare by ear. API selection is
+`{kind: "sfx", params: {sound_model: "stable-audio-3-small-sfx", prompt: "...", seconds: 5}}`;
+Omitting `sound_model` selects Small SFX on Windows, Stable Audio Open elsewhere. To replay legacy effects
+on Windows, explicitly set `sound_model: "stable-audio-open-1.0"`; older saved takes still restore that model.
+Install Open explicitly with `setup-windows-cuda.ps1 -Parts sound-legacy` (or `-LegacySound` alongside other
+parts). It remains selectable; no existing weights or takes are deleted. A missing/unqualified default
+shows its setup/check reason rather than silently switching models.
+
+The runtime stops Studio's owned warm image/sound backends before loading. It never falls back to CPU or
+uses another GPU. Worker parameter validation does not import Studio's web API or require FastAPI in
+the isolated environment; startup failures include the worker's log.
+It has 12 GiB CUDA allocator/process-commit caps, a 16 GiB owned-job cap, a 600-second
+deadline, UUID/LUID-bound WDDM monitoring with two-second freshness and a 2 GiB dedicated-memory reserve.
+Host admission and monitoring use the native image policy's 2 GiB reserve (or a larger configured
+`SPARK_MEMORY_FLOOR_MB`) and Windows' low-memory signal, not the process-commit cap as a RAM requirement.
+Admission still requires 14 GiB dedicated GPU headroom and 18 GiB commit headroom. These are
+**policy bounds, not measured model requirements**; the model's host RAM usage remains unmeasured.
+Existing Windows qualification controls apply:
+gating requires matching local evidence when enabled; disabling gating does not disable limits or live admission.
+Mac and DGX Spark routes remain unavailable for this model until their integration and safety budgets are verified.
+
+**Licences:** Stable Audio 3's weights use the Stability AI Community License (an enterprise licence is needed
+above US$1 million yearly revenue); its text encoder also carries the Gemma Terms of Use. Do not redistribute
+weights. Stable Audio Open and MMAudio keep their existing licences and settings.
 
 **On a DGX Spark** (`bash oneshot-setup-spark.sh --sound`, about 11 GB in `$SPARK_MODELS/Sound-Comfy`) both run through
 the studio's ComfyUI server (`spark/comfy.sh`, with its memory guard beside it) as `spark/spark_generate.py sfx` and

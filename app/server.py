@@ -1486,6 +1486,9 @@ def bolt_need(job: dict, resident_gb: float) -> tuple[bool, str] | None:
     measured peak here (Bolt then goes). On a DGX Spark the memory guard's estimate (clips, songs, sound; Drama 3's
     NEED_GB); on a Mac the peaks measured on an M5 Ultra (bolt.MAC_PEAK_GB) against what vm_stat counts as available."""
 
+    kind, params = job["kind"], job["params"]
+    if kind == "sfx" and windows_audio3.selected(params):
+        return None
     if not SPARK:
         free = voice.mem_available_gb()
         if free < 0:
@@ -1688,6 +1691,13 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     """(command, environment, output paths) for one job. ``room`` False leaves this machine's memory out of it: the
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
 
+    if kind == "sfx" and windows_audio3.selected(params):
+        if why := windows_audio3.prerequisites():
+            raise HTTPException(400, why)
+        try:
+            return windows_audio3.build(params, HOME, job_id)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            raise HTTPException(400, str(error)) from None
     if (WINDOWS or WIN32) and windows_runtime.bounded(kind, params):
         if kind == "qualification":
             return windows_checks.build(HOME, params, job_id)
@@ -1968,7 +1978,8 @@ def run(job: dict, command: list[str], env: dict, label: str = "") -> bool:
             # the native tier's job tree may let ComfyUI break away (spark/comfy_win.py): it stays warm after the job
             gpu_check = local_windows and bounded_job and windows_checks.gpu_check(job)
             # Native image checks keep production native guards; draft allocator/commit caps do not apply.
-            commit = (0 if windows_checks.native_image_check(job) else windows_storyboard.JOB_LIMIT_MB if gpu_check else
+            audio3 = job["kind"] == "sfx" and windows_audio3.selected(job["params"])
+            commit = (windows_audio3.JOB_MB if audio3 else 0 if windows_checks.native_image_check(job) else windows_storyboard.JOB_LIMIT_MB if gpu_check else
                       windows_features.COMMIT_MB if bounded_job and job["kind"] in (*windows_features.KINDS, "qualification") else
                       graphics.WINDOWS_COMMIT_MB if job["kind"] == "graphics" else 0)
             owned = OwnedJob(job_commit_mb=commit, breakaway=WINCUDA and not bounded_job)
@@ -2052,7 +2063,7 @@ def take(job: dict, params: dict, label: str = "") -> tuple[bool, dict, list[str
     """One render of a job's clip, on this machine or on the Spark the job was handed to (sparks.py), which leaves the
     clip at the same path: (False when the job was cancelled meanwhile, the environment, the output paths)."""
 
-    if (WINDOWS or WIN32) and job["kind"] in ("scout", "sfx") and windows_runtime.bounded(job["kind"], params):
+    if (WINDOWS or WIN32) and job["kind"] in ("scout", "sfx") and windows_runtime.bounded(job["kind"], params) and not windows_audio3.selected(params):
         expired = threading.Event()
         def timed_out():
             with lock:
@@ -2369,6 +2380,8 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
     try:
         if WINDOWS or WIN32:
             local_bounded = windows_runtime.bounded(job["kind"], params)
+            if job["kind"] == "sfx" and windows_audio3.selected(params):
+                windows_storyboard.release_backend()
             gpu_kind = job["kind"] in windows_cuda.NATIVE and job["kind"] not in ("export", "soundtrack", "hlg", "finish", "graphics")
             if job["kind"] == "qualification" or job["kind"] == "foley" and local_bounded or gpu_kind and not local_bounded:
                 windows_storyboard.release_backend()
@@ -2462,7 +2475,7 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             revise_then(job)
         with lock:
             if job["status"] != "cancelled":
-                if (WINDOWS or WIN32) and job["kind"] == "sfx" and windows_runtime.bounded("sfx", params):
+                if (WINDOWS or WIN32) and job["kind"] == "sfx" and windows_runtime.bounded("sfx", params) and not windows_audio3.selected(params):
                     windows_sound.save_take(job, HOME, HOME / job["outputs"][0], job["_sound_seconds"])
                 if (WINDOWS or WIN32) and job["kind"] == "foley" and windows_runtime.bounded("foley", params):
                     windows_foley.save_take(job, HOME, HOME / "sound/foley" / job["id"])
@@ -2587,7 +2600,7 @@ def state() -> dict:
                                    "models": "Automatic model installation", "updates": "Automatic source updates",
                                    "image_actions": "Model-based Library actions", "finish": "Tesseract Finish", "hlg": "keys-HDR LORA finishing",
                                }.items()} if selected_mode["enabled"] or not WINCUDA else {})
-        sound_ready = windows_runtime.usage_status("sfx", selected_mode=selected_mode) if windows_runtime.bounded("sfx") else windows_runtime.native_status("sfx", selected_mode, {"available": windows_runtime.native_sound_installed("sfx"), "why": ""})
+        sound_ready = windows_audio3.status()
         gfx_ready = graphics.ready()
         out["capabilities"].update(
             scout={k: out["windows_stills"].get(k) for k in ("available", "why", "runtime_updated")},
@@ -2784,6 +2797,10 @@ def windows_export(body: dict) -> dict:
 
 
 def queue_job(body: dict) -> dict:
+    if body.get("kind") in sound.KINDS:
+        if body.get("params") is not None and not isinstance(body["params"], dict):
+            raise HTTPException(400, "params is an object of the job's settings")
+        body = {**body, "params": sound.parameters(body["kind"], body.get("params") or {})}
     if WINDOWS or WIN32:
         if not isinstance(body.get("kind"), str) or not body["kind"]:
             raise HTTPException(400, "choose a job kind")
@@ -2842,6 +2859,13 @@ def queue_job(body: dict) -> dict:
                 raise HTTPException(400, "title is text")
             return enqueue("graphics", title, params)
         if body.get("kind") == "sfx":
+            if windows_audio3.selected(body["params"]):
+                if body.get("placement") is not None or body.get("sparks") not in (None, 1):
+                    raise HTTPException(400, "Stable Audio 3 runs on this machine only.")
+                params = windows_audio3.parameters(body["params"])
+                if body.get("title") is not None and not isinstance(body["title"], str):
+                    raise HTTPException(400, "title is text")
+                return enqueue("sfx", body.get("title") or sound_title("sfx", params), params)
             sound_ready = windows_runtime.usage_status("sfx")
             if not sound_ready["available"]:
                 raise HTTPException(501, sound_ready["why"])
@@ -3537,6 +3561,7 @@ import qa  # noqa: E402  (Sam Wasserman's QA gate, beside this file)
 import remote  # noqa: E402  (another machine's Studio app, read over its own API, beside this file)
 import slate  # noqa: E402  (Wasserman Slate AI Studio, beside this file)
 import voice  # noqa: E402  (Voice: Fish Audio Drama 3 text to speech, run locally, beside this file)
+import windows_audio3  # noqa: E402
 import bolt  # noqa: E402  (NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine, beside this file)
 
 
@@ -3553,6 +3578,8 @@ bolt.busy = local_running
 def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) -> dict:
     """A job that is not a clip (a voice take) into the queue: it renders on this machine, one at a time with the rest."""
 
+    if kind in sound.KINDS:
+        params = sound.parameters(kind, params)
     if WINDOWS or WIN32:
         params = windows_runtime.freeze(kind, params)
         if not windows_runtime.bounded(kind, params):
@@ -3588,9 +3615,13 @@ def enqueue(kind: str, title: str, params: dict, estimate: int | None = None) ->
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             raise HTTPException(400, str(error)) from None
     if local_bounded and kind == "sfx":
-        params = windows_sound.parameters(params)
         try:
-            windows_sound.preflight()
+            if windows_audio3.selected(params):
+                params = windows_audio3.parameters(params)
+                windows_audio3.preflight()
+            else:
+                params = windows_sound.parameters(params)
+                windows_sound.preflight()
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             raise HTTPException(400, str(error)) from None
     job_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:6]

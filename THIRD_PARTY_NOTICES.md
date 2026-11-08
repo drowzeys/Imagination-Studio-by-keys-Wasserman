@@ -42,6 +42,14 @@ The interface in `app/static/motion.js` follows his app's flow and shares no cod
 | - | `bundle_manifest.json` has one more key, `port`: what this is a port of, the camera move in words, per-stage timings, notes | The original's keys are unchanged and in its order |
 | - | A "MiniMax H3" section at the end of `prompt_pack.md` with the camera move in words; `motion_reference()` | The hand-off this tab exists for |
 
+## Stable Audio 3 Small SFX and T5Gemma
+
+The optional native Windows sound route installs Stability AI's Stable Audio 3 inference package separately
+(MIT, copyright 2026 Stability AI), with a dependency-only patch for the Studio's native Windows CUDA wheels.
+The package's MIT notice is retained in its external source checkout. No upstream source or weights are bundled.
+Stable Audio 3 weights are governed by the Stability AI Community License. Google's T5Gemma encoder is
+governed by the Gemma Terms of Use; setup retains model licence files in its external cache.
+
 ## MediaPipe (Google)
 
 - The `mediapipe` Python package 1.1.0, <https://github.com/google-ai-edge/mediapipe>. Apache License 2.0.
