@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import fcntl
 import os
 import signal
 import shutil
@@ -13,6 +12,11 @@ import threading
 import uuid
 from pathlib import Path
 from urllib.request import ProxyHandler, build_opener
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 import access
 from studio_home import studio_home
@@ -62,6 +66,24 @@ def rebuild_engine(pack: Path, pin: str, port: str) -> None:
     print(f"[launcher] native engine rebuilt at {pin[:8]}", file=sys.stderr, flush=True)
 
 
+def own(handle) -> bool:
+    """This launcher's hold on the checkout: a lock the system lets go of when the process ends, however it ends.
+    Windows has no flock; msvcrt locks the file's first byte, which LK_NBLCK refuses at once when another holds it."""
+
+    if sys.platform == "win32":
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
 def main() -> int:
     pack = Path(__file__).resolve().parent.parent
     home = studio_home(move=True)
@@ -70,10 +92,8 @@ def main() -> int:
     lock_path = Path(git(pack, "rev-parse", "--git-path", "studio-launcher.lock"))
     if not lock_path.is_absolute():
         lock_path = pack / lock_path
-    ownership = lock_path.open("a")
-    try:
-        fcntl.flock(ownership, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    ownership = lock_path.open("a+")
+    if not own(ownership):
         print("This checkout already has a running Studio. Use a separate checkout for another instance.", file=sys.stderr)
         return 1
     stopping = False
@@ -93,8 +113,12 @@ def main() -> int:
 
     def launch():
         session = uuid.uuid4().hex
-        return subprocess.Popen([sys.executable, str(pack / "app/server.py")],
-                                env={**os.environ, "STUDIO_UPDATE_SESSION": session}), session
+        env = {**os.environ, "STUDIO_UPDATE_SESSION": session}
+        # Windows (scripts/app.ps1) gives the server a PID file for its stop script and tray. A PID file otherwise
+        # marks a worker that must not update itself; this one is named as the launcher's own child's.
+        if os.environ.get("STUDIO_PIDFILE"):
+            env["STUDIO_LAUNCHER_PIDFILE"] = os.environ["STUDIO_PIDFILE"]
+        return subprocess.Popen([sys.executable, str(pack / "app/server.py")], env=env), session
 
     def healthy(session: str) -> bool:
         opener = build_opener(ProxyHandler({}))

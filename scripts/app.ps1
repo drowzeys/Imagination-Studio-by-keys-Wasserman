@@ -29,6 +29,8 @@ $env:HOST = '127.0.0.1'
 $env:PORT = "$Port"
 $env:STUDIO_DISCOVER_DELAY = '-1'
 if ($Preview) { Write-Host '-Preview is a compatibility alias; Windows now selects each feature backend independently.' }
+# A PID file given from outside (another Studio's worker, a test) runs the server directly, as scripts/app.sh does.
+$OwnPidFile = -not $env:STUDIO_PIDFILE
 if (-not $env:STUDIO_PIDFILE) {
     $PidName = if ($Port -eq 7870) { 'studio.pid' } else { "studio-$Port.pid" }
     $env:STUDIO_PIDFILE = Join-Path $env:LOCALAPPDATA "ImaginationStudio\$PidName"
@@ -42,5 +44,10 @@ if ($LocalBrain) {
 }
 Write-Host "Native Windows Studio: http://127.0.0.1:$Port"
 Write-Host 'Feature checks explain installed backends, verification and memory requirements. Press Ctrl+C to stop.'
-& $Python -X utf8 (Join-Path $Root 'app\server.py')
+# app\launcher.py owns the server and installs source updates (Settings → Updates) after it exits, as on a Mac or a
+# Spark: one launcher per checkout, on the default port, in a Git checkout. Otherwise the server runs directly.
+$Launcher = $OwnPidFile -and $Port -eq 7870 -and (Get-Command git -ErrorAction SilentlyContinue) -and
+    (& git -C $Root rev-parse --is-inside-work-tree 2>$null) -eq 'true'
+$Entry = if ($Launcher) { 'app\launcher.py' } else { 'app\server.py' }
+& $Python -X utf8 (Join-Path $Root $Entry)
 if ($LASTEXITCODE -ne 0) { throw "Studio exited with code $LASTEXITCODE." }
