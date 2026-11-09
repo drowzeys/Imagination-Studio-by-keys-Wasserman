@@ -313,6 +313,19 @@ def test_status_only_poll_refreshes_each_machine_panel_without_resetting_plans()
     assert out["afterRename"] == 1
 
 
+def test_readings_only_poll_on_a_spark_keeps_the_page():
+    # a DGX Spark: no local GPU placement, and its GPU's readings and free memory move at every 4 s poll
+    out = run("""SPK.data = fixture(1); const d = SPK.data; d.local_gpus.supported = false; d.this.memory_gb = 96.3;
+      const renders = []; globalThis.render = () => renders.push(tab); SPK.plans = { retained: {} };
+      const poll = JSON.parse(JSON.stringify(d)); Object.assign(poll.local_gpus.devices[0], { util_pct: 12, temp_c: 41, power_w: 11.8 });
+      poll.this.memory_gb = 96.4; answers["/api/sparks"] = poll; await spkLoad(true);
+      out.renders = renders.length; out.plans = Object.keys(SPK.plans);
+      const busy = JSON.parse(JSON.stringify(poll)); busy.this.memory_gb = 60; answers["/api/sparks"] = busy;
+      await spkLoad(true); out.afterMemory = renders.length;""")
+    assert out["renders"] == 0 and out["plans"] == ["retained"]
+    assert out["afterMemory"] == 1
+
+
 def test_machine_panel_survives_quiet_gpu_and_no_inventory_fallback():
     out = run("""SPK.data = fixture(1); SPK.data.this.label = "Solo renderer";
       out.quiet = text(viewSparks()); delete SPK.data.local_gpus;

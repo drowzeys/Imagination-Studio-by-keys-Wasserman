@@ -26,7 +26,10 @@ const spkCount = (d, n) => {
   if (onCard()) { const others = n - 1; return spkHere(d) + " and " + others + (spkLocalFleet(d) ? " worker" : " Spark") + (others === 1 ? "" : "s"); }
   return n + " of " + d.available + " available " + (spkLocalFleet(d) ? "workers" : "Sparks");
 };
-const spkSig = d => !d ? "" : JSON.stringify([d.limit, d.available, d.default, d.names, d.placement, d.local_gpus, d.workers.map(w => [w.address, w.kind, w.name, w.label, w.state, w.working, w.enabled, w.why, w.job, w.memory_gb, w.guard, w.usable]), d.this && [d.this.label, d.this.job, d.this.state, d.this.memory_gb, d.this.guard]]);
+// Readings move at every poll and spkMachinesDraw shows them in place: free memory counts to the GB, and a machine
+// without local GPU placement (a DGX Spark) leaves its GPU's readings out, or every poll redraws the whole page.
+const spkGpus = g => !g || g.supported ? g : { ...g, devices: (g.devices || []).map(({ util_pct, temp_c, power_w, used_mb, free_mb, ...gpu }) => gpu) };
+const spkSig = d => !d ? "" : JSON.stringify([d.limit, d.available, d.default, d.names, d.placement, spkGpus(d.local_gpus), d.workers.map(w => [w.address, w.kind, w.name, w.label, w.state, w.working, w.enabled, w.why, w.job, Math.round(w.memory_gb), w.guard, w.usable]), d.this && [d.this.label, d.this.job, d.this.state, Math.round(d.this.memory_gb), d.this.guard]]);
 function spkReconcile(first = false) {
   const d = SPK.data; let n = SPK.n;
   if (first) { try { n = Number(localStorage.getItem("sparks")); } catch {} n = n || d.default; }
