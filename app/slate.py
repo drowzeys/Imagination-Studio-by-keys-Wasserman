@@ -24,6 +24,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+import slate_comfy
+
 import lengths  # which frame counts the model takes, beside this file
 import remote  # another machine's Studio app, read over its own API, beside this file
 import negation  # what a prompt forbids by name, beside this file
@@ -195,6 +197,39 @@ def exists(body: dict) -> dict:
 # ---------- a take rendered somewhere else, logged into a shot ----------
 
 SETTINGS = ("preset", "quality", "frames", "seconds", "width", "height", "steps", "loras", "references", "ref_turbo", "text_encoder")
+
+
+@router.get("/api/slate/comfy/profiles")
+def comfy_profiles() -> dict:
+    try:
+        return {key: {"label": profile["label"], "references": len(profile["inputs"].get("references", []))}
+                for key, profile in slate_comfy.profiles().items()}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise HTTPException(503, f"Invalid ComfyUI configuration: {error}") from error
+
+
+@router.post("/api/slate/comfy/{profile_id}")
+def comfy_submit(profile_id: str, body: dict) -> dict:
+    try:
+        profile = slate_comfy.profiles()[profile_id]
+        prompt, seed, images = body["prompt"], body["seed"], body.get("images", [])
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 20000:
+            raise ValueError("Enter a shot prompt of up to 20,000 characters.")
+        if type(seed) is not int or not 0 <= seed <= 2**53 - 1:
+            raise ValueError("Enter a non-negative whole-number seed.")
+        if not isinstance(images, list) or not all(isinstance(image, str) for image in images):
+            raise ValueError("Select the required reference images.")
+        return {"job": slate_comfy.submit(HOME, profile, prompt, seed, images)}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise HTTPException(502, f"ComfyUI submission failed: {error}") from error
+
+
+@router.get("/api/slate/comfy/{profile_id}/{job}")
+def comfy_result(profile_id: str, job: str) -> dict:
+    try:
+        return slate_comfy.result(HOME, slate_comfy.profiles()[profile_id], job)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise HTTPException(502, f"ComfyUI result failed: {error}") from error
 
 
 @router.post("/api/slate/takes")
