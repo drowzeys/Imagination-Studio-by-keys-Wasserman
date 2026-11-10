@@ -66,6 +66,233 @@ def run(code: str) -> dict:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
+def library_view_setup(*, captions=False):
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    view = page[page.index("const LIBF ="):page.index("\n/* ---------- Tutorial")]
+    return "const LIBPICK = new Set();\n" + view + """
+      const makeElement = el;
+      globalThis.el = (tag, attrs = {}, ...kids) => {
+        const n = makeElement(tag, attrs, ...kids);
+        Object.defineProperty(n, "childNodes", { get: () => n.kids });
+        n.dataset = {}; n.style = {}; n.open = !!attrs.open; n.events = {};
+        n.addEventListener = (type, handler) => { n.events[type] = handler; };
+        n.getAttribute = key => n.attrs[key] || null;
+        n.setAttribute = (key, value) => { n.attrs[key] = value; };
+        return n;
+      };
+      tab = "Library"; globalThis.ART = { ready: new Set() };
+      globalThis.ACT = { state: {} }; globalThis.actPanel = () => null; CAP.map = {};
+      globalThis.rcLibrary = () => null; globalThis.finLibPanel = () => null; globalThis.finLibButton = () => null;
+      globalThis.LORAS = []; globalThis.actButtons = () => null; globalThis.capButton = () => null;
+      answers["/api/trash"] = null;
+    """ + ("" if captions else 'globalThis.capSearch = () => ({ box: null, results: null });\n')
+
+
+@pytest.mark.parametrize("today", ["2026-11-08", "2026-01-03", "2024-03-03"])
+def test_library_date_groups_have_calendar_boundaries_and_unique_members(today):
+    out = run(library_view_setup() + f"""
+      const [year, month, day] = {json.dumps(today)}.split("-").map(Number);
+      const now = new Date(year, month - 1, day, 12);
+      const recent = new Date(year, month - 1, day - 6);
+      const item = (path, date) => ({{ path, modified: date.getTime() / 1000 }});
+      const items = [
+        item("older-year", new Date(year - 2, 0, 1)),
+        item("month-boundary", new Date(year, month - 1, 1)),
+        item("today", now),
+        item("just-before-week", new Date(recent.getTime() - 1000)),
+        item("week-boundary", recent),
+        item("previous-month", new Date(year, month - 2, 1)),
+        item("oldest-month", new Date(year, month - 12, 1)),
+        item("year-boundary", new Date(year, month - 13, 1)),
+        {{ path: "missing-date" }}, {{ path: "invalid-date", modified: "yesterday" }},
+        {{ path: "overflow-date", modified: 1e30 }}
+      ];
+      out.groups = libDateGroups(items, now);
+      out.paths = out.groups.flatMap(g => g.items.map(m => m.path));
+      out.inputOrder = items.map(m => m.path);
+    """)
+    groups = out["groups"]
+    assert groups[0]["key"] == "recent" and groups[0]["label"] == "Past 7 days"
+    assert groups[0]["items"][0]["path"] == "today"
+    for group in groups[:-1]:
+        stamps = [m["modified"] for m in group["items"]]
+        assert stamps == sorted(stamps, reverse=True)
+    by_path = {m["path"]: g["key"] for g in groups for m in g["items"]}
+    assert by_path["week-boundary"] == "recent" and by_path["today"] == "recent"
+    assert by_path["just-before-week"] != "recent"
+    assert by_path["oldest-month"].startswith("month-")
+    assert by_path["year-boundary"].startswith("year-")
+    assert groups[-1]["key"] == "unknown" and groups[-1]["label"] == "Date unavailable"
+    assert len(out["paths"]) == len(set(out["paths"])) == 11
+    assert out["inputOrder"][0] == "older-year"
+    if today == "2026-11-08":
+        assert by_path["month-boundary"] == "month-2026-10"
+        assert by_path["previous-month"] == "month-2026-9"
+        assert groups[1]["label"].startswith("This month")
+        assert groups[2]["label"].startswith("Last month")
+    else:
+        assert by_path["month-boundary"] == "recent"
+        assert by_path["previous-month"].startswith("month-")
+
+
+def test_library_date_sections_preserve_search_selection_and_open_choices():
+    out = run(library_view_setup() + """
+      const now = new Date(), older = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      answers["/api/library"] = [
+        { path: "renders/new.mp4", kind: "video", modified: now.getTime() / 1000 },
+        { path: "renders/older.png", kind: "image", modified: older.getTime() / 1000 },
+        { path: "voice/older.wav", kind: "audio", sound: "voice", modified: older.getTime() / 1000 }
+      ];
+      let root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const recent = find(root, n => n.attrs["data-date-group"] === "recent");
+      const old = find(root, n => (n.attrs["data-date-group"] || "").startsWith("month-"));
+      out.defaults = [recent.open, old.open];
+      out.counts = [recent, old].map(g => find(g, n => n.attrs.class === "lib-date-count").textContent);
+      const originalTile = find(old, n => n.attrs["data-path"] === "renders/older.png");
+      button(root, "Select all").attrs.onclick();
+      out.all = [...LIBPICK]; LIBPICK.clear();
+      const search = find(root, n => n.attrs["aria-label"] === "Find in the Library");
+      search.value = "older"; search.events.change();
+      out.search = [recent.style.display, old.style.display, old.open];
+      out.sameTile = find(old, n => n.attrs["data-path"] === "renders/older.png") === originalTile;
+      button(root, "Select all").attrs.onclick(); out.filtered = [...LIBPICK];
+      search.value = "no-match"; search.events.change();
+      const empty = find(root, n => n.tag === "div" && text(n.kids) === "No files match the current filters.");
+      out.noMatch = empty.style.display === "" && recent.style.display === "none" && old.style.display === "none";
+      search.value = ""; search.events.change();
+      out.cleared = [recent.open, old.open];
+      find(old, n => n.tag === "summary").attrs.onclick(); old.open = true;
+      root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      out.remembered = find(root, n => (n.attrs["data-date-group"] || "").startsWith("month-")).open;
+      out.selectedStill = LIBPICK.has("renders/older.png");
+    """)
+    assert out["defaults"] == [True, False]
+    assert out["counts"] == ["1 file", "2 files"]
+    assert out["all"] == ["renders/new.mp4", "renders/older.png"]
+    assert out["search"] == ["none", "", True] and out["sameTile"]
+    assert out["filtered"] == ["renders/older.png"] and out["noMatch"]
+    assert out["cleared"] == [True, False]
+    assert out["remembered"] and out["selectedStill"]
+
+
+@pytest.mark.parametrize("kind", ["video", "image", "voice"])
+def test_library_date_groups_follow_kind_filters_and_open_newest_nonempty_section(kind):
+    out = run(library_view_setup() + f"""
+      const now = new Date();
+      const old = new Date(now.getFullYear() - 2, 0, 1).getTime() / 1000;
+      answers["/api/library"] = [
+        {{ path: "renders/new.mp4", kind: "video", modified: now.getTime() / 1000 }},
+        {{ path: "renders/old.png", kind: "image", modified: old }},
+        {{ path: "voice/old.wav", kind: "audio", sound: "voice", modified: old }}
+      ];
+      LIBF.kind = {json.dumps(kind)};
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const group = find(root, n => n.attrs.class === "lib-date-group");
+      out.open = group.open; out.count = find(group, n => n.attrs.class === "lib-date-count").textContent;
+      out.path = find(group, n => !!n.attrs["data-path"]).attrs["data-path"];
+    """)
+    assert out["open"] and out["count"] == "1 file"
+    assert out["path"] == {"video": "renders/new.mp4", "image": "renders/old.png", "voice": "voice/old.wav"}[kind]
+
+
+def test_library_date_groups_show_an_empty_library_message():
+    out = run(library_view_setup() + """
+      answers["/api/library"] = [];
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      out.message = text(root); out.group = !!find(root, n => n.attrs.class === "lib-date-group");
+    """)
+    assert "No media yet" in out["message"] and not out["group"]
+
+
+def test_library_date_groups_keep_players_and_open_choices_across_listing_refreshes():
+    out = run(library_view_setup() + """
+      let made = 0;
+      globalThis.media = path => { made++; return el("player", { src: path }); };
+      const now = new Date(), old = new Date(now.getFullYear() - 2, 0, 1).getTime() / 1000;
+      const items = [
+        { path: "renders/new.mp4", kind: "video", modified: now.getTime() / 1000 },
+        { path: "renders/old.png", kind: "image", modified: old },
+        { path: "voice/old.wav", kind: "audio", sound: "voice", modified: old }
+      ];
+      answers["/api/library"] = items;
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const players = new Map(LIB.media);
+      for (const player of players.values()) { player.currentTime = 12; player.paused = false; }
+      const recent = find(root, n => n.attrs["data-date-group"] === "recent");
+      find(recent, n => n.tag === "summary").attrs.onclick(); recent.open = false;
+      let draws = 0; const replace = LIB.box.replaceChildren;
+      LIB.box.replaceChildren = (...kids) => { draws++; replace(...kids); };
+      let finish; const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library"
+        ? new Promise(resolve => { finish = resolve; }) : realApi(path, body);
+      const samePlayers = () => [...players].every(([path, player]) =>
+        LIB.media.get(path) === player && find(root, n => n === player)
+        && player.currentTime === 12 && !player.paused);
+      out.sameRoot = viewLibrary() === root;
+      out.pendingPlayers = samePlayers(); out.pendingDraws = draws;
+      finish(items); await new Promise(resolve => setImmediate(resolve));
+      out.unchangedDraws = draws; out.unchangedPlayers = samePlayers();
+      out.stillClosed = !find(root, n => n.attrs["data-date-group"] === "recent").open;
+      viewLibrary(); finish(items.slice(1)); await new Promise(resolve => setImmediate(resolve));
+      out.removed = !LIB.media.has(items[0].path) && !find(root, n => n === players.get(items[0].path));
+      out.remaining = items.slice(1).every(m => LIB.media.get(m.path) === players.get(m.path));
+      viewLibrary(); finish(items); await new Promise(resolve => setImmediate(resolve));
+      out.restored = !!find(root, n => n === LIB.media.get(items[0].path));
+      out.createdPlayers = made;
+    """)
+    assert out["sameRoot"] and out["pendingPlayers"] and out["unchangedPlayers"] and out["stillClosed"]
+    assert out["pendingDraws"] == out["unchangedDraws"] == 1
+    assert out["removed"] and out["remaining"] and out["restored"] and out["createdPlayers"] == 4
+
+
+def test_library_date_groups_preserve_caption_search_and_selection():
+    out = run(library_view_setup(captions=True) + """
+      answers["/api/library"] = [{ path: "renders/one.mp4", kind: "video", modified: 1 }];
+      answers["/api/library/search?q=cat"] = { items: [{ path: "renders/one.mp4", caption: "a cat" }] };
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const grid = find(root, n => n.attrs.class === "lib-dates");
+      const search = find(root, n => n.attrs["aria-label"] === "Search what is in your clips");
+      search.value = "cat"; await search.events.change();
+      out.hidden = grid.style.display === "none";
+      button(root, "Select all").attrs.onclick(); out.selected = [...LIBPICK];
+      search.value = ""; await search.events.change();
+      out.visible = grid.style.display === "";
+    """)
+    assert out["hidden"] and out["visible"] and out["selected"] == ["renders/one.mp4"]
+
+
+def test_library_date_group_render_keeps_scroll_height_and_players_with_400_clips():
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    render = page[page.index("function keepScroll()"):page.index("\n(async () => { const want")]
+    out = run(library_view_setup() + render + """
+      for (const name of ["viewHome", "viewStory", "viewImage", "viewVideo", "viewPrevis", "viewSound", "viewEditHub",
+          "viewLooks", "viewUpdates", "viewCreate", "viewProduction", "viewImport", "viewMotion", "viewAgent",
+          "viewVoice", "viewMusic", "viewEditor", "viewCast", "viewNight", "viewMachine", "viewSparks", "viewBrains",
+          "viewTutorial"]) if (typeof globalThis[name] === "undefined") globalThis[name] = () => null;
+      globalThis.T = {}; globalThis.coach = () => {}; globalThis.bayUpdate = () => {};
+      globalThis.renderShell = () => {}; globalThis.releaseMedia = () => { throw Error("Library players released"); };
+      const view = el("main"); view.offsetHeight = 6000; NODES["#view"] = view;
+      window.scrollX = 0; window.scrollY = 2500;
+      window.scrollTo = (x, y) => { window.scrollX = x; window.scrollY = y; };
+      answers["/api/library"] = Array.from({ length: 400 }, (_, i) =>
+        ({ path: "renders/clip" + i + ".mp4", kind: "video", modified: 1 }));
+      render(); await new Promise(resolve => setImmediate(resolve));
+      const root = LIB.root, players = new Map(LIB.media);
+      let finish; const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library"
+        ? new Promise(resolve => { finish = resolve; }) : realApi(path, body);
+      render();
+      out.root = view.kids[0] === root; out.height = view.style.minHeight;
+      out.scroll = [window.scrollX, window.scrollY];
+      out.players = [...players].every(([path, player]) =>
+        LIB.media.get(path) === player && !!find(root, n => n === player));
+      finish(answers["/api/library"]); await new Promise(resolve => setImmediate(resolve));
+      out.scrollAfter = [window.scrollX, window.scrollY]; clearTimeout(RENDER_HOLD);
+    """)
+    assert out["root"] and out["players"] and out["height"] == "6000px"
+    assert out["scroll"] == out["scrollAfter"] == [0, 2500]
+
+
 def test_the_memory_guard_fold_refuses_on_a_card_and_still_stops_a_spark():
     out = run("""document.createElementNS = () => ({ setAttribute() {}, append() {}, style: {} });
       answers["/api/storage"] = { buckets: [], free_gb: 10, total_gb: 20, used_pct: 50, computing: false };
