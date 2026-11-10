@@ -37,6 +37,8 @@ import memory_guard  # noqa: E402  (what a clip needs and whether this machine h
 import progress_file  # noqa: E402  (SPARK_PROGRESS_FILE: a clip's progress for a governor, off by default)
 import job_preview  # noqa: E402  (STUDIO_PREVIEW_FILE: a job's live preview for the app's API, off by default)
 import gpus  # noqa: E402  (two or more cards: each stage of a workflow placed on its card)
+sys.path.insert(0, str(HERE.parent / "app"))
+import spark_audio3  # noqa: E402
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
 # On a Mac the same graphs run on a ComfyUI of their own (mac/comfy.sh, scripts/setup-comfy.sh): the Library actions
 # and MOSS-Image, on PyTorch's Metal device. Its port, its model folder and the names of the H3 files differ (MAC_FILES).
@@ -1189,6 +1191,19 @@ def sfx_workflow(prompt: str, negative: str, seconds: float, seed: int, steps: i
     }
 
 
+def audio3_workflow(prompt: str, seconds: float, seed: int, prefix: str = "") -> dict:
+    spark_audio3.parameters({"sound_model": spark_audio3.MODEL, "prompt": prompt, "seconds": seconds, "seed": seed})
+    graph = sfx_workflow(prompt, "", seconds, seed, 8, 1, prefix)
+    graph["1"]["inputs"]["ckpt_name"] = "stable_audio_3_small_sfx.safetensors"
+    graph["2"]["inputs"]["clip_name"] = "t5gemma_b_b_ul2.safetensors"
+    graph["6"]["inputs"]["seconds"] = math.ceil(seconds * 44100 / 4096) * 4096 / 44100
+    graph["12"]["inputs"].update(sampler_name="lcm", scheduler="simple")
+    graph["16"] = {"class_type": "TrimAudioDuration", "inputs": {"audio": ["13", 0],
+                    "start_index": 0.0, "duration": seconds}}
+    graph["17"]["inputs"]["audio"] = ["16", 0]
+    return graph
+
+
 def foley_workflow(video: str, prompt: str, negative: str, seconds: float, seed: int, steps: int = FOLEY_STEPS,
                    cfg: float = FOLEY_CFG, prefix: str = "") -> dict:
     """``video`` is the name of the prepared clip in ComfyUI's input folder (prepared_clip, upload)."""
@@ -1233,8 +1248,9 @@ def sound(args) -> None:
     import sound_generate  # the Mac runner's ffmpeg laying and take file; nothing of its models is imported
 
     started, foley = time.time(), args.kind == "foley"
-    args.steps = args.steps or (FOLEY_STEPS if foley else SFX_STEPS)
-    args.cfg = args.cfg if args.cfg is not None else (FOLEY_CFG if foley else SFX_CFG)
+    audio3 = not foley and getattr(args, "sound_model", spark_audio3.MODEL) == spark_audio3.MODEL
+    args.steps = (8 if args.steps is None else args.steps) if audio3 else args.steps or (FOLEY_STEPS if foley else SFX_STEPS)
+    args.cfg = args.cfg if args.cfg is not None else (FOLEY_CFG if foley else 1 if audio3 else SFX_CFG)
     if foley:
         if not (args.video and args.clip_out):
             sys.exit("foley takes --video and --clip-out")
@@ -1245,12 +1261,21 @@ def sound(args) -> None:
         if seconds < FOLEY_SECONDS[0]:
             sys.exit("the clip is shorter than a second")
     else:
-        seconds = args.seconds
+        seconds = args.seconds if args.seconds is not None else 5 if audio3 else 6
         if not args.prompt.strip():
             sys.exit("say what is heard: --prompt")
         if not SFX_SECONDS[0] <= seconds <= SFX_SECONDS[1]:
             sys.exit(f"--seconds is {SFX_SECONDS[0]:g} to {SFX_SECONDS[1]:g}, got {seconds:g}")
-    found = memory_guard.sound_check(args.kind, seconds)
+    if audio3:
+        try:
+            spark_audio3.parameters({"sound_model": spark_audio3.MODEL, "prompt": args.prompt, "negative": args.negative,
+                                    "seconds": seconds, "seed": args.seed, "steps": args.steps, "cfg": args.cfg})
+        except ValueError as error:
+            sys.exit(str(error))
+        if why := spark_audio3.prerequisites():
+            sys.exit(why)
+    route = spark_audio3.MODEL if audio3 else args.kind
+    found = memory_guard.sound_check(route, seconds)
     if found.get("route") is not None:
         if found.get("need_mb"):
             print(f"[tensorfold] memory: about {found['need_mb'] / 1000:.0f} GB at the peak (give or take {found['error_mb'] / 1000:g}) of "
@@ -1260,9 +1285,10 @@ def sound(args) -> None:
         if not found["fits"]:
             sys.exit("refused before anything was loaded: " + found["reason"])
     last = side("kind").read_text().strip() if side("kind").exists() else ""
-    if up() and last != args.kind:
-        fresh_server(("Stable Audio Open" if args.kind == "sfx" else "MMAudio") + " starts from a server with nothing else loaded")
-    ensure_server(args.kind)
+    if up() and last != route:
+        fresh_server((spark_audio3.TITLE if audio3 else "Stable Audio Open" if args.kind == "sfx" else "MMAudio")
+                     + " starts from a server with nothing else loaded")
+    ensure_server(route)
     if foley:
         listed = call("/object_info/MMAudioModelLoader").get("MMAudioModelLoader", {}).get("input", {}).get("required", {})
         names = listed.get("mmaudio_model", [[]])[0]
@@ -1270,8 +1296,12 @@ def sound(args) -> None:
         if not listed or "StudioMMAudioSampler" not in call("/object_info/StudioMMAudioSampler"):
             missing.insert(0, "ComfyUI-MMAudio and the Studio's sampler node")
     else:
-        missing = [name for name, loader, field in ((SAO_CHECKPOINT, "CheckpointLoaderSimple", "ckpt_name"), (SAO_TEXT, "CLIPLoader", "clip_name"))
+        checkpoint, encoder = (("stable_audio_3_small_sfx.safetensors", "t5gemma_b_b_ul2.safetensors")
+                               if audio3 else (SAO_CHECKPOINT, SAO_TEXT))
+        missing = [name for name, loader, field in ((checkpoint, "CheckpointLoaderSimple", "ckpt_name"), (encoder, "CLIPLoader", "clip_name"))
                    if name not in call(f"/object_info/{loader}")[loader]["input"]["required"][field][0]]
+        if audio3 and "TrimAudioDuration" not in call("/object_info/TrimAudioDuration"):
+            missing.append("TrimAudioDuration")
     if missing:
         sys.exit(f"not installed: {', '.join(missing)} (bash oneshot-setup-spark.sh --sound; a ComfyUI that was running "
                  "before the install needs bash spark/comfy.sh stop)")
@@ -1283,8 +1313,10 @@ def sound(args) -> None:
             print(f"[tensorfold] engine: cuda (ComfyUI, MMAudio large_44k_v2, bf16), {seconds:.2f} s of the clip, seed {args.seed}, "
                   f"{args.steps} steps", flush=True)
         else:
-            w = sfx_workflow(args.prompt, args.negative, seconds, args.seed, args.steps, args.cfg)
-            print(f"[tensorfold] engine: cuda (ComfyUI, Stable Audio Open 1.0), {seconds:g} s, seed {args.seed}, {args.steps} steps", flush=True)
+            w = (audio3_workflow(args.prompt, seconds, args.seed) if audio3
+                 else sfx_workflow(args.prompt, args.negative, seconds, args.seed, args.steps, args.cfg))
+            print(f"[tensorfold] engine: cuda (ComfyUI, {spark_audio3.TITLE if audio3 else 'Stable Audio Open 1.0'}), "
+                  f"{seconds:g} s, seed {args.seed}, {args.steps} steps", flush=True)
         try:
             item, took = render(w, "12")
         finally:
@@ -1295,8 +1327,10 @@ def sound(args) -> None:
         level = music_finish(track, target, "foley track" if foley else "sound effect", 1 if foley else 2)
     if foley:
         sound_generate.lay(Path(args.video), target, Path(args.clip_out), args.replace, args.foley_db)
-    made = {"model": "MMAudio large_44k_v2" if foley else "Stable Audio Open 1.0", "rate": MUSIC_RATE,
+    made = {"model": "MMAudio large_44k_v2" if foley else spark_audio3.TITLE if audio3 else "Stable Audio Open 1.0", "rate": MUSIC_RATE,
             "seconds": round(seconds, 3), "engine": "cuda", "render_s": round(took, 1), **level}
+    if not foley:
+        made["sound_model"] = spark_audio3.MODEL if audio3 else "stable-audio-open-1.0"
     sound_generate.write_take(args, made, started)
     print("[tensorfold] " + json.dumps({"output": str(target), **made}), flush=True)
 
@@ -1442,13 +1476,15 @@ def main() -> None:
     m.add_argument("--ar-cfg", type=float, default=MUSIC_AR_CFG); m.add_argument("--top-k", type=int, default=MUSIC_TOP_K)
     m.add_argument("-o", "--output", required=True, help="the song, a .wav")
     m.set_defaults(run=music)
-    for kind, said in (("sfx", "Stable Audio Open 1.0: a sound effect from words (oneshot-setup-spark.sh --sound)"),
+    for kind, said in (("sfx", "Stable Audio 3 Small SFX (default) or optional Stable Audio Open: a sound effect from words"),
                        ("foley", "MMAudio: a clip's sound made for its picture (oneshot-setup-spark.sh --sound)")):
         f = kinds.add_parser(kind, help=said)  # the flags of sound_generate.py, which app/sound.py gives either runner
         f.add_argument("--prompt", default=""); f.add_argument("--negative", default="")
         f.add_argument("--seed", type=int, default=1)
         f.add_argument("--steps", type=int); f.add_argument("--cfg", type=float)
-        f.add_argument("--seconds", type=float, default=6.0, help="sfx: 1 to 47")
+        f.add_argument("--seconds", type=float, help="sfx: 1 to 5 for Small SFX, 1 to 47 for Open")
+        f.add_argument("--sound-model", choices=(spark_audio3.MODEL, "stable-audio-open-1.0"),
+                       default=spark_audio3.MODEL)
         f.add_argument("--video", help="foley: the clip"); f.add_argument("--max-seconds", type=float, default=FOLEY_SECONDS[1])
         f.add_argument("--foley-db", type=float, default=-6.0); f.add_argument("--replace", action="store_true")
         f.add_argument("--clip-out"); f.add_argument("--take"); f.add_argument("--home")

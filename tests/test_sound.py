@@ -1,6 +1,6 @@
 """Sound effects and foley (app/sound.py, sound_generate.py): python3 -m pytest tests/test_sound.py.
-Nothing real runs: the sound environment's python is a stand-in that writes a short WAV and the take file the real
-runner writes, so the job, its checks, the takes list and the Library are tested end to end."""
+Nothing real runs: the standalone Open/MMAudio worker is replaced by a Python stand-in that writes a short WAV
+and take file, so the job, its checks, the takes list and the Library are tested end to end on any host platform."""
 import json
 import os
 import subprocess
@@ -32,8 +32,8 @@ with wave.open(out, "wb") as w:
 if kind == "foley":
     open(get("--clip-out"), "wb").write(open(get("--video"), "rb").read())
 home = os.path.realpath(get("--home"))
-rel = lambda p: os.path.relpath(os.path.realpath(p), home) if p else p
-json.dump({"id": out.rsplit("/", 1)[-1][:-4], "kind": kind, "prompt": get("--prompt", ""), "seed": int(get("--seed")), "path": rel(out),
+rel = lambda p: os.path.relpath(os.path.realpath(p), home).replace("\\", "/") if p else p
+json.dump({"id": os.path.basename(out)[:-4], "kind": kind, "prompt": get("--prompt", ""), "seed": int(get("--seed")), "path": rel(out),
            "clip": rel(get("--clip-out")), "source": rel(get("--video")), "created": time.time(), "seconds": 0.1,
            "argv": args}, open(get("--take"), "w"))
 print("[sound] done")
@@ -42,21 +42,25 @@ print("[sound] done")
 
 @pytest.fixture
 def ready(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SPARK", False)
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", False)
+    monkeypatch.setattr(sound, "WINDOWS", False)
+    monkeypatch.setattr(sound, "WINCUDA", False)
     models = tmp_path / "models"
     (models / "stable-audio-open-1.0").mkdir(parents=True)
     (models / "stable-audio-open-1.0" / "model_index.json").write_text("{}")
     (models / "mmaudio" / "weights").mkdir(parents=True)
     (models / "mmaudio" / "weights" / "mmaudio_large_44k_v2.pth").write_bytes(b"w")
-    stand_in = tmp_path / "python"
-    stand_in.write_text(f"#!/bin/sh\nexec {sys.executable} {tmp_path / 'runner.py'} \"$@\"\n")
-    stand_in.chmod(0o755)
     (tmp_path / "runner.py").write_text(RUNNER)
-    monkeypatch.setenv("SOUND_PYTHON", str(stand_in))
+    monkeypatch.setenv("SOUND_PYTHON", sys.executable)
     monkeypatch.setenv("SOUND_MODELS", str(models))
     router, build, title, source = sound.attach(server.HOME, ROOT, False, server.inside, server.relative)
     monkeypatch.setattr(server, "sound_build", build)
 
-    def run(job, command, env, label=""):  # the command as it is (another test file swaps the server's runner for its own)
+    def run(job, command, env, label=""):
+        assert command[:2] == [sys.executable, str(ROOT / "sound_generate.py")]
+        command = [sys.executable, str(tmp_path / "runner.py"), *command[1:]]
         done = subprocess.run(command, env={**os.environ, **{k: str(v) for k, v in env.items()}}, capture_output=True, text=True, timeout=120)
         job["log"] += done.stdout + done.stderr
         if done.returncode:
@@ -77,7 +81,10 @@ def finish(job_id, seconds=30):
 
 
 def test_a_sound_effect_is_queued_made_and_listed_with_its_words(ready):
-    job = client.post("/api/jobs", json={"kind": "sfx", "params": {"prompt": "a door  slams in a stone hall", "seconds": 4, "seed": 7}}).json()
+    answer = client.post("/api/jobs", json={"kind": "sfx", "params": {
+        "sound_model": sound.SFX_MODEL, "prompt": "a door  slams in a stone hall", "seconds": 4, "seed": 7}})
+    assert answer.status_code == 200, answer.text
+    job = answer.json()
     assert job["title"] == "Sound effect: a door slams in a stone hall"
     done = finish(job["id"])
     assert done["status"] == "done", done.get("error") or done.get("log")
@@ -111,6 +118,8 @@ def test_each_setting_is_checked_before_the_job_is_queued(ready):
            ("foley", {"video": "../etc/passwd"}, ""), ("sfx", {"prompt": "x" * 700}, "600 characters"),
            ("sfx", {"prompt": "rain", "seed": True}, "seed is a number")]
     for kind, params, words in bad:
+        if kind == "sfx":
+            params = {"sound_model": sound.SFX_MODEL, **params}
         answer = client.post("/api/jobs", json={"kind": kind, "params": params})
         assert answer.status_code in (400, 403), (kind, params, answer.text)
         assert words in answer.json()["error"], (kind, params, answer.json())
@@ -164,6 +173,10 @@ def spark(tmp_path, monkeypatch):
     """A Spark install as app/sound.py looks for it: the studio's venv and ComfyUI, kijai's nodes, the weights."""
 
     import memory_guard
+    monkeypatch.setattr(sound, "WINDOWS", False)
+    monkeypatch.setattr(sound, "WINCUDA", False)
+    monkeypatch.setattr(memory_guard, "guard_mode", lambda: "strict")
+    monkeypatch.setattr(memory_guard, "n1x", lambda: False)
     prefix, models = tmp_path / "prefix", tmp_path / "spark-models"
     for path in ("venv/bin/python", "ComfyUI/main.py", "ComfyUI/custom_nodes/ComfyUI-MMAudio/nodes.py"):
         (prefix / path).parent.mkdir(parents=True, exist_ok=True)
@@ -186,7 +199,7 @@ def spark(tmp_path, monkeypatch):
 
 def test_a_spark_runs_both_kinds_through_spark_generate_with_the_macs_flags(spark):
     router, build, _, _ = spark["attach"]()
-    command, env, outputs = build("sfx", {"prompt": "rain on a tin roof", "seconds": 8, "seed": 3}, "j1")
+    command, env, outputs = build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "rain on a tin roof", "seconds": 8, "seed": 3}, "j1")
     assert command[0] == str(spark["prefix"] / "venv/bin/python") and command[1] == str(ROOT / "spark/spark_generate.py")
     assert command[2] == "sfx" and "--models" not in command and command[command.index("--seconds") + 1] == "8"
     assert outputs == [str(server.HOME / "sound/sfx/j1.wav")] and "--take" in command and "--home" in command
@@ -200,7 +213,8 @@ def test_a_spark_runs_both_kinds_through_spark_generate_with_the_macs_flags(spar
     text = (ROOT / "spark/spark_generate.py").read_text()
     assert all(f'"{flag}"' in text for flag in parser_flags)
     state = TestClient(_app(router)).get("/api/sound/state").json()
-    assert state["spark"] and state["kinds"]["sfx"]["ready"] and state["kinds"]["foley"]["ready"]
+    assert state["spark"] and state["models"][sound.SFX_MODEL]["ready"] and state["kinds"]["foley"]["ready"]
+    assert command[2] == "foley"
 
 
 def _app(router):
@@ -214,20 +228,20 @@ def test_a_spark_refuses_a_kind_the_guard_has_not_measured_or_that_does_not_fit(
     monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (8_000, 10)})
     router, build, _, _ = spark["attach"]()
     state = TestClient(_app(router)).get("/api/sound/state").json()
-    assert state["kinds"]["sfx"]["ready"] and not state["kinds"]["foley"]["ready"]
+    assert state["models"][sound.SFX_MODEL]["ready"] and not state["kinds"]["foley"]["ready"]
     assert "not been measured on a DGX Spark" in state["kinds"]["foley"]["why"]
     with pytest.raises(Exception) as error:
         build("foley", {"video": "renders/walk.mp4"}, "x")
     assert "measured memory estimate" in error.value.detail
     monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (110_000, 10), "foley": (9_000, 50)})
     with pytest.raises(Exception) as error:
-        build("sfx", {"prompt": "rain", "seconds": 40}, "x")
+        build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "rain", "seconds": 40}, "x")
     assert "refused" in error.value.detail and "floor" in error.value.detail
     # The room callback is the Spark path's pool. 20_000 MB available would refuse this estimate.
     _, build, _, _ = sound.attach(server.HOME, ROOT, True, server.inside, server.relative, lambda: 124_000)
     monkeypatch.setattr(spark["guard"], "meminfo", lambda text=None: {"MemTotal": 124_500, "MemAvailable": 20_000})
     monkeypatch.setattr(spark["guard"], "SOUND_ESTIMATE", {"sfx": (8_000, 10), "foley": (9_000, 50)})
-    assert build("sfx", {"prompt": "rain"}, "x")[0][2] == "sfx"
+    assert build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "rain"}, "x")[0][2] == "sfx"
 
 
 def test_a_card_counts_a_loaded_engine_and_ignores_the_ram_room(spark, monkeypatch):
@@ -241,12 +255,12 @@ def test_a_card_counts_a_loaded_engine_and_ignores_the_ram_room(spark, monkeypat
     monkeypatch.setattr(server.bolt, "room_mb", lambda: 80_000)
     held = {"mb": 1_000}
     _, build, _, _ = sound.attach(server.HOME, ROOT, True, server.inside, server.relative, lambda: held["mb"])
-    assert build("sfx", {"prompt": "rain", "seconds": 6}, "x")[0][2] == "sfx"
+    assert build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "rain", "seconds": 6}, "x")[0][2] == "sfx"
     held["mb"] = 124_000
     monkeypatch.setattr(server.voice, "room_mb", lambda: None)
     monkeypatch.setattr(server.bolt, "room_mb", lambda: None)
     with pytest.raises(HTTPException) as error:
-        build("sfx", {"prompt": "rain", "seconds": 40}, "y")
+        build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "rain", "seconds": 40}, "y")
     assert "this GPU" in error.value.detail and "this machine" not in error.value.detail
 
 
@@ -254,23 +268,172 @@ def test_a_spark_says_what_is_not_installed(spark):
     (spark["prefix"] / "ComfyUI/custom_nodes/ComfyUI-MMAudio/nodes.py").unlink()
     (spark["models"] / "Sound-Comfy" / sound.SPARK_FILES["sfx"][0]).unlink()
     router, build, _, _ = spark["attach"]()
-    kinds = TestClient(_app(router)).get("/api/sound/state").json()["kinds"]
-    assert "gated" in kinds["sfx"]["why"] and "--sound" in kinds["sfx"]["why"]
+    state = TestClient(_app(router)).get("/api/sound/state").json()
+    kinds = state["kinds"]
+    assert "gated" in state["models"][sound.SFX_MODEL]["why"]
     assert "ComfyUI-MMAudio" in kinds["foley"]["why"] and "oneshot-setup-spark.sh --sound" in kinds["foley"]["why"]
 
 
-def test_the_sound_guard_is_measured_or_refuses():
+def test_the_sound_guard_is_measured_or_refuses(monkeypatch):
     import memory_guard
+    monkeypatch.setattr(memory_guard, "guard_mode", lambda: "strict")
+    monkeypatch.setattr(memory_guard, "device_room_mb", lambda: None)
+    monkeypatch.setattr(memory_guard, "n1x", lambda: False)
     for kind, (fixed, per_second) in memory_guard.SOUND_ESTIMATE.items():  # each line holds its measured runs
         assert memory_guard.SOUND_MEASURED.get(kind), kind
         for asked, peak in memory_guard.SOUND_MEASURED[kind]:
             assert abs(fixed + per_second * asked - peak) <= memory_guard.ERROR_MB, (kind, asked, peak)
             assert asked <= memory_guard.SOUND_LONGEST[kind]
-    assert set(memory_guard.SOUND_LONGEST) == set(sound.KINDS)
+    assert set(memory_guard.SOUND_LONGEST) == set(sound.KINDS) | {"stable-audio-3-small-sfx"}
     assert memory_guard.SOUND_LONGEST["sfx"] == sound.SFX_SECONDS[1] and memory_guard.SOUND_LONGEST["foley"] == sound.FOLEY_SECONDS[1]
     assert memory_guard.sound_check("sfx", 10, total_mb=0)["fits"]  # a Mac
     unknown = memory_guard.sound_check("nothing", 5, available_mb=118_000, total_mb=124_500)
     assert not unknown["fits"] and "not been measured" in unknown["reason"]
+
+
+def test_spark_audio3_default_is_not_a_windows_runner_or_an_implicit_legacy_fallback(spark, monkeypatch):
+    import windows_audio3
+    monkeypatch.setattr(windows_audio3, "status", lambda: pytest.fail("Spark must not inspect Windows qualification"))
+    monkeypatch.setattr(windows_audio3, "prerequisites", lambda: pytest.fail("Spark must not use Windows admission"))
+    router, build, _, _ = spark["attach"]()
+    state = TestClient(_app(router)).get("/api/sound/state").json()
+    assert state["default_model"] == windows_audio3.MODEL
+    assert not state["kinds"]["sfx"]["ready"]
+    assert state["models"][sound.SFX_MODEL]["ready"]
+    with pytest.raises(HTTPException, match="native Stable Audio 3"):
+        build("sfx", {"prompt": "glass shatters"}, "small")
+    command, _, _ = build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "glass shatters"}, "open")
+    assert command[command.index("--sound-model") + 1] == sound.SFX_MODEL
+    assert sound.default_model() == sound.SFX_MODEL  # attaching a Spark does not change a Mac's defaults
+    assert sound.parameters("sfx", {"prompt": "rain"}, spark=True)["sound_model"] == windows_audio3.MODEL
+
+
+def test_spark_audio3_installed_still_needs_its_own_measured_admission(spark, monkeypatch):
+    import spark_audio3
+    for name, text in (("comfy/supported_models.py", "class StableAudio3(BaseModel): pass"),
+                       ("comfy/text_encoders/sa3.py", "")):
+        path = spark["prefix"] / "ComfyUI" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    monkeypatch.setattr(spark_audio3, "FILES", {name: (1, digest) for name, (_, digest) in spark_audio3.FILES.items()})
+    for name in spark_audio3.FILES:
+        path = spark_audio3.folder() / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"w")
+    assert spark_audio3.status()["installed"] and not spark_audio3.status()["available"]
+    _, build, _, _ = spark["attach"]()
+    with pytest.raises(HTTPException, match="not been measured"):
+        build("sfx", {"prompt": "glass shatters", "seconds": 5, "seed": 0}, "small")
+    assert not spark["guard"].sound_check(spark_audio3.MODEL, 5, total_mb=0)["fits"]
+    # Only this test supplies a synthetic estimate: it is not a hardware measurement.
+    monkeypatch.setitem(spark["guard"].SOUND_ESTIMATE, spark_audio3.MODEL, (8_000, 10))
+    command, _, outputs = build("sfx", {"prompt": "glass shatters", "seconds": 5, "seed": 0}, "small")
+    assert command[:3] == [str(spark["prefix"] / "venv/bin/python"), str(ROOT / "spark/spark_generate.py"), "sfx"]
+    assert command[command.index("--sound-model") + 1] == spark_audio3.MODEL
+    assert command[command.index("--seed") + 1] == "0" and command[command.index("--steps") + 1] == "8"
+    assert outputs[0].endswith("small.wav") and spark_audio3.status()["available"]
+    for params in ({"seconds": 6}, {"negative": "music"}, {"steps": 20}, {"cfg": 7}):
+        with pytest.raises(HTTPException):
+            build("sfx", {"prompt": "rain", **params}, "bad")
+
+
+@pytest.mark.parametrize("seconds", [1, 1.5, 3.17, 5])
+def test_spark_audio3_native_graph_preserves_the_recipe_and_exact_duration(seconds):
+    import spark_generate
+    graph = spark_generate.audio3_workflow("glass shatters", seconds, 0, "fixture")
+    assert graph["1"]["inputs"]["ckpt_name"] == "stable_audio_3_small_sfx.safetensors"
+    assert graph["2"]["inputs"]["clip_name"] == "t5gemma_b_b_ul2.safetensors"
+    assert graph["3"]["inputs"]["text"] == "glass shatters" and graph["4"]["inputs"]["text"] == ""
+    sample = graph["12"]["inputs"]
+    assert (sample["steps"], sample["cfg"], sample["sampler_name"], sample["scheduler"], sample["seed"]) == (8, 1, "lcm", "simple", 0)
+    samples = round(graph["6"]["inputs"]["seconds"] * 44100 / 2048 / 2) * 2 * 2048
+    assert samples >= round(seconds * 44100)
+    assert graph["16"] == {"class_type": "TrimAudioDuration", "inputs": {"audio": ["13", 0], "start_index": 0.0, "duration": seconds}}
+    assert graph["17"]["inputs"]["audio"] == ["16", 0] and graph["18"]["inputs"]["audio"] == ["17", 0]
+
+
+def test_spark_audio3_setup_uses_pinned_checked_files_without_inference(tmp_path, monkeypatch):
+    import hashlib
+    import importlib.util
+    import types
+    import spark_audio3
+    spec = importlib.util.spec_from_file_location("spark_audio3_setup", ROOT / "scripts/setup-spark-audio3.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+    files = {"checkpoints/toy.safetensors": (3, hashlib.sha256(b"toy").hexdigest())}
+    monkeypatch.setattr(spark_audio3, "FILES", files)
+    calls = []
+    def download(repo, name, *, revision, local_dir):
+        calls.append((repo, revision, name))
+        path = local_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"toy")
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=download))
+    setup.setup(tmp_path, False)
+    assert calls == [(spark_audio3.REPO, spark_audio3.REVISION, "checkpoints/toy.safetensors")]
+    setup.setup(tmp_path, True)
+    assert len(calls) == 1
+    (tmp_path / "checkpoints/toy.safetensors").write_bytes(b"bad")
+    with pytest.raises(RuntimeError, match="checksum"):
+        setup.setup(tmp_path, True)
+
+
+def test_spark_audio3_catalog_keeps_windows_and_comfy_encoder_sizes_separate():
+    import model_catalog
+    import model_metadata
+    import spark_audio3
+    assert model_catalog.size_info(spark_audio3.MODEL)["bytes"] == 3492094029
+    assert model_catalog.size_info(spark_audio3.MODEL, platform="linux")["bytes"] == 3457648943
+    info = model_metadata.inventory_info(spark_audio3.MODEL, "linux")
+    assert info["model"] == spark_audio3.MODEL and info["model_metadata"]["engine"] == "comfyui"
+    assert info["download_size"]["bytes"] == 3457648943
+    assert not info["shared_measurements"].get("count")  # Windows evidence is not Spark evidence
+
+
+def test_spark_audio3_unknown_memory_cannot_be_relaxed_by_warn_mode(spark, monkeypatch):
+    import spark_audio3
+    monkeypatch.setattr(spark["guard"], "guard_mode", lambda: "warn")
+    for total in (0, 124_500):
+        found = spark["guard"].sound_check(spark_audio3.MODEL, 5, total_mb=total, available_mb=118_000)
+        assert not found["fits"] and not found["relaxable"] and "warning" not in found
+
+
+def test_spark_audio3_inventory_lists_both_pinned_files_with_the_right_installer(spark, monkeypatch):
+    import discover
+    import installs
+    import spark_audio3
+    monkeypatch.setattr(installs, "SPARK", True)
+    needs = {item["id"]: item for item in discover.spark_comfy_needs()}
+    for nid, name in ((spark_audio3.MODEL, "checkpoints/stable_audio_3_small_sfx.safetensors"),
+                      ("stable-audio-3-t5gemma", "text_encoders/t5gemma_b_b_ul2.safetensors")):
+        item = needs[nid]
+        assert item["expected"] == spark_audio3.folder() / name
+        assert item["sha256"] == spark_audio3.FILES[name][1]
+        plan = installs.plan_of(item)
+        assert plan["how"] == "oneshot" and plan["command"][-1] == "--sound"
+
+
+def test_spark_audio3_shared_ram_admission_never_uses_opens_measurement(spark, monkeypatch):
+    import spark_audio3
+    job = {"kind": "sfx", "params": {"sound_model": spark_audio3.MODEL, "seconds": 5}}
+    assert server.local_ram_need(job) is None
+    monkeypatch.setitem(spark["guard"].SOUND_ESTIMATE, spark_audio3.MODEL, (8_000, 10))
+    assert server.local_ram_need(job) == 8_050 + spark["guard"].ERROR_MB
+
+
+def test_spark_audio3_cli_refuses_before_starting_comfy_and_does_not_default_invalid_steps(spark, monkeypatch):
+    from types import SimpleNamespace
+    import spark_generate
+    import spark_audio3
+    monkeypatch.setattr(spark_audio3, "prerequisites", lambda: "")
+    monkeypatch.setattr(spark_generate, "ensure_server", lambda *args: pytest.fail("Unmeasured model must not start ComfyUI"))
+    args = SimpleNamespace(kind="sfx", sound_model=spark_audio3.MODEL, steps=None, cfg=None, seconds=None,
+                           prompt="glass shatters", negative="", seed=0)
+    with pytest.raises(SystemExit, match="refused before anything was loaded"):
+        spark_generate.sound(args)
+    args.steps = 0
+    with pytest.raises(SystemExit, match="eight passes"):
+        spark_generate.sound(args)
 
 
 def test_the_comfy_workflows(monkeypatch):

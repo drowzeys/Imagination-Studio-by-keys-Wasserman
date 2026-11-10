@@ -1,0 +1,9 @@
+-r requirements-windows-gpu.txt
+einops>=0.8.2
+einops-exts>=0.0.4
+packaging>=26.0
+safetensors>=0.7.0
+tqdm>=4.67.3
+huggingface-hub>=1.7.1
+transformers>=5.8.0
+soundfile>=0.13.1

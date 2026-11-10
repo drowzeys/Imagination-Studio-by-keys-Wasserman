@@ -185,6 +185,52 @@
       },
       "group": "Sound"
     },
+    "stable-audio-3-small-sfx": {
+      "label": "Stable Audio 3 Small SFX",
+      "kind": "isolated",
+      "part": "audio3",
+      "feature": "stable-audio-3-small-sfx",
+      "spark_download_snapshot": {
+        "repo": "Comfy-Org/stable-audio-3",
+        "revision": "75aad8836271cb5a5123fb58304fae5d3bb4b0f9",
+        "checked_at": "2026-11-08",
+        "files": [
+          "checkpoints/stable_audio_3_small_sfx.safetensors",
+          "text_encoders/t5gemma_b_b_ul2.safetensors"
+        ],
+        "sha256": {
+          "checkpoints/stable_audio_3_small_sfx.safetensors": "ed9cf1b6172f1a8c2921a9560c21109ff3239524563ced9dce6dcdef41e2f515",
+          "text_encoders/t5gemma_b_b_ul2.safetensors": "1e1eba25be8872edb0d3c6335c6658fd6388e7b14b60da6e454e404cfcd8150e"
+        }
+      },
+      "download_snapshot": {
+        "repo": "stabilityai/stable-audio-3-small-sfx",
+        "revision": "05ca3857881c94a2b84026b1111c537d78f5f9f0",
+        "checked_at": "2026-11-08T06:46:40.733938+00:00",
+        "files": [
+          "LICENSE.md",
+          "LICENSE_GEMMA.md",
+          "model.safetensors",
+          "model_config.json",
+          "NOTICE",
+          "t5gemma-b-b-ul2/config.json",
+          "t5gemma-b-b-ul2/generation_config.json",
+          "t5gemma-b-b-ul2/model.safetensors",
+          "t5gemma-b-b-ul2/special_tokens_map.json",
+          "t5gemma-b-b-ul2/tokenizer.json",
+          "t5gemma-b-b-ul2/tokenizer.model",
+          "t5gemma-b-b-ul2/tokenizer_config.json"
+        ]
+      },
+      "runtime": {
+        "native": {
+          "required_free_gib": null,
+          "basis": "unknown",
+          "note": "Separate native Windows CUDA cache and runtime; bounded local checks do not establish minimum model memory."
+        }
+      },
+      "group": "Sound"
+    },
     "foley": {
       "label": "MMAudio Foley",
       "kind": "component",
@@ -403,6 +449,28 @@
     }
   },
   "file_sizes": {
+    "Comfy-Org/stable-audio-3@75aad8836271cb5a5123fb58304fae5d3bb4b0f9": {
+      "files": {
+        "checkpoints/stable_audio_3_small_sfx.safetensors": 2270384940,
+        "text_encoders/t5gemma_b_b_ul2.safetensors": 1187264003
+      }
+    },
+    "stabilityai/stable-audio-3-small-sfx@05ca3857881c94a2b84026b1111c537d78f5f9f0": {
+      "files": {
+        "LICENSE.md": 11852,
+        "LICENSE_GEMMA.md": 10541,
+        "model.safetensors": 2270384940,
+        "model_config.json": 10454,
+        "NOTICE": 97,
+        "t5gemma-b-b-ul2/config.json": 2540,
+        "t5gemma-b-b-ul2/generation_config.json": 156,
+        "t5gemma-b-b-ul2/model.safetensors": 1183022944,
+        "t5gemma-b-b-ul2/special_tokens_map.json": 636,
+        "t5gemma-b-b-ul2/tokenizer.json": 34362429,
+        "t5gemma-b-b-ul2/tokenizer.model": 4241003,
+        "t5gemma-b-b-ul2/tokenizer_config.json": 46437
+      }
+    },
     "FastVideo/FastVideo-FastH3-Comfy@main": {
       "files": {
         "diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors": 44079246824,

@@ -21,8 +21,14 @@ import windows_image_checks as images
 import windows_audio_checks as audio
 import windows_setup_fit
 import windows_library_checks as library
+import windows_audio3
 
 CHECKS = {
+    windows_audio3.MODEL: FeatureCheck(windows_audio3.MODEL, windows_audio3.TITLE,
+        "Default Windows sound-effects model, isolated CUDA runtime; 1-5 seconds, eight passes, CFG 1. This checks execution, not prompt fidelity.",
+        (MemoryRequirement("host", windows_audio3.HOST_RESERVE_MB, "policy"),
+         MemoryRequirement("device", windows_audio3.GPU_MB, "policy", windows_audio3.RESERVE_MB),
+         MemoryRequirement("commit", windows_audio3.JOB_MB, "policy", windows_audio3.RESERVE_MB)), group="sound"),
     **{kind: FeatureCheck(kind, library.TITLES[kind],
                          "Production Library workflow on pinned bundled media; only its tested input/settings are enabled.",
                          tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")),
@@ -56,7 +62,7 @@ CHECKS = {
 
 def gpu_check(job: dict) -> bool:
     return (native_image_check(job) or job["kind"] == "foley"
-            or job["kind"] == "qualification" and job["params"].get("feature") in ("foley", *baseline.GPU_KINDS))
+            or job["kind"] == "qualification" and job["params"].get("feature") in ("foley", windows_audio3.MODEL, *baseline.GPU_KINDS))
 
 
 def native_image_check(job: dict) -> bool:
@@ -64,6 +70,8 @@ def native_image_check(job: dict) -> bool:
 
 
 def timeout_seconds(job: dict) -> int:
+    if job["kind"] == "qualification" and job["params"].get("feature") == windows_audio3.MODEL:
+        return windows_audio3.TIMEOUT_S * 2 + 120
     if native_image_check(job):
         params = job["params"]
         if params["feature"] in library.KINDS:
@@ -121,6 +129,13 @@ def parameters(params: dict) -> dict:
 def build(home, params, job_id):
     params = parameters(params)
     kind = params["feature"]
+    if kind == windows_audio3.MODEL:
+        if why := windows_audio3.prerequisites():
+            raise HTTPException(400, why)
+        target = home / "exports" / f"{job_id}-qualification.json"
+        return [sys.executable, "-X", "utf8", str(features.PACK / "app" / "windows_audio3.py"),
+                "--qualify", "--job-id", job_id, "--output", str(home / "renders" / "calibration" / job_id),
+                "--report", str(target)], {}, [str(target)]
     if kind in library.KINDS:
         if why := library.prerequisites(kind):
             raise HTTPException(400, why)
@@ -204,7 +219,7 @@ def attach(server):
         for kind in CHECKS:
             if kind in (*images.KINDS, *audio.KINDS, *library.KINDS):
                 continue
-            found = foley if kind == "foley" else windows_runtime.usage_status(kind, selected_mode=selected_mode)
+            found = windows_audio3.status() if kind == windows_audio3.MODEL else foley if kind == "foley" else windows_runtime.usage_status(kind, selected_mode=selected_mode)
             try:
                 attempt = features.saved(kind, "-attempt")
                 if kind in baseline.KINDS:
@@ -221,20 +236,21 @@ def attach(server):
             minimum_host = spec["requirements"][0]["required_mb"]
             if minimum_host is not None:
                 spec["requirements"][0]["required_mb"] = max(minimum_host, memory.get("host_floor_mb", 0))
-            destination = {"scout": ("Image", "Open storyboard drafts"), "sfx": ("Foley", "Open sound effects"),
+            destination = {windows_audio3.MODEL: ("Foley", "Open sound effects"), "scout": ("Image", "Open storyboard drafts"), "sfx": ("Foley", "Open sound effects"),
                            "graphics": ("Motion graphics", "Open motion graphics"), "hlg": ("Apps", "Open HDR grading"),
                            "foley": ("Foley", "Open Foley"), "finish": ("Finish", "Open Finish")}[kind]
             cards.append({**spec, **found,
-                          "check_available": True, "open_tab": destination[0], "open_mode": "sfx" if kind == "sfx" else "foley" if kind == "foley" else "",
+                          "check_available": True, "open_tab": destination[0], "open_mode": "sfx" if kind in ("sfx", windows_audio3.MODEL) else "foley" if kind == "foley" else "",
+                          "open_sound_model": windows_audio3.MODEL if kind == windows_audio3.MODEL else "",
                           "open_query": "keys-HDR" if kind == "hlg" else "", "open_category": "finish",
                           "open_label": destination[1],
                           "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Minimum installed RAM not established",
                                      "required_headroom_mb": minimum_host, "basis": "Conservative admission requirement, not a measured minimum",
-                                     "job_commit_cap_mb": 16384 if kind in ("foley", *baseline.GPU_KINDS) else features.COMMIT_MB,
-                                     "gpu_required": kind in ("foley", *baseline.GPU_KINDS),
-                                     "lowest_tested_ram_mb": found.get("hardware", {}).get("physical_total_mb") if kind in baseline.KINDS else 65536},
+                                     "job_commit_cap_mb": 16384 if kind in ("foley", windows_audio3.MODEL, *baseline.GPU_KINDS) else features.COMMIT_MB,
+                                     "gpu_required": kind in ("foley", windows_audio3.MODEL, *baseline.GPU_KINDS),
+                                     "lowest_tested_ram_mb": None if kind == windows_audio3.MODEL else found.get("hardware", {}).get("physical_total_mb") if kind in baseline.KINDS else 65536},
                           "evidence": evidence, "attempt": attempt, "job": latest,
-                          "setup": (rf"powershell -ExecutionPolicy Bypass -File scripts\{baseline.SETUP[kind]}" if kind in baseline.KINDS else
+                          "setup": (windows_audio3.SETUP if kind == windows_audio3.MODEL else rf"powershell -ExecutionPolicy Bypass -File scripts\{baseline.SETUP[kind]}" if kind in baseline.KINDS else
                                     r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-foley.ps1" if kind == "foley" else
                                     r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-finish.ps1" if kind == "finish" else
                                     r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-ffmpeg.ps1")})

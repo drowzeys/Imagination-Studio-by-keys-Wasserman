@@ -60,8 +60,11 @@ def status() -> dict:
 
 
 def parameters(params: dict) -> dict:
-    if not isinstance(params, dict) or set(params) - {"prompt", "negative", "seconds", "steps", "cfg", "seed"}:
+    if not isinstance(params, dict) or set(params) - {"prompt", "negative", "seconds", "steps", "cfg", "seed", "sound_model"}:
         raise ValueError("Windows sound effects take prompt, negative, seconds, steps, cfg and seed only")
+    import sound
+    if params.get("sound_model", sound.SFX_MODEL) != sound.SFX_MODEL:
+        raise ValueError("This Windows route renders Stable Audio Open 1.0 only.")
     out = {}
     for key in ("prompt", "negative"):
         text = params.get(key, "")
@@ -73,10 +76,10 @@ def parameters(params: dict) -> dict:
         if type(given) not in (int, float) or not math.isfinite(given) or given != value:
             raise ValueError("Windows sound effects are qualified only at 5 seconds, 100 passes and CFG 7")
         out[key] = value
-    seed = params.get("seed", 7)
-    if type(seed) is not int or not 0 <= seed <= 2 ** 32 - 1:
-        raise ValueError("the sound seed must be an unsigned 32-bit whole number")
+    seed = sound.seed_of(params)
     out["seed"] = seed
+    if "sound_model" in params:
+        out["sound_model"] = params["sound_model"]
     return out
 
 

@@ -24,6 +24,11 @@ and claims. Tests reconstruct every original profile and verify its original con
 
 Each profile separates canonical `model` from `feature`: SD-Turbo is model `sd-turbo`, feature `scout`;
 Stable Audio Open is model `sound`, feature `sfx`. Library actions name their model dependency separately.
+Stable Audio 3 Small SFX uses `stable-audio-3-small-sfx` for both, with the separate
+`torch-cuda` / `stable-audio-3` execution route. Export-only includes its saved one- and five-second
+qualification results, eight passes and CFG 1. Snapshot contents are counted once, excluding duplicate
+Hugging Face blob/link entries. Missing recorded architecture/topology stays unknown; pool capacity is
+not evidence of a device model. This isolated model is not part of the generic rerender campaign.
 The portable identity's `feature` names the checked recipe family, not a second canonical model ID.
 `execution` records OS (`windows`, `macos`, `linux`), backend, engine, CPU architecture and memory topology
 (unified/discrete/host, participating device count, public device family and model). These are closed,

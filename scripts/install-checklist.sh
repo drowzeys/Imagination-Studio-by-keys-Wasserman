@@ -161,7 +161,7 @@ checklist_rows_cuda() {
     "motion|opt|0|0|500|--motion|||Motion previs|Pose, camera solve and depth for the Motion Previs tab" \
     "voice|opt|0|0|41000|--voice|||Voice|Fish Audio Drama 3 for the Voice tab" \
     "music|opt|0|0|22000|--music|||Music 3|MiniMax Music 3 for the Music tab" \
-    "sound|opt|0|0|11000|--sound|||Sound and foley|Stable Audio Open and MMAudio (gated: accept first)" \
+    "sound|opt|0|0|12000|--sound|||Sound and foley|Stable Audio 3 Small SFX and MMAudio; Open is optional (--sound-legacy)" \
     "bolt|opt|0|0|25000|--bolt|||Bolt brain|$bolt" \
     "train|opt|0|0|14000|--train||h3-base|Training|Looks -> Train a LoRA (ticks H3 base, which it needs)" \
     "ref2va|opt|0|0|39000|--ref2va|||Ref2VA|Reference pictures to video, Upscale, Remove a person" \

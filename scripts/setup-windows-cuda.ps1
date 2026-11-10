@@ -32,12 +32,14 @@
 [CmdletBinding()]
 param(
   [string]$Models = "",                  # the model folder (default %LOCALAPPDATA%\ImaginationStudio\models)
-  [string]$Parts = "video,image",         # windows-cuda-setup.py's parts: video, image, image-edit, ref2va, flux3, moss, music, sound,
+  [string]$Parts = "video,image",         # sound is isolated Small SFX; sound-legacy explicitly selects Open.
+                                          # Other parts: video, image, image-edit, ref2va, flux3, moss, music,
                                           # workflows (the Library's actions), swap (Character Swap), foley, train, finish
   [switch]$Bolt,                          # the Bolt brain: build tensorfold-native.exe + bolt.dll and fetch NVIDIA's checkpoints
   [switch]$Music,
   [switch]$Flux3,
   [switch]$Sound,
+  [switch]$LegacySound,                  # optional Stable Audio Open; -Sound installs Small SFX
   [switch]$Voice,                         # Fish Audio Drama 3: build drama3-generate.exe + tensorfold_drama3.dll, fetch fishaudio/drama-3
   [switch]$NoDownload,                    # no model downloads (the files are already in -Models)
   [switch]$AllowUnverifiedImageModel,     # accept failed shared image recipes on matching hardware before download
@@ -65,16 +67,21 @@ function Native([string]$what) { if ($LASTEXITCODE -ne 0) { throw "$what failed 
 if ($Music) { $Parts += ",music" }
 if ($Flux3) { $Parts += ",flux3" }
 if ($Sound) { $Parts += ",sound" }
+if ($LegacySound) { $Parts += ",sound-legacy" }
 if ($Bolt -and -not $BoltModel) { $Parts += ",bolt" }
 if ($Voice) { $Parts += ",voice" }
 $Want = @($Parts -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+$Requested = $Want
+$Audio3 = $Want -contains "sound"
+$Want = @($Want | Where-Object { $_ -ne "sound" } | ForEach-Object { if ($_ -eq "sound-legacy") { "sound" } else { $_ } } | Select-Object -Unique)
+$Parts = $Want -join ','
 $H3Engine = @($Want | Where-Object { $_ -in @("video", "ref2va") }).Count -gt 0
 $MusicEngine = $Want -contains "music"
 $NeedEngines = $H3Engine -or $MusicEngine -or $Bolt -or $Voice
 $NeedToolchain = $NeedEngines -or $ToolchainOnly -or ($Want -contains "train")
 $NeedGpuRuntime = $Bolt -or $Voice -or @($Want | Where-Object { $_ -ne "finish" }).Count -gt 0
 if ($PlanOnly) {
-  @{ parts=$Want; h3_engine=$H3Engine; music_engine=$MusicEngine; bolt_engine=[bool]$Bolt;
+  @{ parts=$Requested; shared_parts=$Want; audio3_isolated=$Audio3; h3_engine=$H3Engine; music_engine=$MusicEngine; bolt_engine=[bool]$Bolt;
      voice_engine=[bool]$Voice; native_toolchain=$NeedToolchain; gpu_runtime=$NeedGpuRuntime;
      foley_isolated=($Want -contains "foley");
      runtime_fit='Not probed in PlanOnly. Before downloads: known insufficient automatic choices are skipped; explicit mismatches require -AllowInsufficientModel. Unknown fit is not a pass.';
@@ -313,6 +320,13 @@ if ($Want -contains "foley") {
   Say "Foley's isolated dependency environment"
   & (Join-Path $PSScriptRoot "setup-windows-foley.ps1") -DependenciesOnly
   Native "the isolated Foley environment"
+}
+if ($Audio3) {
+  Say "Stable Audio 3 Small SFX, the Windows sound-effects default"
+  $Audio3Args = @{}
+  if ($NoDownload) { $Audio3Args.DependenciesOnly = $true }
+  & (Join-Path $PSScriptRoot "setup-windows-audio3.ps1") @Audio3Args
+  Native "the isolated Small SFX runtime and cache"
 }
 if ($Want -contains "train") {
   Say "musubi-tuner's environment (Looks -> Train a LoRA)"

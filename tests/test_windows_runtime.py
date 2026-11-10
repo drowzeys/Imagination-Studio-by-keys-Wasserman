@@ -396,6 +396,7 @@ def test_native_comfy_restarts_owned_server_when_environment_changes(tmp_path, m
 @pytest.mark.parametrize("parts,h3,toolchain,gpu", [
     ("image", False, False, True), ("moss", False, False, True), ("music", False, True, True),
     ("video,image", True, True, True), ("foley", False, False, True), ("finish", False, False, False),
+    ("sound", False, False, False), ("sound-legacy", False, False, True),
 ])
 def test_setup_plan_only_selects_needed_components(parts, h3, toolchain, gpu):
     shell = shutil.which("powershell") or shutil.which("pwsh")
@@ -404,3 +405,7 @@ def test_setup_plan_only_selects_needed_components(parts, h3, toolchain, gpu):
                           capture_output=True, text=True, timeout=30, check=True)
     found = json.loads(done.stdout)
     assert found["h3_engine"] == h3 and found["native_toolchain"] == toolchain and found["gpu_runtime"] == gpu
+    if parts == "sound":
+        assert found["audio3_isolated"] and found["shared_parts"] == []
+    if parts == "sound-legacy":
+        assert not found["audio3_isolated"] and found["shared_parts"] == ["sound"]

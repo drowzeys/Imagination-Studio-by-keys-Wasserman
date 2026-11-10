@@ -65,6 +65,14 @@ image acknowledgment.
    adapter);
 5. ComfyUI's model folders and `cuda-tier.json`.
 
+The Windows `sound` part installs Stable Audio 3 Small SFX (the default sound-effects model) in its
+isolated environment/cache, about 3.25 GiB including T5Gemma. When qualification gating is enabled,
+run its local check before use; setup does not render or qualify automatically.
+Stable Audio Open is optional: request `sound-legacy` in `-NativeParts`, or use
+`scripts\setup-windows-cuda.ps1 -Parts sound-legacy`. Existing weights and takes are retained.
+`setup-windows-cuda.ps1 -Parts sound` needs no H3 toolchain or shared ComfyUI; `-NoDownload` installs
+the isolated dependencies only.
+
 Run again, it resumes and updates. `-ToolchainOnly` installs step 1 alone; `-SkipToolchain -Parts <part>` adds one part
 to an install.
 
