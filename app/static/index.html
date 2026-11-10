@@ -899,9 +899,20 @@ function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB
     el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
       el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
       room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null)); }
-function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
-  const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
-  Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
+// The Library is one node kept between redraws. A redraw builds its tiles at once from the last listing, around the same players and
+// pictures, so nothing reloads and the page keeps its height; the server's listing is asked for after, and only a change draws again
+const LIB = { root: null, box: null, data: null, text: "", media: new Map() };
+function libMedia(path) { let n = LIB.media.get(path); if (!n) { n = media(path); LIB.media.set(path, n); } else if (n.dataset && n.dataset.src0 && !n.getAttribute("src")) n.setAttribute("src", n.dataset.src0);
+  if (n.dataset && !n.dataset.src0 && n.getAttribute) n.dataset.src0 = n.getAttribute("src") || ""; return n; }
+function viewLibrary() { if (!LIB.root) { LIB.box = el("section", { class: "card" }, el("h2", {}, "Library"));
+    const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
+    LIB.root = head ? el("div", {}, head, LIB.box) : LIB.box; }
+  if (LIB.data) libDraw(...LIB.data);
+  Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { const text = JSON.stringify([all_, bin]); if (text === LIB.text && LIB.data) return; LIB.text = text; LIB.data = [all_, bin]; if (tab === "Library") libDraw(all_, bin); })
+    .catch(e => { if (!LIB.data) LIB.box.replaceChildren(el("h2", {}, "Library"), el("div", { class: "note" }, e.message)); });
+  return LIB.root; }
+function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library")); for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
+  for (const p of [...LIB.media.keys()]) if (!all_.some(m => m.path === p)) LIB.media.delete(p);
     // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
     // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
     const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
@@ -921,7 +932,7 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
     const show = () => { const them = pool(); many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
     const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
     const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
-    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
+    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, libMedia(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
       el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
       m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? " · s" + m.seed : "")) : null,
       m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
@@ -941,9 +952,10 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
         bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
         bin && bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
           try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
-      capBar.results, grid); })
-  .catch(e => put(box, el("div", { class: "note" }, e.message)));
-  return head ? el("div", {}, head, box) : box; }
+      capBar.results, grid);
+  LIB.box.replaceChildren(...box.childNodes);
+  // an action just opened from elsewhere: its panel is only there once the listing is, so go to it then, once
+  const opened = ACT.open ? ACT.open.kind + ":" + ACT.open.path : ""; if (opened && opened !== LIB.opened) setTimeout(() => { const n = document.querySelector("#actpanel"); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); }, 0); LIB.opened = opened; }
 
 /* ---------- Tutorial ---------- */
 // lessons per tab, one step on screen at a time; a step can point at the control it describes ("go"), and the coach bar then follows into that tab
@@ -1259,7 +1271,11 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
 // A redraw keeps where the page and its scrolling strips were (the Editor timeline, #54): marked with data-keep-scroll
 function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [...document.querySelectorAll("[data-keep-scroll]")].map(n => [n.dataset.keepScroll, n.scrollLeft, n.scrollTop]);
   return () => { for (const [key, left, top] of strips) { const n = document.querySelector(`[data-keep-scroll="${key}"]`); if (n) { n.scrollLeft = left; n.scrollTop = top; } } window.scrollTo(...at); }; }
-function render() { const back = keepScroll(); renderShell(); releaseMedia($("#view"));
+// A redraw of the same page holds the page's height for a moment: what a page fetches and draws after would otherwise leave it short, and the browser takes the reader back to the top
+let RENDER_TAB = null, RENDER_HOLD = null;
+function renderHold() { const view = $("#view"); if (!view || !view.style) return; clearTimeout(RENDER_HOLD);
+  if (RENDER_TAB === tab && view.offsetHeight) { view.style.minHeight = view.offsetHeight + "px"; RENDER_HOLD = setTimeout(() => { view.style.minHeight = ""; }, 1500); } else view.style.minHeight = ""; RENDER_TAB = tab; }
+function render() { const back = keepScroll(); renderShell(); renderHold(); if (tab !== "Library") releaseMedia($("#view"));
   $("#view").replaceChildren({ Home: viewHome, Apps: typeof viewApps === "function" ? viewApps : () => el("div", { class: "note" }, "Apps is not in this build."), Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Graphics: viewGraphics, Finish: viewFinish, "Cast & Places": viewCast, Director: viewDirector, "Motion graphics": viewGraphics, "Night shift": viewNight, Library: viewLibrary,
     Machine: viewMachine, Models: () => typeof viewDiscover === "function" ? viewDiscover() : el("div", { class: "note" }, "Models & weights is not in this build."), Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial, Settings: viewSettings,
     // Nodes is its own module (nodes.js): a page without it says so quietly
