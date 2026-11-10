@@ -93,10 +93,10 @@ ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 CLIS = {
     "claude": ("Claude Code", "claude", "Run `claude auth login` in a terminal on that machine (your Claude subscription)."),
     "codex": ("Codex · ChatGPT sign-in", "codex", "Run `codex login` in a terminal on that machine and choose Sign in with ChatGPT."),
-    "copilot": ("GitHub Copilot CLI", "copilot", "Run `copilot login` in a terminal on that machine (your Copilot plan)."),
     "gemini": ("Gemini CLI", "gemini", "Run `gemini` once in a terminal on that machine and sign in with Google."),
     "grok": ("Grok CLI", "grok", "Run `grok login` in a terminal on that machine."),
     "hermes": ("Hermes", "hermes", "Run `hermes setup` in a terminal on that machine to sign in to a provider (`hermes model` picks it)."),
+    "copilot": ("GitHub Copilot CLI", "copilot", "Run `copilot login` in a terminal on that machine (your Copilot plan)."),
 }
 BACKENDS = (*CLIS, "local")
 HARNESSES = ("claude", "codex", "copilot")  # run with the Studio's MCP tools
@@ -3134,10 +3134,13 @@ def status_of(backend: str) -> dict:
         return cached[1]
     where = {"where": f"ssh:{host}" if host else "here"}
     if backend == "copilot":
-        last = verified.get((backend, host))
-        checked = bool(last and last.get("ok") and time.time() - last["at"] < STATUS_TTL)
+        last = copilot_connection(host)
+        checked = bool(last and last.get("ok"))
+        remembered = bool(checked and (last.get("remembered") or time.time() - last["at"] >= STATUS_TTL))
         return {"backend": backend, **where, "state": "signed_in" if checked else "unknown",
-                "detail": "Copilot answered the Check." if checked else
+                "remembered": remembered,
+                "detail": ("Previously connected; last successful Check: " + time.strftime("%Y-%m-%d", time.localtime(last["at"])) +
+                           ". Not rechecked automatically.") if remembered else "Copilot answered the Check." if checked else
                 "Check to confirm Copilot's sign-in; use copilot login in a terminal if needed. Copilot CLI has no auth-status subcommand."}
     try:
         answer = gemini_status(host) if backend == "gemini" else read_status(backend, run_short(status_args(backend), backend, host))
@@ -3216,6 +3219,20 @@ LOOK_TOOLS = ('for t in npm brew curl; do command -v "$t" >/dev/null 2>&1 && ech
 installing: dict = {"backend": None}
 verified: dict = {}  # (backend, host) -> the last Verify
 machines: dict = {}  # host -> (monotonic time, uname -s)
+
+
+def copilot_connection(host: str) -> dict | None:
+    """Remember a successful Check, not credentials or a claim of a fresh authentication probe."""
+
+    with lock:
+        last = verified.get(("copilot", host))
+        if last is not None:
+            return last
+        records = read_json(folder() / "copilot-connection.json" if folder() else None, {})
+        at = records.get(host) if isinstance(records, dict) else None
+    if type(at) in (int, float) and 0 < at <= time.time():
+        return {"ok": True, "at": at, "remembered": True}
+    return None
 
 
 def shell_here(line: str, timeout: int, host: str = "") -> subprocess.CompletedProcess:
@@ -3415,6 +3432,16 @@ def verify(backend: str) -> dict:
         out["fix"] = fix_of(backend, out["error"] or "", host) if backend in CLIS else {"action": "verify", "label": "Check again"}
     out.update(backend=backend, where=f"ssh:{host}" if host else "here", at=time.time(), elapsedMs=int(1000 * (time.time() - started)))
     with lock:
+        if backend == "copilot" and folder():
+            path = folder() / "copilot-connection.json"
+            records = read_json(path, {})
+            if not isinstance(records, dict):
+                records = {}
+            if out["ok"]:
+                records[host] = out["at"]
+            else:
+                records.pop(host, None)
+            write_json(path, records)
         verified[(backend, host)] = out
     return out
 
@@ -3501,8 +3528,8 @@ def connect_of(backend: str) -> dict:
     item = next((b for b in detect(config) if b["id"] == backend), {})
     signin_state = status_of(backend) if item.get("found") else {"state": "missing"}
     default = config["default"]
+    last = copilot_connection(host) if backend == "copilot" else verified.get((backend, host))
     with lock:
-        last = verified.get((backend, host))
         ready = verified.get((default, where_of(default, config) if default in CLIS else ""))
     if default != backend and not (ready and ready.get("ok")):  # the default keeps its place while it is signed in
         if default in CLIS:

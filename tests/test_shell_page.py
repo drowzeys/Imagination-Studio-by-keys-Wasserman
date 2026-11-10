@@ -528,6 +528,70 @@ def test_connect_ticks_find_signin_verify_and_default_by_itself():
     assert out["s2"] == {"find": "done", "signin": "done", "verify": "done", "default": "done"} and "Answered “ok” in 2.1 s" in out["done"] and "is ready" in out["done"]
 
 
+def test_copilot_terminal_login_can_be_checked_while_auth_status_is_unknown():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "unknown" }, default_ready: true });
+      await connectStart(b); await settle();
+      out.word = brainWord(b)[0]; out.initial = steps("copilot"); out.instructions = text(panel("copilot"));
+      out.automaticChecks = calls.filter(c => c[0] === "/api/brains/copilot/verify").length;
+      answers["/api/brains/copilot/verify"] = { ok: true, text: "ok", elapsedMs: 120 };
+      await button(panel("copilot"), "Check").attrs.onclick();
+      out.checked = CN.data.copilot.verify.ok;
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "signed_in" },
+        verify: CN.data.copilot.verify, default_ready: true });
+      await cnLoad("copilot");
+      out.finished = steps("copilot"); out.readyWord = brainWord(b)[0];
+      out.signinRequests = calls.filter(c => c[0] === "/api/brains/copilot/signin").length;
+    """)
+    assert out["word"] == "Not checked" and out["initial"]["verify"] == "wait"
+    assert "If you already signed in, press Check" in out["instructions"]
+    assert out["automaticChecks"] == 0 and out["signinRequests"] == 0
+    assert out["checked"] and out["readyWord"] == "Ready"
+    assert out["finished"]["signin"] == out["finished"]["verify"] == "done"
+
+
+def test_copilot_remembered_connection_is_ready_without_an_automatic_check():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "copilot", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      answers["/api/brains/copilot/connect"] = base("copilot", {
+        signin: { state: "signed_in", remembered: true, detail: "Previously connected; not rechecked automatically." },
+        verify: { ok: true, at: 1794000000, remembered: true }, default: true });
+      await connectStart(b); await settle();
+      out.word = brainWord(b)[0]; out.steps = steps("copilot"); out.instructions = text(panel("copilot"));
+      out.nudge = !!connectNudge("home");
+      out.checkAgain = !!button(panel("copilot"), "Check again");
+      out.automaticChecks = calls.filter(c => c[0] === "/api/brains/copilot/verify").length;
+    """)
+    assert out["word"] == "Ready" and not out["nudge"]
+    assert out["steps"]["signin"] == out["steps"]["verify"] == "done"
+    assert "Remembered across restarts" in out["instructions"]
+    assert "undefined" not in out["instructions"]
+    assert out["checkAgain"] and out["automaticChecks"] == 0
+
+
+def test_copilot_failed_login_offers_check_after_terminal_login_not_an_app_signin():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      CN.open = "copilot"; CN.data.copilot = base("copilot", { signin: { state: "unknown" },
+        verify: { ok: false, error: "Run copilot login, then Check again.", fix: { action: "signin", label: "Sign in again" } } });
+      answers["/api/brains/copilot/verify"] = { ok: false, error: "Still not signed in." };
+      await button(panel("copilot"), "Check again after copilot login").attrs.onclick();
+      out.verify = calls.some(c => c[0] === "/api/brains/copilot/verify");
+      out.signin = calls.some(c => c[0] === "/api/brains/copilot/signin");
+      CN.data.copilot = base("copilot", { find: { found: false }, signin: { state: "unknown" } });
+      out.missingCheck = !!button(panel("copilot"), "Check");
+    """)
+    assert out["verify"] and not out["signin"]
+    assert not out["missingCheck"]
+
+
 def test_connect_installs_a_missing_cli_shows_a_device_code_and_the_fix_for_a_failed_answer():
     out = run(CONNECT + """
       const b = { id: "codex", label: "Codex", kind: "cli", found: false, where: "ssh:mac", signin_flow: "pty" };
@@ -614,6 +678,22 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
     assert "Connect your agent" in out["home"] and out["primary"].endswith("Connect Codex")  # the one that is installed first
     assert out["went"][:3] == ["Home", "codex", "codex"] and out["went"][3] == 1  # Connect opens over the page: nothing to go and find
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
+
+
+@pytest.mark.parametrize("codex_found", [False, True])
+def test_connect_banner_keeps_copilot_last_even_when_installed(codex_found):
+    out = run(CONNECT + """
+      BR.data = { default: "claude", settings: {}, backends: CN_ORDER.map(id => ({
+        id, label: id, kind: "cli", found: id === "copilot" || id === "codex" && CODEX_FOUND
+      })) };
+      BR.status = { copilot: { state: "unknown" }, codex: { state: "signed_out" } };
+      const card = connectNudge("home");
+      const chips = find(card, n => n.attrs && n.attrs.class === "chips");
+      out.buttons = chips.kids.filter(n => n && n.tag === "button").map(n => text(n).trim());
+    """.replace("CODEX_FOUND", json.dumps(codex_found)))
+    assert out["buttons"][-1] == "copilot"
+    assert out["buttons"][0].endswith("Connect codex" if codex_found else "Connect claude")
+    assert len(out["buttons"]) == 6
 
 
 def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account():
