@@ -137,6 +137,14 @@ same account used by your local Hugging Face login/token. Missing access is chec
 Open **Machine → Feature checks** to run a check. Checks use the normal one-at-a-time queue; opening the page,
 starting Studio or downloading a model never runs inference automatically.
 
+The diagnostics and feature groups start collapsed. **Feature checks** links on
+feature pages and **Models & weights** open the relevant saved results, prerequisites and setup guidance.
+The picture model picker keeps backend and recipe information under collapsed **Model details**, showing a
+refusal reason directly only when the selected model is unavailable.
+Use **Check this feature**, **Check selected recipes** or **Rerun check** to queue work; **Cancel check**
+uses the same cancellation as the normal queue. **Refresh status** and **Download saved report** only read
+diagnostics. Failed or cancelled reruns show their attempt separately from any saved passing evidence.
+
 | Installed physical RAM | Default policy |
 |---|---|
 | Below 128 GiB, or unknown | Qualification gating and badges are required |
