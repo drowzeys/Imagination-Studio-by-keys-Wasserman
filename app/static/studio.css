@@ -981,3 +981,9 @@ button.appick-t:hover { border-color:var(--amber-muted); }
 .apps-grid .pcard.ap-icon .art { background:radial-gradient(ellipse at 50% 60%, var(--amber-wash, rgba(241,173,102,.12)), transparent 70%), var(--bg2); }
 .apps-grid .pcard.ap-icon .art > img { position:static; width:auto; height:58%; aspect-ratio:1; object-fit:contain; border-radius:22%; box-shadow:0 12px 32px rgba(0,0,0,.45); }
 .apps-grid .pcard.ap-icon .art::after { display:none; }
+
+/* a picture shown larger (zoom.js) */
+[data-room-view="cast"] img:not(button img):not(a img), img[data-zoom] { cursor:zoom-in; }
+.zoom-layer { position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.88); cursor:zoom-out; }
+.zoom-layer img { max-width:96vw; max-height:94vh; object-fit:contain; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,.6); }
+.zoom-close { position:absolute; top:14px; right:18px; width:40px; height:40px; border-radius:20px; border:0; background:rgba(255,255,255,.15); color:#fff; font-size:24px; line-height:40px; cursor:pointer; }
