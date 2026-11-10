@@ -26,6 +26,10 @@ const spkCount = (d, n) => {
   if (onCard()) { const others = n - 1; return spkHere(d) + " and " + others + (spkLocalFleet(d) ? " worker" : " Spark") + (others === 1 ? "" : "s"); }
   return n + " of " + d.available + " available " + (spkLocalFleet(d) ? "workers" : "Sparks");
 };
+// what changes the page, against the readings that move every few seconds (a card's power and heat, the memory free): those
+// are drawn in place (spkMachinesDraw). Redrawing the page for them rebuilt it, and lost the place in it, every four seconds
+const SPK_LIVE = ["power_w", "temp_c", "util_pct", "used_mb", "free_mb"];
+const spkShape = d => !d ? "" : JSON.stringify([d.limit, d.available, d.default, d.names, d.placement, d.local_gpus, d.workers.map(w => [w.address, w.kind, w.name, w.label, w.state, w.working, w.enabled, w.why, w.job, w.guard, w.usable]), d.this && [d.this.label, d.this.job, d.this.state, d.this.guard]], (k, v) => SPK_LIVE.includes(k) ? undefined : v);
 const spkSig = d => !d ? "" : JSON.stringify([d.limit, d.available, d.default, d.names, d.placement, d.local_gpus, d.workers.map(w => [w.address, w.kind, w.name, w.label, w.state, w.working, w.enabled, w.why, w.job, w.memory_gb, w.guard, w.usable]), d.this && [d.this.label, d.this.job, d.this.state, d.this.memory_gb, d.this.guard]]);
 function spkReconcile(first = false) {
   const d = SPK.data; let n = SPK.n;
@@ -33,12 +37,15 @@ function spkReconcile(first = false) {
   const next = d.supported ? Math.max(1, Math.min(Number(n) || d.default || 1, d.limit || 5)) : 1;
   if (next !== SPK.n) { SPK.n = next; try { localStorage.setItem("sparks", String(next)); } catch {} }
 }
-async function spkLoad(draw) { const was = spkSig(SPK.data), before = SPK.n; try { const first = !SPK.data; SPK.data = await api("/api/sparks"); spkReconcile(first);
+async function spkLoad(draw) { const was = spkSig(SPK.data), shape = spkShape(SPK.data), before = SPK.n; try { const first = !SPK.data; SPK.data = await api("/api/sparks"); spkReconcile(first);
   } catch { return; }
   if (SPK.data.supported && !(SPK.ticks++ % 5)) api("/api/sparks/takes").then(t => { SPK.takes = t; }, () => {});
   spkMachinesDraw();  // each machine's own readings move every few seconds: drawn in place, not by redrawing the whole page
   if (spkSig(SPK.data) === was && SPK.n === before) return; SPK.plans = {}; spkQueue();
-  if (draw && typeof tab !== "undefined" && !document.activeElement.matches("input,textarea,select")) render(); }
+  // the Sparks page lists the readings too: there they are refreshed, but not on every tick
+  const now = Date.now(), due = typeof tab !== "undefined" && tab === "Sparks" && now - (SPK.drawn || 0) > 15000;
+  if (spkShape(SPK.data) === shape && SPK.n === before && !due) return;
+  if (draw && typeof tab !== "undefined" && !document.activeElement.matches("input,textarea,select")) { SPK.drawn = now; render(); } }
 function spkSet(n) { SPK.n = SPK.data && SPK.data.supported ? Math.max(1, Math.min(Number(n) || 1, spkLimit())) : 1; SPK.plans = {};
   try { localStorage.setItem("sparks", String(SPK.n)); } catch {} api("/api/sparks", { sparks: SPK.n }).catch(() => {}); spkQueue(); render(); }
 // What the number will do for this job, asked of the app (POST /api/sparks/plan) and said under the chooser

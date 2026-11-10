@@ -170,6 +170,12 @@ def test_remote_actions_and_mac_behavior_remain_and_local_workers_have_no_ssh_ac
     assert out["cards"] == 0 and out["via"] and "this Mac" in out["mac"] and "Local GPUs" not in out["mac"]
 
 
+def test_a_reading_that_moves_does_not_redraw_the_page():
+    out = run("""SPK.data = fixture(2); const before = spkShape(SPK.data); SPK.data.local_gpus.devices[1].temp_c = 70; SPK.data.local_gpus.devices[1].power_w = 99; SPK.data.this.memory_gb = 1;
+      out.same = spkShape(SPK.data) === before; SPK.data.placement = { worker: "head", policy: "require" }; out.changed = spkShape(SPK.data) !== before;""")
+    assert out["same"] and out["changed"]
+
+
 def test_inventory_changes_trigger_redraw_and_plan_cache_invalidation():
     out = run("""SPK.data = fixture(2); const before = spkSig(SPK.data); SPK.data.local_gpus.devices[1].temp_c = 70;
       out.changed = spkSig(SPK.data) !== before;
