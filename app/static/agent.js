@@ -234,7 +234,11 @@ function agLive(thread) {
     el("div", { class: "agr-body" }, el("div", { class: "agr-working" }, el("span", { class: "dotl" + (l.status === "running" ? " r" : " t") }),
       l.status === "queued" ? "Waiting its turn in the agent queue…" : agName(l.backend) + " is working…", el("span", { class: "su-grow" }),
       el("button", { class: "small", onclick: () => agStop(thread.id) }, "Stop")),
-      (l.steps || []).length ? el("div", { class: "agr-steps", style: "margin:8px 0 0" }, (l.steps || []).slice(-6).map(s => el("div", {}, s.text))) : null,
+      // the steps the server sends (the turn's last 60) in a box of their own that scrolls; a redraw keeps where it was,
+      // and one at its end follows the newest
+      (l.steps || []).length ? el("div", { class: "agr-steps", "data-keep-scroll": "agent-steps", style: "margin:8px 0 0;max-height:220px;overflow-y:auto",
+        onscroll: e => { AG.stepsEnd = e.target.scrollTop + e.target.clientHeight >= e.target.scrollHeight - 4; } },
+        (l.steps || []).map(s => el("div", {}, s.text))) : null,
       made.length ? el("div", { class: "agr-files" }, made.slice(-8).map(agThumb)) : null));
 }
 async function agStop(id) { try { await api("/api/agent/threads/" + encodeURIComponent(id) + "/cancel", {}); await agThreadLoad(id); await agThreadsLoad(); agRender(); } catch (e) { toast(e.message); } }
@@ -257,6 +261,15 @@ async function agSend(text, how) {
   } catch (e) { toast(e.message); }
   AG.busy = false; render();
 }
+function agModelPick(id) {
+  // the ready ones the room offers (its agents and local agents: agAgents), never a backend the cards leave out
+  const found = (BR.data && BR.data.backends) || [], offered = agAgents(found).map(a => a[0]);
+  const ready = found.filter(b => agReady(b) && offered.includes(b.id)), shown = ready.some(b => b.id === id) || !id || !offered.includes(id) ? ready : [...ready, { id, label: agName(id) }];
+  if (!shown.length) return el("span", { class: "tag2" }, agBadge(id), agName(id));
+  const pick = el("select", { "aria-label": "Model", "data-ag-model": true, onchange: e => { AG.backend = e.target.value; render(); } },
+    shown.map(b => el("option", { value: b.id, selected: b.id === id }, b.label || agName(b.id))));
+  pick.value = id || ""; return pick;
+}
 function agComposer(key, value, set, placeholder, how, disabled) {
   const area = el("textarea", { placeholder, "aria-label": how === "reply" ? "Your answer" : "Your message", "data-ag": key, rows: how === "start" ? 4 : 2 });
   area.value = value; area.addEventListener("input", () => set(area.value));
@@ -265,7 +278,9 @@ function agComposer(key, value, set, placeholder, how, disabled) {
   return el("div", { class: "agr-box" + (how === "start" ? " agentbox" : "") }, area,
     !ready && how !== "start" && brain ? el("div", { class: "note m-flat agr-err" }, agName(id) + (st ? ": " + (AG_NOT_SIGNED[st.state] || st.state) : brain.error ? ": " + relHome(brain.error) : " is not set up here") + " · ", agSetup()) : null,
     AG.attach.length ? el("div", { class: "chips ag-attached" }, AG.attach.map(p => el("span", { class: "tag2 t" }, p.split("/").pop(), el("a", { href: "#", class: "ag-x", "aria-label": "Remove", onclick: e => { e.preventDefault(); AG.attach = AG.attach.filter(x => x !== p); render(); } }, "×")))) : null,
-    el("div", { class: "agr-bar" }, el("span", { class: "tag2" }, agBadge(id), agName(id)),
+    // the model is picked right here for a new conversation (the ready brains only); a conversation keeps the one it began with
+    el("div", { class: "agr-bar" }, how === "start" ? agModelPick(id)
+      : el("span", { class: "tag2", title: "A conversation stays with its model: start a new conversation to use another" }, agBadge(id), agName(id)),
       how === "start" ? (agIsHarness(id) && AG.tools.size ? el("span", { class: "note m-flat" }, "with " + [...AG.tools].join(", ")) : null)
         : AG.thread && (AG.thread.tools || []).length ? el("span", { class: "note m-flat" }, "with " + AG.thread.tools.join(", ")) : null,
       el("span", { class: "su-grow" }),
@@ -353,12 +368,15 @@ function viewAgent() {
   const found = (BR.data && BR.data.backends) || [];
   agAskSignins(found); agIdleWatch();
   const harnesses = found.filter(b => AG_HARNESS.includes(b.id));
-  if (!agReady(found.find(b => b.id === AG.backend))) {
+  // an agent the room does not offer (a default left from before it left the room) is chosen again like one not ready:
+  // the menu beside Send and the agent a message goes to are always the same one
+  const offers = id => agAgents(found).some(a => a[0] === id);
+  if (!agReady(found.find(b => b.id === AG.backend)) || !offers(AG.backend)) {
     const chosen0 = BR.data && BR.data.settings && BR.data.settings.agent;  // the Agent room's own default (Connect sets it)
-    const def = BR.data && (found.find(b => b.id === chosen0 && agReady(b)) || found.find(b => b.id === BR.data.default && agReady(b)));
+    const def = BR.data && (found.find(b => b.id === chosen0 && agReady(b) && offers(b.id)) || found.find(b => b.id === BR.data.default && agReady(b) && offers(b.id)));
     // nobody chose a brain or an agent, and the set local server answers: it is the room's first choice
     const auto = BR.data && BR.data.automatic && !chosen0 && BR.data.default === "local" ? found.find(b => b.id === "local" && agReady(b)) : null;
-    AG.backend = (auto || ((def && (agIsHarness(def.id) || !harnesses.some(agReady))) ? def : null) || harnesses.find(agReady) || found.find(b => agReady(b) && agAgents(found).some(a => a[0] === b.id)) || { id: AG.backend || "claude" }).id;
+    AG.backend = (auto || ((def && (agIsHarness(def.id) || !harnesses.some(agReady))) ? def : null) || harnesses.find(agReady) || found.find(b => agReady(b) && agAgents(found).some(a => a[0] === b.id)) || { id: offers(AG.backend) ? AG.backend : "claude" }).id;
   }
   const missing = harnesses.filter(b => !agReady(b));
   const toolList = BR.tools ? (BR.tools.tools || BR.tools) : [{ id: "blender", label: "Blender" }, { id: "blockout", label: "Blockout" }, { id: "studio", label: "Studio" }];
@@ -372,6 +390,9 @@ function viewAgent() {
   const earlier = (AG.tasks || []).filter(t => !t.thread);
   // after a send or a new turn, the newest turn is brought into view
   const count = thread ? (thread.turns || []).length + (thread.live ? 1 : 0) : 0;
+  if (thread && thread.live && AG.stepsFor !== thread.live.task) { AG.stepsFor = thread.live.task; AG.stepsEnd = true; }  // a new turn follows its newest step
+  if (thread && thread.live && AG.stepsEnd !== false && typeof requestAnimationFrame === "function")
+    requestAnimationFrame(() => { const box = document.querySelector('[data-keep-scroll="agent-steps"]'); if (box) box.scrollTop = box.scrollHeight; });
   if (thread && count !== AG.seen && typeof requestAnimationFrame === "function") { AG.seen = count; requestAnimationFrame(() => { const end = document.querySelector(".agr-end"); if (end && end.scrollIntoView) end.scrollIntoView({ block: "end", behavior: "smooth" }); }); }
   return el("div", {},
     el("div", { class: "pagehead" + (typeof ART !== "undefined" && ART.ready.has("vault-agent") ? " enghead vault" : "") },
