@@ -856,11 +856,20 @@ function viewEditor() {
     const player = el("video", { class: "main", controls: true }); const info = el("div", { class: "note" });
     const span = c => [Number(c.in) || 0, Number(c.out) > Number(c.in) ? Number(c.out) : c.duration];
     const load = (i, play) => { at = i; if (!tl[i]) return; const [a] = span(tl[i]); player.src = file(tl[i].path) + "#t=" + a; player.currentTime = a; if (play) player.play().catch(() => {}); mark(); };
-    const strip = el("div", { class: "tl", "data-keep-scroll": "timeline" }); const mark = () => [...strip.children].forEach((n, i) => n.classList.toggle("on", i === at));
+    // the mouse wheel scrolls the strip sideways when it is wider than the card (a vertical wheel did nothing on it);
+    // Ctrl and the wheel (a trackpad's pinch too) stays the browser's zoom
+    const strip = el("div", { class: "tl", "data-keep-scroll": "timeline", onwheel: e => { if (!e.ctrlKey && strip.scrollWidth > strip.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); strip.scrollLeft += e.deltaY; } } }); const mark = () => [...strip.children].forEach((n, i) => n.classList.toggle("on", i === at));
     player.addEventListener("timeupdate", () => { const c = tl[at]; if (!c) return; const [, b] = span(c); if (player.currentTime >= b - 0.04 && !player.paused) { if (at + 1 < tl.length) load(at + 1, true); else player.pause(); } });
     player.addEventListener("ended", () => { if (at + 1 < tl.length) load(at + 1, true); });
     const total = () => tl.reduce((s, c) => { const [a, b] = span(c); return s + Math.max(b - a, 0); }, 0);
-    tl.forEach((c, i) => strip.append(el("div", { class: "clip", onclick: e => { if (e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON") load(i, false); } },
+    // a clip is dragged onto another to take its place (as ← and → do one step at a time)
+    // the dragged clip is named with its project ("<project>:<index>"): a clip from another window's timeline moves nothing here
+    const drop = (e, i) => { e.preventDefault(); e.currentTarget.classList.remove("over"); const [of, at] = String(e.dataTransfer.getData("text/x-timeline")).split(":"), from = at === "" || at == null ? NaN : Number(at);
+      if (of !== String(project.id) || !Number.isInteger(from) || from === i || !tl[from]) return; tl.splice(i, 0, tl.splice(from, 1)[0]); saveProject(); render(); };
+    tl.forEach((c, i) => strip.append(el("div", { class: "clip", draggable: "true", "data-clip": String(i), onclick: e => { if (e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON") load(i, false); },
+        ondragstart: e => { if (e.target.closest && e.target.closest("input")) { e.preventDefault(); return; } e.dataTransfer.setData("text/x-timeline", project.id + ":" + i); e.dataTransfer.effectAllowed = "move"; },
+        ondragover: e => { if (e.dataTransfer.types.includes("text/x-timeline")) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
+        ondragleave: e => e.currentTarget.classList.remove("over"), ondrop: e => drop(e, i) },
       el("video", { src: file(c.path) + "#t=0.5", preload: "metadata", muted: true }), el("div", {}, (i + 1) + " · " + c.path.split("/").pop().slice(0, 22)),
       el("div", { class: "row" }, field("In (s)", bind(c, "in", el("input", { type: "number", step: 0.1, min: 0 }), () => { saveProject(); info.textContent = "Timeline " + total().toFixed(1) + " s"; })),
         field("Out (s)", bind(c, "out", el("input", { type: "number", step: 0.1, min: 0, placeholder: c.duration.toFixed(1) }), () => { saveProject(); info.textContent = "Timeline " + total().toFixed(1) + " s"; }))),
