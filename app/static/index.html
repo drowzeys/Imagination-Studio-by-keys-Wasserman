@@ -890,11 +890,34 @@ function viewEditor() {
 
 /* ---------- Library ---------- */
 const LIBF = { kind: "all", q: "" };
+const LIB_DATE_OPEN = new Map();
+function libDateGroups(items, now = new Date()) {
+  const recent = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  recent.setDate(recent.getDate() - 6);
+  const month = now.getFullYear() * 12 + now.getMonth(), groups = new Map();
+  const stamp = m => typeof m.modified === "number" && Number.isFinite(m.modified) && Number.isFinite(new Date(m.modified * 1000).getTime()) ? m.modified : null;
+  for (const m of [...items].sort((a, b) => (stamp(b) ?? -Infinity) - (stamp(a) ?? -Infinity))) {
+    const modified = stamp(m), date = modified === null ? null : new Date(modified * 1000);
+    let key = "unknown", label = "Date unavailable";
+    if (date) {
+      const age = month - (date.getFullYear() * 12 + date.getMonth());
+      if (date >= recent) { key = "recent"; label = "Past 7 days"; }
+      else if (age < 12) {
+        key = "month-" + date.getFullYear() + "-" + date.getMonth();
+        const dated = date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+        label = age === 0 ? "This month · " + dated : age === 1 ? "Last month · " + dated : dated;
+      } else { key = "year-" + date.getFullYear(); label = String(date.getFullYear()); }
+    }
+    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+    groups.get(key).items.push(m);
+  }
+  return [...groups.values()];
+}
 // a voice line, a song or a sound effect: its player, its words, and where it goes next (kept in Voice and Music, not deleted here)
 const LIB_SOUND = { voice: ["Voice line", "Voice"], music: ["Song", "Music"], sfx: ["Sound effect", null] };
 function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
   return el("div", { class: "tile lib-sound", "data-path": m.path, "data-sound": m.sound || "sfx", style: shown ? null : "display:none" },
-    el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
+    el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), libMedia(m.path),
     el("div", { class: "cap" }, el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
     el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
       el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
@@ -920,8 +943,8 @@ function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library"))
     let list = hits(); const capBar = capSearch(() => grid, () => show()); if (!CAP.map) capLoad().then(() => { if (tab === "Library") render(); });
     const kinds = { all: "Everything", video: "Clips", image: "Stills", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
     const find = el("input", { type: "search", placeholder: "Find by name, folder, Spark or \"failed\"", value: LIBF.q, style: "max-width:320px", "aria-label": "Find in the Library" });
-    let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits(); const on = new Set(list.map(m => m.path));
-      for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none"; tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
+    let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits();
+      updateDates(); tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
     find.addEventListener("input", () => { clearTimeout(wait); wait = setTimeout(apply, 150); }); find.addEventListener("change", apply);
     find.addEventListener("keydown", e => { if (e.key === "Enter") apply(); });
     put(box, el("div", { class: "row", style: "align-items:center;margin-bottom:6px" }, el("div", { class: "chips fit" }, Object.entries(kinds).map(([k, t]) => el("button", { class: "small" + (LIBF.kind === k ? " on" : ""), onclick: () => { LIBF.kind = k; render(); } }, t + " · " + n(k)))), el("span"), el("div", { class: "fit" }, find), capBar.box));
@@ -931,8 +954,8 @@ function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library"))
     const all = el("button", { class: "fit", onclick: () => { const them = pool(), every = them.length && them.every(p => LIBPICK.has(p)); LIBPICK.clear(); if (!every) for (const p of them) LIBPICK.add(p); render(); } }, "Select all");
     const show = () => { const them = pool(); many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
     const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
-    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
-    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, libMedia(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
+    const tiles = new Map(kindList.map(m => [m.path, m.kind === "audio" ? libSoundTile(m, true) :
+    el("div", { class: "tile", "data-path": m.path, title: capText(m.path) }, libMedia(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
       el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
       m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? " · s" + m.seed : "")) : null,
       m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
@@ -943,9 +966,31 @@ function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library"))
       m.kind === "video" ? null : el("button", { class: "small", title: "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
       m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),
       // out of the library: the server moves the file to the studio's trash folder
-      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))));
+      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))]));
+    const groups = libDateGroups(kindList), sections = groups.map((group, i) => {
+      const total = el("span", { class: "lib-date-count" });
+      const details = el("details", { class: "lib-date-group", "data-date-group": group.key },
+        el("summary", { onclick: () => { LIB_DATE_OPEN.set(group.key, !details.open); } },
+          el("span", { class: "lib-date-label" }, group.label), total),
+        el("div", { class: "grid" }, group.items.map(m => tiles.get(m.path))));
+      return { group, details, total, defaultOpen: i === 0 };
+    });
+    const empty = el("div", { class: "note" }, all_.length ? "No files match the current filters." : "No media yet. Your pictures, clips and sounds will appear here.");
+    const grid = el("div", { class: "lib-dates" }, sections.map(s => s.details), empty);
+    const updateDates = () => {
+      const on = new Set(list.map(m => m.path)), searching = Boolean(LIBF.q.trim());
+      for (const [path, tile] of tiles) tile.style.display = on.has(path) ? "" : "none";
+      for (const s of sections) {
+        const n = s.group.items.filter(m => on.has(m.path)).length;
+        s.details.style.display = n ? "" : "none";
+        s.total.textContent = count(n, "file");
+        s.details.open = searching ? n > 0 : (LIB_DATE_OPEN.get(s.group.key) ?? s.defaultOpen);
+      }
+      empty.style.display = list.length ? "none" : "";
+    };
+    updateDates();
     if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
-    put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
+    put(box, el("div", { class: "note" }, tally, " files, grouped by file date, newest first. Open a dated section to browse older work. Click a path to copy it. Tick files to delete several at once; Select all includes matching clips and pictures in closed sections. 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
       typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
       el("div", { class: "row", style: "margin-top:10px" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span"),
         bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,

@@ -908,6 +908,13 @@ nav#rooms .lbl.long { white-space:normal; line-height:1.12; font-size:14.5px; }
 .st-embed .pagehead { margin-top:0; }
 @media (max-width: 640px) { .cn-qr { width:132px; height:132px; } .cn-code span { font-size:24px; } .connect { padding:10px; } .cn-step { grid-template-columns:22px minmax(0,1fr); gap:8px; } .cn-tick { width:22px; height:22px; } }
 
+.lib-dates { display:flex; flex-direction:column; gap:12px; margin-top:10px; }
+.lib-date-group { border:1px solid var(--line); border-radius:var(--r2); padding:12px; }
+.lib-date-group > summary { cursor:pointer; color:var(--text); }
+.lib-date-label { font-weight:600; margin-left:6px; }
+.lib-date-count { float:right; color:var(--dim); font:13px var(--sans); margin-left:12px; }
+.lib-date-group > .grid { margin-top:12px; }
+
 /* the Library's sounds: a voice line, a song or a sound effect, with its words over the player */
 .tile.lib-sound { display:flex; flex-direction:column; gap:8px; padding:12px 12px 0; }
 .lib-sound-top { display:flex; flex-direction:column; gap:4px; min-height:64px; }
