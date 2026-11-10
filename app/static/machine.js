@@ -146,7 +146,7 @@ const brainMissing = b => (b.where && b.where !== "here" ? "Not installed on " +
 // the status line and the Sign in / Sign out buttons on a brain card
 function signLine(b) { if (b.kind !== "cli") return null; const st = BR.status[b.id];
   if (b.found && !st) brainStatus(b.id);
-  const on = st && st.state === "signed_in", text = !b.found ? null : !st || st.state === "asking" ? "Asking " + b.label + " whether it is signed in…" : on ? "Signed in" + (st.detail ? " · " + st.detail : "") : st.state === "signed_out" ? "Not signed in" : st.detail || "Sign-in unknown";
+  const on = st && st.state === "signed_in", text = !b.found ? null : !st || st.state === "asking" ? "Asking " + b.label + " whether it is signed in…" : on ? (st.remembered ? "Connected" : "Signed in") + (st.detail ? " · " + st.detail : "") : st.state === "signed_out" ? "Not signed in" : st.detail || "Sign-in unknown";
   if (st && st.state === "broken") return el("div", { class: "signin-state", "data-signin-state": "broken" }, el("div", { class: "note m-flat vt-bad signin-said" }, st.detail), st.hint ? el("div", { class: "note m-flat" }, st.hint) : null);
   return text ? el("div", { class: "note m-flat signin-state " + (on ? "vt-ok" : st && st.state === "signed_out" ? "vt-bad" : ""), "data-signin-state": st ? st.state : "asking" }, text) : null; }
 function signButtons(b) { if (b.kind !== "cli") return []; const st = BR.status[b.id], on = st && st.state === "signed_in", running = BR.sign[b.id] && SIGN_RUNNING.includes(BR.sign[b.id].state);
@@ -248,7 +248,7 @@ function qrSvg(text, px) { const m = qrMatrix(text); if (!m) return null; const 
    Find it (install it when it is missing), sign in (the CLI's own flow: the page opens in a new tab, with the code, a QR
    code and Copy link), check it answers, make it the default. CN.data[id] is GET /api/brains/{id}/connect. */
 const CN = { open: null, data: {}, plan: {}, install: {}, verifying: {}, tried: {}, timer: null, win: null, tick: 0, link: null, linkHost: null, linkSaid: null, linkBusy: false, linkOpen: false };
-const CN_ORDER = ["claude", "codex", "hermes", "gemini", "grok"];
+const CN_ORDER = ["claude", "codex", "hermes", "gemini", "grok", "copilot"];
 const cnRedraw = () => { if (typing()) return; if (CN.sheet) cnSheetDraw(); else if (["Brains", "Settings", "Home", "Agent"].includes(tab)) render(); };
 const cnWhere = b => b && b.where && b.where !== "here" ? b.where.replace(/^ssh:/, "") : "";
 const cnHere = () => typeof location === "undefined" || ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
@@ -261,6 +261,7 @@ function brainWord(b) { if (!b || b.kind !== "cli") return [b && b.found ? "Read
   if (st.state === "broken" || st.state === "missing") return ["Cannot start", "connect", "Fix it"];
   if (st.state === "keychain") return ["Signed in elsewhere", "connect", "Allow over SSH"];
   if (st.state === "signed_in" || ok) return ["Ready", def ? null : "default", "Make default"];
+  if (b.id === "copilot" && st.state === "unknown") return ["Not checked", "connect", "Check"];
   return ["Not signed in", "connect", "Connect"]; }
 // the Connect button's click: a tab is opened now (a click may open one, a timer may not) and pointed at the sign-in page later
 function cnPrepareTab(b) { const st = BR.status[b.id];
@@ -375,23 +376,30 @@ function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : 
   // b. sign in
   const found = d.find.found;
   if (!found) steps.push(["signin", "Sign in", "todo", "After it is installed."]);
-  else if (st.state === "signed_in") steps.push(["signin", "Sign in", "done", "Signed in" + (st.detail ? " · " + st.detail : "") + (where ? " on " + where : "")]);
+  else if (st.state === "signed_in") steps.push(["signin", "Sign in", "done", (st.remembered ? "Connected" : "Signed in") + (st.detail ? " · " + st.detail : "") + (where ? " on " + where : "")]);
   else if (sign && sign.state !== "idle" && !(sign.state === "done")) steps.push(["signin", d.token_flow ? "Allow it over SSH" : "Sign in", sign.state === "failed" ? "failed" : "running", "", ...cnSignBody(b, sign)]);
   else if (st.state === "keychain") steps.push(["signin", "Allow it over SSH", "wait", st.detail, el("div", { class: "note m-flat" }, "macOS keeps Claude Code’s sign-in in that Mac’s Keychain, which an SSH session cannot open. Allow over SSH signs in once more and keeps a sign-in token only on that Mac, in your own folder, readable only by you."),
     el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Allow over SSH"))]);
   else if (st.state === "broken") steps.push(["signin", "Sign in", "failed", st.detail, st.hint ? el("div", { class: "note m-flat" }, st.hint) : null, el("button", { type: "button", class: "small", onclick: () => cnInstall(b.id) }, "Update " + b.label)]);
-  else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait", b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
+  else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait",
+    b.id === "copilot" ? "Copilot CLI cannot report its sign-in status. If you already signed in, press Check below. Otherwise run this in a terminal" + (where ? " on " + where : "") + ", then press Check:"
+      : b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
     el("div", { class: "signin-cmd" }, el("code", {}, b.signin_command || ""), el("button", { type: "button", class: "small", onclick: () => copyText(b.signin_command || "", "Command") }, "Copy"))]);
   else if (b.id === "hermes") steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Which account should Hermes use? It signs in there, then picks a model that account has.",
     el("div", { class: "chips" }, HERMES_PROVIDERS.map(([provider, label]) => el("button", { type: "button", class: "small", onclick: () => { CN.hermesProvider = provider; cnPrepareTab(b); cnSignin(b.id, { provider }); } }, label)))]);
   else steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Not signed in yet.", el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Sign in"))]);
   // c. one real answer
-  const v = d.verify, signed = st.state === "signed_in";
+  const v = d.verify, signed = st.state === "signed_in",
+    canCheck = found && (signed || b.id === "copilot" && st.state === "unknown");
   if (CN.verifying[b.id]) steps.push(["verify", "Check it answers", "running", "Asking " + b.label + " to say ok (one short answer, a minute at most)…"]);
-  else if (v && v.ok) steps.push(["verify", "Check it answers", "done", "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s"]);
-  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" }, act = { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action];
-    steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, fix.label)) : el("div", { class: "note m-flat" }, fix.label)]); }
-  else steps.push(["verify", "Check it answers", signed ? "wait" : "todo", signed ? "" : "After it is signed in.", signed ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
+  else if (v && v.ok) steps.push(["verify", "Check it answers", "done", v.remembered ? "Last successful Check: " + new Date(v.at * 1000).toLocaleDateString() + ". Remembered across restarts; not rechecked automatically." : "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s",
+    b.id === "copilot" ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check again") : null]);
+  else if (v) { const fix = v.fix || { action: "verify", label: "Check again" },
+      terminalLogin = b.id === "copilot" && fix.action === "signin",
+      act = terminalLogin ? () => cnVerify(b.id) : { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action],
+      label = terminalLogin ? "Check again after copilot login" : fix.label;
+    steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, label)) : el("div", { class: "note m-flat" }, label)]); }
+  else steps.push(["verify", "Check it answers", canCheck ? "wait" : "todo", canCheck ? "" : "After it is signed in.", canCheck ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
   // d. the default
   const names = d.harness ? "your default brain and the Agent room's" : "your default brain";
   if (d.default) steps.push(["default", "Make it your default", "done", "It is " + (d.harness && !d.agent_default ? "your default brain" : names) + "."]);
@@ -481,12 +489,12 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
   for (const b of clis) if (b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(cnRedraw, () => {});
   if (clis.some(b => b.found && (!BR.status[b.id] || BR.status[b.id].state === "asking"))) return null;  // not yet known: nothing flashes up
   if (clis.some(b => BR.status[b.id] && BR.status[b.id].state === "signed_in")) return null;
-  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found) || order[0];
+  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found && b.id !== "copilot") || order[0];
   const locals = (BR.data.backends || []).filter(b => (b.id === "local" || b.local_agent) && b.found && !b.error);  // the local brain and each local agent added
   if (!pick) return null;
   return el("section", { class: "panel cn-nudge", "data-card": "connect", "data-where": where },
     el("div", { class: "cn-nudge-h" }, el("div", { class: "m-min" }, el("span", { class: "eyebrow" }, "One click"), el("h2", {}, "Connect your agent"),
-      el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini or Grok, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
+      el("p", { class: "note m-flat" }, "Claude Code, Codex, Hermes, Gemini, Grok or GitHub Copilot CLI, with the subscription you already have. The studio finds it (or installs it), signs you in, checks it answers and makes it your default.")),
       where === "home" ? el("button", { type: "button", class: "small ghost", "aria-label": "Hide this card", onclick: () => { try { localStorage.setItem(CN_DISMISS, "1"); } catch {} render(); } }, "Not now") : null),
     el("div", { class: "chips" }, el("button", { type: "button", class: "primary", onclick: () => connectGo(pick) }, brainLogo(pick.id), "Connect " + pick.label),
       order.length > 1 || locals.length ? el("span", { class: "cn-or" }, "or") : null,
@@ -539,9 +547,9 @@ function viewBrains() {
     el("details", { class: "fold m-fold", open: CN.linkOpen || false }, el("summary", {}, "Set the other computer by hand"),
       el("div", { class: "panel stack" },
       el("div", { class: "note m-flat" }, "Studio runs the CLI there over SSH, with key login only. A DGX Spark usually has no Claude or Codex sign-in of its own: name the Mac (or any machine) where you are signed in."),
-      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "gemini", "grok", "hermes"].filter(id => id !== "hermes" || (d.backends || []).some(b => b.id === "hermes")).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
+      field("SSH host", host), field("How that computer reaches this one (for Blender and Studio tools)", studioHost), el("div", { class: "chips" }, ["claude", "codex", "gemini", "grok", "hermes", "copilot"].filter(id => !["hermes", "copilot"].includes(id) || (d.backends || []).some(b => b.id === id)).map(id => el("label", { class: "toggle m-flat" + ((remote.backends || []).includes(id) ? " on" : "") },
         el("input", { type: "checkbox", checked: (remote.backends || []).includes(id), class: "hide", onchange: e => { const list = new Set(remote.backends || []); e.target.checked ? list.add(id) : list.delete(id); remote.backends = [...list]; e.target.parentNode.classList.toggle("on", e.target.checked); } }),
-        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
+        el("span", { class: "dotl" + ((remote.backends || []).includes(id) ? "" : " o") }), MARKS[id] ? mark(id, "") : null, ({ claude: "Claude Code", codex: "Codex", copilot: "GitHub Copilot CLI", gemini: "Gemini CLI", grok: "Grok CLI", hermes: "Hermes" })[id]))),
       el("div", {}, el("button", { class: "primary", onclick: () => save({ remote: { host: host.value.trim(), backends: remote.backends || [], studio_host: studioHost.value.trim() } }) }, "Save"))))));
   const tools = BR.tools;
   put(wrap, el("div", { class: "sectionhead" }, el("h2", {}, "Tools your agent can use"), el("button", { class: "small", onclick: () => go("Agent") }, "Ask your agent →")),

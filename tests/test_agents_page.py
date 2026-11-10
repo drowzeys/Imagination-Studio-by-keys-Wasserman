@@ -52,6 +52,21 @@ def test_the_chooser_shows_found_remote_and_missing_agents():
     assert out["settings"] == "Set up in Settings → Connections" and out["tab"] == "Settings"
 
 
+def test_copilot_is_a_full_agent_and_unvalidated_windows_tools_stay_off():
+    out = run(BRAINS + """
+      BR.data.backends.push({ id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, harness: true, where: "here" });
+      BR.tools.tools[0].enabled = false; BR.tools.tools[0].unsupported = "Not validated on Windows";
+      AG.backend = "copilot"; const page = viewAgent();
+      const chosen = find(page, n => n.tag === "button" && /agr-card/.test(n.attrs.class || "") && text(n).includes("GitHub Copilot CLI"));
+      out.card = text(chosen); out.backend = AG.backend; out.tools = [...AG.tools];
+      out.disabled = button(cls(page, "agr-under"), "Blender").attrs["aria-disabled"];
+      out.harness = agIsHarness("copilot");""")
+    assert out["backend"] == "copilot" and out["harness"]
+    assert "Uses the Studio" in out["card"]
+    assert "blender" not in out["tools"] and "studio" in out["tools"]
+    assert out["disabled"] == "true"
+
+
 def test_a_new_conversation_starts_and_opens_its_thread():
     out = run(BRAINS + """
       answers["/api/agent/tasks"] = { id: "0101-000000-abcdef", status: "queued", thread: "th-1018-100000-bbbbbb" };
