@@ -7,14 +7,16 @@ import tempfile
 import threading
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import clear  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 
-def studio():
-    home = Path(tempfile.mkdtemp()) / "TensorFoldStudio"
+def studio(home=None):
+    home = home or Path(tempfile.mkdtemp()) / "TensorFoldStudio"
     for name in ("renders", "uploads", "qa", "projects/p1", "slate/f1", "loras", "scouts/s1"):
         (home / name).mkdir(parents=True)
     jobs, order, lock = {}, [], threading.Lock()
@@ -115,6 +117,68 @@ def test_a_song_goes_to_the_trash_with_its_yue2_folder_and_comes_back():
     # an export queued with the song as its soundtrack keeps it too
     jobs["e1"] = {"id": "e1", "kind": "export", "status": "queued", "outputs": [], "params": {"soundtrack": {"take": "m1"}}, "created": 2}
     assert web.post("/api/clear", json={"paths": ["music/m1.wav"]}).json()["files"] == 0
+
+
+@pytest.mark.parametrize("kind", ["sfx", "foley"])
+def test_sound_take_trash_and_restore(tmp_path, kind):
+    home, jobs, order, movable, web = studio(tmp_path / "Studio")
+    (home / "sound" / kind).mkdir(parents=True)
+    audio = write(home, f"sound/{kind}/take1.wav", "audio")
+    note = write(home, f"sound/{kind}/take1.take.json", json.dumps({"id": "take1", "path": audio}))
+    source = write(home, "renders/source.mp4", "original")
+    paths = [audio]
+    if kind == "foley":
+        paths.append(write(home, "sound/foley/take1.mp4", "rendered"))
+    job(jobs, order, "take1", "done", paths, video=source)
+    write(home, f"sound/{kind}/settings.json", "{}")
+    assert refused(movable, f"sound/{kind}/settings.json")
+
+    result = web.post("/api/clear", json={"paths": paths, "films": True}).json()
+    assert result["files"] == len(paths) + 1 and result["skipped"] == [], result
+    assert all(not (home / path).exists() for path in paths + [note])
+    assert (home / source).read_text() == "original"
+    assert "take1" in jobs
+
+    restored = web.post("/api/trash/restore").json()
+    assert restored == {"files": len(paths) + 1, "jobs": 0, "missing": []}
+    assert all((home / path).is_file() for path in paths + [note])
+    assert json.loads((home / note).read_text())["path"] == audio
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+@pytest.mark.parametrize("windows_paths", [False, True])
+@pytest.mark.parametrize("folder", ["sound/sfx", "voice"])
+def test_sound_used_by_job_stays_with_its_record(tmp_path, status, windows_paths, folder):
+    home, jobs, order, _, web = studio(tmp_path / "Studio")
+    (home / folder).mkdir(parents=True)
+    audio = write(home, f"{folder}/take1.wav")
+    note = write(home, f"{folder}/take1.take.json", "{}")
+    reference = audio.replace("/", "\\") if windows_paths else audio
+    job(jobs, order, "other", status, [], ref_audios=[reference])
+    result = web.post("/api/clear", json={"paths": [audio], "films": True}).json()
+    assert result["files"] == 0 and "job uses it" in result["skipped"][0]["why"]
+    assert (home / audio).is_file() and (home / note).is_file()
+    jobs.clear()
+    job(jobs, order, "take1", status, [])
+    result = web.post("/api/clear", json={"paths": [audio, note], "films": True}).json()
+    assert result["files"] == 0 and all("being made" in item["why"] for item in result["skipped"])
+    assert (home / audio).is_file() and (home / note).is_file()
+
+
+def test_bulk_audio_trash_keeps_and_restores_all_take_records(tmp_path):
+    home, _, _, _, web = studio(tmp_path / "Studio")
+    paths, records = [], []
+    for folder in ("sound/sfx", "voice", "music"):
+        (home / folder).mkdir(parents=True)
+        paths.append(write(home, f"{folder}/take1.wav"))
+        records.append(write(home, f"{folder}/take1.take.json", "{}"))
+    kept = write(home, "renders/keep.mp4")
+    result = web.post("/api/clear", json={"paths": paths, "films": True}).json()
+    assert result["files"] == 6 and not result["skipped"]
+    assert all(not (home / path).exists() for path in paths + records)
+    assert (home / kept).is_file()
+    assert web.post("/api/trash/restore").json() == {"files": 6, "jobs": 0, "missing": []}
+    assert all((home / path).is_file() for path in paths + records)
 
 
 if __name__ == "__main__":

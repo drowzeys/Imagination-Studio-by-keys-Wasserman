@@ -134,6 +134,14 @@ button.hot { font-size:16.5px; padding:12px 22px; }
 button.ghost { background:transparent; border-color:var(--line); box-shadow:none; }
 button:disabled { opacity:.4; cursor:default; }
 button.small { padding:5px 12px; font-size:14px; min-height:32px; }
+button.small.trash-button { display:inline-flex; align-items:center; justify-content:center; width:32px; padding:0; color:var(--red); }
+button.small.trash-button:hover:not(:disabled) { background:var(--red-wash); border-color:var(--red); }
+.trash-button .ico, .trash-bulk .ico { display:inline-flex; width:16px; height:16px; color:var(--red); }
+.trash-button svg, .trash-bulk svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.trash-bulk { display:inline-flex; align-items:center; gap:6px; }
+.lib-select { display:inline-flex; align-items:center; gap:5px; flex:none; cursor:pointer; font-size:12px; }
+.lib-select input { margin:0; }
+.lib-sound-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 button.small.on, .hubtabs button.on, button.lora.on { border-color:var(--blue); color:var(--text); background:var(--blue-wash); }
 button.sharp { border-color:rgba(184,121,66,.7); color:var(--amber); white-space:nowrap; }
 button.sharp.on { background:var(--amber-wash); border-color:var(--amber); }
@@ -913,6 +921,13 @@ nav#rooms .lbl.long { white-space:normal; line-height:1.12; font-size:14.5px; }
 .lib-sound-top { display:flex; flex-direction:column; gap:4px; min-height:64px; }
 .lib-sound-top b { font:500 14px/1.35 var(--sans); color:var(--text); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .tile.lib-sound audio { width:100%; }
+.tile .cap.sfx-take-actions { padding:0 0 9px; justify-content:flex-end; flex-wrap:nowrap; }
+.sfx-take-actions button.small { padding:5px; font-size:13px; }
+.sfx-take-menu { align-self:flex-end; max-width:100%; padding-bottom:9px; }
+.sfx-take-menu summary { display:flex; align-items:center; justify-content:center; width:32px; min-height:32px; margin-left:auto;
+  cursor:pointer; list-style:none; border:1px solid var(--line2); border-radius:var(--r1); background:var(--raise2); color:var(--text); font:20px var(--sans); }
+.sfx-take-menu summary::-webkit-details-marker { display:none; }
+.sfx-take-menu-items { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
 
 /* a gated LoRA: the guide over the page (looks.js gateDraw) */
 .gate-wrap { position:fixed; inset:0; z-index:90; display:grid; place-items:center; padding:16px; background:rgba(4,7,12,.66); }
