@@ -1514,15 +1514,30 @@ def recent(thread: dict, limit: int = HISTORY_CHARS) -> str:
     return "\n\n".join(reversed(lines))
 
 
+def asked_budget(value: str) -> int | None:
+    """``STUDIO_HISTORY_CHARS`` read as the budget it asks for: one or more ASCII digits naming a positive number, else
+    None. A superscript or another script's digit is not a number here, and no value raises, however many digits it
+    holds."""
+
+    given = value.strip()
+    if not (given.isascii() and given.isdigit()):
+        return None
+    try:
+        number = int(given)
+    except ValueError:  # more digits than an int holds
+        return None
+    return number if number > 0 else None
+
+
 def history_budget(backend: str = "") -> int:
     """The characters of the conversation a brain reads ahead of the message: ``STUDIO_HISTORY_CHARS`` as given, for
     every brain; else a quarter of the context a local server reports for the model it runs, at CHARS_PER_TOKEN and no
     more than HISTORY_CAP; else HISTORY_CHARS (a brain with a session of its own, and a local server that does not say
     or cannot be asked)."""
 
-    forced = os.environ.get("STUDIO_HISTORY_CHARS", "").strip()
-    if forced:  # not a positive whole number is no answer at all: the budget stays the plain one
-        return int(forced) if forced.isdigit() and int(forced) > 0 else HISTORY_CHARS
+    asked = asked_budget(os.environ.get("STUDIO_HISTORY_CHARS", ""))
+    if asked:  # not a positive whole number of ASCII digits is no answer at all: the budget stays the plain one
+        return asked
     if not is_local(backend):
         return HISTORY_CHARS
     config = as_local(backend, saved_settings())
@@ -1685,6 +1700,15 @@ def own_tools(thread: dict | None, sent, known: dict, harness: bool) -> list[str
     return []  # it chose none while its brain was a harness, or its brain still runs none
 
 
+def sent_tools(given, known: dict) -> list[str] | None:
+    """The tools the person sent with this turn, or None when they sent none: a value that is not a list of the Studio's
+    tool ids is refused here, before the conversation's own list is worked out, whatever its brain could run."""
+
+    if given is not None and (not isinstance(given, list) or any(not isinstance(t, str) or t not in known for t in given)):
+        raise HTTPException(400, "tools are ids from /api/agent/tools")
+    return given
+
+
 def rename_thread(thread_id: str, body: dict) -> dict:
     thread = thread_of(thread_id)
     title = " ".join(str(body.get("title") or "").split())[:80]
@@ -1735,9 +1759,7 @@ def submit(body: dict) -> dict:
         raise HTTPException(501, "The Windows preview runs only Copilot CLI locally; other agent backends are not validated.")
     harness = is_harness(backend)
     known = {t["id"]: t for t in tools()}
-    chosen = own_tools(thread, body.get("tools"), known, harness)  # the conversation's own tools after this turn
-    if not isinstance(chosen, list) or any(t not in known for t in chosen):
-        raise HTTPException(400, "tools are ids from /api/agent/tools")
+    chosen = own_tools(thread, sent_tools(body.get("tools"), known), known, harness)  # the conversation's own tools after this turn
     if harness and any(not known[t]["enabled"] for t in chosen):
         raise HTTPException(400, "a chosen tool is turned off")
     chosen = list(dict.fromkeys(chosen))

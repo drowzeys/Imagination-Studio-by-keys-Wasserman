@@ -196,6 +196,15 @@ def test_a_server_without_tool_calls_stays_a_conversation(local):
     assert thread["turns"][-1]["text"] == "Here is a prompt to paste." and "tools" not in model.asked[-1]
 
 
+def test_a_mistyped_tools_value_is_refused_on_a_brain_that_runs_none(local):
+    local(lambda body, n: {"content": "Here is a prompt."}, tools=False)  # a local brain that runs no tools
+    for sent in ("fake", 7, ["nope"], [{"id": "fake"}]):
+        answer = post("/api/agent/threads", {"text": "A still", "backend": "local", "tools": sent})
+        assert answer.status_code == 400 and "tools are ids from /api/agent/tools" in answer.text, sent
+    made = post("/api/agent/threads", {"text": "A still", "backend": "local"}).json()  # no tools sent at all: it runs
+    assert made["task"]["tools"] == [] and settled(made["thread"]["id"])["turns"][-1]["text"] == "Here is a prompt."
+
+
 def test_a_server_without_props_is_asked_aside_with_one_small_call(local):
     def reply(body, n):
         if body["messages"][-1]["content"] == "Call the ready tool.":
@@ -227,6 +236,17 @@ def test_the_budget_for_a_local_brain_is_a_quarter_of_the_context_its_server_rep
     assert agents.history_budget("local") == 4_000_000  # as given, cap and all
     monkeypatch.setenv("STUDIO_HISTORY_CHARS", "plenty")
     assert agents.history_budget("local") == agents.HISTORY_CHARS  # no crash, and no empty history
+
+
+def test_a_mistyped_budget_on_a_local_brain_leaves_the_context_budget_it_had(local, monkeypatch):
+    monkeypatch.delenv("STUDIO_HISTORY_CHARS", raising=False)
+    local(lambda body, n: {"content": "ok"}, tools=False, context=1048576)  # a server reporting a million tokens
+    plain = agents.history_budget("local")
+    assert plain == agents.HISTORY_CAP  # the quarter of it, capped
+    for given in ("²", "٤", "4 000", "+4000", "4000.0"):  # none of them a number: read as if it were not set
+        monkeypatch.setenv("STUDIO_HISTORY_CHARS", given)
+        assert agents.history_budget("local") == plain, given  # not 8,000, and no error
+        assert agents.history_budget("claude") == agents.HISTORY_CHARS, given  # a brain with a session of its own
 
 
 def test_a_probe_that_could_not_ask_is_never_kept_as_a_no(local, monkeypatch):

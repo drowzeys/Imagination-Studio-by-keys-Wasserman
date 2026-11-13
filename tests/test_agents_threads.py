@@ -217,6 +217,12 @@ def test_the_history_budget_is_eight_thousand_unless_a_local_server_says_otherwi
     assert agents.history_budget("claude") == agents.HISTORY_CHARS  # not a number: no crash, and no empty history
 
 
+@pytest.mark.parametrize("given", ["²", "٤", "+4000", "4000.0", "4 000"])
+def test_a_history_budget_is_read_from_ascii_digits_only(monkeypatch, given):
+    monkeypatch.setenv("STUDIO_HISTORY_CHARS", given)
+    assert agents.history_budget("claude") == agents.HISTORY_CHARS  # no crash, and no empty history, whatever was mistyped
+
+
 def test_one_turn_at_a_time_and_stop(fake, monkeypatch):
     monkeypatch.setenv("FAKE_SLEEP", "30")
     thread = start("Take your time", "claude")["thread"]
