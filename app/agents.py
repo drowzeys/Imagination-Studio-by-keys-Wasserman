@@ -198,6 +198,10 @@ TOOLS_TTL = 10 * 60  # whether a local server takes tool calls, asked again afte
 PROMISE = re.compile(r"\b(?:I(?:'|’| wi)ll|let me(?! know)|I am going to|I'm going to|next,? I|now I)\b", re.I)
 PATHISH = re.compile(r"path|file|folder|dir|output|frame|image|picture", re.I)
 HISTORY_CHARS = 8000  # the recent turns a brain without a session of its own reads ahead of the message
+HISTORY_CAP = 400_000  # the most of it, whatever context a local server reports
+CHARS_PER_TOKEN = 3.5  # characters one token of a conversation costs, for a budget out of a context in tokens
+HISTORY_CUT = " …"  # the mark on a turn shortened from its end to fit the budget
+CONTEXT_KEYS = ("max_model_len", "context_length", "max_context_length", "n_ctx")  # what a server calls a model's context
 STEP_LIMIT = 200
 TEXT_LIMIT = 20000
 
@@ -374,22 +378,50 @@ def props_tools(base: str) -> bool | None:
     return None
 
 
-def probe_tools(base: str, model: str) -> bool:
-    """Whether a server that has no /props takes tool calls: it is offered one tool in a small call and must call it."""
+def probe_tools(base: str, model: str) -> bool | None:
+    """Whether a server that has no /props takes tool calls: it is offered one tool in a small call and must call it.
+    None when it could not be asked (a timeout, a refused connection, an answer that carries no choices): that is
+    unknown, not a no, and nothing is remembered of it."""
 
     try:
         answer = post_json(base + "/chat/completions", {"model": model, "temperature": 0, "max_tokens": 64, "messages": [
             {"role": "user", "content": "Call the ready tool."}], "tools": [{"type": "function", "function": {
                 "name": "ready", "description": "Say that you are ready.", "parameters": {"type": "object", "properties": {}}}}]}, 45)
-        return bool(answer["choices"][0]["message"].get("tool_calls"))
     except Exception:
-        return False
+        return None
+    choices = answer.get("choices") if isinstance(answer, dict) else None
+    first = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+    message = first.get("message")
+    if not isinstance(message, dict):  # no choices, or a choice with no message: no answer was given at all
+        return None
+    return bool(message.get("tool_calls"))
+
+
+def context_of(base: str, model: str) -> int | None:
+    """The context in tokens a local server reports for the model it is running (vLLM's `max_model_len`, or whatever
+    another server calls it), or None when it says none of it: asked, never guessed from the model's name."""
+
+    if not model or not base.startswith(("http://", "https://")):
+        return None
+    try:
+        with urllib.request.urlopen(base.rstrip("/") + "/models", timeout=3) as answer:
+            listed = json.loads(answer.read()).get("data")
+    except Exception:  # a server that cannot be asked, or answers something else: no context from it
+        return None
+    entry = next((one for one in (listed if isinstance(listed, list) else [])
+                  if isinstance(one, dict) and one.get("id") == model), {})
+    for key in CONTEXT_KEYS:
+        value = entry.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return None
 
 
 def tools_of(base: str, model: str, wait: bool = True) -> bool:
     """Whether the local server takes tool calls, kept for TOOLS_TTL; STUDIO_LOCAL_TOOLS=1 or 0 says it instead. A server
     without /props is asked with a small call (probe_tools), which may take a while on a busy server: without ``wait``
-    (a page's look, the automatic agent) that runs aside and the answer is False until it is known."""
+    (a page's look, the automatic agent) that runs aside and the answer is False until it is known. A server that could
+    not be asked is unknown: nothing is kept of it, so the next look asks again."""
 
     forced = os.environ.get("STUDIO_LOCAL_TOOLS", "").strip()
     if forced in ("0", "1"):
@@ -410,8 +442,12 @@ def tools_of(base: str, model: str, wait: bool = True) -> bool:
         return False
     ok = said if said is not None else probe_tools(base, model)
     with lock:
-        tool_checks[key] = (time.monotonic(), ok)
-    return ok
+        if ok is None:  # could not be asked: the next look asks again, with nothing in the way of it
+            if tool_checks.get(key, (0, False))[1] is None:
+                del tool_checks[key]
+        else:
+            tool_checks[key] = (time.monotonic(), ok)
+    return bool(ok)
 
 
 def local_tools(endpoint: str, model: str = "", wait: bool = True) -> bool:
@@ -1451,8 +1487,19 @@ def question_of(text: str) -> tuple[bool, str, list[str]]:
     return bool(last) and last.endswith("?"), text, []
 
 
+def shortened(line: str, room: int) -> str:
+    """A turn's line cut to about ``room`` characters at a word and marked as cut: it keeps its own opening words."""
+
+    room = max(room - len(HISTORY_CUT), 1)  # the mark, and at least one character of the turn
+    cut = line[:room]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 0 else cut).rstrip() + HISTORY_CUT
+
+
 def recent(thread: dict, limit: int = HISTORY_CHARS) -> str:
-    """The thread's turns so far, newest last, as a brain without a session reads them ahead of the message."""
+    """The thread's turns so far, newest last, as a brain without a session reads them ahead of the message: those that
+    fit in ``limit`` characters, and, for the one too long for what is left, its opening words cut at a word and
+    marked, so a long turn is never dropped whole."""
 
     lines, size = [], 0
     for item in reversed(thread.get("turns") or []):
@@ -1460,10 +1507,28 @@ def recent(thread: dict, limit: int = HISTORY_CHARS) -> str:
             continue
         line = ("Filmmaker: " if item["role"] == "user" else "You: ") + item["text"].strip()
         if size + len(line) > limit:
+            lines.append(shortened(line, limit - size))  # the first turn that does not fit keeps its opening words
             break
         lines.append(line)
         size += len(line)
     return "\n\n".join(reversed(lines))
+
+
+def history_budget(backend: str = "") -> int:
+    """The characters of the conversation a brain reads ahead of the message: ``STUDIO_HISTORY_CHARS`` as given, for
+    every brain; else a quarter of the context a local server reports for the model it runs, at CHARS_PER_TOKEN and no
+    more than HISTORY_CAP; else HISTORY_CHARS (a brain with a session of its own, and a local server that does not say
+    or cannot be asked)."""
+
+    forced = os.environ.get("STUDIO_HISTORY_CHARS", "").strip()
+    if forced:  # not a positive whole number is no answer at all: the budget stays the plain one
+        return int(forced) if forced.isdigit() and int(forced) > 0 else HISTORY_CHARS
+    if not is_local(backend):
+        return HISTORY_CHARS
+    config = as_local(backend, saved_settings())
+    base, models = local_server(config["local_endpoint"])
+    context = context_of(base, answering_model(models, config["local_model"])) if base else None
+    return min(int(context / 4 * CHARS_PER_TOKEN), HISTORY_CAP) if context else HISTORY_CHARS
 
 
 def with_history(thread: dict | None, message: str, skip_last: bool = True) -> str:
@@ -1472,7 +1537,7 @@ def with_history(thread: dict | None, message: str, skip_last: bool = True) -> s
     if not thread:
         return message
     earlier = dict(thread, turns=(thread.get("turns") or [])[:-1] if skip_last else thread.get("turns") or [])
-    said = recent(earlier)
+    said = recent(earlier, history_budget(thread.get("backend") or ""))
     return f"The conversation so far:\n\n{said}\n\n---\n\nThe filmmaker now says:\n\n{message}" if said else message
 
 
@@ -1592,12 +1657,32 @@ def load_threads() -> None:
             finish_turn(task)  # the Studio stopped while it ran: its answer (or why it failed) goes into the thread
 
 
-def new_thread(backend: str, tools_: list[str], title: str) -> dict:
+def new_thread(backend: str, tools_: list[str], title: str, harness: bool = False) -> dict:
+    """A conversation's record; `harness` is whether its brain took tools when it was made, which is what tells an empty
+    list that chose none (True) from one that had none to choose (False) when a later turn's brain does take them."""
+
     now = time.time()
     thread = {"id": time.strftime("th-%m%d-%H%M%S-") + uuid.uuid4().hex[:6], "title": " ".join(title.split())[:80] or "A conversation",
-              "backend": backend, "tools": tools_, "created": now, "updated": now, "session": None, "pending": None, "turns": []}
+              "backend": backend, "tools": tools_, "harness": harness, "created": now, "updated": now, "session": None,
+              "pending": None, "turns": []}
     threads[thread["id"]] = thread
     return thread
+
+
+def own_tools(thread: dict | None, sent, known: dict, harness: bool) -> list[str]:
+    """The tools a conversation means to have after this turn, which its later turns keep: the person's list when they
+    send one, else its own less any tool turned off since (never more than it had), and the enabled ones when it was
+    made on a brain that ran no tools, which this one does. A new conversation on such a brain records none, and its
+    `harness` (see `new_thread`) says why its list is empty."""
+
+    own = [t for t in (thread.get("tools") or []) if t in known and known[t]["enabled"]] if thread else []
+    if sent is not None:
+        return sent if thread or harness else []  # the person's list replaces the conversation's own
+    if own:
+        return own
+    if harness and (thread is None or thread.get("harness") is False):
+        return [t for t, v in known.items() if v["enabled"]]  # it had none because its brain ran no tools then
+    return []  # it chose none while its brain was a harness, or its brain still runs none
 
 
 def rename_thread(thread_id: str, body: dict) -> dict:
@@ -1650,17 +1735,13 @@ def submit(body: dict) -> dict:
         raise HTTPException(501, "The Windows preview runs only Copilot CLI locally; other agent backends are not validated.")
     harness = is_harness(backend)
     known = {t["id"]: t for t in tools()}
-    if body.get("tools") is not None:
-        chosen = body["tools"]
-    elif thread:  # a follow-up keeps the conversation's own tools, less any turned off since: never more than it had
-        chosen = [t for t in thread.get("tools") or [] if t in known and known[t]["enabled"]]
-    else:
-        chosen = [t for t, v in known.items() if v["enabled"]]
+    chosen = own_tools(thread, body.get("tools"), known, harness)  # the conversation's own tools after this turn
     if not isinstance(chosen, list) or any(t not in known for t in chosen):
         raise HTTPException(400, "tools are ids from /api/agent/tools")
     if harness and any(not known[t]["enabled"] for t in chosen):
         raise HTTPException(400, "a chosen tool is turned off")
-    chosen = list(dict.fromkeys(chosen)) if harness else []  # a conversation has no tools to run
+    chosen = list(dict.fromkeys(chosen))
+    turn_tools = chosen if harness else []  # what this turn can run: a conversation has no tools to run
     attach_ = body.get("attach") or []
     if not isinstance(attach_, list) or len(attach_) > 20:
         raise HTTPException(400, "attach is a list of up to 20 Library paths")
@@ -1677,14 +1758,16 @@ def submit(body: dict) -> dict:
         waits = bool(thread and thread.get("pending"))  # checked under the lock: two quick messages never both start
         if waits and len(queued_of(thread)) >= QUEUE_LIMIT:
             raise HTTPException(409, "the agent is still working on this conversation and messages are waiting: wait for it, or stop it")
-        thread = thread or new_thread(backend, chosen, prompt)
+        thread = thread or new_thread(backend, chosen, prompt, harness)
         if waits:  # it goes when the running turn ends (promote), in the order sent
             thread["next"] = [*(thread.get("next") or []), task_id]
         else:
             thread["turns"].append(turn("user", prompt, attachments=[str(p) for p in attach_], task=task_id))
             thread.update(pending=task_id)
+        # the task carries only what this turn's brain can run, while the thread keeps the list it means to have: a turn
+        # whose brain runs no tools (busy, or unable to answer) never takes the conversation's own tools away
         thread.update(tools=chosen, updated=time.time())
-        task = {"id": task_id, "status": "queued", "prompt": prompt, "backend": backend, "tools": chosen,
+        task = {"id": task_id, "status": "queued", "prompt": prompt, "backend": backend, "tools": turn_tools,
                 "attach": [str(p) for p in attach_], "where": f"ssh:{host}" if host else "here", "created": time.time(),
                 "started": None, "finished": None, "reply": "", "outputs": [], "error": None, "inputs": [], "thread": thread["id"],
                 "steps": [], "jobs": []}

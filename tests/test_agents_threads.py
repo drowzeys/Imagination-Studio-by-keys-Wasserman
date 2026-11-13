@@ -194,6 +194,29 @@ def test_question_detection(text, asked, shown, options):
     assert agents.question_of(text) == (asked, shown, options)
 
 
+def test_a_turn_too_long_for_the_budget_keeps_its_opening_words():
+    long = "Consider the lighthouse at the end of the world. " + " ".join(["More about the keeper of the light."] * 300)
+    thread = {"turns": [agents.turn("user", "A teaser for a horror film"), agents.turn("agent", "Two shots, then a reveal."),
+                        agents.turn("user", long)]}
+    assert len(long) > agents.HISTORY_CHARS
+    whole = agents.recent(thread, agents.HISTORY_CAP)  # the budget a local server of a million tokens gives
+    assert whole.startswith("Filmmaker: A teaser for a horror film") and whole.endswith(long)
+    assert whole.index("Filmmaker: A teaser") < whole.index("You: Two shots") < whole.index("Consider the lighthouse")
+    cut = agents.recent(thread, agents.HISTORY_CHARS)  # too long for the budget: its own opening words, marked
+    assert cut.startswith("Filmmaker: Consider the lighthouse at the end of the world.")
+    assert cut.endswith(agents.HISTORY_CUT) and len(cut) <= agents.HISTORY_CHARS and "A teaser" not in cut
+    assert agents.recent(thread, 1).strip()  # never nothing at all while the thread holds a turn with text
+
+
+def test_the_history_budget_is_eight_thousand_unless_a_local_server_says_otherwise(monkeypatch):
+    monkeypatch.delenv("STUDIO_HISTORY_CHARS", raising=False)
+    assert agents.history_budget("claude") == agents.history_budget("gemini") == agents.HISTORY_CHARS
+    monkeypatch.setenv("STUDIO_HISTORY_CHARS", "4000000")
+    assert agents.history_budget("claude") == agents.history_budget("local") == 4_000_000  # as given, for every brain
+    monkeypatch.setenv("STUDIO_HISTORY_CHARS", "plenty")
+    assert agents.history_budget("claude") == agents.HISTORY_CHARS  # not a number: no crash, and no empty history
+
+
 def test_one_turn_at_a_time_and_stop(fake, monkeypatch):
     monkeypatch.setenv("FAKE_SLEEP", "30")
     thread = start("Take your time", "claude")["thread"]
