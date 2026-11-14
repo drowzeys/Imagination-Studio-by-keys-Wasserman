@@ -14,8 +14,9 @@ from test_agents import PY, agents, client, fake, post, slate  # noqa: F401  (fa
 class Model:
     """An OpenAI-compatible server: /v1/models, llama.cpp's /props, and /v1/chat/completions answered by `reply`."""
 
-    def __init__(self, reply, tools=True):  # tools None: no /props (not llama.cpp), so the Studio asks with a small call
-        self.asked, self.reply, self.tools = [], reply, tools
+    def __init__(self, reply, tools=True, context=None):  # tools None: no /props (not llama.cpp), so the Studio asks with
+        self.asked, self.reply, self.tools = [], reply, tools  # a small call; context: the max_model_len it reports of itself
+        self.context = context
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -32,7 +33,8 @@ class Model:
 
             def do_GET(self):
                 if self.path == "/v1/models":
-                    return self.send({"data": [{"id": "nvidia-nemotron-3.5-bolt"}]})
+                    one = {"id": "nvidia-nemotron-3.5-bolt", **({"max_model_len": outer.context} if outer.context else {})}
+                    return self.send({"data": [one]})
                 if self.path == "/props" and outer.tools is not None:
                     return self.send({"chat_template_caps": {"supports_tool_calls": outer.tools}})
                 self.send({}, 404)
@@ -68,8 +70,8 @@ def local(fake, monkeypatch):
     post("/api/agent/tools", {"id": "fake", "label": "Fake", "command": [PY, str(fake["tmp"] / "mcp.py")], "env": {}})
     servers = []
 
-    def serve(reply, tools=True):
-        model = Model(reply, tools)
+    def serve(reply, tools=True, context=None):
+        model = Model(reply, tools, context)
         servers.append(model)
         post("/api/brains/settings", {"local_endpoint": model.url})
         return model
@@ -194,6 +196,15 @@ def test_a_server_without_tool_calls_stays_a_conversation(local):
     assert thread["turns"][-1]["text"] == "Here is a prompt to paste." and "tools" not in model.asked[-1]
 
 
+def test_a_mistyped_tools_value_is_refused_on_a_brain_that_runs_none(local):
+    local(lambda body, n: {"content": "Here is a prompt."}, tools=False)  # a local brain that runs no tools
+    for sent in ("fake", 7, ["nope"], [{"id": "fake"}]):
+        answer = post("/api/agent/threads", {"text": "A still", "backend": "local", "tools": sent})
+        assert answer.status_code == 400 and "tools are ids from /api/agent/tools" in answer.text, sent
+    made = post("/api/agent/threads", {"text": "A still", "backend": "local"}).json()  # no tools sent at all: it runs
+    assert made["task"]["tools"] == [] and settled(made["thread"]["id"])["turns"][-1]["text"] == "Here is a prompt."
+
+
 def test_a_server_without_props_is_asked_aside_with_one_small_call(local):
     def reply(body, n):
         if body["messages"][-1]["content"] == "Call the ready tool.":
@@ -209,6 +220,130 @@ def test_a_server_without_props_is_asked_aside_with_one_small_call(local):
         time.sleep(0.1)
     assert {b["id"]: b for b in client.get("/api/brains").json()["backends"]}["local"]["harness"] is True
     assert sum(1 for body in model.asked if body["messages"][-1]["content"] == "Call the ready tool.") == 1  # asked once, then kept
+
+
+def test_the_budget_for_a_local_brain_is_a_quarter_of_the_context_its_server_reports(local, monkeypatch):
+    monkeypatch.delenv("STUDIO_HISTORY_CHARS", raising=False)
+    local(lambda body, n: {"content": "ok"}, tools=False, context=1048576)  # one model, a million tokens, none set
+    assert 300_000 < agents.history_budget("local") <= agents.HISTORY_CAP
+    local(lambda body, n: {"content": "ok"}, tools=False, context=32768)
+    assert 20_000 < agents.history_budget("local") < 40_000  # the quarter of it, not the cap
+    local(lambda body, n: {"content": "ok"}, tools=False)  # a server that reports no context
+    assert agents.history_budget("local") == agents.HISTORY_CHARS
+    post("/api/brains/settings", {"local_endpoint": "http://127.0.0.1:9"})  # and one that cannot be asked
+    assert agents.history_budget("local") == agents.HISTORY_CHARS
+    monkeypatch.setenv("STUDIO_HISTORY_CHARS", "4000000")
+    assert agents.history_budget("local") == 4_000_000  # as given, cap and all
+    monkeypatch.setenv("STUDIO_HISTORY_CHARS", "plenty")
+    assert agents.history_budget("local") == agents.HISTORY_CHARS  # no crash, and no empty history
+
+
+def test_a_mistyped_budget_on_a_local_brain_leaves_the_context_budget_it_had(local, monkeypatch):
+    monkeypatch.delenv("STUDIO_HISTORY_CHARS", raising=False)
+    local(lambda body, n: {"content": "ok"}, tools=False, context=1048576)  # a server reporting a million tokens
+    plain = agents.history_budget("local")
+    assert plain == agents.HISTORY_CAP  # the quarter of it, capped
+    for given in ("²", "٤", "4 000", "+4000", "4000.0"):  # none of them a number: read as if it were not set
+        monkeypatch.setenv("STUDIO_HISTORY_CHARS", given)
+        assert agents.history_budget("local") == plain, given  # not 8,000, and no error
+        assert agents.history_budget("claude") == agents.HISTORY_CHARS, given  # a brain with a session of its own
+
+
+def test_a_probe_that_could_not_ask_is_never_kept_as_a_no(local, monkeypatch):
+    gate, probes, real = threading.Event(), [], agents.post_json
+
+    def busy(*args, **kwargs):  # a server that does not answer the probe in time
+        probes.append(args)
+        gate.wait(10)
+        raise TimeoutError("no answer")
+
+    monkeypatch.setattr(agents, "post_json", busy)
+
+    def reply(body, n):
+        if body["messages"][-1]["content"] == "Call the ready tool.":
+            return {"content": "", "tool_calls": [call("ready", {})]}
+        return {"content": "Hello."}
+    model = local(reply, tools=None)
+    found = lambda: {b["id"]: b for b in client.get("/api/brains").json()["backends"]}["local"]["harness"]
+    assert found() is False  # the page's look does not wait for the probe
+    ends = time.time() + 10
+    while time.time() < ends and not probes:
+        time.sleep(0.05)
+    assert probes  # it was asked, and the ask is in flight
+    gate.set()
+    ends = time.time() + 10
+    while time.time() < ends and agents.tool_checks:
+        time.sleep(0.05)
+    assert agents.tool_checks == {}  # an ask that failed is unknown: nothing is kept of it
+    assert agents.tools_of(model.url + "/v1", "nvidia-nemotron-3.5-bolt") is False  # a caller still gets a plain no
+    monkeypatch.setattr(agents, "post_json", real)
+    ends = time.time() + 10
+    while time.time() < ends and not found():
+        time.sleep(0.1)
+    assert found() is True  # the next look asked again, with no turn in between
+
+
+def test_a_thread_whose_brain_took_no_tools_gets_them_when_it_does(local):
+    local(lambda body, n: {"content": "Here is a prompt to paste."}, tools=False)  # a conversation: no tool calls
+    tools = agents.tools()
+    for tool in tools:
+        tool["enabled"] = tool["id"] == "fake"  # the one the person has on
+    agents.save_tools({"tools": tools})
+    thread = post("/api/agent/threads", {"text": "A still", "backend": "local", "tools": ["fake"]}).json()["thread"]
+    settled(thread["id"])
+    assert thread["tools"] == [] and thread["harness"] is False
+
+    def reply(body, n):
+        if body["messages"][-1]["role"] == "tool":
+            return {"content": "Made the scene."}
+        return {"content": "", "tool_calls": [call("get_scene_info", {})]}
+    local(reply)  # the same brain, its server now taking tool calls
+    said = post(f"/api/agent/threads/{thread['id']}/messages", {"text": "Now do it"}).json()
+    assert said["task"]["tools"] == ["fake"] == said["thread"]["tools"]  # the turn carries them
+    done = settled(thread["id"])
+    assert ("tool", "tools: fake") in [(t["role"], t["text"]) for t in done["turns"]]
+    # a thread that chose no tools while its brain was a harness keeps none
+    quiet = post("/api/agent/threads", {"text": "Just talk", "backend": "local", "tools": []}).json()
+    assert quiet["task"]["tools"] == []
+    again = post(f"/api/agent/threads/{quiet['thread']['id']}/messages", {"text": "Still just talk"}).json()
+    assert again["task"]["tools"] == []
+
+
+def test_a_thread_that_chose_no_tools_keeps_none_while_its_brain_comes_and_goes(local):
+    local(lambda body, n: {"content": "Made the scene."})  # a harness: its server takes tool calls
+    tools = agents.tools()
+    for tool in tools:
+        tool["enabled"] = tool["id"] == "fake"  # the one a wrong grant would hand back
+    agents.save_tools({"tools": tools})
+    first = post("/api/agent/threads", {"text": "Just talk", "backend": "local", "tools": []}).json()
+    assert first["task"]["tools"] == [] and first["thread"]["harness"] is True  # none chosen, its brain a harness
+    settled(first["thread"]["id"])
+    local(lambda body, n: {"content": "A prompt, then."}, tools=False)  # a busy server: this turn's brain says no tools
+    said = post(f"/api/agent/threads/{first['thread']['id']}/messages", {"text": "Still just talk"}).json()
+    assert said["task"]["tools"] == [] and said["thread"]["harness"] is True  # what it was made with is not rewritten
+    settled(first["thread"]["id"])
+    local(lambda body, n: {"content": "Made the scene."})  # tool calls again
+    again = post(f"/api/agent/threads/{first['thread']['id']}/messages", {"text": "Talk to me"}).json()
+    assert again["task"]["tools"] == [] == again["thread"]["tools"]  # it keeps none now too
+
+
+def test_a_thread_that_had_tools_keeps_them_through_a_turn_that_could_run_none(local):
+    local(lambda body, n: {"content": "Made the scene."})  # a harness: its server takes tool calls
+    tools = agents.tools()
+    for tool in tools:
+        tool["enabled"] = tool["id"] in ("fake", "studio")  # studio is enabled, and this conversation never had it
+    agents.save_tools({"tools": tools})
+    first = post("/api/agent/threads", {"text": "Make the scene", "backend": "local", "tools": ["fake"]}).json()
+    assert first["task"]["tools"] == ["fake"] == first["thread"]["tools"]
+    settled(first["thread"]["id"])
+    model = local(lambda body, n: {"content": "A prompt, then."}, tools=False)  # a busy server: this turn's brain says no
+    said = post(f"/api/agent/threads/{first['thread']['id']}/messages", {"text": "Just talk"}).json()
+    assert said["task"]["tools"] == [] and said["thread"]["tools"] == ["fake"]  # it answers as a conversation does
+    done = settled(first["thread"]["id"])
+    assert done["turns"][-1]["text"] == "A prompt, then." and "tools" not in model.asked[-1]
+    local(lambda body, n: {"content": "Made it."})  # tool calls again
+    again = post(f"/api/agent/threads/{first['thread']['id']}/messages", {"text": "Now do it"}).json()
+    assert again["task"]["tools"] == ["fake"] == again["thread"]["tools"]  # its own tools again, never more than it had
 
 
 # a stand-in for the Studio's own MCP server: queue_still queues a job, wait_for_jobs and job_status find it done
