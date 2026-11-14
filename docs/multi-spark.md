@@ -5,7 +5,8 @@ the job may use, the one the app runs on counted as one. The app shows how many 
 and says what the number will do before you queue anything.
 
 The app on a Mac leads worker Sparks too: see *A Mac at the head* below. A Mac can also be one of the workers, of a
-Spark or of another Mac: see *A Mac as a worker*.
+Spark or of another Mac: see *A Mac as a worker*. So can a Windows PC with the native Windows Studio: see *A Windows
+PC as a worker*.
 
 ## Local GPUs on one workstation
 
@@ -300,6 +301,33 @@ were not run. The commands that start, find and stop an app from the head were r
 a stand-in app (`tests/test_sparks_mac_worker.py`), not against a real Studio app started from a head. The time
 estimate for a list with a Mac in it is marked not measured.
 
+## A Windows PC as a worker
+
+A Windows PC running the native Windows Studio (an RTX Spark N1X, [docs/rtx-spark-n1x.md](rtx-spark-n1x.md)) can be
+added to the list too, under **Machine → Sparks → Add a Spark, a Mac or a Windows PC**. It is the CUDA build, so it is
+given what a Spark is given: single FastH3 clips at the sizes and qualities it lists.
+
+**What it needs.**
+
+1. OpenSSH Server on, with a key login from the head (the setup's `-EnableSsh -AuthorizedKey "ssh-ed25519 ..."`
+   does both, for the home network only): `ssh you@192.168.1.30 hostname` answers without a password.
+2. The native Windows Studio installed and **open**, on the same Studio version as the head.
+
+Only its address is asked for. ssh there lands in `cmd.exe` or PowerShell, so the head asks one read-only question in
+PowerShell (the PC's name, and whether an app answers on its `127.0.0.1:7870`), then talks to the app through the
+tunnel like any other worker.
+
+**Its app is its owner's.** Nothing is sent to a Windows PC, started or stopped there from a head: *Update and
+start* and *Stop* only say what to do on that PC. A PC whose app is closed shows *its Studio app is not running*; one
+that is behind shows which files differ, and is given nothing until it is updated there. Code is compared by its
+lines, so a Windows checkout's CRLF line ends are not a difference.
+
+**Memory and checks.** Every clip passes that PC's own memory guard and its own Windows feature checks, asked before
+the clip is sent and again when its job is queued there. A clip it refuses goes back to the head's queue.
+
+**Measured.** See the pull request that added this: the figures are in its description until a release run is
+written here.
+
 ## What is not built
 
 - **One clip split across Sparks.** It is measured, outside the app, on the engine's `h3-cuda-multispark` branch
@@ -316,7 +344,8 @@ estimate for a list with a Mac in it is marked not measured.
 - **The queue across a restart.** Jobs are kept in memory. A remote worker may finish in its own folder, but a restarted
   head does not fetch that clip. Owned local workers stop with their head.
 - **Starting a worker's install.** The app sends code, not models or the environment.
-- **A Windows machine as a worker.** A worker is reached over ssh and started with bash: a Spark, a Linux machine with
-  an NVIDIA card, or a Mac.
+- **A Windows PC at the head.** The native Windows Studio renders on its own machine and can be a worker; it does
+  not lead workers (its Sparks tab says so).
+- **Starting or updating a Windows worker from the head.** Its app is started and updated on that PC.
 - **Five remote-only participants at most.** The limit is 5 (`LIMIT` in `app/sparks.py`), including the head. Local
   workers have a separate four-card bound; the combined selector is at most eight, not eight remote Sparks.

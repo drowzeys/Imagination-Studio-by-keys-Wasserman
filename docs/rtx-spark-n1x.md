@@ -27,7 +27,8 @@ appended to your own pins; it shows after Explorer restarts, or at the next sign
 renders: no sleep or hibernate plugged in, the lid does nothing, Windows on Best performance, the Wi-Fi adapter never
 powered down (`-NeverSleepOnBattery` for battery too, `-NoPower` to skip). Optional: `-StartAtLogon` (starts the Studio
 at sign-in), `-EnableSsh -AuthorizedKey "ssh-ed25519 ..."` (another machine reaches the laptop over SSH on the home
-network). `-Native` is accepted for older command lines and changes nothing.
+network; a DGX Spark or a Mac can then use the laptop as a worker for single clips, [A Windows PC as a
+worker](multi-spark.md#a-windows-pc-as-a-worker)). `-Native` is accepted for older command lines and changes nothing.
 
 Before any component install/download, native setup prints a runtime-fit plan. The default broad selection
 skips missing models whose existing runtime admission requirement exceeds this machine's GPU pool (and host
