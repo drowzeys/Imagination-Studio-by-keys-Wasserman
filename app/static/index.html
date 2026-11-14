@@ -60,6 +60,7 @@ try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = d
 <script src="suitelinks.js"></script>
 <script src="slate.js"></script>
 <script src="director.js"></script>
+<script src="trashbin.js"></script>  <!-- films in the trash, put back -->
 <script src="motion.js"></script>
 <script src="actions.js"></script>
 <script src="captions.js"></script>
@@ -947,6 +948,7 @@ function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library"))
     if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
     put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
       typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
+      typeof tbPanel === "function" ? tbPanel() : null,  // films in the trash, put back (trashbin.js)
       el("div", { class: "row", style: "margin-top:10px" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span"),
         bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,
         bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,

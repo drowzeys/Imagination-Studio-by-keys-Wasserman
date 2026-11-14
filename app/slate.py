@@ -13,6 +13,7 @@ import math
 import os
 import re
 import shutil
+import threading
 import socket
 import subprocess
 import time
@@ -95,13 +96,14 @@ def blank(name: str) -> dict:
 
 
 def write(data: dict) -> dict:
-    file = project_file(data["id"])
-    file.parent.mkdir(parents=True, exist_ok=True)
-    data["updatedAt"] = now()
-    scratch = file.with_suffix(".tmp")
-    scratch.write_text(json.dumps(data, indent=1))
-    scratch.replace(file)
-    return data
+    with TRASH_LOCK:  # never in the middle of a film moved to the trash, put back or replaced
+        file = project_file(data["id"])
+        file.parent.mkdir(parents=True, exist_ok=True)
+        data["updatedAt"] = now()
+        scratch = file.with_suffix(".tmp")
+        scratch.write_text(json.dumps(data, indent=1))
+        scratch.replace(file)
+        return data
 
 
 @router.get("/api/slate/projects")
@@ -131,9 +133,7 @@ def create_project(body: dict) -> dict:
     if not isinstance(given, dict) or not isinstance(given.get("scenes"), list):
         raise HTTPException(400, "this is not a Slate project.json")
     data = {**blank(given.get("name") or "Imported film"), **given}
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(data.get("id", ""))) or project_file(data["id"]).is_file():
-        data["id"] = new_id()
-    return write(data)
+    return write_new(data)
 
 
 @router.get("/api/slate/projects/{project_id}")
@@ -155,30 +155,92 @@ def save_project(project_id: str, body: dict) -> dict:
     """The film as the page has it. A body that carries the ``updatedAt`` it was loaded with, older than the file's
     (a render, the Director, the night shift or the suite wrote it since), is refused: 409, and the page loads it again."""
 
-    file = project_file(project_id)
-    if not file.is_file():
-        raise HTTPException(404, "no such film")
-    if body.get("updatedAt"):
-        try:
-            kept = json.loads(file.read_text()).get("updatedAt") or ""
-        except ValueError:
-            kept = ""
-        if str(body["updatedAt"]) < str(kept):
-            raise HTTPException(409, "the film changed on the server since it was loaded")
-    body["id"] = project_id
-    return {"updatedAt": write(body)["updatedAt"]}
+    with TRASH_LOCK:  # the check and the write as one, never across a film replaced or moved to the trash
+        file = project_file(project_id)
+        if not file.is_file():
+            raise HTTPException(404, "no such film")
+        if body.get("updatedAt"):
+            try:
+                kept = json.loads(file.read_text()).get("updatedAt") or ""
+            except ValueError:
+                kept = ""
+            if str(body["updatedAt"]) < str(kept):
+                raise HTTPException(409, "the film changed on the server since it was loaded")
+        body["id"] = project_id
+        return {"updatedAt": write(body)["updatedAt"]}
+
+
+TRASH_LOCK = threading.RLock()  # films written, moved to the trash, put back and replaced one at a time
+
+
+def write_new(data: dict) -> dict:
+    """A film taken in (an import, the suite's Make a Slate film), written under an id of its own: one already
+    taken, or the folder of a film being put back from the trash, gives it a new id, the check and the write as one."""
+
+    with TRASH_LOCK:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(data.get("id", ""))) or project_file(data["id"]).is_file() \
+                or project_file(data["id"]).parent.exists():
+            data["id"] = new_id()
+        return write(data)
+
+
+def trash_name(project_id: str) -> Path:
+    """A film's place in the trash, its own even when another of the same id went there that second."""
+
+    moment = int(time.time())
+    while (HOME / "trash" / f"slate-{project_id}-{moment}").exists():
+        moment += 1
+    return HOME / "trash" / f"slate-{project_id}-{moment}"
 
 
 @router.delete("/api/slate/projects/{project_id}")
 def remove_project(project_id: str) -> dict:
     """Moved to the studio's trash folder, not erased."""
 
-    folder = project_file(project_id).parent
-    if not folder.is_dir():
-        raise HTTPException(404, "no such film")
-    (HOME / "trash").mkdir(exist_ok=True)
-    shutil.move(str(folder), str(HOME / "trash" / f"slate-{project_id}-{int(time.time())}"))
+    with TRASH_LOCK:
+        folder = project_file(project_id).parent
+        if not folder.is_dir():
+            raise HTTPException(404, "no such film")
+        (HOME / "trash").mkdir(exist_ok=True)
+        shutil.move(str(folder), str(trash_name(project_id)))
     return {"ok": True}
+
+
+TRASHED = re.compile(r"slate-([A-Za-z0-9_-]{1,64})-(\d{1,12})")  # remove_project's folder in the trash
+
+
+@router.get("/api/slate/trash")
+def trashed_films() -> list[dict]:
+    """The films in the trash folder (Remove), newest first: what the Library's trash offers to put back."""
+
+    out = []
+    for folder in (HOME / "trash").glob("slate-*") if (HOME / "trash").is_dir() else []:
+        found = TRASHED.fullmatch(folder.name)
+        if not found or not folder.is_dir() or folder.is_symlink():
+            continue
+        try:
+            name = str(json.loads((folder / "project.json").read_text()).get("name") or "")
+        except (OSError, ValueError, AttributeError):
+            name = ""
+        out.append({"folder": folder.name, "id": found[1], "name": name, "removed": int(found[2])})
+    return sorted(out, key=lambda one: -one["removed"])
+
+
+@router.post("/api/slate/trash/{folder}/restore")
+def restore_film(folder: str) -> dict:
+    """A removed film put back where it was (refused when a film of that id is there again)."""
+
+    found = TRASHED.fullmatch(folder)
+    with TRASH_LOCK:  # the check and the move as one: two of the same film put back at once never nest
+        source = HOME / "trash" / folder
+        if not found or not source.is_dir() or source.is_symlink():
+            raise HTTPException(404, "no such film in the trash")
+        target = HOME / "slate" / found[1]
+        if target.exists() or target.is_symlink():
+            raise HTTPException(409, "a film with that id is in Production again")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)  # a rename: never into a folder that is there
+    return {"id": found[1]}
 
 
 @router.post("/api/slate/exists")

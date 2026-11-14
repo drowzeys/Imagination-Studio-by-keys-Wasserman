@@ -3,8 +3,11 @@
 // shift (each on a film from Production, the open Slate film by default, else the newest), and Finish under Edit. Every
 // panel is drawn by its own module (slate.js, director.js, nightshift.js, finish.js); this file only gives it a page
 // and a film to work on, by opening that film in Slate (SL.p), exactly as Production does.
-const RM = { films: null, asked: false, opening: "", kind: "cast", nsFor: "" };
-async function rmFilms() { try { const got = await api("/api/slate/projects"); RM.films = Array.isArray(got) ? got : []; } catch { RM.films = []; } render(); }
+const RM = { films: null, asked: false, opening: "", kind: "cast", nsFor: "", ask: 0 };
+// each read of the films numbered: an answer to an older one (sent before a film was moved to the trash) is dropped
+async function rmFilms() { const ask = ++RM.ask; let films = [];
+  try { const got = await api("/api/slate/projects"); films = Array.isArray(got) ? got : []; } catch {}
+  if (ask !== RM.ask) return; RM.films = films; render(); }
 const rmNewest = () => (RM.films || []).slice().sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
 // a film opened here is the film Production shows too: the one open there is saved first
 async function rmOpen(id) { if (!id || (SL.p && SL.p.id === id) || RM.opening) return; RM.opening = id; render();
@@ -19,7 +22,19 @@ function rmPicker() { if (!RM.asked) { RM.asked = true; rmFilms(); }
   if (!films.length && !SL.p) return null;
   const list = SL.p && !films.some(f => f.id === SL.p.id) ? [{ id: SL.p.id, name: SL.p.name }, ...films] : films;
   return el("div", { class: "fit", style: "min-width:220px" }, el("label", {}, "Film"),
-    el("select", { "aria-label": "Film", onchange: e => rmOpen(e.target.value) }, list.map(f => el("option", { value: f.id, selected: f.id === open }, f.name || "Untitled")))); }
+    el("div", { class: "row", style: "align-items:center;gap:6px" },
+      el("select", { "aria-label": "Film", onchange: e => rmOpen(e.target.value) }, list.map(f => el("option", { value: f.id, selected: f.id === open }, f.name || "Untitled"))),
+      SL.p ? el("button", { type: "button", class: "small ghost fit", "data-film-trash": SL.p.id, title: "Move this film to the trash (put back from the Library)", onclick: () => rmTrash(SL.p) }, "Move to the trash") : null)); }
+// a film moved to the studio's trash folder (Slate's own Remove), from any room; the Library's trash puts it back
+async function rmTrash(film) {
+  if (!film || !confirm("Move the film " + (film.name || "Untitled") + " to the trash? It can be put back from the Library.")) return;
+  try {
+    if (typeof slCancel === "function") slCancel();
+    await api("/api/slate/projects/" + encodeURIComponent(film.id), undefined, "DELETE");
+    SL.p = null; SL.metas = null; RM.failed = film.id; toast("Moved to the trash: " + (film.name || "Untitled"));
+    if (typeof tbForget === "function") tbForget(); else { RM.films = null; RM.asked = false; }
+  } catch (e) { toast(e.message); }
+  render(); }
 // no film yet: start one in Production
 const rmNone = what => { const waiting = RM.opening || RM.films === null || (RM.films.length && !SL.p && !RM.failed);
   return el("section", { class: "panel" }, el("div", { class: "note m-flat" }, RM.opening ? "Opening the film…" : waiting ? "Loading…" : "No film yet. " + what),
