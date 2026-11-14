@@ -62,7 +62,13 @@ const HC_MODES = { clip: ["Clip with sound", "minimax", "MiniMax H3", "Describe 
 const HC_RECIPES = () => ({ quick: "Quick look", ...(S && S.sharp ? { sharp: "Sharp Spec" } : {}), final: "Final 2K" });
 const hcMode = () => HC.mode || (HC_MODES[homePrefs().presets.mode] ? homePrefs().presets.mode : "clip");
 const hcRecipe = () => { const r = HC.recipe || homePrefs().presets.recipe; return HC_RECIPES()[r] ? r : "quick"; };
-const hcPictureModel = () => { const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"]; return have.includes(want) ? want : "qwen"; };
+const hcPictureModel = () => {
+  if (S?.platform === "windows" && typeof defaultImageModel === "function") return HC.pictureModel || defaultImageModel();
+  const want = homePrefs().presets.image_model, have = S && S.image_models && S.image_models.length ? S.image_models.map(m => m.id) : ["qwen"];
+  return have.includes(want) ? want : "qwen";
+};
+const hcWhy = mode => mode === "picture" && typeof imageModelWhy === "function" ? imageModelWhy(hcPictureModel())
+  : capWhy({ clip: "video", voice: "voice", song: "music" }[mode]);
 const hcSeed = () => typeof prefSeed === "function" ? prefSeed() : 1;
 const hcTitle = t => t.replace(/\s+/g, " ").trim().slice(0, 48);
 // a clip's length: the one picked here, else the recipe's, else Settings → Presets; over 15 s it is a long take, a chain of 15 s clips
@@ -114,6 +120,7 @@ function hcEstimate() { const r = typeof recipeParams === "function" ? recipePar
   return HC.est[key]; }
 // what Generate sends for each kind of take: the same endpoints and bodies the tabs use
 async function hcRequest(mode, text, seed, retake) {
+  const why = hcWhy(mode); if (why) throw new Error(why);
   const p = homePrefs().presets;
   if (mode === "clip") { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" };
     const seconds = hcSeconds(), long = hcLongs()[seconds];
@@ -122,7 +129,13 @@ async function hcRequest(mode, text, seed, retake) {
     const params = { prompt: composed.prompt, image: still, preset: r.preset, quality: r.quality, seed: r.seed && !retake ? r.seed : seed, ...(p.qa_gate ? {} : { qa: false }) };
     return long ? ["/api/jobs", { kind: "long", title: long + ": " + hcTitle(text).slice(0, 40), params: { ...params, total_seconds: seconds, beats: [] } }]
       : ["/api/jobs", { kind: "video", title: hcTitle(text), params: { ...params, seconds } }]; }
-  if (mode === "picture") return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40), params: { prompt: text, count: 1, seed, preset: "2k", image_model: hcPictureModel() } }];
+  if (mode === "picture") {
+    const model = hcPictureModel(), checked = typeof imageCheckedRecipe === "function" ? imageCheckedRecipe(model) : null;
+    const params = { prompt: text, count: 1, seed, image_model: model,
+      ...(checked ? { width: checked.width, height: checked.height } : { preset: "2k" }) };
+    return ["/api/jobs", { kind: "scout", title: "Still: " + hcTitle(text).slice(0, 40),
+      params: typeof stillParams === "function" ? stillParams(params) : params }];
+  }
   if (mode === "voice") return ["/api/voice/takes", { text, seed }];
   const lyrics = /\[(intro|verse|pre-chorus|chorus|bridge|instrumental|outro)\]/i.test(text);
   return ["/api/music/takes", lyrics ? { caption: "A warm, cinematic song with a clear lead vocal.", lyrics: text, seconds: 60, seed } : { caption: text, lyrics: "", seconds: 60, seed }]; }
@@ -165,8 +178,17 @@ function homeComposer() {
       el("button", { type: "button", role: "tab", "data-mode": id, "aria-selected": mode === id ? "true" : "false", class: "cmp-mode" + (mode === id ? " on" : ""), onclick: () => { HC.mode = id; render(); } },
         el("b", {}, label), typeof mark === "function" ? mark(id === "picture" && /^flux/.test(hcPictureModel()) ? "flux" : mk, id === "picture" && /^flux/.test(hcPictureModel()) ? "FLUX3-K" : model) : model))),
     area, el("div", { class: "cmp-hint" }, hint),
+    S?.platform === "windows" && mode === "picture" && typeof imageModels === "function" ? el("div", { class: "row" },
+      el("select", { "aria-label": "Picture model", value: hcPictureModel(),
+        onchange: e => { HC.pictureModel = e.target.value; render(); } },
+        imageModels().map(model => el("option", { value: model.id, selected: model.id === hcPictureModel() }, model.label))),
+      typeof imageCheckedRecipe === "function" && imageCheckedRecipe(hcPictureModel()) ? el("span", { class: "note m-flat" },
+        imageCheckedRecipe(hcPictureModel()).width + " × " + imageCheckedRecipe(hcPictureModel()).height) : null,
+      typeof featureBadge === "function" ? featureBadge(imageFeature(hcPictureModel())) : null,
+      el("button", { class: "small", onclick: () => openFeatureCheck(imageFeature(hcPictureModel())) }, "Feature checks")) : null,
+    hcWhy(mode) ? el("div", { class: "note" }, hcWhy(mode)) : null,
     el("div", { class: "cmp-bar" },
-      el("button", { type: "button", class: "primary cmp-go", disabled: HC.busy, onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
+      el("button", { type: "button", class: "primary cmp-go", disabled: HC.busy || !!hcWhy(mode), title: hcWhy(mode), onclick: () => hcGenerate() }, HC.busy ? "Queuing…" : "Generate", el("kbd", {}, "⌘↵")),
       mode === "clip" ? el("button", { type: "button", class: "small cmp-recipe", title: "The render recipe: click for the next one (Settings → Presets sets the default)",
         onclick: () => { HC.recipe = ids[(ids.indexOf(rec) + 1) % ids.length]; render(); } }, el("span", { class: "eyebrow" }, "Recipe"), recipes[rec]) : null,
       mode === "clip" ? hcLength() : null,

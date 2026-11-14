@@ -40,6 +40,7 @@ function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KI
   const box = el("div", { class: "seg", id: "actpanel", style: "margin-top:12px" },
     el("div", { class: "seghead" }, el("b", {}, a.title || o.kind), el("span", { class: "note", style: "margin:0" }, o.path.split("/").pop()), el("span", { style: "flex:1" }),
       el("button", { class: "small", onclick: () => { ACT.open = null; render(); } }, "Close")));
+  if (typeof featureGuidance === "function") put(box, featureGuidance(o.kind));
   if (!a.ready) { put(box, el("div", { class: "note", style: "color:var(--warn)" }, a.why || "Not available on this machine.")); return box; }
   const by = el("div", { class: "note" }, "With " + a.lora_name + " by " + a.author + ".");
   if (o.kind === "turnaround") {

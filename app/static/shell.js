@@ -1,4 +1,9 @@
 "use strict";
+function capWhy(kind) {
+  if (!kind || !S || S.platform !== "windows") return "";
+  const capability = S.capabilities?.[kind];
+  return capability?.available ? "" : capability?.why || "This action is unavailable on this Windows runtime. See Machine > Feature checks.";
+}
 // The studio's frame: a sidebar of two groups (Creative Engines, Studio Vaults) with the Agent between them, each room
 // with its own tabs, Back and Home in the top bar, the render bay docked along the bottom, the ⌘K palette and the
 // machine chip. Every view is still drawn by its own module; this file only decides where it sits. Settings → Studio
