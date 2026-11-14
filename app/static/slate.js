@@ -434,6 +434,69 @@ function slFeedback(scene, shot, take) { const active = job => job && ["queued",
   const box = bind(take, "notes", el("textarea", { rows: 2, style: "min-height:52px", placeholder: "Notes / feedback on this take: what to keep, what to fix (“her face changes at the end”, “slower push-in”, “the line is mumbled”) · " + slTakeLine(take) }), slSave);
   return el("div", { class: "row", style: "align-items:flex-end;margin-top:8px" }, el("div", {}, take.origin || take.imported || take.settings ? el("div", { class: "note", style: "margin:0 0 4px" }, [take.origin, take.imported || take.settings ? slTakeLine(take) : null].filter(Boolean).join(" · ")) : null, box),
     el("button", { class: "fit hot", disabled: waiting || !!SL.busy, title: "With notes: the brain revises the shot's prompt to answer them, then a new take is queued. Without notes: the same prompt at the next seed. The takes you have are kept.", onclick: () => slRegenerate(scene, shot, take) }, "↻ Regenerate")); }
+function slComfy(project, shot) {
+  if (SL.comfyProfiles === undefined) {
+    SL.comfyProfiles = null;
+    api("/api/slate/comfy/profiles").then(profiles => { SL.comfyProfiles = profiles; render(); })
+      .catch(error => { SL.comfyError = error.message; render(); });
+  }
+  if (SL.comfyError) return el("div", { class: "note" }, SL.comfyError);
+  const profiles = SL.comfyProfiles || {};
+  const ids = Object.keys(profiles);
+  if (!ids.length) return null;
+  const jobs = SL.comfyJobs || (SL.comfyJobs = {});
+  const key = project.id + "/" + shot.id;
+  const job = jobs[key] || (jobs[key] = { profile: ids[0], images: [] });
+  const profile = profiles[job.profile];
+  const run = async () => {
+    if (job.busy) return;
+    job.busy = true;
+    job.error = "";
+    render();
+    try {
+      if (!job.id) {
+        const tf = slTf(shot);
+        job.prompt = tf.h3 || shot.prompt;
+        job.seed = Number(tf.seed ?? 1);
+        const images = Array.from({ length: profile.references }, (_, i) => (job.images[i] || "").trim());
+        if (images.some(image => !image)) throw new Error("Choose all reference images before rendering.");
+        const queued = await api("/api/slate/comfy/" + encodeURIComponent(job.profile),
+          { prompt: job.prompt, seed: job.seed, images });
+        job.id = queued.job;
+        render();
+      }
+      for (let attempt = 0; !job.path && attempt < 600; attempt++) {
+        const result = await api("/api/slate/comfy/" + encodeURIComponent(job.profile) + "/" + encodeURIComponent(job.id));
+        if (result.state === "done") job.path = result.path;
+        else await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      if (!job.path) throw new Error("Still waiting for ComfyUI. Resume checking when the worker is ready.");
+      const currentShot = SL.p?.id === project.id && SL.p.scenes.flatMap(scene => scene.shots).find(item => item.id === shot.id);
+      if (!currentShot) throw new Error("Open this film again to import the finished take.");
+      await slImportTake(currentShot, { path: job.path, prompt: job.prompt, seed: job.seed, notes: profile.label });
+      slDraw();
+      delete jobs[key];
+      toast("ComfyUI take saved: " + shot.name);
+    } catch (error) {
+      job.error = error.message;
+    } finally {
+      job.busy = false;
+      render();
+    }
+  };
+  return el("div", { class: "group" }, el("label", {}, "Render on my PC · ComfyUI"),
+    job.busy || job.id ? el("div", {}, profile.label) : slPick(job, "profile",
+      Object.fromEntries(ids.map(id => [id, profiles[id].label])), () => { job.images = []; render(); }),
+    !job.id && Array.from({ length: profile.references }, (_, index) => field("Reference image " + (index + 1),
+      bind(job.images, index, el("input", { placeholder: "Path to an image in the Studio Library", disabled: !!job.busy })))),
+    el("button", { class: "hot fit", disabled: job.busy,
+    onclick: run }, job.busy ? (job.id ? "Waiting for render…" : "Submitting…") : job.path ? "Import finished take" :
+      job.id ? "Resume checking" : "Render on my PC"),
+    job.error ? el("div", { class: "note" }, job.error) : null,
+    job.id && !job.busy ? el("button", { class: "small", onclick: () => { delete jobs[key]; render(); } },
+      "Clear status (worker keeps its job)") : null);
+}
+
 function slRoll(scene, shot) { const tf = slTf(shot), p = SL.p, plan = SL.plan[shot.id], redo = () => { delete SL.plan[shot.id]; slDraw(); }, soft = () => { tf.h3Auto !== false && delete SL.plan[shot.id]; };
   if (!plan) { SL.plan[shot.id] = { pending: true }; slCompile(shot).then(render, e => { SL.plan[shot.id] = { prompt: "", plan: {}, warnings: [e.message], mode: "text" }; render(); }); }
   const up = el("input", { type: "file", accept: "image/*", onchange: async () => { const data = new FormData(); data.append("file", up.files[0]); const j = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (j.path) { tf.image = j.path; redo(); } else toast(j.error || "upload failed"); } });
@@ -468,7 +531,7 @@ function slRoll(scene, shot) { const tf = slTf(shot), p = SL.p, plan = SL.plan[s
         SL.rendering = false; slDraw(); } }, "🎬 Render this shot"), el("span")),
       // how many Sparks the shots queued from here may use: one shot per Spark, side by side (sparks.js)
       typeof sparksPick === "function" ? sparksPick({ kind: "video", clips: Math.max(1, scene.shots.length), params: { loras: typeof lorasOf === "function" ? lorasOf(slFilm()) : [] } }) : null,
-    shot.takes.some(t => t.mediaPath) ? el("h3", {}, "Takes · circle the one that works") : null, slTakes(scene, shot), slImport(scene, shot)); }
+    slComfy(p, shot), shot.takes.some(t => t.mediaPath) ? el("h3", {}, "Takes · circle the one that works") : null, slTakes(scene, shot), slImport(scene, shot)); }
 function slWorkspace(scene, shot) { if (!SL.open.cat) SL.open.cat = SL.data.categories[0].id; const edit = el("textarea", { style: "min-height:250px;font:14px/1.55 var(--mono)", placeholder: "# Subject\nwho or what the shot is about, the action, wardrobe\n\n# Composition\n# Lighting\n# Camera\n# Style\n# Mood" }); edit.value = shot.prompt;
   edit.addEventListener("input", () => { shot.prompt = edit.value; shot.updatedAt = slNow(); slTf(shot).h3Auto !== false && delete SL.plan[shot.id]; slSave(); });
   const note = el("input", { placeholder: "Talk to the shot: make it rain, keep the neon", onkeydown: e => { if (e.key === "Enter" && note.value.trim()) slNote(shot, note.value.trim()); } }), cats = SL.data.categories, cat = cats.find(c => c.id === SL.open.cat) || cats[0], lines = shot.prompt.split("\n");
