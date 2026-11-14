@@ -59,7 +59,7 @@ def test_the_page_calls_it_a_mac_and_the_time_is_not_called_measured():
         assert hub.team({"kind": "video", "params": PLAIN, "sparks": {"chosen": 2}}) == [MAC]
         said = hub.plan({"sparks": 2, "kind": "video", "clips": 8, "params": PLAIN})
         assert said["used"] == 2 and said["count"] == "2 machines" and "One clip per machine" in said["says"]
-        assert said["estimate"]["measured"] is False and "a Mac and a Spark" in said["estimate"]["note"]
+        assert said["estimate"]["measured"] is False and "that mix has not been measured" in said["estimate"]["note"]
         assert "never split across machines" in hub.plan({"sparks": 2, "kind": "video", "clips": 1, "params": PLAIN})["says"]
         # a list of Sparks alone keeps its words
         hub.state(MAC)["info"] = {**MAC_INFO, "platform": "spark"}
