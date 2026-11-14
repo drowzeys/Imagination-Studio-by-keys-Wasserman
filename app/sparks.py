@@ -97,7 +97,7 @@ STATES = {"new": "not checked yet", "unreachable": "does not answer over ssh", "
           "ready": "idle", "busy": "rendering", "down": "stopped answering"}
 # presets that need the 2x decoder, which a DGX Spark does not have (spark/video.sh refuses them); said by name
 DOUBLED = {"draft": "Draft", "2k": "2K", "qhd": "2K 2560x1440", "p960": "960p"}
-MAC_OWN = ("that Mac runs its own Studio app, which this one never writes over or stops: update it there (Machine → Updates), "
+MAC_OWN = ("That Mac runs its own Studio app, which this one never writes over or stops: update it there (Machine → Updates), "
            "or quit it there and press “Update and start” to run this Spark's code.")
 ONE_CLIP = ("Splitting a single clip across Sparks is measured (1.40x on 2, 1.73x on 3, 1.77x on 4 for a 5 s 864x480 clip) "
             "and is not in the app yet.")
@@ -953,7 +953,7 @@ class Hub:
             own = mac and not found.get("ours")  # the app its owner started on that Mac: never written over from here
             if changed:
                 why = (f"Its Studio code differs from this Spark's in {len(changed)} file{'s' if len(changed) != 1 else ''} ({', '.join(changed[:3])}"
-                       + (", …" if len(changed) > 3 else "") + "): " + (MAC_OWN if own else "“Update and start” brings it level."))
+                       + (", …" if len(changed) > 3 else "") + ")" + (". " + MAC_OWN if own else ": “Update and start” brings it level."))
             elif mac:  # level code, no guard: its memory manager was turned off where it was started
                 why = "Its app runs without its memory guard (STUDIO_MEMORY_MANAGER is off there): no clip is handed to it until it is started with the guard on."
             else:

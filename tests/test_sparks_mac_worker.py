@@ -120,7 +120,7 @@ def test_a_macs_own_app_is_never_written_over_or_stopped():
             assert hub.check(worker)["state"] == "ready"
             assert not any("scripts/app.sh" in command or "kill" in command.replace("kill -0", "") for command in seen)
             # behind this Spark's code: still nothing sent, and the way out is said
-            said["/api/spark/self"] = {**MAC_INFO, "code": {**hub.code(), "VERSION": "other"}, "active": 0}
+            said["/api/spark/self"] = {**MAC_INFO, "code": {**hub.code(), next(iter(hub.code())): "other"}, "active": 0}
             live = hub.update(worker)
             assert live["state"] == "update" and not copied and "runs its own Studio app" in live["why"] and "Machine → Updates" in live["why"]
             assert hub.team({"kind": "video", "params": PLAIN, "sparks": {"chosen": 2}}) == []  # and no clip goes to it meanwhile

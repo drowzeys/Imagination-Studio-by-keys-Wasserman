@@ -4,7 +4,8 @@ A job in the Studio can use more than one DGX Spark. You choose a number from 1 
 the job may use, the one the app runs on counted as one. The app shows how many are there and able, uses that many,
 and says what the number will do before you queue anything.
 
-The app on a Mac leads worker Sparks too: see *A Mac at the head* below.
+The app on a Mac leads worker Sparks too: see *A Mac at the head* below. A Mac can also be one of the workers, of a
+Spark or of another Mac: see *A Mac as a worker*.
 
 ## Local GPUs on one workstation
 
@@ -239,8 +240,65 @@ the Spark were gone within 5 s. The table above, 1 to 5 Sparks, was measured wit
 estimate is marked not measured and says so.
 
 **Not the same as a Spark at the head.** The time estimate multiplies the Mac's own time for one clip by the Spark
-table above: it was not measured with a Mac. A Mac has no memory guard of its own (its row shows none); every clip on a
-Spark still passes that Spark's. The Mac renders the clips no Spark can take, at the Mac's speed.
+table above: it was not measured with a Mac. A Mac's guard is its memory manager (measured peaks against the memory
+it has, asked when a job starts), not a Spark's memory guard; every clip on a Spark still passes that Spark's. The Mac
+renders the clips no Spark can take, at the Mac's speed.
+
+## A Mac as a worker
+
+A Mac with the Studio installed can be added to the list like a Spark, under **Machine → Sparks → Add a Spark or a
+Mac**, from a Spark at the head or from another Mac. It is given single clips, one at a time, through the same ssh
+tunnel to its own `127.0.0.1:7870`.
+
+**What it needs.**
+
+1. *Remote Login* on (System Settings → General → Sharing), and a key login from the head to it: `ssh you@192.168.1.20
+   true` answers without a password, and its host key is in the head's `~/.ssh/known_hosts`.
+2. The Studio installed there (`oneshot-setup.sh`, with FastH3) and **on the same Studio version as the head**: the
+   head compares the code by hash, as it does with a Spark.
+3. Its Studio app open. Only the address is needed then; the folder is asked for only to start an app from the head.
+
+**Its own app is left alone.** The app its owner started on a Mac (the Dock app, a launch agent, with its own folders
+and updater) is used as it is. The head never sends code over it and never stops it. When it is behind, its row says
+so and nothing goes to it until it is updated there (**Machine → Updates** on the Mac). *Update and start* sends code
+and starts an app only on a Mac where none is running, with the default folders (`PREFIX`, the model folders): a Mac
+set up with folders of its own is started the way its owner starts it. A Mac that is asleep does not answer.
+
+**What goes to it.** What it renders with its own files: FastH3 clips (text, first and last frame) at any size it
+lists, with a LoRA it has, and reference clips where it has Ref2VA. A clip with no size named is sent as the head's
+own default (Small from a Spark). These stay on the head, and the page says why:
+
+- a text encoder file of a Spark's: it is a ComfyUI file, and a Mac reads only its own MLX files;
+- anything that is not a single clip, as with a Spark.
+
+It is given a clip only while it is idle: a Mac rendering its owner's own job shows *rendering a job that is not this
+Spark's* and is skipped until it is done.
+
+**Memory.** A Mac has no Spark memory guard. Its guard is its memory manager: when the clip's job starts there, the
+measured peak is held against the memory the Mac has, its idle engines are unloaded to make room, and a clip that
+still does not fit is refused, naming what holds the memory. The clip then goes back to the head's queue for another
+machine. A Mac started with `STUDIO_MEMORY_MANAGER=off` reports no guard and is given nothing.
+
+**Not the same frames.** A Mac and a Spark run different engines. The same seed gives different frames on each, and
+the job's log says which machine rendered it (so does `sparks/takes.jsonl`). Queue with *Render on* set to one
+machine when a retake has to match.
+
+**Measured.** On 2026-11-14, a test app of this branch on a DGX Spark (port 7871, its own folder) and a Mac Studio
+M5 Ultra running its own Studio app on this branch's code, one run:
+
+| Step | Result |
+|---|---|
+| Add by address alone, then *Check* (ssh into zsh, `/api/spark/self`) | *idle*, 168 GB of memory available, 22 LoRAs |
+| A 5 s FastH3 clip (8 passes, seed 7, no size named), *Render on* the Mac, *Wait for it* | sent as Small, 864x480 |
+| Rendered on the Mac (native engine, 5.3 s a pass) | 71 s |
+| Back in the Spark's folder and shot-checked there | 72.9 s after it was queued |
+| The Mac put back on the released code, *Check* | *differs in 3 files*, nothing sent, nothing stopped |
+
+The clip in the Spark's folder is byte for byte the Mac's (SHA-256 `2bec572f…`), 124 frames with sound. One clip, one
+run: several clips side by side on a Mac and a Spark, a Mac leading a Mac, and references and LoRAs on a Mac worker
+were not run. The commands that start, find and stop an app from the head were run on that Mac in zsh and bash against
+a stand-in app (`tests/test_sparks_mac_worker.py`), not against a real Studio app started from a head. The time
+estimate for a list with a Mac in it is marked not measured.
 
 ## What is not built
 
@@ -258,5 +316,7 @@ Spark still passes that Spark's. The Mac renders the clips no Spark can take, at
 - **The queue across a restart.** Jobs are kept in memory. A remote worker may finish in its own folder, but a restarted
   head does not fetch that clip. Owned local workers stop with their head.
 - **Starting a worker's install.** The app sends code, not models or the environment.
+- **A Windows machine as a worker.** A worker is reached over ssh and started with bash: a Spark, a Linux machine with
+  an NVIDIA card, or a Mac.
 - **Five remote-only participants at most.** The limit is 5 (`LIMIT` in `app/sparks.py`), including the head. Local
   workers have a separate four-card bound; the combined selector is at most eight, not eight remote Sparks.
