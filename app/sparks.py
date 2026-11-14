@@ -1406,7 +1406,8 @@ class Hub:
             if job["status"] != "running":
                 return False
             made = call(base, "/api/jobs", {"kind": job["kind"], "title": f"{job['title']} · for {self.name}",
-                                          "placement": {"worker": "head", "policy": "require"}, "params": params_there}, timeout=60)
+                                          "placement": {"worker": "head", "policy": "require"}, "sender": self.name,
+                                          "params": params_there}, timeout=60)
         except Refused as error:
             self.move(job, worker, f"it refused the clip: {error.said}", down=False)
             return False
