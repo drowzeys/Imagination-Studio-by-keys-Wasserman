@@ -3869,6 +3869,13 @@ def about_this_spark() -> dict:
         status = telemetry.compact(TELEMETRY.snapshot())
     except Exception:  # noqa: BLE001
         status = None
+    if sys.platform == "darwin" and memory_manager.enabled():
+        # A Mac's guard is the memory manager's admission (measured peaks against what vm_stat counts as available,
+        # memory_manager.admit): a head asks for a guard before it hands a clip over. The telemetry's own reading,
+        # already taken: nothing more is run for it.
+        seen = (status or {}).get("memory") or {}
+        if seen.get("free_mb") is not None:
+            memory = {"available_mb": int(seen["free_mb"]), "total_mb": seen.get("total_mb"), "floor_mb": seen.get("floor_mb")}
     info = sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent, renders, status)
     info["gpu_uuid"] = os.environ.get("STUDIO_LOCAL_GPU_UUID")
     return info
