@@ -309,7 +309,7 @@ Rules:
   Bounded warm image/sound and cold Foley use UUID/LUID-bound WDDM adapter usage plus identity-validated owned
   handles, not busy-model HTTP/NVML polling or another process's CUDA allocator budget. Missing/invalid/stale
   counters refuse; never sum dedicated, shared and host pools or relax guards to qualify a recipe.
-- Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`): at most four per Studio, including its
+- Local discrete NVIDIA GPUs (`app/local_gpus.py`, `docs/rtx-pro-6000.md`, the recipe `docs/local-gpus.md`): at most four per Studio, including its
   explicitly selected head. Persist worker UUIDs and pin CUDA by UUID, keeping a validated numeric index for guard
   queries. Refuse a stale index after reordering; never substitute another card for a missing UUID. Display workers
   need explicit consent. An unticked but running worker still occupies a slot. Never kill a process merely because

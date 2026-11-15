@@ -14,6 +14,7 @@ The same **Sparks** room also manages one head GPU plus up to three local NVIDIA
 to discover cards, start/stop owned local workers and select required/preferred VIDEO placement. Local workers use
 private loopback HTTP, not SSH, with isolated homes/ports and shared core runtime/model paths.
 [Local setup, memory rules and physical smoke evidence](rtx-pro-6000.md#one-to-four-local-gpus).
+The steps, the calls behind each button and what each refusal means: [the recipe](local-gpus.md).
 
 Single-card studios keep their existing behavior. The head takes a GPU lease and joins shared-RAM admission only
 when an additional local worker starts. Stopping the last worker restores the head's ordinary execution path.
