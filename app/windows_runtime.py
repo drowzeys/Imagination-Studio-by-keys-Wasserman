@@ -139,6 +139,8 @@ def native_sound_installed(kind: str) -> bool:
 
 
 def bounded(kind: str, params: dict | None = None) -> bool:
+    if kind == "sfx" and (params or {}).get("sound_model") == "stable-audio-3-small-sfx":
+        return True
     if kind == "qualification" or kind == "graphics":
         return True
     if kind == "scout":

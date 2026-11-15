@@ -112,7 +112,8 @@ def test_without_a_governor_nothing_changes(monkeypatch):
     script = (ROOT / "spark/comfy.sh").read_text()
     # the governor's branch is taken only when it is named; the upstream start and stop stay as they were
     assert script.count('if [ -n "${SPARK_GOVERNOR:-}" ]') == 2
-    assert 'nice -n 19 "$PREFIX/venv/bin/python" main.py --listen 127.0.0.1 --port "$PORT"' in script
+    assert 'COMMAND=("$PREFIX/venv/bin/python" main.py --listen 127.0.0.1 --port "$PORT")' in script
+    assert 'nice -n 19 "${COMMAND[@]}"' in script
     generate = (ROOT / "spark/spark_generate.py").read_text()
     assert 'if os.environ.get("SPARK_GOVERNOR"):' in generate
     assert "    gate()\n    import aiohttp" in generate

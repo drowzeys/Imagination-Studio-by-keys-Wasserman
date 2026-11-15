@@ -27,7 +27,8 @@ appended to your own pins; it shows after Explorer restarts, or at the next sign
 renders: no sleep or hibernate plugged in, the lid does nothing, Windows on Best performance, the Wi-Fi adapter never
 powered down (`-NeverSleepOnBattery` for battery too, `-NoPower` to skip). Optional: `-StartAtLogon` (starts the Studio
 at sign-in), `-EnableSsh -AuthorizedKey "ssh-ed25519 ..."` (another machine reaches the laptop over SSH on the home
-network). `-Native` is accepted for older command lines and changes nothing.
+network; a DGX Spark or a Mac can then use the laptop as a worker for single clips, [A Windows PC as a
+worker](multi-spark.md#a-windows-pc-as-a-worker)). `-Native` is accepted for older command lines and changes nothing.
 
 Before any component install/download, native setup prints a runtime-fit plan. The default broad selection
 skips missing models whose existing runtime admission requirement exceeds this machine's GPU pool (and host
@@ -64,6 +65,14 @@ image acknowledgment.
    musubi-tuner's venv and its 46 GB of files: MiniMax H3's FL2VA transformer in bf16, its fp16 video encoder and ostris's
    adapter);
 5. ComfyUI's model folders and `cuda-tier.json`.
+
+The Windows `sound` part installs Stable Audio 3 Small SFX (the default sound-effects model) in its
+isolated environment/cache, about 3.25 GiB including T5Gemma. When qualification gating is enabled,
+run its local check before use; setup does not render or qualify automatically.
+Stable Audio Open is optional: request `sound-legacy` in `-NativeParts`, or use
+`scripts\setup-windows-cuda.ps1 -Parts sound-legacy`. Existing weights and takes are retained.
+`setup-windows-cuda.ps1 -Parts sound` needs no H3 toolchain or shared ComfyUI; `-NoDownload` installs
+the isolated dependencies only.
 
 Run again, it resumes and updates. `-ToolchainOnly` installs step 1 alone; `-SkipToolchain -Parts <part>` adds one part
 to an install.

@@ -352,6 +352,11 @@ def check_child_comfy() -> None:
     if not key:
         return
     port = int(os.environ["SPARK_COMFY_PORT"])
+    check_owned_listener(port, "STUDIO_LOCAL_GPU_KEY", key)
+
+
+def check_owned_listener(port: int, marker_name: str, key: str, *, require_listener: bool = False) -> None:
+    """A private process marker must own every listening socket on the selected port."""
     inodes = set()
     for family in ("tcp", "tcp6"):
         try:
@@ -363,8 +368,10 @@ def check_child_comfy() -> None:
             if len(fields) > 9 and fields[3] == "0A" and int(fields[1].split(":")[1], 16) == port:
                 inodes.add(fields[9])
     if not inodes:
+        if require_listener:
+            raise RuntimeError("The owned ComfyUI listener is not present.")
         return
-    marker, owned = ("STUDIO_LOCAL_GPU_KEY=" + key).encode(), set()
+    marker, owned = (marker_name + "=" + key).encode(), set()
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue

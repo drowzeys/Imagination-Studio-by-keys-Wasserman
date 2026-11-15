@@ -511,7 +511,8 @@ def _relaxable(check_fn):
     @functools.wraps(check_fn)
     def checked(*args, **kwargs):
         out = check_fn(*args, **kwargs)
-        if isinstance(out, dict) and out.get("fits") is False and out.get("reason") and guard_mode() == "warn":
+        if (isinstance(out, dict) and out.get("fits") is False and out.get("reason")
+                and out.get("relaxable", True) and guard_mode() == "warn"):
             out = dict(out, fits=True, refused=out["reason"],
                        warning=out["reason"].replace(", so it is refused", "").rstrip(".") +
                        ". It is tried anyway (STUDIO_MEMORY_GUARD=warn) and fails if the memory runs out.")
@@ -835,8 +836,9 @@ def music_check(seconds: float, available_mb: int | None = None, total_mb: int |
 SOUND_ESTIMATE: dict = {"sfx": (7_000, 40), "foley": (13_000, 300)}
 # kind -> ((seconds asked, MB), ...): the measured runs; tests/test_sound.py holds each line to them
 SOUND_MEASURED: dict = {"sfx": ((5, 6_211), (20, 4_665), (47, 8_679)), "foley": ((5, 13_744), (10, 15_426), (15, 16_617))}
-SOUND_LONGEST = {"sfx": 47.0, "foley": 15.0}  # the app's longest of each (app/sound.py)
-SOUND_NAMES = {"sfx": "a sound effect (Stable Audio Open 1.0)", "foley": "foley (MMAudio)"}
+SOUND_LONGEST = {"sfx": 47.0, "foley": 15.0, "stable-audio-3-small-sfx": 5.0}
+SOUND_NAMES = {"sfx": "a sound effect (Stable Audio Open 1.0)", "foley": "foley (MMAudio)",
+               "stable-audio-3-small-sfx": "a sound effect (Stable Audio 3 Small SFX)"}
 
 
 @_relaxable
@@ -848,11 +850,16 @@ def sound_check(kind: str, seconds: float, available_mb: int | None = None, tota
     if total_mb is None:
         total_mb = meminfo().get("MemTotal", 0)
     if not total_mb:
+        if kind == "stable-audio-3-small-sfx":
+            return {"fits": False, "reason": "Stable Audio 3 needs a measured Spark memory estimate and readable memory counters.",
+                    "route": "sound-stable-audio-3-small-sfx", "need_mb": None, "relaxable": False}
         return {"fits": True, "reason": "", "route": None}
     measured_here = available_mb is None and not card
     available_mb, floor, on_card = _pool(available_mb, total_mb, card)
     out = {"fits": False, "reason": "", "need_mb": None, "error_mb": ERROR_MB, "left_mb": None, "floor_mb": floor,
            "available_mb": available_mb, "route": f"sound-{kind}", "rows": None, "nearest": None}
+    if kind == "stable-audio-3-small-sfx":
+        out["relaxable"] = False
     if kind not in SOUND_ESTIMATE:
         if on_card:
             out["reason"] = (f"{SOUND_NAMES.get(kind, kind)} has not been measured on this GPU yet, and nothing renders "

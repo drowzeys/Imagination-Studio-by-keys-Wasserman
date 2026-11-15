@@ -24,6 +24,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(agents, "HOME", tmp_path)
+    monkeypatch.setattr(agents, "verified", {})
+    monkeypatch.setattr(agents, "statuses", {})
     monkeypatch.setattr(agents, "tasks", {})
     monkeypatch.setattr(agents, "threads", {})
     monkeypatch.setattr(agents, "pending", queue.Queue())
@@ -31,6 +33,120 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(agents, "ensure_worker", lambda: None)
     monkeypatch.setattr(agents, "version_key", lambda path: (1, 0, 105))
     return tmp_path
+
+
+def test_copilot_connection_survives_status_expiry_and_restart(isolated, monkeypatch):
+    monkeypatch.setattr(agents, "where_of", lambda *args: "")
+    monkeypatch.setattr(agents, "ask", lambda *args, **kwargs: "ok")
+    checked = agents.verify("copilot")
+    record = isolated / ".studio-agents" / "copilot-connection.json"
+    assert json.loads(record.read_text()) == {"": checked["at"]}
+    later = time.time() + 86400
+    monkeypatch.setattr(agents.time, "time", lambda: later)
+    assert agents.status_of("copilot")["state"] == "signed_in"
+    agents.verified.clear()
+    agents.statuses.clear()
+    monkeypatch.setattr(agents, "ask", lambda *args, **kwargs: pytest.fail("no automatic paid checks"))
+    status = agents.status_of("copilot")
+    assert status["state"] == "signed_in" and status["remembered"]
+    assert "Not rechecked automatically" in status["detail"]
+    monkeypatch.setattr(agents, "saved_settings", lambda: {"default": "copilot", "agent": "copilot"})
+    monkeypatch.setattr(agents, "detect", lambda config: [{"id": "copilot", "found": True}])
+    monkeypatch.setattr(agents, "install_of", lambda backend: {})
+    monkeypatch.setattr(agents, "signin_of", lambda backend: {})
+    connection = agents.connect_of("copilot")
+    assert connection["verify"] == {"ok": True, "at": checked["at"], "remembered": True}
+    assert connection["default"] and connection["agent_default"]
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("No authentication information found"), subprocess.TimeoutExpired("copilot", 60)])
+def test_failed_copilot_check_clears_only_its_host_record(isolated, monkeypatch, failure):
+    host = ""
+    monkeypatch.setattr(agents, "where_of", lambda *args: host)
+    monkeypatch.setattr(agents, "ask", lambda *args, **kwargs: "ok")
+    agents.verify("copilot")
+    host = "worker"
+    agents.verify("copilot")
+    host = ""
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(agents, "ask", fail)
+    assert not agents.verify("copilot")["ok"]
+    assert agents.status_of("copilot")["state"] == "unknown"
+    agents.verified.clear()
+    assert agents.status_of("copilot")["state"] == "unknown"
+    host = "worker"
+    assert agents.status_of("copilot")["state"] == "signed_in"
+    host = "other"
+    assert agents.status_of("copilot")["state"] == "unknown"
+    assert list(json.loads((isolated / ".studio-agents" / "copilot-connection.json").read_text())) == ["worker"]
+
+
+@pytest.mark.parametrize("restart", [False, True])
+@pytest.mark.parametrize("age,connected", [(7 * 86400 - 1, True), (7 * 86400, False), (8 * 86400, False)])
+def test_copilot_connection_expires_after_seven_days(isolated, monkeypatch, restart, age, connected):
+    now = time.time()
+    agents.remember_copilot("", {"ok": True, "at": now})
+    if restart:
+        agents.verified.clear()
+    monkeypatch.setattr(agents.time, "time", lambda: now + age)
+    monkeypatch.setattr(agents, "where_of", lambda *args: "")
+    monkeypatch.setattr(agents, "ask", lambda *args, **kwargs: pytest.fail("no automatic probe"))
+    assert (agents.status_of("copilot")["state"] == "signed_in") == connected
+    assert bool(agents.copilot_connection("")) == connected
+
+
+@pytest.mark.parametrize("failure", [PermissionError("read only"), OSError("disk full")])
+@pytest.mark.parametrize("ok", [True, False])
+def test_copilot_check_survives_disk_write_failure(isolated, monkeypatch, capsys, failure, ok):
+    monkeypatch.setattr(agents, "where_of", lambda *args: "")
+    monkeypatch.setattr(agents, "ask", lambda *args, **kwargs: "ok" if ok else "")
+
+    def fail(*args):
+        raise failure
+
+    monkeypatch.setattr(agents, "write_json", fail)
+    result = agents.verify("copilot")
+    assert result["ok"] == ok
+    assert agents.copilot_connection("") is result
+    assert "could not be saved" in result["warning"]
+    assert "could not be saved" in capsys.readouterr().err
+
+
+def test_normal_copilot_request_refreshes_expired_connection_without_check(isolated, monkeypatch):
+    agents.remember_copilot("", {"ok": True, "at": time.time() - 8 * 86400})
+    monkeypatch.setattr(agents, "saved_settings", lambda: {})
+    monkeypatch.setattr(agents, "where_of", lambda *args: "")
+    monkeypatch.setattr(agents, "cli", lambda *args: "copilot")
+    monkeypatch.setattr(agents, "copilot_version", lambda *args: None)
+    monkeypatch.setattr(agents, "run_cli", lambda *args: subprocess.CompletedProcess(
+        [], 0, json.dumps({"type": "assistant.message", "data": {"content": "A normal reply."}}), ""))
+    assert agents.ask("copilot", "", "Write a scene.") == "A normal reply."
+    agents.verified.clear()
+    assert agents.copilot_connection("")["ok"]
+
+
+@pytest.mark.parametrize("error,connected", [("No authentication information found", False), ("Network unavailable", True)])
+def test_normal_copilot_failure_clears_connection_only_for_auth_errors(isolated, monkeypatch, error, connected):
+    agents.remember_copilot("", {"ok": True, "at": time.time()})
+    monkeypatch.setattr(agents, "saved_settings", lambda: {})
+    monkeypatch.setattr(agents, "where_of", lambda *args: "")
+    monkeypatch.setattr(agents, "cli", lambda *args: "copilot")
+    monkeypatch.setattr(agents, "copilot_version", lambda *args: None)
+    monkeypatch.setattr(agents, "run_cli", lambda *args: subprocess.CompletedProcess([], 1, "", error))
+    with pytest.raises(RuntimeError):
+        agents.ask("copilot", "", "Write a scene.")
+    agents.verified.clear()
+    assert bool(agents.copilot_connection("")) == connected
+
+
+@pytest.mark.parametrize("record", [{}, {"": True}, {"": "invalid"}, {"": -1}, {"": float("inf")}, []])
+def test_copilot_never_infers_connection_from_invalid_or_missing_record(isolated, monkeypatch, record):
+    monkeypatch.setattr(agents, "where_of", lambda *args: "")
+    agents.write_json(isolated / ".studio-agents" / "copilot-connection.json", record)
+    assert agents.status_of("copilot")["state"] == "unknown"
 
 
 def test_copilot_harness_is_limited_to_selected_mcp_servers(isolated):
@@ -77,7 +193,7 @@ def test_copilot_vision_is_not_run_with_claude_arguments(monkeypatch, tmp_path):
     assert tried == ["claude", "codex"]
 
 
-def test_jsonl_reply_tools_jobs_and_errors_are_not_success_fallbacks():
+def test_jsonl_reply_tools_jobs_and_errors_are_not_success_fallbacks(isolated):
     task = {"reply": "", "_host": "", "_session": {"id": ""}}
     session = str(uuid.uuid4())
     def event(kind, data):
@@ -91,6 +207,7 @@ def test_jsonl_reply_tools_jobs_and_errors_are_not_success_fallbacks():
     assert task["_session"]["id"] == session
     event("session.error", {"message": "No authentication information found"})
     assert "copilot login" in task["_error"]
+    assert not agents.copilot_connection("")["ok"]
     agents.render("copilot", json.dumps({"type": "result", "exitCode": 1}), task)
     assert task["_error"]
 
@@ -143,6 +260,7 @@ print(json.dumps({'type': 'result', 'exitCode': 0, 'sessionId': session}))
     agents.finish_turn(agents.tasks[first["id"]])
     thread = agents.threads[first["thread"]]
     assert agents.tasks[first["id"]]["status"] == "done"
+    assert agents.copilot_connection("")["ok"]
     session = thread["session"]["id"]
     second = agents.submit({"thread": thread["id"], "prompt": "Keep the plan.", "tools": ["studio"]})
     agents.perform(agents.tasks[second["id"]])

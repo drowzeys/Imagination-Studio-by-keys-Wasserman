@@ -84,7 +84,8 @@ const APPS = () => [
 
   { id: "voice", cat: "sound", title: "Voices & cloning", one: "Fish Audio Drama 3: cast a voice or clone your own", art: "start-voice", sign: "sound", run: () => go("Voice") },
   { id: "song", cat: "sound", title: "Songs & score", one: "YuE2 or MiniMax-Music3: lyrics and a style to a song", art: "start-song", sign: "sound", run: () => go("Music") },
-  { id: "foley", cat: "sound", title: "Sound effects & foley", one: "Foley for a clip, or any sound from words", art: "start-sfx", sign: "sound", run: () => go("Foley") },
+  { id: "foley", cat: "sound", title: "Sound effects & foley", one: S && S.platform === "windows" ? "Stable Audio 3 Small SFX, 1–5 seconds; Open is optional" : "Foley for a clip, or any sound from words",
+    art: "start-sfx", sign: "sound", run: () => { if (S && S.platform === "windows") SFX.mode = "sfx"; go("Foley"); } },
 
   { id: "upscale", cat: "finish", title: "Upscale", one: "A clip twice the size and sharper", art: "look-video-upscaler", sign: "video",
     off: () => apActReady("upscale"), run: apAct("upscale", "video", "Upscale") },
@@ -120,7 +121,10 @@ function apCard(a) { const st = apState(a);
   const card = pcard({ art: a.art, src: a.src, sign: a.sign, title: a.title, one: a.one, k: (AP_CATS.find(c => c.id === a.cat) || {}).name.toUpperCase(), off: st.off, run: st.run, data: { "data-app": a.id } });
   if (a.icon) card.classList.add("ap-icon");  // an app's square icon, whole, on the card's ground
   if (st.need) card.append(el("span", { class: "ap-need" }, st.need));
-  return card; }
+  const feature = { still: typeof imageFeature === "function" ? imageFeature() : "scout", titles: "graphics",
+    captions: "captions", hlg: "hlg", finish: "finish", foley: "foley", voice: "voice", song: "music",
+    turnaround: "turnaround", upscale: "upscale", remove: "remove", swap: "swap" }[a.id];
+  return withFeatureBadge(card, feature, { "data-feature-app": a.id }); }
 const apHit = (a, words) => !words || [a.title, a.one, a.words, (AP_CATS.find(c => c.id === a.cat) || {}).name].join(" ").toLowerCase().includes(words);
 
 // the take a Library action works on: the newest of the kind it needs

@@ -8,6 +8,7 @@ import pytest
 
 from test_windows_ui import client, server  # noqa: F401
 import windows_features as features
+import windows_audio3 as audio
 import finish
 
 
@@ -200,19 +201,22 @@ def test_progressive_status_and_report_never_run_a_test(check_ui, monkeypatch):
     assert response.status_code == 200, response.text
     cards = response.json()["features"]
     assert [card["id"] for card in cards] == [
-        "hlg", "finish", "foley", "scout", "sfx", "graphics",
+        audio.MODEL, "hlg", "finish", "foley", "scout", "sfx", "graphics",
         "qwen", "qwen-full", "flux3k-fast", "flux3k-full", "moss-image",
         "turnaround", "upscale", "mask", "remove", "swap", "video", "voice", "music"]
+    by_id = {card["id"]: card for card in cards}
     assert all(not card["qualified"] and card["memory"]["minimum_installed_ram_mb"] is None for card in cards)
-    assert all(card["memory"]["required_headroom_mb"] == 4096 for card in cards[:2])
-    assert cards[2]["memory"]["required_headroom_mb"] == 9216 and cards[2]["check_available"]
-    assert not cards[2]["installed"]
+    assert by_id[audio.MODEL]["memory"]["required_headroom_mb"] == audio.HOST_RESERVE_MB
+    assert by_id[audio.MODEL]["check_available"]
+    assert all(by_id[kind]["memory"]["required_headroom_mb"] == 4096 for kind in ("hlg", "finish"))
+    assert by_id["foley"]["memory"]["required_headroom_mb"] == 9216 and by_id["foley"]["check_available"]
+    assert not by_id["foley"]["installed"]
     report = check_ui.get("/api/windows/features/report")
     assert report.status_code == 200 and "attachment" in report.headers["content-disposition"]
     assert report.json()["features"] == cards
     generic = check_ui.get("/api/feature-checks")
     assert generic.status_code == 200 and generic.json()["features"] == cards
-    assert cards[0]["requirements"][0]["pool"] == "host"
+    assert by_id["hlg"]["requirements"][0]["pool"] == "host"
 
 
 def test_progressive_check_is_explicit_queue_work_with_duplicate_refusal(check_ui, monkeypatch):
@@ -249,7 +253,7 @@ def test_failed_attempt_does_not_replace_a_saved_success(check_ui, qualification
         "results": [{"peak_job_commit_mb": 2116}],
     }))
     features.save_attempt("hlg", {"ok": False, "error": "temporarily busy"})
-    card = check_ui.get("/api/windows/features").json()["features"][0]
+    card = next(card for card in check_ui.get("/api/windows/features").json()["features"] if card["id"] == "hlg")
     assert card["qualified"] and card["evidence"]["matches"]
     assert card["attempt"]["error"] == "temporarily busy" and card["evidence"]["checked_at"]
 
