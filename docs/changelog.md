@@ -22,8 +22,14 @@ Spark. On Windows, run the setup again: 4.5.0 adds a setup script for Stable Aud
 - **Library** (ivberg's #245, #246, #256; eveccc2010tw's #240; #262, fixes #253): delete controls and a Trash panel,
   collapsible date groups, films listed in the trash and put back, native sound takes protected, and a deleted sound
   takes its measured beats along.
-- **Library in a browser** (#263): a redraw while the descriptions loaded redrew without end, and the tab's memory
-  grew until the machine ran out. Fixed. wassermanproductions' #236 stops pages flickering and jumping to the top.
+- **Library in a browser** (#263, #265): a redraw while the descriptions loaded redrew without end, and the tab's
+  memory grew until the machine ran out. Every clip also loaded at once, so pictures stayed blank and Play did
+  nothing on a large Library; a clip now loads only near the screen. wassermanproductions' #236 stops pages
+  flickering and jumping to the top.
+- **A picture shown larger** (eveccc2010tw's #239): a click on a picture in the Library or in Cast & Places opens it
+  over the page.
+- **Slate on your own ComfyUI PC** (0eroiQ's #234, carried as #266): a shot can be sent to a ComfyUI on another PC
+  and comes back as a take. Off unless configured: see [Slate on ComfyUI](slate-comfyui.md).
 - **Agent room** (eveccc2010tw's #238; AlexGS74's #252): pick a new conversation's model beside Send, the working
   steps scroll in their box, and a local brain keeps its conversation and its tools.
 - **GitHub Copilot CLI** (ivberg's #244, #255): supported again, connections are remembered across restarts, and
