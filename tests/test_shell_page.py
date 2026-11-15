@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ["shell.js", "captions.js", "home.js", "engines.js", "machine.js", "agent.js", "suite.js", "suitelinks.js", "updates.js", "settings.js", "sound.js",
-         "slate.js", "director.js", "nightshift.js", "looks.js", "train.js", "finish.js", "graphics.js", "roughcut.js", "rooms.js"]
+         "slate.js", "director.js", "nightshift.js", "looks.js", "train.js", "finish.js", "graphics.js", "roughcut.js", "rooms.js", "addons.js"]
 HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
 globalThis.S = { platform: "spark", platform_label: "DGX SPARK · NVIDIA GB10 · H3-CUDA", presets: { small: { size: [864, 480] }, p720: { size: [1280, 720] }, sharp: { size: [1376, 768] } },
@@ -237,7 +237,7 @@ def test_library_redrawn_while_its_descriptions_load_does_not_redraw_without_end
 
 def test_library_render_keeps_scroll_height_and_loaded_players_with_a_large_listing():
     page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
-    render = page[page.index("function keepScroll()"):page.index("\n(async () => { const want")]
+    render = page[page.index("function keepScroll()"):page.index("\n(async () => {")]
     out = run(library_view_setup() + render + """
       for (const name of ["viewHome", "viewStory", "viewImage", "viewVideo", "viewPrevis", "viewSound", "viewEditHub",
           "viewLooks", "viewUpdates", "viewCreate", "viewProduction", "viewImport", "viewMotion", "viewAgent",
@@ -607,7 +607,7 @@ def test_library_date_groups_preserve_caption_search_and_selection():
 
 def test_library_date_group_render_keeps_scroll_height_and_players_with_400_clips():
     page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
-    render = page[page.index("function keepScroll()"):page.index("\n(async () => { const want")]
+    render = page[page.index("function keepScroll()"):page.index("\n(async () => {")]
     out = run(library_dates_setup() + render + """
       for (const name of ["viewHome", "viewStory", "viewImage", "viewVideo", "viewPrevis", "viewSound", "viewEditHub",
           "viewLooks", "viewUpdates", "viewCreate", "viewProduction", "viewImport", "viewMotion", "viewAgent",
