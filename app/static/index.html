@@ -1046,7 +1046,14 @@ function libSoundTile(m, shown, picked) { const [what, room] = LIB_SOUND[m.sound
 // The Library is one node kept between redraws. A redraw builds its tiles at once from the last listing, around the same players and
 // pictures, so nothing reloads and the page keeps its height; the server's listing is asked for after, and only a change draws again
 const LIB = { root: null, box: null, data: null, text: "", media: new Map() };
-function libMedia(path) { let n = LIB.media.get(path); if (!n) { n = media(path, { "data-zoom": true }); LIB.media.set(path, n); } else if (n.dataset && n.dataset.src0 && !n.getAttribute("src")) n.setAttribute("src", n.dataset.src0);
+// A clip's player loads only while it is near the screen, and lets go when it is far and not playing: every clip of a
+// large Library loading at once took all of a browser's connections (pictures stayed blank and Play did nothing)
+const LIBSEE = typeof IntersectionObserver === "function" ? new IntersectionObserver(seen => { for (const one of seen) { const n = one.target, src = n.dataset.src0; if (!src) continue;
+  if (one.isIntersecting) { if (!n.getAttribute("src")) n.setAttribute("src", src); }
+  else if (n.getAttribute("src") && n.paused !== false) { try { n.removeAttribute("src"); n.load(); } catch {} } } }, { rootMargin: "600px 0px" }) : null;
+function libMedia(path) { let n = LIB.media.get(path); const lazy = m => !!(LIBSEE && m.tagName === "VIDEO");
+  if (!n) { n = media(path, { "data-zoom": true }); LIB.media.set(path, n); if (lazy(n)) { n.dataset.src0 = n.getAttribute("src") || ""; n.removeAttribute("src"); LIBSEE.observe(n); } }
+  else if (!lazy(n) && n.dataset && n.dataset.src0 && !n.getAttribute("src")) n.setAttribute("src", n.dataset.src0);
   if (n.dataset && !n.dataset.src0 && n.getAttribute) n.dataset.src0 = n.getAttribute("src") || ""; return n; }
 function viewLibrary() { if (!LIB.root) { LIB.box = el("section", { class: "card" }, el("h2", {}, "Library"));
     const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
