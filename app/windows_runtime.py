@@ -275,6 +275,11 @@ def default_image() -> str:
 def freeze(kind: str, params: dict) -> dict:
     if kind == "scout" and not params.get("image_model"):
         return {**params, "image_model": default_image()}
+    if kind == "long" and not params.get("segment_seconds") and mode()["enabled"]:
+        # with gating on, a long video is cut into the longest parts a passed size check covers at its size
+        import windows_engine_checks as engines
+        if seconds := engines.longest_part(params):
+            return {**params, "segment_seconds": seconds}
     return params
 
 
@@ -330,13 +335,14 @@ def require_native(kind: str, params: dict) -> None:
             raise RouteUnavailable(why)
         if missing := video_missing(params):
             raise RouteUnavailable("H3 model files are missing: " + ", ".join(missing))
-        if kind == "video" and mode()["enabled"]:
-            # the one video recipe with a check (windows_engine_checks.py): a passed check opens it, inside what it ran
+        if kind in ("video", "long") and mode()["enabled"]:
+            # the video recipes with a check (windows_engine_checks.py): a passed check opens them, inside what it ran.
+            # A long video's parts are checked again one by one as they are built (kind "video", from a picture).
             import windows_engine_checks as engines
             found = engines.video_status()
             if not found["qualified"]:
                 raise RouteUnavailable(found["why"])
-            engines.require_scope("video", params)
+            engines.require_scope(kind, params)
             return
     if kind in windows_cuda.NATIVE and kind not in ("export", "soundtrack", "graphics", "hlg", "finish"):
         if mode()["enabled"]:
@@ -389,11 +395,12 @@ def gate_native_state(kind: str, state: dict, selected_mode: dict | None = None)
                                              "available_unverified" if state.get("available") else "unavailable")}
     if why := windows_cuda.configuration_error():
         return {**result, "available": False, "state": "configuration_error", "why": why}
-    checked_kind = "video" if kind == "video" else "bolt" if kind == "Bolt" else ""
+    checked_kind = kind if kind in ("video", "long") else "bolt" if kind == "Bolt" else ""
     if checked_kind and installed and (state.get("available") or state.get("state") == "needs_verification"):
         # H3 video and Bolt have a check of their own (windows_engine_checks.py): with gating on, a passed one opens them
         import windows_engine_checks as engines
-        checked = engines.video_status() if checked_kind == "video" else engines.status(checked_kind)
+        checked = (engines.video_status() if checked_kind == "video" else engines.long_status() if checked_kind == "long"
+                   else engines.status(checked_kind))
         result.update(qualified=checked["qualified"], check_available=True, verified_recipe=checked["verified_recipe"],
                       **({"hardware": checked["hardware"]} if "hardware" in checked else {}))
         if selected_mode["enabled"] and not checked["qualified"]:

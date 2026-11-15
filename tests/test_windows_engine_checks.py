@@ -97,10 +97,11 @@ def test_with_gating_on_video_is_refused_until_its_check_passes_and_then_held_to
                     {"references": ["a.png"]}, {"loras": ["x"]}, {"last_frame": "a.png"}, {"steps": 20}):
         with pytest.raises(ValueError, match="Verified video scope"):
             windows_runtime.require_native("video", {**PLAIN, **outside})
-    # the two video kinds without a check stay refused under the gate
-    for kind in ("studio", "long"):
-        with pytest.raises(windows_runtime.RouteUnavailable, match="has not been verified"):
-            windows_runtime.require_native(kind, PLAIN)
+    # text to picture to video has no check and stays refused under the gate; a long video has its own check
+    with pytest.raises(windows_runtime.RouteUnavailable, match="has not been verified"):
+        windows_runtime.require_native("studio", PLAIN)
+    with pytest.raises(ValueError, match="long videos and a starting picture"):
+        windows_runtime.require_native("long", PLAIN)
 
 
 def test_with_gating_off_video_runs_as_before_with_or_without_a_check(evidence, monkeypatch):
@@ -279,3 +280,91 @@ def test_each_level_renders_its_own_canvas_and_length_and_is_validated_against_t
     monkeypatch.setattr(graphics, "probe", lambda path: {**good, "width": 512, "height": 288, "seconds": 2.0})  # another clip is not this level's
     with pytest.raises(RuntimeError, match="canvas"):
         engines.check_video(clip, kind)
+
+
+def test_a_long_video_and_a_starting_picture_open_with_the_long_video_check_inside_the_passed_sizes(evidence, monkeypatch):
+    """A long video is a chain of clips, each from the last frame of the one before: no size level renders from a picture."""
+    monkeypatch.setattr(windows_cuda, "h3_why_not", lambda: "")
+    monkeypatch.setattr(windows_cuda, "configuration_error", lambda: "")
+    monkeypatch.setattr(windows_runtime, "video_missing", lambda params=None: [])
+    monkeypatch.setattr(windows_runtime, "mode", lambda: {"enabled": True})
+    long = {"prompt": "x", "preset": "small", "quality": "fh8", "total_seconds": 1800}
+    def runs(kind, **settings):
+        try:
+            windows_runtime.require_native(kind, windows_runtime.freeze(kind, {**(long if kind == "long" else PLAIN), **settings}))
+            return True
+        except ValueError as error:
+            runs.why = str(error)
+            return False
+    passed("video")
+    assert not runs("long") and "long videos and a starting picture" in runs.why and not runs("video", image="a.png")
+    raw = {"available": True, "installed": True, "why": "", "state": "available_unverified"}
+    assert windows_runtime.gate_native_state("long", raw, {"enabled": True})["available"] is False
+    passed(engines.CHAIN)
+    assert windows_runtime.gate_native_state("long", raw, {"enabled": True})["available"] is True
+    # its parts are as long as a passed size check covers at that size: 5 s here, never the app's 15 s default
+    assert engines.longest_part(long) == 5 and windows_runtime.freeze("long", long)["segment_seconds"] == 5
+    assert runs("long") and runs("video", image="a.png") and not runs("long", segment_seconds=15) and "each part" in runs.why
+    assert not runs("long", preset="sharp") and not runs("video", image="a.png", preset="sharp")
+    passed("video-long")
+    passed("video-sharp")  # the laptop's passes: Small 15 s, Full size 10 s
+    assert windows_runtime.freeze("long", long)["segment_seconds"] == 15 and runs("long")
+    assert windows_runtime.freeze("long", {**long, "preset": "sharp"})["segment_seconds"] == 10 and runs("long", preset="sharp")
+    assert not runs("long", preset="sharp", segment_seconds=15) and runs("long", preset="sharp", quality="fh4")
+    # each part is built as a clip from a picture: inside the same scope
+    assert runs("video", preset="sharp", frames=243, image="renders/j/seg001_first.jpg", total_seconds=1800, segment_seconds=10)
+    assert not runs("long", loras=[{"name": "x"}]) and not runs("video", image="a.png", last_image="b.png") and not runs("long", quality="fh20")
+    # the long-video check alone opens nothing: a size must have passed
+    assert engines.long_status()["qualified"] and engines.CHAIN not in engines.passed_levels()
+    # with gating off nothing is frozen or held
+    monkeypatch.setattr(windows_runtime, "mode", lambda: {"enabled": False})
+    assert "segment_seconds" not in windows_runtime.freeze("long", long)
+
+
+def test_the_long_video_check_renders_the_chain_a_job_does_and_joins_it(tmp_path, monkeypatch):
+    import chain
+    import graphics
+    import windows_media
+    monkeypatch.setattr(windows_cuda, "translate", lambda argv: ["python", "windows_scripts.py", Path(argv[1]).stem, *argv[2:]])
+    monkeypatch.setattr(windows_media, "search_path", lambda path: path)
+    ran, frames, joined = [], [], []
+    def run(command, env=None, **kwargs):
+        ran.append((command, env))
+        Path(command[-1]).write_bytes(b"clip")
+        return type("Done", (), {"returncode": 0})()
+    monkeypatch.setattr(engines.subprocess, "run", run)
+    monkeypatch.setattr(chain, "last_frame", lambda video, image, env=None: (frames.append((video.name, image.name)), image.write_bytes(b"jpg")))
+    monkeypatch.setattr(chain, "join", lambda clips, final, total, fps, folder, env=None: (joined.append(([c.name for c in clips], total, fps)), final.write_bytes(b"mp4")))
+    engines.worker(engines.CHAIN, tmp_path / "out")
+    (first, first_env), (second, second_env) = ran
+    assert first[2] == "video" and "IMAGE_FILE" not in first_env and first_env["FRAMES"] == "124" and first_env["SEED"] == "7"
+    # the second part: the picture path of the queue (studio.sh, the picture given, the prompt led by it), the next seed
+    assert second[2] == "studio" and second[3] == "" and second[4].startswith(engines.LEAD) and second_env["RAW_PROMPT"] == "1"
+    assert second_env["IMAGE_FILE"].endswith("seg001_first.jpg") and second_env["SEED"] == "8" and (second_env["WIDTH"], second_env["HEIGHT"]) == ("864", "480")
+    assert frames == [("seg001.mp4", "seg001_first.jpg")] and joined == [(["seg001.mp4", "seg002.mp4"], 10, 24)]
+    for source in ("app/server.py", "spark/windows_scripts.py"):  # one lead, word for word, where a part is made
+        assert f'LEAD = "{engines.LEAD}"' in (Path(engines.features.PACK) / source).read_text(encoding="utf-8")
+    # validated as the joined video: its canvas, 24 fps, 10 seconds, with sound
+    good = {"width": 864, "height": 480, "fps": 23.949, "seconds": 10.084, "audio": True}  # what ffprobe says of a real join
+    monkeypatch.setattr(graphics, "probe", lambda path: good)
+    engines.check_video(tmp_path / "out" / "video" / "check.mp4", engines.CHAIN)
+    monkeypatch.setattr(graphics, "probe", lambda path: {**good, "seconds": 5.17})  # one part alone is not the long video
+    with pytest.raises(RuntimeError, match="length"):
+        engines.check_video(tmp_path / "out" / "video" / "check.mp4", engines.CHAIN)
+    assert windows_checks.CHECKS[engines.CHAIN].group == "video" and "30 minutes" in engines.scope_label(engines.CHAIN)
+
+
+def test_the_join_drops_the_repeated_frame_of_every_later_part(tmp_path, monkeypatch):
+    import chain
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return type("Done", (), {"returncode": 0, "stderr": ""})()
+    monkeypatch.setattr(chain.subprocess, "run", run)
+    chain.join([tmp_path / "a.mp4", tmp_path / "b.mp4"], tmp_path / "final.mp4", 10, 24, tmp_path)
+    assert "trim=start_frame=1,setpts=PTS-STARTPTS" not in calls[0] and "trim=start_frame=1,setpts=PTS-STARTPTS" in calls[1]
+    assert calls[2][calls[2].index("-t") + 1] == "10" and calls[2][-1].endswith("final.mp4")
+    monkeypatch.setattr(chain.subprocess, "run", lambda command, **kwargs: type("Done", (), {"returncode": 1, "stderr": "bad part"})())
+    with pytest.raises(chain.JoinFailed) as failed:
+        chain.join([tmp_path / "a.mp4"], tmp_path / "final.mp4", 5, 24, tmp_path)
+    assert failed.value.log == "bad part"

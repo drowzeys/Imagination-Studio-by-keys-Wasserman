@@ -138,6 +138,13 @@ same account used by your local Hugging Face login/token. Missing access is chec
 Open **Machine → Feature checks** to run a check. Checks use the normal one-at-a-time queue; opening the page,
 starting Studio or downloading a model never runs inference automatically.
 
+**Video has several checks.** The size checks (Small 5 s, Small 15 s, Full size 5, 10 and 15 s) each open clips from
+words that are no larger and no longer than what they ran. **Long videos and a starting picture** is one more check:
+it renders a long video the way the queue does, two 5 s parts, the second opening on the last frame of the first, and
+joins them. Once it has passed, a long video (up to 30 minutes) and a clip from a starting picture run under the gate,
+each part inside a passed size check. A long video's parts are as long as the passed checks cover at its size: on a
+machine that passed Full size 10 s but not 15 s, a full-size long video is made of 10 s parts.
+
 The diagnostics and feature groups start collapsed. **Feature checks** links on
 feature pages and **Models & weights** open the relevant saved results, prerequisites and setup guidance.
 The picture model picker keeps backend and recipe information under collapsed **Model details**, showing a

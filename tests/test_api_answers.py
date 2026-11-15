@@ -56,7 +56,8 @@ def test_the_state_never_waits_on_the_gpu_driver():
 
 def test_no_request_runs_a_tool_without_a_time_limit():
     """Every subprocess a request handler can reach has a timeout: the job thread's own renders are the only ones
-    that run as long as they need (run(), the long video's joins, the timeline export, hush)."""
+    that run as long as they need (run(), the timeline export, hush; the long video's joins are chain.py's, reached
+    from the job thread and the Windows Feature check only)."""
 
     import ast
 
@@ -67,7 +68,8 @@ def test_no_request_runs_a_tool_without_a_time_limit():
             name = ast.unparse(call.func)
             if name == "subprocess.run" and not any(keyword.arg == "timeout" for keyword in call.keywords):
                 unlimited.append(function.name)
-    assert sorted(set(unlimited)) == ["export", "hush", "long_take"], sorted(set(unlimited))
+    assert sorted(set(unlimited)) == ["export", "hush"], sorted(set(unlimited))
+    assert "chain.join(" in ast.unparse(next(f for f in ast.walk(tree) if isinstance(f, ast.FunctionDef) and f.name == "long_take"))
 
 
 def test_music_runs_no_tool_without_a_time_limit():

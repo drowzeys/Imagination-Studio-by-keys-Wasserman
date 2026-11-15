@@ -40,7 +40,7 @@ CHECKS = {
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="sound"),
     **{kind: FeatureCheck(kind, engines.TITLES[kind], engines.scope_label(kind),
                          tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")),
-                         group="video" if kind in engines.VIDEO_LEVELS else "agent") for kind in engines.KINDS},
+                         group="video" if kind in engines.VIDEO_KINDS else "agent") for kind in engines.KINDS},
     **{model: FeatureCheck(model, spec[0], "Production native image workflow; qualify canvases and counts separately.",
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="image")
        for model, spec in windows_runtime.IMAGE_SPECS.items()},
@@ -323,7 +323,7 @@ def attach(server):
                                  key=lambda job: job["created"], default=None),
                       "setup": r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts video",
                       "open_tab": "Video", "open_label": "Open video"})
-        for level in engines.VIDEO_LEVELS:  # the larger sizes and longer clips: a card and a check each
+        for level in engines.VIDEO_KINDS:  # the larger sizes, longer clips and long videos: a card and a check each
             if level == "video":
                 continue
             found = engines.usage_status(level, selected_mode)
