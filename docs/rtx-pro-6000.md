@@ -61,6 +61,9 @@ What the installer does differently on this card:
 
 ## One to four local GPUs
 
+**The short way through this, for a person or their agent, with the calls behind each button and what every refusal
+means: [One to four local GPUs: the recipe](local-gpus.md).**
+
 Launch one head with the same `PREFIX`, `SPARK_MODELS`, `STUDIO_HOME` and explicit numeric `STUDIO_GPU` as above.
 Then open **Machine → Sparks**:
 
@@ -76,9 +79,10 @@ Then open **Machine → Sparks**:
    unticked worker still occupies a slot. Missing cards remain identified by UUID, never replaced by the new occupant
    of their old index. CUDA is pinned by UUID; the numeric index used by memory queries is checked too. After a
    reorder, stop/start affected workers and restart the head if its own index changed.
-4. Set **Render clips on** to the desired worker. **Require** waits while that worker is busy or stopped and
-   never falls back. A removed worker or known capability refusal fails with the reason; a failure after dispatch
-   fails explicitly. **Prefer** can use the head or another eligible worker. **Automatic** uses the worker count.
+4. Under **Where new clips render**, set **Render on** to the desired worker. **Wait for it** (*require*) waits
+   while that worker is busy or stopped and never falls back. A removed worker or known capability refusal fails with the reason; a failure after dispatch
+   fails explicitly. **Use another renderer** (*prefer*) can use the head or another eligible worker. **Automatic**
+   uses the worker count.
 5. **Check** only refreshes status. **Stop** drains that owned worker and its model processes, leaving external
    workloads and the other GPUs alone. Quitting the head stops its local workers too. Remote Sparks remain separately
    managed through their existing SSH controls.

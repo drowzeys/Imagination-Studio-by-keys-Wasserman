@@ -170,6 +170,50 @@ def test_a_thermal_stop_cancels_and_queues_again_once(monkeypatch):
     assert len(queued) == 1 and "not queued again" in repeat["error"]
 
 
+def test_a_thermal_stop_leaves_a_clip_another_spark_sent_to_that_spark(monkeypatch):
+    """#242: the Spark that sent the clip follows the job it sent, sees it cancelled and places the clip again. A
+    repeat queued here as well would render on the hot machine under an id nobody follows."""
+
+    cancelled, queued = [], []
+    monkeypatch.setattr(server, "cancel", lambda job_id: cancelled.append(job_id) or {})
+    monkeypatch.setattr(server, "queue_job", lambda body: queued.append(body) or {"id": "again"})
+    monkeypatch.setattr(server, "THERMAL_RETRIES", {})
+    job = {"id": "theirs", "kind": "video", "title": "a clip · for head", "params": {"prompt": "rain"}, "log": "",
+           "status": "running", "sender": "head"}
+    server.thermal_stop(job, "the GPU reached 91 °C (the stop is at 90 °C)")
+    assert cancelled == ["theirs"] and queued == [] and server.THERMAL_RETRIES == {}
+    assert "91 °C" in job["error"] and "head sent this clip and places it again" in job["error"]
+    assert "queued again as" not in job["error"]
+
+
+def test_bolt_given_back_on_an_idle_queue_is_not_left_held(monkeypatch):
+    """#242: the memory manager's release holds Bolt, and only the work loop lifts the hold. With an idle queue the
+    loop sleeps, so the release wakes it. The engine is a stand-in whose release holds, as bolt.release does."""
+
+    import threading
+    from types import SimpleNamespace
+
+    held, lifted = [], threading.Event()
+    monkeypatch.setattr(server, "wake", threading.Event())
+    monkeypatch.setattr(server, "stopping", threading.Event())
+    monkeypatch.setattr(server, "hub", SimpleNamespace(claim=lambda: None))
+    monkeypatch.setattr(server.bolt, "release", lambda why: held.append(why) or True)
+    monkeypatch.setattr(server.bolt, "queue_empty", lambda: (held.clear(), lifted.set()))
+    loop = threading.Thread(target=server.work, daemon=True)
+    loop.start()
+    try:
+        assert not lifted.wait(0.2), "an idle loop has nothing to wake it"
+        module = next(one for one in mm.modules() if one.name == "bolt")
+        assert module._release is server.release_bolt
+        assert module.release("memory is short") is True
+        assert lifted.wait(2) and held == [], "the hold stayed after a release on an idle queue"
+    finally:
+        server.stopping.set()
+        server.wake.set()
+        loop.join(timeout=2)
+    assert not loop.is_alive()
+
+
 def test_the_server_gates_after_the_memory_admission_and_the_watch_has_the_stop():
     source = (ROOT / "app/server.py").read_text()
     assert source.index("memory_manager.thermal_admit(job") > source.index("memory_manager.admit(job")

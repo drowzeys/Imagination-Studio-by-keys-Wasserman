@@ -1152,11 +1152,9 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
         if found.get("app") == "slate" and (folder / "project.json").is_file():
             given = json.loads((folder / "project.json").read_text())  # a Slate film comes in as it is
             project = {**slate.blank(given.get("name") or "Imported film"), **given}
-            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(project.get("id", ""))) or slate.project_file(project["id"]).is_file():
-                project["id"] = slate.new_id()
         else:
             project = as_slate(found, home, slate.blank)
-        slate.write(project)
+        slate.write_new(project)  # its own id, never a film's in Production or one being put back
         found["slate"] = project["id"]
         (folder / "import.json").write_text(json.dumps(found, indent=1))
         return {"project": project["id"], "name": project["name"], "scenes": len(project["scenes"]),

@@ -12,10 +12,15 @@ function artSlot(name, cls = "", sign = "image") { const box = el("div", { class
   if (ART.ready.has(name)) box.append(el("img", { src: "art/" + name + ".webp", alt: "", loading: "lazy", decoding: "async" }));
   return box; }
 // a picture card: the picture, one label, one line, a chevron
-function pcard({ art, sign, title, one, run, k, off, src, data }) {  // data: the card's data-* attributes
+function withFeatureBadge(card, feature, attrs = {}) {
+  const badge = feature && typeof featureBadge === "function" ? featureBadge(feature) : null;
+  return badge ? el("div", { class: "feature-app", "data-feature-card": feature, ...attrs }, card, badge) : card;
+}
+function pcard({ art, sign, title, one, run, k, off, src, data, feature }) {  // data: the card's data-* attributes
   const pic = src ? el("div", { class: "art" }, el("img", { src, alt: "", loading: "lazy" })) : artSlot(art, "", sign);
-  return el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "", ...(data || {}) }, pic, k ? el("span", { class: "k" }, k) : null,
-    el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, off || one) : null), icon("go", "go"))); }
+  const card = el("button", { class: "pcard", type: "button", onclick: run, disabled: !!off, title: off || one || "", ...(data || {}) }, pic, k ? el("span", { class: "k" }, k) : null,
+    el("div", { class: "txt" }, el("div", {}, el("b", {}, title), one ? el("span", { class: "one" }, off || one) : null), icon("go", "go")));
+  return withFeatureBadge(card, feature); }
 // a vault page's head with its cover, like an engine's; without a ready cover it is the plain head
 function vaultHead(id, title, line, right) {
   if (!ART.ready.has("vault-" + id)) return pageHead("Studio Vault", title, line, right);
@@ -67,11 +72,24 @@ const ENGINE_PAGES = {
       { art: "act-edit-library", sign: "library", title: "Library", one: "Every take on this machine", run: () => go("Library") }] }),
 };
 function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_PAGES[id]();
+  const imageKind = typeof imageFeature === "function" ? imageFeature() : "scout";
+  const primary = { image: imageKind, video: "video", sound: "voice" }[id];
+  const why = id === "image" && typeof imageModelWhy === "function" ? imageModelWhy() : capWhy(primary);
+  const kinds = { "act-image-edit": "edit", "act-image-looks": "looks", "act-previs-motion": "motion",
+    "start-voice": "voice", "start-song": "music", "start-sfx": "sfx" };
+  e.cards = e.cards.map((card, index) => {
+    const feature = id === "video" ? "video" : id === "image" && index < 2 ? imageKind : kinds[card.art];
+    const unavailable = id === "image" && index < 2 && typeof imageModelWhy === "function" ? imageModelWhy() : capWhy(feature);
+    return { ...card, feature, off: unavailable || card.off };
+  });
+  if (S.platform === "windows" && id === "image") e.line = imageModelName() + ": installation, supported recipes and memory requirements are in Feature checks.";
+  if (S.platform === "windows" && id === "video" && why) e.line = why;
   return el("div", {},
     el("div", { class: "enghead" }, artSlot("engine-" + id, "", id),
       el("div", { class: "stack" }, el("span", { class: "eyebrow engmark" }, el("img", { src: "brand/module-" + id + ".svg", alt: "", width: 22, height: 22 }), "Creative Engine"), el("h1", { class: "display" }, r.name), el("p", { class: "sub", style: "margin:0" }, e.line),
         e.marks.filter(Boolean).length ? el("div", { class: "marks" }, e.marks) : null,
-        el("div", { class: "acts" }, el("button", { class: "primary", onclick: e.primary[1] }, e.primary[0])))),
+        el("div", { class: "acts" }, el("button", { class: "primary", disabled: !!why, title: why, onclick: e.primary[1] }, e.primary[0]),
+          typeof featureGuidance === "function" ? featureGuidance(primary) : null))),
     el("div", { class: "cards" + (e.cards.length >= 4 ? " c4" : e.cards.length === 3 ? " c3" : "") }, e.cards.map(pcard))); }
 const viewStory = () => engineLanding("story"), viewImage = () => engineLanding("image"), viewVideo = () => engineLanding("video"),
   viewPrevis = () => engineLanding("previs"), viewSound = () => engineLanding("sound"), viewEditHub = () => engineLanding("edit");

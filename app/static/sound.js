@@ -1,17 +1,20 @@
 "use strict";
 // Sound → Sound effects (app/sound.py): foley made for a clip's picture (MMAudio) or a sound effect from words (Stable
 // Audio Open), each a job of the studio's queue. What is made lands in sound/ and the Library's Sound effects.
-const SFX = { state: null, takes: null, mode: "foley", clips: null, video: "", prompt: "", negative: "", seconds: 6, keep: true, db: -6, seed: 1, busy: false, timer: null };
+const SFX = { state: null, takes: null, takeError: "", mode: "foley", clips: null, video: "", prompt: "", negative: "", seconds: 6, keep: true, db: -6, seed: 1, busy: false, timer: null };
 const SFX_MODES = { foley: ["Foley for a clip", "MMAudio watches the clip and makes its sound: steps on the footfalls, the door when it shuts."],
   sfx: ["A sound effect", "Stable Audio Open makes a sound from words: up to 47 seconds, 44.1 kHz stereo."] };
 async function sfxLoad() { try { SFX.state = await api("/api/sound/state"); } catch (e) { SFX.state = { error: e.message }; }
-  try { SFX.takes = await api("/api/sound/takes"); } catch { SFX.takes = []; }
-  if (SFX.clips === null) { try { SFX.clips = (await api("/api/library")).filter(m => m.kind === "video"); } catch { SFX.clips = []; } }
+  SFX.takeError = "";
+  try { SFX.takes = await api("/api/sound/takes"); } catch (e) { SFX.takes = []; SFX.takeError = e.message; }
+  if (SFX.clips === null) { try { SFX.clips = (await api("/api/library")).filter(m => m.kind === "video");
+      if (SFX.video && !SFX.clips.some(c => c.path.replace(/\\/g, "/") === SFX.video.replace(/\\/g, "/"))) SFX.video = ""; } catch (e) { SFX.clips = []; toast(e.message, 7000); } }
   if (tab === "Foley") render(); }
 const sfxLive = () => (typeof jobs !== "undefined" ? jobs : []).some(j => (j.kind === "sfx" || j.kind === "foley") && ["queued", "running"].includes(j.status));
 function sfxWatch() { if (SFX.timer) return; SFX.timer = setInterval(async () => { if (tab !== "Foley") { clearInterval(SFX.timer); SFX.timer = null; return; }
-  const before = JSON.stringify((SFX.takes || []).map(t => t.id)); try { SFX.takes = await api("/api/sound/takes"); } catch {}
-  if (JSON.stringify((SFX.takes || []).map(t => t.id)) !== before) render(); if (!sfxLive()) { clearInterval(SFX.timer); SFX.timer = null; } }, 5000);
+  const before = JSON.stringify([SFX.takeError, (SFX.takes || []).map(t => t.id)]);
+  try { SFX.takes = await api("/api/sound/takes"); SFX.takeError = ""; } catch (e) { SFX.takeError = e.message; }
+  if (JSON.stringify([SFX.takeError, (SFX.takes || []).map(t => t.id)]) !== before) render(); if (!sfxLive()) { clearInterval(SFX.timer); SFX.timer = null; } }, 5000);
   if (SFX.timer && SFX.timer.unref) SFX.timer.unref(); }
 async function sfxMake() { const m = SFX.mode;
   if (m === "foley" && !SFX.video) return toast("Pick the clip to make its sound");
@@ -23,18 +26,25 @@ async function sfxMake() { const m = SFX.mode;
   catch (e) { toast(e.message, 7000); }
   SFX.busy = false; render(); }
 function sfxTake(t) { const clip = t.clip && t.kind === "foley";
+  const actions = [
+    clip ? el("button", { class: "small", onclick: () => addToTimeline(t.clip) }, "+ timeline") : null,
+    el("button", { class: "small", "aria-label": "Use as reference sound", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1;
+      if (!C.refAudios.includes(t.path)) { C.refAudios.push(t.path); C.audio_notes.push(""); } go("Create"); toast("Added as reference sound"); } }, "reference"),
+    el("button", { class: "small", onclick: () => { SFX.seed = (Number(t.seed) || 1) + 1; SFX.prompt = t.prompt || ""; SFX.mode = t.kind; if (t.kind === "foley" && t.source) SFX.video = t.source; render(); } }, "again"),
+    trashButton("Delete " + (t.prompt || t.id), () => clearOut({ paths: clip ? [t.path, t.clip] : [t.path], films: true },
+      clip ? "Delete this Foley take and its rendered clip?\nThe original source clip stays." : "Delete this sound effect?"),
+      clip ? "Delete: move this rendered clip and its sound to trash; the original source clip stays" : "Delete: move this sound effect to trash")];
   return el("div", { class: "tile lib-sound", "data-take": t.id },
     el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, t.kind === "foley" ? "Foley" : "Sound effect"),
       el("b", { title: t.prompt || "" }, t.prompt || (t.source ? "For " + t.source.split("/").pop() : t.id))),
     clip ? media(t.clip, { controls: true, preload: "metadata" }) : media(t.path),
     el("div", { class: "cap" }, el("span", { class: "note m-flat" }, (t.seconds ? Number(t.seconds).toFixed(1) + " s · " : "") + "seed " + t.seed + (t.elapsed ? " · made in " + Math.round(t.elapsed) + " s" : ""))),
-    el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
-      clip ? el("button", { class: "small", onclick: () => addToTimeline(t.clip) }, "+ timeline") : null,
-      el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1;
-        if (!C.refAudios.includes(t.path)) { C.refAudios.push(t.path); C.audio_notes.push(""); } go("Create"); toast("Added as reference sound"); } }, "reference sound"),
-      el("button", { class: "small", onclick: () => { SFX.seed = (Number(t.seed) || 1) + 1; SFX.prompt = t.prompt || ""; SFX.mode = t.kind; if (t.kind === "foley" && t.source) SFX.video = t.source; render(); } }, "again"))); }
+    clip ? el("details", { class: "sfx-take-menu" },
+      el("summary", { "aria-label": "Foley take actions", title: "Timeline, reference sound, again or delete" }, "⋯"),
+      el("div", { class: "sfx-take-menu-items" }, ...actions))
+      : el("div", { class: "cap sfx-take-actions" }, ...actions)); }
 function viewFoley() {
-  if (!SFX.state) sfxLoad(); if (sfxLive()) sfxWatch();
+  if (!SFX.state || !SFX.takes) sfxLoad(); if (sfxLive()) sfxWatch();
   const art = typeof ART !== "undefined" && ART.ready.has("start-sfx") && typeof artSlot === "function";
   const head = art ? el("div", { class: "pagehead enghead vault" }, artSlot("start-sfx", "", "sound"),
       el("div", { class: "stack" }, el("span", { class: "eyebrow" }, "Sound"), el("h1", { class: "display" }, "Sound effects"),
@@ -74,6 +84,8 @@ function viewFoley() {
       el("div", { class: "row" }, el("button", { class: "primary fit", disabled: SFX.busy || !k.ready, onclick: sfxMake }, SFX.busy ? "Queuing…" : m === "foley" ? "Make the foley" : "Make the sound"),
         el("span", { class: "note m-flat" }, k.licence))),
     el("div", { class: "sectionhead" }, el("h2", {}, "Made here"), el("button", { class: "small", onclick: () => { if (typeof LIBF !== "undefined") LIBF.kind = "sfx"; go("Library"); } }, "In the Library")),
-    !SFX.takes ? el("div", { class: "note" }, "Loading…") : !SFX.takes.length ? el("div", { class: "note" }, "Nothing yet: your sound effects and foley line up here.")
+    SFX.takeError ? el("div", { class: "note vt-bad" }, SFX.takeError,
+      el("button", { type: "button", class: "small", onclick: sfxLoad }, "Retry"))
+      : !SFX.takes ? el("div", { class: "note" }, "Loading…") : !SFX.takes.length ? el("div", { class: "note" }, "Nothing yet: your sound effects and foley line up here.")
       : el("div", { class: "grid" }, SFX.takes.slice(0, 24).map(sfxTake)));
 }

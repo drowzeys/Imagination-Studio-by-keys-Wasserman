@@ -60,6 +60,7 @@ try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = d
 <script src="suitelinks.js"></script>
 <script src="slate.js"></script>
 <script src="director.js"></script>
+<script src="trashbin.js"></script>  <!-- films in the trash, put back -->
 <script src="motion.js"></script>
 <script src="actions.js"></script>
 <script src="captions.js"></script>
@@ -140,11 +141,19 @@ const clearButton = (key, label = "Clear", title = "Empty the text fields of thi
 const PICK = new Set(), LIBPICK = new Set();
 const sizeText = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? Math.round(b / 1e6) + " MB" : Math.max(1, Math.round(b / 1e3)) + " kB";
 const count = (n, word) => n + " " + word + (n === 1 ? "" : "s");
-async function restoreLast() { try { const r = await api("/api/trash/restore", {}); toast("Put back " + count(r.files, "file") + (r.jobs ? " and " + count(r.jobs, "job card") : "") + (r.missing.length ? " · " + r.missing.length + " could not be put back" : "")); } catch (e) { toast(e.message); } await poll(); render(); }
+async function refreshMedia() {
+  if (typeof SHELL !== "undefined") SHELL.libCache = null;
+  if (typeof VO !== "undefined") VO.takes = null;
+  if (typeof MU !== "undefined") MU.takes = null;
+  if (typeof SFX !== "undefined") { SFX.takes = null; SFX.clips = null; if (tab === "Foley") await sfxLoad(); }
+}
+async function restoreLast() { try { const r = await api("/api/trash/restore", {}); await refreshMedia(); toast("Put back " + count(r.files, "file") + (r.jobs ? " and " + count(r.jobs, "job card") : "") + (r.missing.length ? " · " + r.missing.length + " could not be put back" : "")); } catch (e) { toast(e.message); } await poll(); render(); }
 async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are moved to the trash folder inside " + S.home + ", not erased. “Restore last deletion” in the Library puts them back.")) return;
-  try { const r = await api("/api/clear", body); PICK.clear(); LIBPICK.clear();
+  try { const r = await api("/api/clear", body); PICK.clear(); LIBPICK.clear(); await refreshMedia();
     toast(el("span", {}, (r.jobs ? count(r.jobs, "job") + " and " : "") + count(r.files, "file") + " moved to the trash" + (r.skipped.length ? " · " + r.skipped.length + " kept: " + r.skipped[0].why : "") + " ",
-      r.files || r.jobs ? el("button", { class: "small", onclick: e => { e.target.closest(".toast").remove(); restoreLast(); } }, "Undo") : null), 12000);
+      r.files || r.jobs ? el("button", { class: "small", onclick: e => { e.target.closest(".toast").remove(); restoreLast(); } }, "Undo") : null,
+      " ", el("a", { href: "#Library", title: "Open the Library's Trash panel and folder location",
+        onclick: e => { e.preventDefault(); go("Library"); } }, "View trash")), 12000);
   } catch (e) { toast(e.message); } await poll(); render(); }
 
 let S = null, jobs = [], tab = "Home", project = null;
@@ -231,7 +240,9 @@ function lastFramePanel() { const set = p => { C.lastImage = p; C.prompt = ""; }
       C.lastImage ? el("button", { class: "fit", onclick: () => { set(null); render(); } }, "No last frame") : null),
     clipFrames(set, "From a clip in the Library"),
     el("div", { class: "row", style: "margin-top:8px;align-items:flex-end" }, field("Or make one from a prompt (" + imageModelName() + ")", bind(L, "prompt", el("input", { placeholder: "the picture the clip ends on" }))),
-      el("button", { class: "fit", onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try { const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: { prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
+      el("button", { class: "fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { if (!L.prompt.trim()) return toast("Describe the picture first"); try {
+        if (imageModelWhy()) throw new Error(imageModelWhy());
+        const j = await api("/api/jobs", { kind: "scout", title: "Last frame", params: stillParams({ prompt: L.prompt, count: 1, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) }) }); L.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make it"),
       scout ? el("span", { class: "pill " + scout.status }, scout.status) : null));
   if (L.lib) { const grid = el("div", { class: "grid", style: "margin-top:10px" }); box.append(grid);
     api("/api/library").then(list => list.filter(m => m.kind === "image").slice(0, 24).forEach(m => grid.append(el("div", { class: "tile" + (C.lastImage === m.path ? " on" : ""), onclick: () => { set(m.path); L.lib = false; render(); } }, media(m.path), el("div", { class: "cap" }, m.path.split("/").pop().slice(-26)))))).catch(() => {}); }
@@ -280,11 +291,99 @@ function changed() { sync(); C.prompt = ""; render(); }
 // The picture model a prompt goes to (server.py IMAGE_MODELS): Qwen 2.1 Turbo on every install, FLUX3-K Fast and Full
 // where oneshot-setup --flux3 put them, MOSS-Image on a DGX Spark with --moss. Only installed ones are offered; a choice
 // that is not installed falls back to Qwen.
-const imageModels = () => (S.image_models && S.image_models.length ? S.image_models : [{ id: "qwen", label: "Qwen 2.1 Turbo", note: "" }]);
-const imageModel = () => (imageModels().some(m => m.id === C.imageModel) ? C.imageModel : "qwen");
-const imageModelName = () => imageModels().find(m => m.id === imageModel()).label;
-const imageModelPick = after => imageModels().length < 2 ? null : el("div", {}, el("label", {}, "Picture model"),
-  choice(C, "imageModel", Object.fromEntries(imageModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), after || render, true));
+const IMAGE_LABELS = { "sd-turbo": "SD-Turbo", qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full",
+  "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image" };
+const imageModels = () => {
+  const available = (S.image_models || []).map(m => typeof m === "string" ? m : m.id);
+  const catalog = S.image_model_options || S.windows_runtime?.image_models;
+  const models = catalog?.length ? catalog : S.image_models?.length ? S.image_models
+    : S.windows_stills?.available ? [{ id: "sd-turbo" }] : [{ id: "qwen" }];
+  return models.map(value => { const m = typeof value === "string" ? { id: value } : value;
+    return { ...m, label: m.label || m.title || IMAGE_LABELS[m.id] || m.id,
+      available: m.available ?? (catalog?.length ? available.includes(m.id) : true) }; });
+};
+const defaultImageModel = () => {
+  const models = imageModels(), preferred = typeof prefs === "function" ? prefs().presets?.image_model || "qwen" : "qwen";
+  return models.find(m => m.id === preferred && m.available)?.id || models.find(m => m.available)?.id || models[0].id;
+};
+// Where the machine sends a catalogue of models with their checks (native Windows), the choice is explicit: a model
+// that is listed but not ready stays chosen so its reason shows, and one that is not listed is refused. Without a
+// catalogue (Mac, DGX Spark) only installed models are listed, and a saved choice this machine does not have (a preset
+// from another install, a model since removed) falls back to an offered one, as it did before the cards: it used to
+// block Make image, Make scouts and Last frame until the person picked again.
+const imageModel = () => {
+  const catalog = S.image_model_options?.length || S.windows_runtime?.image_models?.length;
+  return C.imageModel && (catalog || imageModels().some(m => m.id === C.imageModel)) ? C.imageModel : defaultImageModel();
+};
+const imageIsDraft = (id = imageModel()) => id === "sd-turbo";
+const imageCheckedRecipe = (id = imageModel()) => {
+  const model = imageModels().find(m => m.id === id);
+  return model?.qualification_required && model?.qualified ? model.verified_recipe || null : null;
+};
+const imageCheckedScopes = (id = imageModel()) => {
+  const model = imageModels().find(m => m.id === id), checked = imageCheckedRecipe(id);
+  return checked ? model.verified_scopes?.length ? model.verified_scopes : [checked] : [];
+};
+const imageFeature = (id = imageModel()) => S.platform === "windows" && !imageIsDraft(id)
+  ? imageModels().find(m => m.id === id)?.feature || id : "scout";
+const imageModelWhy = (id = imageModel()) => {
+  const m = imageModels().find(m => m.id === id);
+  if (!m) return "This selected model is not offered by this runtime. Choose a model explicitly.";
+  if (m.available === false) return m.why || m.label + " is unavailable. See Feature checks for installation, verification and memory requirements.";
+  const feature = imageFeature(id);
+  return S.platform === "windows" && !imageIsDraft(id) && !S.capabilities?.[feature] ? ""
+    : typeof capWhy === "function" ? capWhy(feature) : "";
+};
+const stillParams = params => {
+  const hasCatalog = Array.isArray(S.image_model_options) || Array.isArray(S.windows_runtime?.image_models) || !!S.image_models?.length;
+  const legacyDraft = !hasCatalog && S.windows_stills?.available;
+  const id = params.image_model || (legacyDraft ? S.windows_stills.model || "sd-turbo"
+    : typeof imageModel === "function" ? imageModel() : null);
+  const checked = typeof imageCheckedRecipe === "function" ? imageCheckedRecipe(id) : null;
+  if (checked) {
+    const scopes = imageCheckedScopes(id), count = Number(params.count ?? 1);
+    if (params.width && params.height && !scopes.some(scope => scope.width === Number(params.width)
+      && scope.height === Number(params.height) && count >= 1 && count <= scope.count))
+      throw new Error("That size/count has not been verified. Choose a checked recipe or check the next level in Machine.");
+    return { ...params, image_model: id };
+  }
+  if (id !== "sd-turbo") return id ? { ...params, image_model: id } : params;
+  const { preset, ...rest } = params;
+  return { ...rest, width: 512, height: 512,
+    ...(!params.prompts ? { count: Math.min(6, Math.max(1, Number(params.count) || 1)) } : {}), image_model: id };
+};
+const imageModelName = (id = imageModel()) => imageModels().find(m => m.id === id)?.label || IMAGE_LABELS[id] || id;
+const imageModelPick = after => {
+  const descriptions = { "sd-turbo": "Quick storyboard drafts", qwen: "Fast Qwen stills", "qwen-full": "Qwen base model",
+    "flux3k-fast": "Distilled FLUX3-K", "flux3k-full": "FLUX3-K base model", "moss-image": "Prompt-to-picture" };
+  return el("div", {}, el("label", {}, "Picture model"),
+    el("div", { class: "picture-models", role: "radiogroup", "aria-label": "Picture model" },
+      imageModels().map(m => {
+        const label = IMAGE_LABELS[m.id] || m.label, feature = imageFeature(m.id);
+        const badge = S.platform === "windows" && typeof featureBadge === "function"
+          ? featureBadge(feature, { state: m, unqualified: "Unverified" }) : null;
+        return el("div", { class: "picture-model-option", "data-picture-model": m.id },
+          el("button", { type: "button", role: "radio", "aria-checked": String(m.id === imageModel()),
+            class: "picture-model-card" + (m.id === imageModel() ? " on" : "") + (badge ? " has-badge" : ""),
+            onclick: () => { C.imageModel = m.id; (after || render)(); } },
+            el("b", {}, /^(qwen|flux)/.test(m.id) ? mark(/^flux/.test(m.id) ? "flux" : "qwen", label) : label),
+            el("span", { class: "note m-flat" }, descriptions[m.id] || "Picture model")),
+          badge);
+      })),
+    S.platform === "windows" ? (() => {
+      const selected = imageModels().find(model => model.id === imageModel());
+      if (!selected) return el("div", { class: "note m-flat" }, imageModelWhy());
+      const info = typeof dscModelInfo === "function" ? dscModelInfo(selected) : null;
+      return el("div", { class: "stack" },
+        selected.available === false ? el("div", { class: "note m-flat" }, imageModelWhy()) : null,
+        selected.backend || selected.scope || info ? el("details", { class: "fold", "data-model-details": selected.id },
+          el("summary", {}, "Model details"),
+          selected.backend ? el("div", { class: "note m-flat" }, "Backend: " + selected.backend) : null,
+          selected.scope ? el("div", { class: "note m-flat" }, selected.scope) : null, info) : null);
+    })() : null,
+    S.platform === "windows" && typeof openFeatureCheck === "function" ? el("button", { type: "button", class: "small",
+      onclick: () => openFeatureCheck(imageFeature()) }, "Feature checks") : null);
+};
 const choice = (obj, key, options, after, tight) => el("div", { class: "choice" + (tight ? " tight" : ""), role: "radiogroup" }, Object.entries(options).map(([v, [title, sub]]) =>
   el("button", { type: "button", role: "radio", "aria-checked": String(obj[key]) === v ? "true" : "false", class: String(obj[key]) === v ? "on" : "", onclick: () => { obj[key] = v; if (after) after(); } }, el("b", {}, title), sub ? el("span", {}, sub) : null)));
 // A number of passes of your own is the Custom card of each passes chooser, right after its 20-pass card. C.steps
@@ -624,17 +723,31 @@ function viewCreate() {
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
-    const [w, h] = C.imageSize.split("x").map(Number);
+    const checked = imageCheckedRecipe(), scopes = imageCheckedScopes(), draft = imageIsDraft();
+    if (checked && C.verifiedImageModel !== imageModel()) {
+      C.count = 1; C.verifiedImageModel = imageModel();
+    }
+    const allowedSizes = Object.fromEntries(scopes.map(scope => [scope.width + "x" + scope.height,
+      [scope.title || "Verified size", scope.width + " × " + scope.height]]));
+    const size = draft ? "512x512" : checked ? allowedSizes[C.imageSize] ? C.imageSize : Object.keys(allowedSizes).at(-1)
+      : C.imageSize === "512x512" ? "1344x768" : C.imageSize;
+    if (checked) C.imageSize = size;
+    if (draft && Number(C.count) > 6) C.count = 6;
+    const [w, h] = size.split("x").map(Number);
+    const maxCount = checked ? Math.max(...scopes.filter(scope => scope.width === w && scope.height === h).map(scope => scope.count)) : draft ? 6 : 12;
     put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
-      el("label", {}, "Size"), choice(C, "imageSize", { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
+      el("label", {}, "Size"), choice(draft ? { imageSize: size } : C, "imageSize", draft ? { "512x512": ["Storyboard draft", "512 × 512 square"] } : checked ? allowedSizes
+        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] },
+        () => { if (checked) C.count = 1; render(); }, true),
       el("div", { class: "row" },
-        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
+        el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: maxCount }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
       el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
         : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
-      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
-        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() } });
+      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
+        if (imageModelWhy()) throw new Error(imageModelWhy());
+        const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: stillParams({ prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() }) });
         C.imageJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make image"), el("span")));
     if (made) { put(body, el("h3", {}, "Images"), jobCard(made));
       if (made.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, made.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
@@ -708,8 +821,10 @@ function viewCreate() {
         const scout = C.scoutJob && jobs.find(j => j.id === C.scoutJob);
         put(body, imageModelPick(), field("Image prompt (" + imageModelName() + ")", bind(C, "imagePrompt", el("textarea"))),
           el("div", { class: "row" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
-            el("button", { class: "primary fit", disabled: !C.imagePrompt.trim(), onclick: async () => { try { const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
-              params: { prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) } }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
+            el("button", { class: "primary fit", disabled: !C.imagePrompt.trim() || !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try {
+              if (imageModelWhy()) throw new Error(imageModelWhy());
+              const j = await api("/api/jobs", { kind: "scout", title: "Scouts",
+              params: stillParams({ prompt: C.imagePrompt, count: C.count, seed: C.seed, preset: C.preset, image_model: imageModel(), ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}) }) }); C.scoutJob = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Make scouts"), el("span")),
           scout ? el("div", { class: "note" }, "Scout job: ", el("span", { class: "pill " + scout.status }, scout.status)) : el("div", { class: "note" }, "Six scouts take about half a minute. They are made at the size the video model starts from."));
         if (scout && scout.status === "done") put(body, el("div", { class: "grid", style: "margin-top:10px" }, scout.outputs.filter(p => !p.endsWith("sheet.jpg")).map(p =>
           el("div", { class: "tile" + (C.image === p ? " on" : ""), onclick: () => { C.image = p; render(); } }, media(p), el("div", { class: "cap" }, p.split("/").pop(), C.image === p ? "✓ selected" : "pick")))));
@@ -890,18 +1005,71 @@ function viewEditor() {
 
 /* ---------- Library ---------- */
 const LIBF = { kind: "all", q: "" };
-// a voice line, a song or a sound effect: its player, its words, and where it goes next (kept in Voice and Music, not deleted here)
+const LIB_DATE_OPEN = new Map();
+function libDateGroups(items, now = new Date()) {
+  const recent = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  recent.setDate(recent.getDate() - 6);
+  const month = now.getFullYear() * 12 + now.getMonth(), groups = new Map();
+  const stamp = m => typeof m.modified === "number" && Number.isFinite(m.modified) && Number.isFinite(new Date(m.modified * 1000).getTime()) ? m.modified : null;
+  for (const m of [...items].sort((a, b) => (stamp(b) ?? -Infinity) - (stamp(a) ?? -Infinity))) {
+    const modified = stamp(m), date = modified === null ? null : new Date(modified * 1000);
+    let key = "unknown", label = "Date unavailable";
+    if (date) {
+      const age = month - (date.getFullYear() * 12 + date.getMonth());
+      if (date >= recent) { key = "recent"; label = "Past 7 days"; }
+      else if (age < 12) {
+        key = "month-" + date.getFullYear() + "-" + date.getMonth();
+        const dated = date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+        label = age === 0 ? "This month · " + dated : age === 1 ? "Last month · " + dated : dated;
+      } else { key = "year-" + date.getFullYear(); label = String(date.getFullYear()); }
+    }
+    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+    groups.get(key).items.push(m);
+  }
+  return [...groups.values()];
+}
+// a voice line, a song or a sound effect: its player, its words, and where it goes next
 const LIB_SOUND = { voice: ["Voice line", "Voice"], music: ["Song", "Music"], sfx: ["Sound effect", null] };
-function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
+function libSelect(path, picked) { return el("label", { class: "lib-select" },
+  el("input", { type: "checkbox", title: "Select " + path, "aria-label": "Select " + path, checked: LIBPICK.has(path), style: "width:auto;flex:none",
+    onchange: e => { if (e.target.checked) LIBPICK.add(path); else LIBPICK.delete(path); picked(); } }), "Select"); }
+function libSoundTile(m, shown, picked) { const [what, room] = LIB_SOUND[m.sound] || LIB_SOUND.sfx;
   return el("div", { class: "tile lib-sound", "data-path": m.path, "data-sound": m.sound || "sfx", style: shown ? null : "display:none" },
-    el("div", { class: "lib-sound-top" }, el("span", { class: "eyebrow" }, what), el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), media(m.path),
+    el("div", { class: "lib-sound-top" }, el("div", { class: "lib-sound-heading" }, el("span", { class: "eyebrow" }, what), libSelect(m.path, picked)),
+      el("b", { title: m.title || m.path }, m.title || m.path.split("/").pop())), libMedia(m.path),
     el("div", { class: "cap" }, el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path, onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop())),
     el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" },
       el("button", { class: "small", title: "Use this sound as a reference (<Audio N>) for a new clip", onclick: () => { C.goes = "video"; C.start = "refs"; C.step = 1; if (!C.refAudios.includes(m.path)) { C.refAudios.push(m.path); C.audio_notes.push(""); } C.prompt = ""; tab = "Create"; render(); toast("Added as reference sound"); } }, "reference sound"),
-      room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null)); }
-function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {}, "Library"));
-  const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
-  Promise.all([api("/api/library"), api("/api/trash").catch(() => null)]).then(([all_, bin]) => { for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
+      room ? el("button", { class: "small", title: "Open " + room + ", where this take is kept", onclick: () => go(room) }, "open in " + room) : null,
+      trashButton("Delete " + m.path, () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?")))); }
+// The Library is one node kept between redraws. A redraw builds its tiles at once from the last listing, around the same players and
+// pictures, so nothing reloads and the page keeps its height; the server's listing is asked for after, and only a change draws again
+const LIB = { root: null, box: null, data: null, text: "", media: new Map() };
+function libMedia(path) { let n = LIB.media.get(path); if (!n) { n = media(path); LIB.media.set(path, n); } else if (n.dataset && n.dataset.src0 && !n.getAttribute("src")) n.setAttribute("src", n.dataset.src0);
+  if (n.dataset && !n.dataset.src0 && n.getAttribute) n.dataset.src0 = n.getAttribute("src") || ""; return n; }
+function viewLibrary() { if (!LIB.root) { LIB.box = el("section", { class: "card" }, el("h2", {}, "Library"));
+    const head = typeof vaultHead === "function" && ART.ready.has("vault-library") ? vaultHead("library", "Library", "Every take on this machine: stills, clips, voice and songs, newest first.") : null;
+    LIB.root = head ? el("div", {}, head, LIB.box) : LIB.box; }
+  if (LIB.data) libDraw(...LIB.data);
+  Promise.all([api("/api/library"), api("/api/trash").catch(e => ({ error: e.message }))]).then(([all_, bin]) => { const text = JSON.stringify([all_, bin]); if (text === LIB.text && LIB.data) return; LIB.text = text; LIB.data = [all_, bin]; if (tab === "Library") libDraw(all_, bin); })
+    .catch(e => { if (!LIB.data) LIB.box.replaceChildren(el("h2", {}, "Library"), el("div", { class: "note" }, e.message)); });
+  return LIB.root; }
+function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library")); for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
+  for (const p of [...LIB.media.keys()]) if (!all_.some(m => m.path === p)) LIB.media.delete(p);
+    put(box, el("section", { class: "panel", id: "library-trash", "aria-label": "Trash", style: "margin-bottom:12px" },
+      el("h3", {}, "Trash"),
+      bin.error ? el("div", { class: "note vt-bad" }, bin.error) : el("div", {},
+        el("div", { class: "note" }, "Deleted files stay in this folder until you empty the trash:",
+          el("code", { style: "display:block;overflow-wrap:anywhere" }, bin.folder)),
+        el("div", { class: "row" },
+          el("span", { class: "note fit", id: "trashline" }, bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes)
+            : typeof TB !== "undefined" && (TB.films || []).length ? "No files in the trash" : "Trash is empty"),
+          el("span"),
+          el("button", { class: "fit small", onclick: () => copyText(bin.folder, "Trash folder") }, "Copy folder path"),
+          bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
+          bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
+            try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null)),
+      typeof tbPanel === "function" ? tbPanel() : null));  // films in the trash, put back (trashbin.js): one trash, here
     // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
     // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
     const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
@@ -909,19 +1077,20 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
     let list = hits(); const capBar = capSearch(() => grid, () => show()); if (!CAP.map) capLoad().then(() => { if (tab === "Library") render(); });
     const kinds = { all: "Everything", video: "Clips", image: "Stills", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
     const find = el("input", { type: "search", placeholder: "Find by name, folder, Spark or \"failed\"", value: LIBF.q, style: "max-width:320px", "aria-label": "Find in the Library" });
-    let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits(); const on = new Set(list.map(m => m.path));
-      for (const t of grid.children) t.style.display = on.has(t.dataset.path) ? "" : "none"; tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
+    let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits();
+      updateDates(); tally.textContent = list.length + (list.length === all_.length ? "" : " of " + all_.length); show(); };
     find.addEventListener("input", () => { clearTimeout(wait); wait = setTimeout(apply, 150); }); find.addEventListener("change", apply);
     find.addEventListener("keydown", e => { if (e.key === "Enter") apply(); });
     put(box, el("div", { class: "row", style: "align-items:center;margin-bottom:6px" }, el("div", { class: "chips fit" }, Object.entries(kinds).map(([k, t]) => el("button", { class: "small" + (LIBF.kind === k ? " on" : ""), onclick: () => { LIBF.kind = k; render(); } }, t + " · " + n(k)))), el("span"), el("div", { class: "fit" }, find), capBar.box));
-    const many = el("button", { class: "fit", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
+    const many = el("button", { class: "fit small trash-bulk", onclick: () => clearOut({ paths: [...LIBPICK], films: true }, "Delete the " + count(LIBPICK.size, "selected file") + "?") });
     // Select all takes what is shown: the search's matches while searching, else the listing
-    const pool = () => { const f = capBar.found ? capBar.found() : []; return f.length ? f : list.filter(m => m.kind !== "audio").map(m => m.path); };
+    const pool = () => { const f = capBar.found ? capBar.found() : []; return f.length ? f : list.map(m => m.path); };
     const all = el("button", { class: "fit", onclick: () => { const them = pool(), every = them.length && them.every(p => LIBPICK.has(p)); LIBPICK.clear(); if (!every) for (const p of them) LIBPICK.add(p); render(); } }, "Select all");
-    const show = () => { const them = pool(); many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
+    const show = () => { const them = pool(); many.replaceChildren(icon("trash"), "Delete selected (" + LIBPICK.size + ")"); many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
+    put(box, el("div", { class: "row", style: "margin:10px 0" }, all, many, typeof finLibButton === "function" ? finLibButton() : null));
     const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
-    const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
-    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, media(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
+    const tiles = new Map(kindList.map(m => [m.path, m.kind === "audio" ? libSoundTile(m, true, show) :
+    el("div", { class: "tile", "data-path": m.path, title: capText(m.path) }, libMedia(m.path), el("div", { class: "cap" }, libSelect(m.path, show),
       el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
       m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? " · s" + m.seed : "")) : null,
       m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
@@ -932,18 +1101,36 @@ function viewLibrary() { const box = el("section", { class: "card" }, el("h2", {
       m.kind === "video" ? null : el("button", { class: "small", title: "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
       m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),
       // out of the library: the server moves the file to the studio's trash folder
-      el("button", { class: "small", title: "Delete: moves the file to the trash folder", "aria-label": "Delete " + m.path, onclick: () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?") }, "🗑")))));
+      trashButton("Delete " + m.path, () => clearOut({ paths: [m.path], films: true }, "Delete " + m.path.split("/").pop() + "?"))))]));
+    const groups = libDateGroups(kindList), sections = groups.map((group, i) => {
+      const total = el("span", { class: "lib-date-count" });
+      const details = el("details", { class: "lib-date-group", "data-date-group": group.key },
+        el("summary", { onclick: () => { LIB_DATE_OPEN.set(group.key, !details.open); } },
+          el("span", { class: "lib-date-label" }, group.label), total),
+        el("div", { class: "grid" }, group.items.map(m => tiles.get(m.path))));
+      return { group, details, total, defaultOpen: i === 0 };
+    });
+    const empty = el("div", { class: "note" }, all_.length ? "No files match the current filters." : "No media yet. Your pictures, clips and sounds will appear here.");
+    const grid = el("div", { class: "lib-dates" }, sections.map(s => s.details), empty);
+    const updateDates = () => {
+      const on = new Set(list.map(m => m.path)), searching = Boolean(LIBF.q.trim());
+      for (const [path, tile] of tiles) tile.style.display = on.has(path) ? "" : "none";
+      for (const s of sections) {
+        const n = s.group.items.filter(m => on.has(m.path)).length;
+        s.details.style.display = n ? "" : "none";
+        s.total.textContent = count(n, "file");
+        s.details.open = searching ? n > 0 : (LIB_DATE_OPEN.get(s.group.key) ?? s.defaultOpen);
+      }
+      empty.style.display = list.length ? "none" : "";
+    };
+    updateDates();
     if (!ACT.state) actLoad().then(() => { if (tab === "Library") render(); });
-    put(box, el("div", { class: "note" }, tally, " files. Click a path to copy it. Tick files to delete several at once; 🗑 deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
+    put(box, el("div", { class: "note" }, tally, " files, grouped by file date, newest first. Open a dated section to browse older work. Click a path to copy it. Tick Select on cards, then Delete selected above; Select all follows the current filter and includes files in closed sections. The red trash icon deletes one. A deleted file is moved to the trash folder, not erased. Under a clip: Upscale, Remove a person, Restyle, Extend, Fix, Swap the character, Add a title and Caption this clip. Under a picture: Turnaround."), actPanel(),
       typeof rcLibrary === "function" ? rcLibrary() : null, typeof finLibPanel === "function" ? finLibPanel() : null,  // Trailer from these (roughcut.js), Finish these (finish.js)
-      el("div", { class: "row", style: "margin-top:10px" }, all, many, typeof finLibButton === "function" ? finLibButton() : null, el("span"),
-        bin ? el("span", { class: "note fit", id: "trashline" }, "Trash: " + (bin.files ? count(bin.files, "file") + " · " + sizeText(bin.bytes) : "empty")) : null,
-        bin && bin.last ? el("button", { class: "fit", title: "Puts the files of the last deletion back where they were, and its job cards back in the queue", onclick: restoreLast }, "Restore last deletion (" + count(bin.last.files, "file") + ")") : null,
-        bin && bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
-          try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null),
-      capBar.results, grid); })
-  .catch(e => put(box, el("div", { class: "note" }, e.message)));
-  return head ? el("div", {}, head, box) : box; }
+      capBar.results, grid);
+  LIB.box.replaceChildren(...box.childNodes);
+  // an action just opened from elsewhere: its panel is only there once the listing is, so go to it then, once
+  const opened = ACT.open ? ACT.open.kind + ":" + ACT.open.path : ""; if (opened && opened !== LIB.opened) setTimeout(() => { const n = document.querySelector("#actpanel"); if (n) n.scrollIntoView({ behavior: "smooth", block: "start" }); }, 0); LIB.opened = opened; }
 
 /* ---------- Tutorial ---------- */
 // lessons per tab, one step on screen at a time; a step can point at the control it describes ("go"), and the coach bar then follows into that tab
@@ -1250,6 +1437,7 @@ function queueDraw(box) { const shown = jobs.slice(0, 30), was = CARDS.size ? [.
   CARDS.clear(); for (const [id, one] of next) CARDS.set(id, one); }
 async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   if (HELD) return;  // the next poll draws it, once the pointer is up
+  if (typeof wfcObserveJobs === "function") await wfcObserveJobs(jobs);
   jobTools(); queueDraw($("#jobs")); bayUpdate();
   // a timeline changed from another window or device shows here without a reload
   if (project && tab === "Editor" && !busyHere()) { try { const fresh = await api("/api/projects/" + project.id);
@@ -1259,11 +1447,21 @@ async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
 // A redraw keeps where the page and its scrolling strips were (the Editor timeline, #54): marked with data-keep-scroll
 function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [...document.querySelectorAll("[data-keep-scroll]")].map(n => [n.dataset.keepScroll, n.scrollLeft, n.scrollTop]);
   return () => { for (const [key, left, top] of strips) { const n = document.querySelector(`[data-keep-scroll="${key}"]`); if (n) { n.scrollLeft = left; n.scrollTop = top; } } window.scrollTo(...at); }; }
-function render() { const back = keepScroll(); renderShell(); releaseMedia($("#view"));
+// A redraw of the same page holds the page's height for a moment: what a page fetches and draws after would otherwise leave it short, and the browser takes the reader back to the top
+let RENDER_TAB = null, RENDER_HOLD = null;
+function renderHold() { const view = $("#view"); if (!view || !view.style) return; clearTimeout(RENDER_HOLD);
+  if (RENDER_TAB === tab && view.offsetHeight) { view.style.minHeight = view.offsetHeight + "px"; RENDER_HOLD = setTimeout(() => { view.style.minHeight = ""; }, 1500); } else view.style.minHeight = ""; RENDER_TAB = tab; }
+function render() { const back = keepScroll(); renderShell(); renderHold(); if (tab !== "Library") releaseMedia($("#view"));
   $("#view").replaceChildren({ Home: viewHome, Apps: typeof viewApps === "function" ? viewApps : () => el("div", { class: "note" }, "Apps is not in this build."), Story: viewStory, Image: viewImage, Video: viewVideo, Previs: viewPrevis, Sound: viewSound, Edit: viewEditHub, Looks: viewLooks, Updates: viewUpdates, Create: () => createLayout(viewCreate()), Production: viewProduction, Import: viewImport, "Motion Previs": viewMotion, Agent: viewAgent, Voice: viewVoice, Music: viewMusic, Foley: viewFoley, Editor: viewEditor, Graphics: viewGraphics, Finish: viewFinish, "Cast & Places": viewCast, Director: viewDirector, "Motion graphics": viewGraphics, "Night shift": viewNight, Library: viewLibrary,
     Machine: viewMachine, Models: () => typeof viewDiscover === "function" ? viewDiscover() : el("div", { class: "note" }, "Models & weights is not in this build."), Sparks: viewSparks, Brains: viewBrains, Tutorial: viewTutorial, Settings: viewSettings,
     // Nodes is its own module (nodes.js): a page without it says so quietly
-    Nodes: typeof viewNodes === "function" ? viewNodes : () => el("div", { class: "panel" }, el("h2", {}, "Nodes"), el("div", { class: "note m-flat" }, "The node canvas is not part of this install yet.")) }[tab]()); coach(); bayUpdate();
+    Nodes: typeof viewNodes === "function" ? viewNodes : () => el("div", { class: "panel" }, el("h2", {}, "Nodes"), el("div", { class: "note m-flat" }, "The node canvas is not part of this install yet.")) }[tab]());
+  const feature = { Voice: "voice", Music: "music", Foley: typeof SFX !== "undefined" ? SFX.mode : "foley",
+    Finish: "finish", Graphics: "graphics", "Motion graphics": "graphics", "Motion Previs": "motion",
+    Create: C.mode === "image" ? null : C.mode === "edit" ? "edit" : "video" }[tab];
+  const guidance = typeof featureGuidance === "function" ? featureGuidance(feature) : null;
+  if (guidance) $("#view").prepend(guidance);
+  coach(); bayUpdate();
   // a redraw (a job changed, a view finished loading) must not drop the outline a tutorial step just put on a control
   if (T.spot && Date.now() < T.spot[1]) spot(T.spot[0], 3, true);
   back(); }

@@ -120,7 +120,10 @@ function apCard(a) { const st = apState(a);
   const card = pcard({ art: a.art, src: a.src, sign: a.sign, title: a.title, one: a.one, k: (AP_CATS.find(c => c.id === a.cat) || {}).name.toUpperCase(), off: st.off, run: st.run, data: { "data-app": a.id } });
   if (a.icon) card.classList.add("ap-icon");  // an app's square icon, whole, on the card's ground
   if (st.need) card.append(el("span", { class: "ap-need" }, st.need));
-  return card; }
+  const feature = { still: typeof imageFeature === "function" ? imageFeature() : "scout", titles: "graphics",
+    captions: "captions", hlg: "hlg", finish: "finish", foley: "foley", voice: "voice", song: "music",
+    turnaround: "turnaround", upscale: "upscale", remove: "remove", swap: "swap" }[a.id];
+  return withFeatureBadge(card, feature, { "data-feature-app": a.id }); }
 const apHit = (a, words) => !words || [a.title, a.one, a.words, (AP_CATS.find(c => c.id === a.cat) || {}).name].join(" ").toLowerCase().includes(words);
 
 // the take a Library action works on: the newest of the kind it needs
