@@ -332,3 +332,35 @@ def test_a_breakaway_job_is_still_killed_on_close():
 
     job = OwnedJob(breakaway=True)
     job.close()
+
+
+def test_the_engines_come_built_checked_and_never_fall_back_to_a_compile():
+    """Ordinary Windows setup takes TensorFold's engines as published builds of the pinned commit (issue #213): no
+    Zig, MSVC or nvcc. A source build is asked for by name."""
+    import json
+    import re
+    text = (ROOT / "scripts/setup-windows-cuda.ps1").read_text()
+    pins = json.loads((ROOT / "app/windows_engines.json").read_text())
+    assert pins["commit"] == "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2" and f'$TensorFoldCommit = "{pins["commit"]}"' in text
+    assert pins["base"] == "https://github.com/drowzeys/TensorFold/releases/download" and pins["release"].startswith("studio-1.2.2-windows-arm64-")
+    wanted = {"h3": {"tf_h3.dll"}, "drama3": {"drama3-generate.exe", "tensorfold_drama3.dll"},
+              "bolt": {"tensorfold-native.exe", "bolt.dll"}, "music3": {"music3-generate.exe"}}
+    assert set(pins["engines"]) == set(wanted)
+    for name, files in wanted.items():
+        pin = pins["engines"][name]
+        assert set(pin["files"]) == files and pin["archive"] == f"tensorfold-{name}-windows-arm64-sm121.zip"
+        assert all(re.fullmatch(r"[0-9a-f]{64}", value) for value in (pin["sha256"], *pin["files"].values()))
+        assert f'Install-StudioEngine "{name}"' in text
+    # the compiler only for a source build asked for by name, or for training
+    assert '$NeedToolchain = ($NeedEngines -and $BuildEngines) -or $ToolchainOnly -or ($Want -contains "train")' in text
+    assert "[switch]$BuildEngines" in text
+    release = text[text.index("} elseif ($NeedEngines -and -not $BuildEngines"):text.index('Say "TensorFold\'s engines from source')]
+    assert "zig" not in release.lower() and "nvcc" not in release and "vcvars" not in release.lower()
+    for words in ("did not match its sha256", "Nothing was changed", "is not a Windows on Arm (ARM64) program", "0xAA64"):
+        assert words in release, words
+    # checked before the install is touched: the copy into place comes after every check
+    assert release.index("every file checked: only now is the install touched") > release.index("is not a Windows on Arm (ARM64) program")
+    # the runtime libraries only: two of NVIDIA's archives, and Microsoft's runtime for Bolt
+    assert '@("libcublas", "cuda_cudart")' in release and "cuda_nvcc" not in release
+    assert "Microsoft.VCRedist.2015+.arm64" in release
+    assert "} finally { Remove-Item -Recurse -Force $Stage" in release  # a refused archive leaves no staging folder
