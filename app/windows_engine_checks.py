@@ -304,7 +304,8 @@ def check_video(path: Path, kind: str = "video") -> None:
     settings = recipe(kind)
     wanted = settings["seconds"] if kind == CHAIN else settings["frames"] / settings["fps"]
     if ((found["width"], found["height"]) != (settings["width"], settings["height"]) or found["seconds"] is None
-            or not math.isclose(found["fps"], settings["fps"], abs_tol=0.01) or abs(found["seconds"] - wanted) > 0.25):
+            or not math.isclose(found["fps"], settings["fps"], abs_tol=0.1 if kind == CHAIN else 0.01)  # a join's average rate
+            or abs(found["seconds"] - wanted) > 0.25):
         raise RuntimeError("The video check's clip does not have its checked canvas, frame rate or length.")
     if not found["audio"]:
         raise RuntimeError("The video check's clip has no sound.")

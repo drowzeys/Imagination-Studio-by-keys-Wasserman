@@ -345,7 +345,7 @@ def test_the_long_video_check_renders_the_chain_a_job_does_and_joins_it(tmp_path
     for source in ("app/server.py", "spark/windows_scripts.py"):  # one lead, word for word, where a part is made
         assert f'LEAD = "{engines.LEAD}"' in (Path(engines.features.PACK) / source).read_text(encoding="utf-8")
     # validated as the joined video: its canvas, 24 fps, 10 seconds, with sound
-    good = {"width": 864, "height": 480, "fps": 24.0, "seconds": 10.0, "audio": True}
+    good = {"width": 864, "height": 480, "fps": 23.949, "seconds": 10.084, "audio": True}  # what ffprobe says of a real join
     monkeypatch.setattr(graphics, "probe", lambda path: good)
     engines.check_video(tmp_path / "out" / "video" / "check.mp4", engines.CHAIN)
     monkeypatch.setattr(graphics, "probe", lambda path: {**good, "seconds": 5.17})  # one part alone is not the long video
