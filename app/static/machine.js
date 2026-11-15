@@ -447,7 +447,7 @@ function viewMachine() {
   const wrap = el("div");
   const where = typeof cardFace === "function" && cardFace() ? "GPU" : S.platform === "spark" ? "DGX Spark" : S.platform === "mac" ? "Mac" : "This machine";
   put(wrap, pageHead("Studio Vault", "Machine", where + ": live readings, saved diagnostics and explicit feature checks."),
-    S.platform_label ? el("div", { class: "m-plat" }, S.platform_label) : null,
+    S.platform_label ? el("div", { class: "m-plat", "data-machine": typeof machineKind === "function" ? machineKind() || null : null }, S.platform_label) : null,
     el("div", { id: "machwarn", class: "stack m-warns" }),
     el("div", { class: "gauges" },
       el("div", { class: "gauge" }, ring("gpu", "GPU", "var(--green)"), el("div", { class: "foot", "data-foot": "gpu" }, "–")),

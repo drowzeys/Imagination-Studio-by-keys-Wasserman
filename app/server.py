@@ -199,6 +199,17 @@ CARD_WARM: dict[tuple, int] = {}
 
 
 GPU_NAME: list[str] = []  # asked of the driver once: see machine()
+MAC_MODEL: list[str] = []  # a Mac's model name, asked once: see machine()
+
+
+def windows_label(card: str) -> str:
+    """The header label of a native Windows Studio, from the card the driver names: an RTX Spark (nvidia-smi says
+    "NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU)") is called that; any other card is named as a CUDA card."""
+
+    name = re.sub(r"\s*\(.*\)\s*$", "", card or "").strip().upper()
+    if not name:
+        return "NATIVE WINDOWS"
+    return f"RTX SPARK · {name} · NATIVE WINDOWS" if "RTX SPARK" in name else f"CUDA · {name} · NATIVE WINDOWS"
 
 
 def machine() -> tuple[str, str]:
@@ -210,7 +221,13 @@ def machine() -> tuple[str, str]:
     answering. A page that polls the state then holds one of the server's threads per call."""
 
     if WINDOWS or WIN32:
-        return "windows", "NATIVE WINDOWS"
+        if not GPU_NAME:
+            try:
+                GPU_NAME.append(subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                               capture_output=True, text=True, timeout=5).stdout.strip().splitlines()[0])
+            except (OSError, IndexError, subprocess.TimeoutExpired):
+                return "windows", "NATIVE WINDOWS"  # not kept: asked again on a later call
+        return "windows", windows_label(GPU_NAME[0])
     if SPARK:
         if not GPU_NAME:
             try:
@@ -224,8 +241,15 @@ def machine() -> tuple[str, str]:
         many = f"{len(paired)}× " if len(paired) > 1 else ""
         return "spark", (f"DGX SPARK · {GPU_NAME[0].upper()} · H3-CUDA" if "GB10" in GPU_NAME[0].upper()
                          else f"CUDA · {many}{GPU_NAME[0].upper()} · H3-CUDA" + (" · NATIVE WINDOWS" if WINCUDA else ""))
-    # no chip name: the same recipe runs from an M1 with 96 GB up (pictures only from 48 GB)
-    return "mac", "MAC · APPLE SILICON MX · H3-METAL"
+    # no chip name: the same recipe runs from an M1 with 96 GB up (pictures only from 48 GB). The model is the Mac's
+    # own name for itself ("Mac Studio", "MacBook Pro"), asked once
+    if not MAC_MODEL:
+        try:
+            said = subprocess.run(["system_profiler", "SPHardwareDataType"], capture_output=True, text=True, timeout=10).stdout
+            MAC_MODEL.append(next((line.split(":", 1)[1].strip() for line in said.splitlines() if "Model Name:" in line), "") or "Mac")
+        except (OSError, subprocess.TimeoutExpired):
+            return "mac", "MAC · APPLE SILICON MX · H3-METAL"
+    return "mac", f"{MAC_MODEL[0].upper()} · APPLE SILICON MX · H3-METAL"
 
 
 def card_face() -> bool:
