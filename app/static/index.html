@@ -972,9 +972,10 @@ function viewEditor() {
     const player = el("video", { class: "main", controls: true }); const info = el("div", { class: "note" });
     const span = c => [Number(c.in) || 0, Number(c.out) > Number(c.in) ? Number(c.out) : c.duration];
     const load = (i, play) => { at = i; if (!tl[i]) return; const [a] = span(tl[i]); player.src = file(tl[i].path) + "#t=" + a; player.currentTime = a; if (play) player.play().catch(() => {}); mark(); };
-    // the mouse wheel scrolls the strip sideways when it is wider than the card (a vertical wheel did nothing on it);
+    // Shift and the mouse wheel scrolls the strip sideways when it is wider than the card. The wheel alone scrolls
+    // the page, as everywhere else: taking it over on the strip left the page unable to scroll under the pointer.
     // Ctrl and the wheel (a trackpad's pinch too) stays the browser's zoom
-    const strip = el("div", { class: "tl", "data-keep-scroll": "timeline", onwheel: e => { if (!e.ctrlKey && strip.scrollWidth > strip.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); strip.scrollLeft += e.deltaY; } } }); const mark = () => [...strip.children].forEach((n, i) => n.classList.toggle("on", i === at));
+    const strip = el("div", { class: "tl", "data-keep-scroll": "timeline", title: "Shift and the mouse wheel scrolls the timeline sideways", onwheel: e => { if (e.shiftKey && !e.ctrlKey && strip.scrollWidth > strip.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); strip.scrollLeft += e.deltaY; } } }); const mark = () => [...strip.children].forEach((n, i) => n.classList.toggle("on", i === at));
     player.addEventListener("timeupdate", () => { const c = tl[at]; if (!c) return; const [, b] = span(c); if (player.currentTime >= b - 0.04 && !player.paused) { if (at + 1 < tl.length) load(at + 1, true); else player.pause(); } });
     player.addEventListener("ended", () => { if (at + 1 < tl.length) load(at + 1, true); });
     const total = () => tl.reduce((s, c) => { const [a, b] = span(c); return s + Math.max(b - a, 0); }, 0);
@@ -983,6 +984,9 @@ function viewEditor() {
     const drop = (e, i) => { e.preventDefault(); e.currentTarget.classList.remove("over"); const [of, at] = String(e.dataTransfer.getData("text/x-timeline")).split(":"), from = at === "" || at == null ? NaN : Number(at);
       if (of !== String(project.id) || !Number.isInteger(from) || from === i || !tl[from]) return; tl.splice(i, 0, tl.splice(from, 1)[0]); saveProject(); render(); };
     tl.forEach((c, i) => strip.append(el("div", { class: "clip", draggable: "true", "data-clip": String(i), onclick: e => { if (e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON") load(i, false); },
+        // a press inside a field or on a button is that control's: the clip is not draggable from there (dragstart
+        // names the clip, never the field the press began in, so the press is what is looked at)
+        onpointerdown: e => e.currentTarget.setAttribute("draggable", e.target.closest && e.target.closest("input, button") ? "false" : "true"),
         ondragstart: e => { if (e.target.closest && e.target.closest("input")) { e.preventDefault(); return; } e.dataTransfer.setData("text/x-timeline", project.id + ":" + i); e.dataTransfer.effectAllowed = "move"; },
         ondragover: e => { if (e.dataTransfer.types.includes("text/x-timeline")) { e.preventDefault(); e.currentTarget.classList.add("over"); } },
         ondragleave: e => e.currentTarget.classList.remove("over"), ondrop: e => drop(e, i) },

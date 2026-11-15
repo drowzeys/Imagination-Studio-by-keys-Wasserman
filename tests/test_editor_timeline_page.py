@@ -1,6 +1,6 @@
 """The Editor's timeline strip (app/static/index.html, viewEditor), run in node with the page's helpers stood in for:
 python3 -m pytest tests/test_editor_timeline_page.py. A clip is dragged onto another to take its place, and the mouse
-wheel scrolls a strip wider than its card sideways. Skipped without node."""
+Shift and the wheel scrolls a strip wider than its card sideways; the wheel alone is the page's. Skipped without node."""
 from pathlib import Path
 
 from test_shell_page import run
@@ -57,16 +57,23 @@ def test_a_drag_that_starts_in_a_field_is_not_a_clip_drag():
     assert out["prevented"] is True and out["carried"] is None  # In and Out stay text fields to select in
 
 
-def test_the_wheel_scrolls_a_wide_strip_sideways_and_leaves_a_narrow_one():
+def test_shift_and_the_wheel_scrolls_a_wide_strip_sideways_and_the_wheel_alone_is_the_pages():
     out = run(SETUP + r"""
-      const wheel = (dy, dx, ctrlKey = false) => ({ deltaY: dy, deltaX: dx, ctrlKey, prevented: false, preventDefault() { this.prevented = true; } });
+      const wheel = (dy, dx, keys = {}) => ({ deltaY: dy, deltaX: dx, ctrlKey: false, shiftKey: false, ...keys, prevented: false, preventDefault() { this.prevented = true; } });
       Object.assign(strip, { scrollWidth: 1200, clientWidth: 400, scrollLeft: 0 });
-      const down = wheel(120, 0); strip.attrs.onwheel(down); out.wide = [strip.scrollLeft, down.prevented];
-      const sideways = wheel(0, 80); strip.attrs.onwheel(sideways); out.sideways = [strip.scrollLeft, sideways.prevented];
-      const zoom = wheel(120, 0, true); strip.attrs.onwheel(zoom); out.zoom = [strip.scrollLeft, zoom.prevented];
+      const alone = wheel(120, 0); strip.attrs.onwheel(alone); out.alone = [strip.scrollLeft, alone.prevented];
+      const down = wheel(120, 0, { shiftKey: true }); strip.attrs.onwheel(down); out.wide = [strip.scrollLeft, down.prevented];
+      const sideways = wheel(0, 80, { shiftKey: true }); strip.attrs.onwheel(sideways); out.sideways = [strip.scrollLeft, sideways.prevented];
+      const zoom = wheel(120, 0, { shiftKey: true, ctrlKey: true }); strip.attrs.onwheel(zoom); out.zoom = [strip.scrollLeft, zoom.prevented];
       Object.assign(strip, { scrollWidth: 400, clientWidth: 400, scrollLeft: 0 });
-      const narrow = wheel(120, 0); strip.attrs.onwheel(narrow); out.narrow = [strip.scrollLeft, narrow.prevented];""")
+      const narrow = wheel(120, 0, { shiftKey: true }); strip.attrs.onwheel(narrow); out.narrow = [strip.scrollLeft, narrow.prevented];""")
+    assert out["alone"] == [0, False]  # the wheel alone scrolls the page, also over a wide strip
     assert out["wide"] == [120, True]
-    assert out["sideways"] == [120, False]  # a trackpad's own sideways scroll is left to the browser
+    assert out["sideways"] == [120, False]  # a sideways scroll (a trackpad's, or a browser's own Shift and wheel) is left to the browser
     assert out["zoom"] == [120, False]  # Ctrl and the wheel, or a pinch, is the browser's zoom
     assert out["narrow"] == [0, False]  # the page scrolls on as before
+
+
+def test_a_press_in_a_field_or_on_a_button_does_not_make_the_clip_draggable():
+    page = (ROOT / "app/static/index.html").read_text()
+    assert 'onpointerdown: e => e.currentTarget.setAttribute("draggable", e.target.closest && e.target.closest("input, button") ? "false" : "true")' in page
