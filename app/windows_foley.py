@@ -65,7 +65,7 @@ def fingerprint() -> dict:
               "einops", "timm", "omegaconf", "open_clip_torch", "accelerate", "ftfy", "safetensors", "av"}
     site = gpu_python().parent.parent / "Lib/site-packages"
     versions = {dist.metadata["Name"].lower().replace("-", "_"): dist.version
-                for dist in metadata.distributions(path=[str(site)])}
+                for dist in metadata.distributions(path=[str(site)]) if dist.metadata["Name"]}
     missing = needed - versions.keys()
     if missing:
         raise RuntimeError("Foley dependencies are missing: " + ", ".join(sorted(missing)))

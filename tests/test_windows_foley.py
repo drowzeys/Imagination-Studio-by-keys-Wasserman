@@ -205,3 +205,16 @@ def test_gpu_inventory_does_not_count_the_dla_accelerator_as_a_second_gpu(monkey
     with pytest.raises(RuntimeError, match="one physical GPU"):
         foley.device_uuid()
     foley.device_uuid.cache_clear()
+
+
+def test_a_package_record_without_a_name_is_skipped_wherever_packages_are_listed():
+    """An interrupted pip leaves a record with no Name. Listing it raised in windows_foley.fingerprint, and the
+    Studio's /api/state answered 500 on Windows: the page did not load."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    for path in sorted((root / "app").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for found in re.finditer(r'dist\.metadata\["Name"\]\.lower\(\)', text):
+            closing = text.index("}", found.start())
+            assert 'if dist.metadata["Name"]' in text[found.start():closing], f"{path.name}: a nameless package record is not skipped"
