@@ -19,6 +19,7 @@ import windows_runtime
 import windows_cuda
 import windows_image_checks as images
 import windows_audio_checks as audio
+import windows_engine_checks as engines
 import windows_setup_fit
 import windows_library_checks as library
 import windows_audio3
@@ -37,6 +38,9 @@ CHECKS = {
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="sound"),
     "music": FeatureCheck("music", "MiniMax-Music3", "10-second instrumental, native CUDA int8 engine, default sampling; no streaming or transcription.",
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="sound"),
+    **{kind: FeatureCheck(kind, engines.TITLES[kind], engines.scope_label(kind),
+                         tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")),
+                         group="video" if kind == "video" else "agent") for kind in engines.KINDS},
     **{model: FeatureCheck(model, spec[0], "Production native image workflow; qualify canvases and counts separately.",
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="image")
        for model, spec in windows_runtime.IMAGE_SPECS.items()},
@@ -66,7 +70,7 @@ def gpu_check(job: dict) -> bool:
 
 
 def native_image_check(job: dict) -> bool:
-    return job["kind"] == "qualification" and job["params"].get("feature") in (*images.KINDS, *audio.KINDS, *library.KINDS)
+    return job["kind"] == "qualification" and job["params"].get("feature") in (*images.KINDS, *audio.KINDS, *library.KINDS, *engines.KINDS)
 
 
 def timeout_seconds(job: dict) -> int:
@@ -78,6 +82,8 @@ def timeout_seconds(job: dict) -> int:
             return library.TIMEOUT_S + 180
         if params["feature"] in audio.KINDS:
             return audio.TIMEOUT_S + 120
+        if params["feature"] in engines.KINDS:
+            return engines.TIMEOUT_S + 1500  # the render or the answer, then every weight file is hashed for the receipt
         scopes = images.GROUPS[params["group"]][1] if params.get("group") in images.GROUPS else (params.get("scope", "basic"),)
         return sum(images.timeout_seconds(params["feature"], scope) + 120 for scope in scopes)
     return 600
@@ -150,6 +156,13 @@ def build(home, params, job_id):
         return [sys.executable, "-X", "utf8", str(features.PACK / "scripts" / "windows-native-audio-check.py"),
                 "--feature", kind, "--job-id", job_id, "--output", str(home / "renders" / "calibration" / job_id),
                 "--report", str(target)], {}, [str(target)]
+    if kind in engines.KINDS:
+        if why := engines.prerequisites(kind):
+            raise HTTPException(400, why)
+        target = home / "exports" / f"{job_id}-qualification.json"
+        return [sys.executable, "-X", "utf8", str(features.PACK / "scripts" / "windows-native-engine-check.py"),
+                "--feature", kind, "--job-id", job_id, "--output", str(home / "renders" / "calibration" / job_id),
+                "--report", str(target)], {}, [str(target)]
     if kind in images.KINDS:
         if why := images.prerequisites(kind):
             raise HTTPException(400, why)
@@ -217,7 +230,7 @@ def attach(server):
             current = [server.public(job) for job in server.jobs.values()
                        if job["kind"] == "qualification"]
         for kind in CHECKS:
-            if kind in (*images.KINDS, *audio.KINDS, *library.KINDS):
+            if kind in (*images.KINDS, *audio.KINDS, *library.KINDS, *engines.KINDS):
                 continue
             found = windows_audio3.status() if kind == windows_audio3.MODEL else foley if kind == "foley" else windows_runtime.usage_status(kind, selected_mode=selected_mode)
             try:
@@ -299,13 +312,30 @@ def attach(server):
                                                            "workflows,library-h3,h3-shared")})
         video = windows_runtime.native_status("video", selected_mode)
         cards.append({"id": "video", "title": "H3 / FastH3 video", "group": "video", **video,
-                      "scope": f"The existing H3 policy requires a measured CUDA allocation pool of at least {windows_cuda.MIN_POOL_MB} MiB. This is not a minimum installed-RAM claim.",
-                      "requirements": [], "check_available": False,
+                      "scope": engines.scope_label("video") + f" The existing H3 policy also requires a measured CUDA allocation pool of at least {windows_cuda.MIN_POOL_MB} MiB. This is not a minimum installed-RAM claim.",
+                      "requirements": [], "check_available": True, "recipe": engines.recipe("video"),
                       "memory": {"minimum_installed_ram_mb": None, "minimum_label": "See the H3 CUDA-pool policy",
-                                 "lowest_tested_ram_mb": None, "job_commit_cap_mb": None, "gpu_required": True},
-                      "evidence": {"matches": False, "results": []}, "attempt": {}, "job": None,
+                                 "lowest_tested_ram_mb": video.get("hardware", {}).get("physical_total_mb"), "job_commit_cap_mb": None, "gpu_required": True},
+                      "evidence": {"matches": video["qualified"], "results": features.saved("video", "").get("results", []),
+                                   "checked_at": features.saved("video", "").get("checked_at")},
+                      "attempt": features.saved("video", "-attempt"),
+                      "job": max((job for job in current if job["params"].get("feature") == "video"),
+                                 key=lambda job: job["created"], default=None),
                       "setup": r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts video",
                       "open_tab": "Video", "open_label": "Open video"})
+        brain = engines.usage_status("bolt", selected_mode)
+        if brain["installed"] or features.saved("bolt", "-attempt"):  # a card only where the Studio's own Bolt engine is set up
+            cards.append({"id": "bolt", "title": engines.TITLES["bolt"], "group": "agent", **brain, "backend": "native",
+                          "requirements": [], "check_available": True, "recipe": engines.recipe("bolt"),
+                          "memory": {"minimum_installed_ram_mb": None, "minimum_label": "Installed RAM alone does not establish fit",
+                                     "lowest_tested_ram_mb": brain.get("hardware", {}).get("physical_total_mb"), "job_commit_cap_mb": None, "gpu_required": True},
+                          "evidence": {"matches": brain["qualified"], "results": features.saved("bolt", "").get("results", []),
+                                       "checked_at": features.saved("bolt", "").get("checked_at")},
+                          "attempt": features.saved("bolt", "-attempt"),
+                          "job": max((job for job in current if job["params"].get("feature") == "bolt"),
+                                     key=lambda job: job["created"], default=None),
+                          "setup": r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Bolt",
+                          "open_tab": "Brains", "open_label": "Open Brains & tools"})
         import voice
         import music
         for kind, title, raw, part, tab in (
