@@ -9,6 +9,7 @@ still reads or writes.
 
 from __future__ import annotations
 
+import errno
 import json
 import shutil
 import threading
@@ -46,7 +47,8 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
             raise ValueError("not in a folder of clips or pictures")
         song_folder = parts[0] == "music" and len(parts) >= 3 and parts[1].endswith(".yue2")
         take_note = (parts[0] == "sound" or parts[0] in ("music", "voice") and len(parts) == 2) and target.name.endswith(".take.json")
-        if not take_note and target.suffix.lower() not in (SONG_FOLDER if song_folder else FOLDERS[parts[0]]):
+        voice_text = parts[0] == "voice" and len(parts) == 2 and target.suffix.lower() == ".txt"
+        if not take_note and not voice_text and target.suffix.lower() not in (SONG_FOLDER if song_folder else FOLDERS[parts[0]]):
             raise ValueError("not a clip, picture or sound file")
         if target.is_symlink() or (home / text).is_symlink() or not target.is_file():
             raise ValueError("no such file")
@@ -93,17 +95,28 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         return list(dict.fromkeys(found))
 
     def with_records(moved: list[dict], gone: set[str], keep_films: bool) -> tuple[list[dict], list[dict]]:
-        """Take records follow deleted sounds; a YuE2 song also takes its score folder."""
+        """Take records and voice text follow deleted sounds; a YuE2 song also takes its score folder."""
 
         extra = []
         for one in moved:
             name = Path(one["from"])
             if name.parts[0] in ("sound", "voice") and name.suffix.lower() == ".wav":
                 extra.append(name.with_suffix(".take.json").as_posix())
+                if name.parts[0] == "voice" and len(name.parts) == 2:
+                    extra.append(name.with_suffix(".txt").as_posix())
             if name.parts[0] == "music" and len(name.parts) == 2 and name.suffix == ".wav":
                 extra += [f"music/{name.stem}.take.json"]
                 extra += sorted(rel(p) for p in (home / "music" / f"{name.stem}.yue2").rglob("*") if p.is_file())
         more, skipped = move(extra, gone, keep_films) if extra else ([], [])
+        sound_folders = {Path(one["from"]).parent for one in moved + more
+                         if len(Path(one["from"]).parts) == 4 and Path(one["from"]).parts[:2] in
+                         (("sound", "sfx"), ("sound", "foley"))}
+        for folder in sorted(sound_folders):
+            try:
+                (home / folder).rmdir()
+            except OSError as error:
+                if error.errno not in (errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST):
+                    skipped.append({"path": folder.as_posix(), "why": f"could not remove empty take folder: {error}"})
         for one in moved:
             folder = home / "music" / f"{Path(one['from']).stem}.yue2"
             if one["from"].startswith("music/") and folder.is_dir() and not folder.is_symlink():
@@ -130,9 +143,11 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
                     skipped.append({"path": str(path), "why": str(error)})
                 continue
             name = rel(target)
+            parts = Path(name).parts
+            take_id = parts[2] if len(parts) >= 4 and parts[:2] in (("sound", "sfx"), ("sound", "foley")) else parts[-1].split(".")[0]
             if any(json.dumps(form)[1:-1] in busy_text for form in (name, name.replace("/", "\\"))):
                 skipped.append({"path": name, "why": "a queued or running job uses it"})
-            elif name.split("/")[0] in ("sound", "voice") and Path(name).name.split(".")[0] in busy_ids:
+            elif parts[0] in ("sound", "voice") and take_id in busy_ids:
                 skipped.append({"path": name, "why": "the take is still being made"})
             elif name.startswith("music/") and (Path(name).parts[1].split(".")[0] in busy_ids or
                                                  json.dumps(Path(name).parts[1].split(".")[0]) in busy_text + film):
