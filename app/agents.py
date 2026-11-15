@@ -124,6 +124,26 @@ HINTS = {
     "hermes": [(r"no (?:inference )?provider|no model (?:is )?configured|not logged in|401|unauthori[sz]ed|api key|hermes setup",
                 "Hermes has no provider signed in {where}: run `hermes setup` in a terminal there, then retry.")],
 }
+# Local add-ons register adapters once at startup; built-in backend ids are never replaced.
+ADDON_AGENTS = {}
+
+
+def register_addon(adapter):
+    global BACKENDS, HARNESSES, AGENTS, SESSIONS
+    name = adapter["id"]
+    if name in BACKENDS:
+        raise ValueError("duplicate agent id")
+    CLIS[name] = (adapter["label"], adapter["command"], adapter["signin"])
+    ADDON_AGENTS[name] = adapter
+    BACKENDS = (*BACKENDS, name)
+    AGENTS = (*AGENTS, name)
+    if adapter["argv"] is not None:
+        HARNESSES = (*HARNESSES, name)
+    if adapter["session"]:
+        SESSIONS = (*SESSIONS, name)
+    HINTS[name] = adapter["hints"]
+
+
 SYSTEM = ("You are working for a filmmaker inside Imagination Studio. Save every deliverable (renders as .png, .jpg or .mp4, "
           "models as .glb or .blend, data as .json) into the current folder{folder}. When a tool saves a file itself, give it "
           "that folder's absolute path. That folder is the only place you write: never copy a file into it from anywhere "
@@ -856,7 +876,7 @@ def detect(config: dict | None = None, endpoint: str = "") -> list[dict]:
                 item["note"] = "The codex on PATH cannot start (“" + broken[:200] + "”), so the Studio uses the ChatGPT app's newer one."
             elif other and other != item["path"] and older(other, item["path"]):
                 item["note"] = "The ChatGPT app's Codex is newer than the codex on PATH, so the Studio uses it: nothing to install, and it shares your ChatGPT sign-in."
-        item.update(signin_flow=recipe_of(name, item["where"] != "here")["flow"], signin_command=terminal_line(name),
+        item.update(addon=name in ADDON_AGENTS, signin_flow=recipe_of(name, item["where"] != "here")["flow"], signin_command=terminal_line(name),
                     signin_note=SIGNIN_NOTES.get(name))
         out.append(item)
     base, models, tools_ = seen.get(("local", "")) or (None, [], False)
@@ -1065,6 +1085,9 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
     tool = remote_cli(host, backend) if host else cli(backend)
     if not tool:
         raise RuntimeError(f"{CLIS[backend][0]} is not installed on this machine: install it and sign in, or pick another brain in Settings → Connections")
+    if backend in ADDON_AGENTS:
+        return ADDON_AGENTS[backend]["ask"](tool=tool, host=host, system=system, prompt=prompt,
+                                             tier=tier, model=model, timeout=timeout)
     joined = f"{system}\n\n---\n\n{prompt}" if system else prompt
     if backend == "copilot":
         copilot_version(tool, host)
@@ -1881,6 +1904,9 @@ def copilot_version(tool: str, host: str = "") -> None:
 def harness_args(task: dict, tool: str, config_path: str, servers: dict, system: str, session: str | None = None) -> list[str]:
     """The harness's command line; `session` is the id of the thread's session to continue, None for a first turn."""
 
+    adapter = ADDON_AGENTS.get(task["backend"])
+    if adapter and adapter["argv"]:
+        return adapter["argv"](task=task, tool=tool, config_path=config_path, servers=servers, system=system, session=session)
     if task.get("backend") == "copilot":
         copilot_version(tool, task.get("_host") or "")
         args = [tool, "--output-format", "json", "--disable-builtin-mcps", "--no-custom-instructions",
@@ -1970,6 +1996,9 @@ def note_results(task: dict, value, lists: bool = False) -> list[str]:
 def render(backend: str, line: str, task: dict) -> str:
     """One line of the harness's stream as a person reads it; working lines also go to the task's steps."""
 
+    adapter = ADDON_AGENTS.get(backend)
+    if adapter and adapter["read"]:
+        return adapter["read"](line=line, task=task)
     if backend == "hermes" and task.get("_quiet"):  # `chat -Q`: plain lines, the answer itself
         text = line.rstrip("\n").rstrip("\r")
         if not text.strip() or HERMES_NOISE.search(text):
@@ -2220,7 +2249,7 @@ def perform(task: dict) -> None:
             raise RuntimeError("Only local Copilot CLI agent tasks are validated in the Windows preview.")
         if is_local(task["backend"]):  # a local agent runs as the local brain does, at its own address and model
             config = as_local(task["backend"], config)
-        if task["backend"] not in SESSIONS and not (is_local(task["backend"]) and task["tools"]):
+        if task["backend"] not in (*SESSIONS, *HARNESSES) and not (is_local(task["backend"]) and task["tools"]):
             return converse(task, thread, log)
         names = []
         for path in task["attach"]:  # the attachments, in a folder of their own beside what the agent makes
@@ -3079,6 +3108,8 @@ def finish(state: dict, ended: str, reason: str | None) -> None:
 def start_signin(backend: str, body: dict) -> dict:
     if backend not in CLIS:
         raise HTTPException(404, "no such brain")
+    if backend in ADDON_AGENTS:
+        raise HTTPException(400, ADDON_AGENTS[backend]["signin"])
     host = where_of(backend)
     recipe = recipe_of(backend, bool(host), body)
     if backend == "claude" and host and remote_os(host) == "Darwin":
@@ -3257,6 +3288,10 @@ def status_of(backend: str) -> dict:
                 "detail": ("Previously connected; last successful use: " + time.strftime("%Y-%m-%d", time.localtime(last["at"])) +
                            ". Not rechecked automatically.") if remembered else "Copilot answered the Check." if checked else
                 "Check to confirm Copilot's sign-in; use copilot login in a terminal if needed. Copilot CLI has no auth-status subcommand."}
+    if backend in ADDON_AGENTS:
+        checked = verified.get((backend, host), {}).get("ok", False)
+        return {"backend": backend, **where, "state": "signed_in" if checked else "unknown",
+                "detail": ADDON_AGENTS[backend]["signin"]}
     try:
         answer = gemini_status(host) if backend == "gemini" else read_status(backend, run_short(status_args(backend), backend, host))
         if backend == "claude" and host and answer.get("state") == "signed_out" and keychain_signed(host):
@@ -3448,6 +3483,8 @@ def catch_token(state: dict, ended: bool = False) -> None:
 def install_plan(backend: str, host: str = "") -> dict:
     """What Install would run for a CLI, here or on `host`: {ok, command, by, where, chatgpt, os, reason}."""
 
+    if backend in ADDON_AGENTS:
+        return {"ok": False, "reason": "Install this add-on's CLI in a terminal. " + ADDON_AGENTS[backend]["signin"]}
     if backend not in INSTALLERS:
         raise HTTPException(404, "no such brain")
     if WINDOWS and not host:

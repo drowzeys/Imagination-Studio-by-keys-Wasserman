@@ -676,7 +676,7 @@ async function cnSignin(id, extra) { const b = cnBrain(id); if (!b) return;
 function cnPoint(id) { const s = BR.sign[id]; if (CN.win && s && s.url && ["needs_browser", "needs_code", "device_code"].includes(s.state)) { try { CN.win.location.href = s.url; CN.win.opener = null; } catch {} CN.win = null; } }
 async function cnVerify(id) { CN.verifying[id] = true; cnRedraw();
   try { const r = await api("/api/brains/" + id + "/verify", {}); if (CN.data[id]) CN.data[id].verify = r; } catch (e) { if (CN.data[id]) CN.data[id].verify = { ok: false, error: e.message, fix: { action: "verify", label: "Check again" } }; }
-  CN.verifying[id] = false; cnAdvance(id); cnRedraw(); }
+  CN.verifying[id] = false; if (cnBrain(id)?.addon && CN.data[id]?.verify?.ok) await cnLoad(id); else cnAdvance(id); cnRedraw(); }
 async function cnDefault(id) { const d = CN.data[id];
   try { const r = await api("/api/brains/" + id + "/default", {}); if (BR.data) { BR.data.default = r.settings.default; BR.data.settings = r.settings; } if (d) { d.default = true; d.agent_default = r.settings.agent === id; } }
   catch (e) { toast(e.message); } cnRedraw(); }
@@ -687,7 +687,7 @@ async function cnInstall(id) { CN.install[id] = { state: "starting", lines: [] }
 function cnWatch() { const id = CN.open, d = id && CN.data[id];
   const inst = id && CN.install[id], sign = id && BR.sign[id], b = id && cnBrain(id);
   const live = d && !d.error && ((inst && ["starting", "running"].includes(inst.state)) || (sign && SIGN_RUNNING.includes(sign.state)) ||
-    (d.find.found && d.signin && d.signin.state !== "signed_in" && b && b.signin_flow !== "pty"));
+    (d.find.found && d.signin && d.signin.state !== "signed_in" && b && !b.addon && b.signin_flow !== "pty"));
   if (!live) { clearInterval(CN.timer); CN.timer = null; return; }
   if (CN.timer) return;
   CN.timer = setInterval(async () => { const id = CN.open; if (!id) { clearInterval(CN.timer); CN.timer = null; return; } CN.tick++;
@@ -746,6 +746,7 @@ function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : 
   else if (st.state === "keychain") steps.push(["signin", "Allow it over SSH", "wait", st.detail, el("div", { class: "note m-flat" }, "macOS keeps Claude Code’s sign-in in that Mac’s Keychain, which an SSH session cannot open. Allow over SSH signs in once more and keeps a sign-in token only on that Mac, in your own folder, readable only by you."),
     el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Allow over SSH"))]);
   else if (st.state === "broken") steps.push(["signin", "Sign in", "failed", st.detail, st.hint ? el("div", { class: "note m-flat" }, st.hint) : null, el("button", { type: "button", class: "small", onclick: () => cnInstall(b.id) }, "Update " + b.label)]);
+  else if (b.addon) steps.push(["signin", "Sign in", "wait", st.detail || "Sign in using this agent’s own terminal, then press Check below."]);
   else if (b.signin_flow !== "pty") steps.push(["signin", "Sign in", "wait",
     b.id === "copilot" ? "Copilot CLI cannot report its sign-in status. If you already signed in, press Check below. Otherwise run this in a terminal" + (where ? " on " + where : "") + ", then press Check:"
       : b.label + " signs in inside its own terminal" + (where ? " on " + where : "") + ". Run this there; this ticks by itself when it is done:",
@@ -755,15 +756,15 @@ function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : 
   else steps.push(["signin", "Sign in", "wait", st.state === "asking" || !st.state ? "Asking whether it is signed in…" : "Not signed in yet.", el("div", {}, el("button", { type: "button", class: "primary", onclick: () => { cnPrepareTab(b); cnSignin(b.id); } }, "Sign in"))]);
   // c. one real answer
   const v = d.verify, signed = st.state === "signed_in",
-    canCheck = found && (signed || b.id === "copilot" && st.state === "unknown");
+    canCheck = found && (signed || (b.id === "copilot" || b.addon) && st.state === "unknown");
   if (CN.verifying[b.id]) steps.push(["verify", "Check it answers", "running", "Asking " + b.label + " to say ok (one short answer, a minute at most)…"]);
   else if (v && v.ok) steps.push(["verify", "Check it answers", "done", v.remembered ? "Last successful use: " + new Date(v.at * 1000).toLocaleDateString() + ". Remembered across restarts for seven days; not rechecked automatically." : "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s",
     v.warning ? el("div", { class: "note m-flat vt-bad" }, v.warning) : null,
     b.id === "copilot" ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check again") : null]);
   else if (v) { const fix = v.fix || { action: "verify", label: "Check again" },
-      terminalLogin = b.id === "copilot" && fix.action === "signin",
+      terminalLogin = (b.id === "copilot" || b.addon) && fix.action === "signin",
       act = terminalLogin ? () => cnVerify(b.id) : { install: () => cnInstall(b.id), signin: () => { cnPrepareTab(b); cnSignin(b.id, b.id === "hermes" && CN.hermesProvider ? { provider: CN.hermesProvider } : undefined); }, link: () => { CN.linkOpen = true; render(); }, verify: () => cnVerify(b.id) }[fix.action],
-      label = terminalLogin ? "Check again after copilot login" : fix.label;
+      label = terminalLogin ? (b.addon ? "Check again after signing in" : "Check again after copilot login") : fix.label;
     steps.push(["verify", "Check it answers", "failed", "", el("div", { class: "note m-flat vt-bad cn-error" }, v.error), act ? el("div", {}, el("button", { type: "button", class: "primary", onclick: act }, label)) : el("div", { class: "note m-flat" }, label)]); }
   else steps.push(["verify", "Check it answers", canCheck ? "wait" : "todo", canCheck ? "" : "After it is signed in.", canCheck ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check") : null]);
   // d. the default
