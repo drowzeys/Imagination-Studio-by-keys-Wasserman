@@ -333,7 +333,7 @@ def require_native(kind: str, params: dict) -> None:
         if kind == "video" and mode()["enabled"]:
             # the one video recipe with a check (windows_engine_checks.py): a passed check opens it, inside what it ran
             import windows_engine_checks as engines
-            found = engines.status("video")
+            found = engines.video_status()
             if not found["qualified"]:
                 raise RouteUnavailable(found["why"])
             engines.require_scope("video", params)
@@ -393,7 +393,7 @@ def gate_native_state(kind: str, state: dict, selected_mode: dict | None = None)
     if checked_kind and installed and (state.get("available") or state.get("state") == "needs_verification"):
         # H3 video and Bolt have a check of their own (windows_engine_checks.py): with gating on, a passed one opens them
         import windows_engine_checks as engines
-        checked = engines.status(checked_kind)
+        checked = engines.video_status() if checked_kind == "video" else engines.status(checked_kind)
         result.update(qualified=checked["qualified"], check_available=True, verified_recipe=checked["verified_recipe"],
                       **({"hardware": checked["hardware"]} if "hardware" in checked else {}))
         if selected_mode["enabled"] and not checked["qualified"]:

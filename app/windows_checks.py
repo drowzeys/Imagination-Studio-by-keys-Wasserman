@@ -40,7 +40,7 @@ CHECKS = {
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="sound"),
     **{kind: FeatureCheck(kind, engines.TITLES[kind], engines.scope_label(kind),
                          tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")),
-                         group="video" if kind == "video" else "agent") for kind in engines.KINDS},
+                         group="video" if kind in engines.VIDEO_LEVELS else "agent") for kind in engines.KINDS},
     **{model: FeatureCheck(model, spec[0], "Production native image workflow; qualify canvases and counts separately.",
                           tuple(MemoryRequirement(pool, None, "unknown") for pool in ("host", "device", "commit")), group="image")
        for model, spec in windows_runtime.IMAGE_SPECS.items()},
@@ -323,6 +323,21 @@ def attach(server):
                                  key=lambda job: job["created"], default=None),
                       "setup": r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts video",
                       "open_tab": "Video", "open_label": "Open video"})
+        for level in engines.VIDEO_LEVELS:  # the larger sizes and longer clips: a card and a check each
+            if level == "video":
+                continue
+            found = engines.usage_status(level, selected_mode)
+            cards.append({"id": level, "title": engines.TITLES[level], "group": "video", **found, "backend": "native",
+                          "requirements": [], "check_available": True, "recipe": engines.recipe(level),
+                          "memory": {"minimum_installed_ram_mb": None, "minimum_label": "See the H3 CUDA-pool policy",
+                                     "lowest_tested_ram_mb": found.get("hardware", {}).get("physical_total_mb"), "job_commit_cap_mb": None, "gpu_required": True},
+                          "evidence": {"matches": found["qualified"], "results": features.saved(level, "").get("results", []),
+                                       "checked_at": features.saved(level, "").get("checked_at")},
+                          "attempt": features.saved(level, "-attempt"),
+                          "job": max((job for job in current if job["params"].get("feature") == level),
+                                     key=lambda job: job["created"], default=None),
+                          "setup": r"powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts video",
+                          "open_tab": "Video", "open_label": "Open video"})
         brain = engines.usage_status("bolt", selected_mode)
         if brain["installed"] or features.saved("bolt", "-attempt"):  # a card only where the Studio's own Bolt engine is set up
             cards.append({"id": "bolt", "title": engines.TITLES["bolt"], "group": "agent", **brain, "backend": "native",
