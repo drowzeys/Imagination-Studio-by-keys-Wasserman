@@ -210,6 +210,31 @@ def test_library_redraw_keeps_its_root_and_players_until_and_after_the_listing_a
     assert out["deletedPlayerRemoved"] and out["remainingPlayers"]
 
 
+def test_library_redrawn_while_its_descriptions_load_does_not_redraw_without_end():
+    """A redraw of the Library while the descriptions (captions) were still loading asked for them again, was answered at
+    once, and redrew: a loop with no end that kept the reply from ever being read. Firefox on a DGX Spark grew to tens of
+    GB on the Library page."""
+
+    out = run(library_view_setup() + """
+      CAP.map = null; CAP.loading = false; CAP.pending = null;
+      answers["/api/library"] = [{ path: "renders/one.mp4", kind: "video" }];
+      let asked = 0, land, renders = 0;
+      const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library/captions"
+        ? (asked++, new Promise(resolve => { land = resolve; })) : realApi(path, body);
+      globalThis.render = () => { if (++renders > 50) throw new Error("the Library redraws without end"); viewLibrary(); };
+      viewLibrary(); await new Promise(resolve => setImmediate(resolve));   // the listing lands: the first draw asks for the descriptions
+      viewLibrary(); viewLibrary();                                          // redrawn twice while they load (a job's progress, a click)
+      for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+      out.whileLoading = { asked, renders, same: capLoad() === capLoad() };
+      land({ captions: { "renders/one.mp4": { caption: "a red kite" } } });
+      for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+      out.after = { asked, renders, text: capText("renders/one.mp4"), loading: CAP.loading };
+    """)
+    assert out["whileLoading"] == {"asked": 1, "renders": 0, "same": True}
+    assert out["after"] == {"asked": 1, "renders": 1, "text": "a red kite", "loading": False}
+
+
 def test_library_render_keeps_scroll_height_and_loaded_players_with_a_large_listing():
     page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
     render = page[page.index("function keepScroll()"):page.index("\n(async () => { const want")]
