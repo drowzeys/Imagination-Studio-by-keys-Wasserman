@@ -463,6 +463,19 @@ clips under Clips). `POST /api/jobs {kind: "sfx", params: {prompt, seconds, nega
 `{kind: "foley", params: {video, prompt?, negative?, keep_sound?, foley_db?, seed?}}`; `GET /api/sound/state`,
 `GET /api/sound/takes`.
 
+On a Mac and a DGX Spark a new take has a folder of its own, by month, named for when it was made and its first
+words, with the files inside named the same way (suggested by ivberg, #257):
+
+```text
+sound/sfx/2026-11/2026-11-07_181022_heavy-footsteps-truck-engine_ee3e3a/
+    2026-11-07_181022_heavy-footsteps-truck-engine_ee3e3a.wav
+    2026-11-07_181022_heavy-footsteps-truck-engine_ee3e3a.take.json
+```
+
+The words are the first six of your prompt (a foley's are its clip's name), made safe for every file system; no model
+writes them. The job's id stays in the take file. Takes made before this stay where they are, and the Library reads
+both. Clips, pictures, voice and music still use their earlier names; so do sound effects on Windows.
+
 The Library groups all media by the file's modification date in your local time: **Past 7 days** (today and the
 six days before), **This month**, **Last month**, then dated months within the past twelve calendar months.
 Older files are grouped by year. Each file appears once, with newer groups first; empty groups are omitted.

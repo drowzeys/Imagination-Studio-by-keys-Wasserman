@@ -16,6 +16,7 @@ os.environ.setdefault("STUDIO_HOME", str(Path(tempfile.mkdtemp()) / "Imagination
 sys.path.insert(0, str(ROOT / "app"))
 import server  # noqa: E402
 import sound  # noqa: E402
+import take_names  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -33,7 +34,7 @@ if kind == "foley":
     open(get("--clip-out"), "wb").write(open(get("--video"), "rb").read())
 home = os.path.realpath(get("--home"))
 rel = lambda p: os.path.relpath(os.path.realpath(p), home).replace("\\", "/") if p else p
-json.dump({"id": os.path.basename(out)[:-4], "kind": kind, "prompt": get("--prompt", ""), "seed": int(get("--seed")), "path": rel(out),
+json.dump({"id": get("--take-id") or os.path.basename(out)[:-4], "kind": kind, "prompt": get("--prompt", ""), "seed": int(get("--seed")), "path": rel(out),
            "clip": rel(get("--clip-out")), "source": rel(get("--video")), "created": time.time(), "seconds": 0.1,
            "argv": args}, open(get("--take"), "w"))
 print("[sound] done")
@@ -89,7 +90,11 @@ def test_a_sound_effect_is_queued_made_and_listed_with_its_words(ready):
     done = finish(job["id"])
     assert done["status"] == "done", done.get("error") or done.get("log")
     wav = done["outputs"][0]
-    assert wav == f"sound/sfx/{job['id']}.wav" and (server.HOME / wav).is_file()
+    # a take's own folder, by month, with its date, time, first words and the job's token; the take file beside it (#257)
+    month, name = take_names.stem(job["id"], "a door slams in a stone hall")
+    assert name.endswith("_a-door-slams-in-a-stone_" + job["id"].split("-", 2)[2])
+    assert wav == f"sound/sfx/{month}/{name}/{name}.wav" and (server.HOME / wav).is_file()
+    assert (server.HOME / wav).with_name(name + ".take.json").is_file()
     take = next(t for t in client.get("/api/sound/takes").json() if t["id"] == job["id"])
     assert take["kind"] == "sfx" and take["seed"] == 7 and take["path"] == wav
     assert "--seconds" in take["argv"] and take["argv"][take["argv"].index("--seconds") + 1] == "4"
@@ -202,13 +207,18 @@ def test_a_spark_runs_both_kinds_through_spark_generate_with_the_macs_flags(spar
     command, env, outputs = build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "rain on a tin roof", "seconds": 8, "seed": 3}, "j1")
     assert command[0] == str(spark["prefix"] / "venv/bin/python") and command[1] == str(ROOT / "spark/spark_generate.py")
     assert command[2] == "sfx" and "--models" not in command and command[command.index("--seconds") + 1] == "8"
-    assert outputs == [str(server.HOME / "sound/sfx/j1.wav")] and "--take" in command and "--home" in command
+    month, name = take_names.stem("j1", "rain on a tin roof")
+    assert name.endswith("_rain-on-a-tin-roof_j1")
+    assert outputs == [str(server.HOME / f"sound/sfx/{month}/{name}/{name}.wav")] and "--home" in command
+    assert command[command.index("--take") + 1] == str(server.HOME / f"sound/sfx/{month}/{name}/{name}.take.json")
+    assert command[command.index("--take-id") + 1] == "j1"  # the job's id stays the take's identity
+    assert build("sfx", {"sound_model": sound.SFX_MODEL, "prompt": "rain on a tin roof", "seconds": 8, "seed": 3}, "j1")[2] == outputs  # built twice, one place
     command, _, outputs = build("foley", {"video": "renders/walk.mp4", "keep_sound": True}, "j2")
-    assert command[2] == "foley" and "--clip-out" in command and "--replace" not in command and outputs[0].endswith("j2.mp4")
+    assert command[2] == "foley" and "--clip-out" in command and "--replace" not in command and outputs[0].endswith("_walk_j2.mp4") and "/sound/foley/" in outputs[0]
     # every flag app/sound.py passes is one spark_generate.py's sfx and foley take
     import spark_generate
     parser_flags = {"--prompt", "--negative", "--seed", "--steps", "--cfg", "--seconds", "--video", "--max-seconds",
-                    "--foley-db", "--replace", "--clip-out", "--take", "--home", "-o"}
+                    "--foley-db", "--replace", "--clip-out", "--take", "--take-id", "--home", "-o"}
     assert {a for a in command if a.startswith("--") or a == "-o"} <= parser_flags
     text = (ROOT / "spark/spark_generate.py").read_text()
     assert all(f'"{flag}"' in text for flag in parser_flags)

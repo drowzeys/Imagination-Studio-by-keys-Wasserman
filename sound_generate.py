@@ -255,6 +255,7 @@ def main() -> int:
     parser.add_argument("--replace", action="store_true")
     parser.add_argument("--clip-out")
     parser.add_argument("--take")
+    parser.add_argument("--take-id", default="", help="the take's id (the job's): the output's name is readable words, not the id")
     parser.add_argument("--home")
     parser.add_argument("-o", "--output", required=True)
     args = parser.parse_args()
@@ -277,7 +278,7 @@ def write_take(args, made: dict, started: float) -> None:
         return
     home = Path(args.home) if args.home else None
     rel = lambda p: str(Path(p).resolve().relative_to(home.resolve())) if home and p else (str(p) if p else None)
-    Path(args.take).write_text(json.dumps({"id": Path(args.output).stem, "kind": args.kind, "prompt": args.prompt, "negative": args.negative,
+    Path(args.take).write_text(json.dumps({"id": getattr(args, "take_id", "") or Path(args.output).stem, "kind": args.kind, "prompt": args.prompt, "negative": args.negative,
                                            "seed": args.seed, "steps": args.steps, "cfg": args.cfg, "path": rel(args.output),
                                            "clip": rel(args.clip_out), "source": rel(args.video), "created": time.time(),
                                            "elapsed": round(time.time() - started, 1), **made}, indent=1))

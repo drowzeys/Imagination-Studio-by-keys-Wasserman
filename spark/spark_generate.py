@@ -1548,7 +1548,7 @@ def main() -> None:
                        default=spark_audio3.MODEL if spark_audio3.MODEL in memory_guard.SOUND_ESTIMATE else "stable-audio-open-1.0")
         f.add_argument("--video", help="foley: the clip"); f.add_argument("--max-seconds", type=float, default=FOLEY_SECONDS[1])
         f.add_argument("--foley-db", type=float, default=-6.0); f.add_argument("--replace", action="store_true")
-        f.add_argument("--clip-out"); f.add_argument("--take"); f.add_argument("--home")
+        f.add_argument("--clip-out"); f.add_argument("--take"); f.add_argument("--take-id", default=""); f.add_argument("--home")
         f.add_argument("-o", "--output", required=True, help="the sound, a .wav")
         f.set_defaults(run=sound, kind=kind)
     args = parser.parse_args()
