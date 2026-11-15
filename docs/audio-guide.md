@@ -454,9 +454,9 @@ or `oneshot-setup.sh --sound`; about 13 GB of weights in `$PREFIX/sound-models` 
 - **Foley for a clip** (MMAudio large_44k_v2): pick a Library clip; MMAudio watches its frames and makes its sound,
   steps on the footfalls. Words are optional. The result is a WAV and the clip with it, laid under the clip's own
   sound at -6 dB (its speech stays on top; peaks under -1 dBFS) or in place of it. Up to 15 s, the studio's longest clip.
-- **A sound effect**: Windows and DGX Spark default to **Stable Audio 3 Small SFX**, 1-5 seconds;
-  **Stable Audio Open 1.0** is an optional legacy choice there. Mac retains Stable Audio Open
-  (1 to 47 s of 44.1 kHz stereo; the bounded Windows legacy recipe is five seconds).
+- **A sound effect**: Windows defaults to **Stable Audio 3 Small SFX**, 1-5 seconds, with **Stable Audio Open 1.0**
+  an optional legacy choice there (its bounded Windows recipe is five seconds). A DGX Spark and a Mac use Stable
+  Audio Open (1 to 47 s of 44.1 kHz stereo): Small SFX is not measured on a Spark yet, so it does not render there.
 
 Both land in `~/ImaginationStudio/sound/` with a take file each, and in the Library under **Sound effects** (foley
 clips under Clips). `POST /api/jobs {kind: "sfx", params: {prompt, seconds, negative?, seed?, steps?, cfg?}}` or
