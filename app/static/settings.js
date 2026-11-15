@@ -32,6 +32,7 @@ function prefsApply(look) { const a = { ...SET_DEFAULTS.appearance, ...(look || 
 function prefsMirror() { try { localStorage.setItem("studio-look", JSON.stringify(prefs().appearance)); } catch {} }
 // once, when the page opens: the saved settings, the look applied, and the Create wizard's defaults set from the presets
 async function settingsLoad() { try { const r = await api("/api/settings"); SET.data = r.settings || null; } catch { SET.data = SET.data || null; }
+  if (typeof StudioLanguage !== "undefined") await StudioLanguage.load();
   SET.loaded = true; prefsApply(); prefsMirror(); prefsToCreate(); return SET.data; }
 async function settingsSave(patch, quiet) { SET.saving = true;
   try { const r = await api("/api/settings", patch); SET.data = r.settings; prefsApply(); prefsMirror(); if (!quiet) toast("Saved"); }
@@ -62,6 +63,9 @@ const setPanel = (title, line, ...kids) => el("section", { class: "panel st-pane
 const START_NAMES = { clip: "A clip with sound", scout: "Scout, then animate", still: "A still", sharp: "Sharp Spec", long: "A long take", voice: "A voice line", song: "A song", sfx: "Sound effects & foley", looks: "Looks", previs: "Previs", nodes: "Nodes", agent: "Ask your agent" };
 function setAppearance() { const a = prefs().appearance, put1 = patch => settingsSave({ appearance: patch }, true);
   return [setPanel("Appearance", "Applied as you choose, on this screen and every other one that opens the studio.",
+    typeof StudioLanguage !== "undefined" && StudioLanguage.choices().length > 1 ? setRow("Language", "Only this browser; local UI scripts installed by the operator",
+      el("select", { "aria-label": "Studio language", onchange: e => StudioLanguage.choose(e.target.value) },
+        StudioLanguage.choices().map(c => el("option", { value: c.id, selected: c.id === StudioLanguage.current() }, c.label)))) : null,
     setRow("Type size", "Text and controls in the work area", setSeg(a.type_size, { comfortable: "Comfortable", large: "Large", largest: "Largest" }, v => put1({ type_size: v }), "Type size")),
     setRow("Glowing pills", "The soft amber glow on the active place and the machine chip", setSwitch(a.glow, v => put1({ glow: v }), "Glowing pills")),
     setRow("Poster on Home", "The key art beside the greeting", setSwitch(a.poster, v => put1({ poster: v }), "Poster on Home")),
