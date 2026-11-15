@@ -4,6 +4,35 @@
 
 Historical release notes, retained as written for provenance. Old install commands, requirements and limitations describe their releases, not current support. Start with the [README](../README.md) or [Windows guide](windows.md).
 
+## New in 4.5.0 (2026-11-15)
+
+**Other machines as workers**, **a safer machine**, and **the Library's trash**. The engines are the same as 4.2.1's,
+and so is the carrier image. To update, `git pull` and restart; the updater does this by itself on a Mac and a DGX
+Spark. On Windows, run the setup again: 4.5.0 adds a setup script for Stable Audio 3 Small SFX.
+
+- **A Mac or a Windows PC as a worker** (#258, #259, #260): a head hands single clips to a Mac's or a native Windows
+  Studio the way it hands them to a DGX Spark. Their app is always their owner's: a head never writes over it, starts
+  it or stops it. Measured on an RTX Spark N1X: a cold 5 s clip in 134 s, the next in 79 s, the file byte for byte the
+  same on the head. See [Several machines](multi-spark.md).
+- **One to four local GPUs** (#261): [the recipe](local-gpus.md) for rendering the queue on up to four NVIDIA cards
+  in one Linux workstation, written for a person or their agent.
+- **Memory guard and thermal gate** (#229, #230, #251, fixes #242): the Studio gives memory back before a render can
+  run the machine out, waits for the GPU to cool before a GPU job and stops one that overheats. Bolt is no longer
+  left held after an idle release.
+- **Library** (ivberg's #245, #246, #256; eveccc2010tw's #240; #262, fixes #253): delete controls and a Trash panel,
+  collapsible date groups, films listed in the trash and put back, native sound takes protected, and a deleted sound
+  takes its measured beats along.
+- **Library in a browser** (#263): a redraw while the descriptions loaded redrew without end, and the tab's memory
+  grew until the machine ran out. Fixed. wassermanproductions' #236 stops pages flickering and jumping to the top.
+- **Agent room** (eveccc2010tw's #238; AlexGS74's #252): pick a new conversation's model beside Send, the working
+  steps scroll in their box, and a local brain keeps its conversation and its tools.
+- **GitHub Copilot CLI** (ivberg's #244, #255): supported again, connections are remembered across restarts, and
+  connection expiry is handled.
+- **Sound** (ivberg's #232): Stable Audio 3 Small SFX, for effects of 1 to 5 s. It is the default on Windows once
+  installed. On a DGX Spark and a Mac Stable Audio Open stays the default: Small SFX has not been measured there.
+- **Slate** (AlexGS74's #254, offered for #249): a reference shot's prompt says the scene once.
+- **Feature checks** (ivberg's #247): the checks, qualification guidance and model diagnostics are back.
+
 ## New in 4.4.1 (2026-11-08)
 
 **The 4.3.1 screens are back**, at Wasserman's request (#226). The page is 4.3.1's again. Everything under it stays
