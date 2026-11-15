@@ -76,7 +76,7 @@ function viewFoley() {
       SFX.keep ? field("Foley level under the clip's sound (dB)", num("db", { min: -30, max: 0, step: 1 })) : null]
     : [SFX.state.models ? field("Sound model", el("select", { "aria-label": "Sound model", onchange: e => { SFX.model = e.target.value; render(); } },
         Object.values(SFX.state.models).map(model => el("option", { value: model.id, selected: SFX.model === model.id },
-          model.label + (model.ready ? "" : model.installed ? " — needs verification" : " — not installed"))))) : null,
+          model.label + (model.ready ? "" : model.state === "needs_measurement" && !model.installed ? " — not measured here yet" : model.installed ? " — needs verification" : " — not installed"))))) : null,
       field("What is heard", area("prompt", 3, "a heavy wooden door slams shut in a stone hall, short reverb")),
       field(seconds[0] === seconds[1] ? "Seconds (fixed recipe: " + seconds[0] + ")" : "Seconds (" + seconds[0] + " to " + seconds[1] + ")",
         num("seconds", { min: seconds[0], max: seconds[1], step: .5, disabled: seconds[0] === seconds[1] }))];
@@ -85,7 +85,7 @@ function viewFoley() {
       const state = id === "sfx" ? sfxModel() : SFX.state.kinds[id], ready = state.ready, limited = state.bounded ?? !!SFX.state.windows;
       return el("button", { type: "button", class: "sfx-card" + (m === id ? " on" : ""), role: "radio", "aria-checked": m === id ? "true" : "false", onclick: () => { SFX.mode = id; render(); } },
         el("b", {}, name), el("span", { class: "sfx-state", title: state.why || "" }, el("span", { class: "dotl" + (ready ? (m === id ? " t" : "") : " o") }),
-          ready ? "Ready" : state.installed === false ? "Not installed" : state.installed === true || SFX.state.windows ? "Unavailable — see requirements" : "Not installed"),
+          ready ? "Ready" : state.state === "needs_measurement" && !state.installed ? "Not measured here yet" : state.installed === false ? "Not installed" : state.installed === true || SFX.state.windows ? "Unavailable — see requirements" : "Not installed"),
         el("span", { class: "sfx-one" }, id === "sfx" && SFX.model === "stable-audio-3-small-sfx" ? "1-5 seconds, eight passes, CFG 1. " + (SFX.state.spark && !SFX.state.windows ? "Guarded ComfyUI CUDA." : "Isolated native CUDA.")
           : limited && id === "sfx" ? "Five-second stereo sound effects, 100 passes, CFG 7. Made locally." : one)); })),
     el("section", { class: "panel stack", style: "margin-top:14px" },

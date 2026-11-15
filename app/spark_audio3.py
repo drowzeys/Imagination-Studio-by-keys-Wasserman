@@ -39,10 +39,24 @@ def prerequisites() -> str:
     return ""
 
 
+UNMEASURED = ("Stable Audio 3 Small SFX is not measured on a DGX Spark yet, so it does not render here: "
+              "Stable Audio Open makes the sound effects until it is.")
+
+
+def unmeasured() -> bool:
+    """No memory estimate for Small SFX on a Spark (spark/memory_guard.py SOUND_ESTIMATE): nothing of it queues here."""
+
+    import memory_guard
+    return MODEL not in memory_guard.SOUND_ESTIMATE
+
+
 def status() -> dict:
     import memory_guard
     why = prerequisites()
     installed = not why
+    if not installed and unmeasured():
+        # installing it would not make it render: say that, not the 3.2 GB install that leads nowhere yet
+        return {"installed": False, "available": False, "why": UNMEASURED, "state": "needs_measurement", "setup": ""}
     if not why:
         found = memory_guard.sound_check(MODEL, SECONDS[0])
         if not found["fits"]:

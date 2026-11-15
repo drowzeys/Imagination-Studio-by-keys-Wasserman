@@ -306,9 +306,13 @@ def test_a_spark_keeps_stable_audio_open_until_small_sfx_is_measured_there(spark
     assert not sound.spark_measured() and state["default_model"] == sound.SFX_MODEL
     assert state["kinds"]["sfx"]["ready"] and state["models"][sound.SFX_MODEL]["label"] == "Stable Audio Open 1.0"
     assert not state["models"][windows_audio3.MODEL]["ready"]
+    # not measured here: said so, with no install to run (the download would not make it render)
+    small = state["models"][windows_audio3.MODEL]
+    assert small["state"] == "needs_measurement" and "not measured on a DGX Spark" in small["why"]
+    assert not small["setup"] and "--sound" not in small["why"]
     command, _, _ = build("sfx", {"prompt": "glass shatters"}, "open")
     assert command[command.index("--sound-model") + 1] == sound.SFX_MODEL
-    with pytest.raises(HTTPException, match="native Stable Audio 3"):
+    with pytest.raises(HTTPException, match="not measured on a DGX Spark"):
         build("sfx", {"sound_model": windows_audio3.MODEL, "prompt": "glass shatters"}, "small")
     assert sound.default_model() == sound.SFX_MODEL  # attaching a Spark does not change a Mac's defaults
     assert sound.parameters("sfx", {"prompt": "rain"}, spark=True)["sound_model"] == sound.SFX_MODEL

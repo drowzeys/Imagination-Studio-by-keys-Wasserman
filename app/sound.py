@@ -197,7 +197,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
                     params = spark_audio3.parameters(params)
                 except ValueError as error:
                     raise HTTPException(400, str(error)) from None
-                if why := spark_audio3.prerequisites():
+                if why := spark_audio3.status()["why"] if spark_audio3.unmeasured() else spark_audio3.prerequisites():
                     raise HTTPException(400, why)
                 fits(spark_audio3.MODEL, params["seconds"])
                 target = home / "sound" / kind / f"{job_id}.wav"
