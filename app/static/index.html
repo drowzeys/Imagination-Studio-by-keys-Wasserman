@@ -60,6 +60,7 @@ try { const a = JSON.parse(localStorage.getItem("studio-look") || "null"), c = d
 <script src="suitelinks.js"></script>
 <script src="slate.js"></script>
 <script src="director.js"></script>
+<script src="zoom.js"></script>  <!-- a picture shown larger -->
 <script src="trashbin.js"></script>  <!-- films in the trash, put back -->
 <script src="motion.js"></script>
 <script src="actions.js"></script>
@@ -1051,7 +1052,7 @@ const LIBSEE = typeof IntersectionObserver === "function" ? new IntersectionObse
   if (one.isIntersecting) { if (!n.getAttribute("src")) n.setAttribute("src", src); }
   else if (n.getAttribute("src") && n.paused !== false) { try { n.removeAttribute("src"); n.load(); } catch {} } } }, { rootMargin: "600px 0px" }) : null;
 function libMedia(path) { let n = LIB.media.get(path); const lazy = m => !!(LIBSEE && m.tagName === "VIDEO");
-  if (!n) { n = media(path); LIB.media.set(path, n); if (lazy(n)) { n.dataset.src0 = n.getAttribute("src") || ""; n.removeAttribute("src"); LIBSEE.observe(n); } }
+  if (!n) { n = media(path, { "data-zoom": true }); LIB.media.set(path, n); if (lazy(n)) { n.dataset.src0 = n.getAttribute("src") || ""; n.removeAttribute("src"); LIBSEE.observe(n); } }
   else if (!lazy(n) && n.dataset && n.dataset.src0 && !n.getAttribute("src")) n.setAttribute("src", n.dataset.src0);
   if (n.dataset && !n.dataset.src0 && n.getAttribute) n.dataset.src0 = n.getAttribute("src") || ""; return n; }
 function viewLibrary() { if (!LIB.root) { LIB.box = el("section", { class: "card" }, el("h2", {}, "Library"));
