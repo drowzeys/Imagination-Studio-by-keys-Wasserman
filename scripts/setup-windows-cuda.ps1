@@ -7,18 +7,24 @@
   For safe automatic stills setup, use scripts\setup-windows-images.ps1 -Model auto (SD-Turbo).
 
 .DESCRIPTION
-  1. the build tools, when missing: Python 3.13 (ARM64), Git, Zig 0.17, the Visual Studio 2022 Build Tools with the
-     ARM64 compiler (winget), and NVIDIA's CUDA 13.4 Windows-on-Arm toolkit from its redistributable archives
+  1. Python 3.13 (ARM64) and Git, when missing. No compiler: the engines come built (step 3). Only -BuildEngines, a
+     developer's source build, and the train part add Zig 0.17, the Visual Studio 2022 Build Tools with the ARM64
+     compiler (winget) and NVIDIA's CUDA 13.4 Windows-on-Arm toolkit from its redistributable archives
      (sha256-checked) into -CudaRoot;
   2. the app's environment (scripts\app.ps1 -Install), FFmpeg (scripts\setup-windows-ffmpeg.ps1), the GPU venv
      (scripts\setup-windows-gpu.ps1: NVIDIA's PyTorch for CUDA 13.4) and the pinned ComfyUI (scripts\setup-windows-comfy.ps1);
-  3. TensorFold's engines from source, the Studio's fork branch studio-1.2.2 at a pinned commit: `zig build tf-h3-int8`
-     (tf_h3.dll, the int8 H3 blocks ComfyUI's TensorFoldH3Blocks node calls) and, with -Bolt, `zig build native bolt`
-     (tensorfold-native.exe + bolt.dll, the Bolt brain) and, with -Voice, `zig build fish-drama3-generate fish-drama3-lib`
-     (drama3-generate.exe + tensorfold_drama3.dll, Fish Audio Drama 3) and, with the music part, `zig build music3-generate`
-     (music3-generate.exe, MiniMax Music 3's own engine), in an ARM64 developer environment; the files go to
-     %LOCALAPPDATA%\ImaginationStudio\tf-h3, ...\bolt\native\bin, ...\drama3\bin and ...\music3\bin, with the commit
-     they were built from (a run at the same commit keeps them). No prebuilt release is published yet;
+  3. TensorFold's engines, the Studio's fork branch studio-1.2.2 at a pinned commit, as the published Windows on Arm
+     builds of that commit (app\windows_engines.json: the release, each archive and each file by sha256): tf_h3.dll
+     (the int8 H3 blocks ComfyUI's TensorFoldH3Blocks node calls) and, with -Bolt, tensorfold-native.exe + bolt.dll
+     (the Bolt brain), with -Voice, drama3-generate.exe + tensorfold_drama3.dll (Fish Audio Drama 3) and, with the
+     music part, music3-generate.exe (MiniMax Music 3's own engine). An archive is fetched, checked and unpacked
+     beside the install, and only then put in place: a failed download or a wrong checksum changes nothing and is
+     said, never answered with a build. The engines that need them get NVIDIA's cuBLAS and CUDA runtime libraries
+     (two of NVIDIA's redistributable archives, sha256-checked: no compiler, no toolkit), and Bolt Microsoft's Visual
+     C++ runtime. -BuildEngines builds them from source instead (`zig build tf-h3-int8`, `zig build native bolt`,
+     `zig build fish-drama3-generate fish-drama3-lib`, `zig build music3-generate`, in an ARM64 developer
+     environment). The files go to %LOCALAPPDATA%\ImaginationStudio\tf-h3, ...\bolt\native\bin, ...\drama3\bin and
+     ...\music3\bin, with the commit they are from (a run at the same commit keeps them);
   4. the models (scripts\windows-cuda-setup.py models: the DGX Spark's files, from the same repos) and, for the parts that
      need them, the authors' ComfyUI node packs at their pinned commits (scripts\windows-cuda-setup.py nodes: workflows
      for the Library's actions, foley for MMAudio), musubi-tuner's environment (train: scripts\windows-cuda-setup.py
@@ -48,7 +54,8 @@ param(
   [switch]$SkipToolchain,
   [switch]$ToolchainOnly,                 # step 1 alone: the build tools and the CUDA toolkit, nothing else
   [switch]$SkipBuild,                     # keep the engines already in place
-  [string]$EngineFrom = "",               # a folder holding tf_h3.dll (and tensorfold-native.exe, bolt.dll): copied, not built
+  [switch]$BuildEngines,                  # a developer's source build of the engines (Zig, the ARM64 compiler, nvcc) instead of the published builds
+  [string]$EngineFrom = "",               # a folder holding tf_h3.dll (and tensorfold-native.exe, bolt.dll): copied, not built or fetched
   [string]$CudaRoot = "C:\cuda-13.4",
   [string]$CudaRelease = "13.4.1",
   [string]$TensorFoldRepo = "https://github.com/drowzeys/TensorFold.git",
@@ -78,11 +85,12 @@ $Parts = $Want -join ','
 $H3Engine = @($Want | Where-Object { $_ -in @("video", "ref2va") }).Count -gt 0
 $MusicEngine = $Want -contains "music"
 $NeedEngines = $H3Engine -or $MusicEngine -or $Bolt -or $Voice
-$NeedToolchain = $NeedEngines -or $ToolchainOnly -or ($Want -contains "train")
+$NeedToolchain = ($NeedEngines -and $BuildEngines) -or $ToolchainOnly -or ($Want -contains "train")
 $NeedGpuRuntime = $Bolt -or $Voice -or @($Want | Where-Object { $_ -ne "finish" }).Count -gt 0
 if ($PlanOnly) {
   @{ parts=$Requested; shared_parts=$Want; audio3_isolated=$Audio3; h3_engine=$H3Engine; music_engine=$MusicEngine; bolt_engine=[bool]$Bolt;
      voice_engine=[bool]$Voice; native_toolchain=$NeedToolchain; gpu_runtime=$NeedGpuRuntime;
+     engines=$(if (-not $NeedEngines) { 'none' } elseif ($EngineFrom) { 'copied from -EngineFrom' } elseif ($BuildEngines) { 'built from source (-BuildEngines)' } else { 'published builds, sha256-checked (app\windows_engines.json)' });
      foley_isolated=($Want -contains "foley");
      runtime_fit='Not probed in PlanOnly. Before downloads: known insufficient automatic choices are skipped; explicit mismatches require -AllowInsufficientModel. Unknown fit is not a pass.';
      automatic_model_selection=[bool]$AutomaticModelSelection;
@@ -124,7 +132,7 @@ if (-not $NoDownload -and -not $ToolchainOnly -and @($Want | Where-Object { $_ -
   $H3Engine = @($Want | Where-Object { $_ -in @('video','ref2va') }).Count -gt 0
   $MusicEngine = $Want -contains 'music'
   $NeedEngines = $H3Engine -or $MusicEngine -or $Bolt -or $Voice
-  $NeedToolchain = $NeedEngines -or ($Want -contains 'train')
+  $NeedToolchain = ($NeedEngines -and $BuildEngines) -or ($Want -contains 'train')
   $NeedGpuRuntime = $Bolt -or $Voice -or @($Want | Where-Object { $_ -ne 'finish' }).Count -gt 0
 }
 $ImageParts = @($Want | Where-Object { $_ -in @("image", "image-edit", "flux3", "moss") })
@@ -252,6 +260,82 @@ if ($EngineFrom -and $NeedEngines) {
   foreach ($one in @("tensorfold-native.exe", "bolt.dll")) { if (Test-Path (Join-Path $EngineFrom $one)) { Copy-Item (Join-Path $EngineFrom $one) $BoltBin -Force } }
   foreach ($one in @("drama3-generate.exe", "tensorfold_drama3.dll")) { if (Test-Path (Join-Path $EngineFrom $one)) { Copy-Item (Join-Path $EngineFrom $one) $DramaBin -Force } }
   if (Test-Path (Join-Path $EngineFrom "music3-generate.exe")) { Copy-Item (Join-Path $EngineFrom "music3-generate.exe") $MusicBin -Force }
+} elseif ($NeedEngines -and -not $BuildEngines -and (-not $SkipBuild -or ($H3Engine -and -not (Test-Path (Join-Path $TfH3 "tf_h3.dll"))))) {
+  # The published builds (app\windows_engines.json). Nothing here compiles, and nothing falls back to a compile.
+  $Pins = Get-Content -Raw -Encoding UTF8 (Join-Path $Root "app\windows_engines.json") | ConvertFrom-Json
+  if ($Pins.commit -ne $TensorFoldCommit) { throw "The published engines are of TensorFold $($Pins.commit.Substring(0, 8)), not $($TensorFoldCommit.Substring(0, 8)): build that commit with -BuildEngines." }
+  Say "TensorFold's engines, the published Windows on Arm builds ($($Pins.release), $($TensorFoldCommit.Substring(0, 8)))"
+  $Stage = Join-Path $Home_ "engine-stage"
+  function Sha([string]$file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower() }
+  function Arm64([string]$file) {  # a PE file for ARM64 (machine 0xAA64): any other architecture is refused
+    $bytes = [System.IO.File]::ReadAllBytes($file); $at = [BitConverter]::ToInt32($bytes, 0x3C)
+    return ($bytes.Length -gt $at + 6) -and ([BitConverter]::ToUInt16($bytes, $at + 4) -eq 0xAA64)
+  }
+  function Install-StudioEngine([string]$name, [string]$dest) {
+    $pin = $Pins.engines.$name
+    if (-not $pin) { throw "app\windows_engines.json has no published build of the $name engine. Nothing was changed; a developer's source build is -BuildEngines." }
+    $have = @($pin.files.PSObject.Properties | Where-Object { -not (Test-Path (Join-Path $dest $_.Name)) -or (Sha (Join-Path $dest $_.Name)) -ne $_.Value })
+    if ($have.Count -eq 0) { Set-Content -Path (Join-Path $dest "commit") -Value $TensorFoldCommit -Encoding ascii; Ok "$name engine: the published build is in place"; return }
+    $work = Join-Path $Stage $name
+    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $work | Out-Null
+    $zip = Join-Path $Stage $pin.archive
+    $url = "$($Pins.base)/$($Pins.release)/$($pin.archive)"
+    try { Invoke-WebRequest $url -OutFile $zip -UseBasicParsing }
+    catch { throw "The $name engine could not be fetched from $url ($($_.Exception.Message)). Nothing was changed. Try again, or build it with -BuildEngines." }
+    if ((Sha $zip) -ne $pin.sha256) { Remove-Item -Force $zip; throw "The $name engine's archive did not match its sha256 ($($pin.archive)). Nothing was changed; it was not installed and nothing was built." }
+    Expand-Archive -LiteralPath $zip -DestinationPath $work -Force
+    foreach ($file in $pin.files.PSObject.Properties) {
+      $got = Join-Path $work $file.Name
+      if (-not (Test-Path $got)) { throw "The $name engine's archive has no $($file.Name). Nothing was changed." }
+      if ((Sha $got) -ne $file.Value) { throw "$($file.Name) in the $name engine's archive did not match its sha256. Nothing was changed." }
+      if (-not (Arm64 $got)) { throw "$($file.Name) is not a Windows on Arm (ARM64) program. Nothing was changed." }
+    }
+    # every file checked: only now is the install touched
+    foreach ($file in $pin.files.PSObject.Properties) { Copy-Item (Join-Path $work $file.Name) $dest -Force }
+    foreach ($notice in @("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "MANIFEST.json")) { if (Test-Path (Join-Path $work $notice)) { Copy-Item (Join-Path $work $notice) $dest -Force } }
+    Set-Content -Path (Join-Path $dest "commit") -Value $TensorFoldCommit -Encoding ascii
+    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue; Remove-Item -Force $zip -ErrorAction SilentlyContinue
+    Ok "$name engine: $(@($pin.files.PSObject.Properties | ForEach-Object { $_.Name }) -join ' + ')"
+  }
+  New-Item -ItemType Directory -Force -Path $Stage | Out-Null
+  if ($H3Engine) { Install-StudioEngine "h3" $TfH3 }
+  if ($Voice) { Install-StudioEngine "drama3" $DramaBin }
+  if ($Bolt) { Install-StudioEngine "bolt" $BoltBin }
+  if ($MusicEngine) { Install-StudioEngine "music3" $MusicBin }
+  Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
+  # What they open at run time. The driver has nvcuda.dll. Drama 3, Music 3 and Bolt open NVIDIA's cuBLAS, from two of
+  # NVIDIA's redistributable archives, each checked against NVIDIA's own manifest: the libraries, not the toolkit.
+  if ($Voice -or $Bolt -or $MusicEngine) {
+    $RuntimeBin = Join-Path $CudaRoot "bin\arm64"
+    $Needed = @("cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll")
+    if (@($Needed | Where-Object { -not (Test-Path (Join-Path $RuntimeBin $_)) }).Count -gt 0) {
+      $base = "https://developer.download.nvidia.com/compute/cuda/redist"
+      $manifest = Invoke-RestMethod "$base/redistrib_$CudaRelease.json"
+      $work = Join-Path $env:TEMP "cuda-runtime-$CudaRelease"
+      New-Item -ItemType Directory -Force -Path $work, $RuntimeBin | Out-Null
+      foreach ($name in @("libcublas", "cuda_cudart")) {
+        $entry = $manifest.$name."windows-arm64"
+        if (-not $entry) { throw "NVIDIA's $CudaRelease manifest has no windows-arm64 $name" }
+        $zip = Join-Path $work (Split-Path $entry.relative_path -Leaf)
+        Invoke-WebRequest "$base/$($entry.relative_path)" -OutFile $zip -UseBasicParsing
+        if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $entry.sha256.ToUpper()) { throw "$name did not match NVIDIA's sha256" }
+        $out = Join-Path $work $name
+        Expand-Archive $zip -DestinationPath $out -Force
+        Get-ChildItem $out -Recurse -Filter *.dll | Where-Object { $_.FullName -match '\\bin\\' } | ForEach-Object { Copy-Item $_.FullName $RuntimeBin -Force }
+        Get-ChildItem $out -Recurse -Filter LICENSE* | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName (Join-Path $CudaRoot "LICENSE-$name.txt") -Force }
+      }
+      Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+      $gone = @($Needed | Where-Object { -not (Test-Path (Join-Path $RuntimeBin $_)) })
+      if ($gone.Count -gt 0) { throw "NVIDIA's runtime archives did not hold $($gone -join ', ')" }
+      Ok "NVIDIA's cuBLAS and CUDA runtime $CudaRelease in $RuntimeBin (the libraries only)"
+    } else { Ok "NVIDIA's cuBLAS and CUDA runtime in $RuntimeBin" }
+  }
+  # bolt.dll opens Microsoft's Visual C++ runtime (MSVCP140.dll, VCRUNTIME140.dll): the redistributable, not a compiler
+  if ($Bolt -and @("msvcp140.dll", "vcruntime140.dll" | Where-Object { -not (Test-Path (Join-Path $env:WINDIR "System32\$_")) }).Count -gt 0) {
+    Install-StudioPackage "Microsoft.VCRedist.2015+.arm64"
+    Ok "Microsoft Visual C++ runtime (ARM64)"
+  }
 } elseif ($NeedEngines -and (-not $SkipBuild -or ($H3Engine -and -not (Test-Path (Join-Path $TfH3 "tf_h3.dll"))))) {
   Say "TensorFold's engines from source ($TensorFoldRepo @ $($TensorFoldCommit.Substring(0, 8)))"
   $src = Join-Path $Home_ "src\TensorFold"
@@ -262,7 +346,7 @@ if ($EngineFrom -and $NeedEngines) {
   & git -C $src fetch --depth 1 origin $TensorFoldCommit; Native "fetching TensorFold"
   & git -C $src -c advice.detachedHead=false checkout --force --detach FETCH_HEAD; Native "checking out TensorFold"
   $vc = VcVars
-  if (-not $vc) { throw "no Visual Studio ARM64 compiler (vcvarsall.bat): run without -SkipToolchain" }
+  if (-not $vc) { throw "no Visual Studio ARM64 compiler (vcvarsall.bat): -BuildEngines needs the build tools, run it without -SkipToolchain" }
   $nvcc = Join-Path $CudaRoot "bin\nvcc.exe"
   # an engine already built from this commit is kept (its folder's commit file says which)
   function Built([string]$folder, [string]$file) {

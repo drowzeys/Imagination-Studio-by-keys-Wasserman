@@ -120,9 +120,10 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-windows-cuda.ps1 -Parts m
 ```
 
 Other individual setup scripts cover FFmpeg, graphics, Tesseract Finish, SFX and isolated Foley dependencies.
-CPU HDR/Finish do not depend on H3. Image-only setup does not build H3 or obtain its compiler/toolkit.
-Voice and Music native engines may require Zig, MSVC ARM64 and the CUDA toolkit; setup currently builds those
-engines from pinned TensorFold source. Repeated setup reuses completed parts.
+CPU HDR/Finish do not depend on H3. Image-only setup does not fetch H3 or its runtime libraries.
+The H3, Voice, Music and Bolt native engines are installed as published, sha256-checked builds of the pinned TensorFold
+commit: no Zig, no MSVC and no CUDA toolkit. Voice, Music and Bolt add NVIDIA's cuBLAS runtime libraries, and Bolt
+Microsoft's Visual C++ runtime. `-BuildEngines` is the developer's source build. Repeated setup reuses completed parts.
 
 For the broad N1X installer, use the instructions under **Native Windows** in the
 [N1X reference](rtx-spark-n1x.md#install-one-shot-natively). It uses automatic selection by default; explicitly

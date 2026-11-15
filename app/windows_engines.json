@@ -1,0 +1,59 @@
+{
+  "release": "studio-1.2.2-windows-arm64-r1",
+  "commit": "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2",
+  "base": "https://github.com/drowzeys/TensorFold/releases/download",
+  "target": {
+    "os": "Windows 11 on Arm",
+    "architecture": "ARM64 (PE machine 0xAA64)",
+    "gpu": "NVIDIA RTX Spark N1X, CUDA device code for sm_121",
+    "note": "Built and run on an RTX Spark N1X only. Not a claim for any other NVIDIA GPU."
+  },
+  "engines": {
+    "h3": {
+      "archive": "tensorfold-h3-windows-arm64-sm121.zip",
+      "sha256": "988485876418d601556f068d4fc1927395ea65510627e77082cca3d9084aaaa0",
+      "files": {
+        "tf_h3.dll": "0e7123eaa183441c567a3390b22587baf1fbc1894832468411385f96fc3b97e9"
+      },
+      "opens_at_run_time": [
+        "nvcuda.dll (the NVIDIA driver)"
+      ]
+    },
+    "drama3": {
+      "archive": "tensorfold-drama3-windows-arm64-sm121.zip",
+      "sha256": "fc4e3d25f7dbbbb04476b30ac06841076ed72f4141cdf857cfd9c09de1ec06e2",
+      "files": {
+        "drama3-generate.exe": "7d89a368119bed3624152719ad817d18ec8d61d6c94d5127a6038c54308634f8",
+        "tensorfold_drama3.dll": "b682a9baf97e559a16932e5119347d20ce5d678056f5e1461189aff3b821f763"
+      },
+      "opens_at_run_time": [
+        "nvcuda.dll (the NVIDIA driver)",
+        "cublas64_13.dll (NVIDIA libcublas 13)"
+      ]
+    },
+    "bolt": {
+      "archive": "tensorfold-bolt-windows-arm64-sm121.zip",
+      "sha256": "7c93f0e6de543dfe5e8916249ca9b616d884c8e0d658e8255b15e249d13a881d",
+      "files": {
+        "tensorfold-native.exe": "39daf9c22fce500aa21fe7b208b21c60255c177b7aeb2d66cc6263fd80c98a68",
+        "bolt.dll": "c5456709a846631105bd212ef77485e6bdb8f0dc814458f442d7479245989faf"
+      },
+      "opens_at_run_time": [
+        "nvcuda.dll and nvcudart_hybrida64.dll (the NVIDIA driver)",
+        "cublas64_13.dll, cublasLt64_13.dll (NVIDIA libcublas 13)",
+        "MSVCP140.dll, VCRUNTIME140.dll (Microsoft Visual C++ runtime, ARM64)"
+      ]
+    },
+    "music3": {
+      "archive": "tensorfold-music3-windows-arm64-sm121.zip",
+      "sha256": "4e373df7d7f319836a063ea402de2c16c329777dbd5838d080c67c6d0ea15a16",
+      "files": {
+        "music3-generate.exe": "83b1fe22466b953812525a55e3e4cea6625fcdf460ecd7c4522d53e7fd2faeb3"
+      },
+      "opens_at_run_time": [
+        "nvcuda.dll (the NVIDIA driver)",
+        "cublas64_13.dll, cublasLt64_13.dll (NVIDIA libcublas 13)"
+      ]
+    }
+  }
+}
