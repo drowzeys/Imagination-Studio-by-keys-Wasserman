@@ -91,8 +91,9 @@ def test_with_gating_on_video_is_refused_until_its_check_passes_and_then_held_to
         windows_runtime.require_native("video", PLAIN)
     passed("video")
     windows_runtime.require_native("video", PLAIN)
-    windows_runtime.require_native("video", {**PLAIN, "frames": 100})  # shorter is inside it
-    for outside in ({"preset": "native"}, {"quality": "fh20"}, {"frames": 200}, {"image": "renders/a.png"},
+    windows_runtime.require_native("video", {**PLAIN, "frames": 107})  # shorter is inside it
+    windows_runtime.require_native("video", {**PLAIN, "quality": "fh4"})  # fewer passes of the same recipe
+    for outside in ({"preset": "native"}, {"quality": "fh20"}, {"frames": 192}, {"image": "renders/a.png"},
                     {"references": ["a.png"]}, {"loras": ["x"]}, {"last_frame": "a.png"}, {"steps": 20}):
         with pytest.raises(ValueError, match="Verified video scope"):
             windows_runtime.require_native("video", {**PLAIN, **outside})
@@ -217,3 +218,64 @@ def test_the_bolt_check_loads_asks_once_and_drains_the_engine(tmp_path, monkeypa
     monkeypatch.setattr(engines, "bolt_engine", lambda: Stuck())
     with pytest.raises(RuntimeError, match="did not drain"):
         engines.worker("bolt", tmp_path / "again")
+
+
+def test_a_passed_level_opens_every_clip_no_larger_and_no_longer_and_nothing_beyond(evidence, monkeypatch):
+    """The larger sizes and longer clips have checks of their own. A level covers what is smaller and shorter than it."""
+    monkeypatch.setattr(windows_cuda, "h3_why_not", lambda: "")
+    monkeypatch.setattr(windows_runtime, "video_missing", lambda params=None: [])
+    monkeypatch.setattr(windows_runtime, "mode", lambda: {"enabled": True})
+    assert list(engines.VIDEO_LEVELS) == ["video", "video-long", "video-large", "video-sharp", "video-largest"]
+    assert engines.VIDEO_LEVELS["video-largest"][1:] == (1376, 768, 362)  # the app's largest canvas and longest clip
+    def runs(**settings):
+        try:
+            windows_runtime.require_native("video", {**PLAIN, **settings})
+            return True
+        except ValueError:
+            return False
+    passed("video")
+    assert runs() and not runs(seconds=15, frames=None) and not runs(preset="sharp") and not runs(preset="p720")
+    passed("video-long")  # small, 15 s
+    assert runs(frames=362) and runs(frames=243) and not runs(preset="native") and engines.passed_levels() == ["video", "video-long"]
+    passed("video-large")  # full size, 5 s: 720p and Native are inside it, 10 s at full size is not
+    assert runs(preset="sharp") and runs(preset="native") and runs(preset="p720") and runs(preset="custom", width=1024, height=576)
+    assert not runs(preset="sharp", frames=243) and not runs(preset="native", frames=192)
+    assert not runs(preset="custom", width=1920, height=1088) and not runs(preset="custom")
+    passed("video-sharp")  # full size, 10 s
+    assert runs(preset="sharp", frames=243) and runs(preset="native", frames=192) and not runs(preset="sharp", frames=362)
+    passed("video-largest")
+    assert runs(preset="sharp", frames=362) and runs(preset="sharp", frames=362, quality="fh4")
+    assert not runs(preset="sharp", quality="fh20") and not runs(preset="sharp", image="a.png")  # still not what a check ran
+    found = engines.video_status()
+    assert found["qualified"] and found["passed_levels"] == list(engines.VIDEO_LEVELS) and len(found["verified_recipe"]) == 5
+
+
+def test_the_largest_level_alone_is_enough_and_a_larger_pass_does_not_need_the_first(evidence, monkeypatch):
+    monkeypatch.setattr(windows_cuda, "h3_why_not", lambda: "")
+    monkeypatch.setattr(windows_cuda, "configuration_error", lambda: "")
+    monkeypatch.setattr(windows_runtime, "video_missing", lambda params=None: [])
+    monkeypatch.setattr(windows_runtime, "mode", lambda: {"enabled": True})
+    assert not engines.video_status()["qualified"]
+    passed("video-largest")
+    windows_runtime.require_native("video", PLAIN)
+    windows_runtime.require_native("video", {**PLAIN, "preset": "sharp", "frames": 362})
+    raw = {"available": True, "installed": True, "why": "", "state": "available_unverified"}
+    assert windows_runtime.gate_native_state("video", raw, {"enabled": True})["available"] is True
+
+
+@pytest.mark.parametrize("kind", [k for k in engines.VIDEO_LEVELS if k != "video"])
+def test_each_level_renders_its_own_canvas_and_length_and_is_validated_against_them(tmp_path, monkeypatch, kind):
+    monkeypatch.setattr(windows_cuda, "translate", lambda argv: ["python", "windows_scripts.py", "video", *argv[2:]])
+    _, width, height, frames = engines.VIDEO_LEVELS[kind]
+    _, env = engines.video_command(tmp_path / "check.mp4", kind)
+    assert (env["WIDTH"], env["HEIGHT"], env["FRAMES"], env["STEPS"]) == (str(width), str(height), str(frames), "8")
+    assert f"{width}x{height}" in engines.scope_label(kind) and windows_checks.CHECKS[kind].title.startswith("H3 / FastH3 video: ")
+    import graphics
+    clip = tmp_path / "check.mp4"
+    clip.write_bytes(b"x")
+    good = {"width": width, "height": height, "fps": 24.0, "seconds": frames / 24, "audio": True}
+    monkeypatch.setattr(graphics, "probe", lambda path: good)
+    engines.check_video(clip, kind)
+    monkeypatch.setattr(graphics, "probe", lambda path: {**good, "width": 512, "height": 288, "seconds": 2.0})  # another clip is not this level's
+    with pytest.raises(RuntimeError, match="canvas"):
+        engines.check_video(clip, kind)
