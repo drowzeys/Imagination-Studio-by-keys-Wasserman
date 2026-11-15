@@ -1711,3 +1711,21 @@ def test_a_library_clip_loads_only_near_the_screen_and_lets_go_when_far():
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out == {"clipWaits": True, "stillLoads": True, "same": True, "near": "/files/a.mp4", "playingKept": "/files/a.mp4",
                    "farLetGo": True, "back": "/files/a.mp4"}
+
+
+def test_learn_and_its_lessons_are_in_every_install():
+    """Learn is part of the page, not an optional part of an install: its room, its tab and its lessons ship with
+    the app on a DGX Spark, a Mac and a Windows PC, and no installer has a way to leave them out."""
+    import re
+    out = run("""out.room = ROOMS.filter(r => r.tabs.includes("Tutorial")).map(r => [r.name, r.group]); out.tab = TABS.includes("Tutorial");
+      go("Tutorial"); out.opens = tab;""")
+    assert out["room"] == [["Learn", "vaults"]] and out["tab"] is True and out["opens"] == "Tutorial"
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    learn = page[page.index("function lessons() {"):page.index("function viewTutorial()")]
+    tracks = re.findall(r'track: "([^"]+)"', learn)
+    assert len(tracks) >= 20, len(tracks)  # 25 on a DGX Spark, 23 on Windows: a few are a platform's own
+    assert {"Create", "Production", "Editor", "Library"} <= set(tracks)
+    assert "Tutorial: viewTutorial" in page  # the tab draws them
+    for name in ("oneshot-setup.sh", "oneshot-setup-cuda.sh", "oneshot-setup-rtx-spark-n1x.ps1"):
+        text = (ROOT / name).read_text(encoding="utf-8", errors="replace").lower()
+        assert "--no-learn" not in text and "--no-tutorial" not in text, name  # no install leaves it out
