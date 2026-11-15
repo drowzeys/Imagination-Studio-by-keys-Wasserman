@@ -33,11 +33,21 @@ with its own key and forwards the worker's 127.0.0.1:7870 to a socket in a folde
 tunnel ends on (Relay). No key is added anywhere for it. On a Mac at the head only what a Spark renders with its own
 settings is handed over: FastH3 clips at the sizes a Spark makes without the 2x decoder, never MiniMax H3 Turbo's
 qualities or a text encoder file of the Mac's (capable).
+
+A worker may be a Mac too (docs/multi-spark.md, *A Mac as a worker*): its app says so on /api/spark/self, and what is
+run on it over ssh (probe, start_command, stop_command) reads no /proc and needs no setsid. A Mac whose own app is
+running, the one its owner started, is used as it is: this app never sends its code over that one or stops it.
+
+So may a Windows PC running the native Windows Studio (*A Windows PC as a worker*): ssh there lands in cmd.exe or
+PowerShell, so it is asked one thing in PowerShell (WIN_PROBE), and its app is always its owner's: nothing is sent to
+it, started or stopped from here. Its code is held against this one's by its lines (digest), since Git on Windows
+checks text out with CRLF ends.
 """
 
 from __future__ import annotations
 
 import atexit
+import base64
 import functools
 import hashlib
 import json
@@ -93,6 +103,16 @@ STATES = {"new": "not checked yet", "unreachable": "does not answer over ssh", "
           "ready": "idle", "busy": "rendering", "down": "stopped answering"}
 # presets that need the 2x decoder, which a DGX Spark does not have (spark/video.sh refuses them); said by name
 DOUBLED = {"draft": "Draft", "2k": "2K", "qhd": "2K 2560x1440", "p960": "960p"}
+MAC_OWN = ("That Mac runs its own Studio app, which this one never writes over or stops: update it there (Machine → Updates), "
+           "or quit it there and press “Update and start” to run this Spark's code.")
+WIN_OWN = ("That Windows PC runs its own Studio app, which this one never writes over, starts or stops: update it there "
+           "(Machine → Updates, or git pull and its setup script), then Check again.")
+WIN_STOPPED = "Its Studio app is not running. Start Imagination Studio on that Windows PC: a head does not start an app on Windows."
+# What is asked of a Windows worker over ssh, whose shell is cmd.exe or PowerShell: its name, and whether an app answers
+# on its 127.0.0.1:PORT. Sent as PowerShell's -EncodedCommand, which no shell on the way has to quote.
+WIN_PROBE = ("$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='SilentlyContinue'; "
+             "Write-Output ('host ' + $env:COMPUTERNAME); Write-Output 'os Windows'; "
+             "$c = New-Object Net.Sockets.TcpClient; try { $c.Connect('127.0.0.1', %d); if ($c.Connected) { Write-Output 'app yes' } } catch { } finally { $c.Close() }" % PORT)
 ONE_CLIP = ("Splitting a single clip across Sparks is measured (1.40x on 2, 1.73x on 3, 1.77x on 4 for a 5 s 864x480 clip) "
             "and is not in the app yet.")
 
@@ -162,7 +182,8 @@ def digest(pack: Path) -> dict:
     for pattern in CODE:
         for path in sorted(pack.glob(pattern)):
             if path.is_file():
-                found[str(path.relative_to(pack))] = hashlib.sha1(path.read_bytes()).hexdigest()
+                # by its lines: Git on Windows checks text out with CRLF ends (core.autocrlf), which is not another code
+                found[path.relative_to(pack).as_posix()] = hashlib.sha1(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     return found
 
 
@@ -340,11 +361,34 @@ class Relay(Tunnel):
         super().close()
 
 
+def platform_of(info: dict | None) -> str:
+    """What a worker is, from what its app says of itself: "mac", "windows" (the native Windows Studio), or "spark"
+    (a DGX Spark or a CUDA card on Linux, and what an app from before the word was sent is taken for)."""
+
+    said = (info or {}).get("platform")
+    return said if said in ("mac", "windows") else "spark"
+
+
+def family(platform: str | None) -> str:
+    """Whose settings and files a machine has: "mac" (the MLX and Metal engines, MLX files) or "spark" (the CUDA
+    build with ComfyUI's files, which the native Windows Studio is too)."""
+
+    return "mac" if platform == "mac" else "spark"
+
+
+def word_of(platform: str | None) -> str:
+    """What a worker is called in a sentence."""
+
+    return {"mac": "Mac", "windows": "Windows PC"}.get(platform, "Spark")
+
+
 def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> str:
     """Why a worker cannot render this job ("" when it can), from what its app says it has (/api/spark/self).
-    ``spark`` False: the job was queued on a Mac, whose own settings a Spark does not have."""
+    ``spark`` False: the job was queued on a Mac. A worker of the other kind (a Spark for a Mac, a Mac for a Spark) is
+    handed only what it renders with its own settings: the two run different engines and read different files."""
 
     info = info or {}
+    theirs, mine = family(platform_of(info)), "spark" if spark else "mac"
     if kind not in KINDS:
         return "only single clips are handed to another Spark"
     if not info.get("fasth3"):
@@ -353,8 +397,9 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     if info.get("presets") is not None and preset not in info["presets"]:
         return (f"the {DOUBLED.get(preset, preset)} preset is made with the 2x decoder, which is not on that machine" if preset in DOUBLED
                 else f"the {preset} preset is not rendered there")
-    if not spark and params.get("text_encoder") not in (None, "", "regular"):
-        return "the text encoder file is one of this Mac's (an MLX file): a Spark reads only the files in its own ComfyUI folder"
+    if theirs != mine and params.get("text_encoder") not in (None, "", "regular"):
+        return ("the text encoder file is one of this Mac's (an MLX file): a Spark reads only the files in its own ComfyUI folder" if mine == "mac"
+                else "the text encoder file is one of this Spark's (a ComfyUI file): a Mac reads only its own MLX files")
     media = bool(params.get("reference_videos") or params.get("reference_audios"))
     if params.get("references") or media:
         if not info.get("ref2va"):
@@ -365,7 +410,7 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
             return "reference videos and audio need ffmpeg, which is not installed there"
     elif info.get("qualities") is not None and params.get("quality") and params["quality"] not in info["qualities"]:
         return (f"the {params['quality']} quality is MiniMax H3 Turbo, which is not on that machine: a Spark renders FastH3 "
-                "(fh4, fh8, fh20)")
+                "(fh4, fh8, fh20)" if theirs == "spark" else f"the {params['quality']} quality is not rendered there")
     adapters = params.get("loras")
     if not isinstance(adapters, (list, tuple)):
         adapters = []
@@ -374,7 +419,7 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
         return "the LoRA " + ", ".join(missing) + " is not installed there"
     encoder = params.get("text_encoder")
     if encoder not in (None, "", "regular") and Path(str(encoder)).name not in (info.get("text_encoders") or []):
-        return "the text encoder file is not on that Spark"
+        return f"the text encoder file is not on that {word_of(platform_of(info))}"
     return ""
 
 
@@ -661,6 +706,12 @@ class Hub:
             return text
         return text.replace("this Spark", "this " + self.word)
 
+    def platform(self, address: str) -> str:
+        """What a worker is ("mac", "windows" or "spark"): what its app says, else what ssh last found there."""
+
+        live = self.state(address)
+        return platform_of(live["info"]) if live["info"] else live.get("platform") or "spark"
+
     def via(self, address: str) -> str | None:
         """The machine a worker is reached through, or None: it is reached directly."""
 
@@ -717,6 +768,7 @@ class Hub:
         memory = info.get("memory") or {}
         return {"address": worker["address"], "name": worker.get("name") or worker["address"], "label": self.label_of(worker), "folder": worker.get("folder"),
                 "kind": worker.get("kind", "ssh"), **({"gpu_uuid": worker["gpu_uuid"], "owned": self.local.owned(worker)} if worker.get("kind") == "local" else {}),
+                "platform": self.platform(worker["address"]),
                 "enabled": worker.get("enabled", True), "state": live["state"], "says": self.said(STATES.get(live["state"], live["state"])),
                 "why": self.said(live["why"]), "usable": not why, "unusable": self.said(why), "working": live["working"], "checked": live["checked"],
                 "job": live["job"], "version": info.get("version") or live.get("version"), "via": worker.get("via"),
@@ -788,8 +840,12 @@ class Hub:
         worker = next((one for one in self.config()["workers"] if one["address"] == address), {"address": address})
         if worker.get("kind") == "local":
             return self.local.credentials(worker)[1]
+        if self.state(address).get("platform") == "windows":
+            return ""  # the tunnel ends on that PC's own loopback, which is asked for no key (access.local); nothing is read there
         folder = worker.get("folder") or self.default_folder()
-        code, said = self.on(worker, (f'H="$(cd "$HOME/{folder}" 2>/dev/null && python3 app/studio_home.py 2>/dev/null)"; '
+        # the Studio's own Python where it is installed: on a Mac a bare python3 may be the stand-in that asks to install tools
+        code, said = self.on(worker, (f'Y="${{PREFIX:-{PREFIX}}}/venv/bin/python"; [ -x "$Y" ] || Y=python3; '
+                                      f'H="$(cd "$HOME/{folder}" 2>/dev/null && "$Y" app/studio_home.py 2>/dev/null)"; '
                                       f'cat "${{H:-$HOME/ImaginationStudio}}/access-key" 2>/dev/null || cat "{THEIR_HOME}/access-key" 2>/dev/null; true'), 20)
         lines = said.strip().splitlines() if code == 0 else []
         return lines[-1].strip() if lines and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", lines[-1].strip()) else ""
@@ -855,15 +911,28 @@ class Hub:
 
         where = f'"$HOME/{worker.get("folder") or self.default_folder()}"'
         code, said = self.on(worker, (
-            f'F={where}; P="${{PREFIX:-{PREFIX}}}"; H="{THEIR_HOME}"; echo "host $(hostname)"; echo "version $(cat "$F/VERSION" 2>/dev/null)"; '
+            f'F={where}; P="${{PREFIX:-{PREFIX}}}"; H="{THEIR_HOME}"; echo "host $(hostname)"; echo "os $(uname -s)"; echo "version $(cat "$F/VERSION" 2>/dev/null)"; '
             '[ -f "$F/app/server.py" ] && echo "pack yes"; [ -x "$P/venv/bin/python" ] && echo "install yes"; '
-            'grep -E "^(MemTotal|MemAvailable)" /proc/meminfo; '
-            f'(exec 3<>/dev/tcp/127.0.0.1/{PORT}) 2>/dev/null && echo "app yes"; '
+            'grep -E "^(MemTotal|MemAvailable)" /proc/meminfo 2>/dev/null; '  # a Mac has no /proc: its app says its memory
+            # asked of bash by name: a Mac's login shell is zsh, which has no /dev/tcp
+            f'bash -c "(exec 3<>/dev/tcp/127.0.0.1/{PORT}) 2>/dev/null" && echo "app yes"; '
             '[ -f "$H/app.pid" ] && kill -0 "$(cat "$H/app.pid")" 2>/dev/null && echo "ours yes"; true'), 25)
+        found = self.read_probe(code, said)
+        if code != 255 and "host" not in found:
+            # ssh got in and no POSIX shell answered: a Windows machine (cmd.exe or PowerShell) is asked in its own words
+            code, windows = self.on(worker, "powershell -NoProfile -NonInteractive -EncodedCommand " + base64.b64encode(WIN_PROBE.encode("utf-16-le")).decode(), 25)
+            seen = self.read_probe(code, windows)
+            if seen.get("os") == "Windows":
+                return seen
+            found["reached"] = False  # neither: what the first try said is shown
+        return found
+
+    @staticmethod
+    def read_probe(code: int, said: str) -> dict:
         found = {"reached": code == 0, "said": said}
         for line in said.splitlines() if code == 0 else []:
             key, _, value = line.partition(" ")
-            if key in ("host", "version", "pack", "install", "app", "ours"):
+            if key in ("host", "os", "version", "pack", "install", "app", "ours"):
                 found[key] = value.strip()
             elif key.rstrip(":") in ("MemTotal", "MemAvailable"):
                 found[key.rstrip(":")] = int(value.split()[0]) // 1024
@@ -886,11 +955,20 @@ class Hub:
             self.rename(address, found["host"])
         live["version"] = found.get("version") or None
         live["memory_gb"] = round(found["MemAvailable"] / 1000, 1) if "MemAvailable" in found else None
-        if not found.get("pack") or not found.get("install"):
+        live["platform"] = {"Darwin": "mac", "Windows": "windows"}.get(found.get("os"), "spark")
+        mac, windows = live["platform"] == "mac", live["platform"] == "windows"
+        if windows and not found.get("app"):
+            self.hang_up(address)
+            set_to("stopped", WIN_STOPPED, info=None)
+            return live
+        # A Mac whose own app answers is installed, wherever its owner keeps the code and the environment (a folder and
+        # a PREFIX of their own): it is asked what it is, and the folder is only needed to start one from here.
+        if (not found.get("pack") or not found.get("install")) and not ((mac or windows) and found.get("app")):
             self.hang_up(address)
             set_to("bare", ("No Studio code in " + (worker.get("folder") or self.default_folder()) + " there. " if not found.get("pack") else "")
-                   + ("" if found.get("install") else "No Studio environment there (models, ComfyUI, the engine): run oneshot-setup-spark.sh on that Spark once; "
-                      "“Update and start” sends the code, not the models."), info=None)
+                   + ("" if found.get("install") else ("No Studio environment there (the models and the engine): run oneshot-setup.sh on that Mac once; " if mac else
+                                                       "No Studio environment there (models, ComfyUI, the engine): run oneshot-setup-spark.sh on that Spark once; ")
+                      + "“Update and start” sends the code, not the models."), info=None)
             return live
         if not found.get("app"):
             self.hang_up(address)
@@ -913,8 +991,19 @@ class Hub:
             return live
         changed = differs(self.code(), info.get("code"))
         if changed or not info.get("guard"):
-            set_to("update", f"Its Studio code differs from this Spark's in {len(changed)} file{'s' if len(changed) != 1 else ''} ({', '.join(changed[:3])}"
-                   + (", …" if len(changed) > 3 else "") + "): “Update and start” brings it level.", info=info)
+            own = mac and not found.get("ours")  # the app its owner started on that Mac: never written over from here
+            if windows and changed:
+                set_to("update", f"Its Studio code differs from this Spark's in {len(changed)} file{'s' if len(changed) != 1 else ''} ({', '.join(changed[:3])}"
+                       + (", …" if len(changed) > 3 else "") + "). " + WIN_OWN, info=info)
+                return live
+            if changed:
+                why = (f"Its Studio code differs from this Spark's in {len(changed)} file{'s' if len(changed) != 1 else ''} ({', '.join(changed[:3])}"
+                       + (", …" if len(changed) > 3 else "") + ")" + (". " + MAC_OWN if own else ": “Update and start” brings it level."))
+            elif mac:  # level code, no guard: its memory manager was turned off where it was started
+                why = "Its app runs without its memory guard (STUDIO_MEMORY_MANAGER is off there): no clip is handed to it until it is started with the guard on."
+            else:
+                why = "Its app reports no memory guard: “Update and start” brings it level."
+            set_to("update", why, info=info)
             return live
         if info.get("active") and not live["job"]:
             set_to("busy", "It is rendering a job that is not this Spark's.", info=info)
@@ -1010,7 +1099,8 @@ class Hub:
             return live
         folder = worker.get("folder") or self.default_folder()
         found = self.probe(worker)
-        if not found["reached"]:
+        if not found["reached"] or found.get("os") == "Windows":
+            # a Windows PC: nothing is sent to it and nothing is started there; the check says what to do on that PC
             return self.check(worker)
         if found.get("app"):
             try:
@@ -1019,6 +1109,10 @@ class Hub:
                     return live
             except (OSError, Refused):
                 pass
+        if found.get("os") == "Darwin" and found.get("app") and not found.get("ours"):
+            # a Mac's own app, started by its owner (the Dock app, its own updater): nothing is sent over it and it is
+            # not stopped. Level with this code it is used as it is; behind, the check says where to update it.
+            return self.check(worker)
         code, said = (self.copy(self.pack, address, folder, via=worker["via"]) if worker.get("via") else self.copy(self.pack, address, folder))
         if code:
             live.update(state="unreachable" if code == 255 else live["state"], why="The code could not be sent (rsync): " + said[-200:], checked=time.time())
@@ -1041,18 +1135,21 @@ class Hub:
     @staticmethod
     def start_command(folder: str) -> str:
         # in a subshell of its own with every stream closed off: ssh returns at once and the app outlives it
-        return (f'cd "$HOME/{folder}" && mkdir -p "{THEIR_HOME}" && (STUDIO_PIDFILE="{THEIR_HOME}/app.pid" HOST=127.0.0.1 PORT={PORT} '
-                f'nohup setsid bash scripts/app.sh > "{THEIR_HOME}/app.log" 2>&1 < /dev/null &) && echo started')
+        # setsid where there is one (a Mac has none: nohup and the closed streams are what keep its app up there)
+        return (f'cd "$HOME/{folder}" && mkdir -p "{THEIR_HOME}" && S="$(command -v setsid || true)" && (STUDIO_PIDFILE="{THEIR_HOME}/app.pid" HOST=127.0.0.1 PORT={PORT} '
+                f'nohup $S bash scripts/app.sh > "{THEIR_HOME}/app.log" 2>&1 < /dev/null &) && echo started')
 
     @staticmethod
     def stop_command(folder: str, comfy: bool = True) -> str:
         """Stop the app a head started on a worker (by the pid that app wrote down, checked to be a Studio app) and,
         with ``comfy``, the ComfyUI server behind it, which gives the models' memory back."""
 
-        stop = (f'H="{THEIR_HOME}"; if [ -f "$H/app.pid" ] && grep -qa "app/server.py" "/proc/$(cat "$H/app.pid")/cmdline" 2>/dev/null; then '
+        # ps, not /proc: the same words on a Spark and on a Mac
+        stop = (f'H="{THEIR_HOME}"; if [ -f "$H/app.pid" ] && ps -ww -o command= -p "$(cat "$H/app.pid")" 2>/dev/null | grep -q "app/server.py"; then '
                 'kill "$(cat "$H/app.pid")"; for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$(cat "$H/app.pid")" 2>/dev/null || break; sleep 0.5; done; '
                 'rm -f "$H/app.pid"; echo "app stopped"; else echo "no app of ours"; fi')
-        return stop + (f'; cd "$HOME/{folder}" && bash spark/comfy.sh stop' if comfy else "")
+        return stop + (f'; cd "$HOME/{folder}" && if [ "$(uname -s)" = Darwin ]; then [ ! -f mac/comfy.sh ] || bash mac/comfy.sh stop; '
+                       'else bash spark/comfy.sh stop; fi' if comfy else "")
 
     def stop(self, worker: dict) -> dict:
         """A worker's app (the one a head started) and its ComfyUI server stopped: its memory is free again."""
@@ -1066,8 +1163,11 @@ class Hub:
             self.hang_up(address)
             return self.check_local(worker)
         found = self.probe(worker)
+        if found["reached"] and found.get("os") == "Windows":
+            live.update(why="The app on that Windows PC is its owner's: it is left running. Quit it there to free its memory.", checked=time.time())
+            return live
         if found["reached"] and found.get("app") and not found.get("ours"):
-            live.update(why="The app on that Spark was not started by this Studio: it is left running.", checked=time.time())
+            live.update(why=f"The app on that {'Mac' if found.get('os') == 'Darwin' else 'Spark'} was not started by this Studio: it is left running.", checked=time.time())
             return live
         self.hang_up(address)
         self.on(worker, self.stop_command(worker.get("folder") or self.default_folder()), 40)
@@ -1402,7 +1502,10 @@ class Hub:
                 return False
             if room.get("fits") is False:
                 raise Refused(400, room.get("reason") or "its memory guard refused the clip")
-            params_there = self.outbound(base, params)
+            other = family(self.platform(address)) != ("spark" if self.spark else "mac")
+            # a worker of the other kind (a Mac for a Spark) has a default size of its own: the size this machine
+            # renders when none is named is named for it
+            params_there = self.outbound(base, {**params, "preset": "small" if self.spark else "draft"} if other and not params.get("preset") else params)
             if job["status"] != "running":
                 return False
             made = call(base, "/api/jobs", {"kind": job["kind"], "title": f"{job['title']} · for {self.name}",
@@ -1415,7 +1518,8 @@ class Hub:
             self.move(job, worker, f"it stopped answering before the clip was queued ({str(error)[-120:]})", down=True)
             return False
         job["their_job"] = made["id"]
-        say(f"{name} took the clip as its job {made['id']}" + (f"; its memory guard: about {room['need_mb'] / 1000:.0f} GB needed, {room.get('available_mb', 0) / 1000:.0f} GB there" if room.get("need_mb") else ""))
+        say(f"{name} took the clip as its job {made['id']}" + (f"; its memory guard: about {room['need_mb'] / 1000:.0f} GB needed, {room.get('available_mb', 0) / 1000:.0f} GB there" if room.get("need_mb") else "")
+            + (f"; it is a {word_of(self.platform(address))}, whose engine is not this machine's: the same seed gives other frames there" if other else ""))
         silent, theirs = None, {}
         while True:
             if job["status"] != "running":  # cancelled here: cancelled there
@@ -1444,7 +1548,7 @@ class Hub:
             if theirs.get("status") == "done":
                 break
             if theirs.get("status") in ("failed", "cancelled"):
-                self.move(job, worker, "its render failed: " + str(theirs.get("error") or "cancelled on that Spark")[-300:], down=False)
+                self.move(job, worker, "its render failed: " + str(theirs.get("error") or "cancelled on that " + word_of(self.platform(address)))[-300:], down=False)
                 return False
             time.sleep(POLL)
         try:
@@ -1509,7 +1613,8 @@ class Hub:
         able, without = [], []
         workers = self.workers()
         mixed = any(worker.get("kind") == "local" for worker in workers)
-        unit = "worker" if mixed else "Spark"
+        macs = any(worker.get("kind") != "local" and self.platform(worker["address"]) != "spark" for worker in workers)  # a Mac or a Windows PC among the workers
+        unit = "worker" if mixed else "machine" if macs else "Spark"
         for worker in workers:
             why = self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"], self.spark)
             (without.append({"name": self.label_of(worker), "why": self.said(why)}) if why else able.append(worker["address"]))
@@ -1532,7 +1637,7 @@ class Hub:
             mode, says = "parallel", f"One clip per {unit}, {min(used, clips)} at a time: {clips} clips on {min(used, clips)} {unit}s."
         else:
             mode, says = "one", f"This clip renders on one {unit}, the first that is free of the {used}; other queued clips render beside it. " + (
-                "A single render is never split across workers." if mixed else ONE_CLIP)
+                "A single render is never split across workers." if mixed else "A single render is never split across machines." if macs else ONE_CLIP)
         if selected:
             target = selected["worker"]
             name = self.name if target == "head" else next(w.get("name") or target for w in self.workers() if w["address"] == target)
@@ -1561,6 +1666,8 @@ class Hub:
                         + ("; that run had a Spark at the head, not a Mac, and this time is the Mac's for one clip" if mac else "")}
             if mixed and mode == "parallel":
                 estimate.update(measured=False, note="An estimate from the Spark-only benchmark of 8 clips; scaling local or mixed workers has not been measured.")
+            elif macs and mode == "parallel":
+                estimate.update(measured=False, note="an estimate from one run of 8 clips on Sparks alone; a Mac or a Windows PC takes another time for a clip than a Spark, and that mix has not been measured")
         return {"supported": not self.local.child, "limit": self.chooser_limit(), "chosen": chosen, "available": available, "listed": listed, "used": used, "mode": mode,
                 "count": count, "says": says, "without": without, "estimate": estimate, "placement": selected}
 

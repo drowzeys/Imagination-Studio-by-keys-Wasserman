@@ -892,7 +892,8 @@ def compose_references(fields: dict, count: int) -> str:
     A caller with its own template for a reference video (a control layer such as a depth or segmentation pass
     rather than footage, say) can replace what is written about it: ``video_roles`` (one per video) is the
     sentence after ``<Video k> is``, ``video_keeps`` (one per video) the sentence after ``<Video k>: reference -``,
-    ``lead`` opens the summary in place of the usual sentence, ``definitions`` are further lines for the subject definitions (a legend of the control colours, or what a
+    ``lead`` opens the summary in place of the usual sentence, ``summary`` is the caller's own line after it in place
+    of the scene (which is then written once only, in the shot), ``definitions`` are further lines for the subject definitions (a legend of the control colours, or what a
     picture is in relation to a video), and ``avoid`` is closing text for the shot (what the clip must not look
     like), and ``video_follows`` (one per video) the sentence the shot ends on. The create wizard sets them through
     ``motion`` (``{"layer", "mode", "camera"}``, a Motion Previs hand-off for ``<Video 1>``: see ``motion_template``),
@@ -963,6 +964,7 @@ def compose_references(fields: dict, count: int) -> str:
                     else f"<Audio {sounds}>: reference - the target audio references the sound of <Audio {sounds}>.")
         voices.append(f"<Audio {sounds}>")
     scene = (fields.get("scene") or "").strip()
+    summary = (fields.get("summary") or "").strip()
     shot = joined(scene, fields.get("camera", ""), fields.get("action", ""), *follow)
     spoken, away = [], 0
     for index, line in enumerate(fields.get("dialogue") or [], start=1):
@@ -1013,7 +1015,8 @@ def compose_references(fields: dict, count: int) -> str:
             + ((fields.get("lead") or "").strip() + " " if (fields.get("lead") or "").strip()
                else f"A new video with {who}, keeping how each looks in its " + ("reference. " if videos else "picture. ") if who
                else "A new video that follows its video reference. ")
-            + (scene or "A new scene.")
+            # the caller's own line where the scene used to be repeated: the scene is written once, in the shot below
+            + (summary or scene or "A new scene.")
             + "\n\nretention_analysis:\n" + "\n".join(kept)
             # the sound under its own heading, as in the text-to-video form: written on the end of the shot, the model
             # read it as something to say (measured on a DGX Spark: a voice in 41 % and 63 % of the frames of a
@@ -3908,6 +3911,13 @@ def about_this_spark() -> dict:
         status = telemetry.compact(TELEMETRY.snapshot())
     except Exception:  # noqa: BLE001
         status = None
+    if sys.platform == "darwin" and memory_manager.enabled():
+        # A Mac's guard is the memory manager's admission (measured peaks against what vm_stat counts as available,
+        # memory_manager.admit): a head asks for a guard before it hands a clip over. The telemetry's own reading,
+        # already taken: nothing more is run for it.
+        seen = (status or {}).get("memory") or {}
+        if seen.get("free_mb") is not None:
+            memory = {"available_mb": int(seen["free_mb"]), "total_mb": seen.get("total_mb"), "floor_mb": seen.get("floor_mb")}
     info = sparks.about(HOME, hub.code(), state(), [one["id"] for one in listing() if one.get("installed")], active, memory, SPARK_REF2VA.parent, renders, status)
     info["gpu_uuid"] = os.environ.get("STUDIO_LOCAL_GPU_UUID")
     return info

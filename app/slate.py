@@ -594,6 +594,20 @@ def sentence(text: str) -> str:
     return text if not text or text[-1] in ".!?\"”" else text + "."
 
 
+SUMMARY_LIMIT = 400  # characters: a reference prompt's summary is a line, not the picture again
+
+
+def summary_line(place: str) -> str:
+    """What a reference prompt's ``summary`` says: where the shot happens, short of ``SUMMARY_LIMIT``. What happens is
+    the shot's own, said there once; ``compose_references`` writes this in place of the scene it repeated there."""
+
+    line = sentence(place)
+    if len(line) < SUMMARY_LIMIT:
+        return line
+    cut = line[:SUMMARY_LIMIT - 3].rsplit(" ", 1)[0].rstrip(" ,;:.")
+    return (cut or line[:SUMMARY_LIMIT - 3]) + " …"
+
+
 # what a brain writes in a field it has nothing for: never a word of a prompt ("Hair: None. Wearing None.")
 EMPTY_WORDS = {"none", "n/a", "na", "null", "nil", "unknown", "not specified", "unspecified", "-", "--", "—", "tbd", "?"}
 
@@ -877,12 +891,15 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     look = part["style"] or next((sentence("; ".join(bit for bit in (s.get("tone"), s.get("palette"), s.get("lighting")) if bit))
                                   for s in project.get("lookbook") or [] if s.get("tone") or s.get("palette")), "")
     picture = " ".join(bit for bit in (look, *named, where or "", part["subject"], part["composition"], part["lighting"], part["mood"]) if bit)
+    # the summary a reference prompt is given, in place of the picture it used to repeat there: where the shot happens,
+    # and nothing of the action, which the shot says once (the beats, or the Subject section where there are none)
+    summary = summary_line(given(place.get("name")) if place else "")
     framing = " ".join(bit for bit in (SIZE_WORDS.get(spec.get("size") or ""), ANGLE_WORDS.get(spec.get("angle") or ""),
                                         spec.get("lens") and f"on a {spec['lens']} lens") if bit)
     camera = " ".join(bit for bit in (sentence(framing), MOVES.get(spec.get("movement") or "", ""), part["camera"]) if bit)
-    beats = [b for b in shot.get("beatSheet") or [] if (b.get("text") or "").strip()]
     lead = ["First,", "Then,", "After that,", "Next,", "Finally,"]
-    # What happens is the Subject section's, or the beat sheet's when there is one. The shot's intent is a note for
+    beats = [b for b in shot.get("beatSheet") or [] if (b.get("text") or "").strip()]
+    # What happens is the beat sheet's, or the Subject section's when there is none. The shot's intent is a note for
     # people (what the shot is for, where it sits in the song): it used to stand in as the action when there were no
     # beats, and a production run's timecodes and "the audience sees the collision coming" went to the model.
     action = " ".join(f"{lead[min(i, 3)] if i < len(beats) - 1 or i == 0 else lead[4]} {sentence(b['text'][0].lower() + b['text'][1:])}"
@@ -915,6 +932,7 @@ def compile_shot(project: dict, shot_id: str, chain: str | None = None) -> dict:
     music = sentence(", ".join(bit for bit in (cue.get("genre"), cue.get("mood"), cue.get("tempo"), cue.get("instrumentation")) if bit)) if cue else (extra.get("music") or "N/A")
     fields = {"scene": picture, "camera": camera, "action": action, "dialogue": lines, "soundscape": extra.get("soundscape") or "",
               "music": music, "subjects": subjects, "people": bool(cast) or None,  # None: the builder reads the words
+              **({"summary": summary} if references and summary else {}),
               **({"audio_notes": notes} if audios else {}), **({"definitions": definitions} if definitions else {})}
     prompt = compose_references(fields, len(subjects)) if references else compose(fields, bool(image or previous), frames=frames)
     for one in negation.check_fields(fields)["negations"]:  # said, never rewritten (negation.py)

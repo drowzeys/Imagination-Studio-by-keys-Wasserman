@@ -68,11 +68,14 @@ The installed-but-unverified card says **Not checked**, not **Not signed in**. C
 status is unknown; it is an explicit billed request, never proof inferred from installation or a token file.
 After a successful Check, Studio remembers the connection across restarts in
 `<studio folder>/.studio-agents/copilot-connection.json`, separately for this computer and each SSH host.
-Only the check's timestamp is saved, never credentials or the answer. The page labels a restored connection
-as previously connected, not freshly checked. **Check again** is optional and consumes a Copilot request;
+Only the last successful use's timestamp is saved, never credentials or the answer. The record expires after
+seven days, including in the running session. A successful normal request or agent turn refreshes it without
+a separate Check or login. Expiry means not recently checked, not signed out, and does not block normal use.
+The page labels a restored connection as previously connected, not freshly checked. **Check again** is optional and consumes a Copilot request;
 a failed Check clears the remembered connection for that host. A different checkout using the same Studio
 folder shares this record. Signing out in the CLI is detected on the next request or Check, not by an automatic
-paid probe.
+paid probe. If the record cannot be saved, the result remains available for the current session and Studio
+reports a persistence warning; an older disk record can remain until its seven-day expiry.
 
 Agent turns use JSONL output and piped prompts, keep an explicitly named session, and approve only the MCP servers
 selected for that conversation. Built-in GitHub MCP servers and custom instructions are disabled for Studio turns;

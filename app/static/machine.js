@@ -757,7 +757,8 @@ function cnSteps(b, d) { const where = cnWhere(b), on = where ? "on " + where : 
   const v = d.verify, signed = st.state === "signed_in",
     canCheck = found && (signed || b.id === "copilot" && st.state === "unknown");
   if (CN.verifying[b.id]) steps.push(["verify", "Check it answers", "running", "Asking " + b.label + " to say ok (one short answer, a minute at most)…"]);
-  else if (v && v.ok) steps.push(["verify", "Check it answers", "done", v.remembered ? "Last successful Check: " + new Date(v.at * 1000).toLocaleDateString() + ". Remembered across restarts; not rechecked automatically." : "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s",
+  else if (v && v.ok) steps.push(["verify", "Check it answers", "done", v.remembered ? "Last successful use: " + new Date(v.at * 1000).toLocaleDateString() + ". Remembered across restarts for seven days; not rechecked automatically." : "Answered “" + v.text + "” in " + ((v.elapsedMs || 0) / 1000).toFixed(1) + " s",
+    v.warning ? el("div", { class: "note m-flat vt-bad" }, v.warning) : null,
     b.id === "copilot" ? el("button", { type: "button", class: "small", onclick: () => cnVerify(b.id) }, "Check again") : null]);
   else if (v) { const fix = v.fix || { action: "verify", label: "Check again" },
       terminalLogin = b.id === "copilot" && fix.action === "signin",
@@ -854,7 +855,7 @@ function connectNudge(where) { if (typeof BR === "undefined") return null;
   for (const b of clis) if (b.found && !b.error && !BR.status[b.id]) brainStatus(b.id).then(cnRedraw, () => {});
   if (clis.some(b => b.found && (!BR.status[b.id] || BR.status[b.id].state === "asking"))) return null;  // not yet known: nothing flashes up
   if (clis.some(b => BR.status[b.id] && BR.status[b.id].state === "signed_in")) return null;
-  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found && b.id !== "copilot") || order[0];
+  const order = CN_ORDER.map(id => clis.find(b => b.id === id)).filter(Boolean), pick = order.find(b => b.found && !b.error) || order[0];
   const locals = (BR.data.backends || []).filter(b => (b.id === "local" || b.local_agent) && b.found && !b.error);  // the local brain and each local agent added
   if (!pick) return null;
   return el("section", { class: "panel cn-nudge", "data-card": "connect", "data-where": where },
