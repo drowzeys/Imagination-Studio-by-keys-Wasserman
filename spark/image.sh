@@ -11,6 +11,8 @@
 # (UPSAMPLE=0 sends a prompt that is already a full scene caption as written).
 # IMAGE_MODEL=moss-image makes it with MOSS-Image (oneshot-setup-spark.sh --moss): 25 steps at CFG 2.5, the prompt as
 # written; NEGATIVE replaces its template's negative prompt.
+# IMAGE_MODEL=h3-image makes it with MiniMax-H3-Image (oneshot-setup-spark.sh --h3-image): 6 steps, the prompt as
+# written, WIDTH and HEIGHT in steps of 32 up to 2048.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091

@@ -35,6 +35,7 @@ the TensorFold project and the model makers.
 | Qwen-Image pictures | **Built with Qwen**; the model is Qwen-Image-2.1 (Qwen 2.1 Turbo / Qwen 2.1 Full in the UI) |
 | FLUX pictures | **FLUX3-K** in the UI. In prose: FLUX 3 Image Klein by Black Forest Labs |
 | MOSS-Image pictures | **MOSS-Image** in the UI. In prose: MOSS-Image by OpenMOSS |
+| MiniMax-H3-Image pictures | **MiniMax-H3-Image** in the UI, by that name wherever its pictures are shown commercially (its licence asks for it). In prose: MiniMax-H3-Image by MiniMax; *Powered by MiniMax-H3-Image* |
 | Video with sound | MiniMax H3 / FastH3. With an H3 LoRA: *Powered by MiniMax H3* |
 | Songs from the Music tab: in the app, in soundtracks, in demo audio | **MiniMax-Music3** (required in a commercial UI by its licence); in prose: MiniMax Music 3 by MiniMax |
 | Long-form credits | The README's thank-you list and [CREDITS.md](../CREDITS.md): authors first, no credit hyperlinks except Motion Previs Studio |

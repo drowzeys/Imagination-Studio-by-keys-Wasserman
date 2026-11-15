@@ -56,7 +56,7 @@ commercial product must show "MiniMax-Music3" in its interface). The script prin
 
 **On a DGX Spark** the same `bash oneshot-setup.sh` installs the CUDA build (it hands over to
 `oneshot-setup-spark.sh`). It passes on every flag the CUDA install takes (`--all`, `--yes`, `--ref2va`, `--image-edit`,
-`--h3-base`, `--flux3`, `--moss`, `--music`, `--voice`, `--sound`, `--bolt`, `--motion`, `--train`, `--graphics`, `--finish`,
+`--h3-base`, `--flux3`, `--moss`, `--h3-image`, `--music`, `--voice`, `--sound`, `--bolt`, `--motion`, `--train`, `--graphics`, `--finish`,
 `--yue2`, `--swap`, `--image-only`, `--no-render`, `--verify`, `--upgrade` and the LoRA flags). There is no `--turbo`, no `--app` and no 2x
 decoder there, and Finish runs Tesseract on a Mac over ssh (Settings → Connections). Two parts are only there:
 `--yue2` (YuE2 songs, the Music tab's default there, about 14 GB) and `--swap` (the Library's Character Swap, 2.1 GB

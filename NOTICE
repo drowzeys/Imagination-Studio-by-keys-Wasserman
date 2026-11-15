@@ -26,6 +26,12 @@ under the licence's terms. This pack ships no FLUX 3 weights: they are downloade
 (huggingface.co/black-forest-labs) when a user installs them with --flux3. On a Mac they run on flux3-mlx (Apache-2.0,
 felix-ab), installed in an environment of its own.
 
+MiniMax-H3-Image is licensed under the MiniMax-H3-Image Community License Agreement, Copyright © 2026 MiniMax. All Rights Reserved.
+The MiniMax-H3-Image Community License limits the territories in which MiniMax-H3-Image may be used, and asks for
+MiniMax's written authorisation above US$1M of yearly revenue or for a hosted service. This pack ships no
+MiniMax-H3-Image weights: they are downloaded from Comfy Org's repackaged release (huggingface.co/Comfy-Org/MiniMax-H3-Image,
+from MiniMaxAI/MiniMax-H3-Image) when a user installs them with --h3-image.
+
 MOSS-Image is licensed under the Apache License 2.0, Copyright (c) 2026 OpenMOSS. Commercial use is allowed under the
 licence's terms. This pack ships no MOSS-Image weights: they are downloaded from Comfy Org's repackaged release
 (huggingface.co/Comfy-Org/MOSS-Image, from OpenMOSS-Team/MOSS-Image-SFT) when a user installs them with --moss.

@@ -374,6 +374,14 @@ Rules:
   `scripts/image.sh`), never as standalone code. It is offered only where its files and ComfyUI's
   `nodes_moss_image.py` are (`moss_ready`). The settings are ComfyUI's template's (25 steps er_sde, CFG 2.5, its
   negative prompt): change them only with new measurements. It does not edit pictures; the prompt goes as written.
+- MiniMax-H3-Image (`h3-image` in `IMAGE_MODELS`, `oneshot-setup-spark.sh --h3-image`, `h3image_workflow` in
+  `spark/spark_generate.py`): MiniMax's picture model, on a DGX Spark only, inside ComfyUI's workflow (v0.45.1 and
+  later: `COMFY_H3IMAGE_COMMIT`, which an install moves to only when it asks for the model), never as standalone code.
+  One node makes a picture from a prompt and edits from pictures (`spark/spark_edit.py`; `<Picture 1>` is the one
+  changed). Its text encoder is MiniMax H3's, the file FastH3 loads. Sizes are multiples of 32, up to 2048 a side
+  through the app. The settings are ComfyUI's template's (6 Euler steps, no guidance): change them only with new
+  measurements. LoRAs, angles and `base` are Qwen's and an H3-Image edit refuses them. MiniMax-H3-Image Community
+  License: the same territory limits as MiniMax H3; say so when asked, and do not redistribute the weights.
 - A Mac's ComfyUI (`mac/comfy.sh`, `scripts/setup-comfy.sh`, `oneshot-setup.sh --upscale | --remove | --moss`): Upscale,
   Find and Remove a person and MOSS-Image run the Spark's own graphs (`spark/spark_workflows.py`,
   `spark/spark_generate.py`, `MAC`) and the authors' node packs at the Spark's pins, on PyTorch's Metal device in

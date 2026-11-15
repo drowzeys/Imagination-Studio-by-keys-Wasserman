@@ -293,7 +293,9 @@ function changed() { sync(); C.prompt = ""; render(); }
 // where oneshot-setup --flux3 put them, MOSS-Image on a DGX Spark with --moss. Only installed ones are offered; a choice
 // that is not installed falls back to Qwen.
 const IMAGE_LABELS = { "sd-turbo": "SD-Turbo", qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full",
-  "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image" };
+  "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image", "h3-image": "MiniMax-H3-Image" };
+// MiniMax-H3-Image also makes large pictures: 2048 a side, in its 6 steps (the other models keep the four sizes)
+const H3IMAGE_SIZES = { "1152x2048": ["9:16 large", "1152 × 2048"], "2048x1152": ["16:9 very large", "2048 × 1152"], "2048x2048": ["Square large", "2048 × 2048"] };
 const imageModels = () => {
   const available = (S.image_models || []).map(m => typeof m === "string" ? m : m.id);
   const catalog = S.image_model_options || S.windows_runtime?.image_models;
@@ -356,7 +358,7 @@ const stillParams = params => {
 const imageModelName = (id = imageModel()) => imageModels().find(m => m.id === id)?.label || IMAGE_LABELS[id] || id;
 const imageModelPick = after => {
   const descriptions = { "sd-turbo": "Quick storyboard drafts", qwen: "Fast Qwen stills", "qwen-full": "Qwen base model",
-    "flux3k-fast": "Distilled FLUX3-K", "flux3k-full": "FLUX3-K base model", "moss-image": "Prompt-to-picture" };
+    "flux3k-fast": "Distilled FLUX3-K", "flux3k-full": "FLUX3-K base model", "moss-image": "Prompt-to-picture", "h3-image": "6 steps, up to 2048 a side" };
   return el("div", {}, el("label", {}, "Picture model"),
     el("div", { class: "picture-models", role: "radiogroup", "aria-label": "Picture model" },
       imageModels().map(m => {
@@ -730,6 +732,7 @@ function viewCreate() {
     }
     const allowedSizes = Object.fromEntries(scopes.map(scope => [scope.width + "x" + scope.height,
       [scope.title || "Verified size", scope.width + " × " + scope.height]]));
+    if (H3IMAGE_SIZES[C.imageSize] && imageModel() !== "h3-image") C.imageSize = "1344x768";  // a large size is MiniMax-H3-Image's
     const size = draft ? "512x512" : checked ? allowedSizes[C.imageSize] ? C.imageSize : Object.keys(allowedSizes).at(-1)
       : C.imageSize === "512x512" ? "1344x768" : C.imageSize;
     if (checked) C.imageSize = size;
@@ -738,13 +741,14 @@ function viewCreate() {
     const maxCount = checked ? Math.max(...scopes.filter(scope => scope.width === w && scope.height === h).map(scope => scope.count)) : draft ? 6 : 12;
     put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
       el("label", {}, "Size"), choice(draft ? { imageSize: size } : C, "imageSize", draft ? { "512x512": ["Storyboard draft", "512 × 512 square"] } : checked ? allowedSizes
-        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] },
+        : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"], ...(imageModel() === "h3-image" ? H3IMAGE_SIZES : {}) },
         () => { if (checked) C.count = 1; render(); }, true),
       el("div", { class: "row" },
         el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: maxCount }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
       el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
         : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
+        : imageModel() === "h3-image" ? "MiniMax-H3-Image takes your prompt as written: about 4 s an image at 1344 × 768 once loaded, 9 s at 1152 × 2048 and 18 s at 2048 × 2048 on a DGX Spark; put the words to be lettered in quotes"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
         if (imageModelWhy()) throw new Error(imageModelWhy());

@@ -9,7 +9,9 @@ Results are written beside the scout images, so they are in the Library and can 
 `image_model` picks the model (server.py IMAGE_MODELS): Qwen 2.1 Turbo, the default, or FLUX3-K Fast or Full where
 they are installed. FLUX3-K takes the same pictures as references (ten at most) and BFL's prompt upsampler writes the
 edit's caption from the prompt and the pictures; the hub's image LoRAs, the camera angles and Qwen's 40-step base
-model are Qwen's, so a FLUX3-K edit refuses them.
+model are Qwen's, so a FLUX3-K edit refuses them. MiniMax-H3-Image (a DGX Spark, oneshot-setup-spark.sh --h3-image)
+edits with the same model that makes its pictures: the first picture is the one changed, <Picture 1> in a prompt, the
+others its references; it takes the prompt as written and refuses Qwen's LoRAs, angles and base model the same way.
 
 `images` is a list of further pictures the prompt can draw on (nine at most): the model takes several pictures at
 once and knows them as image 1 (the edited one), image 2, ... in the order given. The result has the edited picture's
@@ -46,8 +48,11 @@ SETS = {
     "cover": ("Wide and close", [("front", "eye", False), ("front", "eye", True), ("front-right-quarter", "elevated", False), ("front-right-quarter", "elevated", True)]),
 }
 LIMIT = 12  # results from one job
-STEPS = {"qwen": "8 steps", "flux3k-fast": "16 steps", "flux3k-full": "50 steps"}
+STEPS = {"qwen": "8 steps", "flux3k-fast": "16 steps", "flux3k-full": "50 steps", "h3-image": "6 steps"}
 FLUX3 = ("flux3k-fast", "flux3k-full")  # the picture models that edit through FLUX3-K's own workflow
+H3IMAGE = ("h3-image",)  # MiniMax-H3-Image: its own workflow, the model that also makes its pictures
+OTHERS = {**{name: ("FLUX3-K", "--flux3", "BFL's prompt upsampler writes the caption") for name in FLUX3},
+          **{name: ("MiniMax-H3-Image", "--h3-image", "the prompt as written; further pictures are <Picture 2>, <Picture 3>") for name in H3IMAGE}}
 PICTURES = edit_plan.PICTURES  # pictures in one edit: the edited one and nine beside it
 KINDS = (".png", ".jpg", ".jpeg", ".webp")
 ANGLE_LORA = "qwen-multiple-angles"
@@ -77,13 +82,14 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         return turbo, Path(os.environ.get("QWEN_BASE_DIR", turbo.parent / "Qwen-Image-2.1"))
 
     def flux3() -> list[dict]:
-        return [m for m in models() if m["id"] in FLUX3]  # never Qwen's own (qwen, qwen-full: the base switch)
+        return [m for m in models() if m["id"] in OTHERS]  # never Qwen's own (qwen, qwen-full: the base switch)
 
     def ready(model: str = "qwen") -> tuple[bool, str]:
         """Whether a picture can be edited here with ``model``, and if not, what is missing."""
 
         if model != "qwen":
-            return (True, "") if any(m["id"] == model for m in flux3()) else (False, "that FLUX3-K model is not installed here: oneshot-setup" + ("-spark" if spark else "") + ".sh --flux3")
+            family, flag, _ = OTHERS[model]
+            return (True, "") if any(m["id"] == model for m in flux3()) else (False, f"that {family} model is not installed here: oneshot-setup" + ("-spark" if spark else "") + f".sh {flag}")
         if spark:
             models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
             if not (models / "diffusion_models/qwen_image_2.1_turbo_bf16.safetensors").is_file():
@@ -115,9 +121,9 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
     @router.get("/api/edit/state")
     def state() -> dict:
         qwen, why = ready()
-        # the models an edit can go to: Qwen when its edit pipeline is here, and every installed FLUX3-K
+        # the models an edit can go to: Qwen when its edit pipeline is here, every installed FLUX3-K, MiniMax-H3-Image
         offered = ([{"id": "qwen", "label": "Qwen 2.1 Turbo", "note": "8 steps; image LoRAs and camera angles"}] if qwen else []) \
-            + [{**m, "note": STEPS[m["id"]] + ", BFL's prompt upsampler writes the caption"} for m in flux3()]
+            + [{**m, "note": STEPS[m["id"]] + ", " + OTHERS[m["id"]][2]} for m in flux3()]
         return {"ready": bool(offered), "why": "" if offered else why, "models": offered, "qwen": qwen,
                 "base": qwen and base_ready(), "limit": LIMIT, "pictures": PICTURES, "angle_lora": ANGLE_LORA,
                 "directions": [{"id": key, "label": text.replace(" view", ""), "degrees": degrees} for key, text, degrees in DIRECTIONS],
@@ -137,7 +143,7 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         if not ok:
             raise HTTPException(400, why)
         if model != "qwen" and (params.get("loras") or params.get("angles") or params.get("base")):
-            raise HTTPException(400, "image LoRAs, camera angles and the 40-step base model are Qwen 2.1 Turbo's: pick it for those, or leave them out for FLUX3-K")
+            raise HTTPException(400, "image LoRAs, camera angles and the 40-step base model are Qwen 2.1 Turbo's: pick it for those, or leave them out for " + OTHERS[model][0])
         source = inside(str(params.get("image") or ""))
         if not source.is_file() or source.suffix.lower() not in KINDS:
             raise HTTPException(400, "pick the picture to edit: a png, jpg or webp in the studio's folder")

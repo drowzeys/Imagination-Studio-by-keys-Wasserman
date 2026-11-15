@@ -7,7 +7,8 @@
 # SEED, IMAGES (up to nine further pictures, one path a line: image 2, image 3, ... in the prompt), SIZE (source, the
 # default: the result has the picture's own size; model: about RESOLUTION pixels squared), WIDTH and HEIGHT (another
 # size for the result), LORA (one PATH or PATH:STRENGTH a line; merged at run time on the bfloat16 file), IMAGE_MODEL
-# (qwen, the default; flux3k-fast or flux3k-full: FLUX3-K, oneshot-setup-spark.sh --flux3; no LORA or BASE there) and
+# (qwen, the default; flux3k-fast or flux3k-full: FLUX3-K, oneshot-setup-spark.sh --flux3; h3-image: MiniMax-H3-Image,
+# oneshot-setup-spark.sh --h3-image, where further pictures are <Picture 2>, <Picture 3>; no LORA or BASE there) and
 # UPSAMPLE=0 (FLUX3-K: the prompt as written instead of BFL's upsampler's caption).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

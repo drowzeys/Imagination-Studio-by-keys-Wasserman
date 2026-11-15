@@ -54,6 +54,42 @@ eight Qwen pictures put it on the left.*
 **Limits:** two seeds a prompt and one judge, by eye. These model times leave out the text encode, so they are lower
 than the whole-run times in the table above.
 
+### MiniMax-H3-Image on a DGX Spark
+
+**MiniMax-H3-Image** is MiniMax's picture model: it makes a picture from a prompt and edits one from pictures, with a
+6-step sampler, at up to 2048 pixels a side in the app. On a DGX Spark it is a picture model beside the others, on
+ComfyUI's own support. Asked for by spenchey (#243).
+
+- **Install:** `bash oneshot-setup-spark.sh --h3-image` (23 GB: the pruned 8-bit checkpoint and its decoder, from
+  Comfy-Org/MiniMax-H3-Image). Its text encoder is the one FastH3 already has. It needs ComfyUI v0.45.1, which this
+  option moves the install to; an install that does not ask for it stays on its ComfyUI. Not part of `--all`.
+- **Licence:** the MiniMax-H3-Image Community License. Like MiniMax H3's, it limits where the model may be used (not
+  the European Union, the United Kingdom, the Republic of Korea or the United States without MiniMax's own licence).
+- **Use:** pick **MiniMax-H3-Image** under Picture model, or in **Edit a picture**. The prompt goes as written; put
+  words to be lettered in quotes. In an edit the first picture is the one changed (`<Picture 1>`), further pictures
+  are `<Picture 2>`, `<Picture 3>`. Sizes are in steps of 32 pixels.
+
+Measured on a DGX Spark (2026-11-15, 6 steps, one picture, the Studio's own scripts):
+
+| | Time |
+|---|---|
+| 1024 × 1024, model loaded | 3 s |
+| 1344 × 768, model loaded | 2.6 s |
+| 1152 × 2048, model loaded | 9 s |
+| 2048 × 2048, model loaded | 18 s |
+| 4096 × 4096 (by `scripts/image.sh` only), model loaded | 94 s |
+| First picture from nothing loaded | 25 to 27 s |
+| An edit of a 1344 × 768 picture, from nothing loaded | 40 s |
+| The same edit with a second picture as reference | 69 s |
+
+- **Memory:** about 54 GB taken from the machine while it is loaded.
+- **Against the others, 1024 × 1024, model loaded** (same prompts and seed, 2026-11-10): MiniMax-H3-Image 3 to 6 s,
+  Qwen 2.1 Turbo 12 to 24 s, FLUX3-K Fast 24 to 44 s.
+- **On ComfyUI v0.45.1 the rest still renders** (2026-11-15, one DGX Spark): a FastH3 clip (117 s from nothing
+  loaded), a FLUX3-K Fast picture (14 s) and a MOSS-Image picture (60 s).
+- **Not there yet:** a Mac or Windows path, LoRAs, and a TensorFold engine for it. Its transformer has MiniMax H3's
+  layout without the audio layers, so a native engine looks possible; it is not built.
+
 ### MOSS-Image on a DGX Spark
 
 **MOSS-Image** is OpenMOSS's 5B text-to-image model (Apache 2.0: commercial use is allowed). On a DGX Spark it is a

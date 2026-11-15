@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "app"))
 import loras  # noqa: E402
 import picture_edit as E  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
+import pytest  # noqa: E402
 
 ANGLES = {"id": "qwen-multiple-angles", "name": "Multiple Angles", "path": "/loras/angles.safetensors", "strength": 0.9, "trigger": "<mva>", "lead": "<mva>"}
 
@@ -200,3 +201,32 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_h3_image_edits_from_words_and_refuses_what_is_qwens():
+    from fastapi import FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+
+    home = Path(tempfile.mkdtemp())
+    env = models(home)
+    offered = [{"id": name, "label": name, "note": ""} for name in ("qwen", "h3-image")]
+    router, build = E.attach(home, ROOT, True, lambda *args: [], lambda path: home / path,
+                             lambda path: str(path.relative_to(home)), lambda: offered)
+    app = FastAPI()
+    app.include_router(router)
+    state = with_env(env, lambda: TestClient(app).get("/api/edit/state")).json()
+    assert [m["id"] for m in state["models"]] == ["qwen", "h3-image"]
+    assert state["models"][1]["note"].startswith("6 steps") and "<Picture 2>" in state["models"][1]["note"]
+    (home / "uploads").mkdir(exist_ok=True)
+    from PIL import Image
+    Image.new("RGB", (64, 64)).save(home / "uploads/a.png")
+    _, job_env, _ = with_env(env, lambda: build({"image": "uploads/a.png", "prompt": "make it night", "image_model": "h3-image"}, "j1"))
+    assert job_env["IMAGE_MODEL"] == "h3-image"
+    with pytest.raises(HTTPException) as refused:
+        with_env(env, lambda: build({"image": "uploads/a.png", "prompt": "x", "image_model": "h3-image", "base": True}, "j2"))
+    assert "leave them out for MiniMax-H3-Image" in refused.value.detail
+    router, build = E.attach(home, ROOT, True, lambda *args: [], lambda path: home / path,
+                             lambda path: str(path.relative_to(home)), lambda: offered[:1])
+    with pytest.raises(HTTPException) as missing:
+        with_env(env, lambda: build({"image": "uploads/a.png", "prompt": "x", "image_model": "h3-image"}, "j3"))
+    assert "MiniMax-H3-Image model is not installed" in missing.value.detail and "--h3-image" in missing.value.detail

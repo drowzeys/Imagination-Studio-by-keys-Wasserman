@@ -191,15 +191,17 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=0, help="with --height: another size for the result (the edit shifts when its shape differs from the picture's)")
     parser.add_argument("--height", type=int, default=0)
     parser.add_argument("--lora", action="append", default=[], help="an image LoRA, PATH or PATH:STRENGTH (repeat to stack)")
-    parser.add_argument("--model", choices=("qwen", *sg.FLUX3), default="qwen",
-                        help="qwen: Qwen-Image-2.1 (the default); flux3k-fast or flux3k-full: FLUX3-K (oneshot-setup-spark.sh --flux3)")
+    parser.add_argument("--model", choices=("qwen", *sg.FLUX3, *sg.H3IMAGE), default="qwen",
+                        help="qwen: Qwen-Image-2.1 (the default); flux3k-fast or flux3k-full: FLUX3-K (oneshot-setup-spark.sh --flux3); "
+                             "h3-image: MiniMax-H3-Image, the first picture edited with the others as references (oneshot-setup-spark.sh --h3-image)")
     parser.add_argument("--no-upsample", dest="upsample", action="store_false",
                         help="FLUX3-K: send the prompt as written (a full caption of the result) instead of BFL's prompt upsampler's")
     args = parser.parse_args()
     args.steps_set = "--steps" in sys.argv[1:]
     flux3 = args.model in sg.FLUX3
-    if flux3 and (args.base or args.lora):
-        sys.exit("image LoRAs and the base model are Qwen-Image-2.1's: FLUX3-K takes neither")
+    h3image = args.model in sg.H3IMAGE
+    if (flux3 or h3image) and (args.base or args.lora):
+        sys.exit("image LoRAs and the base model are Qwen-Image-2.1's: " + ("MiniMax-H3-Image" if h3image else "FLUX3-K") + " takes neither")
     for path in args.image:
         if not Path(path).is_file():
             sys.exit(f"no picture at {path}")
@@ -225,9 +227,11 @@ def main() -> None:
                 break
             time.sleep(1)
         time.sleep(5)
-    sg.ensure_server("flux3" if flux3 else "image")
+    sg.ensure_server("flux3" if flux3 else "h3image" if h3image else "image")
     if flux3 and not sg.installed("unet", sg.flux3_unet(args.model)):
         sys.exit(f"{args.model} is not installed: oneshot-setup-spark.sh --flux3")
+    if h3image and not sg.installed("unet", sg.H3IMAGE[args.model][0]):
+        sys.exit("MiniMax-H3-Image is not installed: oneshot-setup-spark.sh --h3-image")
     if args.base and not sg.installed("unet", sg.QWEN_BASE):
         sys.exit("the base model is not installed: oneshot-setup-spark.sh --image-edit fetches Qwen-Image-2.1 (14 GB; Qwen Research License, non-commercial)")
     loras = sg.hub_loras(args.lora)
@@ -238,6 +242,8 @@ def main() -> None:
     sizes = [edit_plan.picture_size(path) for path in args.image]
     plan = edit_plan.canvas(*sizes[0], args.size, args.resolution, (args.width, args.height) if args.width else None, args.most)
     made, size = tuple(plan["made"]), tuple(plan["size"])
+    if h3image:  # its canvas is in steps of 32: the edit is made on the nearest one inside, and brought back below
+        made = tuple(max(sg.H3IMAGE_MULTIPLE, side // sg.H3IMAGE_MULTIPLE * sg.H3IMAGE_MULTIPLE) for side in made)
     if plan["note"]:
         print(f"[tensorfold] {plan['note']}", flush=True)
     noise = edit_plan.noise_seed(args.seed, args.image)
@@ -248,7 +254,10 @@ def main() -> None:
             shown = [sg.upload(str(p)) for p in upsampler_pictures(args.image, Path(scratch))] if flux3 and args.upsample else []
         for prompt, output in edits:
             other = made if tuple(plan["source"]) != made else None
-            if flux3:
+            if h3image:
+                canvas = argparse.Namespace(model=args.model, width=made[0], height=made[1], steps=args.steps if args.steps_set else None)
+                item, seconds = sg.render(sg.h3image_workflow(canvas, prompt, noise, tuple(pictures)), "12")
+            elif flux3:
                 item, seconds = sg.render(flux3_workflow(args, pictures, shown, prompt, noise, other), "12")
             else:
                 item, seconds = sg.render(workflow(args, pictures, prompt, noise, loras, other), "12")
