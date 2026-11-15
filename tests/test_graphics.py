@@ -4,6 +4,7 @@ template's job folder (its page, data.json, data.js and media) and its command a
 refuses, the transcript cache, the runner's progress and the readiness report. STUDIO_GRAPHICS_SMOKE=1 also renders one
 real title at 320x180 with what scripts/setup-graphics.sh installed."""
 import json
+import shutil
 import os
 import subprocess
 import sys
@@ -125,6 +126,13 @@ def test_a_take_id_finds_the_voice_line_and_the_song(installed):
     got = made(installed, {"template": "slideshow", "pictures": ["uploads/one.png"], "voice": "v1", "song": "song"})
     assert (got["folder"] / "assets/voice.wav").is_file() and (got["folder"] / "assets/song.wav").is_file()
     assert 'id="voice" src="assets/voice.wav"' in got["page"] and 'data-volume="0.35"' in got["page"]  # the song under the voice
+    # a voice take in its own folder (issue #257) is found by its id as well
+    own = HOME / "voice/2026-11/2026-11-07_181022_hello-there_ee3e3a"
+    own.mkdir(parents=True)
+    shutil.copy(HOME / "voice/v1.wav", own / (own.name + ".wav"))
+    (own / (own.name + ".take.json")).write_text(json.dumps({"id": "1107-181022-ee3e3a", "path": f"voice/2026-11/{own.name}/{own.name}.wav"}))
+    got = made(installed, {"template": "slideshow", "pictures": ["uploads/one.png"], "voice": "1107-181022-ee3e3a"})
+    assert (got["folder"] / "assets/voice.wav").is_file()
 
 
 def test_settings_it_cannot_make_are_refused_in_words(installed):

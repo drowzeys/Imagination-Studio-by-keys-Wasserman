@@ -1,6 +1,7 @@
 """Voice, Fish Audio Drama 3 (app/voice.py): python3 tests/test_voice.py. No GPU, no model, no network: the engine's
 command line is stood in for by a small script that writes a WAV and its stats."""
 import json
+import re
 import os
 import struct
 import subprocess
@@ -193,7 +194,7 @@ def test_a_cuda_take_runs_on_a_persistent_server_that_holds_the_lock_until_unloa
         assert take["first_audio_ms"] == 250.0 and take["load_s"] is not None and take["device_gb"] == 38.58 and take["chunks"] == 1
         sent = requests_of(folder)[-1]
         assert sent["text"] == "Hello there." and sent["seed"] == 5 and sent["top_k"] == 25 and sent["temperature"] == 1.0
-        assert sent["top_p"] == 0.9 and sent["max_frames"] == 1500 and sent["wav"].endswith(f"{job['id']}.wav") and "ref_audio" not in sent
+        assert sent["top_p"] == 0.9 and sent["max_frames"] == 1500 and sent["wav"].endswith(f"_hello-there_{job['id'].split('-')[-1]}.wav") and "ref_audio" not in sent
         assert (server.HOME / take["path"]).is_file()
         # loaded after the take, holding the GPU lock: the next take does not load again
         assert one.loaded() and voice.lock_owner().startswith("studio-voice drama3")
@@ -333,9 +334,21 @@ def test_a_take_runs_under_the_gpu_lock_and_is_listed():
         assert not voice.LOCK.exists()  # ... and the lock is given back after the run
         assert fake.seen[-1]["seed"] == 7 and fake.seen[-1]["sampling"] == {"temperature": 1.0, "top_p": 0.9, "top_k": 20}
         take = done["voice"]
-        assert take["duration"] == 3.0 and take["frames_per_s"] == 63.0 and take["path"] == f"voice/{job['id']}.wav"
-        listed = client.get("/api/voice/takes").json()
-        assert listed[0]["id"] == job["id"]
+        assert take["duration"] == 3.0 and take["frames_per_s"] == 63.0 and take["path"].startswith("voice/20")
+        # its own folder by month, named by date, time, first spoken words (tags are not words) and the job's token (#257)
+        month, folder, name = take["path"].split("/")[1:]
+        token = job["id"].split("-")[-1]
+        assert re.fullmatch(r"\d{4}-\d{2}", month) and name == folder + ".wav" and folder.endswith(f"_hello-there-hi_{token}")
+        made = voice.HOME / "voice" / month / folder
+        assert {f.name[len(folder):] for f in made.iterdir()} >= {".wav", ".take.json", ".txt"}
+        assert voice.take_file(job["id"], ".wav") == made / name and voice.take_file("0101-000000-nobody", ".wav") is None
+        # a take made before the folders, flat beside the others, is still found, listed and played
+        (voice.HOME / "voice" / "0101-010101-old001.wav").write_bytes(b"RIFF")
+        (voice.HOME / "voice" / "0101-010101-old001.take.json").write_text(json.dumps({"id": "0101-010101-old001", "path": "voice/0101-010101-old001.wav", "created": 1}))
+        assert client.get("/api/voice/takes/0101-010101-old001").json()["path"] == "voice/0101-010101-old001.wav"
+        assert client.get("/api/voice/takes/0101-010101-old001/audio").status_code == 200
+        assert {"0101-010101-old001", job["id"]} <= {t["id"] for t in client.get("/api/voice/takes").json()}
+        assert client.get(f"/api/voice/takes/{job['id']}").json()["id"] == job["id"]
         audio = client.get(f"/api/voice/takes/{job['id']}/audio")
         assert audio.status_code == 200 and audio.headers["content-type"] == "audio/wav"
         # a lock held by someone else: the take waits, and a cancelled take stops waiting

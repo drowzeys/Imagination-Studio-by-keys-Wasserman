@@ -43,6 +43,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import model_catalog
+import take_names  # a take's readable folder and file names, beside this file
 
 try:
     import discover  # Models & weights: what was found elsewhere on this machine and linked
@@ -1234,7 +1235,11 @@ def perform(job: dict) -> bool:
 
     params, folder = job["params"], HOME / "voice"
     folder.mkdir(parents=True, exist_ok=True)
-    stem = folder / job["id"]
+    # a take's own folder, by month, date, time and its first spoken words (take_names.py; speaker and delivery tags
+    # are not words): the voice and its take file share one readable stem. Takes made before this stay where they are.
+    folder, name = take_names.folder(folder, job["id"], re.sub(r"<\|[^|>]*\|>|\[[^\]]*\]", " ", str(params.get("text") or "")), "voice")
+    folder.mkdir(parents=True, exist_ok=True)  # the take is made here and now (a Feature check's too): its text is written next
+    stem = folder / name
     wav, stats, text_file = stem.with_suffix(".wav"), stem.with_suffix(".stats.json"), stem.with_suffix(".txt")
     text_file.write_text(dialogue(params["text"]) + "\n")  # what the engine reads: a turn a line
     reference = None
@@ -1471,7 +1476,7 @@ def engine_score(parts: list[dict]) -> dict:
 
 def takes() -> list[dict]:
     out = []
-    for file in (HOME / "voice").glob("*.take.json"):
+    for file in (HOME / "voice").rglob("*.take.json"):
         try:
             take = json.loads(file.read_text())
         except (OSError, ValueError):
@@ -1481,11 +1486,26 @@ def takes() -> list[dict]:
     return sorted(out, key=lambda t: -float(t.get("created") or 0))
 
 
+def take_file(take_id: str, suffix: str) -> Path | None:
+    """A take's file by the take's id and the file's ending (``.take.json``, ``.wav``, ``.txt``), in either layout:
+    beside the others as ``voice/<id><suffix>`` (takes made before issue #257), or in the take's own folder, whose name
+    ends in the id's token (take_names.py). None when it is not on disk."""
+    flat = HOME / "voice" / f"{take_id}{suffix}"
+    if flat.is_file():
+        return flat
+    wanted = take_names.stem(take_id, "")[1].rsplit("_", 1)  # ("<date>_<time>_<title>", "<token>"): the title is not known here
+    day_time = "????" + "_".join(wanted[0].split("_")[:2])[4:]  # the id has no year: any year's folder
+    for found in sorted((HOME / "voice").glob(f"*/{day_time}_*_{wanted[1]}/{day_time}_*_{wanted[1]}{suffix}")):
+        if found.is_file():
+            return found
+    return None
+
+
 def one_take(take_id: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", take_id):
         raise HTTPException(400, "bad take id")
-    file = HOME / "voice" / f"{take_id}.take.json"
-    if not file.is_file():
+    file = take_file(take_id, ".take.json")
+    if file is None:
         raise HTTPException(404, "no such take")
     return json.loads(file.read_text())
 
@@ -1543,8 +1563,8 @@ def take_live(take_id: str):
     entry, began = LIVE.get(take_id), time.time()
     # a take that has started (its text is written first) and is not at the engine yet: its clip is being read
     # the page may ask before the worker has written the text: a short grace for that, never minutes for an unknown id
-    while entry is None and ((HOME / "voice" / f"{take_id}.txt").is_file() or time.time() - began < LIVE_GRACE_S) \
-            and not (HOME / "voice" / f"{take_id}.take.json").is_file() and time.time() - began < 300:
+    while entry is None and (take_file(take_id, ".txt") is not None or time.time() - began < LIVE_GRACE_S) \
+            and take_file(take_id, ".take.json") is None and time.time() - began < 300:
         time.sleep(0.2)
         entry = LIVE.get(take_id)
     if entry is None:
