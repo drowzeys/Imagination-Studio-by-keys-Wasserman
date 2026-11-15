@@ -48,7 +48,9 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         song_folder = parts[0] == "music" and len(parts) >= 3 and parts[1].endswith(".yue2")
         take_note = (parts[0] == "sound" or parts[0] in ("music", "voice") and len(parts) == 2) and target.name.endswith(".take.json")
         voice_text = parts[0] == "voice" and len(parts) == 2 and target.suffix.lower() == ".txt"
-        if not take_note and not voice_text and target.suffix.lower() not in (SONG_FOLDER if song_folder else FOLDERS[parts[0]]):
+        # a sound's measured beats (beats.py keeps them beside the file): they follow it, and are nothing without it
+        beats_note = parts[0] in ("music", "sound", "voice") and not song_folder and target.name.endswith(".beats.json")
+        if not take_note and not voice_text and not beats_note and target.suffix.lower() not in (SONG_FOLDER if song_folder else FOLDERS[parts[0]]):
             raise ValueError("not a clip, picture or sound file")
         if target.is_symlink() or (home / text).is_symlink() or not target.is_file():
             raise ValueError("no such file")
@@ -95,11 +97,13 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         return list(dict.fromkeys(found))
 
     def with_records(moved: list[dict], gone: set[str], keep_films: bool) -> tuple[list[dict], list[dict]]:
-        """Take records and voice text follow deleted sounds; a YuE2 song also takes its score folder."""
+        """Take records, voice text and measured beats follow deleted sounds; a YuE2 song also takes its score folder."""
 
         extra = []
         for one in moved:
             name = Path(one["from"])
+            if name.parts[0] in ("music", "sound", "voice") and name.suffix.lower() in FOLDERS[name.parts[0]]:
+                extra.append(name.with_name(name.stem + ".beats.json").as_posix())  # issue #253: it was left behind
             if name.parts[0] in ("sound", "voice") and name.suffix.lower() == ".wav":
                 extra.append(name.with_suffix(".take.json").as_posix())
                 if name.parts[0] == "voice" and len(name.parts) == 2:

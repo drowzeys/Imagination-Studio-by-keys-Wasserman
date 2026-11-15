@@ -275,6 +275,29 @@ def test_native_sound_folder_cleanup_error_is_reported(tmp_path, monkeypatch):
     assert web.post("/api/trash/restore").json() == {"files": 1, "jobs": 0, "missing": []}
 
 
+def test_a_sound_s_measured_beats_go_with_it_and_come_back(tmp_path):
+    """beats.py keeps <stem>.beats.json beside a measured file: a deleted song, take or effect takes it along (#253)."""
+
+    home, jobs, order, movable, web = studio(tmp_path / "Studio")
+    for folder in ("music", "voice", "sound/sfx/take1"):
+        (home / folder).mkdir(parents=True)
+        audio = write(home, f"{folder}/a1.wav", "audio")
+        beats = write(home, f"{folder}/a1.beats.json", "{}")
+        other = write(home, f"{folder}/b2.beats.json", "{}")  # another sound's: stays
+        result = web.post("/api/clear", json={"paths": [audio], "films": True}).json()
+        assert result["files"] == 2 and not result["skipped"], result
+        assert not (home / audio).exists() and not (home / beats).exists() and (home / other).is_file()
+        assert web.post("/api/trash/restore").json()["files"] == 2
+        assert (home / audio).read_text() == "audio" and (home / beats).is_file()
+    write(home, "music/a1.other.json")
+    assert refused(movable, "music/a1.other.json")  # only its beats and its take record follow a song
+    # a song being made keeps its beats
+    jobs["a1"] = {"id": "a1", "kind": "music", "status": "running", "outputs": [], "params": {}, "created": 0}
+    order.append("a1")
+    result = web.post("/api/clear", json={"paths": ["music/a1.beats.json"], "films": True}).json()
+    assert result["files"] == 0 and (home / "music/a1.beats.json").is_file(), result
+
+
 if __name__ == "__main__":
     test_paths(), test_delete_restore_empty(), test_a_song_goes_to_the_trash_with_its_yue2_folder_and_comes_back()
     print("ok")
