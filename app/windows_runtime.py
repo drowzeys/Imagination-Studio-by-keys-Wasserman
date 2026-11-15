@@ -330,6 +330,14 @@ def require_native(kind: str, params: dict) -> None:
             raise RouteUnavailable(why)
         if missing := video_missing(params):
             raise RouteUnavailable("H3 model files are missing: " + ", ".join(missing))
+        if kind == "video" and mode()["enabled"]:
+            # the one video recipe with a check (windows_engine_checks.py): a passed check opens it, inside what it ran
+            import windows_engine_checks as engines
+            found = engines.status("video")
+            if not found["qualified"]:
+                raise RouteUnavailable(found["why"])
+            engines.require_scope("video", params)
+            return
     if kind in windows_cuda.NATIVE and kind not in ("export", "soundtrack", "graphics", "hlg", "finish"):
         if mode()["enabled"]:
             raise RouteUnavailable("This native recipe has not been verified yet. Machine > Feature checks explains the available checked alternatives.")
@@ -381,6 +389,19 @@ def gate_native_state(kind: str, state: dict, selected_mode: dict | None = None)
                                              "available_unverified" if state.get("available") else "unavailable")}
     if why := windows_cuda.configuration_error():
         return {**result, "available": False, "state": "configuration_error", "why": why}
+    checked_kind = "video" if kind == "video" else "bolt" if kind == "Bolt" else ""
+    if checked_kind and installed and (state.get("available") or state.get("state") == "needs_verification"):
+        # H3 video and Bolt have a check of their own (windows_engine_checks.py): with gating on, a passed one opens them
+        import windows_engine_checks as engines
+        checked = engines.status(checked_kind)
+        result.update(qualified=checked["qualified"], check_available=True, verified_recipe=checked["verified_recipe"],
+                      **({"hardware": checked["hardware"]} if "hardware" in checked else {}))
+        if selected_mode["enabled"] and not checked["qualified"]:
+            result.update(available=False, state=checked["state"] if checked["state"] != "not_installed" else "needs_verification",
+                          why=checked["why"])
+        elif checked["qualified"]:
+            result.update(state="qualified")
+        return result
     if installed and selected_mode["enabled"] and (state.get("available") or state.get("state") == "needs_verification"):
         result.update(available=False, state="needs_verification",
                       why=f"The native {kind} recipe has no Windows verification check yet. See Machine > Feature checks.")
