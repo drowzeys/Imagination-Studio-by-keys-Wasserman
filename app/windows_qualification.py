@@ -1,7 +1,6 @@
 """Compatibility boundaries for bounded Windows qualification; hashes remain provenance."""
 from __future__ import annotations
 
-from importlib import metadata
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -19,12 +18,39 @@ def version_family(version: str, parts: int = 1) -> str:
     return ".".join(match[1].split(".")[:parts])
 
 
+def site_versions(site: Path) -> dict[str, str]:
+    """{package name: version} of what is installed in ``site`` (a venv's site-packages), names in lower case with
+    underscores. Read from each package's own record on disk, every time: importlib.metadata keeps a per-process
+    listing of a folder and answers an unreadable one with nothing, so one bad moment named every package missing
+    until the app was restarted. A folder that cannot be listed is an OSError with its reason; a record with no name
+    (a leftover of an interrupted install) is passed over."""
+    found = {}
+    for record in sorted(os.scandir(site), key=lambda entry: entry.name):
+        if not record.name.endswith((".dist-info", ".egg-info")) or record.name.startswith("~"):
+            continue
+        name = version = ""
+        for file in ("METADATA", "PKG-INFO"):
+            try:
+                with open(os.path.join(record.path, file), encoding="utf-8", errors="replace") as lines:
+                    for line in lines:
+                        if not line.strip():
+                            break  # the headers end at the first empty line
+                        if line.startswith("Name:") and not name:
+                            name = line[5:].strip()
+                        elif line.startswith("Version:") and not version:
+                            version = line[8:].strip()
+                break
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+        if name and version:
+            found[name.lower().replace("-", "_").replace(".", "_")] = version
+    return found
+
+
 def gpu_runtime(venv: Path) -> dict:
     config = dict(line.split("=", 1) for line in (venv / "pyvenv.cfg").read_text().splitlines() if "=" in line)
     config = {key.strip(): value.strip() for key, value in config.items()}
-    versions = {dist.metadata["Name"].lower().replace("-", "_"): dist.version
-                for dist in metadata.distributions(path=[str(venv / "Lib" / "site-packages")]) if dist.metadata["Name"]}
-    return {"python": config["version"], "versions": versions}
+    return {"python": config["version"], "versions": site_versions(venv / "Lib" / "site-packages")}
 
 
 def gpu_compatibility(venv: Path) -> dict:
