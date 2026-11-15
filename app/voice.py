@@ -43,6 +43,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import model_catalog
+import take_names  # a take's readable folder and file names, beside this file
 
 try:
     import discover  # Models & weights: what was found elsewhere on this machine and linked
@@ -1234,7 +1235,12 @@ def perform(job: dict) -> bool:
 
     params, folder = job["params"], HOME / "voice"
     folder.mkdir(parents=True, exist_ok=True)
-    stem = folder / job["id"]
+    # a take's own folder, by month, date, time and its first words (take_names.py): the voice and its take file
+    # share one readable stem. Takes made before this stay where they are and are read as before.
+    folder, name = take_names.folder(folder, job["id"], params.get("text", ""), "voice")
+    if job["id"] != "check":  # a command built only to be checked leaves no empty take folder behind
+        folder.mkdir(parents=True, exist_ok=True)
+    stem = folder / name
     wav, stats, text_file = stem.with_suffix(".wav"), stem.with_suffix(".stats.json"), stem.with_suffix(".txt")
     text_file.write_text(dialogue(params["text"]) + "\n")  # what the engine reads: a turn a line
     reference = None
@@ -1471,7 +1477,7 @@ def engine_score(parts: list[dict]) -> dict:
 
 def takes() -> list[dict]:
     out = []
-    for file in (HOME / "voice").glob("*.take.json"):
+    for file in (HOME / "voice").rglob("*.take.json"):
         try:
             take = json.loads(file.read_text())
         except (OSError, ValueError):
@@ -1484,7 +1490,17 @@ def takes() -> list[dict]:
 def one_take(take_id: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", take_id):
         raise HTTPException(400, "bad take id")
+    # new layout: the take file sits in a per-take folder (take_names); old takes stay flat
     file = HOME / "voice" / f"{take_id}.take.json"
+    if not file.is_file():
+        for candidate in (HOME / "voice").rglob("*.take.json"):
+            try:
+                take = json.loads(candidate.read_text())
+            except (OSError, ValueError):
+                continue
+            if take.get("id") == take_id:
+                file = candidate
+                break
     if not file.is_file():
         raise HTTPException(404, "no such take")
     return json.loads(file.read_text())
