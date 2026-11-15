@@ -266,7 +266,7 @@ function agModelPick(id) {
   const found = (BR.data && BR.data.backends) || [], offered = agAgents(found).map(a => a[0]);
   const ready = found.filter(b => agReady(b) && offered.includes(b.id)), shown = ready.some(b => b.id === id) || !id || !offered.includes(id) ? ready : [...ready, { id, label: agName(id) }];
   if (!shown.length) return el("span", { class: "tag2" }, agBadge(id), agName(id));
-  const pick = el("select", { "aria-label": "Model", "data-ag-model": true, onchange: e => { AG.backend = e.target.value; render(); } },
+  const pick = el("select", { "aria-label": "Model", "data-ag-model": true, style: "width:auto;max-width:min(260px,100%);flex:0 1 auto;padding:6px 34px 6px 10px;font-size:13.5px", onchange: e => { AG.backend = e.target.value; render(); } },
     shown.map(b => el("option", { value: b.id, selected: b.id === id }, b.label || agName(b.id))));
   pick.value = id || ""; return pick;
 }
