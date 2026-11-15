@@ -60,6 +60,7 @@ if LOCAL_GPU_CHILD:
         raise RuntimeError("a managed local GPU worker requires its private control key")
     os.environ["STUDIO_DISCOVER_DELAY"] = "-1"
 
+import chain  # noqa: E402  (a long video's last frame and join, beside this file)
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
 import memory_guard  # noqa: E402  (a DGX Spark's memory: what a clip needs and whether this machine has it, in spark/)
@@ -1917,11 +1918,9 @@ def passes(chosen: dict, steps: bool) -> dict:
 
 
 def last_frame(video: Path, image: Path) -> None:
-    """The clip's last frame. No -vsync/-fps_mode: ffmpeg 7+ dropped -vsync and 4.x lacks -fps_mode, and with -update
-    each decoded frame overwrites the image, so the last one written is the last frame either way."""
+    """The clip's last frame (chain.py)."""
 
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-sseof", "-0.2", "-i", str(video), "-update", "1",
-                    "-q:v", "1", str(image)], check=True, env=environment({}), timeout=120)
+    chain.last_frame(video, image, environment({}))
 
 
 def frame_at(video: Path, image: Path, at: float) -> None:
@@ -2290,31 +2289,14 @@ def long_take(job: dict) -> bool:
             raise RuntimeError(f"part {index + 1} wrote no clip")
         clips.append(target)
         job["outputs"] = [relative(c) for c in clips]  # finished parts can be watched while the rest renders
-    # join: every part after the first repeats the frame it started from, so that frame is dropped
+    # join: every part after the first repeats the frame it started from, so that frame is dropped (chain.py)
     job["progress"] = {"stage": "joining", "at": len(clips), "of": len(clips)}
-    listing = folder / "parts.txt"
-    trimmed = []
-    for index, clip in enumerate(clips):
-        part = folder / f"join{index + 1:03d}.ts"
-        cut = ["-vf", "trim=start_frame=1,setpts=PTS-STARTPTS", "-af", f"atrim=start={1 / FPS},asetpts=PTS-STARTPTS"] if index else []
-        done = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip), *cut, "-c:v", "libx264", "-crf", "17",
-                               "-preset", "medium", "-pix_fmt", "yuv420p", "-r", str(FPS), "-c:a", "aac", "-b:a",
-                               "256k", "-ar", "48000", "-f", "mpegts", str(part)], capture_output=True, text=True,
-                              env=environment({}))
-        if done.returncode:
-            job["log"] += done.stderr
-            raise RuntimeError("ffmpeg failed while preparing a part")
-        trimmed.append(part)
-    listing.write_text("".join(f"file '{part}'\n" for part in trimmed))
     final = HOME / "renders" / f"{job['id']}.mp4"
-    done = subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-t",
-                           str(total), "-c", "copy", "-movflags", "+faststart", str(final)], capture_output=True,
-                          text=True, env=environment({}))
-    for part in trimmed:
-        part.unlink(missing_ok=True)
-    if done.returncode:
-        job["log"] += done.stderr
-        raise RuntimeError("ffmpeg failed while joining the parts")
+    try:
+        chain.join(clips, final, total, FPS, folder, environment({}))
+    except chain.JoinFailed as error:
+        job["log"] += error.log
+        raise RuntimeError(str(error)) from None
     job["outputs"] = [relative(final)] + [relative(c) for c in clips]
     return True
 
