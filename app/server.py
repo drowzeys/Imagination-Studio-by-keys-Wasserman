@@ -4062,6 +4062,9 @@ async def fresh_pages(request, call_next):
 
 import desktop_control  # noqa: E402
 app.include_router(desktop_control.attach(sys.modules[__name__]))
+import languages
+app.include_router(languages.attach(HOME))
+
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 
 if not media_tools()["ffmpeg"]:
