@@ -76,13 +76,19 @@ case "${1:-start}" in
       cp "$HERE/studio_mmaudio/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
     fi
     cd "$PREFIX/ComfyUI"
+    COMMAND=("$PREFIX/venv/bin/python" main.py --listen 127.0.0.1 --port "$PORT")
+    if [ "${STUDIO_AUDIO3_CALIBRATION:-0}" = 1 ]; then
+      [ -n "${STUDIO_AUDIO3_CHECK_OWNER:-}" ] || { echo "start audio calibration through scripts/check-spark-audio3.py" >&2; exit 1; }
+      COMMAND=("$PREFIX/venv/bin/python" "$HERE/../scripts/windows-comfy-calibration-launcher.py"
+        --comfy "$PREFIX/ComfyUI/main.py" --gpu-limit-mb 12288 -- --listen 127.0.0.1 --port "$PORT" --disable-cuda-malloc)
+    fi
     # --use-ck-attention: ComfyUI's own flash-attention kernel, 12% faster a pass than PyTorch's on a GB10
     if [ -n "${SPARK_GOVERNOR:-}" ]; then
       # shellcheck disable=SC2086
-      exec python3 "$HERE/managed_comfy.py" run "$PREFIX/venv/bin/python" main.py --listen 127.0.0.1 --port "$PORT" ${SPARK_COMFY_ARGS:---use-ck-attention}
+      exec python3 "$HERE/managed_comfy.py" run "${COMMAND[@]}" ${SPARK_COMFY_ARGS:---use-ck-attention}
     fi
     # shellcheck disable=SC2086
-    nice -n 19 "$PREFIX/venv/bin/python" main.py --listen 127.0.0.1 --port "$PORT" ${SPARK_COMFY_ARGS:---use-ck-attention} &
+    nice -n 19 "${COMMAND[@]}" ${SPARK_COMFY_ARGS:---use-ck-attention} &
     pid=$!
     trap 'kill $pid 2>/dev/null' TERM INT
     # the guard stands beside the server until it ends (status 3: it stopped the server). It is started with the

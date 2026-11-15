@@ -84,7 +84,8 @@ const APPS = () => [
 
   { id: "voice", cat: "sound", title: "Voices & cloning", one: "Fish Audio Drama 3: cast a voice or clone your own", art: "start-voice", sign: "sound", run: () => go("Voice") },
   { id: "song", cat: "sound", title: "Songs & score", one: "YuE2 or MiniMax-Music3: lyrics and a style to a song", art: "start-song", sign: "sound", run: () => go("Music") },
-  { id: "foley", cat: "sound", title: "Sound effects & foley", one: "Foley for a clip, or any sound from words", art: "start-sfx", sign: "sound", run: () => go("Foley") },
+  { id: "foley", cat: "sound", title: "Sound effects & foley", one: S && S.platform === "windows" ? "Stable Audio 3 Small SFX, 1–5 seconds; Open is optional" : "Foley for a clip, or any sound from words",
+    art: "start-sfx", sign: "sound", run: () => { if (S && S.platform === "windows") SFX.mode = "sfx"; go("Foley"); } },
 
   { id: "upscale", cat: "finish", title: "Upscale", one: "A clip twice the size and sharper", art: "look-video-upscaler", sign: "video",
     off: () => apActReady("upscale"), run: apAct("upscale", "video", "Upscale") },

@@ -1,0 +1,12 @@
+diff --git a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -12,6 +12,6 @@ dependencies = [
+     "packaging>=26.0",
+     "safetensors>=0.7.0",
+-    "torch==2.7.1",
+-    "torchaudio==2.7.1",
++    "torch==2.14.0+cu134",
++    "torchaudio==2.11.0+cu134",
+     "tqdm>=4.67.3",
+     "huggingface-hub>=1.7.1",

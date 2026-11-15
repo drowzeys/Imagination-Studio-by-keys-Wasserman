@@ -63,6 +63,38 @@ def fits_with(box, need):
     return lambda: {"fits": box.available - need >= box.floor, "need_mb": need, "available_mb": box.available, "floor_mb": box.floor}
 
 
+@pytest.mark.parametrize("spark_flag", [False, True])
+def test_windows_small_sfx_does_not_borrow_legacy_sound_memory(monkeypatch, spark_flag):
+    monkeypatch.setattr(server, "SPARK", spark_flag)
+    monkeypatch.setattr(server, "WINDOWS", True)
+    monkeypatch.setattr(server, "WIN32", True)
+    monkeypatch.setattr(server.voice, "mem_available_gb", lambda: pytest.fail("Small SFX has its own Windows admission"))
+    monkeypatch.setattr(server.memory_guard, "sound_check", lambda *a, **k: pytest.fail("Do not use Linux or legacy sound memory"))
+    job = {"kind": "sfx", "params": {"sound_model": server.windows_audio3.MODEL, "seconds": 5}}
+    assert server.job_fit(job, 100_000) is None
+
+
+def test_spark_small_sfx_memory_manager_asks_its_own_route(monkeypatch):
+    monkeypatch.setattr(server, "SPARK", True)
+    monkeypatch.setattr(server, "WINDOWS", False)
+    monkeypatch.setattr(server, "WIN32", False)
+    monkeypatch.setattr(server.memory_guard, "card_room_applies", lambda: False)
+    monkeypatch.setattr(server.memory_guard, "floor_mb", lambda: 25_000)
+    calls = []
+
+    def check(route, seconds, **kwargs):
+        calls.append((route, seconds, kwargs))
+        if route == server.windows_audio3.MODEL:
+            return {"need_mb": None}
+        return {"need_mb": 8_000, "available_mb": kwargs["available_mb"], "fits": True}
+
+    monkeypatch.setattr(server.memory_guard, "sound_check", check)
+    assert server.job_fit({"kind": "sfx", "params": {"sound_model": server.windows_audio3.MODEL, "seconds": 5}}, 100_000) is None
+    assert calls[-1] == (server.windows_audio3.MODEL, 5.0, {"available_mb": 100_000, "card": False})
+    legacy = server.job_fit({"kind": "sfx", "params": {"sound_model": server.sound.SFX_MODEL, "seconds": 5}}, 100_000)
+    assert calls[-1][0] == "sfx" and legacy["need_mb"] == 8_000 and legacy["fits"]
+
+
 def test_a_job_that_fits_changes_nothing(machine):
     log = []
     fake(machine, "bolt", 28_000, log=log)

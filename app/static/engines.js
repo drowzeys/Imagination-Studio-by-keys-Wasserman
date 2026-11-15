@@ -72,6 +72,11 @@ const ENGINE_PAGES = {
       { art: "act-edit-library", sign: "library", title: "Library", one: "Every take on this machine", run: () => go("Library") }] }),
 };
 function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_PAGES[id]();
+  if (id === "sound" && S && S.platform === "windows") {
+    e.line = "Stable Audio 3 Small SFX is the default; Stable Audio Open is optional. MMAudio makes foley. Each backend has its own recipe, installation and verification requirements.";
+    const effect = () => { SFX.mode = "sfx"; go("Foley"); };
+    e.marks = []; e.primary = ["Make a sound effect", effect]; e.cards[2].one = "Sound effects from words; limits follow the selected backend"; e.cards[2].run = effect;
+  }
   const imageKind = typeof imageFeature === "function" ? imageFeature() : "scout";
   const primary = { image: imageKind, video: "video", sound: "voice" }[id];
   const why = id === "image" && typeof imageModelWhy === "function" ? imageModelWhy() : capWhy(primary);

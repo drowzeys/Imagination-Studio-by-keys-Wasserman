@@ -16,7 +16,7 @@ POOLS = ("host_available_mb", "host_commit_headroom_mb", "dedicated_gpu_free_mb"
 METRICS = ("elapsed_s", "peak_job_commit_mb", "peak_process_commit_mb", "gpu_pool_mb", "commit_limit_mb",
            "host_pool_mb", "unified_pool_mb")
 RECIPE = ("width", "height", "count", "workflow_sha256", "fps", "seconds", "frames", "view_size", "strength",
-          "steps", "quality", "anchor", "denoise", "megapixels", "window", "silent", "clean_frame",
+          "steps", "cfg", "quality", "anchor", "denoise", "megapixels", "window", "silent", "clean_frame",
           "max_words", "max_characters", "max_seconds", "reference", "live", "asr", "engine", "backend",
           "weights", "sampling")
 OUTCOMES = ("passed", "commit_reserve", "memory_refusal", "provenance_changed", "cancelled", "execution_failed")
@@ -89,7 +89,7 @@ def validate_execution(value):
     if value["platform"] not in ("windows", "macos", "linux", "unknown"):
         raise ValueError("Invalid platform.")
     allowed = {"backend": ("torch-cuda", "torch-metal", "mlx", "native-cuda", "native-metal", "cpu", "unknown"),
-               "engine": ("comfyui", "tensorfold", "mlx", "diffusers", "mmaudio", "ffmpeg", "tesseract", "unknown"),
+               "engine": ("comfyui", "tensorfold", "mlx", "diffusers", "mmaudio", "stable-audio-3", "ffmpeg", "tesseract", "unknown"),
                "architecture": ("x86-64", "arm64", "unknown")}
     if any(value[key] not in choices for key, choices in allowed.items()):
         raise ValueError("Invalid execution backend/architecture.")
