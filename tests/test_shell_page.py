@@ -1659,3 +1659,35 @@ def test_home_ignores_inflight_memory_answer_for_an_obsolete_worker_state():
     assert out["pendingRequests"] == 1 and out["requests"] == 2
     assert "Obsolete head refusal" not in out["between"] and "Obsolete head refusal" not in out["after"]
     assert "about 18 s on Ready GPU" in out["after"]
+
+
+def test_a_library_clip_loads_only_near_the_screen_and_lets_go_when_far():
+    """Every clip of a large Library loading at once took all of a browser's connections: pictures stayed blank and
+    Play did nothing. A clip's player has no source until it is near the screen; a playing one is never let go."""
+    need_node()
+    page = (ROOT / "app/static/index.html").read_text()
+    source = page[page.index("const LIBSEE = "):page.index("\n", page.index("return n; }", page.index("function libMedia(path)")))]
+    script = """
+      let watch; const seen = [];
+      globalThis.IntersectionObserver = function (run, how) { watch = run; this.how = how; this.observe = n => seen.push(n); };
+      const LIB = { media: new Map() };
+      const node = (tag, src) => ({ tagName: tag, dataset: {}, attrs: { src }, paused: true, loads: 0, getAttribute(k) { return this.attrs[k] || null; },
+        setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; }, load() { this.loads++; } });
+      const media = path => node(/mp4$/.test(path) ? "VIDEO" : "IMG", "/files/" + path);
+    """ + source + """
+      const clip = libMedia("a.mp4"), still = libMedia("a.png"), out = {};
+      out.clipWaits = clip.getAttribute("src") === null && seen.includes(clip); out.stillLoads = still.getAttribute("src") === "/files/a.png" && !seen.includes(still);
+      out.same = libMedia("a.mp4") === clip && clip.getAttribute("src") === null;  // a redraw does not load it
+      watch([{ target: clip, isIntersecting: true }]); out.near = clip.getAttribute("src");
+      clip.paused = false; watch([{ target: clip, isIntersecting: false }]); out.playingKept = clip.getAttribute("src");
+      clip.paused = true; watch([{ target: clip, isIntersecting: false }]); out.farLetGo = clip.getAttribute("src") === null && clip.loads === 1;
+      watch([{ target: clip, isIntersecting: true }]); out.back = clip.getAttribute("src");
+      console.log(JSON.stringify(out));
+    """
+    with tempfile.TemporaryDirectory() as scratch:
+        (Path(scratch) / "lazy.js").write_text(script)
+        done = subprocess.run(["node", str(Path(scratch) / "lazy.js")], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr[-1500:]
+    out = json.loads(done.stdout.strip().splitlines()[-1])
+    assert out == {"clipWaits": True, "stillLoads": True, "same": True, "near": "/files/a.mp4", "playingKept": "/files/a.mp4",
+                   "farLetGo": True, "back": "/files/a.mp4"}
