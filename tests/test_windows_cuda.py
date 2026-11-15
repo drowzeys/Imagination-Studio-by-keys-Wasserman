@@ -363,3 +363,4 @@ def test_the_engines_come_built_checked_and_never_fall_back_to_a_compile():
     # the runtime libraries only: two of NVIDIA's archives, and Microsoft's runtime for Bolt
     assert '@("libcublas", "cuda_cudart")' in release and "cuda_nvcc" not in release
     assert "Microsoft.VCRedist.2015+.arm64" in release
+    assert "} finally { Remove-Item -Recurse -Force $Stage" in release  # a refused archive leaves no staging folder

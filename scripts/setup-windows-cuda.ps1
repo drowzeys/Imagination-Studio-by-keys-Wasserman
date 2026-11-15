@@ -299,11 +299,12 @@ if ($EngineFrom -and $NeedEngines) {
     Ok "$name engine: $(@($pin.files.PSObject.Properties | ForEach-Object { $_.Name }) -join ' + ')"
   }
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-  if ($H3Engine) { Install-StudioEngine "h3" $TfH3 }
-  if ($Voice) { Install-StudioEngine "drama3" $DramaBin }
-  if ($Bolt) { Install-StudioEngine "bolt" $BoltBin }
-  if ($MusicEngine) { Install-StudioEngine "music3" $MusicBin }
-  Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
+  try {
+    if ($H3Engine) { Install-StudioEngine "h3" $TfH3 }
+    if ($Voice) { Install-StudioEngine "drama3" $DramaBin }
+    if ($Bolt) { Install-StudioEngine "bolt" $BoltBin }
+    if ($MusicEngine) { Install-StudioEngine "music3" $MusicBin }
+  } finally { Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue }  # a refused archive leaves nothing behind either
   # What they open at run time. The driver has nvcuda.dll. Drama 3, Music 3 and Bolt open NVIDIA's cuBLAS, from two of
   # NVIDIA's redistributable archives, each checked against NVIDIA's own manifest: the libraries, not the toolkit.
   if ($Voice -or $Bolt -or $MusicEngine) {
