@@ -1038,7 +1038,10 @@ def ask(backend: str, system: str, prompt: str, tier: str = "top", endpoint: str
         for line in done.stdout.splitlines():
             render("copilot", line, task)
         if not done.returncode and not task.get("_error") and task["reply"].strip():
+            remember_copilot(host, {"ok": True, "at": time.time(), "remembered": True})
             return task["reply"].strip()
+        if re.search(HINTS["copilot"][0][0], done.stderr or "", re.I):
+            remember_copilot(host, {"ok": False, "at": time.time()})
         raise RuntimeError(hinted("copilot", task.get("_error") or done.stderr or "Copilot CLI gave no answer", host))
     if backend == "codex":
         done = run_cli([tool, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "-"], joined, host, timeout)
@@ -1891,7 +1894,10 @@ def render(backend: str, line: str, task: dict) -> str:
             if data.get("success") is False:
                 out.append("tool failed: " + str(data.get("toolCallId") or "tool"))
         elif kind == "session.error":
-            task["_error"] = hinted("copilot", str(data.get("message") or "Copilot session failed"), task.get("_host") or "")
+            message = str(data.get("message") or "Copilot session failed")
+            if re.search(HINTS["copilot"][0][0], message, re.I):
+                remember_copilot(task.get("_host") or "", {"ok": False, "at": time.time()})
+            task["_error"] = hinted("copilot", message, task.get("_host") or "")
         elif kind == "result":
             if event.get("exitCode") != 0:
                 task["_error"] = hinted("copilot", f"Copilot turn stopped with code {event.get('exitCode')}", task.get("_host") or "")
@@ -2203,9 +2209,13 @@ def perform(task: dict) -> None:
         error = task.pop("_error", None)
         if code or error:
             said = (here / "stderr.txt").read_text(errors="replace").strip()
+            if task["backend"] == "copilot" and re.search(HINTS["copilot"][0][0], said, re.I):
+                remember_copilot(host, {"ok": False, "at": time.time()})
             task.update(status="failed", error=error or hinted(task["backend"], said or f"{task['backend']} stopped with code {code}", host))
         else:
             task["status"] = "done"
+            if task["backend"] == "copilot":
+                remember_copilot(host, {"ok": True, "at": time.time(), "remembered": True})
         if task["status"] != "done" or not (task.get("_session") or {}).get("id"):
             task["_session"] = None  # the thread keeps the session it had: only a finished turn names a new one
     finally:
@@ -3139,7 +3149,7 @@ def status_of(backend: str) -> dict:
         remembered = bool(checked and (last.get("remembered") or time.time() - last["at"] >= STATUS_TTL))
         return {"backend": backend, **where, "state": "signed_in" if checked else "unknown",
                 "remembered": remembered,
-                "detail": ("Previously connected; last successful Check: " + time.strftime("%Y-%m-%d", time.localtime(last["at"])) +
+                "detail": ("Previously connected; last successful use: " + time.strftime("%Y-%m-%d", time.localtime(last["at"])) +
                            ". Not rechecked automatically.") if remembered else "Copilot answered the Check." if checked else
                 "Check to confirm Copilot's sign-in; use copilot login in a terminal if needed. Copilot CLI has no auth-status subcommand."}
     try:
@@ -3219,6 +3229,7 @@ LOOK_TOOLS = ('for t in npm brew curl; do command -v "$t" >/dev/null 2>&1 && ech
 installing: dict = {"backend": None}
 verified: dict = {}  # (backend, host) -> the last Verify
 machines: dict = {}  # host -> (monotonic time, uname -s)
+COPILOT_CONNECTION_TTL = 7 * 24 * 60 * 60
 
 
 def copilot_connection(host: str) -> dict | None:
@@ -3227,12 +3238,32 @@ def copilot_connection(host: str) -> dict | None:
     with lock:
         last = verified.get(("copilot", host))
         if last is not None:
-            return last
+            return last if not last.get("ok") or 0 <= time.time() - last["at"] < COPILOT_CONNECTION_TTL else None
         records = read_json(folder() / "copilot-connection.json" if folder() else None, {})
         at = records.get(host) if isinstance(records, dict) else None
-    if type(at) in (int, float) and 0 < at <= time.time():
+    if type(at) in (int, float) and at > 0 and 0 <= time.time() - at < COPILOT_CONNECTION_TTL:
         return {"ok": True, "at": at, "remembered": True}
     return None
+
+
+def remember_copilot(host: str, result: dict) -> None:
+    with lock:
+        verified[("copilot", host)] = result
+        if not folder():
+            return
+        try:
+            path = folder() / "copilot-connection.json"
+            records = read_json(path, {})
+            if not isinstance(records, dict):
+                records = {}
+            if result["ok"]:
+                records[host] = result["at"]
+            else:
+                records.pop(host, None)
+            write_json(path, records)
+        except OSError:
+            result["warning"] = "Copilot connection updated for this session, but could not be saved to disk. A previous saved connection may remain until it expires."
+            print("[studio] " + result["warning"], file=sys.stderr)
 
 
 def shell_here(line: str, timeout: int, host: str = "") -> subprocess.CompletedProcess:
@@ -3431,18 +3462,11 @@ def verify(backend: str) -> dict:
     if not out["ok"]:
         out["fix"] = fix_of(backend, out["error"] or "", host) if backend in CLIS else {"action": "verify", "label": "Check again"}
     out.update(backend=backend, where=f"ssh:{host}" if host else "here", at=time.time(), elapsedMs=int(1000 * (time.time() - started)))
-    with lock:
-        if backend == "copilot" and folder():
-            path = folder() / "copilot-connection.json"
-            records = read_json(path, {})
-            if not isinstance(records, dict):
-                records = {}
-            if out["ok"]:
-                records[host] = out["at"]
-            else:
-                records.pop(host, None)
-            write_json(path, records)
-        verified[(backend, host)] = out
+    if backend == "copilot":
+        remember_copilot(host, out)
+    else:
+        with lock:
+            verified[(backend, host)] = out
     return out
 
 

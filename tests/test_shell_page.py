@@ -1227,7 +1227,7 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
 
 
 @pytest.mark.parametrize("codex_found", [False, True])
-def test_connect_banner_keeps_copilot_last_even_when_installed(codex_found):
+def test_connect_banner_prefers_installed_cli_including_copilot(codex_found):
     out = run(CONNECT + """
       BR.data = { default: "claude", settings: {}, backends: CN_ORDER.map(id => ({
         id, label: id, kind: "cli", found: id === "copilot" || id === "codex" && CODEX_FOUND
@@ -1237,8 +1237,8 @@ def test_connect_banner_keeps_copilot_last_even_when_installed(codex_found):
       const chips = find(card, n => n.attrs && n.attrs.class === "chips");
       out.buttons = chips.kids.filter(n => n && n.tag === "button").map(n => text(n).trim());
     """.replace("CODEX_FOUND", json.dumps(codex_found)))
-    assert out["buttons"][-1] == "copilot"
-    assert out["buttons"][0].endswith("Connect codex" if codex_found else "Connect claude")
+    assert out["buttons"][0].endswith("Connect codex" if codex_found else "Connect copilot")
+    assert out["buttons"][-1] == ("copilot" if codex_found else "grok")
     assert len(out["buttons"]) == 6
 
 
