@@ -55,8 +55,12 @@ aside#side { position:fixed; left:0; top:0; bottom:0; width:var(--side); z-index
 .brand .byline { display:flex; align-items:center; gap:8px; width:230px; margin:2px 0 4px 5px; }
 .brand .byline .by { font:italic 400 15px/1 var(--display); color:var(--text); flex:none; }
 .brand .creator { width:206px; height:auto; max-width:none; display:block; flex:none; filter:drop-shadow(0 0 8px rgba(99,255,54,.2)); }
-nav#rooms { flex:1; overflow-y:auto; padding:4px 10px 12px; display:flex; flex-direction:column; gap:1px; scrollbar-width:none; }
-nav#rooms::-webkit-scrollbar { display:none; }
+/* the room list scrolls when the window is short: its bar shows, and its last rows fade out while more is below */
+nav#rooms { flex:1; min-height:0; overflow-y:auto; padding:4px 10px 30px; display:flex; flex-direction:column; gap:1px; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.32) transparent;
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 30px),transparent); mask-image:linear-gradient(to bottom,#000 calc(100% - 30px),transparent); }
+nav#rooms::-webkit-scrollbar { width:6px; } nav#rooms::-webkit-scrollbar-thumb { background:rgba(255,255,255,.32); border-radius:3px; }
+/* a short window: the film ribbon and the credit make room for the rooms, so Learn and Settings are not under the fold */
+@media (max-height:900px) and (min-width:1100px) { .brand .ribbon { display:none; } .sidefoot .credit { display:none; } nav#rooms .grp { padding-top:12px; } nav#rooms button { height:34px; } }
 nav#rooms .grp { font:500 12px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); padding:18px 10px 8px; white-space:nowrap; }
 nav#rooms .grp:first-child { padding-top:8px; }
 nav#rooms button { display:flex; align-items:center; gap:12px; width:100%; height:40px; padding:0 10px; box-shadow:none; border:0; border-radius:var(--r1); background:transparent; color:var(--dim);
@@ -541,6 +545,10 @@ button.primary:hover:not(:disabled), button.hot:hover:not(:disabled), button.pri
 /* the machine chip: green while ready, amber on a warning, red while rolling */
 .machinepill, .m-plat { --led:99,255,54; border-radius:999px; border:1px solid rgba(var(--led),.7); background:rgba(var(--led),.06);
   box-shadow:0 0 0 1px rgba(var(--led),.35),0 0 18px rgba(var(--led),.35); font:500 12px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--text); }
+/* its colour says which machine: a DGX Spark green (the default), an RTX Spark yellow, a Mac blue, an RTX PRO 6000 purple */
+.machinepill[data-machine="rtx-spark"], .m-plat[data-machine="rtx-spark"] { --led:255,221,51; }
+.machinepill[data-machine="mac"], .m-plat[data-machine="mac"] { --led:64,156,255; }
+.machinepill[data-machine="rtx-pro-6000"], .m-plat[data-machine="rtx-pro-6000"] { --led:180,100,255; }
 .machinepill:has(.dotl.r) { --led:255,90,106; }
 .machinepill { position:relative; } .machinepill.warn::after { content:""; position:absolute; top:-3px; right:-3px; width:9px; height:9px; border-radius:50%; background:var(--amber); box-shadow:0 0 6px rgba(241,173,102,.9); }
 .machinepill:hover:not(:disabled) { border-color:rgba(var(--led),.9); background:rgba(var(--led),.1); }

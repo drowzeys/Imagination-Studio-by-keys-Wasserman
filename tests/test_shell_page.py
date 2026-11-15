@@ -683,6 +683,26 @@ def test_the_chip_names_the_card_and_a_spark_stays_a_spark():
     assert out["mac"] == "Mac" and out["macCard"] is False
 
 
+def test_the_chip_calls_an_rtx_spark_that_and_each_machine_has_its_colour():
+    out = run("""out.spark = machineKind();
+      S.platform_label = "CUDA · NVIDIA RTX PRO 6000 BLACKWELL MAX-Q WORKSTATION EDITION · H3-CUDA"; out.pro = machineKind();
+      S.platform_label = "CUDA · NVIDIA RTX 5090 · H3-CUDA"; out.card = machineKind(); out.cardName = platName();
+      S.platform = "windows"; S.platform_label = "RTX SPARK · NVIDIA RTX SPARK N1X · NATIVE WINDOWS"; out.n1x = [platName(), machineKind()];
+      S.platform_label = "CUDA · NVIDIA RTX PRO 6000 BLACKWELL · NATIVE WINDOWS"; out.winPro = [platName(), machineKind()];
+      S.platform_label = "NATIVE WINDOWS"; out.winBare = [platName(), machineKind()];
+      S.platform = "mac"; S.platform_label = "MAC · APPLE SILICON MX · H3-METAL"; out.mac = machineKind();
+      out.macNames = ["MAC STUDIO", "MACBOOK PRO", "MAC MINI", "MAC"].map(m => { S.platform_label = m + " · APPLE SILICON MX · H3-METAL"; return platName(); });""")
+    assert out["macNames"] == ["Mac Studio", "MacBook Pro", "Mac Mini", "Mac"]
+    assert out["spark"] == "dgx-spark" and out["pro"] == "rtx-pro-6000" and out["mac"] == "mac"
+    assert out["card"] == "card" and out["cardName"] == "RTX 5090"
+    assert out["n1x"] == ["RTX Spark", "rtx-spark"] and out["winPro"] == ["RTX PRO 6000", "rtx-pro-6000"]
+    assert out["winBare"] == ["NATIVE WINDOWS", ""]
+    css = (ROOT / "app/static/studio.css").read_text()
+    for kind, led in (("rtx-spark", "255,221,51"), ("mac", "64,156,255"), ("rtx-pro-6000", "180,100,255")):
+        assert f'.machinepill[data-machine="{kind}"], .m-plat[data-machine="{kind}"] {{ --led:{led}; }}' in css
+    assert ".machinepill, .m-plat { --led:99,255,54;" in css  # a DGX Spark's green is the default
+
+
 def test_a_card_shows_no_video_number_until_that_canvas_is_sampled():
     """A GB10 label keeps the Spark suffix. A card shows a number only when the answer is that canvas's own sample."""
 

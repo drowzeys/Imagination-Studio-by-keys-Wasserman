@@ -182,14 +182,26 @@ const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
 // (platform_label is "CUDA · NVIDIA RTX PRO 6000 BLACKWELL … · H3-CUDA"), plus the nvidia-smi index.
 const platName = () => {
   if (!S) return "";
-  if (S.platform === "mac") return "Mac";
-  if (S.platform !== "spark") return S.platform_label || "";
   const label = S.platform_label || "";
+  // a Mac by its model, as it names itself ("MAC STUDIO · …" is "Mac Studio", "MACBOOK PRO · …" is "MacBook Pro")
+  if (S.platform === "mac") return (label.split(" · ")[0] || "Mac").toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()).replace(/^Macbook/, "MacBook").replace(/^Imac/, "iMac");
+  if (label.startsWith("RTX SPARK")) return "RTX Spark";
+  if (S.platform !== "spark" && !label.startsWith("CUDA · ")) return label;
   if (!label || label.startsWith("DGX SPARK")) return "DGX Spark";
   const raw = (label.split(" · ")[1] || "").replace(/^NVIDIA\s+/, "");
   const card = raw.split(/\s+(?:BLACKWELL|ADA|AMPERE|MAX-Q|WORKSTATION)\b/)[0].trim();
-  if (!card) return "DGX Spark";
+  if (!card) return S.platform === "spark" ? "DGX Spark" : label;
   return S.gpu_index ? card + " · " + S.gpu_index : card;
+};
+// Which machine this is, for the chip's colour (studio.css [data-machine]): a DGX Spark glows green, an RTX Spark
+// yellow, a Mac blue, an RTX PRO 6000 purple. Another card keeps the green.
+const machineKind = () => {
+  if (!S) return "";
+  const label = S.platform_label || "";
+  if (S.platform === "mac") return "mac";
+  if (label.startsWith("RTX SPARK")) return "rtx-spark";
+  if (label.startsWith("CUDA · ")) return /RTX PRO 6000/.test(label) ? "rtx-pro-6000" : "card";
+  return S.platform === "spark" ? "dgx-spark" : "";
 };
 // Unified vs card, from the banner machine() already wrote. Unified starts with "DGX SPARK"
 // (a GB10, and the nvidia-smi failure banner). A card is the CUDA build and starts with "CUDA · ".
@@ -360,7 +372,7 @@ function shellStart() {
   if (typeof MutationObserver === "function") new MutationObserver(list => { for (const m of list) for (const n of m.removedNodes) if (n.nodeType === 1 && !n.isConnected) releaseMedia(n); })
     .observe($("#view"), { childList: true, subtree: true });
   window.addEventListener("hashchange", () => { palClose(); const t = decodeURIComponent(location.hash.slice(1)); if (TABS.includes(t) && t !== tab) go(t, { fromHash: true }); });
-  if (S) { $("#plat").textContent = platName(); $("#mpill").title = (S.platform_label || platName()) + " · open the Machine room"; }
+  if (S) { $("#plat").textContent = platName(); $("#mpill").title = (S.platform_label || platName()) + " · open the Machine room"; if (machineKind()) $("#mpill").setAttribute("data-machine", machineKind()); }
   if (typeof updatesWatch === "function") updatesWatch();
   telStart(); }
 

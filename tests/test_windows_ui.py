@@ -28,7 +28,7 @@ def test_windows_state_is_not_a_mac_or_a_render_backend(client):
     assert response.status_code == 200
     state = response.json()
     assert state["platform"] == "windows" and state["ui_only"]
-    assert state["platform_label"] == "NATIVE WINDOWS"
+    assert state["platform_label"].endswith("NATIVE WINDOWS")  # named by its card where the driver answers (windows_label)
     assert state["platform_note"] == ""
     assert state["image_models"] == [] and state["text_encoders"] == []
     assert not any(state[key] for key in ("zig", "turbo", "x2", "ref2va", "ref2va_turbo", "ref_media"))
@@ -227,3 +227,10 @@ def test_windows_memory_and_disk_are_real_readings(tmp_path):
     assert total > 0 and 0 <= available <= total
     disk = telemetry.disk_of(tmp_path)
     assert disk["total_gb"] > 0 and disk["free_gb"] >= 0
+
+
+def test_a_windows_pc_is_named_by_its_card_and_an_rtx_spark_is_called_that():
+    import server
+    assert server.windows_label("NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU)") == "RTX SPARK · NVIDIA RTX SPARK N1X · NATIVE WINDOWS"
+    assert server.windows_label("NVIDIA RTX PRO 6000 Blackwell") == "CUDA · NVIDIA RTX PRO 6000 BLACKWELL · NATIVE WINDOWS"
+    assert server.windows_label("") == "NATIVE WINDOWS"
