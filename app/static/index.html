@@ -1074,7 +1074,7 @@ function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library"))
     // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
     const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
     const hits = () => { const words = LIBF.q.trim().toLowerCase().split(/\s+/).filter(Boolean); return kindList.filter(m => words.every(w => (m.path + " " + (m.spark || "") + (m.failed ? " failed check" : "")).toLowerCase().includes(w))); };
-    let list = hits(); const capBar = capSearch(() => grid, () => show()); if (!CAP.map) capLoad().then(() => { if (tab === "Library") render(); });
+    let list = hits(); const capBar = capSearch(() => grid, () => show()); if (!CAP.map && !CAP.loading) capLoad().then(() => { if (tab === "Library") render(); });  // the draw that starts the load redraws once when it lands; a draw while it loads waits for that one
     const kinds = { all: "Everything", video: "Clips", image: "Stills", voice: "Voice", music: "Music", sfx: "Sound effects" }, n = k => k === "all" ? all_.length : all_.filter(m => kindOf(m) === k).length;
     const find = el("input", { type: "search", placeholder: "Find by name, folder, Spark or \"failed\"", value: LIBF.q, style: "max-width:320px", "aria-label": "Find in the Library" });
     let wait = null; const apply = () => { clearTimeout(wait); if (LIBF.q === find.value) return; LIBF.q = find.value; list = hits();

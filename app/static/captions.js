@@ -1,9 +1,12 @@
 "use strict";
 // Search the Library by what is in it: the Studio's local vision model describes each clip and picture in the
 // background (app/captions.py); this draws the search box, the matching tiles and the "Describe now" button.
-const CAP = { map: null, loading: false, busy: new Set() };
-function capLoad() { if (CAP.map || CAP.loading) return Promise.resolve(); CAP.loading = true;
-  return api("/api/library/captions").then(r => { CAP.map = r.captions || {}; }, () => { CAP.map = {}; }).finally(() => { CAP.loading = false; }); }
+const CAP = { map: null, loading: false, pending: null, busy: new Set() };
+// One load at a time, and everyone who asks while it runs waits for that same load: an answer given at once while the
+// map was still loading made the Library redraw, ask again and redraw again without end (the page never got its turn
+// to read the reply, and the browser's memory grew until the tab died).
+function capLoad() { if (CAP.map) return Promise.resolve(); if (CAP.pending) return CAP.pending; CAP.loading = true;
+  return CAP.pending = api("/api/library/captions").then(r => { CAP.map = r.captions || {}; }, () => { CAP.map = {}; }).finally(() => { CAP.loading = false; CAP.pending = null; }); }
 const capText = path => (CAP.map && CAP.map[path] && CAP.map[path].caption) || null;
 // a tile that has no description yet offers to make one
 function capButton(m) { if (m.kind !== "video" && m.kind !== "image") return null; if (!CAP.map || capText(m.path)) return null;
