@@ -819,8 +819,11 @@ def request(stopped=lambda: False, wait: bool = True, say=None):
     one = engine()
     if WINCUDA and not isinstance(one, External) and not one.present():
         from windows_runtime import mode
-        if mode()["enabled"]:
-            raise RuntimeError("The native Bolt recipe has no Windows verification check yet. See Machine > Feature checks.")
+        if mode()["enabled"]:  # with gating on, Bolt answers only after its own check passed (windows_engine_checks.py)
+            import windows_engine_checks
+            checked = windows_engine_checks.status("bolt")
+            if not checked["qualified"]:
+                raise RuntimeError(checked["why"])
     return one.request(stopped, wait, say)
 
 
@@ -937,8 +940,11 @@ def load_async() -> dict:
         raise RuntimeError(why)
     if WINCUDA:
         from windows_runtime import mode
-        if mode()["enabled"]:
-            raise RuntimeError("The native Bolt recipe has no Windows verification check yet. See Machine > Feature checks.")
+        if mode()["enabled"]:  # with gating on, Bolt answers only after its own check passed (windows_engine_checks.py)
+            import windows_engine_checks
+            checked = windows_engine_checks.status("bolt")
+            if not checked["qualified"]:
+                raise RuntimeError(checked["why"])
 
     def run() -> None:
         try:

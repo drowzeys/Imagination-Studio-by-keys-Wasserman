@@ -232,7 +232,7 @@ def test_progressive_check_is_explicit_queue_work_with_duplicate_refusal(check_u
     assert created == [("qualification", {"feature": "hlg"})]
     monkeypatch.setitem(server.jobs, "check-duplicate", response.json())
     assert check_ui.post("/api/windows/features/check", json={"feature": "hlg"}).status_code == 409
-    assert check_ui.post("/api/windows/features/check", json={"feature": "video"}).status_code == 400
+    assert check_ui.post("/api/windows/features/check", json={"feature": "long"}).status_code == 400  # long video has no check
     assert check_ui.post("/api/windows/features/check", json={"feature": "finish", "command": "ignored"}).status_code == 400
 
 
