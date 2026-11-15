@@ -223,29 +223,29 @@ def test_a_new_turns_steps_follow_the_newest_again_after_the_last_one_was_scroll
 
 
 def test_the_model_picker_leaves_out_a_ready_backend_the_room_does_not_offer():
-    # the server may find an agent the room does not offer (GitHub Copilot CLI, out of the room since 4.4.1)
+    # the server may find an agent the room does not offer (one a later Studio knows, or one taken out of the room)
     out = run(BRAINS + """
-      BR.data.backends.push({ id: "copilot", label: "GitHub Copilot CLI", found: true, where: "here", harness: true },
+      BR.data.backends.push({ id: "elsewhere", label: "An agent the room leaves out", found: true, where: "here", harness: true },
         { id: "mine", label: "My agent", found: true, where: "here", local_agent: true });
       let page = viewAgent();
       const pick = find(page, n => n.tag === "select" && n.attrs && n.attrs["data-ag-model"]);
       out.options = all(pick, n => n.tag === "option").map(n => n.attrs.value);""")
-    assert "copilot" not in out["options"]
+    assert "elsewhere" not in out["options"]
     assert out["options"] == ["claude", "codex", "hermes", "local", "mine"]  # a local agent is still offered
 
 
 def test_a_default_the_room_no_longer_offers_is_neither_chosen_nor_listed():
     out = run(BRAINS + """
-      BR.data.backends.push({ id: "copilot", label: "GitHub Copilot CLI", found: true, where: "here", harness: true });
-      BR.data.settings = { agent: "copilot" }; BR.data.default = "copilot"; AG.backend = "copilot";
+      BR.data.backends.push({ id: "elsewhere", label: "An agent the room leaves out", found: true, where: "here", harness: true });
+      BR.data.settings = { agent: "elsewhere" }; BR.data.default = "elsewhere"; AG.backend = "elsewhere";
       let page = viewAgent();
       const pick = find(page, n => n.tag === "select" && n.attrs && n.attrs["data-ag-model"]);
       out.options = all(pick, n => n.tag === "option").map(n => n.attrs.value); out.backend = AG.backend; out.value = pick.value;""")
-    assert "copilot" not in out["options"] and out["backend"] == "claude" and out["value"] == "claude"  # shown is sent
+    assert "elsewhere" not in out["options"] and out["backend"] == "claude" and out["value"] == "claude"  # shown is sent
 
 
 def test_with_only_an_agent_the_room_does_not_offer_ready_none_of_it_is_chosen():
     out = run(BRAINS + """
-      BR.data.backends = [{ id: "copilot", label: "GitHub Copilot CLI", found: true, where: "here", harness: true }];
-      AG.backend = "copilot"; viewAgent(); out.backend = AG.backend;""")
-    assert out["backend"] == "claude"  # not ready here, so the room says so instead of sending to Copilot
+      BR.data.backends = [{ id: "elsewhere", label: "An agent the room leaves out", found: true, where: "here", harness: true }];
+      AG.backend = "elsewhere"; viewAgent(); out.backend = AG.backend;""")
+    assert out["backend"] == "claude"  # not ready here, so the room says so instead of sending to it
