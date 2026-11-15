@@ -34,6 +34,8 @@ def execution_profile(feature, fingerprint=None):
                        else ("torch-cuda", "comfyui"))
     if feature in ("scout", "sfx", "foley"):
         engine = "mmaudio" if feature == "foley" else "diffusers"
+    if feature == "stable-audio-3-small-sfx":
+        engine = "stable-audio-3"
     profile = shared.execution_profile("windows", backend, engine)
     recorded = (fingerprint or {}).get("measurement_profile")
     if recorded is not None:
@@ -131,11 +133,47 @@ def export():
             receipt = baseline.evidence(feature, False)
         if receipt.get("ok") is True:
             profiles.append(make_profile(feature, "bounded", "passed", receipt, None, receipt.get("hardware", {})))
+    feature = "stable-audio-3-small-sfx"
+    receipt = evidence.saved(feature, "")
+    if receipt.get("ok") is True:
+        profiles.append(audio3_profile(receipt, "passed"))
+    attempt = evidence.saved(feature, "-attempt")
+    if attempt.get("ok") is False and attempt.get("error"):
+        profiles.append(audio3_profile(attempt, failure_kind(attempt)))
     data = {"schema": 1, "generated_at": datetime.now(timezone.utc).isoformat(),
             "purpose": "Shared observations, not local passes, minimum RAM requirements or guaranteed fit.",
             "profiles": profiles}
     shared.validate(data)
     return data
+
+
+def audio3_profile(receipt, outcome):
+    """Normalize the isolated cache without exporting paths or counting blob/link copies twice."""
+    fingerprint = receipt.get("fingerprint", {})
+    files = {name: row for name, row in fingerprint.get("models", {}).get("files", {}).items()
+             if "/snapshots/" in name.replace("\\", "/")}
+    normalized = {
+        "model": "stable-audio-3-small-sfx", "contract": fingerprint.get("contract"),
+        "recipe": {**fingerprint.get("recipe", {}), "max_seconds": max(fingerprint.get("seconds", [5]))},
+        "models": files, "engine": fingerprint.get("upstream", {}), "abi": fingerprint.get("runtime", {}),
+        "guard": {key: fingerprint[key] for key in ("limits_mb", "host_reserve_mb") if key in fingerprint},
+        "hardware": {target: fingerprint[source] for source, target in
+                     (("physical_mb", "physical_total_mb"), ("host_mb", "host_total_mb"),
+                      ("dedicated_mb", "gpu_dedicated_total_mb")) if source in fingerprint},
+        "runtime": {"versions": {name: value for name, value in fingerprint.get("versions", {}).items()
+                                if name in ("torch", "numpy")}},
+    }
+    hashes = {name: row.get("sha256") for name, row in files.items()}
+    if "measurement_profile" in fingerprint:
+        normalized["measurement_profile"] = fingerprint["measurement_profile"]
+    identity = shared.portable_identity(normalized, hashes) if fingerprint else None
+    rows = []
+    for row in receipt.get("results", []):
+        seconds = row.get("audio", {}).get("seconds")
+        rows.append({**row, "case": {"seconds": seconds, **fingerprint.get("recipe", {})}
+                     if shared.number(seconds) else None})
+    return make_profile("stable-audio-3-small-sfx", "bounded", outcome,
+                        {**receipt, "fingerprint": normalized, "results": rows}, identity, hardware(normalized))
 
 
 def normalized_levels(levels):

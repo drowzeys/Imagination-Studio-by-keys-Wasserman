@@ -49,7 +49,7 @@ listeners.click({ target: other, preventDefault() {} }); out.other = document.bo
 def test_the_library_grid_and_cast_pictures_are_the_ones_it_opens():
     page = (ROOT / "app/static/index.html").read_text()
     assert 'el("div", { class: "tile", "data-path": m.path' in page
-    assert 'media(m.path, { "data-zoom": true })' in page  # the Library's grid marks its pictures
+    assert 'n = media(path, { "data-zoom": true })' in page  # the Library marks its pictures where it makes them (libMedia)
     assert '<script src="zoom.js"></script>' in page
     selector = (ROOT / "app/static/zoom.js").read_text().split("const ZOOM_IN = ", 1)[1].split(";", 1)[0]
     assert selector == "'[data-room-view=\"cast\"] img, img[data-zoom]'"

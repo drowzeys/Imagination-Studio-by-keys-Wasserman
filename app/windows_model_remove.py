@@ -56,6 +56,8 @@ def safe_file(root: Path, relative: Path) -> Path:
 
 
 def plan(key: str, root: Path) -> dict:
+    if model_catalog.model(key).get("kind") == "isolated":
+        raise ValueError("Isolated model caches require manual review; automatic removal is unavailable.")
     for variable in ({"voice": ("DRAMA3_CUDA_MODEL", "DRAMA3_CUDA_CODEC"),
                       "music": ("MUSIC3_MODEL",), "bolt": ("BOLT_MODEL", "BOLT_DRAFT_MODEL",)}.get(key, ())):
         if os.environ.get(variable):

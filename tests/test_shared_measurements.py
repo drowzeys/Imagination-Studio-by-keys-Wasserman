@@ -83,6 +83,58 @@ def test_export_does_not_invent_provenance_for_old_failures():
     assert row["hardware"] == {}
 
 
+def test_audio3_export_preserves_recipe_limits_and_distinct_pools_without_private_data(monkeypatch):
+    import windows_audio3
+    key = windows_audio3.MODEL
+    manifest = {
+        "hub/models/snapshots/revision/model.safetensors": {"size": 20, "sha256": "a" * 64},
+        "hub/models/snapshots/revision/t5gemma/model.safetensors": {"size": 10, "sha256": "b" * 64},
+        "hub/models/blobs/model": {"size": 20, "sha256": "a" * 64},
+    }
+    fp = {"contract": 2, "recipe": {"steps": 8, "cfg": 1.0}, "seconds": [1, 5],
+          "limits_mb": [12288, 12288, 16384, 2048], "host_reserve_mb": 2048,
+          "models": {"files": manifest}, "upstream": {"engine.py": "c" * 64},
+          "runtime": {"contract": 1, "python_abi": "3.13", "torch_major": 2, "numpy_major": 2, "cuda_major": 13},
+          "versions": {"torch": "2.14.0+cu134", "numpy": "2.4.6"}, "device": "private-device-hash",
+          "physical_mb": 65536, "host_mb": 32460, "dedicated_mb": 31232}
+    receipt = {"ok": True, "checked_at": "2026-11-08T06:46:40+00:00", "fingerprint": fp,
+               "job_id": "private-job", "results": [
+                   {"case": "private prompt", "rendered": True, "audio": {"seconds": seconds},
+                    "elapsed_s": 20, "peak_job_commit_mb": 10197, "measurements": {
+                        "samples": 75, "initial": {"gpu_dedicated_total_mb": 31232,
+                                                 "host_commit_limit_mb": 67846},
+                        "minima": {"host_available_mb": 7640, "dedicated_gpu_free_mb": 26473}}}
+                   for seconds in (1, 5)]}
+    monkeypatch.setattr(windows, "recipes", lambda: iter(()))
+    monkeypatch.setattr(windows.evidence, "saved", lambda feature, suffix:
+                        receipt if feature == key and not suffix else {})
+    data = windows.export()
+    shared.validate(data)
+    assert len(data["profiles"]) == 1
+    row = data["profiles"][0]
+    assert row["model"] == row["feature"] == key
+    assert row["execution"]["engine"] == "stable-audio-3"
+    assert row["execution"]["architecture"] == "unknown"
+    assert row["provenance_complete"] and row["identity"]["weights_expected"] == 2
+    assert row["identity"]["recipe"] == {"steps": 8, "cfg": 1.0, "max_seconds": 5}
+    assert "guard_sha256" in row["identity"]["contracts"]
+    assert [reading["case"]["seconds"] for reading in row["observations"]] == [1, 5]
+    assert row["observations"][1]["minimum_free_mb"]["host_available_mb"] == 7640
+    assert row["observations"][1]["gpu_pool_mb"] == 31232
+    assert "private" not in json.dumps(row) and "snapshots" not in json.dumps(row)
+
+
+def test_audio3_failed_attempt_export_does_not_invent_identity_or_execution(monkeypatch):
+    key = "stable-audio-3-small-sfx"
+    monkeypatch.setattr(windows, "recipes", lambda: iter(()))
+    monkeypatch.setattr(windows.evidence, "saved", lambda feature, suffix:
+                        {"ok": False, "error": "private worker failure"} if feature == key and suffix else {})
+    row = windows.export()["profiles"][0]
+    assert row["outcome"] == "execution_failed"
+    assert row["identity"] is None and not row["provenance_complete"]
+    assert row["hardware"] == {} and "private" not in json.dumps(row)
+
+
 def test_published_local_measurements_are_visible_without_installed_models():
     result = shared.references("qwen", platform="windows", backend="torch-cuda", engine="comfyui")
     assert result["passed_recipes"] >= 5

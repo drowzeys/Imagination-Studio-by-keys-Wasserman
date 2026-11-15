@@ -52,6 +52,21 @@ def test_the_chooser_shows_found_remote_and_missing_agents():
     assert out["settings"] == "Set up in Settings → Connections" and out["tab"] == "Settings"
 
 
+def test_copilot_is_a_full_agent_and_unvalidated_windows_tools_stay_off():
+    out = run(BRAINS + """
+      BR.data.backends.push({ id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, harness: true, where: "here" });
+      BR.tools.tools[0].enabled = false; BR.tools.tools[0].unsupported = "Not validated on Windows";
+      AG.backend = "copilot"; const page = viewAgent();
+      const chosen = find(page, n => n.tag === "button" && /agr-card/.test(n.attrs.class || "") && text(n).includes("GitHub Copilot CLI"));
+      out.card = text(chosen); out.backend = AG.backend; out.tools = [...AG.tools];
+      out.disabled = button(cls(page, "agr-under"), "Blender").attrs["aria-disabled"];
+      out.harness = agIsHarness("copilot");""")
+    assert out["backend"] == "copilot" and out["harness"]
+    assert "Uses the Studio" in out["card"]
+    assert "blender" not in out["tools"] and "studio" in out["tools"]
+    assert out["disabled"] == "true"
+
+
 def test_a_new_conversation_starts_and_opens_its_thread():
     out = run(BRAINS + """
       answers["/api/agent/tasks"] = { id: "0101-000000-abcdef", status: "queued", thread: "th-1018-100000-bbbbbb" };
@@ -169,3 +184,68 @@ def test_a_local_model_that_takes_tool_calls_uses_the_studio_and_is_the_rooms_fi
     assert "It may use" in out["under"] and "This Studio" in out["under"]
     assert out["sent"][1]["backend"] == "local" and "studio" in out["sent"][1]["tools"]
     assert "Conversation" in out["plain"][0] and "does not take tool calls" in out["plain"][1]
+
+
+def test_a_new_conversations_model_is_picked_beside_send_from_the_ready_ones():
+    out = run(BRAINS + """
+      let page = viewAgent();
+      const pick = find(page, n => n.tag === "select" && n.attrs && n.attrs["data-ag-model"]);
+      out.options = all(pick, n => n.tag === "option").map(n => n.attrs.value); out.value = pick.value;
+      pick.attrs.onchange({ target: { value: "hermes" } }); out.chosen = AG.backend;""")
+    assert out["options"] == ["claude", "codex", "hermes", "local"]  # the ready ones, as their cards say: codex over SSH counts
+    assert out["value"] == "claude" and out["chosen"] == "hermes"
+
+
+def test_a_conversation_keeps_its_model_and_its_steps_scroll_in_their_box():
+    out = run(BRAINS + THREAD + """
+      thread.live = { status: "running", backend: "claude", steps: Array.from({ length: 12 }, (_, i) => ({ text: "→ step " + (i + 1) })), outputs: [], jobs: [] };
+      AG.cur = thread.id; AG.thread = thread; let page = viewAgent();
+      out.pick = !!find(page, n => n.tag === "select" && n.attrs && n.attrs["data-ag-model"]);
+      const box = find(page, n => n.attrs && n.attrs["data-keep-scroll"] === "agent-steps");
+      out.steps = all(box, n => n.tag === "div" && !n.attrs["data-keep-scroll"]).map(text);
+      out.scrolls = /overflow-y:auto/.test(box.attrs.style);""")
+    assert out["pick"] is False
+    assert out["steps"][0] == "→ step 1" and out["steps"][-1] == "→ step 12" and len(out["steps"]) == 12  # every step, not the last six
+    assert out["scrolls"] is True
+
+
+def test_a_new_turns_steps_follow_the_newest_again_after_the_last_one_was_scrolled_up():
+    out = run(BRAINS + THREAD + """
+      const box = { scrollTop: 0, scrollHeight: 500 };
+      document.querySelector = sel => sel.includes("agent-steps") ? box : null; globalThis.requestAnimationFrame = f => f();
+      const live = task => ({ task, status: "running", backend: "claude", steps: [{ text: "→ a step" }], outputs: [], jobs: [] });
+      thread.live = live("t1"); AG.cur = thread.id; AG.thread = thread; viewAgent(); out.first = box.scrollTop;
+      AG.stepsEnd = false; box.scrollTop = 40; viewAgent(); out.scrolledUp = box.scrollTop;
+      thread.live = live("t2"); viewAgent(); out.next = box.scrollTop;""")
+    assert out["first"] == 500  # a live turn follows its newest step
+    assert out["scrolledUp"] == 40  # scrolled up, it stays where it was
+    assert out["next"] == 500  # the next turn follows again
+
+
+def test_the_model_picker_leaves_out_a_ready_backend_the_room_does_not_offer():
+    # the server may find an agent the room does not offer (one a later Studio knows, or one taken out of the room)
+    out = run(BRAINS + """
+      BR.data.backends.push({ id: "elsewhere", label: "An agent the room leaves out", found: true, where: "here", harness: true },
+        { id: "mine", label: "My agent", found: true, where: "here", local_agent: true });
+      let page = viewAgent();
+      const pick = find(page, n => n.tag === "select" && n.attrs && n.attrs["data-ag-model"]);
+      out.options = all(pick, n => n.tag === "option").map(n => n.attrs.value);""")
+    assert "elsewhere" not in out["options"]
+    assert out["options"] == ["claude", "codex", "hermes", "local", "mine"]  # a local agent is still offered
+
+
+def test_a_default_the_room_no_longer_offers_is_neither_chosen_nor_listed():
+    out = run(BRAINS + """
+      BR.data.backends.push({ id: "elsewhere", label: "An agent the room leaves out", found: true, where: "here", harness: true });
+      BR.data.settings = { agent: "elsewhere" }; BR.data.default = "elsewhere"; AG.backend = "elsewhere";
+      let page = viewAgent();
+      const pick = find(page, n => n.tag === "select" && n.attrs && n.attrs["data-ag-model"]);
+      out.options = all(pick, n => n.tag === "option").map(n => n.attrs.value); out.backend = AG.backend; out.value = pick.value;""")
+    assert "elsewhere" not in out["options"] and out["backend"] == "claude" and out["value"] == "claude"  # shown is sent
+
+
+def test_with_only_an_agent_the_room_does_not_offer_ready_none_of_it_is_chosen():
+    out = run(BRAINS + """
+      BR.data.backends = [{ id: "elsewhere", label: "An agent the room leaves out", found: true, where: "here", harness: true }];
+      AG.backend = "elsewhere"; viewAgent(); out.backend = AG.backend;""")
+    assert out["backend"] == "claude"  # not ready here, so the room says so instead of sending to it

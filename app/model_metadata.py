@@ -11,6 +11,7 @@ COMMON = {
 }
 MAC = {**COMMON, "drama3-mlx": "voice", "music3-weights": "music", "ref2va": "ref2va", "fasth3": "video"}
 SPARK = {**COMMON, "drama3-checkpoint": "voice", "music3-weights": "music", "ref2va": "ref2va", "fasth3": "video"}
+SPARK["stable-audio-3-small-sfx"] = "stable-audio-3-small-sfx"
 
 
 def inventory_info(need_id, platform):
@@ -32,5 +33,7 @@ def inventory_info(need_id, platform):
     spec = model_catalog.model(model)
     return {"model": model, "model_metadata": {"label": spec["label"], "platform": platform,
             "backend": backend, "engine": engine, "layout": layout},
+            **({"download_size": model_catalog.size_info(model, platform=platform)}
+               if model == "stable-audio-3-small-sfx" and platform == "linux" else {}),
             "shared_measurements": (shared_measurements.references(model, platform=platform, backend=backend, engine=engine)
                                     if backend != "unknown" and engine != "unknown" else {})}

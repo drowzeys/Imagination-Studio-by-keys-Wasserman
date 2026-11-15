@@ -199,6 +199,8 @@ def test_a_dispatched_clip_does_not_inherit_the_worker_studios_video_default(iso
                 queued = seen["queued"]
                 assert queued["placement"] == {"worker": "head", "policy": "require"}
                 assert queued["status"] == "queued"
+                # the worker knows who follows the clip: its thermal stop leaves the repeat to that Spark (#242)
+                assert server.jobs[queued["id"]]["sender"] == "Test coordinator"
             finally:
                 clip["status"] = "cancelled"
             assert result.result(timeout=5) is False

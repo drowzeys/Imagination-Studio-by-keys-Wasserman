@@ -66,6 +66,577 @@ def run(code: str) -> dict:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
+def sound_delete_setup():
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    helpers = page[page.index("const PICK = new Set()"):page.index("\nlet S = null")]
+    return helpers + "\nglobalThis.clearOut = clearOut;\n" + """
+      S.home = "studio"; tab = "Foley"; globalThis.confirm = () => true;
+      globalThis.toast = t => toasts.push(t);
+      const state = { kinds: { sfx: { ready: true }, foley: { ready: true } } };
+      SFX.state = state; SFX.clips = [];
+      answers["/api/sound/state"] = state; answers["/api/library"] = [];
+    """
+
+
+@pytest.mark.parametrize("kind", ["sfx", "foley"])
+def test_sound_card_delete_refreshes_and_undo_restores(kind):
+    out = run(sound_delete_setup() + f"""
+      const take = {{ id: "take1", kind: {json.dumps(kind)}, prompt: "a door shuts",
+        path: "sound/{kind}/take1.wav", clip: "sound/foley/take1.mp4", source: "renders/source.mp4" }};
+      SFX.takes = [take]; SFX.video = "renders\\\\source.mp4";
+      SHELL.libCache = [take];
+      answers["/api/library"] = [{{ kind: "video", path: take.source }}];
+      answers["/api/sound/takes"] = [];
+      answers["/api/clear"] = {{ files: 2, jobs: 0, skipped: [] }};
+      const del = button(sfxTake(take), "Delete");
+      out.label = del.attrs["aria-label"]; await del.attrs.onclick();
+      out.deleted = SFX.takes.length; out.source = SFX.video; out.cache = SHELL.libCache;
+      out.deleteCall = calls.find(c => c[0] === "/api/clear");
+      out.message = text(toasts[0]);
+      answers["/api/sound/takes"] = [take];
+      answers["/api/trash/restore"] = {{ files: 2, jobs: 0, missing: [] }};
+      await button(toasts[0], "Undo").attrs.onclick({{ target: {{ closest: () => ({{ remove() {{}} }}) }} }});
+      await new Promise(resolve => setImmediate(resolve));
+      out.restored = SFX.takes.map(t => t.id);
+      out.restoreCalled = calls.some(c => c[0] === "/api/trash/restore");
+    """)
+    paths = [f"sound/{kind}/take1.wav"]
+    if kind == "foley":
+        paths.append("sound/foley/take1.mp4")
+    assert out["deleteCall"] == ["/api/clear", {"paths": paths, "films": True}]
+    assert out["label"] == "Delete a door shuts"
+    assert out["deleted"] == 0 and out["cache"] is None
+    assert out["source"] == "renders\\source.mp4"
+    assert "Undo" in out["message"]
+    assert out["restored"] == ["take1"] and out["restoreCalled"]
+
+
+def test_library_delete_invalidates_sound_cache_for_the_next_visit():
+    out = run(sound_delete_setup() + """
+      tab = "Library"; SFX.takes = [{ id: "gone" }]; SFX.video = "sound/foley/gone.mp4";
+      answers["/api/clear"] = { files: 1, jobs: 0, skipped: [] };
+      answers["/api/sound/takes"] = [];
+      await clearOut({ paths: ["sound/sfx/gone.wav"], films: true }, "Delete?");
+      out.invalidated = SFX.takes === null && SFX.clips === null;
+      out.notLoadedYet = !calls.some(c => c[0] === "/api/sound/takes");
+      tab = "Foley"; viewFoley();
+      await new Promise(resolve => setImmediate(resolve));
+      out.loaded = SFX.takes.length === 0;
+      out.selection = SFX.video;
+    """)
+    assert out["invalidated"] and out["notLoadedYet"] and out["loaded"]
+    assert out["selection"] == ""
+
+
+def test_delete_message_links_to_the_library_trash():
+    out = run(sound_delete_setup() + """
+      answers["/api/clear"] = { files: 2, jobs: 0, skipped: [] };
+      answers["/api/sound/takes"] = [];
+      await clearOut({ paths: ["sound/sfx/take1.wav"], films: true }, "Delete?");
+      const link = find(toasts[0], n => n.tag === "a");
+      out.label = text(link.kids); out.href = link.attrs.href;
+      out.undo = !!button(toasts[0], "Undo");
+      let prevented = false;
+      link.attrs.onclick({ preventDefault() { prevented = true; } });
+      out.prevented = prevented; out.tab = tab;
+    """)
+    assert out["label"] == "View trash" and out["href"] == "#Library"
+    assert out["undo"] and out["prevented"] and out["tab"] == "Library"
+
+
+def library_view_setup():
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    view = page[page.index("const LIB_DATE_OPEN ="):page.index("\n/* ---------- Tutorial")]
+    return sound_delete_setup() + view + """
+      const makeElement = el;
+      globalThis.el = (tag, attrs = {}, ...kids) => {
+        const n = makeElement(tag, attrs, ...kids);
+        Object.defineProperty(n, "childNodes", { get: () => n.kids });
+        n.dataset = {}; n.style = {};
+        n.getAttribute = key => n.attrs[key] || null;
+        n.setAttribute = (key, value) => { n.attrs[key] = value; };
+        return n;
+      };
+      tab = "Library"; globalThis.ART = { ready: new Set() }; globalThis.LIBF = { q: "", kind: "all" };
+      globalThis.ACT = { state: {} }; globalThis.actPanel = () => null; CAP.map = {};
+      globalThis.capSearch = () => ({ box: null, results: null });
+      globalThis.rcLibrary = () => null; globalThis.finLibPanel = () => null; globalThis.finLibButton = () => null;
+      globalThis.relHome = p => p;
+      globalThis.LORAS = []; globalThis.capText = () => ""; globalThis.actButtons = () => null; globalThis.capButton = () => null;
+      answers["/api/trash"] = { files: 0, bytes: 0, folder: "studio/trash", last: null };
+    """
+
+
+def test_library_redraw_keeps_its_root_and_players_until_and_after_the_listing_arrives():
+    out = run(library_view_setup() + """
+      let made = 0;
+      globalThis.media = path => { made++; return el("player", { src: path }); };
+      const items = [
+        { path: "renders/one.mp4", kind: "video" },
+        { path: "renders/one.png", kind: "image" },
+        { path: "voice/one.wav", kind: "audio", sound: "voice" },
+        { path: "music/one.wav", kind: "audio", sound: "music" },
+        { path: "sound/sfx/one.wav", kind: "audio", sound: "sfx" }
+      ];
+      answers["/api/library"] = items;
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const players = new Map(LIB.media);
+      for (const player of players.values()) { player.currentTime = 12; player.paused = false; }
+      let draws = 0; const replace = LIB.box.replaceChildren;
+      LIB.box.replaceChildren = (...kids) => { draws++; replace(...kids); };
+      let finish;
+      const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library"
+        ? new Promise(resolve => { finish = resolve; }) : realApi(path, body);
+      const samePlayers = () => [...players].every(([path, player]) =>
+        LIB.media.get(path) === player && find(root, n => n === player)
+        && player.currentTime === 12 && !player.paused);
+      out.sameRoot = viewLibrary() === root;
+      out.pendingPlayers = samePlayers(); out.pendingDraws = draws;
+      finish(items); await new Promise(resolve => setImmediate(resolve));
+      out.unchangedDraws = draws; out.unchangedPlayers = samePlayers();
+      answers["/api/trash"] = { ...answers["/api/trash"], files: 1, bytes: 42, last: { files: 1 } };
+      viewLibrary(); finish(items); await new Promise(resolve => setImmediate(resolve));
+      out.changedTrashPlayers = samePlayers();
+      out.trashUpdated = !!button(root, "Restore last deletion");
+      out.createdPlayers = made;
+      viewLibrary(); finish(items.slice(1)); await new Promise(resolve => setImmediate(resolve));
+      out.deletedPlayerRemoved = !LIB.media.has(items[0].path) && !find(root, n => n === players.get(items[0].path));
+      out.remainingPlayers = items.slice(1).every(m => LIB.media.get(m.path) === players.get(m.path));
+    """)
+    assert out["sameRoot"] and out["pendingPlayers"] and out["unchangedPlayers"]
+    assert out["pendingDraws"] == out["unchangedDraws"] == 1
+    assert out["changedTrashPlayers"] and out["trashUpdated"] and out["createdPlayers"] == 5
+    assert out["deletedPlayerRemoved"] and out["remainingPlayers"]
+
+
+def test_library_redrawn_while_its_descriptions_load_does_not_redraw_without_end():
+    """A redraw of the Library while the descriptions (captions) were still loading asked for them again, was answered at
+    once, and redrew: a loop with no end that kept the reply from ever being read. Firefox on a DGX Spark grew to tens of
+    GB on the Library page."""
+
+    out = run(library_view_setup() + """
+      CAP.map = null; CAP.loading = false; CAP.pending = null;
+      answers["/api/library"] = [{ path: "renders/one.mp4", kind: "video" }];
+      let asked = 0, land, renders = 0;
+      const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library/captions"
+        ? (asked++, new Promise(resolve => { land = resolve; })) : realApi(path, body);
+      globalThis.render = () => { if (++renders > 50) throw new Error("the Library redraws without end"); viewLibrary(); };
+      viewLibrary(); await new Promise(resolve => setImmediate(resolve));   // the listing lands: the first draw asks for the descriptions
+      viewLibrary(); viewLibrary();                                          // redrawn twice while they load (a job's progress, a click)
+      for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+      out.whileLoading = { asked, renders, same: capLoad() === capLoad() };
+      land({ captions: { "renders/one.mp4": { caption: "a red kite" } } });
+      for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+      out.after = { asked, renders, text: capText("renders/one.mp4"), loading: CAP.loading };
+    """)
+    assert out["whileLoading"] == {"asked": 1, "renders": 0, "same": True}
+    assert out["after"] == {"asked": 1, "renders": 1, "text": "a red kite", "loading": False}
+
+
+def test_library_render_keeps_scroll_height_and_loaded_players_with_a_large_listing():
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    render = page[page.index("function keepScroll()"):page.index("\n(async () => { const want")]
+    out = run(library_view_setup() + render + """
+      for (const name of ["viewHome", "viewStory", "viewImage", "viewVideo", "viewPrevis", "viewSound", "viewEditHub",
+          "viewLooks", "viewUpdates", "viewCreate", "viewProduction", "viewImport", "viewMotion", "viewAgent",
+          "viewVoice", "viewMusic", "viewEditor", "viewCast", "viewNight", "viewMachine", "viewSparks", "viewBrains",
+          "viewTutorial"]) if (typeof globalThis[name] === "undefined") globalThis[name] = () => null;
+      globalThis.T = {}; globalThis.coach = () => {}; globalThis.bayUpdate = () => {};
+      globalThis.renderShell = () => {}; globalThis.releaseMedia = () => { throw Error("Library players released"); };
+      const view = el("main"); view.offsetHeight = 6000; NODES["#view"] = view;
+      window.scrollX = 0; window.scrollY = 2500;
+      window.scrollTo = (x, y) => { window.scrollX = x; window.scrollY = y; };
+      answers["/api/library"] = Array.from({ length: 400 }, (_, i) =>
+        ({ path: "renders/clip" + i + ".mp4", kind: "video" }));
+      render(); await new Promise(resolve => setImmediate(resolve));
+      const root = LIB.root, players = new Map(LIB.media);
+      const strip = { dataset: { keepScroll: "timeline" }, scrollLeft: 130, scrollTop: 40 };
+      document.querySelectorAll = () => [strip]; document.querySelector = () => strip;
+      let finish;
+      const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library"
+        ? new Promise(resolve => { finish = resolve; }) : realApi(path, body);
+      render();
+      out.root = view.kids[0] === root; out.height = view.style.minHeight;
+      out.scroll = [window.scrollX, window.scrollY, strip.scrollLeft, strip.scrollTop];
+      out.players = [...players].every(([path, player]) =>
+        LIB.media.get(path) === player && !!find(root, n => n === player));
+      finish(answers["/api/library"]); await new Promise(resolve => setImmediate(resolve));
+      out.scrollAfter = [window.scrollX, window.scrollY];
+      clearTimeout(RENDER_HOLD);
+    """)
+    assert out["root"] and out["players"] and out["height"] == "6000px"
+    assert out["scroll"] == [0, 2500, 130, 40] and out["scrollAfter"] == [0, 2500]
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_library_trash_panel_shows_its_folder_and_controls(unavailable):
+    out = run(library_view_setup() + f"""
+      Object.defineProperty(globalThis, "navigator", {{ configurable: true,
+        value: {{ clipboard: {{ async writeText(p) {{ out.copied = p; }} }} }} }});
+      answers["/api/trash"] = {str(unavailable).lower()} ? new Error("trash could not be loaded")
+        : {{ files: 2, bytes: 4096, folder: "studio/trash", last: {{ files: 2 }} }};
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const panel = find(root, n => n.attrs.id === "library-trash");
+      out.firstPanel = root.kids.find(n => n && n.tag === "section") === panel;
+      out.panel = text(panel);
+      if (!{str(unavailable).lower()}) {{
+        await button(panel, "Copy folder path").attrs.onclick();
+        out.restore = !!button(panel, "Restore last deletion");
+        globalThis.confirm = () => false;
+        await button(panel, "Empty trash").attrs.onclick();
+        out.cancelled = !calls.some(c => c[0] === "/api/trash?confirm=erase");
+      }}
+    """)
+    assert out["firstPanel"]
+    if unavailable:
+        assert "trash could not be loaded" in out["panel"]
+        assert "Trash is empty" not in out["panel"]
+    else:
+        assert "Trash" in out["panel"] and "studio/trash" in out["panel"]
+        assert out["copied"] == "studio/trash" and out["restore"] and out["cancelled"]
+
+
+@pytest.mark.parametrize("kind", ["all", "sfx", "voice", "music", "video", "image"])
+def test_library_select_all_and_bulk_delete_include_filtered_audio(kind):
+    out = run(library_view_setup() + f"""
+      const items = [
+        {{ path: "sound/sfx/one.wav", kind: "audio", sound: "sfx" }},
+        {{ path: "voice/one.wav", kind: "audio", sound: "voice" }},
+        {{ path: "music/one.wav", kind: "audio", sound: "music" }},
+        {{ path: "renders/one.mp4", kind: "video" }},
+        {{ path: "renders/one.png", kind: "image" }}
+      ];
+      LIBF.kind = {json.dumps(kind)}; answers["/api/library"] = items;
+      let root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      button(root, "Select all").attrs.onclick();
+      out.selected = [...LIBPICK];
+      root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const many = button(root, "Delete selected");
+      out.label = text(many.kids); out.enabled = !many.disabled;
+      globalThis.VO = {{ takes: [{{ id: "one" }}] }}; globalThis.MU = {{ takes: [{{ id: "one" }}] }};
+      answers["/api/clear"] = {{ files: LIBPICK.size, jobs: 0, skipped: [] }};
+      await many.attrs.onclick();
+      out.deleteCall = calls.find(c => c[0] === "/api/clear");
+      out.cachesCleared = VO.takes === null && MU.takes === null;
+    """)
+    paths = {
+        "sfx": "sound/sfx/one.wav", "voice": "voice/one.wav", "music": "music/one.wav",
+        "video": "renders/one.mp4", "image": "renders/one.png",
+    }
+    expected = list(paths.values()) if kind == "all" else [paths[kind]]
+    assert out["selected"] == expected
+    assert out["label"].strip() == f"Delete selected ({len(expected)})" and out["enabled"]
+    assert out["deleteCall"] == ["/api/clear", {"paths": expected, "films": True}]
+    assert out["cachesCleared"]
+
+
+@pytest.mark.parametrize("kind", ["sfx", "voice", "music"])
+def test_library_audio_cards_have_select_and_the_same_trash_icon_as_sound(kind):
+    path = "sound/sfx/one.wav" if kind == "sfx" else f"{kind}/one.wav"
+    out = run(library_view_setup() + f"""
+      const take = {{ id: "one", kind: "sfx", path: "sound/sfx/one.wav" }};
+      const item = {{ kind: "audio", sound: {json.dumps(kind)}, path: {json.dumps(path)} }};
+      let updates = 0; const card = libSoundTile(item, true, () => updates++);
+      const checkbox = find(card, n => n.tag === "input" && n.attrs.type === "checkbox");
+      checkbox.attrs.onchange({{ target: {{ checked: true }} }}); out.selected = LIBPICK.has(item.path);
+      checkbox.attrs.onchange({{ target: {{ checked: false }} }}); out.unselected = !LIBPICK.has(item.path);
+      out.updates = updates; out.selectLabel = checkbox.attrs["aria-label"];
+      const del = button(card, "Delete");
+      out.deleteLabel = del.attrs["aria-label"]; out.deleteClass = del.attrs.class;
+      out.libraryIcon = find(del, n => n.tag === "span").innerHTML;
+      out.soundIcon = find(button(sfxTake(take), "Delete"), n => n.tag === "span").innerHTML;
+      answers["/api/clear"] = {{ files: 1, jobs: 0, skipped: [] }};
+      await del.attrs.onclick(); out.deleteCall = calls.find(c => c[0] === "/api/clear");
+    """)
+    assert out["selected"] and out["unselected"] and out["updates"] == 2
+    assert out["selectLabel"] == f"Select {path}" and out["deleteLabel"] == f"Delete {path}"
+    assert "trash-button" in out["deleteClass"]
+    assert out["libraryIcon"] == out["soundIcon"] and 'M4 6h16' in out["soundIcon"]
+    assert out["deleteCall"] == ["/api/clear", {"paths": [path], "films": True}]
+
+
+def test_sound_actions_are_compact_and_foley_uses_a_more_menu():
+    out = run("""
+      const take = { id: "take1", kind: "sfx", path: "sound/sfx/take1.wav" };
+      const sound = sfxTake(take);
+      const row = find(sound, n => (n.attrs.class || "").includes("sfx-take-actions"));
+      out.actions = row.kids.filter(n => n && n.tag === "button").map(n =>
+        (n.attrs.class || "").includes("trash-button") ? n.attrs["aria-label"] : text(n.kids));
+      out.referenceLabel = button(row, "reference").attrs["aria-label"];
+      const foley = sfxTake({ ...take, kind: "foley", clip: "sound/foley/take1.mp4" });
+      const menu = find(foley, n => n.tag === "details");
+      out.menuLabel = find(menu, n => n.tag === "summary").attrs["aria-label"];
+      out.menuActions = ["+ timeline", "reference", "again", "Delete"].map(label => !!button(menu, label));
+    """)
+    assert out["actions"] == ["reference", "again", "Delete take1"]
+    assert out["referenceLabel"] == "Use as reference sound"
+    assert out["menuLabel"] == "Foley take actions"
+    assert all(out["menuActions"])
+
+
+def test_sound_card_delete_cancel_errors_and_busy_files():
+    out = run(sound_delete_setup() + """
+      const take = { id: "take1", kind: "sfx", path: "sound/sfx/take1.wav", prompt: "a door shuts" };
+      SFX.takes = [take];
+      globalThis.confirm = () => false;
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.cancelCalls = calls.length; out.cancelTakes = SFX.takes.length;
+      globalThis.confirm = () => true;
+      answers["/api/clear"] = new Error("trash is unavailable");
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.errorTakes = SFX.takes.length; out.error = toasts[0];
+      answers["/api/clear"] = { files: 0, jobs: 0, skipped: [{ why: "a queued job uses it" }] };
+      answers["/api/sound/takes"] = [take];
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.busyTakes = SFX.takes.length; out.busy = text(toasts[1]);
+      out.busyUndo = !!button(toasts[1], "Undo");
+      answers["/api/clear"] = { files: 2, jobs: 0, skipped: [] };
+      answers["/api/sound/takes"] = new Error("could not refresh sound takes");
+      await button(sfxTake(take), "Delete").attrs.onclick();
+      out.refreshError = text(viewFoley());
+      answers["/api/sound/takes"] = [];
+      await button(viewFoley(), "Retry").attrs.onclick();
+      out.retried = SFX.takeError === "";
+    """)
+    assert out["cancelCalls"] == 0 and out["cancelTakes"] == 1
+    assert out["errorTakes"] == 1 and out["error"] == "trash is unavailable"
+    assert out["busyTakes"] == 1 and "a queued job uses it" in out["busy"]
+    assert out["busyUndo"] is False
+    assert "could not refresh sound takes" in out["refreshError"] and "Retry" in out["refreshError"]
+    assert out["retried"]
+
+
+def library_dates_setup(*, captions=False):
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    view = page[page.index("const LIBF ="):page.index("\n/* ---------- Tutorial")]
+    return sound_delete_setup() + view + """
+      const makeElement = el;
+      globalThis.el = (tag, attrs = {}, ...kids) => {
+        const n = makeElement(tag, attrs, ...kids);
+        Object.defineProperty(n, "childNodes", { get: () => n.kids });
+        n.dataset = {}; n.style = {}; n.open = !!attrs.open; n.events = {};
+        n.addEventListener = (type, handler) => { n.events[type] = handler; };
+        n.getAttribute = key => n.attrs[key] || null;
+        n.setAttribute = (key, value) => { n.attrs[key] = value; };
+        return n;
+      };
+      tab = "Library"; globalThis.ART = { ready: new Set() };
+      globalThis.ACT = { state: {} }; globalThis.actPanel = () => null; CAP.map = {};
+      globalThis.rcLibrary = () => null; globalThis.finLibPanel = () => null; globalThis.finLibButton = () => null;
+      globalThis.LORAS = []; globalThis.actButtons = () => null; globalThis.capButton = () => null;
+      globalThis.relHome = p => p;
+      answers["/api/trash"] = { files: 0, bytes: 0, folder: "studio/trash", last: null };
+    """ + ("" if captions else 'globalThis.capSearch = () => ({ box: null, results: null });\n')
+
+
+@pytest.mark.parametrize("today", ["2026-11-08", "2026-01-03", "2024-03-03"])
+def test_library_date_groups_have_calendar_boundaries_and_unique_members(today):
+    out = run(library_dates_setup() + f"""
+      const [year, month, day] = {json.dumps(today)}.split("-").map(Number);
+      const now = new Date(year, month - 1, day, 12);
+      const recent = new Date(year, month - 1, day - 6);
+      const item = (path, date) => ({{ path, modified: date.getTime() / 1000 }});
+      const items = [
+        item("older-year", new Date(year - 2, 0, 1)),
+        item("month-boundary", new Date(year, month - 1, 1)),
+        item("today", now),
+        item("just-before-week", new Date(recent.getTime() - 1000)),
+        item("week-boundary", recent),
+        item("previous-month", new Date(year, month - 2, 1)),
+        item("oldest-month", new Date(year, month - 12, 1)),
+        item("year-boundary", new Date(year, month - 13, 1)),
+        {{ path: "missing-date" }}, {{ path: "invalid-date", modified: "yesterday" }},
+        {{ path: "overflow-date", modified: 1e30 }}
+      ];
+      out.groups = libDateGroups(items, now);
+      out.paths = out.groups.flatMap(g => g.items.map(m => m.path));
+      out.inputOrder = items.map(m => m.path);
+    """)
+    groups = out["groups"]
+    assert groups[0]["key"] == "recent" and groups[0]["label"] == "Past 7 days"
+    assert groups[0]["items"][0]["path"] == "today"
+    for group in groups[:-1]:
+        stamps = [m["modified"] for m in group["items"]]
+        assert stamps == sorted(stamps, reverse=True)
+    by_path = {m["path"]: g["key"] for g in groups for m in g["items"]}
+    assert by_path["week-boundary"] == "recent" and by_path["today"] == "recent"
+    assert by_path["just-before-week"] != "recent"
+    assert by_path["oldest-month"].startswith("month-")
+    assert by_path["year-boundary"].startswith("year-")
+    assert groups[-1]["key"] == "unknown" and groups[-1]["label"] == "Date unavailable"
+    assert len(out["paths"]) == len(set(out["paths"])) == 11
+    assert out["inputOrder"][0] == "older-year"
+    if today == "2026-11-08":
+        assert by_path["month-boundary"] == "month-2026-10"
+        assert by_path["previous-month"] == "month-2026-9"
+        assert groups[1]["label"].startswith("This month")
+        assert groups[2]["label"].startswith("Last month")
+    else:
+        assert by_path["month-boundary"] == "recent"
+        assert by_path["previous-month"].startswith("month-")
+
+
+def test_library_date_sections_preserve_search_selection_and_open_choices():
+    out = run(library_dates_setup() + """
+      const now = new Date(), older = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      answers["/api/library"] = [
+        { path: "renders/new.mp4", kind: "video", modified: now.getTime() / 1000 },
+        { path: "renders/older.png", kind: "image", modified: older.getTime() / 1000 },
+        { path: "voice/older.wav", kind: "audio", sound: "voice", modified: older.getTime() / 1000 }
+      ];
+      let root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const recent = find(root, n => n.attrs["data-date-group"] === "recent");
+      const old = find(root, n => (n.attrs["data-date-group"] || "").startsWith("month-"));
+      out.defaults = [recent.open, old.open];
+      out.counts = [recent, old].map(g => find(g, n => n.attrs.class === "lib-date-count").textContent);
+      const originalTile = find(old, n => n.attrs["data-path"] === "renders/older.png");
+      button(root, "Select all").attrs.onclick();
+      out.all = [...LIBPICK]; LIBPICK.clear();
+      const search = find(root, n => n.attrs["aria-label"] === "Find in the Library");
+      search.value = "older"; search.events.change();
+      out.search = [recent.style.display, old.style.display, old.open];
+      out.sameTile = find(old, n => n.attrs["data-path"] === "renders/older.png") === originalTile;
+      button(root, "Select all").attrs.onclick(); out.filtered = [...LIBPICK];
+      search.value = "no-match"; search.events.change();
+      const empty = find(root, n => n.tag === "div" && text(n.kids) === "No files match the current filters.");
+      out.noMatch = empty.style.display === "" && recent.style.display === "none" && old.style.display === "none";
+      search.value = ""; search.events.change();
+      out.cleared = [recent.open, old.open];
+      find(old, n => n.tag === "summary").attrs.onclick(); old.open = true;
+      root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      out.remembered = find(root, n => (n.attrs["data-date-group"] || "").startsWith("month-")).open;
+      out.selectedStill = LIBPICK.has("renders/older.png");
+    """)
+    assert out["defaults"] == [True, False]
+    assert out["counts"] == ["1 file", "2 files"]
+    assert sorted(out["all"]) == ["renders/new.mp4", "renders/older.png", "voice/older.wav"]  # sounds too (#245)
+    assert out["search"] == ["none", "", True] and out["sameTile"]
+    assert sorted(out["filtered"]) == ["renders/older.png", "voice/older.wav"] and out["noMatch"]
+    assert out["cleared"] == [True, False]
+    assert out["remembered"] and out["selectedStill"]
+
+
+@pytest.mark.parametrize("kind", ["video", "image", "voice"])
+def test_library_date_groups_follow_kind_filters_and_open_newest_nonempty_section(kind):
+    out = run(library_dates_setup() + f"""
+      const now = new Date();
+      const old = new Date(now.getFullYear() - 2, 0, 1).getTime() / 1000;
+      answers["/api/library"] = [
+        {{ path: "renders/new.mp4", kind: "video", modified: now.getTime() / 1000 }},
+        {{ path: "renders/old.png", kind: "image", modified: old }},
+        {{ path: "voice/old.wav", kind: "audio", sound: "voice", modified: old }}
+      ];
+      LIBF.kind = {json.dumps(kind)};
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const group = find(root, n => n.attrs.class === "lib-date-group");
+      out.open = group.open; out.count = find(group, n => n.attrs.class === "lib-date-count").textContent;
+      out.path = find(group, n => !!n.attrs["data-path"]).attrs["data-path"];
+    """)
+    assert out["open"] and out["count"] == "1 file"
+    assert out["path"] == {"video": "renders/new.mp4", "image": "renders/old.png", "voice": "voice/old.wav"}[kind]
+
+
+def test_library_date_groups_show_an_empty_library_message():
+    out = run(library_dates_setup() + """
+      answers["/api/library"] = [];
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      out.message = text(root); out.group = !!find(root, n => n.attrs.class === "lib-date-group");
+    """)
+    assert "No media yet" in out["message"] and not out["group"]
+
+
+def test_library_date_groups_keep_players_and_open_choices_across_listing_refreshes():
+    out = run(library_dates_setup() + """
+      let made = 0;
+      globalThis.media = path => { made++; return el("player", { src: path }); };
+      const now = new Date(), old = new Date(now.getFullYear() - 2, 0, 1).getTime() / 1000;
+      const items = [
+        { path: "renders/new.mp4", kind: "video", modified: now.getTime() / 1000 },
+        { path: "renders/old.png", kind: "image", modified: old },
+        { path: "voice/old.wav", kind: "audio", sound: "voice", modified: old }
+      ];
+      answers["/api/library"] = items;
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const players = new Map(LIB.media);
+      for (const player of players.values()) { player.currentTime = 12; player.paused = false; }
+      const recent = find(root, n => n.attrs["data-date-group"] === "recent");
+      find(recent, n => n.tag === "summary").attrs.onclick(); recent.open = false;
+      let draws = 0; const replace = LIB.box.replaceChildren;
+      LIB.box.replaceChildren = (...kids) => { draws++; replace(...kids); };
+      let finish; const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library"
+        ? new Promise(resolve => { finish = resolve; }) : realApi(path, body);
+      const samePlayers = () => [...players].every(([path, player]) =>
+        LIB.media.get(path) === player && find(root, n => n === player)
+        && player.currentTime === 12 && !player.paused);
+      out.sameRoot = viewLibrary() === root;
+      out.pendingPlayers = samePlayers(); out.pendingDraws = draws;
+      finish(items); await new Promise(resolve => setImmediate(resolve));
+      out.unchangedDraws = draws; out.unchangedPlayers = samePlayers();
+      out.stillClosed = !find(root, n => n.attrs["data-date-group"] === "recent").open;
+      viewLibrary(); finish(items.slice(1)); await new Promise(resolve => setImmediate(resolve));
+      out.removed = !LIB.media.has(items[0].path) && !find(root, n => n === players.get(items[0].path));
+      out.remaining = items.slice(1).every(m => LIB.media.get(m.path) === players.get(m.path));
+      viewLibrary(); finish(items); await new Promise(resolve => setImmediate(resolve));
+      out.restored = !!find(root, n => n === LIB.media.get(items[0].path));
+      out.createdPlayers = made;
+    """)
+    assert out["sameRoot"] and out["pendingPlayers"] and out["unchangedPlayers"] and out["stillClosed"]
+    assert out["pendingDraws"] == out["unchangedDraws"] == 1
+    assert out["removed"] and out["remaining"] and out["restored"] and out["createdPlayers"] == 4
+
+
+def test_library_date_groups_preserve_caption_search_and_selection():
+    out = run(library_dates_setup(captions=True) + """
+      answers["/api/library"] = [{ path: "renders/one.mp4", kind: "video", modified: 1 }];
+      answers["/api/library/search?q=cat"] = { items: [{ path: "renders/one.mp4", caption: "a cat" }] };
+      const root = viewLibrary(); await new Promise(resolve => setImmediate(resolve));
+      const grid = find(root, n => n.attrs.class === "lib-dates");
+      const search = find(root, n => n.attrs["aria-label"] === "Search what is in your clips");
+      search.value = "cat"; await search.events.change();
+      out.hidden = grid.style.display === "none";
+      button(root, "Select all").attrs.onclick(); out.selected = [...LIBPICK];
+      search.value = ""; await search.events.change();
+      out.visible = grid.style.display === "";
+    """)
+    assert out["hidden"] and out["visible"] and out["selected"] == ["renders/one.mp4"]
+
+
+def test_library_date_group_render_keeps_scroll_height_and_players_with_400_clips():
+    page = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    render = page[page.index("function keepScroll()"):page.index("\n(async () => { const want")]
+    out = run(library_dates_setup() + render + """
+      for (const name of ["viewHome", "viewStory", "viewImage", "viewVideo", "viewPrevis", "viewSound", "viewEditHub",
+          "viewLooks", "viewUpdates", "viewCreate", "viewProduction", "viewImport", "viewMotion", "viewAgent",
+          "viewVoice", "viewMusic", "viewEditor", "viewCast", "viewNight", "viewMachine", "viewSparks", "viewBrains",
+          "viewTutorial"]) if (typeof globalThis[name] === "undefined") globalThis[name] = () => null;
+      globalThis.T = {}; globalThis.coach = () => {}; globalThis.bayUpdate = () => {};
+      globalThis.renderShell = () => {}; globalThis.releaseMedia = () => { throw Error("Library players released"); };
+      const view = el("main"); view.offsetHeight = 6000; NODES["#view"] = view;
+      window.scrollX = 0; window.scrollY = 2500;
+      window.scrollTo = (x, y) => { window.scrollX = x; window.scrollY = y; };
+      answers["/api/library"] = Array.from({ length: 400 }, (_, i) =>
+        ({ path: "renders/clip" + i + ".mp4", kind: "video", modified: 1 }));
+      render(); await new Promise(resolve => setImmediate(resolve));
+      const root = LIB.root, players = new Map(LIB.media);
+      let finish; const realApi = api;
+      globalThis.api = (path, body) => path === "/api/library"
+        ? new Promise(resolve => { finish = resolve; }) : realApi(path, body);
+      render();
+      out.root = view.kids[0] === root; out.height = view.style.minHeight;
+      out.scroll = [window.scrollX, window.scrollY];
+      out.players = [...players].every(([path, player]) =>
+        LIB.media.get(path) === player && !!find(root, n => n === player));
+      finish(answers["/api/library"]); await new Promise(resolve => setImmediate(resolve));
+      out.scrollAfter = [window.scrollX, window.scrollY]; clearTimeout(RENDER_HOLD);
+    """)
+    assert out["root"] and out["players"] and out["height"] == "6000px"
+    assert out["scroll"] == out["scrollAfter"] == [0, 2500]
+
+
 def test_the_memory_guard_fold_refuses_on_a_card_and_still_stops_a_spark():
     out = run("""document.createElementNS = () => ({ setAttribute() {}, append() {}, style: {} });
       answers["/api/storage"] = { buckets: [], free_gb: 10, total_gb: 20, used_pct: 50, computing: false };
@@ -79,6 +650,23 @@ def test_the_memory_guard_fold_refuses_on_a_card_and_still_stops_a_spark():
     for face in ("spark", "mac"):
         assert "stops the renderer if memory falls under its floor" in out[face]
         assert "leave the GPU" not in out[face]
+
+
+def test_windows_small_sfx_entry_points_preserve_the_upstream_screen():
+    out = run("""
+      globalThis.artSlot = () => null;
+      globalThis.imageModelName = () => "Qwen 2.1 Turbo";  // index.html's: the Windows image landing names the model (#247)
+      S.platform = "windows"; SFX.mode = "foley";
+      const start = STARTS().find(c => c.id === "sfx"); out.start = start.one;
+      start.run(); out.startMode = SFX.mode;
+      out.image = text(viewImage()); out.sound = text(viewSound());
+      SFX.mode = "foley"; button(viewSound(), "Make a sound effect").attrs.onclick(); out.soundMode = SFX.mode;
+      S.platform = "mac"; out.macSound = text(viewSound()); out.macStart = STARTS().find(c => c.id === "sfx").one;
+    """)
+    assert "Stable Audio 3 Small SFX" in out["start"] and out["startMode"] == "sfx"
+    assert "Qwen 2.1" in out["image"]
+    assert "Stable Audio 3 Small SFX is the default" in out["sound"] and out["soundMode"] == "sfx"
+    assert "Stable Audio 3" not in out["macSound"] and "Foley" in out["macStart"]
 
 
 def test_the_chip_names_the_card_and_a_spark_stays_a_spark():
@@ -528,6 +1116,70 @@ def test_connect_ticks_find_signin_verify_and_default_by_itself():
     assert out["s2"] == {"find": "done", "signin": "done", "verify": "done", "default": "done"} and "Answered “ok” in 2.1 s" in out["done"] and "is ready" in out["done"]
 
 
+def test_copilot_terminal_login_can_be_checked_while_auth_status_is_unknown():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "unknown" }, default_ready: true });
+      await connectStart(b); await settle();
+      out.word = brainWord(b)[0]; out.initial = steps("copilot"); out.instructions = text(panel("copilot"));
+      out.automaticChecks = calls.filter(c => c[0] === "/api/brains/copilot/verify").length;
+      answers["/api/brains/copilot/verify"] = { ok: true, text: "ok", elapsedMs: 120 };
+      await button(panel("copilot"), "Check").attrs.onclick();
+      out.checked = CN.data.copilot.verify.ok;
+      answers["/api/brains/copilot/connect"] = base("copilot", { signin: { state: "signed_in" },
+        verify: CN.data.copilot.verify, default_ready: true });
+      await cnLoad("copilot");
+      out.finished = steps("copilot"); out.readyWord = brainWord(b)[0];
+      out.signinRequests = calls.filter(c => c[0] === "/api/brains/copilot/signin").length;
+    """)
+    assert out["word"] == "Not checked" and out["initial"]["verify"] == "wait"
+    assert "If you already signed in, press Check" in out["instructions"]
+    assert out["automaticChecks"] == 0 and out["signinRequests"] == 0
+    assert out["checked"] and out["readyWord"] == "Ready"
+    assert out["finished"]["signin"] == out["finished"]["verify"] == "done"
+
+
+def test_copilot_remembered_connection_is_ready_without_an_automatic_check():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "copilot", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      answers["/api/brains/copilot/connect"] = base("copilot", {
+        signin: { state: "signed_in", remembered: true, detail: "Previously connected; not rechecked automatically." },
+        verify: { ok: true, at: 1794000000, remembered: true }, default: true });
+      await connectStart(b); await settle();
+      out.word = brainWord(b)[0]; out.steps = steps("copilot"); out.instructions = text(panel("copilot"));
+      out.nudge = !!connectNudge("home");
+      out.checkAgain = !!button(panel("copilot"), "Check again");
+      out.automaticChecks = calls.filter(c => c[0] === "/api/brains/copilot/verify").length;
+    """)
+    assert out["word"] == "Ready" and not out["nudge"]
+    assert out["steps"]["signin"] == out["steps"]["verify"] == "done"
+    assert "Remembered across restarts" in out["instructions"]
+    assert "undefined" not in out["instructions"]
+    assert out["checkAgain"] and out["automaticChecks"] == 0
+
+
+def test_copilot_failed_login_offers_check_after_terminal_login_not_an_app_signin():
+    out = run(CONNECT + """
+      const b = { id: "copilot", label: "GitHub Copilot CLI", kind: "cli", found: true, where: "here",
+        signin_flow: "terminal", signin_command: "copilot login" };
+      BR.data = { default: "local", settings: {}, backends: [b] }; BR.tools = { tools: [] };
+      CN.open = "copilot"; CN.data.copilot = base("copilot", { signin: { state: "unknown" },
+        verify: { ok: false, error: "Run copilot login, then Check again.", fix: { action: "signin", label: "Sign in again" } } });
+      answers["/api/brains/copilot/verify"] = { ok: false, error: "Still not signed in." };
+      await button(panel("copilot"), "Check again after copilot login").attrs.onclick();
+      out.verify = calls.some(c => c[0] === "/api/brains/copilot/verify");
+      out.signin = calls.some(c => c[0] === "/api/brains/copilot/signin");
+      CN.data.copilot = base("copilot", { find: { found: false }, signin: { state: "unknown" } });
+      out.missingCheck = !!button(panel("copilot"), "Check");
+    """)
+    assert out["verify"] and not out["signin"]
+    assert not out["missingCheck"]
+
+
 def test_connect_installs_a_missing_cli_shows_a_device_code_and_the_fix_for_a_failed_answer():
     out = run(CONNECT + """
       const b = { id: "codex", label: "Codex", kind: "cli", found: false, where: "ssh:mac", signin_flow: "pty" };
@@ -614,6 +1266,22 @@ def test_home_and_the_agent_room_offer_connect_until_an_agent_is_signed_in():
     assert "Connect your agent" in out["home"] and out["primary"].endswith("Connect Codex")  # the one that is installed first
     assert out["went"][:3] == ["Home", "codex", "codex"] and out["went"][3] == 1  # Connect opens over the page: nothing to go and find
     assert out["room"] and out["dismissed"] and out["roomStill"] and out["gone"]
+
+
+@pytest.mark.parametrize("codex_found", [False, True])
+def test_connect_banner_prefers_installed_cli_including_copilot(codex_found):
+    out = run(CONNECT + """
+      BR.data = { default: "claude", settings: {}, backends: CN_ORDER.map(id => ({
+        id, label: id, kind: "cli", found: id === "copilot" || id === "codex" && CODEX_FOUND
+      })) };
+      BR.status = { copilot: { state: "unknown" }, codex: { state: "signed_out" } };
+      const card = connectNudge("home");
+      const chips = find(card, n => n.attrs && n.attrs.class === "chips");
+      out.buttons = chips.kids.filter(n => n && n.tag === "button").map(n => text(n).trim());
+    """.replace("CODEX_FOUND", json.dumps(codex_found)))
+    assert out["buttons"][0].endswith("Connect codex" if codex_found else "Connect copilot")
+    assert out["buttons"][-1] == ("copilot" if codex_found else "grok")
+    assert len(out["buttons"]) == 6
 
 
 def test_the_connect_card_offers_the_local_brain_and_hermes_asks_which_account():
