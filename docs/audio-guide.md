@@ -473,7 +473,8 @@ The three actions on a sound effect's *Made here* card fit on one line; a Foley 
 **Delete** uses the Library's trash-and-Undo flow. A sound effect's audio and take record
 go together; a Foley take also removes its rendered video, never the original source clip. Files needed by queued
 or running jobs stay protected, including native Windows takes stored inside a job's own sound folder.
-A deleted voice take also takes its text sidecar to the trash. Empty per-job sound folders are removed; shared
+A deleted voice take also takes its text sidecar to the trash. A sound whose beats were measured takes that record
+(`<name>.beats.json`) along too. Empty per-job sound folders are removed; shared
 folders and folders with files left inside stay. Use **Undo** in the message or **Restore last deletion** in the
 Library to put the files back, recreating their folders.
 **View trash**, beside Undo, opens the Library's **Trash** panel. It shows the folder location, lets you copy its
