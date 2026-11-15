@@ -74,5 +74,14 @@ the person opted in with `--stop-foreign`) stops the largest of their own model 
 cancels the render. Its log is `memguard.log` in the folder `status` names. Remove it with
 `python3 scripts/memguard.py uninstall`.
 
+## 6. More than one NVIDIA card in the machine
+
+One Studio manages up to four cards, itself on one of them: it starts a worker of its own on each other card and
+shares single clips out between them. Set it up through the Studio, never beside it: do not start a second Studio, a
+ComfyUI or a `CUDA_VISIBLE_DEVICES` launcher for another card. The recipe, with the calls and what each refusal
+means, is [docs/local-gpus.md](docs/local-gpus.md): start the Studio with `STUDIO_GPU=<head index>`, then
+`POST /api/sparks/local {"gpu": "local:GPU-…", "action": "start"}` per card (**Machine → Sparks → Local GPUs →
+Start**) and `POST /api/sparks {"sparks": N}`. Host RAM, not VRAM, decides how many clips run at once.
+
 If the Studio needs a key (`401`), send `X-Studio-Key: <key>` from `~/ImaginationStudio/access-key`; from this
 computer itself none is needed.
