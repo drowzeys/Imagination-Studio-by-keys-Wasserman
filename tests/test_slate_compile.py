@@ -458,6 +458,117 @@ def test_a_place_s_none_and_n_a_never_reach_the_prompt():
     assert "N/A" not in prompt and "None" not in prompt and "unknown" not in prompt and "lit by" not in prompt and "night.," not in prompt
 
 
+# The prompt a caller that passes no summary gets, taken before the change and unchanged by it: the scene on the end of
+# the lead sentence in summary:, and once more in the shot.
+NO_SUMMARY = """\
+subject_definitions:
+<Subject 1> is Theo, 34 years old, male, hair: cropped dark hair, wearing a grey t-shirt shown in <Picture 1>.
+<Picture 2> is the place: Iron Yard Gym
+
+summary:
+[subject reference] A new video with <Subject 1>, keeping how each looks in its picture. Theo stands by the window in a low-ceilinged gym.
+
+retention_analysis:
+<Subject 1> (appears in [Shot 1]): fully_preserved - the identity, face, hair, clothing and colours shown in <Picture 1> are kept.
+
+detailed_description:
+[Shot 1] Theo stands by the window in a low-ceilinged gym. Medium shot at eye level. He sets the kettlebell down and breathes out. <Subject 1> (S1), in a low male voice, speaks: <d>[English] That is the set.</d> Mouth movements follow the words. After the last word the speaker stops talking, closes the mouth and stays silent until the end of the clip. No text anywhere in the frame.
+
+overall_soundscape:
+Iron plates settle, a fan hums. After the spoken lines only ambient sound is heard."""
+
+
+def gym_fields() -> dict:
+    """The wizard's fields of a shot on one picture, as its Create tab hands them over."""
+
+    return {"scene": "Theo stands by the window in a low-ceilinged gym.", "camera": "Medium shot at eye level.",
+            "action": "He sets the kettlebell down and breathes out.",
+            "subjects": ["Theo, 34 years old, male, hair: cropped dark hair, wearing a grey t-shirt"],
+            "definitions": ["<Picture 2> is the place: Iron Yard Gym"],
+            "dialogue": [{"text": "That is the set.", "voice": "a low male voice", "language": "English", "subject": 1}],
+            "soundscape": "Iron plates settle, a fan hums.", "music": "N/A", "avoid": "No text anywhere in the frame."}
+
+
+def test_a_summary_from_its_caller_replaces_the_scene_s_second_copy():
+    """A caller with its own short line gets it after the lead sentence, and the scene is left to the shot; a caller
+    without one gets the prompt it got before, word for word."""
+
+    made = gym_fields()
+    assert server.compose_references(made, 1) == NO_SUMMARY
+    told = server.compose_references({**made, "summary": "Iron Yard Gym. He sets the kettlebell down."}, 1)
+    assert "picture. Iron Yard Gym. He sets the kettlebell down.\n\nretention_analysis" in told
+    assert told.count(made["scene"]) == 1 and len(told) < len(NO_SUMMARY)
+    assert f"detailed_description:\n[Shot 1] {made['scene']} Medium shot at eye level." in told  # the scene, in the shot
+    assert server.compose_references({**made, "summary": " "}, 1) == NO_SUMMARY  # nothing to say: as before
+
+
+SUBJECT = "Leo steadies himself over the bar and breathes out slow. Mia watches him from the bench."
+PLACE = "A paved walkway under old trees"  # the walkway sheet's description (bible_film)
+
+
+def reference_film() -> dict:
+    """A reference shot in this film's cast: two people with pictures pinned, the place, a
+    Subject section naming both and a two-beat sheet."""
+
+    made = bible_film()
+    shot = made["scenes"][0]["shots"][0]
+    shot["prompt"] = ("# Subject\n" + SUBJECT + "\n# Composition\nMedium two-shot in profile.\n"
+                      "# Lighting\nLow-key light from the ceiling strip.")
+    shot["beatSheet"] = [{"from": 0, "to": 2, "text": "Leo sets the barbell down."}, {"from": 2, "to": 5, "text": "Mia looks up and smiles."}]
+    return made
+
+
+def passed_to_compose(made: dict) -> tuple[dict, int]:
+    """(fields, pictures) as Slate hands them to the reference composer for this film's shot-1, without compiling it."""
+
+    seen, had = {}, slate.compose_references
+
+    def capture(fields, count):
+        seen.update(fields=fields, count=count)
+        return ""
+
+    try:
+        slate.compose_references = capture
+        slate.compile_shot(made, "shot-1")
+    finally:
+        slate.compose_references = had
+    return seen["fields"], seen["count"]
+
+
+def test_a_reference_shot_says_the_place_once_and_keeps_the_subject():
+    """A shot cast on the bible's pictures: the place's description once, its name alone in the summary (the action is
+    the shot's, and beat 1 is said once, in the beats), and the Subject section in the shot on every shot, beat sheet or
+    not: it is the one place a person named only there is described."""
+
+    def test():
+        told = slate.compile_shot(reference_film(), "shot-1")
+        prompt = told["prompt"]
+        assert told["mode"] == "references" and prompt.count(PLACE) == 1  # the place, in the shot
+        assert f"[Shot 1] Campus Walkway: {PLACE}." in prompt  # the shot says where it is, as it did
+        assert SUBJECT in prompt  # the Subject section, in the shot, though the beat sheet is the action
+        assert prompt.lower().count("leo sets the barbell down") == 1  # the first beat: in the beats only
+        summary = prompt.split("summary:\n[subject reference] ", 1)[1].split("\n\n", 1)[0]
+        assert summary.endswith("Campus Walkway.") and "sets the barbell down" not in summary and len(summary) < 400
+        fields, count = passed_to_compose(reference_film())
+        scene_copy = server.compose_references({**fields, "summary": ""}, count)  # a caller with no summary: the scene again
+        assert len(scene_copy) - len(prompt) == len(fields["scene"]) - len(fields["summary"])
+        dropped = len(scene_copy) - len(prompt)  # the summary line in place of the scene's copy
+        print(f"the shot's prompt: {len(prompt)} characters, {dropped} fewer than the scene repeated")
+        # no beats: the Subject section is the shot's action, and the summary still says only where the shot is
+        plain = reference_film()
+        plain["scenes"][0]["shots"][0]["beatSheet"] = None
+        kept = slate.compile_shot(plain, "shot-1")["prompt"]
+        assert SUBJECT in kept and "Campus Walkway. Leo steadies himself" not in kept
+        # a reference shot naming someone only in the Subject section still describes them
+        unnamed = reference_film()
+        unnamed["scenes"][0]["shots"][0]["prompt"] = "# Subject\nTheo stands by the window in a grey t-shirt.\n# Composition\nWide shot."
+        assert "Theo stands by the window in a grey t-shirt." in slate.compile_shot(unnamed, "shot-1")["prompt"]
+        # and a shot from text keeps it, beats or none: there it is the shot's only prose
+        worded = slate.compile_shot(film(beatSheet=[{"from": 0, "to": 2, "text": "Leo holds out the books."}]), "shot-1")["prompt"]
+        assert "Leo hands Mia the stack of books" in worded
+    with_ref2va(test)
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
