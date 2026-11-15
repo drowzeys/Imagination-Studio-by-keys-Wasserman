@@ -17,11 +17,30 @@ def profiles() -> dict:
     path = os.environ.get("STUDIO_COMFY_WORKFLOWS")
     if not path or not os.environ.get("STUDIO_COMFY_URL"):
         return {}
+    worker()  # a refused address is said on the panel, before anything is sent
     return json.loads(Path(path).read_text())
 
 
-def request(route: str, body=None, content_type="application/json"):
+def own_ports() -> set[str]:
+    """The ports this Studio's own ComfyUI listens on (spark/comfy.sh, spark/comfy_win.py, spark/spark_generate.py)."""
+
+    return {(os.environ.get("SPARK_COMFY_PORT") or "8190").strip(), (os.environ.get("MAC_COMFY_PORT") or "8191").strip()}
+
+
+def worker() -> str:
+    """The operator's ComfyUI address. Never this Studio's own ComfyUI: its renders are queue jobs, admitted by the
+    memory guard and the thermal gate, and a workflow posted to it directly would go around all three."""
+
     base = remote.address(os.environ["STUDIO_COMFY_URL"])
+    parts = urllib.parse.urlsplit(base)
+    if parts.hostname in ("127.0.0.1", "localhost", "::1") and str(parts.port or 80) in own_ports():
+        raise ValueError("STUDIO_COMFY_URL is this Studio's own ComfyUI. Point it at the ComfyUI of another PC "
+                         "(for one behind an SSH tunnel, use a local port other than " + " or ".join(sorted(own_ports())) + ").")
+    return base
+
+
+def request(route: str, body=None, content_type="application/json"):
+    base = worker()
     if isinstance(body, dict):
         body = json.dumps(body).encode()
     return remote.OPENER.open(urllib.request.Request(
