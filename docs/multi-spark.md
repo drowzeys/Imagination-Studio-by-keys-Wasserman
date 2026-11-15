@@ -325,8 +325,24 @@ lines, so a Windows checkout's CRLF line ends are not a difference.
 **Memory and checks.** Every clip passes that PC's own memory guard and its own Windows feature checks, asked before
 the clip is sent and again when its job is queued there. A clip it refuses goes back to the head's queue.
 
-**Measured.** See the pull request that added this: the figures are in its description until a release run is
-written here.
+**Its page file.** A video load commits well over the PC's system RAM (about 33 GB on an N1X with 31 GB), and the
+PC's guard stops a render that leaves Windows under 4 GB of commit. With a Windows-managed page file of 6 to 8 GB
+every clip was stopped there, rendered from a head or on the PC itself; with a fixed 64 GB page file (commit limit
+96.7 GB) they render. The head's question before sending does not count commit, so a PC with a small page file is
+sent the clip and refuses it, with this reason in the job.
+
+**Measured** (2026-11-14, a Spark head and an RTX Spark N1X on the home network, Studio at the commit that added
+this, the N1X's app started from its desktop):
+
+| | |
+|---|---|
+| Added by | its address alone: *ready*, shown as a Windows PC with 97.5 GB |
+| Clip | 5 s FastH3 (fh8), Small 864x480, 124 frames with sound |
+| First clip after the app started | 134.1 s on the PC, 136.5 s from queueing to the file on the head |
+| Next clip | 79.4 s from queueing to the file on the head |
+| The file | the head's copy is the PC's file, byte for byte (SHA-256) |
+
+Not run: a Windows PC beside Sparks on several clips at once, references or LoRAs on it, a Mac head.
 
 ## What is not built
 
