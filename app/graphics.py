@@ -686,6 +686,13 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
             # a take's id: a Voice tab line (voice/<id>.wav) or a Music tab song (music/<id>.take.json says its file)
             if (home / "voice" / f"{value}.wav").is_file():
                 return home / "voice" / f"{value}.wav"
+            for said in (home / "voice").glob("*/*/*.take.json"):  # a take in its own folder (issue #257) says its id and file
+                try:
+                    take = json.loads(said.read_text())
+                except (OSError, ValueError):
+                    continue
+                if isinstance(take, dict) and take.get("id") == value and said.with_name(said.name[:-10] + ".wav").is_file():
+                    return said.with_name(said.name[:-10] + ".wav")
             take = home / "music" / f"{value}.take.json"
             if take.is_file():
                 try:

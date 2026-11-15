@@ -30,6 +30,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from sound_seed import seed_of
 
+import take_names  # a take's readable folder and file names, beside this file
 import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
 
 KINDS = ("sfx", "foley")
@@ -200,13 +201,15 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
                 if why := spark_audio3.status()["why"] if spark_audio3.unmeasured() else spark_audio3.prerequisites():
                     raise HTTPException(400, why)
                 fits(spark_audio3.MODEL, params["seconds"])
-                target = home / "sound" / kind / f"{job_id}.wav"
-                target.parent.mkdir(parents=True, exist_ok=True)
+                folder, name = take_names.folder(home / "sound" / kind, job_id, params["prompt"], "sound-effect")
+                target = folder / f"{name}.wav"
+                if job_id != "check":  # a command built only to be checked leaves no empty take folder behind
+                    target.parent.mkdir(parents=True, exist_ok=True)
                 command = [str(python(kind)), str(pack / "spark/spark_generate.py"), "sfx",
                            "--sound-model", spark_audio3.MODEL, "--prompt", params["prompt"],
                            "--seconds", str(params["seconds"]), "--seed", str(params["seed"]),
                            "--steps", "8", "--cfg", "1", "-o", str(target),
-                           "--take", str(target.with_suffix(".take.json")), "--home", str(home)]
+                           "--take", str(target.with_suffix(".take.json")), "--take-id", job_id, "--home", str(home)]
                 return command, {}, [str(target)]
             if why := windows_audio3.prerequisites():
                 raise HTTPException(400, why)
@@ -216,10 +219,14 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
             raise HTTPException(400, why)
         prompt, negative = words(params, "prompt", kind == "sfx"), words(params, "negative", False)
         seed = number(params, "seed", 1, int)
-        folder = home / "sound" / kind
-        folder.mkdir(parents=True, exist_ok=True)
+        # a take's own folder, by month, date, time and its first words (take_names.py): the sound, its take file and
+        # a foley's clip share one readable stem. Takes made before this stay where they are and are read as before.
+        described = prompt or (Path(str(params.get("video") or "")).stem if kind == "foley" else "")
+        folder, name = take_names.folder(home / "sound" / kind, job_id, described, "sound-effect" if kind == "sfx" else "foley")
+        if job_id != "check":  # a command built only to be checked leaves no empty take folder behind
+            folder.mkdir(parents=True, exist_ok=True)
         runner = [str(pack / "spark" / "spark_generate.py"), kind] if spark else [str(pack / "sound_generate.py"), kind, "--models", str(models)]
-        command = [str(python(kind)), *runner, "--seed", str(seed), "--take", str(folder / f"{job_id}.take.json"), "--home", str(home)]
+        command = [str(python(kind)), *runner, "--seed", str(seed), "--take", str(folder / f"{name}.take.json"), "--take-id", job_id, "--home", str(home)]
         if spark and kind == "sfx":
             command += ["--sound-model", SFX_MODEL]
         if prompt:
@@ -233,7 +240,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
             if not 10 <= steps <= 200 or not 1 <= cfg <= 15:
                 raise HTTPException(400, "the passes are 10 to 200 (100 is the card's setting) and the guidance 1 to 15")
             fits(kind, seconds)
-            target = folder / f"{job_id}.wav"
+            target = folder / f"{name}.wav"
             return command + ["--seconds", f"{seconds:g}", "--steps", str(steps), "--cfg", f"{cfg:g}", "-o", str(target)], {}, [str(target)]
         clip = inside(str(params.get("video") or ""))
         if not clip.is_file() or clip.suffix.lower() not in VIDEO:
@@ -252,7 +259,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, room=None, sec
             # refused here, not by the runner after the job has unloaded Voice or Music and started the sound venv
             raise HTTPException(400, f"the clip is {length:.2f} s and foley needs at least {FOLEY_SECONDS[0]:g} s of picture: pick a longer clip")
         fits(kind, FOLEY_SECONDS[1])  # the clip's length is read by the runner; the longest is asked for here
-        sound, film = folder / f"{job_id}.wav", folder / f"{job_id}.mp4"
+        sound, film = folder / f"{name}.wav", folder / f"{name}.mp4"
         command += ["--video", str(clip), "--steps", str(steps), "--cfg", f"{cfg:g}", "--max-seconds", f"{FOLEY_SECONDS[1]:g}",
                     "--foley-db", f"{level:g}", "-o", str(sound), "--clip-out", str(film)] + ([] if under else ["--replace"])
         return command, {}, [str(film), str(sound)]

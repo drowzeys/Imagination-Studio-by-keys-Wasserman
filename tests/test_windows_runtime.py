@@ -394,8 +394,9 @@ def test_native_comfy_restarts_owned_server_when_environment_changes(tmp_path, m
 
 @pytest.mark.skipif(not (shutil.which("powershell") or shutil.which("pwsh")), reason="PowerShell is required")
 @pytest.mark.parametrize("parts,h3,toolchain,gpu", [
-    ("image", False, False, True), ("moss", False, False, True), ("music", False, True, True),
-    ("video,image", True, True, True), ("foley", False, False, True), ("finish", False, False, False),
+    ("image", False, False, True), ("moss", False, False, True), ("music", False, False, True),
+    ("video,image", True, False, True), ("foley", False, False, True), ("finish", False, False, False),
+    ("train", False, True, True),  # training still needs the compiler; the engines come built (app/windows_engines.json)
     ("sound", False, False, False), ("sound-legacy", False, False, True),
 ])
 def test_setup_plan_only_selects_needed_components(parts, h3, toolchain, gpu):

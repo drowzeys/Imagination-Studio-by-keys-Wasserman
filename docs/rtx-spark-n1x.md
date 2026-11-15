@@ -43,20 +43,28 @@ image acknowledgment.
 
 `scripts\setup-windows-cuda.ps1` installs:
 
-1. the build tools where missing: Python 3.13 (ARM64), Git, Zig 0.17 and the Visual Studio 2022 Build Tools with the
-   ARM64 compiler (winget), and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc,
-   the runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`;
-   Zig is detected before invoking it. Missing or older versions trigger the pinned winget install, a terminal
-   PATH refresh and a version recheck. If Zig is still unavailable, setup stops with instructions to open a new
-   PowerShell window or correct PATH order, rather than continuing to an engine build with missing tools.
+1. Python 3.13 (ARM64) and Git where missing. **No compiler**: the engines come built (step 3). Only a developer's
+   source build (`-BuildEngines`) and the train part add Zig 0.17, the Visual Studio 2022 Build Tools with the ARM64
+   compiler (winget) and NVIDIA's CUDA 13.4 toolkit for Windows on Arm from its redistributable archives (nvcc, the
+   runtime, cuBLAS, NVRTC, nvJitLink, CCCL, NVVM; each archive checked against NVIDIA's sha256) into `C:\cuda-13.4`.
+   Zig is then detected before invoking it: a missing or older version triggers the pinned winget install, a terminal
+   PATH refresh and a version recheck, and setup stops with instructions if Zig is still unavailable.
 2. the app's venv, FFmpeg, the GPU venv (NVIDIA's PyTorch 2.14 for CUDA 13.4) and the pinned ComfyUI (PR #200's scripts);
-3. TensorFold's engines **built from source** (no prebuilt release yet): drowzeys/TensorFold `studio-1.2.2` at
-   `1c8bdbfd`: `zig build tf-h3-int8 -Dsm=121` (`tf_h3.dll`), `zig build native bolt -Dsm=121 -Doptimize=ReleaseFast`
-   (`tensorfold-native.exe` + `bolt.dll`), `zig build fish-drama3-generate fish-drama3-lib -Dsm=121`
-   (`drama3-generate.exe` + `tensorfold_drama3.dll`) and, with the music part, `zig build music3-generate -Dsm=121
-   -Doptimize=ReleaseFast` (`music3-generate.exe`), in an ARM64 developer prompt, into
-   `%LOCALAPPDATA%\ImaginationStudio\tf-h3`, `...\bolt\native\bin`, `...\drama3\bin` and `...\music3\bin`, each with
-   the commit it was built from (a run at the same commit keeps them);
+3. TensorFold's engines, **as published builds** of drowzeys/TensorFold `studio-1.2.2` at `1c8bdbfd` (release
+   `studio-1.2.2-windows-arm64-r1`; `app\windows_engines.json` pins the release, each archive and each file by
+   sha256): `tf_h3.dll`, `tensorfold-native.exe` + `bolt.dll`, `drama3-generate.exe` + `tensorfold_drama3.dll` and,
+   with the music part, `music3-generate.exe`, into `%LOCALAPPDATA%\ImaginationStudio\tf-h3`, `...\bolt\native\bin`,
+   `...\drama3\bin` and `...\music3\bin`, each with the commit it is from (a run at the same commit keeps them).
+   - An archive is fetched, checked (its sha256, each file's sha256, each file an ARM64 program) and only then put in
+     place. A failed download or a wrong checksum changes nothing and is said. It is never answered with a build.
+   - What they open at run time: the NVIDIA driver's `nvcuda.dll`; for Drama 3, Music 3 and Bolt, NVIDIA's cuBLAS
+     and CUDA runtime libraries (`libcublas` and `cuda_cudart` from NVIDIA's redistributable archives, sha256-checked,
+     into `C:\cuda-13.4\bin\arm64`: the libraries, not the toolkit); for Bolt, Microsoft's Visual C++ runtime (ARM64).
+   - They are built for the RTX Spark N1X (`sm_121`) and were run on one. They are not a claim for any other GPU.
+   - `-BuildEngines` builds them from source instead, as before: `zig build tf-h3-int8 -Dsm=121`, `zig build native
+     bolt -Dsm=121 -Doptimize=ReleaseFast`, `zig build fish-drama3-generate fish-drama3-lib -Dsm=121` and `zig build
+     music3-generate -Dsm=121 -Doptimize=ReleaseFast`, in an ARM64 developer prompt. `-EngineFrom` still copies them
+     from a folder;
 4. the models (`scripts\windows-cuda-setup.py models`: the DGX Spark's files from the same repos, with the Spark
    scripts' own SHA-256s where they pin one; `-NativeParts`, default video, image, music, FLUX3-K, sound effects, swap
    (Ref2VA int8, the Character Swap and Turbo LoRAs, SAM 3.1: 25 GB), workflows (the Library's actions: three node packs,

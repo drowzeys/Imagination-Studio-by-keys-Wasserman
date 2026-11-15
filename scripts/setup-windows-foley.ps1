@@ -1,7 +1,14 @@
 param(
     [switch]$Verify,
-    [switch]$DependenciesOnly
+    [switch]$DependenciesOnly,
+    [switch]$BuildSoxr   # a developer's source build of python-soxr (the ARM64 compiler) instead of the published wheel
 )
+# python-soxr has no Windows on Arm wheel on PyPI yet (dofuuz/python-soxr#36). This is PyPI's own soxr 1.1.0 source
+# built for ARM64 and published with its provenance and licences (release windows-arm64-wheels-r1): fetched, checked
+# against this sha256 and installed, so an ordinary Foley setup compiles nothing for it.
+$SoxrWheel = 'soxr-1.1.0-cp312-abi3-win_arm64.whl'
+$SoxrSha256 = 'e30ebcec1be4cb09f147d25b89dca2427529883937c422331eed696458d8c1ee'
+$SoxrUrl = "https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/windows-arm64-wheels-r1/$SoxrWheel"
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
@@ -46,6 +53,20 @@ if (-not $Verify) {
     . (Join-Path $PSScriptRoot 'windows-rust.ps1')
     Write-Host "  Rust: $(Initialize-StudioRust)"
     & $Python -X utf8 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('soxr') else 1)"
+    if ($LASTEXITCODE -ne 0 -and -not $BuildSoxr) {
+        $Wheel = Join-Path $env:TEMP $SoxrWheel
+        try { Invoke-WebRequest $SoxrUrl -OutFile $Wheel -UseBasicParsing }
+        catch { throw "python-soxr's Windows on Arm wheel could not be fetched from $SoxrUrl ($($_.Exception.Message)). Nothing was installed. Try again, or build it with -BuildSoxr." }
+        if ((Get-FileHash -LiteralPath $Wheel -Algorithm SHA256).Hash.ToLower() -ne $SoxrSha256) {
+            Remove-Item -Force $Wheel
+            throw "python-soxr's wheel did not match its sha256. Nothing was installed and nothing was built."
+        }
+        & $CorePython -X utf8 -m pip install --target $TargetSite --no-deps --upgrade $Wheel
+        if ($LASTEXITCODE -ne 0) { throw "python-soxr's checked wheel did not install." }
+        Remove-Item -Force $Wheel -ErrorAction SilentlyContinue
+        Write-Host '  python-soxr 1.1.0: the published Windows on Arm wheel, sha256-checked (no compiler)'
+        & $Python -X utf8 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('soxr') else 1)"
+    }
     if ($LASTEXITCODE -ne 0) {
         $Compiler = Initialize-StudioArm64Compiler
         $Locator = Find-StudioVsWhere

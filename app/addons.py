@@ -66,7 +66,7 @@ def attach(app, home: Path, queue):
                 app.include_router(addon.router, prefix="/api/addons/" + addon.id)
                 loaded[addon.id] = (folder.resolve(), addon)
             except Exception:
-                log.warning("Add-on %s was not loaded", folder.name, exc_info=False)
+                log.warning("Add-on %s was not loaded", folder.name, exc_info=True)
 
     @app.get("/api/addons")
     def listing():

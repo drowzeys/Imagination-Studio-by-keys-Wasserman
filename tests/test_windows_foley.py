@@ -218,3 +218,18 @@ def test_a_package_record_without_a_name_is_skipped_wherever_packages_are_listed
         for found in re.finditer(r'dist\.metadata\["Name"\]\.lower\(\)', text):
             closing = text.index("}", found.start())
             assert 'if dist.metadata["Name"]' in text[found.start():closing], f"{path.name}: a nameless package record is not skipped"
+
+
+def test_foley_setup_installs_the_checked_soxr_wheel_and_compiles_only_when_asked():
+    """python-soxr has no Windows on Arm wheel on PyPI (issue #214). The setup takes the published build of PyPI's own
+    source, by sha256, before anything reaches for the compiler; -BuildSoxr is the source build."""
+    import re
+    text = (ROOT / "scripts" / "setup-windows-foley.ps1").read_text(encoding="utf-8")
+    assert "[switch]$BuildSoxr" in text
+    assert "$SoxrWheel = 'soxr-1.1.0-cp312-abi3-win_arm64.whl'" in text
+    assert re.search(r"\$SoxrSha256 = '[0-9a-f]{64}'", text)
+    assert "releases/download/windows-arm64-wheels-r1/$SoxrWheel" in text
+    wheel = text[text.index("if ($LASTEXITCODE -ne 0 -and -not $BuildSoxr) {"):text.index("$Compiler = Initialize-StudioArm64Compiler")]
+    assert wheel.index("Get-FileHash") < wheel.index("pip install")  # checked before it is installed
+    assert "did not match its sha256. Nothing was installed and nothing was built." in wheel and "--no-deps" in wheel
+    assert "Initialize-StudioArm64Compiler" not in wheel and "vcvars" not in wheel.lower()

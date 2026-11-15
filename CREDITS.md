@@ -277,7 +277,7 @@ safetensors copies of MMAudio's weights. The studio clones it at a pinned commit
 (`spark/studio_mmaudio`) calls kijai's loaders' models and generate. On a Spark a sound effect runs on **ComfyUI**'s
 own Stable Audio nodes.
 
-**KEUM Myungchul** provides **python-soxr** (LGPL-2.1-or-later), the native resampler used by librosa.
+**KEUM Myungchul** provides **python-soxr** (LGPL-2.1-or-later), the native resampler used by librosa. On Windows on Arm, where PyPI has no wheel of it yet, the setup installs a build of PyPI's own unmodified soxr 1.1.0 source (release `windows-arm64-wheels-r1` of this repository, with its licence files inside and its sha256 in `scripts/setup-windows-foley.ps1`). Tracked by **ivberg** (issue #214).
 The Windows ARM64 foley setup builds it when a compatible wheel is unavailable, using the Microsoft
 compiler/SDK credited below; it does not replace the installed CUDA packages.
 

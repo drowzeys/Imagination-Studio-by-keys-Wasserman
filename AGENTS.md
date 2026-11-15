@@ -471,3 +471,5 @@ RobZombAI (H3MLX), mrbizarro (minimax-h3-mlx / Phosphene), Filip Strand and mflu
 NVIDIA Research, FastVideo, Sam Wasserman (Slate: the film workflow in Production; keep app/static/slate/NOTICE. Motion Previs Studio: the Motion Previs tab's analysis is a modified Python port of it; keep LICENSES/Motion-Previs-Studio-NOTICE, THIRD_PARTY_NOTICES.md and the headers of app/motion*.py, and keep the link to the original), Apple MLX. Authors only — no credit hyperlinks, except the link to Motion Previs Studio.
 
 Local extensions are opt-in (`STUDIO_ADDONS=1`); see [Local add-ons](docs/addons.md). Treat their modules as operator-installed code, never as a sandbox; render through the Studio job queue and keep routes under the existing access checks.
+
+Local UI language scripts are optional operator-installed code (docs/local-languages.md); English is the default. Do not bundle a dictionary, fetch translations, or change model prompts/payloads as part of this hook.

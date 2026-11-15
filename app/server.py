@@ -4064,6 +4064,8 @@ import desktop_control  # noqa: E402
 app.include_router(desktop_control.attach(sys.modules[__name__]))
 import addons
 addons.attach(app, HOME, queue_job)
+import languages
+app.include_router(languages.attach(HOME))
 
 app.mount("/", StaticFiles(directory=HERE / "static", html=True), name="static")
 

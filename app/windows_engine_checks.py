@@ -23,20 +23,42 @@ import windows_image_checks as native
 import windows_runtime
 from windows_qualification import hardware_profile, verify_model_updates, version_family
 
-KINDS = ("video", "bolt")
-TITLES = {"video": "H3 / FastH3 video", "bolt": "NVIDIA Nemotron 3.5 Bolt"}
+# The video check has levels: a canvas and a length each. A passed level opens every clip that is no larger and no
+# longer than it (the same model and passes on fewer pixels and frames take less memory and less time), so the largest
+# level covers them all, and a machine that cannot pass it still has the smaller ones. "video" is the first level.
+VIDEO_LEVELS = {
+    "video": ("Small, 5 seconds", 864, 480, 124),
+    "video-long": ("Small, 15 seconds", 864, 480, 362),
+    "video-large": ("Full size, 5 seconds", 1376, 768, 124),
+    "video-sharp": ("Full size, 10 seconds", 1376, 768, 243),
+    "video-largest": ("Full size, 15 seconds", 1376, 768, 362),
+}
+KINDS = (*VIDEO_LEVELS, "bolt")
+TITLES = {**{kind: "H3 / FastH3 video: " + row[0].lower() for kind, row in VIDEO_LEVELS.items()},
+          "video": "H3 / FastH3 video", "bolt": "NVIDIA Nemotron 3.5 Bolt"}
+# the canvas each size of the app is generated at (server.PRESETS): what a job is measured by
+CANVASES = {"small": (864, 480), "p720": (1280, 736), "native": (1344, 768), "sharp": (1376, 768)}
+QUALITIES = ("fh8", "fh4")  # FastH3 at the checked 8 passes, or at 4: fewer passes of the same recipe
 CONTRACT = 1
-TIMEOUT_S = 1800
+TIMEOUT_S = 3600
 VIDEO_PROMPT = ("A middle-aged baker in a cream shirt and green apron stands behind a wooden counter in a small bakery at "
                 "dawn, warm window light from the left. He lifts a loaf with both hands and sets it down on the counter.")
 BOLT_QUESTION = "In one short sentence, what is a clapperboard used for?"
-# the plain clip the check renders, as server.build makes it for {"preset": "small", "quality": "fh8", "frames": 124}
-VIDEO_ENV = {"SEED": "7", "FRAMES": "124", "WIDTH": "864", "HEIGHT": "480", "ENGINE": "fasth3", "STEPS": "8"}
+
+
+def video_env(kind: str = "video") -> dict:
+    """The plain clip a level renders, as server.build makes it for that size at "fh8" and that many frames."""
+    _, width, height, frames = VIDEO_LEVELS[kind]
+    return {"SEED": "7", "FRAMES": str(frames), "WIDTH": str(width), "HEIGHT": str(height), "ENGINE": "fasth3", "STEPS": "8"}
+
+
+VIDEO_ENV = video_env()
 
 
 def recipe(kind: str) -> dict:
-    if kind == "video":
-        return {"mode": "text to video", "engine": "fasth3", "width": 864, "height": 480, "steps": 8, "frames": 124,
+    if kind in VIDEO_LEVELS:
+        _, width, height, frames = VIDEO_LEVELS[kind]
+        return {"mode": "text to video", "engine": "fasth3", "width": width, "height": height, "steps": 8, "frames": frames,
                 "fps": 24, "image": False, "last_frame": False, "references": False, "loras": False}
     if kind == "bolt":
         return {"question": BOLT_QUESTION, "max_tokens": 48, "streams": 1, "tools": False, "vision": False}
@@ -45,8 +67,10 @@ def recipe(kind: str) -> dict:
 
 def scope_label(kind: str) -> str:
     recipe(kind)
-    if kind == "video":
-        return ("One FastH3 clip from words: 864x480, 8 passes, up to 5 seconds (124 frames) at 24 fps, with sound. "
+    if kind in VIDEO_LEVELS:
+        _, width, height, frames = VIDEO_LEVELS[kind]
+        return (f"One FastH3 clip from words: {width}x{height}, 8 passes, {frames} frames ({frames / 24:.0f} seconds) at 24 fps, with sound. "
+                "A pass opens clips from words up to this size and length, at 8 or 4 passes. "
                 "No starting picture, last frame, references or LoRAs. This checks execution, not the picture's quality.")
     return ("The engine loads, answers one short question and unloads. This checks execution, not the quality of an "
             "answer, long contexts, tools or pictures.")
@@ -64,7 +88,7 @@ def files(kind: str) -> tuple[list[Path], Path, list[Path]]:
     """(the engine's own files, the model folder, the weights it loads) for this recipe."""
     paths = windows_cuda.paths()
     root = windows_runtime.model_root()
-    if kind == "video":
+    if kind in VIDEO_LEVELS:
         import spark_generate as generation
         shared = root / "FastH3-Comfy"
         transformers = [shared / "diffusion_models" / name for name in generation.FASTH3.values()
@@ -86,7 +110,7 @@ def prerequisites(kind: str) -> str:
     recipe(kind)
     if why := windows_cuda.configuration_error():
         return why
-    if kind == "video":
+    if kind in VIDEO_LEVELS:
         if why := windows_cuda.h3_why_not():
             return why
         if missing := windows_runtime.video_missing({}):
@@ -103,7 +127,7 @@ def prerequisites(kind: str) -> str:
     missing = [path.name for path in engine + weights if not path.is_file() or path.stat().st_size == 0]
     if missing:
         return f"Missing native {TITLES[kind]} files: " + ", ".join(missing)
-    if kind == "video":
+    if kind in VIDEO_LEVELS:
         import shutil
         import windows_media
         for tool in ("ffmpeg", "ffprobe"):
@@ -115,9 +139,9 @@ def prerequisites(kind: str) -> str:
 def fingerprint(kind: str) -> dict:
     engine, model, weights = files(kind)
     mapping = {str(path.resolve()): {"size": path.stat().st_size, "mtime_ns": path.stat().st_mtime_ns} for path in weights}
-    sources = (("app/windows_engine_checks.py", "spark/spark_generate.py", "spark/windows_scripts.py") if kind == "video"
+    sources = (("app/windows_engine_checks.py", "spark/spark_generate.py", "spark/windows_scripts.py") if kind in VIDEO_LEVELS
                else ("app/windows_engine_checks.py", "app/bolt.py"))
-    guards = (("SPARK_COMFY_ARGS", "SPARK_VAE", "SPARK_MEMORY_FLOOR_MB", "PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF") if kind == "video"
+    guards = (("SPARK_COMFY_ARGS", "SPARK_VAE", "SPARK_MEMORY_FLOOR_MB", "PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF") if kind in VIDEO_LEVELS
               else ("BOLT_GUARD_GB", "BOLT_PARALLEL", "BOLT_CONTEXT", "BOLT_DRAFTS", "BOLT_VISION", "BOLT_THINKING"))
     return {"contract": CONTRACT, "kind": kind, "recipe": recipe(kind),
             "hardware": {**hardware_profile(), "device": hashlib.sha256(native.device_uuid().encode()).hexdigest()},
@@ -165,27 +189,64 @@ def usage_status(kind: str, selected_mode=None) -> dict:
             "qualification_required": mode["enabled"], "scope": scope_label(kind)}
 
 
+def passed_levels() -> list[str]:
+    """The video levels with a pass that still stands, smallest first."""
+    return [kind for kind in VIDEO_LEVELS if status(kind)["qualified"]]
+
+
+def video_status() -> dict:
+    """Video as the gate sees it: checked when any level passed, and then held to what the passed levels cover."""
+    levels = {kind: status(kind) for kind in VIDEO_LEVELS}
+    done = [kind for kind, found in levels.items() if found["qualified"]]
+    first = levels["video"]
+    if not done:
+        return {**first, "passed_levels": []}
+    widest = max(done, key=lambda kind: (VIDEO_LEVELS[kind][1] * VIDEO_LEVELS[kind][2], VIDEO_LEVELS[kind][3]))
+    return {**levels[widest], "installed": True, "qualified": True, "available": True, "state": "qualified", "why": "",
+            "passed_levels": done, "verified_recipe": [recipe(kind) for kind in done]}
+
+
+def job_canvas(params: dict) -> tuple[int, int] | None:
+    preset = params.get("preset")
+    if preset in CANVASES:
+        return CANVASES[preset]
+    if preset == "custom":
+        try:
+            return int(params["width"]), int(params["height"])
+        except (KeyError, TypeError, ValueError):
+            return None
+    return None
+
+
 def require_scope(kind: str, params: dict) -> None:
-    """With gating on, a job stays inside what the check ran (the video recipe; Bolt's check has no job settings)."""
+    """With gating on, a job stays inside what a passed check ran: a clip from words no larger and no longer than a
+    passed video level, at its 8 passes or at 4 (Bolt's check has no job settings)."""
     if kind != "video":
         return
-    settings = recipe(kind)
+    import lengths
+    done = passed_levels()
     plain = not any(params.get(key) for key in ("image", "last_frame", "references", "reference_videos", "reference_audios", "loras"))
-    frames = params.get("frames")
-    seconds = float(params.get("seconds") or 5)
-    short = int(frames) <= settings["frames"] if frames else seconds <= settings["frames"] / settings["fps"] + 0.2
-    if (params.get("preset") != "small" or params.get("quality") != "fh8" or params.get("steps") not in (None, "", 8, "8")
-            or not plain or not short):
-        raise ValueError("Verified video scope: a clip from words at Small 864x480, FastH3 8 passes, up to 5 seconds; "
-                         "no starting picture, last frame, references or LoRAs. Other settings have no check yet.")
+    canvas = job_canvas(params)
+    try:
+        frames = lengths.of({"frames": params.get("frames"), "seconds": float(params.get("seconds") or 5)})
+    except (TypeError, ValueError):
+        frames = None
+    steps_ok = params.get("steps") in (None, "") or str(params.get("steps")) in ("4", "8")
+    inside = bool(canvas and frames and plain and steps_ok and params.get("quality") in QUALITIES and any(
+        canvas[0] * canvas[1] <= VIDEO_LEVELS[level][1] * VIDEO_LEVELS[level][2] and frames <= VIDEO_LEVELS[level][3] for level in done))
+    if not inside:
+        have = "; ".join(f"{VIDEO_LEVELS[level][1]}x{VIDEO_LEVELS[level][2]} up to {VIDEO_LEVELS[level][3] / 24:.0f} s" for level in done) or "none"
+        raise ValueError("Verified video scope: a clip from words, FastH3 at 8 or 4 passes, no larger and no longer than a "
+                         f"passed video check ({have}); no starting picture, last frame, references or LoRAs. "
+                         "Machine > Feature checks has a check for larger sizes and longer clips.")
 
 
-def check_video(path: Path) -> None:
+def check_video(path: Path, kind: str = "video") -> None:
     import graphics
     if not path.is_file() or not path.stat().st_size:
         raise RuntimeError("The video check did not write its clip.")
     found = graphics.probe(path)
-    settings = recipe("video")
+    settings = recipe(kind)
     wanted = settings["frames"] / settings["fps"]
     if ((found["width"], found["height"]) != (settings["width"], settings["height"]) or found["seconds"] is None
             or not math.isclose(found["fps"], settings["fps"], abs_tol=0.01) or abs(found["seconds"] - wanted) > 0.25):
@@ -194,18 +255,18 @@ def check_video(path: Path) -> None:
         raise RuntimeError("The video check's clip has no sound.")
 
 
-def video_command(target: Path) -> tuple[list[str], dict]:
+def video_command(target: Path, kind: str = "video") -> tuple[list[str], dict]:
     command = windows_cuda.translate(["bash", str(features.PACK / "scripts" / "video.sh"), VIDEO_PROMPT, str(target)])
-    return command, dict(VIDEO_ENV)
+    return command, video_env(kind)
 
 
 def worker(kind: str, output: Path) -> None:
     """The production path with an isolated output folder: the render script the app runs, or the app's own Bolt engine."""
     output.mkdir(parents=True, exist_ok=True)
-    if kind == "video":
+    if kind in VIDEO_LEVELS:
         target = output / "video" / "check.mp4"
         target.parent.mkdir(parents=True, exist_ok=True)
-        command, env = video_command(target)
+        command, env = video_command(target, kind)
         done = subprocess.run(command, env={**os.environ, **env}, stdin=subprocess.DEVNULL, timeout=TIMEOUT_S,
                               creationflags=0x08000000 if sys.platform == "win32" else 0)
         if done.returncode:
@@ -244,8 +305,8 @@ def check_bolt(output: Path) -> None:
 
 def qualify(kind: str, output: Path, job_id: str) -> dict:
     attempt = {"feature": kind, "job_id": job_id, "ok": False, "checked_at": datetime.now(timezone.utc).isoformat()}
-    observations = {"case": "FastH3: 5-second 864x480 clip from words" if kind == "video" else "Bolt: load, one short answer, unload",
-                    "rendered": False}
+    observations = {"case": (f"FastH3: {VIDEO_LEVELS[kind][3] / 24:.0f}-second {VIDEO_LEVELS[kind][1]}x{VIDEO_LEVELS[kind][2]} clip from words"
+                             if kind in VIDEO_LEVELS else "Bolt: load, one short answer, unload"), "rendered": False}
     features.save_attempt(kind, attempt)
     try:
         if why := prerequisites(kind):
@@ -255,7 +316,7 @@ def qualify(kind: str, output: Path, job_id: str) -> dict:
         before = fingerprint(kind)
         command = [sys.executable, "-X", "utf8", str(features.PACK / "scripts" / "windows-native-engine-check.py"),
                    "--feature", kind, "--output", str(output), "--worker"]
-        validate = (lambda: check_video(output / "video" / "check.mp4")) if kind == "video" else (lambda: check_bolt(output))
+        validate = (lambda: check_video(output / "video" / "check.mp4", kind)) if kind in VIDEO_LEVELS else (lambda: check_bolt(output))
         native.observe_native(command, output, validate, observations, TIMEOUT_S + 60)
         digests = {name: audio.digest(Path(name), row["size"], row["mtime_ns"]) for name, row in before["models"].items()}
         current = fingerprint(kind)

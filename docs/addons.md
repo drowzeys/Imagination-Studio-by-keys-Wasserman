@@ -27,6 +27,8 @@ The groups are `apps`, `engines`, `agent` and `vaults`. A tab may also name an e
 Built-in room/tab ids cannot be replaced. A room uses the Studio's generic Agent icon.
 An add-on can serve local `.js`, `.css`, `.svg` and `.png` assets under `/api/addons/<name>/assets/`;
 Python files, hidden files and paths escaping the folder are not assets.
+Do not keep secrets in an add-on folder: like the rest of the Studio's data folder, its files can be read
+through `/files/` by anyone who holds the access key.
 
 ## A server route
 
