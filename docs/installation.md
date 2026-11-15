@@ -62,6 +62,7 @@ FastH3 video with sound (125 GB), motion graphics, Finish and phone notification
 | `--image-edit` | Qwen-Image-2.1's 40-step model (14 GB more) |
 | `--flux3` | FLUX3-K pictures (41 GB more, gated) |
 | `--moss` | MOSS-Image (30 GB more) |
+| `--h3-image` | MiniMax-H3-Image pictures and edits, on a DGX Spark (23 GB more; its text encoder is FastH3's). Moves that install's ComfyUI to v0.45.1. Not part of `--all` |
 | `--music` | MiniMax Music 3 (22 GB more) |
 | `--yue2` | YuE2 songs, the Music tab's default engine on Linux with an NVIDIA GPU (about 14 GB more; not on a Mac) |
 | `--bolt` | Nemotron 3.5 Bolt, the studio's brain (about 25 GB more) |

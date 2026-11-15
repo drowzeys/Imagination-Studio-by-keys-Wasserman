@@ -87,7 +87,7 @@ if [ "$(uname -s)" = Linux ]; then
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --all|--yes|-y|--image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--sound|--graphics|--no-graphics|--finish|--no-finish|--train|--ref2va|--image-edit|--h3-base|--yue2|--swap|--loras|--loras=*|--no-loras|--lora-bundle=*|--no-memguard|--memguard-stop-foreign) SPARK_ARGS+=("$arg");;
+      --all|--yes|-y|--image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--h3-image|--bolt|--sound|--graphics|--no-graphics|--finish|--no-finish|--train|--ref2va|--image-edit|--h3-base|--yue2|--swap|--loras|--loras=*|--no-loras|--lora-bundle=*|--no-memguard|--memguard-stop-foreign) SPARK_ARGS+=("$arg");;
       --upscale|--remove)
         if [ "$ON_CARD" = 1 ]; then echo "note: on this GPU $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"
         else echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"; fi

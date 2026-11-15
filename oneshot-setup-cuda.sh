@@ -26,6 +26,12 @@
 #   bash oneshot-setup-spark.sh --moss        # add MOSS-Image (OpenMOSS) as a picture model, 30 GB more: the SFT checkpoint
 #                                             # (bf16), its Qwen3.5 9B text encoder (bf16) and the FLUX.2 small decoder, from
 #                                             # Comfy-Org/MOSS-Image. Apache 2.0, commercial use allowed
+#   bash oneshot-setup-spark.sh --h3-image    # add MiniMax-H3-Image as a picture model (text to picture and edits), 23 GB more:
+#                                             # the pruned 8-bit checkpoint and its decoder, from Comfy-Org/MiniMax-H3-Image.
+#                                             # Its text encoder is the one FastH3 already has (the same file; an --image-only
+#                                             # install fetches it, 27 GB more). It moves this install's ComfyUI to
+#                                             # v0.45.1, the first with the model. MiniMax-H3-Image Community License: the
+#                                             # same territory limits as MiniMax H3. Not part of --all: ask for it by name
 #   bash oneshot-setup-spark.sh --music       # add MiniMax Music 3 for the Music tab, 22 GB more: its DiT (fp16), text encoder
 #                                             # (pruned, bf16) and decoder, read by ComfyUI and by TensorFold's CUDA engine,
 #                                             # which it builds too (spark/build-music3.sh). MiniMax-Music3 Community License:
@@ -104,6 +110,9 @@ MODELS="${SPARK_MODELS:-$HOME/spark-studio-models}"
 studio_pin_gpu || exit 1
 [ -z "${STUDIO_GPU:-}" ] || export PATH="$HERE/spark/smi-pin:$PATH"
 COMFY_COMMIT=b9b290e43f1eb379946dfeb013faf9bbefa1a618  # v0.42.0 and later: ComfyUI's FLUX 3 and MOSS-Image nodes
+# MiniMax-H3-Image is in ComfyUI from v0.45.1: an install that has asked for it (--h3-image, or its checkpoint is on
+# disk) is moved there and stays there. Measured on a DGX Spark at this commit: FastH3 clips and the picture models as before.
+COMFY_H3IMAGE_COMMIT=02457b8c8cad2da1801ef69bd9c6d654c751d32c
 # In a terminal with no feature flag: the checklist of parts (scripts/install-checklist.sh), every part ticked; what is
 # ticked becomes this script's own flags below. --yes, any flag, no terminal: no list. (On a Mac oneshot-setup.sh shows it.)
 # shellcheck source=scripts/install-checklist.sh
@@ -123,13 +132,13 @@ fi
 # written down in this repo to copy, and the resolver keeps them beside the torch pinned here.
 TORCH_PIN=(torch==2.14.1 torchvision==0.29.1)  # requirements.lock; scripts/setup-comfy.sh pins the same pair
 STUDIO_PIN=(huggingface_hub==1.33.0 fastapi==0.142.2 uvicorn==0.54.0 python-multipart==0.0.32 pillow==12.3.0)  # requirements.lock
-IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; SOUND_LEGACY=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0; MEMGUARD=1; MEMGUARD_FOREIGN=0
+IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; H3IMAGE=0; MUSIC=0; SOUND=0; SOUND_LEGACY=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0; MEMGUARD=1; MEMGUARD_FOREIGN=0
 for arg in "$@"; do
   case "$arg" in
     # --sound also asks for Stable Audio Open: Small SFX has no measured memory estimate on a DGX Spark yet, so Open is
     # the model a sound effect renders with there. Without access to its gated page it is skipped, as before.
     --sound-legacy) SOUND=1; SOUND_LEGACY=1;;
-    --ref2va) REF2VA=1;; --swap) SWAP=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1; SOUND_LEGACY=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
+    --ref2va) REF2VA=1;; --swap) SWAP=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --h3-image) H3IMAGE=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1; SOUND_LEGACY=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --all) SWAP=1; REF2VA=1; H3_BASE=1; IMAGE_EDIT=1; FLUX3=1; MOSS=1; MUSIC=1; YUE2=1; SOUND=1; BOLT=1; VOICE=1; MOTION=1; TRAIN=1; GRAPHICS=1; FINISH=1;;  # every feature
     --no-workflows) WORKFLOWS=0;;
     --no-memguard) MEMGUARD=0;; --memguard-stop-foreign) MEMGUARD_FOREIGN=1;;  # the machine memory guard (scripts/memguard.py)
@@ -163,6 +172,7 @@ if [ "$UPGRADE" = 1 ]; then
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || FLUX3=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] || FLUX3=1
   [ ! -s "$MODELS/MOSS-Image-Comfy/diffusion_models/moss_image_sft_bf16.safetensors" ] || MOSS=1
+  [ ! -s "$MODELS/MiniMax-H3-Image-Comfy/diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors" ] || H3IMAGE=1
   [ ! -s "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" ] || MUSIC=1
   [ ! -x "${YUE2_HOME:-$PREFIX/yue2}/venv/bin/python" ] || YUE2=1
   [ ! -d "$PREFIX/ComfyUI/custom_nodes/ComfyUI-MMAudio" ] || SOUND=1
@@ -253,6 +263,7 @@ if [ "$IMAGE_ONLY" = 0 ]; then
   [ "$FLUX3" = 0 ] || [ -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] \
     || [ -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || NEED=$((NEED + 42))
   [ "$MOSS" = 0 ] || ! missing "$MODELS/MOSS-Image-Comfy/diffusion_models/moss_image_sft_bf16.safetensors" || NEED=$((NEED + 31))
+  [ "$H3IMAGE" = 0 ] || ! missing "$MODELS/MiniMax-H3-Image-Comfy/diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors" || NEED=$((NEED + 23 + ($([ -s "$MODELS/FastH3-Comfy/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors" ] && echo 0 || echo 27))))
   [ "$MUSIC" = 0 ] || ! missing "$MODELS/MiniMax-Music3-Comfy/diffusion_models/minimax_music3_dit_fp16.safetensors" || NEED=$((NEED + 23))
   [ "$YUE2" = 0 ] || ! missing "${YUE2_WEIGHTS:-${YUE2_HOME:-$PREFIX/yue2}/weights}/YuE2-3B/model.safetensors" || NEED=$((NEED + 14))
   [ "$SOUND" = 0 ] || ! missing "$MODELS/Sound-Comfy/checkpoints/stable_audio_3_small_sfx.safetensors" || NEED=$((NEED + 3))
@@ -289,6 +300,7 @@ fi
 "$PY" -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)" || die "PyTorch does not see the GPU"
 ok "torch $("$PY" -c 'import torch; print(torch.__version__, "on", torch.cuda.get_device_name(0))')"
 
+[ "$H3IMAGE" = 0 ] || COMFY_COMMIT="$COMFY_H3IMAGE_COMMIT"  # MiniMax-H3-Image's ComfyUI (see the pin above)
 say "ComfyUI @ ${COMFY_COMMIT:0:8} -> $PREFIX/ComfyUI"
 if [ "$(git -C "$PREFIX/ComfyUI" rev-parse HEAD 2>/dev/null)" != "$COMFY_COMMIT" ]; then
   [ "$VERIFY" = 0 ] || die "ComfyUI is missing or not at the pinned commit"
@@ -312,12 +324,14 @@ studio:
     MiniMax-H3-Comfy/diffusion_models
     FLUX3-K-Comfy/diffusion_models
     MOSS-Image-Comfy/diffusion_models
+    MiniMax-H3-Image-Comfy/diffusion_models
     MiniMax-Music3-Comfy/diffusion_models
   text_encoders: |
     FastH3-Comfy/text_encoders
     Qwen-Image-2.1-Comfy/text_encoders
     FLUX3-K-Comfy/text_encoders
     MOSS-Image-Comfy/text_encoders
+    MiniMax-H3-Image-Comfy/text_encoders
     MiniMax-Music3-Comfy/text_encoders
     Sound-Comfy/text_encoders
   vae: |
@@ -325,6 +339,7 @@ studio:
     Qwen-Image-2.1-Comfy/vae
     FLUX3-K-Comfy/vae
     MOSS-Image-Comfy/vae
+    MiniMax-H3-Image-Comfy/vae
     MiniMax-Music3-Comfy/vae
   loras: |
     loras
@@ -471,6 +486,23 @@ if [ "$MOSS" = 1 ]; then
     text_encoders/qwen3.5_9b_bf16.safetensors vae/flux2-vae_small.safetensors
   [ -f "$PREFIX/ComfyUI/comfy_extras/nodes_moss_image.py" ] || die "this ComfyUI has no MOSS-Image nodes: run without --verify to move it to ${COMFY_COMMIT:0:8}"
   got "MOSS-Image: a picture model (IMAGE_MODEL=moss-image)"
+  if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
+fi
+
+if [ "$H3IMAGE" = 1 ]; then
+  say "MiniMax-H3-Image for ComfyUI: the pruned checkpoint (8-bit) and its decoder (23 GB) -> $MODELS"
+  [ "$VERIFY" = 1 ] || { echo "  MiniMax-H3-Image is under the MiniMax-H3-Image Community License Agreement. It limits where the model may"
+    echo "  be used (not in the European Union, the United Kingdom, the Republic of Korea or the United States without"
+    echo "  MiniMax's own licence), and asks for MiniMax's written authorisation above US\$1M yearly revenue or for a"
+    echo "  hosted service. Read it first: https://huggingface.co/MiniMaxAI/MiniMax-H3-Image/blob/main/LICENSE"; }
+  fetch Comfy-Org/MiniMax-H3-Image MiniMax-H3-Image-Comfy diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors \
+    vae/minimax_h3_image_vae_fp16.safetensors
+  # its text encoder is MiniMax H3's, the file FastH3 has (the same bytes): fetched only where that one is not on disk
+  [ -s "$MODELS/FastH3-Comfy/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors" ] \
+    || fetch Comfy-Org/MiniMax-H3-Image MiniMax-H3-Image-Comfy text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+  grep -q MiniMaxH3ImageConditioning "$PREFIX/ComfyUI/comfy_extras/nodes_minimax_h3.py" 2>/dev/null \
+    || die "this ComfyUI has no MiniMax-H3-Image nodes: run without --verify to move it to ${COMFY_H3IMAGE_COMMIT:0:8}"
+  got "MiniMax-H3-Image: a picture model, text to picture and edits (IMAGE_MODEL=h3-image)"
   if [ "$VERIFY" = 0 ] && bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
 fi
 
@@ -704,7 +736,7 @@ if [ "$UPGRADE" = 1 ]; then
   say "Upgraded: $INSTALLED -> $(cat "$PREFIX/VERSION"). Checking the install (restart the app to serve the new pages: scripts/app.sh)"
   [ "$SOUND_LEGACY" = 0 ] || set -- --sound-legacy
   [ "$SOUND_LEGACY" = 1 ] || set --
-  exec bash "$HERE/oneshot-setup-cuda.sh" --verify "$@" $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$SWAP" = 0 ] || echo --swap) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$MUSIC" = 0 ] || echo --music) $([ "$YUE2" = 0 ] || echo --yue2) $([ "$SOUND" = 0 ] || echo --sound) $([ "$BOLT" = 0 ] || echo --bolt) $([ "$VOICE" = 0 ] || echo --voice) $([ "$TRAIN" = 0 ] || echo --train) $([ "$GRAPHICS" = 0 ] && echo --no-graphics || echo --graphics) $([ "$FINISH" = 0 ] && echo --no-finish || echo --finish)
+  exec bash "$HERE/oneshot-setup-cuda.sh" --verify "$@" $([ "$IMAGE_ONLY" = 0 ] || echo --image-only) $([ "$REF2VA" = 0 ] || echo --ref2va) $([ "$SWAP" = 0 ] || echo --swap) $([ "$FLUX3" = 0 ] || echo --flux3) $([ "$MOSS" = 0 ] || echo --moss) $([ "$H3IMAGE" = 0 ] || echo --h3-image) $([ "$MUSIC" = 0 ] || echo --music) $([ "$YUE2" = 0 ] || echo --yue2) $([ "$SOUND" = 0 ] || echo --sound) $([ "$BOLT" = 0 ] || echo --bolt) $([ "$VOICE" = 0 ] || echo --voice) $([ "$TRAIN" = 0 ] || echo --train) $([ "$GRAPHICS" = 0 ] && echo --no-graphics || echo --graphics) $([ "$FINISH" = 0 ] && echo --no-finish || echo --finish)
 fi
 # The essential LoRA bundle: every preset of the LoRA hub, fetched once from its author's page into one folder laid out
 # by the hub's groups, then installed (oneshot-essential-bundle.sh). --loras=GROUPS takes some groups, --lora-bundle=PATH

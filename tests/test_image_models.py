@@ -442,3 +442,107 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_h3_image_is_offered_only_on_a_spark_with_its_files_and_a_comfyui_that_knows_it():
+    import server
+
+    had = server.SPARK, server.WINCUDA, {key: os.environ.get(key) for key in ("SPARK_MODELS", "PREFIX")}
+    encoder = "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    own = ("diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors", "vae/minimax_h3_image_vae_fp16.safetensors")
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            server.SPARK, server.WINCUDA = True, False
+            os.environ["SPARK_MODELS"], os.environ["PREFIX"] = folder + "/models", folder + "/prefix"
+            files = Path(folder) / "models/MiniMax-H3-Image-Comfy"
+            for name in own:
+                (files / name).parent.mkdir(parents=True, exist_ok=True)
+                (files / name).write_bytes(b"x")
+            nodes = Path(folder) / "prefix/ComfyUI/comfy_extras/nodes_minimax_h3.py"
+            nodes.parent.mkdir(parents=True)
+            nodes.write_text("class MiniMaxH3ImageToVideo: pass\n")  # MiniMax H3's video nodes: a ComfyUI from before v0.45.1
+            shared = Path(folder) / "models/FastH3-Comfy" / encoder
+            shared.parent.mkdir(parents=True)
+            shared.write_bytes(b"x")  # the text encoder FastH3 has is the one it uses
+            assert "h3-image" not in server.image_models()
+            nodes.write_text("class MiniMaxH3ImageConditioning: pass\n")
+            assert server.image_models()[-1] == "h3-image"
+            shared.unlink()
+            assert "h3-image" not in server.image_models()  # no text encoder anywhere
+            (files / encoder).parent.mkdir(parents=True)
+            (files / encoder).write_bytes(b"x")  # its own copy (an --image-only install)
+            assert server.image_models()[-1] == "h3-image"
+            (files / own[1]).unlink()
+            assert "h3-image" not in server.image_models()  # the decoder too
+            (files / own[1]).write_bytes(b"x")
+            server.SPARK = False
+            assert "h3-image" not in server.image_models()  # a Mac has no path for it yet
+        finally:
+            server.SPARK, server.WINCUDA = had[0], had[1]
+            for key, value in had[2].items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+def test_h3_image_is_asked_for_by_name_refused_where_it_is_not_and_in_steps_of_32():
+    import server
+    from fastapi import HTTPException
+
+    had = server.image_models
+    try:
+        server.image_models = lambda: ["qwen"]
+        with pytest.raises(HTTPException) as refused:
+            server.image_model_env({"image_model": "h3-image"})
+        assert "MiniMax-H3-Image is not installed" in refused.value.detail and "--h3-image" in refused.value.detail
+        server.image_models = lambda: ["qwen", "h3-image"]
+        _, env, _ = server.build("scout", {"prompt": "a poster", "count": 1, "seed": 3, "image_model": "h3-image", "width": 1152, "height": 2048}, "j1")
+        assert env["IMAGE_MODEL"] == "h3-image" and (int(env["WIDTH"]), int(env["HEIGHT"])) == (1152, 2048)
+        with pytest.raises(HTTPException) as odd:
+            server.build("scout", {"prompt": "a poster", "image_model": "h3-image", "width": 1040, "height": 768}, "j2")
+        assert "steps of 32" in odd.value.detail and "1040x768" in odd.value.detail
+        server.build("scout", {"prompt": "a poster", "image_model": "qwen", "width": 1040, "height": 768}, "j3")  # Qwen's grid is 16
+    finally:
+        server.image_models = had
+
+
+def test_the_h3_image_workflow_follows_comfys_template_and_edits_from_pictures():
+    import spark_generate as G
+
+    class Args:
+        model, width, height, steps = "h3-image", 1152, 2048, None
+
+    w = G.h3image_workflow(Args, 'A sign that reads "KEEPERS REST"', 7)
+    assert w["1"]["inputs"]["unet_name"] == "minimax_h3_image_pruned_int8_convrot.safetensors"
+    assert w["3"]["inputs"] == {"clip_name": G.H3_TEXT, "type": "minimax", "device": "default"}  # MiniMax H3's text encoder, FastH3's file
+    assert w["4"]["inputs"]["vae_name"] == "minimax_h3_image_vae_fp16.safetensors"
+    node = w["5"]
+    assert node["class_type"] == "MiniMaxH3ImageConditioning"
+    assert node["inputs"] == {"clip": ["3", 0], "vae": ["4", 0], "prompt": 'A sign that reads "KEEPERS REST"', "width": 1152, "height": 2048}
+    sampler = w["12"]["inputs"]
+    assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"], sampler["seed"]) == (6, 1.0, "euler", "simple", 7)
+    assert sampler["latent_image"] == ["5", 1] and w["6"]["class_type"] == "ConditioningZeroOut"  # its own latent, no guidance
+    # an edit: the pictures go to the same node, the first is the one changed
+    w = G.h3image_workflow(Args, "make it night", 7, ("a.png", "b.png"))
+    assert w["31"] == {"class_type": "LoadImage", "inputs": {"image": "a.png"}} and w["32"]["inputs"]["image"] == "b.png"
+    assert w["5"]["inputs"]["images.image_1"] == ["31", 0] and w["5"]["inputs"]["images.image_2"] == ["32", 0]
+    with pytest.raises(SystemExit, match="multiple of 32"):
+        G.h3image_size(1040, 768)
+    G.h3image_size(1344, 768)
+
+
+def test_the_installer_adds_h3_image_by_name_and_moves_comfyui_only_then():
+    text = (ROOT / "oneshot-setup-cuda.sh").read_text()
+    assert "COMFY_COMMIT=b9b290e43f1eb379946dfeb013faf9bbefa1a618" in text  # everyone else's ComfyUI stays where it is
+    assert "COMFY_H3IMAGE_COMMIT=02457b8c8cad2da1801ef69bd9c6d654c751d32c" in text
+    assert '[ "$H3IMAGE" = 0 ] || COMFY_COMMIT="$COMFY_H3IMAGE_COMMIT"' in text
+    assert "--h3-image) H3IMAGE=1;;" in text
+    everything = text[text.index("    --all) "):].splitlines()[0]
+    assert "H3IMAGE" not in everything  # its licence and its ComfyUI are asked for by name
+    block = text[text.index('if [ "$H3IMAGE" = 1 ]; then'):text.index('if [ "$MUSIC" = 1 ]; then')]
+    assert "MiniMax-H3-Image Community License" in block and "https://huggingface.co/MiniMaxAI/MiniMax-H3-Image/blob/main/LICENSE" in block
+    assert "fetch Comfy-Org/MiniMax-H3-Image MiniMax-H3-Image-Comfy diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors" in block
+    # the text encoder is fetched only where FastH3's copy of the same file is not on disk
+    assert '[ -s "$MODELS/FastH3-Comfy/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors" ] \\\n    || fetch Comfy-Org/MiniMax-H3-Image' in block
+    assert "--h3-image" in (ROOT / "oneshot-setup.sh").read_text()

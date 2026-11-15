@@ -1124,12 +1124,15 @@ def turbo_ready() -> bool:
 # (flux3-mlx), Full 57.5 on a Spark and 53.6 on an M5 Ultra; BFL's prompt upsampler adds about 18 s on a Spark (8-bit,
 # ComfyUI) and 5 s on an M5 Ultra (8-bit MLX), once per prompt. MOSS-Image (OpenMOSS, Apache 2.0, oneshot-setup-spark.sh
 # --moss / oneshot-setup.sh --moss) runs on ComfyUI v0.42.0's own support on both machines, the Mac's ComfyUI on
-# PyTorch's Metal device (mac/comfy.sh): 45 s for 1344x768 on a Spark with the model loaded.
+# PyTorch's Metal device (mac/comfy.sh): 45 s for 1344x768 on a Spark with the model loaded. MiniMax-H3-Image (MiniMax,
+# oneshot-setup-spark.sh --h3-image) runs on ComfyUI v0.45.1's own support, on a DGX Spark: 6 steps, 3 s for 1024x1024
+# and 18 s for 2048x2048 with the model loaded, and the same model edits a picture.
 IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Research License (non-commercial)"),
                 "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
                 "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast"),
-                "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed")}
+                "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed"),
+                "h3-image": ("MiniMax-H3-Image", "6 steps, the quickest here: up to 2048 x 2048 and vertical, exact lettering, and it edits pictures; MiniMax-H3-Image Community License (territory limits)")}
 IMAGE_MODELS["sd-turbo"] = ("SD-Turbo", "Windows storyboard draft, 512x512, one step; Stability AI Community License")
 # BFL's file names, the present one first (renamed 2026-10-17, the same files; spark_generate.FLUX3_OLD)
 FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors"),
@@ -1159,7 +1162,28 @@ def image_models() -> list[str]:
             found.append(name)
     if moss_ready():
         found.append("moss-image")
+    if h3image_ready():
+        found.append("h3-image")
     return found
+
+
+def h3image_ready() -> bool:
+    """MiniMax-H3-Image on a DGX Spark: its checkpoint and decoder, MiniMax H3's text encoder (its own copy or the one
+    FastH3 has: the same file), and a ComfyUI that knows the model (v0.45.1 and later)."""
+
+    if not SPARK or WINCUDA:
+        return False
+    prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
+    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
+    own, encoder = models / "MiniMax-H3-Image-Comfy", "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    nodes = prefix / "ComfyUI/comfy_extras/nodes_minimax_h3.py"
+    try:
+        knows = "MiniMaxH3ImageConditioning" in nodes.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return (knows and (own / "diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors").is_file()
+            and (own / "vae/minimax_h3_image_vae_fp16.safetensors").is_file()
+            and ((own / encoder).is_file() or (models / "FastH3-Comfy" / encoder).is_file()))
 
 
 def moss_ready() -> bool:
@@ -1209,7 +1233,7 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
-        how = {"qwen": "", "qwen-full": " --image-edit", "moss-image": " --moss"}.get(name, " --flux3")
+        how = {"qwen": "", "qwen-full": " --image-edit", "moss-image": " --moss", "h3-image": " --h3-image"}.get(name, " --flux3")
         raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh{how} adds it"
                                  + (" (Machine → Models & weights shows what is missing)" if name == "qwen" else ""))
     return {"IMAGE_MODEL": name}
@@ -1785,6 +1809,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
             width, height = int(params["width"]), int(params["height"])
             if width % 16 or height % 16 or not (256 <= width <= 2048 and 256 <= height <= 2048):
                 raise HTTPException(400, "image sides are multiples of 16 between 256 and 2048")
+        if params.get("image_model") == "h3-image" and (width % 32 or height % 32):
+            raise HTTPException(400, f"MiniMax-H3-Image makes pictures in steps of 32 pixels a side: {width}x{height} is not one")
         if (WINDOWS or WIN32) and windows_runtime.mode()["enabled"]:
             import windows_image_checks
             if params.get("image_model") in windows_image_checks.KINDS:

@@ -26,7 +26,7 @@ The same credits the studio shows in Settings → About; [CREDITS.md](../CREDITS
   Previs Studio, Slate, Circle Take, Stem Studio, Call Sheet, DaVinci MCP), the Sharp Spec, the 80s Horror LoRA and the
   studio's art.
 - **Qwen team** — Qwen-Image-2.1. **Black Forest Labs** — FLUX 3 Image Klein (FLUX3-K). **OpenMOSS** — MOSS-Image.
-  **MiniMax** — MiniMax H3 and MiniMax-Music3. **Built with Fish Audio** — Fish Audio Drama 3.
+  **MiniMax** — MiniMax H3, MiniMax-H3-Image and MiniMax-Music3. **Built with Fish Audio** — Fish Audio Drama 3.
 - **Stability AI** — Stable Audio Open · **Ho Kei Cheng et al.** — MMAudio · **kijai** — ComfyUI-MMAudio (sound effects
   and foley).
 - **Ash Hart** — TensorFold.
@@ -41,7 +41,8 @@ The same credits the studio shows in Settings → About; [CREDITS.md](../CREDITS
 - **The community LoRA authors**, by name in Looks and in [CREDITS.md](../CREDITS.md).
 
 **Licences.** The studio's code is Apache-2.0. The models keep their own terms; do not redistribute their weights.
-Qwen-Image-2.1: Qwen Research License (non-commercial) · MiniMax H3: MiniMax H3 Community License (territory limits) ·
+Qwen-Image-2.1: Qwen Research License (non-commercial) · MiniMax H3: MiniMax H3 Community License (territory limits) · MiniMax-H3-Image: MiniMax-H3-Image Community License
+(territory limits; MiniMax's authorisation above US$1M of yearly revenue or for a hosted service) ·
 MiniMax-Music3: its licence asks for its name in a commercial UI · FLUX3-K: FLUX Kommunity License · MOSS-Image:
 Apache 2.0 (commercial use allowed) · Fish Audio Drama
 3: Fish Audio Community License v1.0 (a hosted voice service needs Fish's own licence) · Stable Audio Open 1.0:
