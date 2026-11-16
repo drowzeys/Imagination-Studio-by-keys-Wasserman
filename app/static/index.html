@@ -914,6 +914,32 @@ function libSoundTile(m, shown) { const [what, room] = LIB_SOUND[m.sound] || LIB
 // The Library is one node kept between redraws. A redraw builds its tiles at once from the last listing, around the same players and
 // pictures, so nothing reloads and the page keeps its height; the server's listing is asked for after, and only a change draws again
 const LIB = { root: null, box: null, data: null, text: "", media: new Map() };
+// The full-size viewer: a picture fitted to the window (click: actual size, drag or scroll to look around), a clip at
+// its own shape with controls; Esc closes, ← → step through the Library's visible pictures and clips.
+function libViewable(path, list) { const n = libMedia(path); if (!n.dataset.view) { n.dataset.view = "1"; n.style.cursor = "zoom-in";
+    if (n.tagName === "IMG") n.addEventListener("click", () => viewOpen(path, list()));
+    else n.addEventListener("dblclick", e => { e.preventDefault(); n.pause(); viewOpen(path, list()); }); } return n; }
+function viewOpen(path, list = [path]) {
+  document.getElementById("viewer")?.remove();
+  const at = Math.max(0, list.indexOf(path)), name = path.split("/").pop(), video = /\.(mp4|mov)$/i.test(path);
+  const close = () => { box.remove(); document.removeEventListener("keydown", key); last?.focus?.(); }, last = document.activeElement;
+  const step = d => { const i = list.indexOf(path) + d; if (i >= 0 && i < list.length) viewOpen(list[i], list); };
+  const key = e => { if (e.key === "Escape") close(); else if (e.key === "ArrowRight" && !video) step(1); else if (e.key === "ArrowLeft" && !video) step(-1);
+    else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && e.altKey) step(e.key === "ArrowRight" ? 1 : -1); };
+  const shown = video ? el("video", { src: file(path), controls: true, autoplay: true, playsinline: true, class: "view-media" })
+    : el("img", { src: file(path), alt: name, class: "view-media fit", onclick: e => { e.stopPropagation(); shown.classList.toggle("fit"); stage.classList.toggle("full"); } });
+  const stage = el("div", { class: "view-stage", onclick: e => { if (e.target === stage) close(); } }, shown);
+  const info = el("span", { class: "view-name", title: path }, name);
+  if (!video) shown.addEventListener("load", () => { info.textContent = name + " · " + shown.naturalWidth + " × " + shown.naturalHeight; });
+  else shown.addEventListener("loadedmetadata", () => { info.textContent = name + " · " + shown.videoWidth + " × " + shown.videoHeight + " · " + shown.duration.toFixed(1) + " s"; });
+  const nav = (d, t) => el("button", { class: "small", disabled: !list[at + d], title: t, onclick: () => step(d) }, d < 0 ? "←" : "→");
+  const box = el("div", { id: "viewer", role: "dialog", "aria-modal": "true", "aria-label": "View " + name },
+    el("div", { class: "view-bar" }, nav(-1, video ? "Previous (Alt+←)" : "Previous (←)"), el("span", { class: "view-count" }, (at + 1) + " / " + list.length), nav(1, video ? "Next (Alt+→)" : "Next (→)"), info,
+      video ? null : el("span", { class: "note", style: "margin:0" }, "click the picture: actual size"),
+      el("a", { class: "fit", href: file(path), target: "_blank", rel: "noopener" }, "Open in a tab"), el("a", { class: "fit", href: file(path), download: name }, "Download"),
+      el("button", { class: "small", "aria-label": "Close the viewer", title: "Close (Esc)", onclick: close }, "✕")), stage);
+  document.body.append(box); document.addEventListener("keydown", key); box.querySelector(".view-bar button:last-child").focus();
+}
 function libMedia(path) { let n = LIB.media.get(path); if (!n) { n = media(path); LIB.media.set(path, n); } else if (n.dataset && n.dataset.src0 && !n.getAttribute("src")) n.setAttribute("src", n.dataset.src0);
   if (n.dataset && !n.dataset.src0 && n.getAttribute) n.dataset.src0 = n.getAttribute("src") || ""; return n; }
 function viewLibrary() { if (!LIB.root) { LIB.box = el("section", { class: "card" }, el("h2", {}, "Library"));
@@ -944,13 +970,14 @@ function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library"))
     const show = () => { const them = pool(); many.textContent = "Delete selected (" + LIBPICK.size + ")"; many.disabled = !LIBPICK.size; all.textContent = them.length && them.every(p => LIBPICK.has(p)) ? "Select none" : "Select all"; }; show();
     const tally = el("span", {}, list.length + (list.length === all_.length ? "" : " of " + all_.length));
     const shown = new Set(list.map(m => m.path)), grid = el("div", { class: "grid", style: "margin-top:10px" }, kindList.map(m => m.kind === "audio" ? libSoundTile(m, shown.has(m.path)) :
-    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, libMedia(m.path), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
+    el("div", { class: "tile", "data-path": m.path, title: capText(m.path), style: shown.has(m.path) ? null : "display:none" }, libViewable(m.path, () => kindList.filter(o => o.kind !== "audio" && grid.querySelector('[data-path="' + CSS.escape(o.path) + '"]')?.style.display !== "none").map(o => o.path)), el("div", { class: "cap" }, el("input", { type: "checkbox", title: "Select " + m.path, "aria-label": "Select " + m.path, checked: LIBPICK.has(m.path), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) LIBPICK.add(m.path); else LIBPICK.delete(m.path); show(); } }),
       el("span", { style: "cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: m.path + (m.spark ? " · rendered on " + (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? ", seed " + m.seed : "") : ""), onclick: () => { navigator.clipboard?.writeText(m.path); toast("Copied " + m.path); } }, m.path.split("/").pop()),
       m.spark ? el("span", { class: "note fit", style: "margin:0", title: "The Spark that rendered this clip" + (m.seed != null ? ", and its seed" : "") }, (typeof spkLabel === "function" ? spkLabel(m.spark) : m.spark) + (m.seed != null ? " · s" + m.seed : "")) : null,
       m.failed ? el("span", { class: "note fit", style: "margin:0", title: "This take failed its check. It is kept here to look at; the Director leaves it out of the cut unless you circle it in Slate." }, "failed check") : null),
       // the buttons on a row of their own: a long file name no longer pushes them out of the tile
       el("div", { class: "cap", style: "padding-top:0;justify-content:flex-end;flex-wrap:wrap" }, actButtons(m), capButton(m),
       m.kind === "video" ? el("button", { class: "small", title: "Start a new clip on this clip's last frame", onclick: async () => { try { const r = await api("/api/frame", { path: m.path, at: "last" }); C.image = r.path; C.prompt = ""; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } catch (e) { toast(e.message); } } }, "continue") : el("button", { class: "small", title: "End a new clip on this picture", onclick: () => { C.lastImage = m.path; C.prompt = ""; C.goes = "video"; if (C.start === "refs") C.start = "text"; C.step = 1; tab = "Create"; render(); } }, "last frame"),
+      el("button", { class: "small", title: "View at full size (Esc closes, ← → step through)", "aria-label": "View " + m.path + " at full size", onclick: () => viewOpen(m.path, kindList.filter(o => o.kind !== "audio" && grid.querySelector('[data-path="' + CSS.escape(o.path) + '"]')?.style.display !== "none").map(o => o.path)) }, "⤢ view"),
       m.kind === "video" ? el("button", { class: "small", onclick: () => addToTimeline(m.path) }, "+ timeline") : el("button", { class: "small", onclick: () => { C.image = m.path; C.goes = "video"; C.start = "own"; C.step = 1; tab = "Create"; render(); } }, "use"),
       m.kind === "video" ? null : el("button", { class: "small", title: "Re-draw this picture: say in words what changes", onclick: () => edOpen(m.path) }, "edit"),
       m.kind === "video" || !LORAS.some(r => r.target === "image" && r.installed && r.id === "qwen-multiple-angles") ? null : el("button", { class: "small", title: "Show this picture's subject from another camera angle (Multiple Angles LoRA)", onclick: () => edOpen(m.path, "angles") }, "new angle"),

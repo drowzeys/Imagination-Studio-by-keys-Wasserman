@@ -214,7 +214,7 @@ input[type=file]::file-selector-button { font:500 14px var(--sans); color:var(--
 .tile .cap > :first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .tile .cap button, .tile .cap a { white-space:nowrap; flex:none; }
 .tile:hover { border-color:var(--line3); box-shadow:var(--sh-lift); transform:translateY(-1px); }
 .tile.on { border-color:var(--blue); box-shadow:inset 0 0 0 1px var(--blue),var(--sh-card); }
-.tile img, .tile video { width:100%; display:block; background:#000; aspect-ratio:16/9; object-fit:cover; }
+.tile img, .tile video { width:100%; display:block; background:#000; aspect-ratio:16/9; object-fit:contain; }  /* the whole frame: a 9:16 clip is not cropped to the tile */
 .tile .cap { padding:9px 12px; font-size:13.5px; color:var(--dim); display:flex; gap:6px; align-items:center; justify-content:space-between; }
 .tile > input { border-radius:0; border-width:1px 0 0; }
 video.main { width:100%; background:#000; border-radius:var(--r2); max-height:56vh; border:1px solid var(--line); }
@@ -981,3 +981,15 @@ button.appick-t:hover { border-color:var(--amber-muted); }
 .apps-grid .pcard.ap-icon .art { background:radial-gradient(ellipse at 50% 60%, var(--amber-wash, rgba(241,173,102,.12)), transparent 70%), var(--bg2); }
 .apps-grid .pcard.ap-icon .art > img { position:static; width:auto; height:58%; aspect-ratio:1; object-fit:contain; border-radius:22%; box-shadow:0 12px 32px rgba(0,0,0,.45); }
 .apps-grid .pcard.ap-icon .art::after { display:none; }
+
+/* the Library's full-size viewer (viewOpen in index.html) */
+#viewer { position:fixed; inset:0; z-index:90; display:flex; flex-direction:column; background:rgba(5,6,9,.97); }
+#viewer .view-bar { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+#viewer .view-bar a { font-size:13px; }
+#viewer .view-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted, #aab); font-size:13px; }
+#viewer .view-count { font-size:13px; color:var(--muted, #aab); min-width:52px; text-align:center; }
+#viewer .view-stage { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; padding:12px; }
+#viewer .view-stage.full { display:block; }
+#viewer .view-media { max-width:100%; max-height:100%; object-fit:contain; background:#000; }
+#viewer img.view-media { cursor:zoom-in; }
+#viewer img.view-media:not(.fit) { max-width:none; max-height:none; cursor:zoom-out; }
