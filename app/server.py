@@ -1812,7 +1812,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
             raise HTTPException(400, "The checked native recipe takes one image prompt at a time.")
         if params.get("loras"):  # text to picture has no LoRA path: an identity LoRA works only in an edit of a picture
             raise HTTPException(400, "a picture made from words alone cannot take LoRAs (they would be ignored): use Edit a picture with a source picture for an identity LoRA")
-        folder = HOME / "scouts" / job_id
+        folder = take_names.pictures(HOME, job_id, params)  # its own readable folder by month (issue #257)
         prompt = params["prompt"]
         count = max(1, min(int(params.get("count", 4)), 12))
         # a scout is made at the size the video model will start from (the draft keeps a full 1344x768 still)
@@ -2497,6 +2497,8 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             done, env, outputs = take(job, params)
             if not done:
                 return
+            if job["kind"] in ("scout", "edit") + actions.KINDS:  # pictures under their readable names (take_names.named)
+                outputs = take_names.named(list(outputs))
             job["outputs"] = [relative(Path(p)) for p in outputs if Path(p).is_file()]
             if not job["outputs"]:
                 raise RuntimeError("the script finished without writing its output")

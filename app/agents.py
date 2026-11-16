@@ -2518,7 +2518,7 @@ LOCAL_RULES = (" Do only what the filmmaker asked, exactly: one call for each th
                "anything over 15 s queue_long, a voice line queue_voice, a song or instrumental queue_song, a sound effect or foley "
                "queue_sound, a song under a clip queue_soundtrack, Motion Previs motion_previs, a timeline add_to_timeline and "
                "export_timeline; the QA gate (check_clip) only when they ask for a check; Slate films, scenes and shots only when they say Slate, film, scene or shot. The Studio's tools take Library paths as the filmmaker or the tools give them "
-               "(renders/a.mp4, scouts/<job>/scout_s1.png), never with a folder put in front. Name only files and ids the tools returned.")
+               "(renders/a.mp4, scouts/2026-11/<take>/<take>_s1.png), never with a folder put in front. Name only files and ids the tools returned.")
 LOCAL_HINTS = {
     "queue_still": {"count": "how many pictures: exactly the number asked for (1 for 'a picture', 'one picture', 'a still'); 4 only "
                              "when they ask for options or candidates without a number",

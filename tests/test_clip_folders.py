@@ -96,3 +96,28 @@ def test_the_trash_removes_a_clips_emptied_folder():
     done = client.post("/api/clear", json={"paths": [f"renders/2026-11/{stem}/{stem}.mp4"], "films": True}).json()
     assert done["files"] == 1 and not done["skipped"] and not folder.exists() and (server.HOME / "renders/2026-11").is_dir()
     assert client.post("/api/trash/restore").json()["files"] == 1 and (folder / f"{stem}.mp4").is_file()
+
+
+def test_pictures_get_their_own_folder_and_readable_names():
+    job = "1109-193812-a9fb3a"
+    params = {"prompt": "Snowy train station at night, sodium lamps", "count": 2, "seed": 7}
+    folder = take_names.pictures(server.HOME, job, params)  # where server.build sends the scout script
+    outputs = [str(folder / name) for name in ("scout_s7.png", "scout_s8.png", "sheet.jpg")]
+    assert folder.parents[1] == server.HOME / "scouts" and "take_names.pictures(HOME, job_id, params)" in (ROOT / "app/server.py").read_text()
+    assert folder.name.endswith("-11-09_193812_snowy-train-station-at-night-sodium_a9fb3a")
+    assert [Path(o).name for o in outputs] == ["scout_s7.png", "scout_s8.png", "sheet.jpg"]  # what the render scripts write
+    # when the job is done its pictures carry the take's name; the sheet keeps its own
+    folder.mkdir(parents=True, exist_ok=True)
+    for path in outputs:
+        Path(path).write_bytes(b"x")
+    named = take_names.named(outputs)
+    assert [Path(o).name for o in named] == [f"{folder.name}_s7.png", f"{folder.name}_s8.png", "sheet.jpg"]
+    assert all(Path(o).is_file() for o in named) and not Path(outputs[0]).exists()
+    assert take_names.named(named) == named  # nothing to do twice
+    # an older flat folder and a clip are left alone
+    old = server.HOME / "scouts/oldjob"
+    old.mkdir(parents=True, exist_ok=True)
+    (old / "scout_s1.png").write_bytes(b"x")
+    assert take_names.named([str(old / "scout_s1.png")]) == [str(old / "scout_s1.png")] and (old / "scout_s1.png").is_file()
+    assert take_names.pictures(server.HOME, "check", params) == server.HOME / "scouts/check"
+    assert take_names.pictures(server.HOME, job, {"prompts": ["A red door", "A blue door"]}).name.endswith("_a-red-door_a9fb3a")

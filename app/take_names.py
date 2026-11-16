@@ -101,3 +101,28 @@ def folder_of(root: Path, job_id: str, title: str | None, prompt: str | None, fa
     plain = unicodedata.normalize("NFKD", str(title or "")).encode("ascii", "ignore").decode("ascii")
     words = title if re.search(r"[A-Za-z0-9]", plain) else prompt  # a title with no usable word (or none) leaves the prompt's
     return folder(root, job_id, words or "", fallback)
+
+
+def pictures(home: Path, job_id: str, params: dict) -> Path:
+    """The folder a job's pictures go to: its own under ``scouts``, by month, named by the first words of what was
+    asked for and the job's token. A command built only to be checked ("check") names the old flat place."""
+    if job_id == "check":
+        return home / "scouts" / job_id
+    several = params.get("prompts")
+    words = params.get("prompt") or (several[0] if isinstance(several, list) and several else "")
+    return folder(home / "scouts", job_id, str(words or ""), "picture")[0]
+
+
+def named(outputs: list[str]) -> list[str]:
+    """A picture job's files under their readable names: in a take's own folder, ``scout_s7.png`` (what the render
+    scripts write on every platform) becomes ``<folder name>_s7.png``, so a picture copied out of its folder still
+    says what it is. The contact sheet and any other file keep their names. Returns the paths as they are now."""
+    out = []
+    for path in map(Path, outputs):
+        own = bool(re.fullmatch(r"\d{4}-\d{2}", path.parent.parent.name)) and path.parent.parent.parent.name == "scouts"
+        if own and path.name.startswith("scout_") and path.suffix.lower() == ".png" and path.is_file():
+            target = path.with_name(path.parent.name + path.name[len("scout"):])
+            path.replace(target)
+            path = target
+        out.append(str(path))
+    return out

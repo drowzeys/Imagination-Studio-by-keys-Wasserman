@@ -55,9 +55,9 @@ def refused(call, *args):
 def test_turnaround_command_and_outputs():
     home, build, title, source, _ = studio()
     command, env, outputs = build("turnaround", {"image": "uploads/a.png", "size": 512, "strength": 0.7, "seed": 5}, "j1")
-    assert command[1].endswith("scripts/turnaround.sh") and command[2].endswith("uploads/a.png") and command[3].endswith("scouts/j1/turn")
+    assert command[1].endswith("scripts/turnaround.sh") and command[2].endswith("uploads/a.png") and Path(command[3]).name == "turn" and Path(command[3]).parent.name.endswith("_j1") and Path(command[3]).parents[2].name == "scouts"
     assert (env["SIZE"], env["STRENGTH"], env["SEED"]) == (512, "0.7", 5) and env["TURNAROUND_LORA"].endswith("loras/turnaround.safetensors")
-    assert outputs[0].endswith("scouts/j1/turn_sheet.png") and len(outputs) == 6   # under scouts: the Library lists them
+    assert outputs[0].endswith("_j1/turn_sheet.png") and Path(outputs[0]).parent == Path(command[3]).parent and len(outputs) == 6   # under scouts: the Library lists them
     assert title("turnaround", {"image": "uploads/a.png"}) == "Turnaround sheet: a.png"
     assert source("turnaround", {"image": "uploads/a.png"}) == "uploads/a.png"
 

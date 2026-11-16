@@ -100,7 +100,8 @@ def test_a_set_of_angles_becomes_one_job_with_a_picture_each():
     plan = json.loads(Path(job_env["SET_FILE"]).read_text())
     assert [p for p, _ in plan] == ["<mva> front view, eye-level shot", "<mva> back view, high-angle shot close-up"]
     assert [Path(o).name for o in outputs] == ["edit_front_eye.png", "edit_back_high_close.png"] and [o for _, o in plan] == outputs
-    assert all(Path(o).parent == home / "scouts/j1" for o in outputs)  # beside the scout images: in the Library
+    folders = {Path(o).parent for o in outputs}  # one folder of its own under scouts: in the Library (issue #257)
+    assert len(folders) == 1 and next(iter(folders)).name.endswith("_j1") and next(iter(folders)).parents[1] == home / "scouts"
     assert job_env["LORA"] == "/loras/angles.safetensors:0.9" and job_env["SEED"] == 7 and job_env["BASE"] == "" and "QUANTIZE" not in job_env
 
 

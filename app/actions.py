@@ -25,6 +25,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+import take_names  # a take's readable folder and file names, beside this file
+
 import hlg
 import windows_cuda  # noqa: E402  (the native Windows CUDA tier, beside this file)
 
@@ -208,7 +210,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             strength = number(params, "strength", 1.0)
             if not 0.3 <= strength <= 1.5:
                 raise HTTPException(400, "the strength is between 0.3 and 1.5 (1.0 turns furthest, about 0.7 keeps the look closest)")
-            folder = home / "scouts" / job_id
+            folder = take_names.pictures(home, job_id, params)  # its own readable folder by month (issue #257)
             # the same script on both machines: the MLX engine on a Mac, the author's ComfyUI nodes on a Spark
             env.update(SIZE=size, STRENGTH=f"{strength:g}", SEED=number(params, "seed", 0, int), TURNAROUND_LORA=str(lora))
             if (params.get("prompt") or "").strip():
