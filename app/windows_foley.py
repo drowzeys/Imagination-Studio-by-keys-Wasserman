@@ -30,10 +30,11 @@ CUSTOM_NODES = ("ComfyUI-MMAudio", "studio_mmaudio")
 MAX_WIDTH = 660
 HOST_REQUIRED_MB = 9216
 # The render process's private-commit cap. Measured on an RTX Spark N1X (torch 2.14 cu134, pinned ComfyUI and
-# ComfyUI-MMAudio): the 5 s case peaks at 12,189 MiB and the 1 s case at 11,998 MiB, of which about 3.7 GiB is the
-# CUDA runtime before any model and the rest the models' host copies while they are cast and moved. The shared
-# 12,288 MiB cap left 100 MiB: a run a little higher died of MemoryError inside ComfyUI and ran out its deadline.
-# The job's 16,384 MiB cap, the device limit and the live memory guard are unchanged.
+# ComfyUI-MMAudio): under the shared 12,288 MiB cap one run passed at 12,189 MiB and the next died of MemoryError
+# inside ComfyUI at the cap and ran out its deadline. With room, three runs in a row peak at 12,430-12,431 MiB
+# (5 s case) and 11,939-12,001 MiB (1 s case); about 3.7 GiB of that is the CUDA runtime before any model, the rest
+# the models' host copies while they are cast and moved. The job's 16,384 MiB cap, the device limit and the live
+# memory guard are unchanged.
 PROCESS_COMMIT_MB = 14336
 FILES = {
     "mmaudio_large_44k_v2_fp16.safetensors": (2061198424, "a61378951ba4e8bfde2e977c0ad8211a7e02e1e92fd6a5b1c258a6464c1d102f"),
