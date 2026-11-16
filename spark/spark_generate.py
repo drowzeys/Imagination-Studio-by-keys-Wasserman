@@ -220,6 +220,15 @@ MOSS_INT8 = {"moss_image_sft_bf16.safetensors": "moss_image_sft_int8_convrot.saf
 MOSS_TEXT_INT8 = "qwen3.5_9b_int8_convrot.safetensors"
 MOSS_VAE = "flux2-vae_small.safetensors"
 MOSS_NEGATIVE = "nsfw, worst quality, bad anatomy, watermark, jpeg artifact"
+# MiniMax H3 Image (MiniMax H3 Community License) on ComfyUI's own support (v0.45.0): Comfy-Org/MiniMax-H3-Image's
+# files. The settings of ComfyUI's template "image_minimax_h3_image_t2i": 6 euler steps at CFG 1 against the zeroed
+# condition, the size given to MiniMaxH3ImageConditioning (the model is tuned for about 4 MP; it is poor at small sizes).
+# The template's optional prompt expansion (Qwen3.5 9B) is not run: the prompt goes to the model as written. The int8
+# checkpoint first, else the w4a8 one (a small card's: 12.5 GB); the Qwen3-VL 32B encoder in int8, else nvfp4.
+H3IMAGE_DIR = "MiniMax-H3-Image-Comfy"
+H3IMAGE = {"h3-image": (("minimax_h3_image_pruned_int8_convrot.safetensors", "minimax_h3_image_pruned_w4a8.safetensors"), 6, 1.0)}
+H3IMAGE_TEXT = ("qwen3vl_32b_minimax_h3_int8_convrot.safetensors", "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
+H3IMAGE_VAE = "minimax_h3_image_vae_fp16.safetensors"
 
 
 def _small_card_file(folder: Path, name: str, small: str | None) -> str:
@@ -241,6 +250,23 @@ def moss_unet(model: str = "moss-image") -> str:
 
 def moss_text() -> str:
     return _small_card_file(MODELS / MOSS_DIR / "text_encoders", MOSS_TEXT, MOSS_TEXT_INT8)
+
+
+def _first_present(folder: Path, names: tuple[str, ...]) -> str:
+    """The first of names that is in folder (H3IMAGE_WEIGHTS=<file name> chooses outright), else the first name."""
+
+    said = os.environ.get("H3IMAGE_WEIGHTS", "").strip()
+    if said in names:
+        return said
+    return next((name for name in names if (folder / name).is_file()), names[0])
+
+
+def h3image_unet(model: str = "h3-image") -> str:
+    return _first_present(MODELS / H3IMAGE_DIR / "diffusion_models", H3IMAGE[model][0])
+
+
+def h3image_text() -> str:
+    return _first_present(MODELS / H3IMAGE_DIR / "text_encoders", H3IMAGE_TEXT)
 
 
 def call(path, data=None):
@@ -1154,6 +1180,27 @@ def moss_workflow(args, text: str, seed: int) -> dict:
     }
 
 
+def h3image_workflow(args, text: str, seed: int) -> dict:
+    """MiniMax H3 Image, the layout of ComfyUI's template without its prompt expansion: the conditioning node makes the
+    condition and the empty latent at the size asked, the negative is the zeroed condition."""
+
+    _, steps, cfg = H3IMAGE[args.model]
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": h3image_unet(args.model), "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": h3image_text(), "type": "minimax", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": H3IMAGE_VAE}},
+        "5": {"class_type": "MiniMaxH3ImageConditioning", "inputs": {"clip": ["3", 0], "vae": ["4", 0], "prompt": text,
+                                                                     "width": args.width, "height": args.height}},
+        "6": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}},
+        "12": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps or steps,
+                                                    "cfg": cfg, "sampler_name": "euler", "scheduler": "simple",
+                                                    "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["5", 1],
+                                                    "denoise": 1.0}},
+        "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/image_{uuid.uuid4().hex[:8]}"}},
+    }
+
+
 # MiniMax Music 3 (lyrics and a style caption to a song with sung vocals, 44.1 kHz stereo) on ComfyUI's own nodes, the
 # layout of ComfyUI's blueprint "Text to Music (MiniMax Music 3)": the text encoder runs MiniMax's autoregressive
 # model (the acoustic conditioning, and where the song ends), the DiT fills it in over 30 Euler steps at CFG 1.7 against
@@ -1460,10 +1507,20 @@ def image(args) -> None:
         if value % 16:
             sys.exit(f"--{name} must be a multiple of 16, got {value}")
     flux3 = args.model in FLUX3
-    ensure_server("flux3" if flux3 else "moss" if args.model in MOSS else "image")
+    ensure_server("flux3" if flux3 else "moss" if args.model in MOSS else "h3image" if args.model in H3IMAGE else "image")
     text = prompt_of(args)
     target = Path(args.output)
     seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else [args.seed]
+    if args.model in H3IMAGE:
+        for seed in seeds:
+            item, seconds = render(h3image_workflow(args, text, seed), "12")
+            out = target.with_name(f"{target.stem}_s{seed}{target.suffix}") if args.seeds else target
+            fetch(item, out)
+            print("[tensorfold] " + json.dumps({"output": str(out), "engine": ENGINE, "model": args.model,
+                                                "weights": h3image_unet(args.model), "width": args.width,
+                                                "height": args.height, "seed": seed,
+                                                "steps": args.steps or H3IMAGE[args.model][1], "total_s": round(seconds, 1)}), flush=True)
+        return
     if args.model in MOSS:
         for seed in seeds:
             item, seconds = render(moss_workflow(args, text, seed), "12")
@@ -1549,10 +1606,11 @@ def main() -> None:
     i.add_argument("-o", "--output", required=True)
     i.add_argument("--width", type=int, default=1344); i.add_argument("--height", type=int, default=768)
     i.add_argument("--seed", type=int, default=0); i.add_argument("--seeds", default="", help="several pictures: 1,2,3")
-    i.add_argument("--model", choices=("qwen", *FLUX3, *MOSS), default=os.environ.get("IMAGE_MODEL") or "qwen",
+    i.add_argument("--model", choices=("qwen", *FLUX3, *MOSS, *H3IMAGE), default=os.environ.get("IMAGE_MODEL") or "qwen",
                    help="qwen: Qwen-Image-2.1-Turbo (the default); flux3k-fast: FLUX3-K distilled, 16 steps; "
                         "flux3k-full: FLUX3-K base, 50 steps at CFG 3.5 (oneshot-setup-spark.sh --flux3); "
-                        "moss-image: MOSS-Image SFT, 25 steps at CFG 2.5 (oneshot-setup-spark.sh --moss)")
+                        "moss-image: MOSS-Image SFT, 25 steps at CFG 2.5 (oneshot-setup-spark.sh --moss); "
+                        "h3-image: MiniMax H3 Image, 6 steps at CFG 1 (its files in $SPARK_MODELS/MiniMax-H3-Image-Comfy)")
     i.add_argument("--no-upsample", dest="upsample", action="store_false",
                    help="FLUX3-K: send the prompt as written (a full scene caption) instead of BFL's prompt upsampler's")
     i.add_argument("--base", action="store_true", help="the base model without the turbo adapter")

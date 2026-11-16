@@ -1102,7 +1102,9 @@ IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Re
                 "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
                 "flux3k-full": ("FLUX3-K Full", "FLUX 3 Image Klein base, 50 steps: the most detail, about 5x slower than Fast"),
-                "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed")}
+                "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed"),
+                "h3-image": ("MiniMax H3 Image", "6 steps, made for large pictures (about 4 MP); MiniMax H3 Community License, "
+                                                 "not licensed for use in the EU, the UK, South Korea or the US")}
 IMAGE_MODELS["sd-turbo"] = ("SD-Turbo", "Windows storyboard draft, 512x512, one step; Stability AI Community License")
 # BFL's file names, the present one first (renamed 2026-10-17, the same files; spark_generate.FLUX3_OLD)
 FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors",
@@ -1133,7 +1135,26 @@ def image_models() -> list[str]:
             found.append(name)
     if moss_ready():
         found.append("moss-image")
+    if h3image_ready():
+        found.append("h3-image")
     return found
+
+
+def h3image_ready() -> bool:
+    """MiniMax H3 Image's ComfyUI files (spark_generate.H3IMAGE: the int8 or w4a8 checkpoint, the int8 or nvfp4
+    Qwen3-VL 32B encoder, its VAE) and a ComfyUI that knows the model (v0.45.0 and later). On a Spark or a card only."""
+
+    if not SPARK:
+        return False
+    prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
+    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "MiniMax-H3-Image-Comfy"
+    nodes = prefix / "ComfyUI/comfy_extras/nodes_minimax_h3.py"
+    return (any((models / "diffusion_models" / name).is_file()
+                for name in ("minimax_h3_image_pruned_int8_convrot.safetensors", "minimax_h3_image_pruned_w4a8.safetensors"))
+            and any((models / "text_encoders" / name).is_file()
+                    for name in ("qwen3vl_32b_minimax_h3_int8_convrot.safetensors", "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"))
+            and (models / "vae/minimax_h3_image_vae_fp16.safetensors").is_file()
+            and nodes.is_file() and "MiniMaxH3ImageConditioning" in nodes.read_text(errors="ignore"))
 
 
 def moss_ready() -> bool:
@@ -1188,6 +1209,10 @@ def image_model_env(params: dict) -> dict:
     if name not in IMAGE_MODELS:
         raise HTTPException(400, f"unknown picture model {name}: one of {', '.join(IMAGE_MODELS)}")
     if name not in image_models():
+        if name == "h3-image":
+            raise HTTPException(400, "MiniMax H3 Image is not installed here: put Comfy-Org/MiniMax-H3-Image's files in "
+                                     "$SPARK_MODELS/MiniMax-H3-Image-Comfy (diffusion_models, text_encoders, vae) and "
+                                     "update ComfyUI to v0.45.0 or later")
         how = {"qwen": "", "qwen-full": " --image-edit", "moss-image": " --moss"}.get(name, " --flux3")
         raise HTTPException(400, f"{IMAGE_MODELS[name][0]} is not installed here: oneshot-setup.sh{how} adds it"
                                  + (" (Machine → Models & weights shows what is missing)" if name == "qwen" else ""))

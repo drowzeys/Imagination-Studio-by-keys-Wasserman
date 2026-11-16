@@ -61,7 +61,7 @@ resident = lambda: ""  # what is loaded beside the queue now, in words (server.r
 pictures = lambda: []  # the picture models installed here (server.image_models)
 # the picture model of the cast's and places' stills where Settings' default is not installed here: the app's own order
 # (Qwen first, as every page's default), then FLUX3-K Fast, which draws whole figures, then the slower ones
-PICTURE_ORDER = ("qwen", "flux3k-fast", "moss-image", "qwen-full", "flux3k-full")
+PICTURE_ORDER = ("qwen", "flux3k-fast", "moss-image", "qwen-full", "flux3k-full", "h3-image")
 
 runs: dict[str, dict] = {}  # project -> {"thread", "stop"}
 guard = threading.RLock()  # one read-modify-write of a film file at a time

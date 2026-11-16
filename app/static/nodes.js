@@ -220,7 +220,7 @@ function ndField(node, key, kind, options) {
     kind === "area" ? null : el("span", {}, words), input); }
 function ndFields(node) {
   const models = typeof S !== "undefined" && S && S.image_models && S.image_models.length ? Object.fromEntries(S.image_models.map(m => [m.id, m.label]))
-    : { qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full", "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image" };
+    : { qwen: "Qwen 2.1 Turbo", "qwen-full": "Qwen 2.1 Full", "flux3k-fast": "FLUX3-K Fast", "flux3k-full": "FLUX3-K Full", "moss-image": "MOSS-Image", "h3-image": "MiniMax H3 Image" };
   const f = (key, kind, options) => ndField(node, key, kind, options);
   return {
     text: () => [f("text", "area")], note: () => [f("text", "area")],

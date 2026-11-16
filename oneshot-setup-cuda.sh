@@ -108,7 +108,7 @@ MODELS="${SPARK_MODELS:-$HOME/spark-studio-models}"
 . "$HERE/spark/gpu.sh"
 studio_pin_gpu || exit 1
 [ -z "${STUDIO_GPU:-}" ] || export PATH="$HERE/spark/smi-pin:$PATH"
-COMFY_COMMIT=b9b290e43f1eb379946dfeb013faf9bbefa1a618  # v0.42.0 and later: ComfyUI's FLUX 3 and MOSS-Image nodes
+COMFY_COMMIT=2aa4d535a76e4b6acf6a94f263bc482430c396dd  # v0.45.4: ComfyUI's FLUX 3, MOSS-Image and MiniMax H3 Image nodes
 # In a terminal with no feature flag: the checklist of parts (scripts/install-checklist.sh), every part ticked; what is
 # ticked becomes this script's own flags below. --yes, any flag, no terminal: no list. (On a Mac oneshot-setup.sh shows it.)
 # shellcheck source=scripts/install-checklist.sh
@@ -350,12 +350,14 @@ studio:
     MiniMax-H3-Comfy/diffusion_models
     FLUX3-K-Comfy/diffusion_models
     MOSS-Image-Comfy/diffusion_models
+    MiniMax-H3-Image-Comfy/diffusion_models
     MiniMax-Music3-Comfy/diffusion_models
   text_encoders: |
     FastH3-Comfy/text_encoders
     Qwen-Image-2.1-Comfy/text_encoders
     FLUX3-K-Comfy/text_encoders
     MOSS-Image-Comfy/text_encoders
+    MiniMax-H3-Image-Comfy/text_encoders
     MiniMax-Music3-Comfy/text_encoders
     Sound-Comfy/text_encoders
   vae: |
@@ -363,6 +365,7 @@ studio:
     Qwen-Image-2.1-Comfy/vae
     FLUX3-K-Comfy/vae
     MOSS-Image-Comfy/vae
+    MiniMax-H3-Image-Comfy/vae
     MiniMax-Music3-Comfy/vae
   loras: |
     loras
