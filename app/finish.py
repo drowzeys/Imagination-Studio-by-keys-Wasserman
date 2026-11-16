@@ -39,6 +39,8 @@ import time
 import zipfile
 from pathlib import Path
 
+import take_names  # where a take's files are, in either layout, beside this file
+
 KINDS = ("finish",)
 TSRCT_VERSION = "0.4.0"        # the release Tesseract's own skills pin (fxSchemaVersion 77)
 CONVERTER_VERSION = "0.3.0"    # Tesseract Converter built on the same FX schema
@@ -260,9 +262,10 @@ def song_path(value) -> Path | None:
     if value in (None, "", False):
         return None
     value = str(value)
-    if ID.fullmatch(value) and HOME and (HOME / "music" / f"{value}.take.json").is_file():
+    said = take_names.find(HOME / "music", value, ".take.json") if ID.fullmatch(value) and HOME else None
+    if said is not None:
         try:
-            meta = json.loads((HOME / "music" / f"{value}.take.json").read_text())
+            meta = json.loads(said.read_text())
             return inside(meta["path"])
         except (OSError, ValueError, KeyError, TypeError):
             raise bad(f"the song {value} cannot be read")

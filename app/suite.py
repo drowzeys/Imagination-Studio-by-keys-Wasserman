@@ -33,6 +33,8 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 from xml.sax.saxutils import quoteattr
 
+import take_names  # where a take's files are, in either layout, beside this file
+
 import anyio.from_thread
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -1246,7 +1248,7 @@ def attach(home: Path, jobs: dict, lock: threading.Lock, presets: dict, app=None
         take = said.get("take") if isinstance(said, dict) else said
         if take and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(take)):
             try:
-                meta = json.loads((home / "music" / f"{take}.take.json").read_text())
+                meta = json.loads((take_names.find(home / "music", str(take), ".take.json") or home / "music" / f"{take}.take.json").read_text())
                 path = (home / meta["path"]).resolve()
                 if home.resolve() in path.parents and path.is_file():
                     song = {"path": path, "seconds": probe(path).get("seconds") or meta.get("seconds")}
