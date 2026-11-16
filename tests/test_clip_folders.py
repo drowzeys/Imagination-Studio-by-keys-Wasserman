@@ -125,3 +125,29 @@ def test_pictures_get_their_own_folder_and_readable_names():
     assert take_names.named([str(old / "scout_s1.png")]) == [str(old / "scout_s1.png")] and (old / "scout_s1.png").is_file()
     assert take_names.pictures(server.HOME, "check", params) == server.HOME / "scouts/check"
     assert take_names.pictures(server.HOME, job, {"prompts": ["A red door", "A blue door"]}).name.endswith("_a-red-door_a9fb3a")
+
+
+def test_organize_through_the_app_moves_older_takes_keeps_old_paths_opening_and_undoes():
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+    old = server.HOME / "voice"
+    old.mkdir(parents=True, exist_ok=True)
+    (old / "0102-030405-0a0b0c.wav").write_bytes(b"RIFF")
+    (old / "0102-030405-0a0b0c.take.json").write_text('{"id": "0102-030405-0a0b0c", "path": "voice/0102-030405-0a0b0c.wav", "text": "Good morning."}')
+    seen = client.get("/api/organize").json()
+    assert seen["takes"] >= 1 and seen["kinds"]["voice line"] >= 1
+    done = client.post("/api/organize", json={}).json()
+    assert done["takes"] >= 1 and not done["failed"] and not (old / "0102-030405-0a0b0c.wav").exists()
+    moved = server.organized()["voice/0102-030405-0a0b0c.wav"]
+    assert moved.endswith("_good-morning_0a0b0c.wav") and (server.HOME / moved).is_file()
+    assert server.inside("voice/0102-030405-0a0b0c.wav") == (server.HOME / moved).resolve()  # the old path still opens
+    assert client.get("/api/voice/takes/0102-030405-0a0b0c").json()["path"] == moved  # and the take is found by its id
+    assert client.get("/api/organize").json()["undo"] >= 2
+    back = client.post("/api/organize", json={"undo": True}).json()
+    assert back["files"] >= 2 and (old / "0102-030405-0a0b0c.wav").is_file() and "voice/0102-030405-0a0b0c.wav" not in server.organized()
+    # refused while a job waits: it may be reading these files
+    server.jobs["busy-organize"] = {"id": "busy-organize", "status": "queued", "kind": "video", "params": {}, "outputs": []}
+    try:
+        assert client.post("/api/organize", json={}).status_code == 409
+    finally:
+        server.jobs.pop("busy-organize")

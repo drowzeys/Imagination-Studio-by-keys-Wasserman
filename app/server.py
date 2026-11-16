@@ -61,6 +61,7 @@ if LOCAL_GPU_CHILD:
     os.environ["STUDIO_DISCOVER_DELAY"] = "-1"
 
 import take_names  # noqa: E402  (a take's readable folder and file names, beside this file)
+import organize  # noqa: E402  (older takes moved into those folders when asked, beside this file)
 import chain  # noqa: E402  (a long video's last frame and join, beside this file)
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
@@ -685,7 +686,27 @@ def inside(path: str | Path) -> Path:
         raise HTTPException(400, "path is outside the studio folder")
     if hidden(resolved.relative_to(home)):
         raise HTTPException(400, "hidden files of the studio folder are not served or used")
+    if not resolved.exists():  # a take that Organize moved to its readable folder still opens by its old path
+        there = organized().get(resolved.relative_to(home).as_posix())
+        if there and (home / there).is_file():
+            return (home / there).resolve()
     return resolved
+
+
+_ORGANIZED: dict = {"at": None, "moved": {}}
+
+
+def organized() -> dict:
+    """old path -> new path for what Organize moved (organize.py), read again only when its list changes."""
+
+    file = HOME / "organize" / "moved.json"
+    try:
+        at = file.stat().st_mtime_ns
+    except OSError:
+        return {}
+    if _ORGANIZED["at"] != at:
+        _ORGANIZED.update(at=at, moved=organize.moved(HOME))
+    return _ORGANIZED["moved"]
 
 
 def hidden(relative_path: Path | str) -> bool:
@@ -3241,6 +3262,43 @@ def fit_picture(body: dict) -> dict:
     if not target.is_file():
         raise HTTPException(400, "the picture could not be read")
     return {"path": relative(target)}
+
+
+def organize_plan(busy: set[str]) -> dict:
+    return organize.plan(HOME, hub.takes(), busy)
+
+
+@app.get("/api/organize")
+def organize_preview() -> dict:
+    """What Organize would move (each take's old and new paths), and what it would leave and why. Reads only."""
+
+    with lock:
+        busy = {job["id"] for job in jobs.values() if job["status"] in ("queued", "running")}
+    found = organize_plan(busy)
+    last = organize._record(HOME / "organize" / "last.json").get("moved") or {}
+    return {"takes": found["takes"], "files": found["files"], "kinds": found["kinds"],
+            "moves": [{"what": one["what"], "id": one["id"], "files": one["files"]} for one in found["moves"][:500]],
+            "skipped": found["skipped"][:500], "skipped_count": len(found["skipped"]), "undo": len(last)}
+
+
+@app.post("/api/organize")
+def organize_run(body: dict | None = None) -> dict:
+    """Move older takes into their readable folders, or take the last run back ({"undo": true}). The queue is held
+    for the length of the run: nothing is queued or started while files move."""
+
+    with lock:
+        if any(job["status"] in ("queued", "running") for job in jobs.values()):
+            raise HTTPException(409, "wait until the queue is empty: a job may be reading or writing these files")
+        if (body or {}).get("undo"):
+            done = organize.undo(HOME)
+            mapping = {new: old for old, new in (done.pop("back", None) or {}).items()}
+        else:
+            done = organize.apply(HOME, organize_plan(set()))
+            mapping = organize._record(HOME / "organize" / "last.json").get("moved") or {}
+        for job in jobs.values():  # the jobs still listed name their files where they are now
+            if job.get("outputs"):
+                job["outputs"] = [mapping.get(path, path) for path in job["outputs"]]
+    return done
 
 
 @app.get("/api/library")

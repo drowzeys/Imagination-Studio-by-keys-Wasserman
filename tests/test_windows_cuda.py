@@ -342,7 +342,7 @@ def test_the_engines_come_built_checked_and_never_fall_back_to_a_compile():
     text = (ROOT / "scripts/setup-windows-cuda.ps1").read_text()
     pins = json.loads((ROOT / "app/windows_engines.json").read_text())
     assert pins["commit"] == "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2" and f'$TensorFoldCommit = "{pins["commit"]}"' in text
-    assert pins["base"] == "https://github.com/drowzeys/TensorFold/releases/download" and pins["release"].startswith("studio-1.2.2-windows-arm64-")
+    assert pins["base"] == "https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/releases/download" and pins["release"].startswith("studio-1.2.2-windows-arm64-")
     wanted = {"h3": {"tf_h3.dll"}, "drama3": {"drama3-generate.exe", "tensorfold_drama3.dll"},
               "bolt": {"tensorfold-native.exe", "bolt.dll"}, "music3": {"music3-generate.exe"}}
     assert set(pins["engines"]) == set(wanted)

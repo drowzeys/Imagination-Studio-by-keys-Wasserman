@@ -99,10 +99,10 @@ def clip(home: Path, job_id: str, title: str | None, prompt: str | None) -> Path
     return folder / f"{name}.mp4"
 
 
-def folder_of(root: Path, job_id: str, title: str | None, prompt: str | None, fallback: str) -> tuple[Path, str]:
+def folder_of(root: Path, job_id: str, title: str | None, prompt: str | None, fallback: str, now: float | None = None) -> tuple[Path, str]:
     plain = unicodedata.normalize("NFKD", str(title or "")).encode("ascii", "ignore").decode("ascii")
     words = title if re.search(r"[A-Za-z0-9]", plain) else prompt  # a title with no usable word (or none) leaves the prompt's
-    return folder(root, job_id, words or "", fallback)
+    return folder(root, job_id, words or "", fallback, now)
 
 
 def pictures(home: Path, job_id: str, params: dict) -> Path:
