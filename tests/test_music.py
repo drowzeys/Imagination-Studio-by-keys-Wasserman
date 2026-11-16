@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "app"))
 sys.path.insert(0, str(ROOT / "spark"))
 import server  # noqa: E402
 import music  # noqa: E402
+import take_names  # noqa: E402
 import voice  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -811,7 +812,8 @@ def test_a_song_cancelled_as_its_engine_finishes_leaves_no_take(monkeypatch):
     monkeypatch.setattr(music, "loaded_engines", lambda: [])
     job = {"id": "test-cancel-at-the-end", "status": "running", "params": {"caption": "pop", "lyrics": "", "seconds": 10, "seed": 1}}
     assert music.perform(job) is False
-    wav = music.HOME / "music" / f"{job['id']}.wav"
+    _folder, _name = take_names.folder(music.HOME / "music", job["id"], job["params"].get("lyrics") or job["params"].get("caption", ""), "music")
+    wav = _folder / f"{_name}.wav"
     assert not wav.exists() and not wav.with_suffix(".yue2").exists() and not wav.with_suffix(".take.json").exists()
 
 

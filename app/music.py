@@ -63,6 +63,7 @@ from fastapi.responses import FileResponse
 
 import voice
 import model_catalog
+import take_names  # a take's readable folder and file names, beside this file
 import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
 
 router = APIRouter()
@@ -950,7 +951,11 @@ def perform(job: dict) -> bool:
 
     params, folder = job["params"], HOME / "music"
     folder.mkdir(parents=True, exist_ok=True)
-    wav = folder / f"{job['id']}.wav"
+    # a take's own folder, by month, date, time and its first words (take_names.py): the song and its take file
+    # share one readable stem. Takes made before this stay where they are and are read as before.
+    folder, name = take_names.folder(folder, job["id"], params.get("lyrics") or params.get("prompt", ""), "music")
+    folder.mkdir(parents=True, exist_ok=True)
+    wav = folder / f"{name}.wav"
     chosen = params.get("engine") or "music3"  # a song queued before engines were two is MiniMax Music 3's
     one = engine(chosen)
     for other in loaded_engines():  # the other song engine gives back its memory and the GPU lock first
@@ -1009,7 +1014,7 @@ def forget_song(wav: Path) -> None:
 
 def takes() -> list[dict]:
     out = []
-    for file in (HOME / "music").glob("*.take.json"):
+    for file in (HOME / "music").rglob("*.take.json"):
         try:
             take = json.loads(file.read_text())
         except (OSError, ValueError):
@@ -1023,6 +1028,15 @@ def one_take(take_id: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", take_id):
         raise HTTPException(400, "bad take id")
     file = HOME / "music" / f"{take_id}.take.json"
+    if not file.is_file():
+        for candidate in (HOME / "music").rglob("*.take.json"):
+            try:
+                take = json.loads(candidate.read_text())
+            except (OSError, ValueError):
+                continue
+            if take.get("id") == take_id:
+                file = candidate
+                break
     if not file.is_file():
         raise HTTPException(404, "no such song")
     return json.loads(file.read_text())
