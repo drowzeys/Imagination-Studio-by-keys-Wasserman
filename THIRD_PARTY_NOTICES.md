@@ -150,6 +150,17 @@ no node pack is installed for it and no code of anyone below is copied into this
   read and followed. Its optional first frame went to a paid picture service; here the studio's own FLUX3-K edit draws
   it, on this machine.
 
+## MiniMax H3 Multi Swap, by TheBeast-Spec, after Noncoder's tutorial
+
+- <https://github.com/TheBeast-Spec/minimax-h3-multi-swap-comfyui>, commit `69706a7` (2026-11-08): a ComfyUI workflow
+  and its README, published without a licence. Nothing of it is copied into this repository and none of its node
+  packs is installed. What was read and followed is the idea: SAM 3 numbers the people, up to four are swapped in
+  one run, one after another, each on the result of the one before; each is drawn in a crop of the frame and only
+  that person is pasted back, so the rest of every frame stays the video's own pixels. The numbered picture, the
+  crop (one box for the whole part, never more pixels than the canvas), the paste through the tracked mask, its
+  margin and the settings are the studio's own, on ComfyUI's own SAM 3 nodes; the workflow's pose control, its second picture, its BiRefNet cut-out,
+  its newer LoRA files and its timed cut or wipe are not used.
+
 ## H3 Character Swap, by Akatz Labs
 
 - The workflow: Akatz Labs' H3 Character Swap workflow (MIT, Copyright (c) 2026 Akatz Labs), as Openjutsu carries it,

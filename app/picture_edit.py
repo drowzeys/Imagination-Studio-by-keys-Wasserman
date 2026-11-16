@@ -86,7 +86,9 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
             return (True, "") if any(m["id"] == model for m in flux3()) else (False, "that FLUX3-K model is not installed here: oneshot-setup" + ("-spark" if spark else "") + ".sh --flux3")
         if spark:
             models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
-            if not (models / "diffusion_models/qwen_image_2.1_turbo_bf16.safetensors").is_file():
+            # the bf16 transformer, or the 8-bit one a small-card install fetches (spark_generate.py qwen_file)
+            if not any((models / "diffusion_models" / name).is_file()
+                       for name in ("qwen_image_2.1_turbo_bf16.safetensors", "qwen_image_2.1_turbo_int8_convrot.safetensors")):
                 return False, "Qwen-Image-2.1-Turbo is not installed here: run oneshot-setup-spark.sh"
             return True, ""
         turbo, _ = model_dirs()

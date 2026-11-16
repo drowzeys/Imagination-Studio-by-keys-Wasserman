@@ -474,9 +474,17 @@ def c_compose(r: Run):
     r.ctx["prompt"] = composed["prompt"]
     checked = r.api.post("/api/prompt/check", {"prompt": "a quiet street, no cars"})
     est = r.api.post("/api/estimate", {"preset": "small", "quality": "fh4", "seconds": 5, "text_only": True})
-    if est.get("seconds") is None:
+    memory = est.get("memory") or {}
+    if memory.get("fits") and "refused" in (memory.get("reason") or ""):
+        raise Fail(f"the estimate says the clip fits and that it is refused: {memory}")
+    # a discrete card (the banner starts "CUDA · ") shows a time only from its own sample of this canvas (CARD_WARM in
+    # app/server.py, empty until one is measured): no number there is the app's answer, not a missing estimate
+    card = str(r.state.get("platform_label") or "").startswith("CUDA")
+    if est.get("seconds") is None and not card:
         raise Fail(f"no estimate for a 5 s clip at small/fh4 on this machine: {est}")
-    return {"prompt_chars": len(composed["prompt"]), "negations": checked, "estimate_s": est.get("seconds")}
+    return {"prompt_chars": len(composed["prompt"]), "negations": checked,
+            "estimate_s": est.get("seconds") if est.get("seconds") is not None else "no time is measured on this card",
+            **({"memory_warning": memory["warning"]} if memory.get("warning") else {})}
 
 
 @check("probe-frame-shot-lineart")

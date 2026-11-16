@@ -84,8 +84,125 @@ def own(handle) -> bool:
     return True
 
 
+def started(pid: int) -> str:
+    """When a process started, as ps says it: with the PID, the identity of one process (a PID is used again)."""
+
+    try:
+        done = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return " ".join(done.stdout.split())
+
+
+def is_launcher(pid: int) -> bool:
+    try:
+        done = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "launcher.py" in done.stdout
+
+
+def record_of(lock_path: Path) -> Path:
+    return lock_path.with_name("studio-launcher.pid")
+
+
+def note(lock_path: Path) -> None:
+    """Who holds the lock, for `launcher.py stop`: this launcher's PID and when it started."""
+
+    try:
+        write_json(record_of(lock_path), {"pid": os.getpid(), "started": started(os.getpid())})
+    except OSError:
+        pass  # stop then looks the holder up in /proc/locks, where there is one
+
+
+def holder(lock_path: Path) -> int | None:
+    """The launcher that holds this checkout's lock: the one the record names, when it is that same process still
+    (PID and start time) and a launcher; else, on Linux, the process /proc/locks shows holding the file."""
+
+    try:
+        said = json.loads(record_of(lock_path).read_text())
+        pid = int(said["pid"])
+        if said.get("started") and started(pid) == said["started"] and is_launcher(pid):
+            return pid
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    try:
+        inode = str(lock_path.stat().st_ino)
+        for line in Path("/proc/locks").read_text().split("\n"):
+            fields = line.split()  # 1: FLOCK ADVISORY WRITE pid major:minor:inode start end
+            if len(fields) >= 6 and fields[1] == "FLOCK" and fields[5].rsplit(":", 1)[-1] == inode and is_launcher(int(fields[4])):
+                return int(fields[4])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+STOP_WAIT_S = 45  # the launcher gives its server 15 s to end, then 5 more (retire)
+
+
+def stop_running(lock_path: Path, force: bool = False, wait: float = STOP_WAIT_S) -> int:
+    """`launcher.py stop`: end the Studio this checkout runs, and return once its lock is free. A launcher paused in
+    its terminal (Ctrl+Z, state T) is resumed first: a paused process does not see a plain kill until then, and it
+    keeps the lock, so the next start was refused. Only the lock's own holder is signalled, never a process found by
+    name or port. ``force`` ends a launcher that did not leave in ``wait`` seconds, and its server child."""
+
+    if sys.platform == "win32":
+        print("On Windows stop the Studio with scripts\\stop-windows-studio.ps1.", file=sys.stderr)
+        return 2
+
+    def free() -> bool:
+        with lock_path.open("a+") as handle:
+            if not own(handle):
+                return False
+            fcntl.flock(handle, fcntl.LOCK_UN)
+            return True
+
+    if not lock_path.exists() or free():
+        print("The Studio is not running in this checkout.")
+        return 0
+    pid = holder(lock_path)
+    if pid is None:
+        print("A Studio holds this checkout, and its launcher could not be identified. In the terminal it was started in, "
+              "run `fg` and press Ctrl+C once.", file=sys.stderr)
+        return 1
+    children = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True, timeout=5).stdout.split()
+    try:
+        for one in (pid, *map(int, children)):  # paused with Ctrl+Z, the server under it is paused too
+            os.kill(one, signal.SIGCONT)
+        os.kill(pid, signal.SIGTERM)  # the launcher hands it to its server and waits for it
+    except ProcessLookupError:
+        pass
+    print(f"Stopping the Studio (launcher {pid})…", flush=True)
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if free():
+            print("The Studio has stopped.")
+            return 0
+        time.sleep(0.5)
+    if not force:
+        print(f"The Studio did not stop in {wait:g} s (a render may still be ending). Run `bash scripts/app.sh stop --force` "
+              "to end it now.", file=sys.stderr)
+        return 1
+    for one in (*map(int, children), pid):
+        if one == pid or started(one):
+            try:
+                os.kill(one, signal.SIGKILL)  # this checkout's launcher and its own server child only
+            except ProcessLookupError:
+                pass
+    for _ in range(20):
+        if free():
+            print("The Studio was ended.")
+            return 0
+        time.sleep(0.5)
+    print("The Studio's lock is still held.", file=sys.stderr)
+    return 1
+
+
 def main() -> int:
     pack = Path(__file__).resolve().parent.parent
+    if sys.argv[1:2] == ["stop"]:
+        lock_path = Path(git(pack, "rev-parse", "--git-path", "studio-launcher.lock"))
+        return stop_running(lock_path if lock_path.is_absolute() else pack / lock_path, force="--force" in sys.argv[2:])
     home = studio_home(move=True)
     manager = Manager(pack, home, None, lambda: False)
     # Lock the checkout across launchers, even when two installations use different Studio homes or ports.
@@ -94,8 +211,11 @@ def main() -> int:
         lock_path = pack / lock_path
     ownership = lock_path.open("a+")
     if not own(ownership):
-        print("This checkout already has a running Studio. Use a separate checkout for another instance.", file=sys.stderr)
+        print("This checkout already has a running Studio (bash scripts/app.sh restart stops it and starts again). "
+              "Use a separate checkout for another instance.", file=sys.stderr)
         return 1
+    if sys.platform != "win32":
+        note(lock_path)
     stopping = False
     child = None
 
@@ -110,6 +230,10 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    if hasattr(signal, "SIGTSTP"):
+        # Ctrl+Z would pause the launcher and its server with the lock held: nothing answers, and the next start is
+        # refused. Ignored here, and by the server, which inherits it.
+        signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 
     def launch():
         session = uuid.uuid4().hex

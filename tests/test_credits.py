@@ -26,7 +26,7 @@ CORE = ["Keys (drowzeys)", "Sam Wasserman", "Wasserman Productions", "Qwen", "Bl
         "bbaudio-2025", "Alissonerdx", "Akatz Labs", "SAM 3.1", "MediaPipe", "Depth Anything", "OpenCV", "ONNX Runtime",
         "llama.cpp", "Whisper", "faster-whisper", "yt-dlp", "FFmpeg", "PyTorch", "diffusers", "FastAPI", "Geist",
         "Instrument Serif", "blender-mcp", "LobeHub", "itxabdullaa", "Mobius Labs", "Xenova", "Descript", "SGLang-Omni",
-        "xgrammar", "Zig", "BusyBox", "YuE2", "Multimodal Art Projection", "Openjutsu", "tiktoken", "qwen.tiktoken", "Simple Icons", "DeepBeepMeep", "VisualInference", "Synchformer", "BigVGAN", "T5"]
+        "xgrammar", "Zig", "BusyBox", "YuE2", "Multimodal Art Projection", "Openjutsu", "Noncoder", "TheBeast-Spec", "tiktoken", "qwen.tiktoken", "Simple Icons", "DeepBeepMeep", "VisualInference", "Synchformer", "BigVGAN", "T5"]
 
 
 def test_core_makers_are_credited_in_the_repo_and_on_the_page():

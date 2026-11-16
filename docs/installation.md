@@ -56,6 +56,8 @@ FastH3 video with sound (125 GB), motion graphics, Finish and phone notification
 |---|---|
 | `--all` | Every feature below, about 400 GB (on a Mac, every feature its memory runs, without `--train`) |
 | `--image-only` | Qwen-Image-2.1 only (26 GB) |
+| `--small` | On Linux, a GeForce under 24 GB (an RTX 5060 Ti, an RTX 4060) beside 24 GB of RAM or more: video on FastH3's 8-bit transformer (53 GB in place of 75), no TensorFold engine, no LoRA bundle, the memory guard warns instead of refusing ([small-cards.md](small-cards.md)). On a Mac, video and music from 64 GB ([Smaller Macs](#smaller-macs---small-and---client)) |
+| `--client` | A Mac with no models (a MacBook Neo): the app alone, clips rendered on a worker under Machine → Sparks ([Smaller Macs](#smaller-macs---small-and---client)). Not on Linux |
 | `--ref2va` | Reference pictures to video (39 GB more) |
 | `--swap` | The Library's Character Swap: MiniMax H3 Ref2VA in int8, two LoRAs and SAM 3.1 (23 GB more; 2.1 GB where the int8 Ref2VA is already there). DGX Spark and CUDA only |
 | `--h3-base` | MiniMax H3's own transformer, for keyframe LoRAs and the Library actions (40 GB more) |
@@ -115,8 +117,14 @@ and the render says so.
 ```bash
 cd Imagination-Studio-by-keys-Wasserman && git pull
 bash oneshot-setup.sh --upgrade  # on Linux: oneshot-setup-spark.sh --upgrade
-bash scripts/app.sh              # restart the app on the new version
+bash scripts/app.sh restart      # stop the running app and start it on the new version
 ```
+
+`bash scripts/app.sh stop` stops the app this clone runs and returns once it has left (`--force` ends one that does
+not leave in 45 seconds); `restart` does that and starts it again. In the terminal the app runs in, Ctrl+C once
+stops it. Ctrl+Z is ignored: it used to pause the app with its lock held, so nothing answered, a plain `kill` waited
+unseen, and the next start was refused with "This checkout already has a running Studio". An app paused that way by
+an older version is resumed and stopped by `stop` too.
 
 `--upgrade` moves an existing install to the version of the clone: the environment's packages, ComfyUI at its pinned
 commit, the engines (rebuilt or taken from the carrier only when their pinned commit changed), every optional part
@@ -342,9 +350,11 @@ disk, nothing copied) and leaves `~/TensorFoldStudio` as a link to it (`app/stud
 | The default on an M1 to M4 | **96 GB** | 212 GB | FastH3 on the MLX engine with 8-bit weights, much slower |
 | With `--turbo`: MiniMax H3 Turbo and its 20-step modes as well | **128 GB** | 240 GB | M5 family for the fast path |
 | With `--ref2va`: reference pictures to video (MiniMax H3 Ref2VA) | **128 GB** | 64 GB more | M5 family for the fast path |
+| `--small`: images, FastH3 video and music, the web app; no voice, no Bolt | **64 GB** | 175 GB (212 on M1 to M4) | Any Apple silicon; M1 to M4 on the MLX engine with 8-bit weights, much slower |
+| `--client`: the app with no models; clips render on a Linux machine or DGX Spark (Machine → Sparks) | **8 GB** | 2 GB | Any Apple silicon, a MacBook Neo (A18 Pro) included |
 
 The setup enforces the memory figures (the default's was 64 GB up to 4.3.0; under 96 GB it now offers
-`--image-only`). All of this was measured on one machine, a Mac Studio M5 Ultra with 256 GB: the figures below are what each stage of a job used there (`/usr/bin/time -l`, peak memory footprint), not a run
+`--image-only`, and `--small` from 64 GB: see *Smaller Macs* below). All of this was measured on one machine, a Mac Studio M5 Ultra with 256 GB: the figures below are what each stage of a job used there (`/usr/bin/time -l`, peak memory footprint), not a run
 on a smaller Mac.
 
 | FastH3 job, native engine (M5 Ultra, 2026-10-08) | Prompt export | Passes | Decode | **Peak** |
@@ -382,7 +392,27 @@ small change, as it does between bfloat16 and int8 on the M5).
 | M5 Max or M5 Pro, 96 GB or more | Untested. Meets the memory check for the default install with room to spare; less GPU, so expect longer times. |
 | M5 family, 48 to 95 GB | Untested. Images only (`--image-only`); the setup refuses the default install (video, voice, music) under 96 GB, though a video job's measured peak is 32 GiB. |
 | M1 to M4, 96 GB or more | Untested on real hardware; emulated on the M5 Ultra. No tensor units: FastH3 runs on the MLX engine with 8-bit weights, about six times slower a pass than the native engine even on an M5 Ultra's GPU, and slower again on an older one. |
+| M1 to M4, 64 to 95 GB (an M4 Pro or M4 Max with 64 GB) | Untested. `--small`: the same 8-bit MLX path (40 GiB at its peak), music (33 GB); no voice (52 GB) and no Bolt. |
+| Any Apple silicon, 48 to 63 GB (an M4 Max with 48 GB) | Untested. Pictures only (`--image-only`, 28 GiB at their peak). |
+| Under 48 GB, a MacBook Neo (A18 Pro, 8 GB) | No model fits. `--client`: the app alone, with clips rendered on a worker (*Smaller Macs* below). |
 | macOS 26 | Untested. The kernels need Metal 4, so it is the likely minimum. |
+
+#### Smaller Macs: `--small` and `--client`
+
+`bash oneshot-setup.sh --small --app` installs video and music on a Mac with **64 GB or more** (the floor up to 4.3.0),
+which the measured peaks allow: FastH3 on the native engine 32 GiB, on the MLX engine with 8-bit weights (M1 to M4)
+40 GiB, music 33 GB, pictures 28 GiB. Voice (52 GB at its peak) and the Bolt brain stay at 96 GB and are left out below
+it, with a line saying so; `--small --all` between 64 and 95 GB adds motion previs, sound and image edit and leaves
+voice, Bolt, FLUX3-K, MOSS-Image, Turbo and Ref2VA out. On an M1 to M4 the 8-bit path is what runs, and it is
+untested on real hardware and slow (the table above). Pictures stay at 48 GB.
+
+`bash oneshot-setup.sh --client` is for a Mac that holds no model: a **MacBook Neo** (A18 Pro, 8 GB of unified
+memory) or any Mac you do not want 175 GB of weights on. It installs the Python environment, motion graphics and
+Finish, builds the app, and downloads no weights. Planning, the script, imports, the timeline, graphics and Finish
+work on the Mac itself; **clips render on a Linux machine or DGX Spark** added under **Machine → Sparks**
+([multi-spark.md](multi-spark.md)): the Studio hands single clips to a worker and brings the file back. Pictures,
+voice and music are not handed to a worker today, so a client makes none of those; a project started elsewhere can be
+edited on it.
 
 Installed size: about 175 GB, nearly all model weights (FastH3 65 GB, MiniMax H3's text encoder and decoders 72 GB,
 Qwen-Image-2.1-Turbo 31 GB, the 2x decoder 6 GB, Python environment 1.3 GB). `--turbo` adds 64 GB

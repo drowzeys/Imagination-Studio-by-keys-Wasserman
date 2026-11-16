@@ -9,7 +9,10 @@ const capText = path => (CAP.map && CAP.map[path] && CAP.map[path].caption) || n
 function capButton(m) { if (m.kind !== "video" && m.kind !== "image") return null; if (!CAP.map || capText(m.path)) return null;
   return el("button", { class: "small", title: "Look at this " + (m.kind === "video" ? "clip" : "picture") + " with the local model so the Library can search by what is in it", disabled: CAP.busy.has(m.path),
     onclick: async () => { CAP.busy.add(m.path); render(); try { const r = await api("/api/library/captions/run", { paths: [m.path] });
-        if (r.busy) toast("The local model is busy with a render. Try again when it is done."); else if (r.failed && r.failed.length) toast("The model could not describe this one."); } catch (e) { toast(e.message); }
+        if (r.busy && /no local vision model/.test(r.why || "")) toast("No local vision model is connected: pick one under Brains & tools (a local server such as LM Studio or Ollama with a model that reads pictures).");
+        else if (r.busy && r.why) toast("The local model cannot look right now: " + r.why + ". Try again when it is done.");
+        else if (r.busy) toast("The local model is busy with a render. Try again when it is done."); else if (r.failed && r.failed.length) toast("The model could not describe this one.");
+        else if (r.done && r.done.length) { CAP.map = null; await capLoad(); toast("Described: " + (capText(m.path) || "done") + " (the Library's search finds it now)"); } } catch (e) { toast(e.message); }
       CAP.busy.delete(m.path); CAP.map = null; render(); } }, CAP.busy.has(m.path) ? "Describing…" : "Describe now"); }
 // the search field and its results; `grid` is a function giving the normal listing, hidden while results show; each
 // result has the Library's tick box (LIBPICK), and `picked` is called when one changes so the page's counts follow

@@ -94,7 +94,9 @@ const hcAdmissionSig = () => {
 function hcEstimateNote() {
   const seconds = hcEstimate(), info = HC.estInfo[hcEstimateKey()], worker = estimateWorkerName(info);
   if (info && info.memory && info.memory.fits === false) return el("small", { class: "note m-flat", style: "color:var(--warn)" }, "This clip will be refused: " + (info.memory.reason || "not enough available memory") + (worker ? " on " + worker : ""));
-  return seconds ? el("small", { class: "note m-flat" }, "about " + hcSpan(seconds) + (worker ? " on " + worker : "")) : null;
+  if (seconds) return el("small", { class: "note m-flat" }, "about " + hcSpan(seconds) + (worker ? " on " + worker : ""));
+  // a guard that warns instead of refusing (a small-card install, an N1X): the clip is tried, and the page says why it may fail
+  return info && info.memory && info.memory.warning ? el("small", { class: "note m-flat" }, info.memory.warning) : null;
 }
 function hcEstimate() { const r = typeof recipeParams === "function" ? recipeParams(hcRecipe()) : { preset: "small", quality: "fh4" }, seconds = hcSeconds(), key = hcEstimateKey(), admission = hcAdmissionSig();
   if (!(key in HC.est) || HC.estAdmission[key] !== admission) {

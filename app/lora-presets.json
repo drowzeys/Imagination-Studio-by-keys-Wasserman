@@ -545,7 +545,7 @@
   "id": "video-upscaler",
   "name": "Video Upscaler LoRA",
   "author": "dntpi",
-  "url": "https://huggingface.co/sandpies/ComfyUI-H3-Video-Upsampler/resolve/main/lora/h3upscale_v2_x2.safetensors",
+  "url": "https://huggingface.co/sandpies/ComfyUI-H3-Video-Upsampler/resolve/6e7a957e186cf3c7a297cf635a43380dfb8b0ad5/lora/h3upscale_v2_x2.safetensors",
   "page": "github.com/dntpi/ComfyUI-H3-Video-Upsampler",
   "sha256": "ff671fa94e377fd277319a89c366a67f49b97ae6528c8ac3b0c5e0a3b254c56c",
   "size": 620285992,

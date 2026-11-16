@@ -132,15 +132,31 @@ TOOLS = [
     {"name": "swap_character", "description": "Character Swap: replace the person in a 5 to 15 s part of a Library clip (one "
                                               "continuous shot, the person in view in its first frame) with the character in a "
                                               "Library picture. The scene, the performance and the clip's own sound stay; with "
-                                              "several people the largest is swapped. One job: its first output is the swapped part.",
+                                              "several people the largest is swapped, or the one `person` describes, or the one "
+                                              "with the number `which`. `who: true` makes a job instead that follows everyone through the part "
+                                              "(also people who come into view later) and whose output is a picture with a number on "
+                                              "each: read the numbers from it. "
+                                              "`swaps` swaps up to four people in one job, one after another, each with its own "
+                                              "picture (in place of `picture`, `person`, `which` and `direction`); each person is one "
+                                              "more whole swap. One job: its first output is the swapped part.",
      "inputSchema": text_schema({"clip": {"type": "string", "description": "Library path of the clip"},
                                  "picture": {"type": "string", "description": "Library path of the character's picture, outfit included"},
                                  "start": {"type": "number", "description": "where the part starts, in seconds (default 0)"},
                                  "seconds": {"type": "number", "description": "how long the part is, 5 to 15 (default 5)"},
                                  "quality": {"type": "integer", "enum": [480, 768], "description": "the short side, 480 (default, Fast) or 768 (High, a little over twice as long)"},
                                  "direction": {"type": "string", "description": "optional words for the model, e.g. she keeps her hands in her pockets"},
+                                 "person": {"type": "string", "description": "optional: a few words for who is swapped when the shot has several people, e.g. man in a blue jacket"},
+                                 "which": {"type": "integer", "description": "optional: the person's number in the numbered picture (who: true); that person is drawn in a crop around them and pasted back"},
+                                 "who": {"type": "boolean", "description": "true: only number the people of the part (same clip, start, seconds and quality as the swap that follows); no picture needed"},
+                                 "swaps": {"type": "array", "description": "several people, at most four, in the order they are swapped",
+                                           "items": {"type": "object", "properties": {
+                                               "picture": {"type": "string", "description": "Library path of this person's character picture"},
+                                               "which": {"type": "integer", "description": "the person's number in the numbered picture"},
+                                               "person": {"type": "string", "description": "or a few words for the person"},
+                                               "direction": {"type": "string"}, "seed": {"type": "integer"}}, "required": ["picture"]}},
                                  "anchor": {"type": "boolean", "description": "put the character in the first frame first (default true)"},
-                                 "seed": {"type": "integer"}, "title": {"type": "string"}}, ("clip", "picture"))},
+                                 "ref_size": {"type": "string", "enum": ["match", "max"], "description": "the character's picture as the model reads it: match (scaled to the part's size) or max (full size, best likeness, slower; only where the machine offers it: GET /api/swap ref_sizes)"},
+                                 "seed": {"type": "integer"}, "title": {"type": "string"}}, ("clip",))},
     {"name": "queue_sound", "description": "Queue a sound: kind sfx is a sound effect from words (Stable Audio Open, 1 to 47 s, a .wav); "
                                            "kind foley makes a clip's sound for its picture (MMAudio: a .wav and the clip with it).",
      "inputSchema": text_schema({"kind": {"type": "string", "enum": ["sfx", "foley"]},
@@ -512,8 +528,11 @@ def run(name: str, args: dict):
         made = call("POST", "/api/revise", {"kind": name.split("_")[0], "params": {k: args[k] for k in keys if args.get(k) not in (None, "")}})
         return {**job_summary(made), "revise": made.get("revise")}
     if name == "swap_character":  # Character Swap (app/swap.py): one job of kind swap
-        params = {"video": args.get("clip"), "image": args.get("picture"),
-                  **{k: args[k] for k in ("start", "seconds", "quality", "direction", "anchor", "seed") if args.get(k) not in (None, "")}}
+        params = {"video": args.get("clip"), **({"image": args["picture"]} if args.get("picture") else {}),
+                  **{k: args[k] for k in ("start", "seconds", "quality", "direction", "person", "which", "who", "anchor", "ref_size", "seed") if args.get(k) not in (None, "")}}
+        if isinstance(args.get("swaps"), list):  # each person's picture goes as the job's "image"
+            params["swaps"] = [{("image" if k == "picture" else k): v for k, v in one.items() if v not in (None, "")}
+                               for one in args["swaps"] if isinstance(one, dict)]
         return job_summary(call("POST", "/api/jobs", {"kind": "swap", **({"title": args["title"]} if args.get("title") else {}), "params": params}))
     if name == "queue_sound":
         kind = args.get("kind")

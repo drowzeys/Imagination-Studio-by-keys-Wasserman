@@ -196,15 +196,24 @@ def held_note(info: dict | None = None) -> str:
                    "back: README, \"The memory guard (DGX Spark)\".")
 
 
+SMALL_CARD_FLOOR_MB = 1500  # the least floor on a small-card install (small_card): a tenth of 31 GB is 3 GB
+
+
 def floor_mb(total_mb: int | None = None) -> int:
     """The least memory that stays available while a render runs: SPARK_MEMORY_FLOOR_MB, or a tenth of the machine
-    (and never under 8 GB)."""
+    (and never under 8 GB). On a small-card install (docs/small-cards.md) a tenth of the machine and never under
+    1.5 GB: the 8 GB floor is a DGX Spark's, where the GPU driver takes from the same pool and a machine that runs out
+    stops answering; a GeForce beside 24 to 64 GB of RAM streams a 22 GB transformer through that RAM, so 8 GB of it
+    held back stops every clip, and the kernel's OOM killer (and the machine memory guard, scripts/memguard.py) stand
+    behind the lower floor."""
 
     asked = os.environ.get("SPARK_MEMORY_FLOOR_MB", "").strip()
     if asked.isdigit() and int(asked) > 0:
         return int(asked)
     if total_mb is None:
         total_mb = meminfo().get("MemTotal", 0)
+    if small_card():
+        return max(SMALL_CARD_FLOOR_MB, total_mb // 10)
     return max(8000, total_mb // 10)
 
 
@@ -490,16 +499,38 @@ def n1x() -> bool:
     return "N1X" in _N1X["name"] or "RTX SPARK" in _N1X["name"]
 
 
+def small_card_mark() -> str:
+    """The mark a small-card install leaves (oneshot-setup-rtx-6000.sh --small): $PREFIX/small-card."""
+
+    return os.path.join(os.environ.get("PREFIX") or os.path.expanduser("~/.local/opt/tensorfold-studio"), "small-card")
+
+
+def small_card() -> bool:
+    """A small-card install (docs/small-cards.md): a GeForce too small to hold the video models (an RTX 5060 Ti 16 GB,
+    an RTX 4060 8 GB), set up with oneshot-setup-rtx-6000.sh --small, which leaves its mark at $PREFIX/small-card;
+    STUDIO_SMALL_CARD=1 says so too, and 0 says no. It is the install's choice, not read off the card's size: a 32 GB
+    RTX 5090 with STUDIO_ROOM_MB keeps the strict guard of docs/rtx-5090.md. On a small card ComfyUI streams the
+    weights from RAM and the page cache, so the Spark's estimates (the models held whole: 54 to 75 GB) are not its
+    peak and say nothing about what fits. The guard warns and lets the job try (guard_mode), and a job that really
+    runs out fails with ComfyUI's error, as on an N1X; the floor under the machine's RAM (watch) stands as before."""
+
+    said = os.environ.get("STUDIO_SMALL_CARD", "").strip()
+    if said in ("0", "1"):
+        return said == "1"
+    return os.path.isfile(small_card_mark())
+
+
 def guard_mode() -> str:
     """STUDIO_MEMORY_GUARD: "strict" refuses a job the estimate says does not fit (a DGX Spark's default: there a job
     that runs out of memory can take the whole machine down); "warn" flags it and lets it run, and a job that really
     runs out of memory then fails with ComfyUI's error (an N1X's default: its GPU memory is a fixed carve-out, so a
-    job that overruns it fails on its own without starving the machine)."""
+    job that overruns it fails on its own without starving the machine; a small card's too: ComfyUI streams the
+    weights to it, and the estimate is not its peak, small_card)."""
 
     said = os.environ.get("STUDIO_MEMORY_GUARD", "").strip().lower()
     if said in ("strict", "warn"):
         return said
-    return "warn" if n1x() else "strict"
+    return "warn" if n1x() or small_card() else "strict"
 
 
 def _relaxable(check_fn):
@@ -512,9 +543,12 @@ def _relaxable(check_fn):
     def checked(*args, **kwargs):
         out = check_fn(*args, **kwargs)
         if isinstance(out, dict) and out.get("fits") is False and out.get("reason") and guard_mode() == "warn":
+            why = "STUDIO_MEMORY_GUARD=warn"
+            if not os.environ.get("STUDIO_MEMORY_GUARD", "").strip() and not n1x() and small_card():
+                why = "a small card's default: ComfyUI streams the weights to it, and a DGX Spark's figure is not its peak"
             out = dict(out, fits=True, refused=out["reason"],
                        warning=out["reason"].replace(", so it is refused", "").rstrip(".") +
-                       ". It is tried anyway (STUDIO_MEMORY_GUARD=warn) and fails if the memory runs out.")
+                       f". It is tried anyway ({why}) and fails if the memory runs out.")
         return out
     return checked
 

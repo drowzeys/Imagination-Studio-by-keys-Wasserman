@@ -86,7 +86,12 @@ bash oneshot-setup.sh --app
 Open **Wasserman Slate AI Studio** in Applications. The app is a local launcher around this clone; rebuild it
 if you move the clone. Use `--image-only` for pictures without the video installation.
 
+Smaller Macs: `--small` installs video and music from **64 GB** (an M4 Pro or M4 Max with 64 GB runs FastH3 on the
+slower 8-bit MLX path; no voice, no Bolt below 96 GB). A Mac that holds no model, such as a **MacBook Neo** (A18 Pro,
+8 GB), takes `--client`: the app alone, with clips rendered on a Linux machine or DGX Spark under Machine → Sparks.
+
 [Mac installation and hardware details](docs/installation.md#install-and-the-one-click-app) ·
+[Smaller Macs](docs/installation.md#smaller-macs---small-and---client) ·
 [Install flags](docs/installation.md#install-flags)
 
 ## NVIDIA Linux
@@ -109,6 +114,7 @@ For other GPUs, use the machine-specific instructions rather than assuming Spark
 
 - [RTX Pro 6000 and local GPU workers](docs/rtx-pro-6000.md)
 - [RTX 5090](docs/rtx-5090.md)
+- [Small cards: RTX 5060 Ti 16 GB, RTX 4060 8 GB](docs/small-cards.md) (`--small`: the 8-bit video file, no engine, not measured)
 - [Two-GPU rendering](docs/two-gpus.md)
 - [Multiple Spark machines](docs/multi-spark.md)
 

@@ -23,6 +23,7 @@ import asyncio
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -220,9 +221,21 @@ def ref2va() -> str | None:
     return next((sg.REF2VA[one] for one in ("bf16", "int8") if sg.REF2VA.get(one) in have), None)
 
 
+def text_encoder() -> str:
+    """The H3 text encoder these graphs load: the regular file, or, on an install that kept another build in its
+    place (a small card's NVFP4 one, docs/small-cards.md), the one a clip uses by default there
+    (sg.default_text_encoder). ComfyUI turns a graph away for a file it does not list."""
+
+    have = listed("CLIPLoader", "clip_name")
+    if sg.H3_TEXT in have:
+        return sg.H3_TEXT
+    other = sg.default_text_encoder()
+    return next((one for one in (other, f"H3/{other}") if other != "regular" and one in have), sg.H3_TEXT)
+
+
 def loaders(w: dict, vae: str | None = None) -> None:
     w["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": ref2va() or sg.REF2VA["bf16"], "weight_dtype": "default"}}
-    w["3"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.H3_TEXT, "type": "minimax", "device": "default"}}
+    w["3"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": text_encoder(), "type": "minimax", "device": "default"}}
     w["4"] = {"class_type": "VAELoader", "inputs": {"vae_name": vae or sg.H3_VAE}}
     w["5"] = {"class_type": "VAELoader", "inputs": {"vae_name": sg.H3_AUDIO_VAE}}
 
@@ -697,6 +710,14 @@ def find_person(args, scratch: Path) -> tuple[str, dict, Path, Path]:
     return name, size, green, matte
 
 
+def deliver(made: Path, target) -> None:
+    """A file made in the job's scratch folder, moved to where it is kept. The scratch folder is the system's temporary
+    one, often a file system of its own (a tmpfs /tmp on Fedora): a rename across file systems fails with EXDEV
+    ("Invalid cross-device link"), so the file is copied there and the scratch copy removed."""
+
+    shutil.move(str(made), str(target))
+
+
 def mask(args) -> None:
     server("mask")
     if SAM not in listed("CheckpointLoaderSimple", "ckpt_name"):
@@ -709,7 +730,7 @@ def mask(args) -> None:
             outputs = [str(base.parent / f"{base.name}_mask.mp4"), str(base.parent / f"{base.name}_matte.mp4"),
                        str(base.parent / f"{base.name}_plate.png")]
             size["plate_from_clip"] = round(plate(Path(scratch) / "source.mp4", matte, size, Path(outputs[2])), 3)
-            green.replace(outputs[0]); matte.replace(outputs[1])
+            deliver(green, outputs[0]); deliver(matte, outputs[1])
     finally:
         sg.forget_uploads()
     say(json.dumps({"outputs": outputs, "engine": sg.ENGINE, "action": "mask", **size}))
@@ -813,13 +834,13 @@ def remove(args) -> None:
                      "-movflags", "+faststart", str(target)], capture_output=True).returncode == 0:
                 report["sound"] = "the clip's own"
             else:
-                trimmed.replace(target)
+                deliver(trimmed, target)
                 report["sound"] = "none"
             keep = Path(args.keep) if args.keep else None
             if keep:
                 keep.parent.mkdir(parents=True, exist_ok=True)
-                green.replace(keep.parent / f"{keep.name}_mask.mp4")
-                clean.replace(keep.parent / f"{keep.name}_clean.png")
+                deliver(green, keep.parent / f"{keep.name}_mask.mp4")
+                deliver(clean, keep.parent / f"{keep.name}_clean.png")
                 report["kept"] = [str(keep.parent / f"{keep.name}_mask.mp4"), str(keep.parent / f"{keep.name}_clean.png")]
     finally:
         sg.forget_uploads()

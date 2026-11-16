@@ -6,6 +6,11 @@
 #   bash oneshot-setup-spark.sh               # the core (pictures and FastH3 video with sound, motion graphics, Finish, phone
 #                                             # notifications), then a 5 second test clip
 #   bash oneshot-setup-spark.sh --image-only  # Qwen-Image-2.1 only (26 GB)
+#   bash oneshot-setup-rtx-6000.sh --small    # a GeForce under 24 GB (an RTX 5060 Ti 16 GB, an RTX 4060 8 GB) beside 24 GB of RAM
+#                                             # or more: video on FastH3's 8-bit file (22 GB, in place of the 44 GB bf16 one) on
+#                                             # ComfyUI's own blocks, streamed to the card; no TensorFold engine (it keeps the 50
+#                                             # int8 blocks on the card); the memory guard warns instead of refusing; no LoRA
+#                                             # bundle (a LoRA merges into the bf16 file). Slow, not measured: docs/small-cards.md
 #   bash oneshot-setup-spark.sh --no-render   # skip the test clip
 #   bash oneshot-setup-spark.sh --ref2va      # add MiniMax H3 Ref2VA (reference pictures hold a face), 39 GB more
 #   bash oneshot-setup-spark.sh --swap        # add the Library's Swap the character, 23 GB more: MiniMax H3 Ref2VA in int8
@@ -123,10 +128,10 @@ fi
 # written down in this repo to copy, and the resolver keeps them beside the torch pinned here.
 TORCH_PIN=(torch==2.14.1 torchvision==0.29.1)  # requirements.lock; scripts/setup-comfy.sh pins the same pair
 STUDIO_PIN=(huggingface_hub==1.33.0 fastapi==0.142.2 uvicorn==0.54.0 python-multipart==0.0.32 pillow==12.3.0)  # requirements.lock
-IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0; MEMGUARD=1; MEMGUARD_FOREIGN=0
+IMAGE_ONLY=0; RENDER=1; VERIFY=0; REF2VA=0; MOTION=0; VOICE=0; UPGRADE=0; LORAS=""; H3_BASE=0; WORKFLOWS=1; IMAGE_EDIT=0; FLUX3=0; MOSS=0; MUSIC=0; SOUND=0; BOLT=0; TRAIN=0; GRAPHICS=""; FINISH=""; YUE2=0; SWAP=0; MEMGUARD=1; MEMGUARD_FOREIGN=0; SMALL=0
 for arg in "$@"; do
   case "$arg" in
-    --ref2va) REF2VA=1;; --swap) SWAP=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
+    --ref2va) REF2VA=1;; --swap) SWAP=1;; --h3-base) H3_BASE=1;; --image-edit) IMAGE_EDIT=1;; --flux3) FLUX3=1;; --moss) MOSS=1;; --music) MUSIC=1;; --yue2) YUE2=1;; --bolt) BOLT=1;; --train) TRAIN=1;; --graphics) GRAPHICS=1;; --no-graphics) GRAPHICS=0;; --finish) FINISH=1;; --no-finish) FINISH=0;; --sound) SOUND=1;; --motion) MOTION=1;; --voice) VOICE=1;; --image-only) IMAGE_ONLY=1;; --small) SMALL=1;; --no-render) RENDER=0;; --verify) VERIFY=1; RENDER=0;; --upgrade) UPGRADE=1; RENDER=0; MOTION=1;;
     --all) SWAP=1; REF2VA=1; H3_BASE=1; IMAGE_EDIT=1; FLUX3=1; MOSS=1; MUSIC=1; YUE2=1; SOUND=1; BOLT=1; VOICE=1; MOTION=1; TRAIN=1; GRAPHICS=1; FINISH=1;;  # every feature
     --no-workflows) WORKFLOWS=0;;
     --no-memguard) MEMGUARD=0;; --memguard-stop-foreign) MEMGUARD_FOREIGN=1;;  # the machine memory guard (scripts/memguard.py)
@@ -154,8 +159,13 @@ command -v nvidia-smi >/dev/null || die "no nvidia-smi: this needs an NVIDIA GPU
 INSTALLED="$(cat "$PREFIX/VERSION" 2>/dev/null || echo "2.6 or earlier")"
 if [ "$UPGRADE" = 1 ]; then
   [ -x "$PREFIX/venv/bin/python" ] || die "nothing to upgrade at $PREFIX: run oneshot-setup-spark.sh without --upgrade"
-  [ -s "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" ] || IMAGE_ONLY=1
+  if [ ! -s "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" ]; then
+    # a small-card install (--small) holds FastH3's 8-bit file only: it stays one
+    if [ -s "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors" ]; then SMALL=1; else IMAGE_ONLY=1; fi
+  fi
   [ ! -s "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" ] || REF2VA=1
+  # a small-card install's Ref2VA is the 8-bit file (--small --ref2va)
+  [ "$SMALL" = 0 ] || [ ! -s "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" ] || REF2VA=1
   [ ! -s "$MODELS/MiniMax-H3-Comfy/loras/h3_character_swap_v1.5.safetensors" ] || SWAP=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || FLUX3=1
   [ ! -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] || FLUX3=1
@@ -201,13 +211,27 @@ if [ "${STUDIO_N1X:-0}" = 1 ]; then
   STUDIO_ALLOW_SMALL_VRAM=1
   echo "  ! RTX Spark N1X: the GPU's ${VRAM_GB:-?} GB carve-out holds the models; this Linux has ${MEM_GB} GB beside it"
 fi
+# A small card (--small, docs/small-cards.md): a GeForce under 24 GB (an RTX 5060 Ti 16 GB, an RTX 4060 8 GB) beside 24 GB
+# of RAM or more. Video runs on FastH3's 8-bit file (22 GB) on ComfyUI's own blocks, which it streams to the card from RAM
+# and the page cache; TensorFold's engine is not built (it keeps the 50 int8 blocks on the card, 22 GB); the memory guard
+# warns instead of refusing (spark/memory_guard.py small_card). Nothing here is measured: slow, and said so.
+if [ "$SMALL" = 1 ]; then
+  [ -n "$VRAM_GB" ] || die "--small is for a card with memory of its own (a GeForce); a DGX Spark takes the plain install"
+  STUDIO_ALLOW_SMALL_VRAM=1
+  [ "$MEM_GB" -ge 24 ] || die "--small needs 24 GB of RAM or more beside the card (FastH3's 8-bit file alone is 22 GB, read through it); this machine has ${MEM_GB} GB. Pictures only: --image-only"
+  echo "  ! small card (--small): ${VRAM_GB} GB on the card, ${MEM_GB} GB of RAM. Video runs on FastH3's 8-bit weights on ComfyUI's own blocks, streamed to the card: slow, not measured (docs/small-cards.md)"
+  [ "$VRAM_GB" -ge 12 ] || [ "$IMAGE_ONLY" = 1 ] || echo "  ! under 12 GB on the card: pictures are the part that is known to run; a clip is tried, and may take hours"
+  [ "$MEM_GB" -ge 48 ] || [ "$IMAGE_ONLY" = 1 ] || echo "  ! under 48 GB of RAM: a clip's text encoder (27 GB) and transformer (22 GB) do not sit in RAM together; the kernel pages them from disk between the two"
+  [ "$REF2VA" = 0 ] || echo "  --ref2va on a small card: the 8-bit Ref2VA (21 GB); reference clips run the model's 20 passes (the 4-pass Turbo adapter merges into the 40 GB bf16 file only)"
+fi
 if [ -n "$VRAM_GB" ]; then
-  [ "$VRAM_GB" -ge 90 ] || [ "$IMAGE_ONLY" = 1 ] || [ "${STUDIO_ALLOW_SMALL_VRAM:-0}" = 1 ] || die "video needs a card of about 96 GB (an RTX Pro 6000 Blackwell); this one has ${VRAM_GB} GB. --image-only fits on 48 GB. STUDIO_ALLOW_SMALL_VRAM=1 installs video anyway: ComfyUI then holds the weights in RAM and streams blocks to the card (docs/rtx-5090.md)."
-  [ "$MEM_GB" -ge 64 ] || [ "${STUDIO_N1X:-0}" = 1 ] || die "the machine needs 64 GB of RAM or more beside the card (the models are read through it); this one has ${MEM_GB} GB"
+  [ "$VRAM_GB" -ge 90 ] || [ "$IMAGE_ONLY" = 1 ] || [ "${STUDIO_ALLOW_SMALL_VRAM:-0}" = 1 ] || die "video needs a card of about 96 GB (an RTX Pro 6000 Blackwell); this one has ${VRAM_GB} GB. --image-only fits on 48 GB. STUDIO_ALLOW_SMALL_VRAM=1 installs video anyway: ComfyUI then holds the weights in RAM and streams blocks to the card (docs/rtx-5090.md). A GeForce under 24 GB (an RTX 5060 Ti, an RTX 4060) takes --small: the 8-bit file, no engine (docs/small-cards.md)."
+  [ "$MEM_GB" -ge 64 ] || [ "${STUDIO_N1X:-0}" = 1 ] || [ "$SMALL" = 1 ] || die "the machine needs 64 GB of RAM or more beside the card (the models are read through it); this one has ${MEM_GB} GB. A small card beside 24 GB or more takes --small (docs/small-cards.md)"
 else
   [ "$MEM_GB" -ge 100 ] || [ "$IMAGE_ONLY" = 1 ] || [ "${STUDIO_N1X:-0}" = 1 ] || die "video needs about 90 GB of memory at 1344x768 (128 GB machine); this one has ${MEM_GB} GB. --image-only fits."
 fi
-for tool in git ffmpeg ffprobe; do command -v "$tool" >/dev/null || die "install $tool first (sudo apt install $([ "$tool" = ffprobe ] && echo ffmpeg || echo "$tool"))"; done
+PKG="sudo apt install"; ! command -v dnf >/dev/null 2>&1 || PKG="sudo dnf install"  # Fedora and the like
+for tool in git ffmpeg ffprobe; do command -v "$tool" >/dev/null || die "install $tool first ($PKG $([ "$tool" = ffprobe ] && echo ffmpeg || echo "$tool"))"; done
 if ! command -v uv >/dev/null; then
   [ "$VERIFY" = 0 ] || die "no uv"
   curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
@@ -236,14 +260,30 @@ fi
 # disk for what is still to fetch (GB, with room): each part asked for whose weights are not here yet, by the file that
 # says it is (the sizes in the header above); a machine that holds some of them already needs only the rest
 missing() { [ ! -s "$1" ]; }
+# a small card keeps an H3 text encoder that is already here (another build of the same encoder, such as an NVFP4 one,
+# found by the scan and linked) in place of the 27 GB int8 download; spark_generate.py uses it by default then
+h3_encoder_here() { ls "$MODELS"/FastH3-Comfy/text_encoders/qwen3vl_32b_minimax_h3_*.safetensors >/dev/null 2>&1; }
 NEED=5
-missing "$MODELS/Qwen-Image-2.1-Comfy/diffusion_models/qwen_image_2.1_turbo_bf16.safetensors" && NEED=$((NEED + 26))
+if [ "$SMALL" = 1 ]; then  # the 8-bit Qwen-Image-2.1-Turbo (7.3 GB) in place of the bf16 one (14 GB); the same text encoder and decoder
+  missing "$MODELS/Qwen-Image-2.1-Comfy/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors" && NEED=$((NEED + 19))
+else
+  missing "$MODELS/Qwen-Image-2.1-Comfy/diffusion_models/qwen_image_2.1_turbo_bf16.safetensors" && NEED=$((NEED + 26))
+fi
 if [ "$IMAGE_ONLY" = 0 ]; then
-  missing "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" && NEED=$((NEED + 75))
-  [ "$REF2VA" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" || NEED=$((NEED + 40))
+  if [ "$SMALL" = 1 ]; then  # the 8-bit transformer (22 GB) in place of the bf16 one (44 GB) and the decoders; the text encoder (27 GB) unless one is here
+    missing "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors" && NEED=$((NEED + 26))
+    h3_encoder_here || NEED=$((NEED + 27))
+  else
+    missing "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" && NEED=$((NEED + 75))
+  fi
+  if [ "$SMALL" = 1 ]; then  # the 8-bit Ref2VA (21 GB) serves --ref2va and --swap alike on a small card
+    { [ "$REF2VA" = 0 ] && [ "$SWAP" = 0 ]; } || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" || NEED=$((NEED + 22))
+  else
+    [ "$REF2VA" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors" || NEED=$((NEED + 40))
+  fi
   [ "$H3_BASE" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_fl2va_pruned_bf16.safetensors" || NEED=$((NEED + 42))
   [ "$SWAP" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/loras/h3_character_swap_v1.5.safetensors" || NEED=$((NEED + 4))
-  [ "$SWAP" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" || NEED=$((NEED + 22))
+  [ "$SMALL" = 1 ] || [ "$SWAP" = 0 ] || ! missing "$MODELS/MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" || NEED=$((NEED + 22))
   [ "$IMAGE_EDIT" = 0 ] || ! missing "$MODELS/Qwen-Image-2.1-Comfy/diffusion_models/qwen_image_2.1_bf16.safetensors" || NEED=$((NEED + 15))
   [ "$FLUX3" = 0 ] || [ -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3_image_klein_sd_bf16.safetensors" ] \
     || [ -s "$MODELS/FLUX3-K-Comfy/diffusion_models/flux3-image-klein-bf16.safetensors" ] || NEED=$((NEED + 42))
@@ -260,6 +300,12 @@ fi
 [ "$FINISH" = 0 ] || [ -f "$PREFIX/finish/fonts/InstrumentSerif-Regular.ttf" ] || NEED=$((NEED + 1))
 # STUDIO_DISK_DRY=1 (tests): what this install would fetch, and stop
 [ "${STUDIO_DISK_DRY:-0}" != 1 ] || { echo "need=$NEED ref2va=$REF2VA swap=$SWAP vram=${VRAM_GB:-unified}"; exit 0; }
+# the mark of a small-card install, read by the memory guard (spark/memory_guard.py small_card: it warns instead of
+# refusing there); an install without --small on a card takes it away again
+if [ "$VERIFY" = 0 ]; then
+  mkdir -p "$PREFIX"
+  if [ "$SMALL" = 1 ]; then : > "$PREFIX/small-card"; else rm -f "$PREFIX/small-card"; fi
+fi
 if [ "$VERIFY" = 0 ]; then
   mkdir -p "$PREFIX" "$MODELS"
   FREE=$(df -BG --output=avail "$MODELS" | tail -1 | tr -dc 0-9)
@@ -375,6 +421,9 @@ fetch() {
 # so --verify and --upgrade say a missing Qwen is optional instead of stopping or warning (a fresh install fetches it)
 QWEN_FILES=(diffusion_models/qwen_image_2.1_turbo_bf16.safetensors text_encoders/qwen3vl_8b_int8_convrot.safetensors
   vae/qwen_image_2.1_vae_bf16.safetensors)
+# a small card: Comfy-Org's 8-bit Turbo checkpoint (7.3 GB, whole on a 16 GB card) in place of the bf16 one; pictures
+# render on it when it is the only one here (spark_generate.py qwen_file)
+[ "${SMALL:-0}" = 0 ] || QWEN_FILES[0]=diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors
 qwen_here() { local file; for file in "${QWEN_FILES[@]}"; do [ -s "$MODELS/Qwen-Image-2.1-Comfy/$file" ] || return 1; done; }
 klein_here() {
   [ -s "$MODELS/FLUX3-K-Comfy/system_prompts.json" ] || return 1
@@ -383,22 +432,43 @@ klein_here() {
   done
   return 1
 }
-say "Qwen-Image-2.1-Turbo for ComfyUI (24 GB) -> $MODELS"
+say "Qwen-Image-2.1-Turbo for ComfyUI ($([ "${SMALL:-0}" = 1 ] && echo "8-bit, 17 GB" || echo "24 GB")) -> $MODELS"
 if { [ "$VERIFY" = 1 ] || [ "$UPGRADE" = 1 ]; } && ! qwen_here && klein_here; then
   QWEN_PATHS=(); for file in "${QWEN_FILES[@]}"; do QWEN_PATHS+=("$MODELS/Qwen-Image-2.1-Comfy/$file"); done
   elsewhere "${QWEN_PATHS[@]}"
   if qwen_here; then ok "Qwen-Image-2.1-Turbo (8 steps), its text encoder and decoder"
   else echo "  - Qwen-Image-2.1-Turbo is not installed (optional: pictures use FLUX3-K; bash oneshot-setup-spark.sh without --verify or --upgrade adds it, 24 GB, non-commercial licence)"
   fi
-else
+elif [ "${SMALL:-0}" = 0 ]; then
   # the files spelled out: app/discover.py reads every fetch line for its catalogue (the same three as QWEN_FILES)
   fetch Comfy-Org/Qwen-Image-2.1 Qwen-Image-2.1-Comfy diffusion_models/qwen_image_2.1_turbo_bf16.safetensors \
     text_encoders/qwen3vl_8b_int8_convrot.safetensors vae/qwen_image_2.1_vae_bf16.safetensors
   got "Qwen-Image-2.1-Turbo (8 steps), its text encoder and decoder"
+else
+  # a small card: the 8-bit transformer in place of the bf16 one (QWEN_FILES above says the same)
+  fetch Comfy-Org/Qwen-Image-2.1 Qwen-Image-2.1-Comfy diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors \
+    text_encoders/qwen3vl_8b_int8_convrot.safetensors vae/qwen_image_2.1_vae_bf16.safetensors
+  got "Qwen-Image-2.1-Turbo (8 steps, 8-bit), its text encoder and decoder"
 fi
 # the end of the Qwen-Image-2.1-Turbo step
 
-if [ "$IMAGE_ONLY" = 0 ]; then
+if [ "$IMAGE_ONLY" = 0 ] && [ "$SMALL" = 1 ]; then
+  # a small card: the 8-bit transformer (22 GB) that spark_generate.py renders on when the bf16 file is not here
+  # (SPARK_WEIGHTS=int8 is then its default); the text encoder and decoders are the same files
+  # the int8 text encoder (27 GB) only where no build of it is here yet (h3_encoder_here): the one that is here is the
+  # default (spark_generate.py default_text_encoder), and the app lists every file in that folder
+  H3_ENC=(text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors)
+  if h3_encoder_here && [ ! -s "$MODELS/FastH3-Comfy/${H3_ENC[0]}" ]; then
+    H3_ENC=(); echo "  H3 text encoder already here, kept in place of the 27 GB int8 download: $(ls "$MODELS"/FastH3-Comfy/text_encoders/qwen3vl_32b_minimax_h3_*.safetensors | xargs -n1 basename | tr '\n' ' ')"
+  fi
+  say "FastH3 8-Step V2 for ComfyUI, the 8-bit transformer ($([ ${#H3_ENC[@]} = 0 ] && echo 26 || echo 53) GB) -> $MODELS"
+  fetch FastVideo/FastVideo-FastH3-Comfy FastH3-Comfy diffusion_models/fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors \
+    ${H3_ENC[@]+"${H3_ENC[@]}"} vae/minimax_h3_video_vae_int8_convrot.safetensors \
+    vae/minimax_h3_audio_vae_fp32.safetensors
+  got "FastH3 transformer (8-bit), H3 text encoder$([ ${#H3_ENC[@]} = 0 ] && echo " (the one already here)" || echo " (8-bit)"), video decoder (8-bit) and audio decoder"
+  [ -s "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" ] \
+    || echo "  a LoRA needs the bf16 transformer (44 GB), not fetched here: hf download FastVideo/FastVideo-FastH3-Comfy diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors --local-dir $MODELS/FastH3-Comfy"
+elif [ "$IMAGE_ONLY" = 0 ]; then
   say "FastH3 8-Step V2 for ComfyUI (75 GB) -> $MODELS"
   fetch FastVideo/FastVideo-FastH3-Comfy FastH3-Comfy diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors \
     text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors vae/minimax_h3_video_vae_int8_convrot.safetensors \
@@ -406,7 +476,15 @@ if [ "$IMAGE_ONLY" = 0 ]; then
   got "FastH3 transformer (bf16), H3 text encoder (8-bit), video decoder (8-bit) and audio decoder"
 fi
 
-if [ "$REF2VA" = 1 ] && [ "$IMAGE_ONLY" = 0 ]; then
+if [ "$REF2VA" = 1 ] && [ "$IMAGE_ONLY" = 0 ] && [ "$SMALL" = 1 ]; then
+  # a small card: the 8-bit Ref2VA (21 GB) in place of the bf16 file (40 GB). Reference clips run the model's own 20
+  # passes on it (spark_generate.py: the 4-pass Turbo adapter merges into the bf16 file only), and Character Swap
+  # runs on the same file (spark/setup-swap.sh adds its two LoRAs)
+  say "MiniMax H3 Ref2VA for ComfyUI, the 8-bit transformer (21 GB) -> $MODELS"
+  fetch Comfy-Org/MiniMax-H3 MiniMax-H3-Comfy diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors
+  got "Ref2VA transformer (8-bit): reference clips at the model's 20 passes (the Turbo adapter needs the bf16 file, 40 GB)"
+  if bash "$HERE/spark/comfy.sh" status | grep -q running; then echo "  restart ComfyUI to see it: bash spark/comfy.sh stop (the next render starts it)"; fi
+elif [ "$REF2VA" = 1 ] && [ "$IMAGE_ONLY" = 0 ]; then
   say "MiniMax H3 Ref2VA for ComfyUI and its Turbo adapter (39 GB) -> $MODELS"
   fetch Comfy-Org/MiniMax-H3 MiniMax-H3-Comfy diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors \
     loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors
@@ -613,7 +691,12 @@ if [ "$IMAGE_ONLY" = 0 ] && [ "$SWAP" = 1 ]; then
     || echo "  ! Swap the character is not fully set up: the Library says what is missing"
 fi
 
-if [ "$IMAGE_ONLY" = 0 ]; then
+if [ "$IMAGE_ONLY" = 0 ] && { [ "$SMALL" = 1 ] || { [ -n "$VRAM_GB" ] && [ "$VRAM_GB" -lt 24 ]; }; }; then
+  # the engine keeps FastH3's 50 blocks on the card in int8 (22 GB, spark/tensorfold_h3): a card under 24 GB cannot hold
+  # them, so clips render on ComfyUI's own blocks, which stream what the card does not hold
+  say "TensorFold's H3 engine for CUDA: not built for a ${VRAM_GB:-small} GB card"
+  echo "  the engine holds the 50 int8 blocks on the card (22 GB): clips render on ComfyUI's own blocks here (bash spark/build-engine.sh builds it anyway)"
+elif [ "$IMAGE_ONLY" = 0 ]; then
   say "TensorFold's H3 engine for CUDA -> $PREFIX/tf-h3"
   if [ "$VERIFY" = 1 ]; then
     [ -s "$PREFIX/tf-h3/libtf_h3.so" ] && ok "libtf_h3.so" || echo "  not built: clips render on ComfyUI's own blocks (slower)"
@@ -694,6 +777,12 @@ fi
 # The essential LoRA bundle: every preset of the LoRA hub, fetched once from its author's page into one folder laid out
 # by the hub's groups, then installed (oneshot-essential-bundle.sh). --loras=GROUPS takes some groups, --lora-bundle=PATH
 # (or LORA_BUNDLE) takes the files from another copy of a bundle with no other network, --no-loras skips it.
+if [ "$SMALL" = 1 ] && [ "$IMAGE_ONLY" = 0 ] && [ "$VERIFY" != 1 ] && [ -z "$LORAS" ] \
+   && [ ! -s "$MODELS/FastH3-Comfy/diffusion_models/fastvideo_fasth3_8step_v2_pruned_bf16.safetensors" ]; then
+  # a LoRA is merged into the bf16 transformer, which a small-card install does not fetch: the bundle waits for it
+  echo; echo "== Essential LoRA bundle: left out on a small card (a LoRA merges into the bf16 transformer, not fetched here; --loras asks for the bundle anyway)"
+  LORAS=none
+fi
 if [ "$LORAS" != none ] && [ "$IMAGE_ONLY" = 0 ] && [ "$VERIFY" != 1 ]; then
   echo; echo "== Essential LoRA bundle${LORA_BUNDLE:+ from $LORA_BUNDLE}"
   PREFIX="$PREFIX" H3_MODEL_DIR="${H3_MODEL_DIR:-$HOME/h3-models/MiniMax-H3}" bash "$HERE/oneshot-essential-bundle.sh" \
@@ -706,11 +795,13 @@ if [ "$RENDER" = 1 ]; then
   PREFIX="$PREFIX" bash "$HERE/scripts/image.sh" "A lighthouse on a rocky coast at sunrise, waves breaking, warm light." "$HERE/outputs/test.png"
   ok "outputs/test.png"
   if [ "$IMAGE_ONLY" = 0 ]; then
-    PREFIX="$PREFIX" bash "$HERE/scripts/video.sh" 'A woman in a yellow raincoat stands on a pier, looks at the camera and says in a clear voice: "The tide is coming in." Gulls and waves.' "$HERE/outputs/test.mp4"
-    ok "outputs/test.mp4 (864x480, 124 frames, 8 passes)"
+    TEST_FRAMES=124; [ "$SMALL" = 0 ] || TEST_FRAMES=56  # a small card streams the weights every pass: a shorter test clip
+    PREFIX="$PREFIX" FRAMES="$TEST_FRAMES" bash "$HERE/scripts/video.sh" 'A woman in a yellow raincoat stands on a pier, looks at the camera and says in a clear voice: "The tide is coming in." Gulls and waves.' "$HERE/outputs/test.mp4"
+    ok "outputs/test.mp4 (864x480, $TEST_FRAMES frames, 8 passes)"
   fi
 fi
 echo "DONE. Web app: ${STUDIO_GPU:+STUDIO_GPU=$STUDIO_GPU }bash $HERE/scripts/app.sh   (http://127.0.0.1:7870)"
+[ "$SMALL" = 0 ] || echo "Small card: clips render on ComfyUI's own blocks with the 8-bit weights, and the memory guard warns instead of refusing (STUDIO_MEMORY_GUARD=strict turns refusals back on). Start the app with the same STUDIO_GPU. docs/small-cards.md"
 echo "      Image:   bash $HERE/scripts/image.sh \"a prompt\" out.png"
 echo "      Video:   bash $HERE/scripts/video.sh \"a prompt\" out.mp4"
 echo "      Free the models' memory: bash $HERE/spark/comfy.sh stop"

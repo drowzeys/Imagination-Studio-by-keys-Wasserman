@@ -20,6 +20,8 @@
 # place of FastH3, when oneshot-setup-spark.sh --h3-base has fetched it: 25 passes by default), PROMPT_FILE, CROP=WxH, SPARK_WEIGHTS (bf16, the default, or int8: no faster on a Spark, 22 GB
 # less memory), SPARK_SPARSITY (0 is dense attention; unset picks by size), SPARK_ENGINE (tensorfold: the transformer's
 # blocks on TensorFold's CUDA engine in int8, the default once it is built; comfy: ComfyUI's own blocks in bf16).
+# SPARK_TRANSFORMER names another build of the video model in ComfyUI's diffusion_models folder (FastH3's, or Ref2VA's
+# for a clip from references); unset is the regular file.
 # TEXT_ENCODER names another MiniMax H3 text encoder file in ComfyUI's text_encoders folder; unset or regular is MiniMax's own.
 # The clip's sound is made from a lossless copy of the decoder's output: 256 kb/s, and limited to -1 dBFS when the
 # decoded peak is higher (the render says which). AUDIO_EQ=off keeps ComfyUI's own track.
@@ -83,6 +85,7 @@ fi
 [ -z "${FIRST_FRAME:-}" ] || ARGS+=(--first-frame "$FIRST_FRAME")
 [ -z "${LAST_FRAME:-}" ] || { [ -s "$LAST_FRAME" ] || { echo "no last frame at $LAST_FRAME" >&2; exit 2; }; ARGS+=(--last-frame "$LAST_FRAME"); }
 [ -z "${TEXT_ENCODER:-}" ] || ARGS+=(--text-encoder "$TEXT_ENCODER")
+[ -z "${SPARK_TRANSFORMER:-}" ] || ARGS+=(--transformer "$SPARK_TRANSFORMER")
 [ -z "${CROP:-}" ] || ARGS+=(--crop "$CROP")
 [ -z "${SPARK_SPARSITY:-}" ] || ARGS+=(--sparsity "$SPARK_SPARSITY")
 [ -z "${SPARK_ENGINE:-}" ] || ARGS+=(--engine "$SPARK_ENGINE")

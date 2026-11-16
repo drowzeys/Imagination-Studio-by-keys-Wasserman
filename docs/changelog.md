@@ -4,6 +4,90 @@
 
 Historical release notes, retained as written for provenance. Old install commands, requirements and limitations describe their releases, not current support. Start with the [README](../README.md) or [Windows guide](windows.md).
 
+## Unreleased
+
+**Character Swap no longer refuses one continuous shot for a "cut" that is a fast gesture.** A person talking to a
+locked camera with their hands near the lens (measured on two filmed 720x1280 clips) gave 39 frames that `app/shot.py`'s
+two figures call a cut, and the swap refused the part ("the part has a cut 10.83 s in"). A cut changes most of the
+frame (0.84 to 0.98 of it on the real cuts measured, 0.20 to 0.47 on the gestures): every cut now carries `changed`,
+and the swap refuses only those at `shot.CUT_CHANGED` (0.65) or more, saying how many fast moves it took as one shot.
+The check of a finished clip flags what it flagged before.
+
+**The page follows its jobs without leaving it and coming back.** The first job queued after the app started did not
+redraw the page (an empty queue was taken for "not polled yet"), so an action's panel showed no card for it until the
+job ended. A job's card inside a page (Character Swap, the other Library actions, the wizards) was the job as it was
+when the page was drawn: every poll now brings it up to date in place (`viewCards`), stage, clock and error. A tick
+box, a slider or a file button that kept the focus after its click no longer holds a redraw back (only typing and a
+menu do), and a pointer released outside the window no longer leaves the page waiting for it.
+
+**Smaller machines**: a GeForce under 24 GB on Linux, a Mac from 64 GB, and a Mac with no models.
+
+- **Small cards** (`oneshot-setup-rtx-6000.sh --small`, [small-cards.md](small-cards.md)): an RTX 5060 Ti (16 GB) or an
+  RTX 4060 (8 GB) beside 24 GB of RAM or more. The install fetches FastH3's 8-bit transformer (22 GB) in place of the
+  bf16 one (44 GB) and Qwen-Image-2.1-Turbo's 8-bit checkpoint (7.3 GB, whole on a 16 GB card) in place of its bf16
+  one (`spark_generate.py` `qwen_file`, `SPARK_IMAGE_WEIGHTS`; `app/discover.py` lists it, so a copy on the machine
+  is linked), keeps an H3 text encoder that is already there (another build of it) in place of the 27 GB int8
+  download and uses it by default (`default_text_encoder`), takes the 8-bit Ref2VA (21 GB) for `--ref2va` in place of
+  the bf16 file (reference clips at the model's 20 passes; Character Swap shares the file), skips TensorFold's engine (it keeps the 50 int8 blocks on the card) and the LoRA bundle (a LoRA
+  merges into the bf16 file), and renders a 56-frame test clip. Clips render on ComfyUI's own blocks with the 8-bit
+  file by default when the bf16 file is not there (`spark/spark_generate.py` `default_weights`). The install leaves a
+  mark (`$PREFIX/small-card`) and the memory guard then warns instead of refusing (`spark/memory_guard.py`
+  `small_card`; `STUDIO_SMALL_CARD`, `STUDIO_MEMORY_GUARD=strict`), as on an N1X: the Spark's estimates are not a
+  streamed card's peak. The watcher's floor there is a tenth of the RAM (never under 1.5 GB) instead of the Spark's
+  8 GB, which stopped every clip on a 31 GB machine (`floor_mb`); the machine memory guard (`scripts/memguard.py`)
+  takes that same floor from the Studio's module and, beside a card with memory of its own, never gives back the
+  model files' page cache (what the card streams from). The Library's Describe says why it cannot look (no vision
+  model connected, or a render running) and waits for an idle queue. A 32 GB RTX 5090 keeps the strict guard of
+  [rtx-5090.md](rtx-5090.md). The engine is also left unbuilt on any card under 24 GB. Not measured: the times are
+  not known. The installer's package hint names `dnf` on Fedora.
+- **Stopping and restarting on Linux and a Mac's terminal.** `bash scripts/app.sh stop` and `restart`
+  (`app/launcher.py stop`): the launcher that holds the checkout's lock is found by its own record (PID and start
+  time, `studio-launcher.pid` beside the lock; on Linux also by `/proc/locks`), resumed if it was paused, asked to
+  end, and the command returns when the lock is free; `--force` ends one that does not leave. Nothing is found by
+  name or port. The launcher and its server now ignore Ctrl+Z: paused, they kept the lock, a plain `kill` was not
+  seen until they were resumed, and the next start was refused.
+- **Character Swap: the character's picture at full size.** The picture reached the model scaled down to the part's
+  pixel area (`ref_image_size` `match`): a large reference sheet, a full figure beside a close-up, arrived with its
+  face a few dozen pixels across, and a swap came back all but unchanged. `ref_size` `max` (`spark_swap.py
+  --ref-size max`, `SWAP_REF_IMAGE`; *Use the character's picture at full size* in the panel) keeps it up to 2048
+  pixels on its short side, as ComfyUI recommends for likeness and Noncoder's workflow sets. Its rows ride through
+  every pass and it is not measured on a DGX Spark, so it is offered, and the default, only where the memory guard
+  warns instead of refusing; a Spark keeps `match`.
+- **Character Swap: the mask's margin follows the person.** Every mask was grown by 64 pixels, whatever the
+  person's size: on someone 60 pixels across in a wide shot the redrawn area was wider than they were and took in
+  the people beside them. The margin is now about a third of the person's width on each frame, at least 12 and at
+  most 64 pixels (`grow_to_size` in `spark_swap.py`), for every swap; a close-up is as before. Chosen by sight on
+  one clip, not measured; `SWAP_GROW=fixed` keeps 64 pixels on a plain one-person swap.
+- **Character Swap: several people.** One job swaps up to four people, each with a picture of their own (`swaps` on
+  the job and on the agents' `swap_character`, `spark_swap.py --swaps`). *Number the people* (a job with `who`,
+  `--who`) follows everyone SAM 3.1 finds through the whole part, people who come into view after the first frame
+  included (at most nine), and shows them numbered on the frame with the most in view; *Who is swapped* takes that
+  number (`which`, `--which`). Each person is followed on the clip's own frames, then the swaps run one after
+  another, each on the result of the one before. A person picked by number is drawn in a crop around them, at no
+  more pixels than the frame (`swap_plan.crop`), and pasted back through their mask, so the rest of every frame
+  stays the clip's own pixels. A person not yet in view is left alone (no anchor, no window made for frames without them), and two
+  chosen people standing close leave each other out of their masks. The idea is
+  Noncoder's tutorial and TheBeast-Spec's MiniMax H3 Multi Swap workflow; no node pack and no new model. Not yet
+  measured on a DGX Spark: one person with no number is made as before, on the whole frame.
+- **Character Swap: who is swapped.** With several people in the part's first frame the largest was always the one
+  swapped. *Who is swapped* (the job's `person`, the agents' `swap_character` `person`, `spark_swap.py --person`)
+  takes a few words ("man in a blue jacket"): SAM 3.1 looks for them in place of "person" when it finds and follows,
+  and the anchor's edit names them. Empty, nothing changes.
+- **Small cards, found by running them.** Find a person and Remove a person failed where the scratch folder is on
+  another file system than the Library (a rename across them; `spark_workflows.py` `deliver`). The Library actions
+  and Character Swap asked ComfyUI for the int8 H3 text encoder by name and were turned away on an install that kept
+  another build: they now load the one a clip uses there (`text_encoder` in `spark_workflows.py` and
+  `spark_swap.py`). `/api/estimate` said a clip the guard only warns about "is refused": it now carries the warning,
+  and the Home page shows it. `scripts/studio-check.py` no longer fails a discrete card for having no measured time.
+- **A Mac from 64 GB** (`oneshot-setup.sh --small`): video and music at the floor of 4.3.0, which the measured peaks
+  allow (FastH3 32 GiB native, 40 GiB on the 8-bit MLX path of an M1 to M4; music 33 GB). Voice (52 GB) and Bolt stay
+  at 96 GB and are left out below it, said in a line; `--small --all` picks what fits. An M4 is untested, as before.
+- **A Mac with no models** (`oneshot-setup.sh --client`): a MacBook Neo (A18 Pro, 8 GB) or any Mac. The environment,
+  motion graphics, Finish and the app, no weights, no memory floor; clips render on a Linux machine or DGX Spark
+  under Machine → Sparks. Pictures, voice and music are not handed to a worker.
+- Tests: `tests/test_small_machines.py` (the installers' dry runs on a 5060 Ti, a 4060, a 64 GB Mac and an A18 Pro
+  Mac; the guard's small-card mark; the 8-bit default).
+
 ## New in 4.4.1 (2026-11-08)
 
 **The 4.3.1 screens are back**, at Wasserman's request (#226). The page is 4.3.1's again. Everything under it stays

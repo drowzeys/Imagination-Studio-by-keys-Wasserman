@@ -21,10 +21,21 @@ FPS = 24
 WINDOW = 124          # frames a window is at most, the history included (5.17 s)
 HISTORY = 18          # frames carried into the next window: 17 before the join, and the join
 SECONDS = (5.0, 15.0)  # the part of the clip that is swapped
+# Where the memory guard warns instead of refusing (a small card, docs/small-cards.md) a longer part is tried: a part
+# is made in windows of at most 124 frames whatever its length, so only the tracking and the time grow with it. Not
+# measured on a DGX Spark, which keeps 15 s.
+LONGEST_TRIED = 25.0
 QUALITIES = (480, 768)  # the short side of the canvas
 MULTIPLE = 32
 MAX_PIXELS = 768 * 1344
 FRAME_PER_LATENT = (1, 4, 4, 4, 4)
+# Several people in one job: each is one more swap, made on the result of the one before (the chain of Noncoder's
+# MiniMax H3 Multi Swap workflow, which has four). A person picked by number is drawn in a crop of the frame around
+# them and pasted back, so everything outside their mask stays the clip's own pixels however many swaps there are.
+MOST_SWAPS = 4
+MOST_PEOPLE = 9       # the people SAM 3.1 follows and the who's-who picture numbers
+# The crop's shape is kept between 9:16 and 16:9 (the shapes the canvas itself has). Choices, not measurements.
+NARROWEST, WIDEST = 9 / 16, 16 / 9
 
 
 def on_grid(frames: int) -> bool:
@@ -115,3 +126,37 @@ def held_latents(history: int) -> int:
     if not history:
         return 0
     return (history - 1) // 17 * 5 + 1
+
+
+def crop(left: int, top: int, right: int, bottom: int, width: int, height: int) -> dict:
+    """The crop one person is drawn in. ``left, top, right, bottom`` is the box that holds their grown mask on every
+    frame of the part (right and bottom past the last pixel), ``width`` x ``height`` the part's canvas. Returns
+    ``box`` (x, y, w, h on the canvas: one box for the whole part, so the crop does not move) and ``size`` (the
+    width and height the crop is drawn at: multiples of 32, the box's shape, and never more pixels than the canvas
+    has, so a crop asks no more memory than the measured whole frame). A box as large as the canvas is the canvas."""
+
+    if width <= 0 or height <= 0:
+        raise ValueError("the part has no picture size")
+    left, top = max(0, int(left)), max(0, int(top))
+    right, bottom = min(width, int(right)), min(height, int(bottom))
+    if right <= left or bottom <= top:
+        raise ValueError("the person's box is empty")
+    wide, tall = float(right - left), float(bottom - top)
+    if wide / tall < NARROWEST:
+        wide = tall * NARROWEST
+    elif wide / tall > WIDEST:
+        tall = wide / WIDEST
+    wide, tall = min(wide, float(width)), min(tall, float(height))
+    scale = math.sqrt(width * height / (wide * tall))
+    side = lambda value: max(MULTIPLE, int(value * scale + 1e-6) // MULTIPLE * MULTIPLE)  # noqa: E731
+    size = (side(wide), side(tall))
+    # the box takes the drawn size's shape where the canvas has the room, so the person is not stretched
+    shape = size[0] / size[1]
+    if wide / tall < shape:
+        wide = min(float(width), tall * shape)
+    else:
+        tall = min(float(height), wide / shape)
+    w, h = min(width, max(2, round(wide))), min(height, max(2, round(tall)))
+    x = min(max(0, round((left + right) / 2 - w / 2)), width - w)
+    y = min(max(0, round((top + bottom) / 2 - h / 2)), height - h)
+    return {"box": (x, y, w, h), "size": size}

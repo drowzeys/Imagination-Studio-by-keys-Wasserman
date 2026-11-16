@@ -1105,8 +1105,9 @@ IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Re
                 "moss-image": ("MOSS-Image", "25 steps: exact lettering for posters, titles and signs; Apache 2.0, commercial use allowed")}
 IMAGE_MODELS["sd-turbo"] = ("SD-Turbo", "Windows storyboard draft, 512x512, one step; Stability AI Community License")
 # BFL's file names, the present one first (renamed 2026-10-17, the same files; spark_generate.FLUX3_OLD)
-FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors"),
-               "flux3k-full": ("flux3-image-klein-base-bf16.safetensors", "flux3_image_klein_base_bf16.safetensors")}
+FLUX3_FILES = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", "flux3_image_klein_sd_bf16.safetensors",
+                               "flux3_image_klein_int8_convrot.safetensors"),  # the 8-bit one: a small card's (spark_generate.FLUX3_INT8)
+               "flux3k-full":("flux3-image-klein-base-bf16.safetensors", "flux3_image_klein_base_bf16.safetensors")}
 
 
 def image_models() -> list[str]:
@@ -1146,8 +1147,11 @@ def moss_ready() -> bool:
         models = Path(os.environ.get("MAC_COMFY_MODELS") or prefix / "comfy-models")
         if not (prefix / "comfy-venv/bin/python").exists():
             return False
-    return ((models / "diffusion_models/moss_image_sft_bf16.safetensors").is_file()
-            and (models / "text_encoders/qwen3.5_9b_bf16.safetensors").is_file()
+    # the bf16 files, or their 8-bit counterparts on a small card (spark_generate.MOSS_INT8, MOSS_TEXT_INT8)
+    return (any((models / "diffusion_models" / name).is_file()
+                for name in ("moss_image_sft_bf16.safetensors", "moss_image_sft_int8_convrot.safetensors"))
+            and any((models / "text_encoders" / name).is_file()
+                    for name in ("qwen3.5_9b_bf16.safetensors", "qwen3.5_9b_int8_convrot.safetensors"))
             and (models / "vae/flux2-vae_small.safetensors").is_file()
             and (prefix / "ComfyUI/comfy_extras/nodes_moss_image.py").is_file())
 
@@ -1159,9 +1163,11 @@ def qwen_ready() -> bool:
     if not SPARK:
         return True
     models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "Qwen-Image-2.1-Comfy"
-    return all((models / name).is_file() for name in ("diffusion_models/qwen_image_2.1_turbo_bf16.safetensors",
-                                                     "text_encoders/qwen3vl_8b_int8_convrot.safetensors",
-                                                     "vae/qwen_image_2.1_vae_bf16.safetensors"))
+    # the transformer: the bf16 file, or the 8-bit one a small-card install fetches (spark_generate.py qwen_file)
+    transformer = any((models / "diffusion_models" / name).is_file()
+                      for name in ("qwen_image_2.1_turbo_bf16.safetensors", "qwen_image_2.1_turbo_int8_convrot.safetensors"))
+    return transformer and all((models / name).is_file() for name in ("text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+                                                                     "vae/qwen_image_2.1_vae_bf16.safetensors"))
 
 
 def qwen_base_ready() -> bool:
@@ -1199,6 +1205,49 @@ def text_encoders() -> dict[str, str]:
     folder = Path(os.environ.get("H3_MODEL_DIR", Path.home() / "h3-models/MiniMax-H3")).parent / "text_encoders"
     return {f.name: str(f) for f in sorted(folder.glob("*.safetensors"))}
 
+
+
+REGULAR_TRANSFORMERS = {"fastvideo_fasth3_8step_v2_pruned_bf16.safetensors", "fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors",
+                        "minimax_h3_ref2va_pruned_bf16.safetensors", "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+                        "minimax_h3_fl2va_pruned_bf16.safetensors"}
+
+
+def transformers() -> dict[str, str]:
+    """Other builds of the video model found on this machine: file name -> "frames" (beside FastH3: a clip from text
+    or a frame) or "references" (beside MiniMax H3 Ref2VA: a clip from references, Character Swap). A file put in
+    either diffusion_models folder is offered by name (a 4-bit or 6-bit build, a hybrid). Only where the memory guard
+    warns instead of refusing (a small card, docs/small-cards.md): its estimates are the regular files' measurements,
+    and a DGX Spark's strict guard would pass a file nobody measured there."""
+
+    if not SPARK or windows_cuda.native_os() or memory_guard.guard_mode() != "warn":
+        return {}
+    found = {}
+    for folder, family in ((SPARK_REF2VA.parent / "FastH3-Comfy/diffusion_models", "frames"), (SPARK_REF2VA / "diffusion_models", "references")):
+        for one in sorted(folder.glob("*.safetensors")):
+            if one.name not in REGULAR_TRANSFORMERS and one.is_file():
+                found.setdefault(one.name, family)
+    return found
+
+
+def own_transformer(params: dict) -> str | None:
+    """The video model file a job chose (``transformer``), checked: its name, or None for the regular file."""
+
+    asked = params.get("transformer")
+    if asked in (None, "", "regular"):
+        return None
+    name = Path(str(asked)).name
+    family = transformers().get(name)
+    wants = "references" if params.get("references") or params.get("reference_videos") or params.get("reference_audios") else "frames"
+    if family is None:
+        raise HTTPException(400, f"no video model file named {name} in this machine's diffusion_models folders")
+    if family != wants:
+        raise HTTPException(400, f"{name} is a model for a clip from " + ("references" if family == "references" else "text or a frame")
+                                 + ": this clip is from " + ("references" if wants == "references" else "text or a frame"))
+    if params.get("loras"):
+        raise HTTPException(400, "a LoRA merges into the regular video model: render without the LoRA, or on the regular model")
+    if params.get("base") == "h3":
+        raise HTTPException(400, "MiniMax H3's own transformer is a video model of its own: choose one or the other")
+    return name
 
 
 def own_text_encoder(asked: str) -> str | None:
@@ -1252,6 +1301,9 @@ def custom(params: dict) -> tuple[dict, bool]:
             raise HTTPException(400, f"no text encoder file at {asked} on this machine (a .safetensors file"
                                      + (" in ComfyUI's text_encoders folder)" if SPARK else ")"))
         env["TEXT_ENCODER"] = found
+    chosen = own_transformer(params)
+    if chosen:
+        env["SPARK_TRANSFORMER"] = chosen
     return env, bool(env)
 
 
@@ -2275,6 +2327,7 @@ def local_ram_need(job: dict) -> int | None:
         if (room.get("route") == "int8" and card and card["total_mb"] >= 96000
                 and memory_guard.room_budget_mb() is None and not found and not params.get("loras")
                 and not params.get("text_encoder") and os.environ.get("TEXT_ENCODER", "regular") in ("", "regular")
+                and not params.get("transformer")
                 and os.environ.get("SPARK_ENGINE", "tensorfold") == "tensorfold"
                 and sized.get("SPARK_BASE") != "h3" and os.environ.get("SPARK_BASE") != "h3"
                 and frames <= 243 and (room.get("rows") or 0) <= 75336
@@ -2335,7 +2388,7 @@ def perform(job: dict, worker: dict | None = None) -> None:
                                                      or params.get("reference_audios") or params.get("loras")
                                                      or params.get("base") == "h3"):
             encoder = params.get("text_encoder") or "regular"
-            route = "video" + ("+" + encoder if encoder != "regular" else "")
+            route = "video" + ("+" + encoder if encoder != "regular" else "") + ("+" + str(params["transformer"]) if params.get("transformer") else "")
         need = local_ram_need(job)
         total, available = local_gpus.memory()
         if need is not None and available - need + local_gpus.model_ram_mb(route) < memory_guard.floor_mb(total):
@@ -2542,6 +2595,8 @@ def state() -> dict:
             "ref_media": ref2va_ready(), "reference_video_limit": REFERENCE_VIDEO_LIMIT,
             "reference_audio_limit": REFERENCE_AUDIO_LIMIT, "reference_total": REFERENCE_TOTAL,
             "text_encoders": sorted(text_encoders()),
+            # other builds of the video model on this machine: [{"file", "for": "frames" | "references"}] (a small card)
+            "transformers": [{"file": name, "for": family} for name, family in transformers().items()],
             # the picture models installed here, in the order the page offers them (IMAGE_MODELS)
             "image_models": [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()], "sharp": SHARP if "sharp" in PRESETS and "fh8" in QUALITIES else None, "custom": {"sides": CUSTOM_SIDES, "pixels": CUSTOM_PIXELS, "steps": CUSTOM_STEPS},
             "platform": machine()[0], "platform_label": machine()[1],
@@ -2578,6 +2633,7 @@ def state() -> dict:
             for key in ("ref2va", "ref2va_turbo", "ref_media", "last_frame", "shot_check"):
                 out[key] = False
             out["text_encoders"] = []
+            out["transformers"] = []
         for key in ("voice", "music"):
             out[key] = windows_runtime.gate_native_state(key, out[key], selected_mode)
         out["capabilities"] = ({kind: {"available": False, "why": why + " needs a supported, verified Windows recipe."}
@@ -2700,7 +2756,12 @@ def estimate_time(body: dict) -> dict:
             # and a bigger number here only costs this process memory to hold a list it cannot answer for
             room = memory_of(body, sized, lengths.of({"frames": body.get("frames"), "seconds": body.get("seconds") or 5}), bool(body.get("loras") or body.get("with_lora")),
                              {"pictures": [None] * count, "videos": []} if body.get("referenced") else None)
+            warned = room.get("warning") if room.get("fits") else None
             room = {key: room.get(key) for key in ("fits", "reason", "need_mb", "error_mb", "left_mb", "floor_mb", "available_mb", "nearest")}
+            if warned:
+                # the guard warns here instead of refusing (memory_guard.guard_mode: a small-card install, an N1X): the
+                # clip is tried, so the page is told that, not the refusal's "so it is refused" beside "fits": true
+                room.update(reason="", warning=warned)
         except (HTTPException, ValueError, KeyError):
             room = None  # the settings are refused for another reason when the job is queued
     if body.get("preset") == "custom" or body.get("steps") not in (None, "") or body.get("loras"):
@@ -3796,7 +3857,9 @@ import actions  # noqa: E402  (Turnaround sheet, Upscale and Remove a person: Li
 action_router, action_build, action_title, action_source = actions.attach(
     HOME, PACK, SPARK, inside, relative, windows=lambda: bool(WINDOWS or WIN32) and windows_runtime.mode()["enabled"])
 import swap  # noqa: E402  (Character Swap: the person in a part of a clip replaced by a character, a Library action, beside this file)
-swap_router, swap_build, swap_title, swap_source, swap_estimate = swap.attach(HOME, PACK, SPARK, inside, relative, media_seconds, held_room)
+swap_router, swap_build, swap_title, swap_source, swap_estimate = swap.attach(HOME, PACK, SPARK, inside, relative, media_seconds, held_room,
+                                                                               lambda: [n for n, f in transformers().items() if f == "references"],
+                                                                               lambda: SPARK and not windows_cuda.native_os() and memory_guard.guard_mode() == "warn")
 app.include_router(swap_router)
 import sound  # noqa: E402  (sound effects and foley: Stable Audio Open and MMAudio, run locally, beside this file)
 sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative, held_room, media_seconds)

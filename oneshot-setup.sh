@@ -38,6 +38,13 @@
 #                                       # source); the converter is MIT
 #   bash oneshot-setup.sh --train       # training a LoRA runs on a CUDA machine (oneshot-setup-spark.sh --train): said, and left out here
 #   bash oneshot-setup.sh --image-only  # the image model only (33 GB), render a test image
+#   bash oneshot-setup.sh --small       # a smaller Mac: video and music from 64 GB (the floor up to 4.3.0; an M1 to M4 runs FastH3 on
+#                                       # the MLX engine with 8-bit weights, 40 GiB at its peak, much slower than an M5); Voice (52 GB
+#                                       # at its peak) and Bolt stay at 96 GB and are left out below it. Pictures stay at 48 GB
+#   bash oneshot-setup.sh --client      # no models on this Mac (a MacBook Neo, 8 GB; any Mac): the app alone, for planning, the
+#                                       # script, the timeline, graphics and Finish, with clips rendered on a Linux machine or DGX
+#                                       # Spark added under Machine -> Sparks (docs/multi-spark.md). Pictures, voice and music are
+#                                       # not handed to a worker today. Builds the app (--app)
 #   bash oneshot-setup.sh --no-render   # install and fetch only
 #   bash oneshot-setup.sh --no-loras    # skip the essential LoRA bundle (about 4 GB from the LoRAs' authors; --loras=camera,style
 #                                       # takes some groups, --lora-bundle=PATH installs from a bundle on disk with no other network)
@@ -87,13 +94,13 @@ if [ "$(uname -s)" = Linux ]; then
   SPARK_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --all|--yes|-y|--image-only|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--sound|--graphics|--no-graphics|--finish|--no-finish|--train|--ref2va|--image-edit|--h3-base|--yue2|--swap|--loras|--loras=*|--no-loras|--lora-bundle=*|--no-memguard|--memguard-stop-foreign) SPARK_ARGS+=("$arg");;
+      --all|--yes|-y|--image-only|--small|--no-render|--verify|--motion|--upgrade|--voice|--flux3|--music|--moss|--bolt|--sound|--graphics|--no-graphics|--finish|--no-finish|--train|--ref2va|--image-edit|--h3-base|--yue2|--swap|--loras|--loras=*|--no-loras|--lora-bundle=*|--no-memguard|--memguard-stop-foreign) SPARK_ARGS+=("$arg");;
       --upscale|--remove)
         if [ "$ON_CARD" = 1 ]; then echo "note: on this GPU $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"
         else echo "note: on a DGX Spark $arg comes with --ref2va (spark/setup-workflows.sh): adding --ref2va"; fi
         SPARK_ARGS+=("--ref2va");;
       --fasth3) ;;
-      --turbo|--app)
+      --turbo|--app|--client)
         if [ "$ON_CARD" = 1 ]; then echo "note: $arg is for the Mac build and does nothing on this GPU"
         else echo "note: $arg is for the Mac build and does nothing on a DGX Spark"; fi;;
       *) echo "unknown option $arg" >&2; exit 2;;
@@ -151,11 +158,13 @@ REF_ADAPTER_NAME="lightx2v_ref2v_4step_v0.1_ourlayout.safetensors"
 X2_REPO="speach1sdef178/MiniMax-H3-X2-Detail-VAE"
 X2_NAME="MiniMax-H3-X2-Detail-v1.safetensors"
 X2_SHA256="2296840f4acedcaa976688e7d7b97f7bf570b136e400385d3f46224011897aac"
-ALL=0; MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; BOLT=0; GRAPHICS=""; FINISH=""; TRAIN=0; COMFY_ARGS=(); MEMGUARD=1; MEMGUARD_FOREIGN=0
+ALL=0; MODE=""; VIDEO=1; TURBO=0; APP=0; REF2VA=0; MOTION=0; UPGRADE=0; LORAS=""; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; BOLT=0; GRAPHICS=""; FINISH=""; TRAIN=0; COMFY_ARGS=(); MEMGUARD=1; MEMGUARD_FOREIGN=0; SMALL=0; CLIENT=0
 for arg in "$@"; do
   case "$arg" in
     --all) ALL=1;;  # every feature this Mac's memory runs (chosen after the preflight reads the chip and the memory)
     --image-only) VIDEO=0;;
+    --small) SMALL=1;;  # a smaller Mac: video and music from 64 GB (the preflight below)
+    --client) CLIENT=1; VIDEO=0; APP=1;;  # no models: the app, with clips rendered on a worker (Machine -> Sparks)
     --yes|-y) ;;  # the plain install without the checklist
     --fasth3) ;;  # FastH3 is the default video engine since 2.1; the flag is kept so older commands still run
     --turbo) TURBO=1;;
@@ -201,12 +210,27 @@ step "Preflight"
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || die "Apple silicon macOS only"
 CHIP=$(sysctl -n machdep.cpu.brand_string); RAM=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 ok "$CHIP, macOS $(sw_vers -productVersion), ${RAM} GB"
+# --client: no model on this Mac. The app, motion graphics and Finish; clips render on a worker added under Machine ->
+# Sparks (app/sparks.py hands single clips to a worker; pictures, voice and music stay on the machine that has them).
+# A MacBook Neo (A18 Pro, 8 GB) runs nothing here but this; any Mac can be a client.
+if [ "$CLIENT" = 1 ]; then
+  VIDEO=0; TURBO=0; REF2VA=0; IMAGE_EDIT=0; VOICE=0; FLUX3=0; MUSIC=0; SOUND=0; BOLT=0; MOTION=0; TRAIN=0; COMFY_ARGS=(); LORAS=none; ALL=0
+  [ "$MODE" = "--verify" ] || MODE="--no-render"
+  echo "  --client: no models on this Mac; the app alone. Clips render on a Linux machine or DGX Spark added under Machine -> Sparks; pictures, voice and music need a Mac with the models"
+fi
 # --all: every feature this Mac runs, by its memory (each a job's measured peak on an M5 Ultra, one job at a time:
 # the Studio unloads one model before the next). What is left out is said, with why.
 if [ "$ALL" = 1 ]; then
   GRAPHICS="${GRAPHICS:-1}"; FINISH="${FINISH:-1}"
   echo "  --all: training a LoRA left out: it runs on a CUDA machine (oneshot-setup-spark.sh --train)"
-  if [ "$RAM" -lt 96 ]; then VIDEO=0; echo "  --all on ${RAM} GB: pictures only (video, voice, music and Bolt need 96 GB)"
+  if [ "$RAM" -lt 96 ] && { [ "$SMALL" = 0 ] || [ "$RAM" -lt 64 ]; }; then
+    VIDEO=0; echo "  --all on ${RAM} GB: pictures only (video, voice, music and Bolt need 96 GB)"
+    [ "$RAM" -lt 64 ] || echo "  --small installs video and music from 64 GB (voice and Bolt stay at 96 GB)"
+  elif [ "$RAM" -lt 96 ]; then
+    # --small between 64 and 95 GB: what the measured peaks allow (video 32 GiB native, 40 GiB on the MLX engine with
+    # 8-bit weights; music 33 GB; sound and image edit less); Voice (52 GB) and Bolt wait for 96 GB
+    MOTION=1; MUSIC=1; SOUND=1; IMAGE_EDIT=1
+    echo "  --all --small on ${RAM} GB: video, music, sound, image edit and Motion Previs; voice, Bolt, FLUX3-K, MOSS-Image, H3 Turbo and Ref2VA left out (96 GB and up)"
   else
     MOTION=1; VOICE=1; MUSIC=1; FLUX3=1; SOUND=1; IMAGE_EDIT=1; COMFY_ARGS+=(--moss)
     case "$CHIP" in *M[5-9]*) BOLT=1;; *) echo "  --all: NVIDIA Nemotron 3.5 Bolt left out: its Metal engine is measured on an M5 only (add --bolt to try it)";; esac
@@ -268,7 +292,15 @@ GRAPHICS="${GRAPHICS:-1}"; FINISH="${FINISH:-1}"
 # The default install (video, voice, music, Bolt) needs 96 GB, the Studio's minimum for a Mac since the release after
 # 4.3.0 (64 GB before). Pictures only (--image-only) stays at 48 GB.
 FAST_NEED=96; FORMER_NEED=64  # the default install's floor up to 4.3.0
-if [ "$VIDEO" = 0 ]; then NEED=48; elif [ "$TURBO" = 1 ] || [ "$REF2VA" = 1 ]; then NEED=128; else NEED=$FAST_NEED; fi
+# --small: video and music from 64 GB, the floor up to 4.3.0, which the measured peaks allow (FastH3 on the native engine
+# 32 GiB; on the MLX engine with 8-bit weights, as an M1 to M4 runs it, 40 GiB; music 33 GB). Voice (52 GB at its peak)
+# and Bolt stay at 96 GB and are left out below it. Pictures stay at 48 GB (28 GiB at their peak); a client needs no floor.
+[ "$SMALL" = 0 ] || FAST_NEED=64
+if [ "$SMALL" = 1 ] && [ "$RAM" -lt 96 ]; then
+  [ "$VOICE" = 0 ] || { echo "  --small on ${RAM} GB: Voice left out (its measured peak is 52 GB: 96 GB)"; VOICE=0; }
+  [ "$BOLT" = 0 ] || { echo "  --small on ${RAM} GB: the Bolt brain left out (96 GB; any OpenAI-compatible server works in Settings -> Connections)"; BOLT=0; }
+fi
+if [ "$CLIENT" = 1 ]; then NEED=0; elif [ "$VIDEO" = 0 ]; then NEED=48; elif [ "$TURBO" = 1 ] || [ "$REF2VA" = 1 ]; then NEED=128; else NEED=$FAST_NEED; fi
 if [ "$RAM" -lt "$NEED" ] && [ "$NEED" = "$FAST_NEED" ] && [ "$RAM" -ge "$FORMER_NEED" ] \
    && { [ "$UPGRADE" = 1 ] || [ "$MODE" = "--verify" ]; } && [ -x "$PREFIX/venv/bin/python" ]; then
   # an install made under the 64 GB floor: kept and moved to this version, with nothing new added
@@ -278,7 +310,8 @@ if [ "$RAM" -lt "$NEED" ] && [ "$NEED" = "$FAST_NEED" ] && [ "$RAM" -ge "$FORMER
   echo "    Pictures need 48 GB: an install made from now on here would be bash oneshot-setup.sh --image-only."
 elif [ "$RAM" -lt "$NEED" ]; then
   if [ "$NEED" = "$FAST_NEED" ] && [ "$RAM" -ge 48 ]; then
-    die "this Mac has ${RAM} GB; the default install (video, voice, music and Bolt) needs 96 GB or more of unified memory. Pictures only need 48 GB: bash oneshot-setup.sh --image-only"
+    [ "$SMALL" = 1 ] || [ "$RAM" -lt 64 ] || die "this Mac has ${RAM} GB; the default install (video, voice, music and Bolt) needs 96 GB or more of unified memory. --small installs video and music from 64 GB (voice and Bolt left out; an M1 to M4 runs FastH3 on the slower MLX engine with 8-bit weights: docs/installation.md). Pictures only need 48 GB: bash oneshot-setup.sh --image-only"
+    die "this Mac has ${RAM} GB; the default install (video, voice, music and Bolt) needs ${FAST_NEED} GB or more of unified memory$([ "$SMALL" = 0 ] || echo " (--small)"). Pictures only need 48 GB: bash oneshot-setup.sh --image-only"
   fi
   die "needs ${NEED} GB+ unified memory for this install$([ "$TURBO" = 1 ] && [ "$RAM" -ge "$FAST_NEED" ] && echo " (without --turbo it needs ${FAST_NEED} GB)") (measured on 256 GB only); this Mac has ${RAM} GB"
 fi
@@ -360,6 +393,9 @@ print(f"  ✓ tensorfold {m.version('tensorfold')} with the H3 and Qwen-Image fa
 print("  ✓ int8 tensor-unit kernels available" if mlp_int8.available() else "  ! int8 kernels unavailable on this GPU: bfloat16 only")
 EOF
 
+if [ "$CLIENT" = 1 ]; then
+  step "Models: none on this Mac (--client). Clips render on a worker under Machine -> Sparks"
+else
 step "Qwen-Image-2.1-Turbo weights (33 GB) -> $QWEN_MODEL_DIR"
 [ -f "$QWEN_MODEL_DIR/transformer/diffusion_pytorch_model-00002-of-00002.safetensors" ] || elsewhere "$QWEN_MODEL_DIR"
 if [ ! -f "$QWEN_MODEL_DIR/transformer/diffusion_pytorch_model-00002-of-00002.safetensors" ] && ! absent "no Qwen-Image-2.1-Turbo weights at $QWEN_MODEL_DIR"; then
@@ -380,6 +416,7 @@ if [ ! -f "$QWEN_MODEL_DIR/transformer/diffusion_pytorch_model-00002-of-00002.sa
 fi
 grep -q sample_sigmas "$QWEN_MODEL_DIR/model_index.json" || die "$QWEN_MODEL_DIR is not Qwen-Image-2.1-Turbo (its model_index.json has no saved schedule)"
 ok "Qwen-Image-2.1-Turbo at $QWEN_MODEL_DIR ($(du -shL "$QWEN_MODEL_DIR" | cut -f1))"
+fi  # the end of the Qwen-Image-2.1-Turbo step (not on a client)
 
 if [ "$IMAGE_EDIT" = 1 ]; then
   # Edit a picture runs on Turbo as it is. The 40-step base model is what image LoRAs are trained on: its transformer
@@ -643,6 +680,12 @@ if [ ${#COMFY_ARGS[@]} -gt 0 ] || [ -d "$PREFIX/ComfyUI" ]; then  # Upscale, Rem
   PREFIX="$PREFIX" H3_MODEL_DIR="$H3_MODEL_DIR" bash "$HERE/scripts/setup-comfy.sh" ${COMFY_ARGS[@]+"${COMFY_ARGS[@]}"} \
     $([ "$MODE" = "--verify" ] || [ "$UPGRADE" = 1 ] || [ ${#COMFY_ARGS[@]} = 0 ] && echo --verify) \
     || [ ${#COMFY_ARGS[@]} -gt 0 ] || echo "  ! ComfyUI's actions are not fully set up: bash scripts/setup-comfy.sh --verify says what is missing"
+fi
+if [ "$CLIENT" = 1 ]; then
+  echo; echo "DONE. Client install: no models on this Mac."
+  echo "Open Wasserman Slate AI Studio in ~/Applications, then Machine -> Sparks: add the Linux machine or DGX Spark that renders clips (docs/multi-spark.md)."
+  echo "Pictures, voice and music are not handed to a worker: they need a Mac with the models (bash oneshot-setup.sh --image-only from 48 GB)."
+  exit 0
 fi
 if [ "$MODE" = "--verify" ] || [ "$MODE" = "--no-render" ]; then
   echo; echo "DONE. Image: bash $HERE/scripts/image.sh \"a prompt\" out.png"

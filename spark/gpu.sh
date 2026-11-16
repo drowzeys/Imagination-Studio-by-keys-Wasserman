@@ -97,9 +97,12 @@ studio_pin_gpu() {
   indexes="$(studio_compute_indexes || true)"
   count=$(printf '%s\n' "$indexes" | sed '/^$/d' | wc -l | tr -d ' ')
   if [ "${count:-0}" -ge 2 ]; then
-    echo "This machine has ${count} compute GPUs. Set STUDIO_GPU to the nvidia-smi index this process should use:" >&2
-    nvidia-smi --query-gpu=index,name,memory.total,display_active --format=csv >&2 || true
-    echo "A row with display_active Enabled is a monitor card. It is not used unless STUDIO_GPU names it." >&2
+    echo "This machine has ${count} compute GPUs, and this Studio uses one. Both cards work. Set STUDIO_GPU to the one it should use:" >&2
+    # the table as people read it: display_active is whether a monitor hangs off the card, not whether the card is on
+    nvidia-smi --query-gpu=index,name,memory.total,display_active --format=csv,noheader 2>/dev/null \
+      | awk -F', *' '{ disp = (tolower($4) ~ /enabled/) ? "a monitor is on it" : "no monitor on it"; printf "  STUDIO_GPU=%s  %s, %s (%s)\n", $1, $2, $3, disp }' >&2 || true
+    echo "Then run the same command with that in front, e.g. STUDIO_GPU=$(printf '%s\n' "$indexes" | sed '/^$/d' | head -1) $(basename "${STUDIO_SETUP_ENTRY:-$0}")" >&2
+    echo "(\"no monitor\" is nvidia-smi's display_active Disabled: the card is fine, nothing is turned off. Pick the larger card.)" >&2
     echo "One studio uses one card, or two paired with STUDIO_GPUS=0,1 (docs/two-gpus.md). A second studio is another process with its own STUDIO_GPU, PORT, SPARK_COMFY_PORT, STUDIO_HOME and STUDIO_GPU_LOCK." >&2
     return 1
   fi

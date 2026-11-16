@@ -138,7 +138,7 @@ def flux3_workflow(args, pictures: list[str], shown: list[str], prompt: str, see
 
 def workflow(args, pictures: list[str], prompt: str, seed: int, loras: list[tuple[str, float]], made: tuple[int, int] | None = None) -> dict:
     w = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": sg.QWEN_BASE if args.base else sg.QWEN, "weight_dtype": "default"}},
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": sg.QWEN_BASE if args.base else sg.qwen_file(), "weight_dtype": "default"}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.QWEN_TEXT, "type": "qwen_image", "device": "default"}},
         "4": {"class_type": "VAELoader", "inputs": {"vae_name": sg.QWEN_VAE}},
         # the pictures are seen by the text encoder and spliced into the sequence as latents; the node's own latent is

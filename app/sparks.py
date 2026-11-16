@@ -372,6 +372,8 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     missing = [str(one.get("id")) for one in adapters if isinstance(one, dict) and one.get("id") not in (info.get("loras") or [])]
     if missing:
         return "the LoRA " + ", ".join(missing) + " is not installed there"
+    if params.get("transformer") not in (None, "", "regular"):
+        return "the video model file is one of this machine's own: a worker renders on its regular files"
     encoder = params.get("text_encoder")
     if encoder not in (None, "", "regular") and Path(str(encoder)).name not in (info.get("text_encoders") or []):
         return "the text encoder file is not on that Spark"

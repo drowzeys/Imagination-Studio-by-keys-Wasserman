@@ -35,6 +35,15 @@ but at 1.1 times its neighbours (the whole stretch moves), and a whip into a cut
 at a correlation of 0.74. So a cut is a correlation under CUT_LIKENESS together with a change of CUT_RATIO times
 the neighbours' or more: halfway between the weakest cut and the nearest other pair on each axis. A cross-fade is not
 a cut and is not flagged: its frames change no faster than the frames around them.
+
+How much of the frame changed (``changed`` on every cut: the share of its pixels more than CUT_PIXEL grey levels from
+the frame before). The run above was generated clips; filmed ones were measured 2026-11-15, five 720x1280 clips
+brought to 24 frames a second. Two are one person talking to a locked camera with their hands near the lens, one
+continuous shot each: the test above finds 39 cuts in them (a correlation of 0.44 to 0.70, 1.8 to 4.6 times the
+neighbours), every one a hand crossing a still background, with 0.20 to 0.47 of the frame changed. Their one real
+cut (to black) changed 0.98; two real cuts in the other clips 0.84 and 0.89; a jump with the camera following it, no
+cut, 0.63. CUT_CHANGED is halfway between the most a gesture changed and the least a real cut did. Nothing here uses
+it to drop a cut: Character Swap, which refuses a part with a cut in it, reads it (spark/spark_swap.py).
 """
 
 from __future__ import annotations
@@ -51,6 +60,8 @@ CUT_LIKENESS = 0.70     # correlation of a frame with the one before
 CUT_RATIO = 1.75        # its change against the median change of the frames around it
 CUT_WINDOW = 6          # frames on each side
 CUT_FLOOR = 0.5         # grey levels: a still stretch does not make a small change a large ratio
+CUT_PIXEL = 12.0        # grey levels: a pixel further than this from the frame before has changed
+CUT_CHANGED = 0.65      # the share of the frame a cut changes; under it, something crossed a picture that stayed
 MARK = "[Shot 2]"       # a prompt that writes a second shot asks for a cut
 
 
@@ -155,7 +166,9 @@ def cuts(stack) -> list[dict]:
             continue
         _, same = likeness(stack[at], stack[at + 1])
         if same < CUT_LIKENESS:
-            found.append({"frame": at + 1, "seconds": round((at + 1) / FPS, 2), "likeness": round(same, 2), "ratio": round(ratio, 1)})
+            changed = float((np.abs(stack[at + 1] - stack[at]) > CUT_PIXEL).mean())
+            found.append({"frame": at + 1, "seconds": round((at + 1) / FPS, 2), "likeness": round(same, 2), "ratio": round(ratio, 1),
+                          "changed": round(changed, 2)})
     return found
 
 

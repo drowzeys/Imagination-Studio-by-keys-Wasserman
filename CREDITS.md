@@ -115,7 +115,10 @@ repository at a pinned commit when the Studio is installed; none of their code i
   H3 Community License). It runs with **LightX2V**'s 8-step Turbo LoRA for MiniMax H3 (Apache-2.0), **SAM 3.1** from
   Meta for the person (SAM License) and **MiniMax H3** Ref2VA. The settings are the ones Akatz Labs published; the
   code is this pack's own, on ComfyUI's own nodes (no node pack). The first frame is drawn by FLUX3-K (Black Forest
-  Labs) where Openjutsu used a paid picture service.
+  Labs) where Openjutsu used a paid picture service. Several people in one job (each person numbered in the first
+  frame, the swaps made one after another, each on the result of the one before, each person drawn in a crop and
+  pasted back) is the idea of **Noncoder**'s tutorial and **TheBeast-Spec**'s MiniMax H3 Multi Swap workflow for
+  ComfyUI; the code here is this pack's own, on ComfyUI's own nodes, with none of that workflow's node packs.
 
 ## The Motion Previs tab: Sam Wasserman's Motion Previs Studio
 

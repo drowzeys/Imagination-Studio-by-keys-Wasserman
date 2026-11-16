@@ -150,7 +150,7 @@ async function clearOut(body, ask) { if (ask && !confirm(ask + "\nFiles are move
 let S = null, jobs = [], tab = "Home", project = null;
 const TABS = ["Home", "Apps", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Models", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
 const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", seconds: 5, seed: 1, scene: "", action: "", camera: "",
-  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
+  dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", transformer: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
 const field = (labelText, node) => el("div", {}, el("label", {}, labelText), node);
 const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"; if (isBox) node.checked = !!obj[key]; else node.value = obj[key] ?? "";
@@ -274,7 +274,7 @@ function sync() {
 // the output: a preset, or a size typed in by hand
 const output = () => C.preset === "custom" ? { label: "Custom " + C.cw + "x" + C.ch, size: [Number(C.cw), Number(C.ch)] } : S.presets[C.preset];
 // what a job carries beyond the preset: the hand-set size and passes, and the text encoder
-const extras = () => ({ ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}), ...(String(C.steps).trim() ? { steps: Number(C.steps) } : {}), ...(lorasOf(C).length ? { loras: lorasOf(C) } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) });
+const extras = () => ({ ...(C.preset === "custom" ? { width: Number(C.cw), height: Number(C.ch) } : {}), ...(String(C.steps).trim() ? { steps: Number(C.steps) } : {}), ...(lorasOf(C).length ? { loras: lorasOf(C) } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}), ...(modelOf() ? { transformer: modelOf() } : {}) });
 function changed() { sync(); C.prompt = ""; render(); }
 // one decision shown as cards: options are value -> [title, detail]
 // The picture model a prompt goes to (server.py IMAGE_MODELS): Qwen 2.1 Turbo on every install, FLUX3-K Fast and Full
@@ -318,6 +318,9 @@ function sharpCreate() { if (isRef()) C.start = "text";
 /* ---------- Keys and Wasserman LoRA Hub ---------- */
 // what a job carries: the picked LoRAs that are installed on this machine
 // another text encoder file found on this machine, picked by its file name ("" is the model's own)
+// another build of the video model on this machine (S.transformers, a small card): only one made for this kind of clip
+const modelsFor = () => (S && S.transformers || []).filter(t => t.for === (isRef() ? "references" : "frames")).map(t => t.file);
+const modelOf = () => modelsFor().includes(C.transformer) ? C.transformer : "";
 const encoderOf = () => C.textEncoder === "__own" ? String(C.textEncoderPath || "").trim() : (S && (S.text_encoders || []).includes(C.textEncoder)) ? C.textEncoder : "";
 const encoderName = f => f.split("/").pop().replace(/\.safetensors$/, "").replace(/^qwen3vl_32b_minimax_h3_/, "").replace(/[_-]+/g, " ");
 const lorasOf = obj => (obj.loras || []).filter(p => LORAS.some(r => r.id === p.id && r.installed));
@@ -464,6 +467,9 @@ function videoControls(after) {
       el("div", { class: "fit", style: "width:130px" }, el("label", {}, "Height"), typed(bind(C, "ch", el("input", { type: "number", step: 32, min: S.custom.sides[0], max: S.custom.sides[1] })), after)),
       el("div", { class: "note" }, "Multiples of 32, each side " + S.custom.sides[0] + " to " + S.custom.sides[1] + ", at most 1344 × 768 pixels in all. No time estimate for a custom size.")) : null,
     loraHub(C, () => { C.prompt = ""; }),
+    ...(modelsFor().length ? [el("label", {}, "Video model"),
+      choice(C, "transformer", { "": ["Regular", isRef() ? "MiniMax H3 Ref2VA, this install's own file" : "FastH3, this install's own file"], ...Object.fromEntries(modelsFor().map(f => [f, [encoderName(f), "another build in this machine's diffusion_models folder"]])) }, changed, true),
+      modelOf() ? el("div", { class: "note" }, "Another build of the video model on this machine, run on ComfyUI's own blocks. The Studio does not provide, check or measure it: no time or memory figure applies, a LoRA and the Turbo adapter do not go with it, and the file, its license and what you make with it are your own choice and responsibility.") : null] : []),
     el("label", {}, "Text encoder"),
     choice(C, "textEncoder", { "": ["Regular", "MiniMax H3's own"], ...Object.fromEntries((S.text_encoders || []).map(f => [f, [encoderName(f), "a file in this machine's text_encoders folder"]])), "__own": ["Your own", "a text encoder file you choose"] }, changed, true),
     C.textEncoder === "__own" ? el("div", {}, bind(C, "textEncoderPath", el("input", { placeholder: S.platform === "spark" ? "name of a .safetensors file in ComfyUI's text_encoders folder" : "/path/to/your-text-encoder.safetensors" })),
@@ -1224,7 +1230,7 @@ function jobCard(job) { const p = job.progress; const elapsed = job.elapsed != n
   // the bar follows the time against the estimate (a job has several stages, each with its own step count)
   const share = job.estimate && elapsed != null ? Math.min(99, Math.max(3, Math.round(100 * elapsed / job.estimate))) : (p ? Math.round(100 * p.at / p.of) : 3);
   const pre = el("pre", { class: "hide" }, relHome(job.log || ""));
-  return el("div", { class: "job" }, el("div", { class: "seghead" }, el("b", {}, job.title), el("span", { class: "pill " + job.status }, job.status), el("span", { style: "flex:1" }),
+  return el("div", { class: "job", "data-job": job.id }, el("div", { class: "seghead" }, el("b", {}, job.title), el("span", { class: "pill " + job.status }, job.status), el("span", { style: "flex:1" }),
       ["queued", "running"].includes(job.status) ? el("button", { class: "small", onclick: async () => { await api("/api/jobs/" + job.id + "/cancel", {}); poll(); } }, "Cancel")
         : [el("input", { type: "checkbox", title: "Select this job", "aria-label": "Select " + job.title, checked: PICK.has(job.id), style: "width:auto;flex:none", onchange: e => { if (e.target.checked) PICK.add(job.id); else PICK.delete(job.id); jobTools(); } }),
            el("button", { class: "small", title: "Delete this job and what it made (moved to the trash folder)", "aria-label": "Delete " + job.title, onclick: () => clearOut({ jobs: [job.id] }, "Delete “" + job.title + "” and the files it made?") }, "🗑")],
@@ -1242,11 +1248,22 @@ function jobTools() { const done = jobs.filter(j => ["done", "cancelled"].includ
     el("button", { class: "small", disabled: !PICK.size, title: "The selected takes with their prompt, seed, model and LoRAs, packed for Circle Take", onclick: () => location.assign("/api/export/dailies.zip?jobs=" + [...PICK].join(",")) }, "Dailies for Circle Take (" + PICK.size + ")"),
     el("button", { class: "small", disabled: !failed, title: "Take every failed job out of this list", onclick: () => clearOut({ failed: true }, "Clear the " + count(failed, "failed job") + " from the queue list?") }, "Clear failed (" + failed + ")"),
     el("button", { class: "small", disabled: !done, title: "Every finished or cancelled job leaves this list and its clips, stills and check sheets go to the trash folder. A clip that is in a film (a project's timeline, a Slate take) stays.", onclick: () => clearOut({ finished: true }, "Delete all " + count(done, "finished job") + " and the files they made?\nA clip that is in a film (a project's timeline or a Slate take) stays where it is.") }, "Delete all finished (" + done + ")")] : [])); }
-let lastSig = "";
+let lastSig = null;  // null until the first poll: an empty queue is a signature too ("")
 // A pointer held down (a click or a tap under way): the page is not rebuilt under it, or the click is lost (#54)
 let HELD = false;
 for (const [on, held] of [["pointerdown", true], ["pointerup", false], ["pointercancel", false]]) document.addEventListener(on, () => { HELD = held; }, true);
-const busyHere = () => HELD || document.activeElement.matches("input,textarea,select");
+// a button released outside the window (a drag out of it, a native menu) sends no pointerup: a pointer moving with no button down is up
+document.addEventListener("pointermove", e => { if (!e.buttons) HELD = false; }, true);
+// typing, or a menu that may be open: a tick box, a slider or a file button keeps the focus after its click and holds nothing
+const busyHere = () => HELD || document.activeElement.matches("textarea,select,input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=button]):not([type=submit]):not([type=color])");
+// A job's card inside a page (an action's panel, a wizard) is the job as it was when the page was drawn: each poll brings it up
+// to date in place, so its stage, clock and error show without leaving the page and coming back
+function viewCards() { for (const was of document.querySelectorAll("#view .job[data-job]")) { if (was.closest("#jobs")) continue;
+    const job = jobs.find(j => j.id === was.dataset.job); if (!job) continue;
+    const sig = JSON.stringify(job); if (was.dataset.sig === sig && job.status !== "running") continue;
+    const card = jobCard(job), log = was.querySelector(":scope > pre"); card.dataset.sig = sig;
+    if (log && !log.classList.contains("hide")) card.querySelector(":scope > pre").classList.remove("hide");
+    was.replaceWith(card); } }
 // The queue keeps each job's card while the job is unchanged, so a tick, an open log or a click on it survives the poll;
 // a running job's card is redrawn every poll for its clock
 const CARDS = new Map();
@@ -1262,11 +1279,11 @@ function queueDraw(box) { const shown = jobs.slice(0, 30), was = CARDS.size ? [.
   CARDS.clear(); for (const [id, one] of next) CARDS.set(id, one); }
 async function poll() { try { jobs = await api("/api/jobs"); } catch { return; }
   if (HELD) return;  // the next poll draws it, once the pointer is up
-  jobTools(); queueDraw($("#jobs")); bayUpdate();
+  jobTools(); queueDraw($("#jobs")); viewCards(); bayUpdate();
   // a timeline changed from another window or device shows here without a reload
   if (project && tab === "Editor" && !busyHere()) { try { const fresh = await api("/api/projects/" + project.id);
     if (JSON.stringify(fresh.timeline) !== JSON.stringify(project.timeline)) { project = fresh; render(); } } catch {} }
-  const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig && !busyHere()) { const had = lastSig; lastSig = sig; if (had) render(); } }
+  const sig = jobs.map(j => j.id + j.status).join(); if (sig !== lastSig && !busyHere()) { const had = lastSig; lastSig = sig; if (had !== null) render(); } }
 
 // A redraw keeps where the page and its scrolling strips were (the Editor timeline, #54): marked with data-keep-scroll
 function keepScroll() { const at = [window.scrollX, window.scrollY], strips = [...document.querySelectorAll("[data-keep-scroll]")].map(n => [n.dataset.keepScroll, n.scrollLeft, n.scrollTop]);

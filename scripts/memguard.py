@@ -208,6 +208,34 @@ def thresholds(total_mb: int, floor_mb: int | None = None) -> dict:
     return {"warn_mb": int(floor * WARN_FACTOR), "floor_mb": floor, "critical_mb": int(floor * CRITICAL_FACTOR)}
 
 
+def studio_floor(total_mb: int) -> int | None:
+    """The Studio's own floor for this machine (spark/memory_guard.py floor_mb: a tenth of the RAM, never under 8 GB;
+    on a small-card install, docs/small-cards.md, never under 1.5 GB), so that this guard and the Studio's watcher
+    draw the same line. None off Linux, or when the module cannot be read: thresholds() then takes its own default."""
+
+    guard = spark_guard()
+    if guard is None:
+        return None
+    try:
+        return int(guard.floor_mb(total_mb))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def on_a_card() -> bool:
+    """Whether the GPU has memory of its own (a GeForce, an RTX Pro 6000). The page cache is a GB10's trouble (one
+    memory for the GPU and the system); a card streams the model files out of that cache, so it is never given back
+    there, as the Studio's own watcher never gives it back beside a card."""
+
+    guard = spark_guard()
+    if guard is None:
+        return False
+    try:
+        return bool(guard.discrete())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def level_of(now: dict, limits: dict, fall_mb_s: float = 0.0) -> str:
     """ok, low (give back the Studio's idle modules), floor (and, opted in, the person's own servers) or critical.
     ``fall_mb_s`` is how fast the available memory fell over the last second: a fall that would reach the critical
@@ -577,10 +605,13 @@ def run(args) -> int:
     studio = Studio(args.url)
     poll = args.poll or (0.5 if sys.platform.startswith("linux") else 1.0)
     first = reading()
-    limits = thresholds(first.get("total_mb") or 0, args.floor_mb)
+    asked = os.environ.get("STUDIO_MEMGUARD_FLOOR_MB", "").strip()
+    limits = thresholds(first.get("total_mb") or 0, args.floor_mb or (None if asked.isdigit() else studio_floor(first.get("total_mb") or 0)))
+    card = on_a_card()  # read once: the card does not change while the guard runs
     say(f"start: watching every {poll:g} s; warn {limits['warn_mb']} MB, floor {limits['floor_mb']} MB, critical "
         f"{limits['critical_mb']} MB; stop the person's own servers: {'yes' if args.stop_foreign else 'no'}; cancel a render "
-        f"as the last resort: {'no' if args.no_cancel else 'yes'}; Studio {studio.url}")
+        f"as the last resort: {'no' if args.no_cancel else 'yes'}; Studio {studio.url}"
+        + ("; a card with memory of its own: the model files' page cache is kept" if card else ""))
     if sys.platform.startswith("linux") and not args.once:
         try:  # its pages now stay in memory (MCL_CURRENT, as memory_guard.watch): it must keep running when memory is short
             import ctypes
@@ -605,7 +636,8 @@ def run(args) -> int:
         while seen and at - seen[0][0] > 1.0:
             seen.pop(0)
         fall = (seen[0][1] - seen[-1][1]) / max(at - seen[0][0], 0.05) if len(seen) >= 2 and at - seen[0][0] >= 0.2 else 0.0
-        actions = decide(level_of(now, limits, fall), memo, at, args.stop_foreign, not args.no_cancel, cache_crowding(now, limits))
+        actions = decide(level_of(now, limits, fall), memo, at, args.stop_foreign, not args.no_cancel,
+                         not card and cache_crowding(now, limits))
         if actions:
             act(actions, now, limits, studio, say)
         if args.once:

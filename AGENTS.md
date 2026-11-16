@@ -43,6 +43,13 @@ Do these in order on the person's Mac, and report each result plainly.
 1. Check the machine: `uname -m` is `arm64`, `sysctl -n machdep.cpu.brand_string` names an M5-family chip (others run
    without the int8 kernels, far slower: say so and ask before continuing), memory is 96 GB or more (48 GB is enough for `--image-only`, pictures only; 128 GB if they want `--turbo`; on an M1 to M4 say plainly that video will be much slower than on an M5, and that it is untested there), and
    `df -h ~` shows 185 GB free (250 GB with `--turbo`). Stop and report if memory or disk falls short.
+   Between 64 and 95 GB, `--small` installs video and music (no voice, no Bolt; an M4 on the slow 8-bit MLX path): say
+   what it leaves out before running it. A Mac that holds no model (a MacBook Neo, A18 Pro, 8 GB) takes `--client`:
+   the app alone, clips rendered on a Linux machine or DGX Spark added under Machine → Sparks; pictures, voice and
+   music are not handed to a worker, so do not promise them there ([docs/installation.md](docs/installation.md), *Smaller Macs*).
+   On Linux, a GeForce under 24 GB (an RTX 5060 Ti, an RTX 4060) beside 24 GB of RAM or more takes
+   `STUDIO_GPU=<index> bash oneshot-setup-rtx-6000.sh --small` ([docs/small-cards.md](docs/small-cards.md)): the 8-bit
+   FastH3 file, no engine, no LoRAs, the guard warns instead of refusing, and no time is measured: say so.
 2. `brew install python@3.11 uv ffmpeg` (install Homebrew first only with the person's agreement).
 3. Tell the person the download sizes and licenses before starting: Qwen-Image-2.1 33 GB (Qwen Research License,
    non-commercial), MiniMax H3 text encoder and decoders 72 GB (MiniMax H3 Community License, territory limits; 134 GB with `--turbo`), FastH3 65 GB (same license).

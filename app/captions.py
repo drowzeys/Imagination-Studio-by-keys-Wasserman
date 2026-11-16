@@ -256,22 +256,27 @@ def attach(home: Path, listing, inside, relative, guard, idle, takes, auto) -> A
         return out
 
     def caption(items: list[dict]) -> dict:
-        """Describe these items now. {done: [paths], failed: [paths], busy: bool}; stops at the first Busy."""
+        """Describe these items now. {done: [paths], failed: [paths], busy: bool, why: str}; stops at the first Busy,
+        whose words are ``why`` (a render holds the memory, or no vision model is set up: the page says which)."""
 
-        done, bad, busy = [], [], False
+        done, bad, busy, why = [], [], False, ""
+        if not idle():
+            # a local model server (LM Studio, Ollama) shares the card with the render: the background round waits for
+            # an idle queue, and so does Describe now
+            return {"done": done, "failed": bad, "busy": True, "why": "a render is running on this machine"}
         table = takes() or {}
         with mine:
             for item in items:
                 try:
                     store.put(item["path"], describe(home, item, table))
                     done.append(item["path"])
-                except Busy:
-                    busy = True
+                except Busy as error:
+                    busy, why = True, str(error)
                     break
                 except Exception:  # noqa: BLE001 - a clip that cannot be described is left for later
                     failed[item["path"]] = time.time()
                     bad.append(item["path"])
-        return {"done": done, "failed": bad, "busy": busy}
+        return {"done": done, "failed": bad, "busy": busy, "why": why}
 
     def one_round() -> None:
         if not auto() or not idle():

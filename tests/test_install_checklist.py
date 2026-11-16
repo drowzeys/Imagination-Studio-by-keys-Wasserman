@@ -239,7 +239,9 @@ esac; done
 echo "GPU 0: $FAKE_GPU_NAME"
 """
 CARDS = {"gb10": ("NVIDIA GB10", "[N/A]", "12.1"), "rtx-pro-6000": ("NVIDIA RTX PRO 6000 Blackwell Workstation Edition", "97887", "12.0"),
-         "rtx-5090": ("NVIDIA GeForce RTX 5090", "32607", "12.0")}
+         "rtx-5090": ("NVIDIA GeForce RTX 5090", "32607", "12.0"),
+         # small cards (docs/small-cards.md): a 16 GB Blackwell and an 8 GB Ada
+         "rtx-5060-ti": ("NVIDIA GeForce RTX 5060 Ti", "16311", "12.0"), "rtx-4060": ("NVIDIA GeForce RTX 4060", "8188", "8.9")}
 
 
 def disk_need(tmp_path, card, *flags, have=(), **extra):

@@ -279,3 +279,39 @@ def test_an_action_starts_from_an_empty_server_after_another_kind_of_job(monkeyp
         W.server("turnaround")
         assert bool(stops) == restarted, last
     assert len(released) == 5  # on a Spark the model files' page cache is given back before every action loads
+
+
+def test_a_file_from_the_scratch_folder_is_kept_across_file_systems(tmp_path, monkeypatch):
+    """Find a person works in the system's temporary folder, which is a file system of its own on Fedora (a tmpfs
+    /tmp): a rename from there into the studio's folder fails with EXDEV, and the mask was lost with the job."""
+
+    import errno
+
+    sys.path.insert(0, str(PACK / "spark"))
+    import spark_workflows as sw
+
+    def other_device(*_a, **_k):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    made, kept = tmp_path / "scratch" / "green.mp4", tmp_path / "masks" / "person_mask.mp4"
+    made.parent.mkdir(); kept.parent.mkdir()
+    made.write_bytes(b"mask")
+    monkeypatch.setattr(os, "rename", other_device)
+    sw.deliver(made, str(kept))
+    assert kept.read_bytes() == b"mask" and not made.exists()
+
+
+def test_the_actions_load_the_text_encoder_a_small_card_kept(monkeypatch):
+    """An install that kept an NVFP4 text encoder has no int8 one: ComfyUI turned the removal's graph away for it."""
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spark"))
+    import spark_workflows as W
+
+    regular, kept = W.sg.H3_TEXT, "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    monkeypatch.setattr(W.sg, "default_text_encoder", lambda: kept)
+    for have, chosen in (([regular, kept], regular), ([kept], kept), ([f"H3/{kept}"], f"H3/{kept}"), ([], regular)):
+        monkeypatch.setattr(W, "listed", lambda loader, field, have=have: have)
+        assert W.text_encoder() == chosen
+    monkeypatch.setattr(W.sg, "default_text_encoder", lambda: "regular")
+    monkeypatch.setattr(W, "listed", lambda loader, field: [kept])
+    assert W.text_encoder() == regular  # no single other build: the regular name, and ComfyUI says what is missing

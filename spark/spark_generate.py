@@ -112,6 +112,23 @@ ENGINE_LIB = (Path(os.environ.get("TF_H3_LIB") or PREFIX / "tf-h3" / "tf_h3.dll"
 
 FASTH3 = {"bf16": "fastvideo_fasth3_8step_v2_pruned_bf16.safetensors",
           "int8": "fastvideo_fasth3_8step_v2_pruned_int8_convrot.safetensors"}
+
+
+def fasth3_file(weights: str) -> Path:
+    """Where ComfyUI reads FastH3's transformer of these weights on this install."""
+
+    return MODELS / "FastH3-Comfy" / "diffusion_models" / FASTH3[weights]
+
+
+def default_weights() -> str:
+    """The FastH3 file a clip renders on when SPARK_WEIGHTS does not say: bf16, or int8 where a small-card install
+    (oneshot-setup-rtx-6000.sh --small, docs/small-cards.md) fetched the 8-bit file only."""
+
+    if MAC or WINDOWS:
+        return "bf16"
+    if not fasth3_file("bf16").is_file() and fasth3_file("int8").is_file():
+        return "int8"
+    return "bf16"
 # MiniMax H3 Ref2VA: reference pictures hold a face or a subject through the clip. The adapter (LightX2V's Ref2VA Turbo,
 # 4 passes) is merged at run time, which only works on the bf16 file: on the 8-bit one the weights are rotated and an
 # adapter added to them silently spoils the picture. Without the adapter the 8-bit file runs the full 20 steps.
@@ -136,7 +153,39 @@ if MAC:
     H3_TEXT = MAC_FILES["text"]
     H3_VAE = MAC_FILES["vae"]
 QWEN = "qwen_image_2.1_turbo_bf16.safetensors"   # Qwen-Image-2.1-Turbo, the 8-step checkpoint
+# the same checkpoint in Comfy-Org's 8-bit (int8, rotated) form, 7.3 GB in place of 14: what a small-card install
+# fetches (oneshot-setup-rtx-6000.sh --small, docs/small-cards.md), and whole on a 16 GB card
+QWEN_INT8 = "qwen_image_2.1_turbo_int8_convrot.safetensors"
 QWEN_BASE = "qwen_image_2.1_bf16.safetensors"    # the 40-step base model, only when it has been downloaded
+
+
+def default_text_encoder() -> str:
+    """The H3 text encoder a clip uses when TEXT_ENCODER does not say: "regular" (H3_TEXT, Comfy-Org's int8 file), or,
+    where that file is not here and exactly one other build of the same encoder is (qwen3vl_32b_minimax_h3_*, such as
+    an NVFP4 one a small-card install kept in place of the 27 GB download), that file's name."""
+
+    if MAC or WINDOWS:
+        return "regular"
+    folder = MODELS / "FastH3-Comfy" / "text_encoders"
+    if (folder / H3_TEXT).is_file():
+        return "regular"
+    others = sorted(p.name for p in folder.glob("qwen3vl_32b_minimax_h3_*.safetensors") if p.is_file() and p.name != H3_TEXT)
+    return others[0] if len(others) == 1 else "regular"
+
+
+def qwen_file() -> str:
+    """The Qwen-Image-2.1-Turbo file a picture renders on: SPARK_IMAGE_WEIGHTS=bf16|int8 when set; else the bf16 file,
+    or the 8-bit one where it is the only one here (a small-card install)."""
+
+    said = os.environ.get("SPARK_IMAGE_WEIGHTS", "").strip().lower()
+    if said in ("bf16", "int8"):
+        return QWEN if said == "bf16" else QWEN_INT8
+    if MAC or WINDOWS:
+        return QWEN
+    folder = MODELS / "Qwen-Image-2.1-Comfy" / "diffusion_models"
+    if not (folder / QWEN).is_file() and (folder / QWEN_INT8).is_file():
+        return QWEN_INT8
+    return QWEN
 QWEN_TEXT = "qwen3vl_8b_int8_convrot.safetensors"
 QWEN_VAE = "qwen_image_2.1_vae_bf16.safetensors"
 # the schedule saved with the Turbo checkpoint (model_index.json, sample_sigmas), then zero
@@ -151,7 +200,10 @@ FLUX3 = {"flux3k-fast": ("flux3-image-klein-bf16.safetensors", 16, 1.0),
 # BFL's names until 2026-10-17, the same files (same SHA-256): an install made before then has these until the setup renames them
 FLUX3_OLD = {"flux3-image-klein-bf16.safetensors": "flux3_image_klein_sd_bf16.safetensors",
              "flux3-image-klein-base-bf16.safetensors": "flux3_image_klein_base_bf16.safetensors"}
-FLUX3_TEXT = "qwen3vl_4b_bf16.safetensors"
+# the distilled checkpoint in 8-bit (int8, rotated) form, 5.4 GB in place of 11: what a small card (16 GB) keeps; there is
+# no 8-bit base checkpoint, so Full needs its bf16 file
+FLUX3_INT8 = {"flux3-image-klein-bf16.safetensors": "flux3_image_klein_int8_convrot.safetensors"}
+FLUX3_TEXT ="qwen3vl_4b_bf16.safetensors"
 FLUX3_UPSAMPLER = "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors"
 FLUX3_VAE = "flux2-vae.safetensors"
 # MOSS-Image (OpenMOSS, Apache 2.0) on ComfyUI's own MOSS-Image support (v0.42.0): the SFT checkpoint, its Qwen3.5 9B
@@ -163,8 +215,32 @@ FLUX3_VAE = "flux2-vae.safetensors"
 MOSS_DIR = "MOSS-Image-Comfy"
 MOSS = {"moss-image": ("moss_image_sft_bf16.safetensors", 25, 2.5)}
 MOSS_TEXT = "qwen3.5_9b_bf16.safetensors"
+# the same checkpoint and encoder in 8-bit (int8, rotated) form, 5 GB and 9 GB in place of 10 and 19: a small card's files
+MOSS_INT8 = {"moss_image_sft_bf16.safetensors": "moss_image_sft_int8_convrot.safetensors"}
+MOSS_TEXT_INT8 = "qwen3.5_9b_int8_convrot.safetensors"
 MOSS_VAE = "flux2-vae_small.safetensors"
 MOSS_NEGATIVE = "nsfw, worst quality, bad anatomy, watermark, jpeg artifact"
+
+
+def _small_card_file(folder: Path, name: str, small: str | None) -> str:
+    """name, or its 8-bit counterpart where only that one is here (a small-card install); SPARK_IMAGE_WEIGHTS=bf16|int8
+    chooses outright."""
+
+    said = os.environ.get("SPARK_IMAGE_WEIGHTS", "").strip().lower()
+    if not small or MAC:
+        return name
+    if said in ("bf16", "int8"):
+        return name if said == "bf16" else small
+    return small if not (folder / name).is_file() and (folder / small).is_file() else name
+
+
+def moss_unet(model: str = "moss-image") -> str:
+    name = MOSS[model][0]
+    return _small_card_file(MODELS / MOSS_DIR / "diffusion_models", name, MOSS_INT8.get(name))
+
+
+def moss_text() -> str:
+    return _small_card_file(MODELS / MOSS_DIR / "text_encoders", MOSS_TEXT, MOSS_TEXT_INT8)
 
 
 def call(path, data=None):
@@ -498,6 +574,25 @@ def fetch(item: dict, target: Path) -> None:
         target.write_bytes(reply.read())
 
 
+def own_transformer(args, loras=()) -> str:
+    """A video model file of the user's own choosing (--transformer, SPARK_TRANSFORMER): another build of FastH3 or of
+    MiniMax H3 Ref2VA in ComfyUI's diffusion_models folder (a 4-bit or 6-bit one, a hybrid), as ComfyUI lists it; ""
+    for the regular file. ComfyUI's own blocks run it, and nothing about it is measured here. A LoRA is refused with
+    it: a LoRA merges into the regular bf16 file."""
+
+    asked = (getattr(args, "transformer", "") or "").strip()
+    if asked in ("", "regular"):
+        return ""
+    if loras:
+        sys.exit("a LoRA merges into the regular bf16 transformer: render without the LoRA, or on the regular video model")
+    listed = call("/object_info/UNETLoader")["UNETLoader"]["input"]["required"]["unet_name"][0]
+    name = next((one for one in (asked, f"H3/{asked}") if one in listed), None)
+    if name is None:
+        sys.exit(f"ComfyUI does not list the video model {asked}")
+    print(f"[tensorfold] video model: {name} (a file of your own choosing, on ComfyUI's own blocks: not measured here)", flush=True)
+    return name
+
+
 def installed(kind: str, name: str) -> bool:
     """Whether ComfyUI lists a model file (it reads its folders again on every call)."""
 
@@ -719,7 +814,24 @@ def reference(args) -> None:
     mode = args.ref_mode
     # a LoRA (the Turbo adapter, or one from the hub) is merged at run time, which needs the bf16 file: merged into
     # the 8-bit file's rotated weights it corrupts the clip without an error
+    if mode == "turbo" and not loras and not installed("unet", REF2VA["bf16"]) and installed("unet", REF2VA["int8"]):
+        # a small-card install (docs/small-cards.md) holds the 8-bit file only: the model's own 20 passes on it
+        print("[tensorfold] the Ref2VA Turbo adapter merges into the bf16 transformer, which this install does not have "
+              "(the 8-bit file only): rendering the model's 20 passes instead", flush=True)
+        mode = "full"
+        if args.steps == 4:
+            args.steps = None
     name = REF2VA["bf16"] if mode == "turbo" or loras or not installed("unet", REF2VA["int8"]) else REF2VA["int8"]
+    chosen = own_transformer(args, loras)
+    if chosen:
+        if mode == "turbo":
+            # the adapter is merged at run time into the bf16 file: on another build it would spoil the picture
+            print("[tensorfold] the Ref2VA Turbo adapter merges into the regular bf16 transformer: rendering the "
+                  "model's 20 passes on the chosen file instead", flush=True)
+            mode = "full"
+            if args.steps == 4:
+                args.steps = None
+        name = chosen
     missing = [f for kind, f in (("unet", name),) + ((("lora", REF2VA_TURBO),) if mode == "turbo" else ()) if not installed(kind, f)]
     if missing:
         sys.exit(f"not installed: {', '.join(missing)} (bash oneshot-setup-spark.sh --ref2va)")
@@ -850,6 +962,11 @@ def video(args) -> None:
             args.engine = "comfy"
         if args.weights != "bf16":
             print("[tensorfold] a LoRA renders with the bf16 weights", flush=True)
+            if not (MAC or WINDOWS) and not fasth3_file("bf16").is_file() and fasth3_file("int8").is_file():
+                # a small-card install (docs/small-cards.md) fetched the 8-bit file only: a LoRA cannot merge into it
+                sys.exit("a LoRA merges into FastH3's bf16 transformer, and this install has the 8-bit file only (a small-card "
+                         f"install). Add it (44 GB): hf download FastVideo/FastVideo-FastH3-Comfy diffusion_models/{FASTH3['bf16']} "
+                         f"--local-dir {MODELS / 'FastH3-Comfy'}; or render without the LoRA")
         args.weights = "bf16"
     if base:
         # the undistilled model: ComfyUI's own blocks, dense attention (FastH3's sparse routing is FastH3's), the
@@ -874,12 +991,15 @@ def video(args) -> None:
     fits_or_exit(args, bool(loras), False, base)
     # a LoRA on the engine needs no server of its own: the node merges it and puts the weights back after
     ensure_server("video" + ("+h3base" if base else "") + ("+lora" if on_comfy else ""))
+    chosen = "" if base else own_transformer(args, loras)
+    if chosen and args.engine == "tensorfold":
+        sys.exit("a video model file of your own runs on ComfyUI's own blocks: SPARK_ENGINE=comfy, or the regular video model")
     if base and not installed("unet", H3_FL2VA):
         sys.exit(f"MiniMax H3's own transformer ({H3_FL2VA}) is not installed: oneshot-setup-spark.sh --h3-base adds it "
                  "(40 GB), or render on FastH3 without --base h3")
     model = ["2", 0]
     w = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": H3_FL2VA if base else FASTH3[args.weights], "weight_dtype": "default"}},
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": H3_FL2VA if base else chosen or FASTH3[args.weights], "weight_dtype": "default"}},
         # FastH3's schedule: video shift 10, audio shift 3 (fastvideo_inference.json); MiniMax H3's own: 12 and 3
         "2": {"class_type": "MiniMaxH3SigmaShift", "inputs": {"model": ["1", 0], "shift_video": 12.0 if base else 10.0, "shift_audio": 3.0}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": H3_TEXT, "type": "minimax", "device": "default"}},
@@ -969,11 +1089,14 @@ def flux3_system_prompt(task: str = "t2i") -> str:
 
 
 def flux3_unet(model: str) -> str:
-    """The file of a FLUX3-K model, under BFL's present name, or the old one where only that is on disk."""
+    """The file of a FLUX3-K model, under BFL's present name, or the old one where only that is on disk, or the 8-bit
+    one where only that is (a small-card install)."""
 
     name = FLUX3[model][0]
     folder = MODELS / FLUX3_DIR / "diffusion_models"
-    return FLUX3_OLD[name] if not (folder / name).is_file() and (folder / FLUX3_OLD[name]).is_file() else name
+    if not (folder / name).is_file() and (folder / FLUX3_OLD[name]).is_file():
+        return FLUX3_OLD[name]
+    return _small_card_file(folder, name, FLUX3_INT8.get(name))
 
 
 def flux3_workflow(args, text: str, seed: int, caption: str = "") -> dict:
@@ -1013,10 +1136,11 @@ def flux3_workflow(args, text: str, seed: int, caption: str = "") -> dict:
 def moss_workflow(args, text: str, seed: int) -> dict:
     """MOSS-Image, the layout of ComfyUI's template: the prompt goes to the model as written."""
 
-    unet, steps, cfg = MOSS[args.model]
+    _, steps, cfg = MOSS[args.model]
+    unet = moss_unet(args.model)
     return {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
-        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": MOSS_TEXT, "type": "moss_image", "device": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": moss_text(), "type": "moss_image", "device": "default"}},
         "4": {"class_type": "VAELoader", "inputs": {"vae_name": MOSS_VAE}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": text}},
         "6": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": args.width, "height": args.height, "batch_size": 1}},
@@ -1304,7 +1428,7 @@ def sound(args) -> None:
 def qwen_image_workflow(args, text: str, seed: int) -> dict:
     """The production Qwen graph, shared with recipe qualification."""
     w = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_BASE if args.base else QWEN,
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": QWEN_BASE if args.base else qwen_file(),
                                                      "weight_dtype": "default"}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN_TEXT, "type": "qwen_image", "device": "default"}},
         "4": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN_VAE}},
@@ -1399,10 +1523,14 @@ def main() -> None:
                         "max: up to 2048 pixels on the short edge, several times slower")
     v.add_argument("--first-frame", default="", help="an image the clip starts from")
     v.add_argument("--last-frame", default="", help="an image the clip ends on (with or without --first-frame)")
-    v.add_argument("--text-encoder", default=os.environ.get("TEXT_ENCODER") or "regular",
-                   help="regular, or the file name of another MiniMax H3 text encoder in ComfyUI's text_encoders folder")
+    v.add_argument("--text-encoder", default=os.environ.get("TEXT_ENCODER") or default_text_encoder(),
+                   help="regular, or the file name of another MiniMax H3 text encoder in ComfyUI's text_encoders folder "
+                        "(the default where the regular file is not here and one other build of it is)")
+    v.add_argument("--transformer", default=os.environ.get("SPARK_TRANSFORMER") or "",
+                   help="the file name of another build of the video model in ComfyUI's diffusion_models folder (FastH3's "
+                        "for a clip from text or a frame, MiniMax H3 Ref2VA's for a clip from references); default: the regular file")
     v.add_argument("--crop", default="", help="WxH centre crop of the finished clip")
-    v.add_argument("--weights", choices=sorted(FASTH3), default=os.environ.get("SPARK_WEIGHTS", "bf16"))
+    v.add_argument("--weights", choices=sorted(FASTH3), default=os.environ.get("SPARK_WEIGHTS") or default_weights())
     v.add_argument("--engine", choices=("tensorfold", "comfy"),
                    default=os.environ.get("SPARK_ENGINE") or ("tensorfold" if ENGINE_LIB.exists() else "comfy"),
                    help="what runs the transformer blocks: TensorFold's CUDA family (the default once "

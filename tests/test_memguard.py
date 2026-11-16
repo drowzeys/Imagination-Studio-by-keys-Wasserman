@@ -26,6 +26,27 @@ def test_thresholds_follow_the_studios_floor(monkeypatch):
     assert mg.thresholds(124_500)["floor_mb"] == 20_000
 
 
+def test_the_guard_draws_the_studios_line_on_a_small_card(monkeypatch, tmp_path):
+    """On a small-card install (the mark --small leaves, docs/small-cards.md) the Studio's floor is a tenth of the RAM,
+    not 8 GB: the machine guard asks the Studio's module for it, so the two never disagree. The page cache is never
+    given back beside a card: it is what the models stream from."""
+
+    if not sys.platform.startswith("linux"):
+        pytest.skip("the Studio's memory module is Linux's")
+    monkeypatch.delenv("STUDIO_MEMGUARD_FLOOR_MB", raising=False)
+    monkeypatch.delenv("STUDIO_SMALL_CARD", raising=False)
+    monkeypatch.setenv("PREFIX", str(tmp_path))
+    assert mg.studio_floor(31_000) == 8_000  # not a small-card install: the Spark's floor, as before
+    (tmp_path / "small-card").write_text("")
+    assert mg.studio_floor(31_000) == 3_100
+    assert mg.thresholds(31_000, mg.studio_floor(31_000))["floor_mb"] == 3_100
+    guard = mg.spark_guard()
+    monkeypatch.setattr(guard, "discrete", lambda: True)
+    assert mg.on_a_card()
+    run = (ROOT / "scripts" / "memguard.py").read_text()
+    assert "not card and cache_crowding(now, limits)" in run
+
+
 @pytest.mark.parametrize("now, fall, level", [
     ({"available_mb": 60_000}, 0, "ok"),
     ({"available_mb": 18_000}, 0, "low"),

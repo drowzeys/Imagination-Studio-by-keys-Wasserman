@@ -497,13 +497,16 @@ fully local: FLUX3-K draws the first frame where Openjutsu used a paid picture s
 3. Choose **the part**: where it starts and how long it is (5 to 15 seconds).
 4. Choose **Fast** (480p, the default) or **High** (768p), and leave **Put the character in the first frame first** on: the
    picture model draws the character into the part's first frame and the swap starts from that frame (FLUX3-K Fast,
-   or Qwen-Image-2.1 where FLUX3-K is not installed). A **direction** (optional) adds your own words.
+   or Qwen-Image-2.1 where FLUX3-K is not installed). A **direction** (optional) adds your own words. **Who is swapped** (optional) takes a few words for one of several
+   people ("man in a blue jacket"), or their number (see *Several people* below).
 5. Press **Swap the character**. The job card shows the stages: the part, finding the person, following them, the
    first frame, each window, and the assembly. The result is in the Library (`renders/<job>.mp4`), beside the part
    with the swapped person tinted green, so you can see who was swapped, and the first frame it started from.
 
 How it works: SAM 3.1 finds the people in the part's first frame and the largest one is swapped; it follows them
-through the part, and the mask is grown by 64 pixels so hair, hands and the outfit's edges are inside it. Only that
+through the part, and the mask is grown by a margin of the person's own size on each frame (about a third of their
+width, at most 64 pixels) so hair, hands and the outfit's edges are inside it without taking in the people beside
+someone far from the camera. Only that
 person is drawn again: the rest of each frame is the clip's own. MiniMax H3 Ref2VA with Akatz Labs' Character Swap
 LoRA and LightX2V's 8-step Turbo LoRA draws the person, 8 passes a window, in windows of at most 124 frames (5.2 s),
 each starting with the last 18 frames of the window before so the joins hold: 106 new frames a window after the first.
@@ -532,12 +535,46 @@ TensorFold's int8 engine (the one FastH3 runs on) can run these blocks too, with
 (`spark/patches/tensorfold-h3-gateless.patch`, not part of the install). Measured, it is no faster here: FastH3's speed
 is its sparse attention, which those weights drive, and on 54,500 rows a dense pass took 72 s against ComfyUI's 67 s.
 
+**The character's picture at full size.** By default the picture reaches the model scaled down to the part's size.
+A large reference sheet (a full figure beside a close-up) then arrives with its face very small, and the swap can
+come back barely changed. Where the memory guard warns instead of refusing (a small card), *Use the character's
+picture at full size* is offered and on: the model reads the picture at up to 2048 pixels on its short side.
+It is slower, and not measured on a DGX Spark, which keeps the scaled picture: there, crop the sheet to one view of
+the character before you upload it.
+
+**Several people.** One job swaps up to four people, each with a picture of their own:
+
+1. Choose the part and the quality, then press **Number the people**. A job of its own (SAM 3.1 alone) follows
+   everyone through the part, also people who come into view after the first frame, and shows the frame with the
+   most of them in view, each tinted and numbered (a second and third frame under it for people who are not in
+   that one). At most nine people are numbered. The numbers hold for that start, length and quality: number them
+   again after changing any.
+2. Under **Who is swapped** type the person's number (or a few words, as before), and choose their character.
+3. Press **Add another person** for each further one: a picture, a number or a few words, and a direction of their
+   own. Press **Swap 2 people** (or 3, or 4).
+
+Every chosen person is followed through the clip's own frames first. Then the swaps run one after another, each on
+the result of the one before, so each person is one more whole swap in time (a 5 s Fast swap of two people: about
+11 min by the measured stages of one). A person picked by number is drawn in a crop of the frame around them (one
+box for the whole part, drawn at no more pixels than the frame has, so it asks no more memory than one swap) and
+only their mask is pasted back with a soft edge: everything else stays the clip's own pixels however many swaps
+there are. A person who comes into view
+later is left alone until then: no first-frame picture is drawn for them, and a window they are not in is not
+made. Where two chosen people stand close, each one's mask leaves the other out. The part beside the result
+shows each swapped person in a colour of their own. This is the chain of Noncoder's MiniMax H3 Multi Swap workflow
+for ComfyUI, made inside the studio; its pose control, second picture and timed cuts are not in it. The crop and
+the paste are new and have not been measured on a DGX Spark yet: one person with no number is still made as
+before, on the whole frame.
+
 Limits:
 
 - **One continuous shot.** A part with a hard cut in it is refused (choose a part before or after the cut).
+- **Each person once.** Two swaps that name the same person are refused. A person named by a few words (or by
+  nothing) is looked for in the first frame; a person named by number may come into view later.
 - **A person in the first frame.** A part that opens on nobody (a title, a fade from black) is refused before
   anything is drawn.
-- **The largest person is swapped** when several are in the first frame.
+- **The largest person is swapped** when several are in the first frame, unless **Who is swapped** describes
+  another in a few words (clothes, position); the green-tinted part beside the result shows who was followed.
 - A clip without sound gives a result without sound. Lip sync and identity can still drift on long parts: the model
   is an experimental one.
 
@@ -545,7 +582,7 @@ Needs: a DGX Spark (or another CUDA machine) with MiniMax H3 Ref2VA, and `bash o
 Ref2VA when it is not there, Akatz Labs' Character Swap LoRA v1.5, LightX2V's 8-step Turbo LoRA and SAM 3.1, about
 2.1 GB beside Ref2VA; ticked in the installer's checklist). Not on a Mac. MiniMax H3 and the LoRA are under the
 MiniMax H3 Community License, which does not cover use in the EU, the UK, South Korea or the US; the panel says so
-beside the button. Agents have it as `swap_character` (clip, picture, start, seconds, quality, direction); over the
+beside the button. Agents have it as `swap_character` (clip, picture, start, seconds, quality, direction, person); over the
 API it is `POST /api/jobs {kind: "swap", params: {video, image, start, seconds, quality, anchor, direction, seed}}`.
 
 ### Clearing prompts and deleting clips

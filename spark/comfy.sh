@@ -76,6 +76,16 @@ case "${1:-start}" in
       cp "$HERE/studio_mmaudio/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
     fi
     cd "$PREFIX/ComfyUI"
+    # A small card (--small, $PREFIX/small-card; STUDIO_SMALL_CARD=1|0 overrides) beside ~32 GB of RAM: ComfyUI's
+    # pinned memory takes half the RAM (15 GB on 31 GB), locked where neither the kernel nor the cache can reclaim
+    # it, so H3's text encoder and transformer met the guard's floor while loading and every clip was stopped.
+    # Unpinned, with the weights read from disk (page cache the kernel gives back), and ComfyUI's RAM cache letting
+    # go of a model 6 GB above the floor rather than at it.
+    SMALL="${STUDIO_SMALL_CARD:-}"
+    if [ -z "$SMALL" ]; then [ -f "$PREFIX/small-card" ] && SMALL=1 || SMALL=0; fi
+    if [ "$SMALL" = 1 ] && [ -z "${SPARK_COMFY_ARGS:-}" ]; then
+      SPARK_COMFY_ARGS="--use-ck-attention --disable-pinned-memory --fast-disk --cache-ram 6"
+    fi
     # --use-ck-attention: ComfyUI's own flash-attention kernel, 12% faster a pass than PyTorch's on a GB10
     if [ -n "${SPARK_GOVERNOR:-}" ]; then
       # shellcheck disable=SC2086

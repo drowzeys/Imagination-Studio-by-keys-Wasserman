@@ -2,6 +2,8 @@
 # The TensorFold Studio web app: create wizard, production board, clip editor.
 #   bash scripts/app.sh                 # http://127.0.0.1:7870
 #   HOST=0.0.0.0 bash scripts/app.sh    # also reachable from other machines on your network (behind the access key, app/access.py: trusted LANs only)
+#   bash scripts/app.sh stop            # stop the Studio this checkout runs (--force when it does not leave)
+#   bash scripts/app.sh restart         # stop it, then start again
 # Environment: PREFIX, QWEN_MODEL_DIR, H3_MODEL_DIR (as for the other scripts), HOST, PORT, STUDIO_HOME (default
 # ~/ImaginationStudio, where projects, uploads and renders are kept).
 set -euo pipefail
@@ -13,6 +15,12 @@ export PATH="/opt/homebrew/bin:$PATH"
 studio_pin_gpu
 [ -z "${STUDIO_GPU:-}" ] || echo "  compute GPU ${STUDIO_GPU}: $(studio_smi --query-gpu=name --format=csv,noheader | head -1)"
 [ -x "$PREFIX/venv/bin/python" ] || { echo "run oneshot-setup.sh first: no environment at $PREFIX" >&2; exit 1; }
+case "${1:-}" in
+  stop) exec "$PREFIX/venv/bin/python" "$HERE/app/launcher.py" stop "${@:2}" ;;
+  restart) "$PREFIX/venv/bin/python" "$HERE/app/launcher.py" stop "${@:2}" || exit 1 ;;
+  "") ;;
+  *) echo "usage: bash scripts/app.sh [stop [--force] | restart [--force]]" >&2; exit 2 ;;
+esac
 echo "Imagination Studio by keys+Wasserman · powered by TensorFold on http://${HOST:-127.0.0.1}:${PORT:-7870}"
 # The app starts without ffmpeg and says what it then cannot do (long videos, the timeline export, frames taken from a
 # clip, reference videos and audio); the page shows the same line.

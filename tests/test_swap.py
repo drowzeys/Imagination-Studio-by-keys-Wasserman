@@ -541,7 +541,13 @@ def test_the_agents_swap_a_character_through_the_studio_tools(monkeypatch):
     monkeypatch.setattr(mcp, "call", lambda method, path, body=None, **_: sent.append((method, path, body)) or
                         {"id": "j1", "kind": "swap", "status": "queued", "outputs": []})
     listed = {t["name"]: t for t in mcp.answer({"method": "tools/list"})["tools"]}
-    assert listed["swap_character"]["inputSchema"]["required"] == ["clip", "picture"]
+    assert listed["swap_character"]["inputSchema"]["required"] == ["clip"]  # a job that numbers the people, or `swaps`, has no one picture
+    mcp.answer({"method": "tools/call", "params": {"name": "swap_character", "arguments": {"clip": "renders/a.mp4", "swaps": [
+        {"picture": "scouts/b/hero.png", "which": 2}, {"picture": "scouts/b/villain.png", "person": "man in a blue jacket"}]}}})
+    assert sent[-1][2] == {"kind": "swap", "params": {"video": "renders/a.mp4", "swaps": [
+        {"image": "scouts/b/hero.png", "which": 2}, {"image": "scouts/b/villain.png", "person": "man in a blue jacket"}]}}
+    mcp.answer({"method": "tools/call", "params": {"name": "swap_character", "arguments": {"clip": "renders/a.mp4", "who": True, "quality": 480}}})
+    assert sent[-1][2] == {"kind": "swap", "params": {"video": "renders/a.mp4", "quality": 480, "who": True}}
     assert set(listed["swap_character"]["inputSchema"]["properties"]) >= {"clip", "picture", "start", "seconds", "quality", "direction"}
     reply = mcp.answer({"method": "tools/call", "params": {"name": "swap_character", "arguments": {
         "clip": "renders/a.mp4", "picture": "scouts/b/hero.png", "start": 2, "seconds": 10, "quality": 480, "direction": ""}}})
@@ -685,7 +691,7 @@ def test_a_clip_gets_swap_the_character_and_its_panel_queues_one_job():
       out.anchor = find(panel, n => n.attrs && n.attrs.class === "switch").kids[0].attrs.checked;
       out.range = (({ min, max, step }) => ({ min, max, step }))(find(panel, n => n.attrs && n.attrs.type === "range").attrs);
       hot(panel).attrs.onclick(); out.refused = toasts.slice(-1)[0];
-      SWAP.f.image = "scouts/s1/hero.png"; SWAP.f.seconds = 10; SWAP.f.start = 2; SWAP.f.direction = "keep the scarf";
+      SWAP.f.swaps[0].image = "scouts/s1/hero.png"; SWAP.f.seconds = 10; SWAP.f.start = 2; SWAP.f.swaps[0].direction = "keep the scarf";
       out.windows = text(actPanel()).includes("3 windows"); out.ten = text(actPanel());
       out.counts = [5, 6, 9, 10, 14, 15].map(swapWindows);
       out.high = find(actPanel(), n => n.attrs && n.attrs.class === "seg-ctl").kids[1].attrs.title;
@@ -725,3 +731,586 @@ def test_a_swap_the_machine_has_no_room_for_is_refused_before_it_is_queued(tmp_p
     assert refused.value.status_code == 400 and "Character Swap at High (768p) needs about 62 GB" in said and "Fast (480p) fits" in said
     assert s.build("swap", {**GOOD, "quality": 480}, "j1")
     assert not (s.home / "masks" / "j1").exists()  # a refused swap made no folder
+
+
+def test_a_window_loads_the_text_encoder_a_small_card_kept(monkeypatch):
+    """An install that kept an NVFP4 text encoder has no int8 one: ComfyUI turned the graph away for the missing name."""
+
+    kept = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+
+    class Kept(FakeComfy):
+        have = [kept]
+
+        def call(self, path, data=None):
+            return {"CLIPLoader": {"input": {"required": {"clip_name": [self.have]}}}}
+
+        def default_text_encoder(self):
+            return kept
+
+    monkeypatch.setattr(spark_swap, "sg", Kept(), raising=False)
+    assert spark_swap.text_encoder() == kept
+    Kept.have = [FakeComfy.H3_TEXT, kept]
+    assert spark_swap.text_encoder() == FakeComfy.H3_TEXT
+    Kept.have = []
+    assert spark_swap.text_encoder() == FakeComfy.H3_TEXT
+
+
+def test_a_few_words_choose_who_is_swapped(tmp_path, monkeypatch):
+    """Several people in the first frame: `person` goes to SAM 3.1 in place of "person", for finding and following, and
+    the anchor's edit names them; without it everything is as before."""
+
+    s = stand_in(tmp_path)
+    command, _, _ = s.build("swap", {**GOOD, "person": "  man in a   blue jacket "}, "j1")
+    assert "--person=man in a blue jacket" in command
+    assert not any(one.startswith("--person") for one in s.build("swap", dict(GOOD), "j2")[0])
+    for bad in (7, "x" * (swap.PERSON_MOST + 1)):
+        with pytest.raises(HTTPException):
+            s.build("swap", {**GOOD, "person": bad}, "j3")
+    assert spark_swap.sam_nodes()["2"]["inputs"]["text"] == "person"
+    assert spark_swap.sam_nodes("man in a blue jacket")["2"]["inputs"]["text"] == "man in a blue jacket"
+    assert spark_swap.anchor_edit() == spark_swap.ANCHOR_EDIT
+    assert spark_swap.anchor_edit("The man in a blue jacket").startswith("Image 1 with the man in a blue jacket replaced by the character of image 2")
+    monkeypatch.setattr(spark_swap, "sg", FakeComfy(), raising=False)
+    graphs = []
+    monkeypatch.setattr(spark_swap, "run_graph", lambda w, sampler, named=None: graphs.append(w["2"]["inputs"]["text"]) or "p1")
+    monkeypatch.setattr(spark_swap, "said_text", lambda prompt, node: "[[]]")
+    with pytest.raises(SystemExit) as refused:
+        spark_swap.find_person({"frames": [tmp_path / "f.png"], "width": 64, "height": 32}, tmp_path, "man in a blue jacket")
+    assert 'nobody matching "man in a blue jacket"' in str(refused.value) and graphs == ["man in a blue jacket"]
+
+
+def test_a_swap_runs_on_another_build_of_ref2va_the_machine_offers(tmp_path, monkeypatch):
+    """`transformer`: one of the files the server offers (a small card's 4-bit build) reaches the script as
+    SPARK_TRANSFORMER, where it is the file the windows load; any other name is refused."""
+
+    own = "minimax_h3_ref2va_pruned_w4a8_mixed.safetensors"
+    s = stand_in(tmp_path)
+    assert "SPARK_TRANSFORMER" not in s.build("swap", dict(GOOD), "j1")[1]
+    with pytest.raises(HTTPException):
+        s.build("swap", {**GOOD, "transformer": own}, "j2")  # nothing is offered here
+    monkeypatch.setattr(spark_swap, "sg", FakeComfy(), raising=False)
+    monkeypatch.setattr(spark_swap.sg, "call", lambda path, data=None: {"UNETLoader": {"input": {"required": {"unet_name": [[own, FakeComfy.REF2VA["int8"]]]}}}}, raising=False)
+    monkeypatch.delenv("SPARK_TRANSFORMER", raising=False)
+    assert spark_swap.weights() == FakeComfy.REF2VA["int8"]
+    monkeypatch.setenv("SPARK_TRANSFORMER", own)
+    assert spark_swap.weights() == own
+    monkeypatch.setenv("SPARK_TRANSFORMER", "missing.safetensors")
+    with pytest.raises(SystemExit):
+        spark_swap.weights()
+
+
+def test_a_part_is_longer_only_where_the_guard_warns(tmp_path, monkeypatch):
+    """15 s is the measured limit; a machine whose guard warns (a small card) tries up to plan.LONGEST_TRIED, and the
+    script takes the longer part only when the app says so."""
+
+    s = stand_in(tmp_path, length=30.0)
+    with pytest.raises(HTTPException):
+        s.build("swap", {**GOOD, "seconds": 20}, "j1")
+    def inside(path):
+        return (s.home / str(path)).resolve()
+
+    spec = swap.attach(s.home, ROOT, True, inside, lambda p: str(Path(p).relative_to(s.home.resolve())),
+                       lambda path: (30.0, True), None, None, lambda: True)
+    command, env, _ = spec[1]("swap", {**GOOD, "seconds": 20}, "j2")
+    assert "--seconds 20" in " ".join(command) and env["SWAP_LONGEST"] == f"{plan.LONGEST_TRIED:g}"
+    assert "SWAP_LONGEST" not in spec[1]("swap", {**GOOD, "seconds": 15}, "j3")[1]
+    with pytest.raises(HTTPException):
+        spec[1]("swap", {**GOOD, "seconds": plan.LONGEST_TRIED + 1}, "j4")
+    assert [w["length"] for w in plan.windows(plan.part_frames(plan.LONGEST_TRIED))][0] == plan.WINDOW
+
+
+# ---------------------------------------------------------------- several people: numbers, the chain, the crop
+
+@pytest.mark.parametrize("box,canvas", [
+    ((300, 100, 420, 400), (864, 480)), ((10, 200, 60, 300), (864, 480)), ((0, 0, 700, 480), (864, 480)),
+    ((100, 50, 700, 470), (1344, 768)), ((400, 0, 560, 480), (864, 480)), ((0, 300, 480, 420), (480, 864)),
+])
+def test_a_persons_crop_is_on_32_inside_the_frame_and_never_more_pixels_than_it(box, canvas):
+    found = plan.crop(*box, *canvas)
+    (x, y, w, h), (wide, tall) = found["box"], found["size"]
+    assert wide % 32 == 0 and tall % 32 == 0 and wide * tall <= canvas[0] * canvas[1]  # no more rows than the measured frame
+    assert 0 <= x and 0 <= y and x + w <= canvas[0] and y + h <= canvas[1]
+    assert x <= box[0] and y <= box[1] and x + w >= min(box[2], canvas[0]) and y + h >= min(box[3], canvas[1])  # the person is in it
+    assert 9 / 16 - 0.05 <= wide / tall <= 16 / 9 + 0.05
+    assert abs(w / h - wide / tall) < 0.08  # drawn in the box's own shape
+
+
+def test_a_person_who_fills_the_frame_is_drawn_on_the_frame():
+    assert plan.crop(0, 0, 864, 480, 864, 480) == {"box": (0, 0, 864, 480), "size": (864, 480)}
+    with pytest.raises(ValueError):
+        plan.crop(10, 10, 10, 40, 864, 480)
+
+
+TWO = [{"image": "uploads/hero.png", "which": 2, "direction": " keeps the  scarf "}, {"image": "uploads/hero.png", "person": "man in a blue jacket", "seed": 9}]
+
+
+def test_several_people_are_one_job_with_a_swap_each(tmp_path):
+    s = stand_in(tmp_path)
+    command, _, outputs = s.build("swap", {"video": "uploads/clip.mp4", "start": 1, "seconds": 5, "quality": 480, "seed": 7, "swaps": TWO}, "j1")
+    assert "--image" not in command and "--which" not in command
+    sent = json.loads(next(c for c in command if c.startswith("--swaps="))[len("--swaps="):])
+    hero = str((s.home / "uploads/hero.png").resolve())
+    assert sent == [{"image": hero, "which": 2, "person": "", "direction": "keeps the scarf", "seed": 7},
+                    {"image": hero, "which": 0, "person": "man in a blue jacket", "direction": "", "seed": 9}]
+    assert outputs[0] == str(s.home / "renders/j1.mp4")
+    # one person picked by number: the same swap, with their number
+    command, _, _ = s.build("swap", {**GOOD, "which": 3}, "j2")
+    assert command[command.index("--which") + 1] == "3" and "--image" in command
+    # the time: each further person is a whole swap less the finding
+    one, two = swap.estimate(5, 480), swap.estimate(5, 480, swaps=2)
+    assert two == 2 * one - round(swap.FIND + swap.OTHER)
+    assert s.guess({"seconds": 5, "swaps": TWO}) == two
+
+
+@pytest.mark.parametrize("change,said", [
+    ({"swaps": []}, "1 to 4 people"),
+    ({"swaps": [{"image": "uploads/hero.png", "which": n} for n in range(1, 6)]}, "1 to 4 people"),
+    ({"swaps": "two"}, "1 to 4 people"),
+    ({"swaps": TWO, "image": "uploads/hero.png"}, "takes the place of image"),
+    ({"swaps": [{"which": 1}]}, "choose the character's picture of swap 1"),
+    ({"swaps": [{"image": "uploads/hero.png", "which": 2}, {"image": "uploads/hero.png", "which": 2}]}, "same person"),
+    ({"swaps": [{"image": "uploads/hero.png"}, {"image": "uploads/hero.png"}]}, "say who each swap is for"),
+    ({"swaps": [{"image": "uploads/hero.png", "which": 10}]}, "1 to 9"),
+    ({"swaps": [{"image": "uploads/hero.png", "which": 1, "person": "the tall one"}]}, "not both"),
+    ({"swaps": [{"image": "uploads/hero.png", "which": 1, "seed": -1}]}, "swap 1: the seed"),
+    ({"swaps": [{"image": "uploads/hero.png", "which": 1, "direction": "x" * 501}]}, "at most 500"),
+    ({"image": "uploads/hero.png", "which": 0.5}, "1 to 9"),
+    ({"who": "yes"}, "who is true or false"),
+])
+def test_what_several_people_are_refused_for_before_the_job_is_queued(tmp_path, change, said):
+    s = stand_in(tmp_path)
+    given = {"video": "uploads/clip.mp4", "seconds": 5, **change}
+    with pytest.raises(HTTPException) as refused:
+        s.build("swap", given, "j1")
+    assert refused.value.status_code == 400 and said in refused.value.detail
+
+
+def test_numbering_the_people_is_a_job_that_makes_one_picture(tmp_path):
+    s = stand_in(tmp_path)
+    command, _, outputs = s.build("swap", {"video": "uploads/clip.mp4", "start": 1, "seconds": 5, "quality": 480, "who": True}, "j1")
+    assert command[command.index("--who") + 1] == str(s.home / "scouts/j1/people.png") == outputs[0] and len(outputs) == 1
+    assert "--image" not in command and "-o" not in command and "--swap-lora" not in command
+    assert s.title({"video": "uploads/clip.mp4", "who": True}) == "Character Swap: the people in clip.mp4"
+    assert s.guess({"who": True, "seconds": 10}) == round(swap.OTHER + swap.FOLLOW * 240)
+    # its picture stays when the job is tidied (it made no clip); a failed one leaves nothing
+    (s.home / "scouts/j1").mkdir()
+    (s.home / "scouts/j1/people.png").write_bytes(b"png")
+    (s.home / "scouts/j2").mkdir()
+    swap.tidy(s.home, "j1")
+    swap.tidy(s.home, "j2")
+    assert (s.home / "scouts/j1/people.png").is_file() and not (s.home / "scouts/j2").exists()
+
+
+def mask_file(path, size, box):
+    from PIL import Image
+
+    mask = Image.new("L", size)
+    mask.paste(255, box)
+    mask.save(path)
+    return path
+
+
+def test_everyone_is_followed_through_the_whole_part_from_the_word_person(monkeypatch, tmp_path):
+    """The graph of --who and of a swap by number: text-prompted tracking with no first-frame mask, so a person who
+    comes into view later is found, and one mask stream an object."""
+
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    graphs = []
+    monkeypatch.setattr(spark_swap, "sg", FakeComfy(), raising=False)
+    monkeypatch.setattr(spark_swap, "put", lambda path: "in_" + Path(path).name)
+    monkeypatch.setattr(spark_swap, "forget_upload", lambda path: None)
+    monkeypatch.setattr(spark_swap, "run_graph", lambda w, sampler, named=None: graphs.append(w) or "p1")
+    monkeypatch.setattr(spark_swap, "collect", lambda prompt, node: [node])
+    monkeypatch.setattr(spark_swap, "fetch_all", lambda items, folder: [mask_file(tmp_path / f"m{items[0]}.png", (64, 32), (2, 2, 30, 30))])
+    (tmp_path / "source.mp4").write_bytes(b"clip")
+    found = spark_swap.everyone({"count": 3}, tmp_path, [0, 2])
+    w = graphs[0]
+    track = w["7"]["inputs"]
+    assert w["7"]["class_type"] == "SAM3_VideoTrack" and "initial_mask" not in track and track["max_objects"] == plan.MOST_PEOPLE
+    assert w["2"]["inputs"]["text"] == "person" and track["conditioning"] == ["2", 0] and track["detection_threshold"] == spark_swap.TRACK
+    picked = sorted(n["inputs"]["object_indices"] for n in w.values() if n["class_type"] == "SAM3_TrackToMask")
+    assert picked == ["0", "2"] and not any(n["class_type"] == "ImageScaleBy" for n in w.values())
+    assert sorted(found) == [0, 2] and len(found[0]) == 3 and found[0][2].sum() == 28 * 28  # a short stream holds its last frame
+    spark_swap.everyone({"count": 3}, tmp_path, [0], 0.5)  # the who's-who picture reads them at half size
+    assert [n["inputs"]["scale_by"] for n in graphs[1].values() if n["class_type"] == "ImageScaleBy"] == [0.5]
+    assert np is not None
+
+
+def test_a_person_is_left_alone_before_they_come_into_view_and_mended_while_they_are_in_it():
+    np = pytest.importorskip("numpy")
+    on, off = np.ones((16, 16), bool), np.zeros((16, 16), bool)
+    speck = off.copy()
+    speck[0, 0] = True  # a few pixels are not a person
+    masks, filled = spark_swap.mend([off, speck, on, off, on, off])
+    assert filled == 1 and [bool(m.any()) for m in masks] == [False, False, True, True, True, False]
+    masks, filled = spark_swap.mend([off, off])
+    assert filled == 0 and not any(m.any() for m in masks)
+
+
+def test_the_numbered_picture_shows_everyone_even_those_who_come_in_later(tmp_path):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    size, half = (128, 96), (48, 64)  # the masks at half the canvas, as --who reads them
+    frames = []
+    for n in range(4):
+        frames.append(tmp_path / f"{n}.png")
+        Image.new("RGB", size, (90, 90, 90)).save(frames[-1])
+    part = {"frames": frames, "width": size[0], "height": size[1]}
+
+    def at(left, right, *there):
+        mask = np.zeros(half, bool)
+        mask[10:40, left:right] = True
+        return [mask if n in there else np.zeros(half, bool) for n in range(4)]
+
+    # person 1 is alone in the first frame; 2 and 3 come in at frame 2; 4 is only in the last frame, after 1 has left
+    people = {0: at(5, 15, 0, 1, 2), 1: at(25, 35, 2, 3), 2: at(45, 55, 2, 3), 3: at(58, 63, 3), 4: at(0, 0)}
+    shown = spark_swap.whos_who(part, people, tmp_path / "who/people.png")
+    assert shown == [1, 2, 3, 4]  # an object that was never there has no number
+    made = np.asarray(Image.open(tmp_path / "who/people.png").convert("RGB")).astype(int)
+    assert made.shape[:2] == (2 * size[1], size[0])  # frame 2 holds three of them; frame 3 is added for the fourth
+    grey = (90, 90, 90)
+    assert tuple(made[60, 20]) != grey and tuple(made[60, 60]) != grey and tuple(made[60, 100]) != grey and tuple(made[60, 122]) == grey
+    assert tuple(made[size[1] + 60, 122]) != grey and tuple(made[5, 60]) == grey
+    with pytest.raises(SystemExit) as refused:
+        spark_swap.whos_who(part, {0: at(0, 0)}, tmp_path / "none.png")
+    assert "no person was found in the part" in str(refused.value)
+
+
+def test_a_number_picks_its_person_wherever_they_come_in_and_words_pick_one_in_the_first_frame(monkeypatch, tmp_path):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    size = (128, 96)
+
+    def at(left, right, *there):
+        mask = np.zeros((size[1], size[0]), bool)
+        mask[10:90, left:right] = True
+        return [mask if n in there else np.zeros((size[1], size[0]), bool) for n in range(30)]
+
+    asked = []
+
+    def everyone(part, work, wanted, scale=1.0):
+        asked.append(wanted)
+        return {0: at(5, 30, *range(30)), 2: at(90, 120, *range(12, 30)), 5: at(0, 0)}
+
+    first = {"mask": mask_file(tmp_path / "first.png", size, (5, 10, 30, 90)), "area": 2000, "score": 0.97, "x": 17.0, "top": 10}
+    monkeypatch.setattr(spark_swap, "everyone", everyone)
+    monkeypatch.setattr(spark_swap, "detect", lambda part, work, words="": [first])
+    monkeypatch.setattr(spark_swap, "track", lambda part, chosen, work, words="": at(50, 70, *range(30)))
+    part = {"width": size[0], "height": size[1], "count": 30}
+    tracks = spark_swap.follow_all(part, tmp_path, [{"which": 3, "person": ""}, {"which": 0, "person": "woman in red"}])
+    assert asked == [[2]]  # only the numbered person's object is read
+    assert not tracks[0][0].any() and tracks[0][12].any() and tracks[1][0][50, 60]  # person 3 comes in at frame 12
+    with pytest.raises(SystemExit) as refused:
+        spark_swap.follow_all(part, tmp_path, [{"which": 6, "person": ""}])
+    assert "there is no person 6 in this part" in str(refused.value)
+    monkeypatch.setattr(spark_swap, "track", lambda part, chosen, work, words="": at(5, 30, *range(30)))
+    with pytest.raises(SystemExit) as refused:  # person 1, and the largest in the first frame, who is person 1
+        spark_swap.follow_all(part, tmp_path, [{"which": 1, "person": ""}, {"which": 0, "person": ""}])
+    assert "swaps 1 and 2 name the same person" in str(refused.value)
+
+
+def test_two_people_standing_close_do_not_draw_over_each_other():
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("torch")
+    left, right = np.zeros((96, 256), bool), np.zeros((96, 256), bool)
+    left[20:80, 60:100] = True
+    right[20:80, 110:150] = True
+    one, two = spark_swap.apart([[left], [right]])
+    assert one[0][50, 105] and two[0][50, 105]  # the ground between them is in both grown masks
+    assert not (one[0] & right).any() and not (two[0] & left).any()  # neither holds the other person
+    # grown by a margin of its own size (0.3 of the root of 2400 pixels: 15), not the 64 of a plain swap
+    assert (one[0] & left).sum() == left.sum() and one[0][50, 46] and not one[0][50, 40]
+    big = np.zeros((480, 864), bool)
+    big[40:440, 200:600] = True  # a close-up: the margin stops at the plain swap's 64 pixels
+    grown = spark_swap.grow_to_size([big, np.zeros((480, 864), bool)])
+    assert grown[0][240, 137] and not grown[0][240, 135] and not grown[1].any()
+
+
+def test_a_swap_in_a_crop_is_pasted_back_through_the_mask_and_the_rest_is_the_clips_own(tmp_path):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    size = (256, 160)
+    rng = np.random.default_rng(3)
+    frames, masks = [], []
+    for n in range(3):
+        frames.append(tmp_path / f"{n}.png")
+        Image.fromarray(rng.integers(0, 255, (size[1], size[0], 3), dtype=np.uint8)).save(frames[-1])
+        mask = np.zeros((size[1], size[0]), bool)
+        mask[30:130, 40 + 4 * n:90 + 4 * n] = True
+        masks.append(mask)
+    part = {"frames": frames, "width": size[0], "height": size[1], "count": 3, "sound": None}
+    own, small, box = spark_swap.crop_part(part, frames, masks, tmp_path / "swap1")
+    x, y, w, h = box
+    assert (own["width"], own["height"]) == plan.crop(40, 30, 98, 130, *size)["size"] and own["count"] == 3 and len(own["frames"]) == 3
+    assert Image.open(own["frames"][0]).size == (own["width"], own["height"]) and small[0].shape == (own["height"], own["width"])
+    assert x <= 40 and y <= 30 and x + w >= 98 and y + h >= 130 and small[0].any() and small[0].dtype == bool
+    drawn = tmp_path / "red.png"
+    Image.new("RGB", (own["width"], own["height"]), (255, 0, 0)).save(drawn)
+    pasted = spark_swap.paste(frames, [drawn] * 3, masks, box, tmp_path / "swap1")
+    for n in range(3):
+        before, after = np.asarray(Image.open(frames[n])).astype(int), np.asarray(Image.open(pasted[n])).astype(int)
+        far = np.ones(masks[n].shape, bool)
+        far[30 - 16:130 + 16, 40 + 4 * n - 16:90 + 4 * n + 16] = False
+        assert (before[far] == after[far]).all()  # outside the mask and its soft edge: the clip's own pixels, exactly
+        inner = after[50:110, 55 + 4 * n:75 + 4 * n]
+        assert (inner[..., 0] == 255).all() and (inner[..., 1:] == 0).all()  # inside: what the swap drew
+    # a person who fills the frame: nothing is cut, the frames are the ones given
+    full = [np.ones((size[1], size[0]), bool)] * 3
+    own, small, box = spark_swap.crop_part(part, frames, full, tmp_path / "swap2")
+    assert own["frames"] == frames and box == (0, 0, *size) and not (tmp_path / "swap2/source").exists()
+
+
+def test_the_swaps_of_a_run_are_read_from_the_command(tmp_path):
+    hero = tmp_path / "hero.png"
+    hero.write_bytes(b"png")
+    base = dict(image=str(hero), which=0, person=" the  tall one ", direction="", seed=7, swaps="")
+    assert spark_swap.asked(SimpleNamespace(**base)) == [{"image": str(hero), "which": 0, "person": "the tall one", "direction": "", "seed": 7}]
+    two = json.dumps([{"image": str(hero), "which": 2, "person": "ignored beside a number"}, {"image": str(hero), "person": "man", "seed": 9}])
+    assert spark_swap.asked(SimpleNamespace(**{**base, "swaps": two})) == [
+        {"image": str(hero), "which": 2, "person": "", "direction": "", "seed": 7}, {"image": str(hero), "which": 0, "person": "man", "direction": "", "seed": 9}]
+    for bad, said in (("{", "JSON list"), ("[]", "1 to 4"), (json.dumps([{"image": str(hero)}] * 5), "1 to 4"),
+                      (json.dumps([{"image": str(hero), "which": 12}]), "1 to 9"), (json.dumps([{"which": 1}]), "no character picture"),
+                      (json.dumps([{"image": str(tmp_path / "gone.png")}]), "no character picture at")):
+        with pytest.raises(SystemExit) as refused:
+            spark_swap.asked(SimpleNamespace(**{**base, "swaps": bad}))
+        assert said in str(refused.value)
+
+
+def test_two_people_are_swapped_one_after_another_each_on_the_result_before(monkeypatch, tmp_path):
+    """The whole run with ComfyUI stood in for: both people followed on the clip's own frames first, the second swap
+    drawn on frames that already hold the first, and the final frames the clip's own outside both masks."""
+
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    pytest.importorskip("torch")
+    from PIL import Image
+
+    size, count = (448, 256), 120
+    hero = tmp_path / "hero.png"
+    hero.write_bytes(b"png")
+    lora = tmp_path / "lora.safetensors"
+    lora.write_bytes(b"x")
+    work = tmp_path / "work"
+    source = tmp_path / "frame.png"
+    Image.new("RGB", size, (90, 90, 90)).save(source)
+
+    def prepare(args, folder):
+        return {"width": size[0], "height": size[1], "frames": [source] * count, "count": count, "sound": None, "clip": {}}
+
+    boxes = {1: (60, 100, 100, 160), 2: (340, 100, 380, 160)}  # the two people, left and right
+    seen = {"tracked": [], "drawn_on": [], "windows": []}
+
+    def follow_all(part, folder, swaps):
+        tracks = []
+        for one in swaps:
+            seen["tracked"].append(one["which"])
+            mask = np.zeros((size[1], size[0]), bool)
+            left, top, right, bottom = boxes[one["which"]]
+            mask[top:bottom, left:right] = True
+            tracks.append([mask] * count)
+        return tracks
+
+    def window_inputs(one, part, masks, made, folder, anchored):
+        # what this swap is drawn on: the middle of its crop's first frame
+        seen["drawn_on"].append(Image.open(part["frames"][0]).convert("RGB").getpixel((part["width"] // 2, part["height"] // 2)))
+        return {"part": part, "folder": folder}
+
+    def window(one, files, part, args, unet, loras, character, folder, blocks=None):
+        seen["windows"].append((folder.name, args.seed, part["width"], part["height"]))
+        colour = (255, 0, 0) if folder.name == "swap1" else (0, 0, 255)
+        (folder / "window1").mkdir(parents=True, exist_ok=True)
+        drawn = folder / "window1" / "drawn.png"
+        Image.new("RGB", (part["width"], part["height"]), colour).save(drawn)
+        return [drawn] * one["length"]
+
+    final = {}
+
+    def assemble(made, part, target, folder):
+        final["first"] = np.asarray(Image.open(made[0]).convert("RGB")).astype(int)
+        final["count"] = len(made)
+
+    fake = SimpleNamespace(UPLOADED=[], PREFIX=tmp_path, upload=lambda path: "up", installed=lambda kind, name: True,
+                           hub_loras=lambda names: [(names[0].split(":")[0], 1.0)],
+                           call=lambda path, body=None: {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [[spark_swap.SAM]]}}}})
+    monkeypatch.setattr(spark_swap, "sg", fake, raising=False)
+    for name, stand in (("prepare", prepare), ("refuse_cuts", lambda part: None), ("server", lambda kind: None), ("need", lambda nodes: None),
+                        ("follow_all", follow_all), ("window_inputs", window_inputs), ("window", window), ("assemble", assemble),
+                        ("weights", lambda: "minimax_h3_ref2va_pruned_int8_convrot.safetensors"), ("engine_blocks", lambda: None)):
+        monkeypatch.setattr(spark_swap, name, stand)
+    swaps = json.dumps([{"image": str(hero), "which": 1}, {"image": str(hero), "which": 2, "seed": 11}])
+    monkeypatch.setattr(sys, "argv", ["spark_swap.py", "--video", str(hero), "--seconds", "5", "--quality", "480", "--no-anchor", "--swaps", swaps,
+                                      "--swap-lora", str(lora), "--turbo-lora", str(lora), "--work", str(work), "--keep", "-o", str(tmp_path / "out.mp4")])
+    spark_swap.main()
+    assert seen["tracked"] == [1, 2] and len(seen["windows"]) == 2
+    assert [w[:2] for w in seen["windows"]] == [("swap1", 904239), ("swap2", 11)]
+    assert all(w[2] * w[3] <= size[0] * size[1] and w[2] % 32 == 0 and w[3] % 32 == 0 for w in seen["windows"])
+    assert seen["drawn_on"] == [(90, 90, 90), (90, 90, 90)]  # each crop holds its own person, not yet drawn
+    first = final["first"]
+    assert final["count"] == count
+    assert tuple(first[130, 80]) == (255, 0, 0) and tuple(first[130, 360]) == (0, 0, 255)  # both swaps are in the result
+    assert tuple(first[130, 220]) == (90, 90, 90) and tuple(first[5, 5]) == (90, 90, 90)  # between and around them: the clip's own
+    assert not (work / "swap1").exists() and (work / "swap2/pasted").is_dir()  # the first swap's frames are not kept
+
+
+def test_the_panel_takes_several_people_and_numbers_them():
+    got = page("""
+      ACT.state = {};
+      SWAP.state = { ready: true, seconds: [5, 15], qualities: [480, 768], quality: 480, anchor: true, anchor_model: "flux3k-fast", most_swaps: 4, once: 10,
+                     estimates: { "480": { "5": 331 }, "768": { "5": 739 } }, anchor_seconds: { "480": 41, "768": 54 }, licence: "" };
+      const hot = node => find(node, n => n.attrs && n.attrs.class === "hot");
+      const button = (node, words) => find(node, n => n.tag === "button" && text(n.kids) === words);
+      actOpen("swap", "renders/a.mp4"); out.one = text(actPanel());
+      answers["/api/jobs"] = { id: "w1", title: "Character Swap: the people in a.mp4" };
+      await button(actPanel(), "Number the people").attrs.onclick(); out.who = calls.slice(-1)[0];
+      jobs = [{ id: "w1", status: "done", outputs: ["scouts/w1/people.png"] }];
+      out.numbered = text(actPanel());
+      SWAP.f.swaps[0].image = "uploads/a.png"; SWAP.f.swaps[0].who = "2";
+      await hot(actPanel()).attrs.onclick(); out.byNumber = calls.slice(-1)[0][1].params;
+      button(actPanel(), "Add another person").attrs.onclick(); out.two = text(actPanel());
+      hot(actPanel()).attrs.onclick(); out.noPicture = toasts.slice(-1)[0];
+      SWAP.f.swaps[1].image = "uploads/b.png"; SWAP.f.swaps[1].who = "2";
+      hot(actPanel()).attrs.onclick(); out.same = toasts.slice(-1)[0];
+      SWAP.f.swaps[1].who = "the man in a blue jacket"; SWAP.f.swaps[1].direction = "he keeps his hat on";
+      await hot(actPanel()).attrs.onclick(); out.sent = calls.slice(-1)[0][1].params;
+      button(actPanel(), "Add another person").attrs.onclick(); button(actPanel(), "Add another person").attrs.onclick();
+      out.full = !button(actPanel(), "Add another person") && SWAP.f.swaps.length === 4;
+    """)
+    assert "Number the people" in got["one"] and "Add another person" in got["one"] and "about 6 min" in got["one"]
+    assert got["who"] == ["/api/jobs", {"kind": "swap", "params": {"video": "renders/a.mp4", "start": 0, "seconds": 5, "quality": 480, "who": True}}]
+    assert "The people of the part, numbered" in got["numbered"]
+    assert got["byNumber"]["swaps"] == [{"image": "uploads/a.png", "which": 2}] and "image" not in got["byNumber"]
+    assert "Person 1" in got["two"] and "Person 2" in got["two"] and "Swap 2 people" in got["two"] and "about 11 min" in got["two"]
+    assert got["noPicture"] == "Choose a picture for every person" and "same person" in got["same"]
+    assert got["sent"]["swaps"] == [{"image": "uploads/a.png", "which": 2},
+                                    {"image": "uploads/b.png", "person": "the man in a blue jacket", "direction": "he keeps his hat on"}]
+    assert got["sent"]["seed"] == 904239 and got["sent"]["anchor"] is True and got["full"] is True
+
+
+def test_a_person_who_comes_in_later_gets_no_anchor_and_no_window_before_they_are_in_view(monkeypatch, tmp_path):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    pytest.importorskip("torch")
+    from PIL import Image
+
+    size, count = (256, 160), 240  # 10 s: three windows (frames 0-123, 124-229, 230-239)
+    hero = tmp_path / "hero.png"
+    hero.write_bytes(b"png")
+    source = tmp_path / "frame.png"
+    Image.new("RGB", size, (90, 90, 90)).save(source)
+    mask = np.zeros((size[1], size[0]), bool)
+    mask[40:120, 100:140] = True
+    seen = {"windows": [], "anchors": 0}
+
+    def window(one, files, part, args, unet, loras, character, folder, blocks=None):
+        seen["windows"].append(one["index"])
+        drawn = folder / f"drawn{one['index']}.png"
+        Image.new("RGB", (part["width"], part["height"]), (255, 0, 0)).save(drawn)
+        return [drawn] * one["length"]
+
+    final = {}
+    fake = SimpleNamespace(UPLOADED=[], PREFIX=tmp_path, upload=lambda path: "up", installed=lambda kind, name: True,
+                           hub_loras=lambda names: [(names[0].split(":")[0], 1.0)],
+                           call=lambda path, body=None: {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [[spark_swap.SAM]]}}}})
+    monkeypatch.setattr(spark_swap, "sg", fake, raising=False)
+    for name, stand in (("prepare", lambda args, folder: {"width": size[0], "height": size[1], "frames": [source] * count, "count": count,
+                                                         "sound": None, "clip": {}}),
+                        ("refuse_cuts", lambda part: None), ("server", lambda kind: None), ("need", lambda nodes: None),
+                        ("follow_all", lambda part, folder, swaps: [[np.zeros_like(mask)] * 130 + [mask] * 110]),  # in view from frame 130
+                        ("anchor", lambda *a, **k: seen.__setitem__("anchors", seen["anchors"] + 1)),
+                        ("window_inputs", lambda *a, **k: {}), ("window", window),
+                        ("assemble", lambda made, part, target, folder: final.update(
+                            frames=[tuple(Image.open(made[i]).convert("RGB").getpixel((120, 80))) for i in (0, 123, 129, 130, 239)])),
+                        ("weights", lambda: "minimax_h3_ref2va_pruned_int8_convrot.safetensors"), ("engine_blocks", lambda: None)):
+        monkeypatch.setattr(spark_swap, name, stand)
+    monkeypatch.setattr(sys, "argv", ["spark_swap.py", "--video", str(hero), "--image", str(hero), "--which", "2", "--seconds", "10", "--quality", "480",
+                                      "--swap-lora", str(hero), "--turbo-lora", str(hero), "--work", str(tmp_path / "work"), "-o", str(tmp_path / "out.mp4")])
+    spark_swap.main()
+    assert seen["anchors"] == 0  # nobody to put the character on in the first frame
+    assert seen["windows"] == [2, 3]  # the first window has nobody in it: the model is not run for it
+    grey, red = (90, 90, 90), (255, 0, 0)
+    assert final["frames"] == [grey, grey, grey, red, red]  # the clip's own frames until the person is in view
+
+
+def test_a_plain_swaps_margin_follows_the_person_too_and_the_fixed_one_can_be_kept(monkeypatch):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("torch")
+    small = np.zeros((480, 864), bool)
+    small[200:350, 400:460] = True  # a dancer 60 pixels across in a wide shot
+    monkeypatch.setattr(spark_swap, "track", lambda part, chosen, work, words="": [small])
+    grown = spark_swap.follow_person({}, None, None)[0]
+    reach = round(spark_swap.MARGIN * (60 * 150) ** 0.5)  # 28 pixels, not 64
+    assert grown[275, 400 - reach] and not grown[275, 400 - reach - 1] and reach < 30
+    monkeypatch.setenv("SWAP_GROW", "fixed")
+    fixed = spark_swap.follow_person({}, None, None)[0]
+    assert fixed[275, 400 - 64] and not fixed[275, 400 - 65]
+
+
+def test_the_characters_picture_goes_at_full_size_only_where_the_guard_warns(tmp_path, monkeypatch):
+    s = stand_in(tmp_path)  # a DGX Spark: the measured, scaled picture, and full size refused
+    command, _, _ = s.build("swap", GOOD, "j1")
+    assert "--ref-size" not in command
+    with pytest.raises(HTTPException) as refused:
+        s.build("swap", {**GOOD, "ref_size": "max"}, "j1")
+    assert "not measured on this machine" in refused.value.detail
+    with pytest.raises(HTTPException) as refused:
+        s.build("swap", {**GOOD, "ref_size": "huge"}, "j1")
+    assert "match or max" in refused.value.detail
+    # where the guard warns (a small card): full size is offered, and the default
+    home = s.home
+    _, build, *_ = swap.attach(home, ROOT, True, lambda p: (home / str(p)).resolve(), lambda p: str(p), lambda path: (8.0, True), tried=lambda: True)
+    command, _, _ = build("swap", GOOD, "j2")
+    assert command[command.index("--ref-size") + 1] == "max"
+    command, _, _ = build("swap", {**GOOD, "ref_size": "match"}, "j3")
+    assert "--ref-size" not in command
+    # the window's graph carries it
+    w, _ = graph(monkeypatch)
+    assert w["20"]["inputs"]["ref_image_size"] == "match"
+    monkeypatch.setattr(spark_swap, "sg", FakeComfy(), raising=False)
+    monkeypatch.setattr(spark_swap, "put", lambda path: "in_" + Path(path).name)
+    one = plan.windows(120)[0]
+    files = {"pixels": Path("w/p.mp4"), "ref": Path("w/p.mp4"), "mask": Path("w/m.mp4"), "sound": None, "anchor": None}
+    w = spark_swap.window_graph(one, files, {"width": 864, "height": 480}, SimpleNamespace(seed=1, direction="", ref_size="max"),
+                                FakeComfy.REF2VA["int8"], [], "up_hero.png")
+    assert w["20"]["inputs"]["ref_image_size"] == "max"
+
+
+def test_a_hand_crossing_a_still_picture_is_not_a_cut_and_a_real_cut_still_is(tmp_path, capsys):
+    """A person talking to a locked camera, a hand passing the lens: app/shot.py's two figures call it a cut, and a
+    portrait clip of one person was refused for it. Most of the picture stayed, so the part is one shot; a part whose
+    whole picture changes is still refused."""
+
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(7)
+    wall = np.full((864, 480), 150.0) + rng.normal(0, 2, (864, 480))
+    wall[300:700, 140:340] = 90  # the person, still
+
+    def part(frames: list) -> dict:
+        folder = tmp_path / f"part{len(list(tmp_path.iterdir()))}"
+        folder.mkdir()
+        paths = []
+        for index, frame in enumerate(frames):
+            paths.append(folder / f"{index + 1:05d}.png")
+            Image.fromarray(np.clip(frame, 0, 255).astype(np.uint8)).save(paths[-1])
+        return {"width": 480, "height": 864, "frames": paths}
+
+    def hand(at: int | None) -> np.ndarray:
+        frame = wall + rng.normal(0, 1, wall.shape)
+        if at is not None:
+            frame[500:860, at:at + 190] = 235  # a hand near the lens: about a sixth of the frame
+        return frame
+
+    gesture = [hand(None)] * 10 + [hand(20), hand(270)] + [hand(None)] * 10
+    spark_swap.refuse_cuts(part(gesture))
+    assert "taken as one shot" in capsys.readouterr().out
+
+    other = np.full((864, 480), 60.0) + rng.normal(0, 25, (864, 480))
+    with pytest.raises(SystemExit) as refused:
+        spark_swap.refuse_cuts(part([hand(None)] * 12 + [other + rng.normal(0, 1, other.shape) for _ in range(12)]))
+    assert "has a cut 0.50 s in" in str(refused.value)
