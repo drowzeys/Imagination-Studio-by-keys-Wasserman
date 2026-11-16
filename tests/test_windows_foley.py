@@ -233,3 +233,11 @@ def test_foley_setup_installs_the_checked_soxr_wheel_and_compiles_only_when_aske
     assert wheel.index("Get-FileHash") < wheel.index("pip install")  # checked before it is installed
     assert "did not match its sha256. Nothing was installed and nothing was built." in wheel and "--no-deps" in wheel
     assert "Initialize-StudioArm64Compiler" not in wheel and "vcvars" not in wheel.lower()
+
+
+def test_foley_setup_leaves_the_environment_readable_by_the_app():
+    """pip --target moves its result out of a temporary folder; from an elevated shell the moved files were readable
+    by administrators only and the app, never elevated, reported every dependency missing."""
+    text = (ROOT / "scripts" / "setup-windows-foley.ps1").read_text(encoding="utf-8")
+    reset = text.index("icacls.exe $FoleyRuntime /reset /T /C /Q")
+    assert text.rindex("pip install --target") < reset < text.index("Foley files and dependencies are installed.")

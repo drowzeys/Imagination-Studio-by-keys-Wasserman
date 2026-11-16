@@ -5,7 +5,6 @@ import argparse
 from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
-from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -90,8 +89,8 @@ def fingerprint() -> dict:
     from windows_qualification import gpu_version_contract
     manifest = inventory()
     needed = ("torch", "torchaudio", "numpy", "transformers", "huggingface-hub", "stable-audio-3", "soundfile", "safetensors")
-    versions = {dist.metadata["Name"].lower().replace("_", "-"): dist.version
-                for dist in metadata.distributions(path=[str(runtime() / "Lib" / "site-packages")]) if dist.metadata["Name"]}
+    from windows_qualification import site_versions
+    versions = {name.replace("_", "-"): version for name, version in site_versions(runtime() / "Lib" / "site-packages").items()}
     missing = set(needed) - versions.keys()
     if missing:
         raise RuntimeError("Stable Audio 3 dependencies are missing: " + ", ".join(sorted(missing)))
