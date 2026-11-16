@@ -29,7 +29,7 @@ def test_the_carrier_strips_every_cuda_engine_it_copies_and_refuses_a_leak():
 
 def test_the_spark_h3_and_drama3_builds_and_the_mac_bolt_use_the_4_2_1_parts():
     for name in ("spark/build-engine.sh", "spark/build-drama3.sh"):
-        assert 'IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:4.2.1}"' in (ROOT / name).read_text(), name
+        assert 'IMAGE="${IMAGE:-ghcr.io/keys-wasserman/keys-tensorfold-studio:4.2.1}"' in (ROOT / name).read_text(), name
     bolt = (ROOT / "scripts/setup-bolt.sh").read_text()
     url = re.search(r'^METAL_URL="([^"]+)"', bolt, re.M).group(1)
     assert url.endswith("/releases/download/v4.2.1/bolt-metal-772da34b-macos-arm64.tar.gz")

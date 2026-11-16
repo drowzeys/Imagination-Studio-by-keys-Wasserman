@@ -13,7 +13,7 @@
 # carrier is built without the engine and oneshot-setup.sh builds from source or stays on the MLX engine.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio}"
+IMAGE="${IMAGE:-ghcr.io/keys-wasserman/keys-tensorfold-studio}"
 TAG="${TAG:-4.2.1}"
 TF_REPO="https://github.com/drowzeys/TensorFold.git"
 TF_COMMIT="a2b592fef5366bf16d4729651b6549094981d3fe"
