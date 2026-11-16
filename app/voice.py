@@ -1490,15 +1490,7 @@ def take_file(take_id: str, suffix: str) -> Path | None:
     """A take's file by the take's id and the file's ending (``.take.json``, ``.wav``, ``.txt``), in either layout:
     beside the others as ``voice/<id><suffix>`` (takes made before issue #257), or in the take's own folder, whose name
     ends in the id's token (take_names.py). None when it is not on disk."""
-    flat = HOME / "voice" / f"{take_id}{suffix}"
-    if flat.is_file():
-        return flat
-    wanted = take_names.stem(take_id, "")[1].rsplit("_", 1)  # ("<date>_<time>_<title>", "<token>"): the title is not known here
-    day_time = "????" + "_".join(wanted[0].split("_")[:2])[4:]  # the id has no year: any year's folder
-    for found in sorted((HOME / "voice").glob(f"*/{day_time}_*_{wanted[1]}/{day_time}_*_{wanted[1]}{suffix}")):
-        if found.is_file():
-            return found
-    return None
+    return take_names.find(HOME / "voice", take_id, suffix)
 
 
 def one_take(take_id: str) -> dict:

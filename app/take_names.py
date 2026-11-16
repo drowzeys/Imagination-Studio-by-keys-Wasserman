@@ -71,3 +71,19 @@ def folder(root: Path, job_id: str, title: str, fallback: str = "take", now: flo
     the stem ends in the job's own token."""
     month, name = stem(job_id, title, fallback, now)
     return root / month / name, name
+
+
+def find(root: Path, job_id: str, suffix: str) -> Path | None:
+    """A take's file under ``root`` by the job's id and the file's ending (``.take.json``, ``.wav``, ``.mp4``), in
+    either layout: beside the others as ``<root>/<id><suffix>`` (takes made before the folders), or in the take's own
+    folder, whose name starts with the job's date and time and ends in its token. None when it is not on disk."""
+    flat = root / f"{job_id}{suffix}"
+    if flat.is_file():
+        return flat
+    name = stem(job_id, "")[1]
+    clock = "_".join(name.split("_")[:2])[4:]  # "-MM-DD_HHMMSS": the id has no year, so any year's folder
+    pattern = f"????{clock}_*_{name.rsplit('_', 1)[1]}"
+    for found in sorted(root.glob(f"*/{pattern}/{pattern}{suffix}")):
+        if found.is_file():
+            return found
+    return None

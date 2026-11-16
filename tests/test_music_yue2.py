@@ -390,8 +390,10 @@ def test_a_yue2_song_runs_on_its_server_holds_the_lock_and_gives_way(tmp_path):
             assert again["music"]["instrumental"] is True and requests_of(here.folder)[-1]["instrumental"] is True
             failed = wait(client.post("/api/music/takes", json={"caption": "FAIL", "seconds": 10}).json()["id"])
             assert failed["status"] == "failed" and "score came out empty" in failed["error"] and one.loaded()
-            assert not (music.HOME / "music" / f"{failed['id']}.yue2").exists()  # its half-made score went with it
-            assert (music.HOME / "music" / f"{job['id']}.yue2" / "score.abc").is_file()  # a finished song's stays
+            scores = [p for p in (music.HOME / "music").rglob("*.yue2") if p.is_dir()]
+            assert not any(p.name.endswith(f"_{failed['id'].split('-')[-1]}.yue2") for p in scores)  # its half-made score went with it
+            kept = Path(music.HOME / take["path"]).with_suffix(".yue2")  # a finished song's stays, beside it under its stem
+            assert (kept / "score.abc").is_file() and kept.parent.name == kept.stem and kept in scores
             # the takes and the Library list it as a YuE2 song
             listed = {t["id"]: t for t in client.get("/api/music/takes").json()}
             assert listed[job["id"]]["engine"] == "yue2" and again["id"] in listed and failed["id"] not in listed

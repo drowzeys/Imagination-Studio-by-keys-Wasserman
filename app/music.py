@@ -62,6 +62,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 import voice
+import take_names  # a take's readable folder and file names, beside this file
 import model_catalog
 import windows_cuda  # the native Windows CUDA tier: False off Windows without a look
 
@@ -948,9 +949,12 @@ def checked(body: dict) -> dict:
 def perform(job: dict) -> bool:
     """One song to its end; False when it was cancelled meanwhile."""
 
-    params, folder = job["params"], HOME / "music"
+    params = job["params"]
+    # a song's own folder, by month, date, time and its title or the first words of its style (take_names.py): the
+    # song, its take file and a YuE2 score share one readable stem. Songs made before this stay where they are.
+    folder, name = take_names.folder(HOME / "music", job["id"], params.get("title") or params.get("caption") or "", "song")
     folder.mkdir(parents=True, exist_ok=True)
-    wav = folder / f"{job['id']}.wav"
+    wav = folder / f"{name}.wav"
     chosen = params.get("engine") or "music3"  # a song queued before engines were two is MiniMax Music 3's
     one = engine(chosen)
     for other in loaded_engines():  # the other song engine gives back its memory and the GPU lock first
@@ -1009,7 +1013,7 @@ def forget_song(wav: Path) -> None:
 
 def takes() -> list[dict]:
     out = []
-    for file in (HOME / "music").glob("*.take.json"):
+    for file in (HOME / "music").rglob("*.take.json"):
         try:
             take = json.loads(file.read_text())
         except (OSError, ValueError):
@@ -1022,8 +1026,8 @@ def takes() -> list[dict]:
 def one_take(take_id: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", take_id):
         raise HTTPException(400, "bad take id")
-    file = HOME / "music" / f"{take_id}.take.json"
-    if not file.is_file():
+    file = take_names.find(HOME / "music", take_id, ".take.json")
+    if file is None:
         raise HTTPException(404, "no such song")
     return json.loads(file.read_text())
 

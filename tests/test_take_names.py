@@ -57,3 +57,18 @@ def test_a_take_has_one_stem_for_its_folder_and_files_and_one_place_per_job(tmp_
     # a whole path stays well inside Windows' 260 characters under a usual home
     longest = names.folder(Path("C:/Users/someone/ImaginationStudio/sound/foley"), "1109-194432-adc366-vsa", "w" * 300, "foley", NOV)
     assert len(str(longest[0] / (longest[1] + ".take.json"))) < 230  # Windows' limit is 260
+
+
+def test_a_take_is_found_by_its_job_id_in_either_layout(tmp_path):
+    root = tmp_path / "music"
+    folder, name = names.folder(root, "1107-181022-ee3e3a", "Night drive, synthwave", "song", now=NOV)
+    folder.mkdir(parents=True)
+    (folder / f"{name}.take.json").write_text("{}")
+    assert names.find(root, "1107-181022-ee3e3a", ".take.json") == folder / f"{name}.take.json"
+    assert names.find(root, "1107-181022-ee3e3a", ".wav") is None and names.find(root, "1107-181022-ffffff", ".take.json") is None
+    assert names.find(root, "1107-181023-ee3e3a", ".take.json") is None  # another second is another job
+    (root / "1107-181022-ee3e3a.take.json").write_text("{}")  # a take made before the folders wins: it is the id's own name
+    assert names.find(root, "1107-181022-ee3e3a", ".take.json") == root / "1107-181022-ee3e3a.take.json"
+    # found whatever the year is now: the id carries none
+    assert names.find(root, "1107-181022-ee3e3a", ".take.json") is not None
+    assert names.find(tmp_path / "nowhere", "1107-181022-ee3e3a", ".wav") is None

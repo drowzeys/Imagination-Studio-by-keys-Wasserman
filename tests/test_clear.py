@@ -301,3 +301,30 @@ def test_a_sound_s_measured_beats_go_with_it_and_come_back(tmp_path):
 if __name__ == "__main__":
     test_paths(), test_delete_restore_empty(), test_a_song_goes_to_the_trash_with_its_yue2_folder_and_comes_back()
     print("ok")
+
+
+def test_a_take_in_its_own_folder_goes_with_its_records_and_its_folder(tmp_path):
+    """Issue #257: a voice line, a song and a sound effect in <root>/<YYYY-MM>/<stem>/ take their records along, the
+    emptied take folder goes too, and Undo brings all of it back."""
+
+    home, jobs, order, movable, web = studio(tmp_path / "Studio")
+    stem = "2026-11-07_181022_rain-on-window_ee3e3a"
+    for root, records in (("voice", (".take.json", ".txt", ".stats.json", ".beats.json")), ("music", (".take.json", ".beats.json")),
+                          ("sound/sfx", (".take.json",))):
+        folder = f"{root}/2026-11/{stem}"
+        (home / folder).mkdir(parents=True)
+        audio = write(home, f"{folder}/{stem}.wav", "audio")
+        for record in records:
+            write(home, f"{folder}/{stem}{record}", "{}")
+        if root == "music":
+            (home / folder / f"{stem}.yue2").mkdir()
+            write(home, f"{folder}/{stem}.yue2/score.abc", "X:1")
+        result = web.post("/api/clear", json={"paths": [audio], "films": True}).json()
+        assert not result["skipped"] and result["files"] == 1 + len(records) + (root == "music"), result
+        assert not (home / folder).exists() and (home / root / "2026-11").is_dir()  # the take folder went, the month stays
+        assert web.post("/api/trash/restore").json()["files"] == result["files"]
+        assert (home / audio).read_text() == "audio" and all((home / folder / f"{stem}{record}").is_file() for record in records)
+    assert (home / "music/2026-11" / stem / f"{stem}.yue2/score.abc").is_file()
+    # another file in a take folder is not the take's: refused, as before
+    write(home, f"voice/2026-11/{stem}/notes.txt")
+    assert refused(movable, f"voice/2026-11/{stem}/notes.txt")

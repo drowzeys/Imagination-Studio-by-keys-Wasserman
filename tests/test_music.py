@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "app"))
 sys.path.insert(0, str(ROOT / "spark"))
 import server  # noqa: E402
 import music  # noqa: E402
+import take_names  # noqa: E402
 import voice  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -165,7 +166,7 @@ def test_a_song_runs_on_the_served_engine_holds_the_lock_and_is_unloaded_before_
         sent = requests_of(folder)[-1]
         assert sent["caption"] == "Hip-hop anthem, 92 BPM" and sent["lyrics"] == "[Verse]\nRaise it up" and sent["seconds"] == 60.0
         assert sent["seed"] == 7 and sent["steps"] == 30 and sent["dit_cfg"] == 1.7 and sent["ar_cfg"] == 1.5 and sent["top_k"] == 50
-        assert sent["progress"] is True and sent["wav"].endswith(f"{job['id']}.wav") and sent["id"] == job["id"]
+        assert sent["progress"] is True and sent["wav"].endswith(f"_{job['id'].split('-')[-1]}.wav") and "/music/20" in sent["wav"].replace("\\", "/") and sent["id"] == job["id"]
         # an engine that does not stream gets the request it always had, and the take keeps its old keys
         assert "pcm" not in sent and "stream" not in sent and "dit_mode" not in sent and "overlap" not in sent
         assert "streamed" not in take and "first_audio_s" not in take and client.get("/api/music/state").json()["stream"] is False
@@ -228,7 +229,7 @@ def test_a_song_plays_while_it_is_made_as_stereo_and_keeps_the_finished_wav():
         assert take["streamed"] is True and take["first_audio_s"] == 1.5 and take["duration"] == 5.0 and take["play_s"] is not None
         assert music.lead_s(10) - 0.01 <= take["lead_s"] < 5.0  # it was let play once the lead was made, before the end
         sent = requests_of(folder)[-1]
-        assert sent["stream"] is True and sent["pcm"].endswith(f"{job['id']}.live/0.pcm")
+        assert sent["stream"] is True and sent["pcm"].replace("\\", "/").endswith(f"_{job['id'].split('-')[-1]}.live/0.pcm")
         with wave.open(str(server.HOME / take["path"])) as w:  # the kept song is the engine's finished WAV
             assert (w.getnchannels(), w.getframerate(), w.getnframes()) == (2, 44100, int(44100 * 5.0))
         # unticked: no stream asked, the old request
@@ -811,7 +812,9 @@ def test_a_song_cancelled_as_its_engine_finishes_leaves_no_take(monkeypatch):
     monkeypatch.setattr(music, "loaded_engines", lambda: [])
     job = {"id": "test-cancel-at-the-end", "status": "running", "params": {"caption": "pop", "lyrics": "", "seconds": 10, "seed": 1}}
     assert music.perform(job) is False
-    wav = music.HOME / "music" / f"{job['id']}.wav"
+    folder, name = take_names.folder(music.HOME / "music", job["id"], "pop", "song")  # its own folder, named by its style
+    wav = folder / f"{name}.wav"
+    assert name.endswith("_pop_test-cancel-at-the-end") and folder.parent.parent == music.HOME / "music"
     assert not wav.exists() and not wav.with_suffix(".yue2").exists() and not wav.with_suffix(".take.json").exists()
 
 

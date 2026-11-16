@@ -10,6 +10,7 @@ still reads or writes.
 from __future__ import annotations
 
 import errno
+import re
 import json
 import shutil
 import threading
@@ -45,9 +46,11 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         parts = target.relative_to(root).parts
         if parts[0] not in FOLDERS or len(parts) < 2:
             raise ValueError("not in a folder of clips or pictures")
-        song_folder = parts[0] == "music" and len(parts) >= 3 and parts[1].endswith(".yue2")
-        take_note = (parts[0] == "sound" or parts[0] in ("music", "voice") and len(parts) == 2) and target.name.endswith(".take.json")
-        voice_text = parts[0] == "voice" and len(parts) == 2 and target.suffix.lower() == ".txt"
+        # a take's own folder (issue #257): <root>/<YYYY-MM>/<stem>/<stem>.* ; older takes lie flat in the root
+        own = len(parts) == 4 and bool(re.fullmatch(r"\d{4}-\d{2}", parts[1])) and target.name.startswith(parts[2] + ".")
+        song_folder = parts[0] == "music" and len(parts) >= 3 and any(part.endswith(".yue2") for part in parts[1:-1])
+        take_note = (parts[0] == "sound" or parts[0] in ("music", "voice") and (len(parts) == 2 or own)) and target.name.endswith(".take.json")
+        voice_text = parts[0] == "voice" and (len(parts) == 2 and target.suffix.lower() == ".txt" or own and target.name.endswith((".txt", ".stats.json")))
         # a sound's measured beats (beats.py keeps them beside the file): they follow it, and are nothing without it
         beats_note = parts[0] in ("music", "sound", "voice") and not song_folder and target.name.endswith(".beats.json")
         if not take_note and not voice_text and not beats_note and target.suffix.lower() not in (SONG_FOLDER if song_folder else FOLDERS[parts[0]]):
@@ -99,36 +102,45 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
     def with_records(moved: list[dict], gone: set[str], keep_films: bool) -> tuple[list[dict], list[dict]]:
         """Take records, voice text and measured beats follow deleted sounds; a YuE2 song also takes its score folder."""
 
-        extra = []
+        extra, take_folders = [], set()
         for one in moved:
             name = Path(one["from"])
             if name.parts[0] in ("music", "sound", "voice") and name.suffix.lower() in FOLDERS[name.parts[0]]:
                 extra.append(name.with_name(name.stem + ".beats.json").as_posix())  # issue #253: it was left behind
+            # a take's records sit beside its sound under the same stem, flat or in the take's own folder (issue #257)
+            own = len(name.parts) >= 4 and name.parent.name == name.stem and bool(re.fullmatch(r"\d{4}-\d{2}", name.parts[-3]))
             if name.parts[0] in ("sound", "voice") and name.suffix.lower() == ".wav":
                 extra.append(name.with_suffix(".take.json").as_posix())
-                if name.parts[0] == "voice" and len(name.parts) == 2:
-                    extra.append(name.with_suffix(".txt").as_posix())
-            if name.parts[0] == "music" and len(name.parts) == 2 and name.suffix == ".wav":
-                extra += [f"music/{name.stem}.take.json"]
-                extra += sorted(rel(p) for p in (home / "music" / f"{name.stem}.yue2").rglob("*") if p.is_file())
+                if name.parts[0] == "voice" and (len(name.parts) == 2 or own):
+                    extra += [name.with_suffix(".txt").as_posix(), name.with_suffix(".stats.json").as_posix()] if own else [name.with_suffix(".txt").as_posix()]
+            if name.parts[0] == "music" and (len(name.parts) == 2 or own) and name.suffix == ".wav":
+                extra += [name.with_suffix(".take.json").as_posix()]
+                extra += sorted(rel(p) for p in (home / name.with_suffix(".yue2")).rglob("*") if p.is_file())
+            if own and name.parts[0] in ("music", "voice", "sound"):
+                take_folders.add(name.parent)
         more, skipped = move(extra, gone, keep_films) if extra else ([], [])
         sound_folders = {Path(one["from"]).parent for one in moved + more
                          if len(Path(one["from"]).parts) == 4 and Path(one["from"]).parts[:2] in
                          (("sound", "sfx"), ("sound", "foley"))}
-        for folder in sorted(sound_folders):
+        for folder in sorted(sound_folders | take_folders):
             try:
                 (home / folder).rmdir()
             except OSError as error:
                 if error.errno not in (errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST):
                     skipped.append({"path": folder.as_posix(), "why": f"could not remove empty take folder: {error}"})
         for one in moved:
-            folder = home / "music" / f"{Path(one['from']).stem}.yue2"
+            folder = home / Path(one["from"]).with_suffix(".yue2")
             if one["from"].startswith("music/") and folder.is_dir() and not folder.is_symlink():
                 for inner in sorted((p for p in folder.rglob("*") if p.is_dir()), key=lambda p: -len(p.parts)) + [folder]:
                     try:  # emptied, bottom up (restoring makes them again); a file left in one keeps it
                         inner.rmdir()
                     except OSError:
                         pass
+        for folder in sorted(take_folders):  # once more, now that a song's score folder is gone
+            try:
+                (home / folder).rmdir()
+            except OSError:
+                pass
         return more, [one for one in skipped if one.get("why") != "no such file"]
 
     def move(paths: list[str], gone: set[str], keep_films: bool) -> tuple[list[dict], list[dict]]:
