@@ -1,11 +1,11 @@
 # Agent one-shot — Imagination Studio by keys+Wasserman, powered by TensorFold (Mac + DGX Spark)
 
-**Repo:** https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman  
+**Repo:** https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman  
 **Carrier image:** `ghcr.io/drowzeys/keys-tensorfold-studio:4.2.1` (one for both builds, not a runtime; for a Mac the TensorFold wheel + lock + render scripts + the native FastH3 engine, for a DGX Spark the prebuilt CUDA engines: H3, MiniMax Music 3, Fish Audio Drama 3 and Nemotron 3.5 Bolt). The Mac's native engine also comes from the v3.2.0 release (the same engine build as 3.1.0), and Bolt on Metal from the v4.2.1 release (its symbol table stripped of build paths; H3 and Drama 3 come from the 4.2.1 carrier, the other engines are the same as 4.2.0's)  
 **Engine:** TensorFold 0.6.5 + H3 and Qwen-Image families @ `drowzeys/TensorFold` `a2b592fe`, own venv, int8 tensor-unit kernels
 
 ```bash
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git
 cd Imagination-Studio-by-keys-Wasserman
 brew install python@3.11 uv ffmpeg
 bash oneshot-setup.sh               # image model, FastH3 and its text encoder and decoders (175 GB) and a test clip; --image-only for 33 GB; --turbo adds MiniMax H3 Turbo (64 GB more, 128 GB of memory); --ref2va adds reference pictures to video (64 GB more, 128 GB)

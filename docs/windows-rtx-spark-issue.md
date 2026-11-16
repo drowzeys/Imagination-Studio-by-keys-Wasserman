@@ -1,6 +1,6 @@
 # Windows RTX Spark: published issue and updates
 
-Published discussion: [drowzeys/Imagination-Studio-by-keys-Wasserman#195](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/issues/195).
+Published discussion: [Keys-Wasserman/Imagination-Studio-by-keys-Wasserman#195](https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/issues/195).
 The proposal and substantive posted update below are preserved from that discussion.
 Use the [current plan](windows-rtx-spark-plan.md) for support status and the
 [dated test results](windows-rtx-spark-test-results.md) for concise testing evidence.
@@ -206,7 +206,7 @@ Since the original proposal, this has progressed from feasibility work to a work
 
 The latest post-merge focused local run passed **365 tests**, with one explicit Windows file-symlink privilege skip. Final compile checks covered **63 Python modules and 15 JavaScript files**. These are local results, not a full hosted/Linux/GPU-suite claim.
 
-The existing Ubuntu CI job is retained, and a public-repository-only, model-free `windows-11-arm` job is added. The current [hosted tests run](https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/actions/runs/41729991119) reports **`action_required`**; upstream action/approval is still needed before treating hosted CI as verified.
+The existing Ubuntu CI job is retained, and a public-repository-only, model-free `windows-11-arm` job is added. The current [hosted tests run](https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/actions/runs/41729991119) reports **`action_required`**; upstream action/approval is still needed before treating hosted CI as verified.
 
 H3/Ref2VA video generation, larger image/edit routes, foley, Drama 3/Music generators, Windows paired/local/remote GPU workers, automatic model/source installation, Nodes execution, automatic rough cuts, soundtrack jobs and transcription/captions remain unqualified. The 48 GB results do not qualify the 64/128 GB tiers or other GPUs. Upstream's new FLUX3-K/YuE2 Home chips, paired-card/HDR features and credits are preserved, not silently enabled on Windows.
 

@@ -13,7 +13,7 @@ What differs from a DGX Spark is the laptop's memory split and its power budget.
 In an administrator PowerShell on the laptop:
 
 ```powershell
-irm https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile $env:TEMP\n1x.ps1
+irm https://raw.githubusercontent.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile $env:TEMP\n1x.ps1
 powershell -ExecutionPolicy Bypass -File $env:TEMP\n1x.ps1
 ```
 

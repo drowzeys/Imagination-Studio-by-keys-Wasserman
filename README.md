@@ -19,7 +19,7 @@ Planning, imports, settings and media browsing do not require large model downlo
 Run the Windows installer in an administrator PowerShell:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1"
 ```
 
@@ -78,7 +78,7 @@ hardware measurements and may be much slower.
 
 ```bash
 brew install python@3.11 uv ffmpeg
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git
 cd Imagination-Studio-by-keys-Wasserman
 bash oneshot-setup.sh --app
 ```
@@ -95,7 +95,7 @@ if you move the clone. Use `--image-only` for pictures without the video install
 Allow about **125 GB free disk** for the core install, or about **400 GB** with the optional models.
 
 ```bash
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git
 cd Imagination-Studio-by-keys-Wasserman
 sudo apt install -y git ffmpeg
 bash oneshot-setup.sh
