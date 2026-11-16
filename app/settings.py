@@ -41,7 +41,9 @@ DEFAULTS = {
     # On for a new studio; a settings.json written before the switch existed keeps every room (load)
     "layout": {"hidden": [], "order": [], "simple": True},
     "presets": {"recipe": "quick", "image_model": "qwen", "seconds": 5, "qa_gate": True, "audio_rate": "keep",
-                "seed": "fixed", "mode": "clip", "captions_auto": True, "music_engine": "auto"},
+                "seed": "fixed", "mode": "clip", "captions_auto": True, "music_engine": "auto",
+                # a local model suggests a short title for a clip's folder in Create (title_suggest.py, issue #293): off unless asked for
+                "title_suggest": False},
     "hermes_profile": "",
     "hermes_command": "",
 }
@@ -58,7 +60,8 @@ CHOICES = {
     # the Music tab's song engine (music.default_engine): auto is YuE2 where it is installed, MiniMax Music 3 elsewhere
     ("presets", "music_engine"): ("auto", "yue2", "music3"),
 }
-FLAGS = {("appearance", "glow"), ("appearance", "poster"), ("presets", "qa_gate"), ("presets", "captions_auto"), ("layout", "simple")}
+FLAGS = {("appearance", "glow"), ("appearance", "poster"), ("presets", "qa_gate"), ("presets", "captions_auto"), ("presets", "title_suggest"),
+         ("layout", "simple")}
 # what the Agent room runs with the user's sign-ins: set from this computer or its Tailscale address only (agents.local)
 LOCAL_ONLY = ("hermes_command", "hermes_profile")
 

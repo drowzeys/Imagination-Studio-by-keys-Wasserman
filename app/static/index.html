@@ -165,6 +165,19 @@ const C = { step: 0, mode: "scout", preset: "draft", quality: "standard", second
   dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, scoutJob: null, prompt: "", job: null, count: 4, imageSize: "1344x768", imageJob: null, imageModel: "qwen", beats: "", cw: 864, ch: 480, steps: "", loras: [], textEncoder: "", lastImage: null, frames: null, retake: false, negations: [], negFor: null };
 let LORAS = [];  // the LoRA hub's recipes, with whether each is installed here
 const field = (labelText, node) => el("div", {}, el("label", {}, labelText), node);
+// an optional name for the clip's folder (issue #293): shown only with Settings → Presets → "Suggest a title for a clip"
+// on. The local model's answer fills the field; the person keeps, edits or clears it before the clip is queued
+const titleOn = () => typeof prefs === "function" && !!prefs().presets.title_suggest;
+function titleRow() { if (!titleOn()) return null;
+  const field = el("input", { value: C.title || "", maxlength: 80, placeholder: (C.action || C.scene || "Clip").slice(0, 48), "aria-label": "Name for this clip's folder", oninput: e => { C.title = e.target.value; } });
+  const ask = async () => { C.titleBusy = true; C.titleNote = ""; render();
+    try { const r = await api("/api/title/suggest", { text: C.prompt || C.action || C.scene || "" });
+      if (r.ok) { C.title = r.title; C.titleNote = "Suggested by your local model: edit it, or clear it to keep the usual name."; } else C.titleNote = (r.error || "No suggestion") + " The usual name is kept."; }
+    catch (e) { C.titleNote = e.message + " The usual name is kept."; }
+    C.titleBusy = false; render(); };
+  return el("div", { style: "margin-top:10px" }, el("label", {}, "Name for this clip's folder (optional)"),
+    el("div", { class: "row", style: "align-items:center" }, field, el("button", { type: "button", class: "fit small", disabled: !!C.titleBusy, onclick: ask }, C.titleBusy ? "Asking…" : "Suggest a title")),
+    C.titleNote ? el("div", { class: "note" }, C.titleNote) : null); }
 const bind = (obj, key, node, after) => { const isBox = node.type === "checkbox"; if (isBox) node.checked = !!obj[key]; else node.value = obj[key] ?? "";
   node.addEventListener("input", () => { obj[key] = isBox ? node.checked : (node.type === "number" ? Number(node.value) : node.value); if (after) after(); }); return node; };
 // a field the page is redrawn after only once it is finished (Enter, Tab or a click elsewhere): redrawing on every key
@@ -869,12 +882,15 @@ function viewCreate() {
       negNote(),
       isLong() ? null : el("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px", title: "After the render the app looks at the clip (app/shot.py): does it open on its first frame and end on its last, and is there a cut inside it. The verdict is shown beside the clip either way." },
         bind(C, "retake", el("input", { type: "checkbox", style: "width:auto" })), "If the shot check fails (a keyframe not held, or a cut inside the shot), render it once more at the next seed. That is a second full render."),
+      titleRow(),
       // how many Sparks this job may use, and what that means for it, before it is queued (sparks.js)
       el("div", { style: "margin-top:10px" }, sparksPick({ kind: isLong() ? "long" : "video", clips: 1, params: { loras: lorasOf(C), ...(isRef() ? { references: C.refs, reference_videos: C.refVideos, reference_audios: C.refAudios, ref_turbo: C.refPasses === "4" } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) } })),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !ready, onclick: async () => { try {
         const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
-        const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
-          : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
+        const named = titleOn() ? (C.title || "").trim().slice(0, 80) : "";
+        const j = await api("/api/jobs", isLong() ? { kind: "long", title: named || S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
+          : { kind: "video", title: named || (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
+        C.title = ""; C.titleNote = "";
         C.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Queue this clip"),
         // the way back to step 1 once a clip is queued: with the same settings, or with the words cleared
         el("button", { class: "fit", onclick: () => { C.step = 0; C.job = null; render(); } }, "Back to the start, keep this setup"),

@@ -62,6 +62,7 @@ if LOCAL_GPU_CHILD:
 
 import take_names  # noqa: E402  (a take's readable folder and file names, beside this file)
 import organize  # noqa: E402  (older takes moved into those folders when asked, beside this file)
+import title_suggest  # noqa: E402  (an optional title for a take's folder from a local model, beside this file)
 import chain  # noqa: E402  (a long video's last frame and join, beside this file)
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
@@ -3266,6 +3267,18 @@ def fit_picture(body: dict) -> dict:
 
 def organize_plan(busy: set[str]) -> dict:
     return organize.plan(HOME, hub.takes(), busy)
+
+
+@app.post("/api/title/suggest")
+def suggest_title(body: dict) -> dict:
+    """A short title for the clip ``text`` describes, from a local model (title_suggest.py). Only with the setting on:
+    nothing is asked of a model otherwise. A model that fails or is slow answers {"ok": false, "error"}; the page
+    keeps the name it had."""
+    if not settings.load()["presets"].get("title_suggest"):
+        raise HTTPException(409, "Title suggestions are off: switch them on in Settings → Presets.")
+    if not isinstance(body, dict) or not isinstance(body.get("text"), str):
+        raise HTTPException(400, "text is what the clip shows")
+    return title_suggest.suggest(body["text"])
 
 
 @app.get("/api/organize")
