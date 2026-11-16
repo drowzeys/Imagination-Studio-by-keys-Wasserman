@@ -44,6 +44,13 @@ def test_extra_node_packs_are_explicit_and_do_not_change_the_default_guard():
     foley_case = check.CalibrationCase(case.prepare, case.exercise, custom_nodes=foley.CUSTOM_NODES)
     assert (foley_case.gpu_limit_mb, foley_case.process_commit_mb, foley_case.job_commit_mb) == (
         case.gpu_limit_mb, case.process_commit_mb, case.job_commit_mb)
+    # Foley names its own process cap, measured above the shared one; the device and job caps stay the shared ones
+    foley_case = check.CalibrationCase(case.prepare, case.exercise, custom_nodes=foley.CUSTOM_NODES, process_commit_mb=foley.PROCESS_COMMIT_MB)
+    assert (foley_case.gpu_limit_mb, foley_case.process_commit_mb, foley_case.job_commit_mb) == (case.gpu_limit_mb, 14336, case.job_commit_mb)
+    assert check.CalibrationCase.process_commit_mb == case.process_commit_mb == 12288  # no other recipe's cap moved
+    for outside in (12287, 16384, 15361, 14336.0):
+        with pytest.raises(ValueError, match="process commit cap"):
+            check.CalibrationCase(case.prepare, case.exercise, process_commit_mb=outside)
     with pytest.raises(ValueError, match="explicitly supported"):
         check.CalibrationCase(case.prepare, case.exercise, custom_nodes=("another-node-pack",))
     built_in = check.CalibrationCase(case.prepare, case.exercise, wddm_device_uuid="selected-device")
