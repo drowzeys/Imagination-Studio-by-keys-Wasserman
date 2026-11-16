@@ -28,6 +28,7 @@ CONCEPTS = ("identity", "pose_motion", "clothing", "background", "style", "gener
 PICTURES = (".png", ".jpg", ".jpeg", ".webp")
 CLIPS = (".mp4", ".mov")
 MOST_IMAGES, MOST_VIDEOS = 16, 8
+MOST_IN_CLIP = 8  # Load H3 RefMods' slots: the RefMods one clip loads (spark_generate.REFMOD_LIMIT)
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$")
 SECONDS = (1.0, 30.0)
 DESCRIPTION_MOST = 400
@@ -183,4 +184,4 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds)
         except HTTPException:
             return None
 
-    return router, build, title, source_of
+    return router, build, title, source_of, saved

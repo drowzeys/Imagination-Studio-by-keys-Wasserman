@@ -1265,7 +1265,7 @@ def own_transformer(params: dict) -> str | None:
         return None
     name = Path(str(asked)).name
     family = transformers().get(name)
-    wants = "references" if params.get("references") or params.get("reference_videos") or params.get("reference_audios") else "frames"
+    wants = "references" if params.get("references") or params.get("reference_videos") or params.get("reference_audios") or params.get("refmods") else "frames"
     if family is None:
         raise HTTPException(400, f"no video model file named {name} in this machine's diffusion_models folders")
     if family != wants:
@@ -1370,7 +1370,8 @@ def references(params: dict) -> dict:
     if len(found["videos"]) == 1 and freed(params.get("pace"), params.get("motion") if isinstance(params.get("motion"), dict) else None, len(found["pictures"])):
         found["videos"] = []  # Impacts over a slow reference: the prompt carries the fight (see freed)
     pictures, videos, audios = found["pictures"], found["videos"], found["audios"]
-    if not (pictures or videos or audios):
+    mods = refmods_of(params)
+    if not (pictures or videos or audios or mods):
         return {}
     for kind, limit, files in (("reference pictures", REFERENCE_LIMIT, pictures), ("reference videos", REFERENCE_VIDEO_LIMIT, videos),
                                ("reference audio clips", REFERENCE_AUDIO_LIMIT, audios)):
@@ -1378,7 +1379,7 @@ def references(params: dict) -> dict:
             raise HTTPException(400, f"at most {limit} {kind}")
     if len(pictures) + len(videos) + len(audios) > REFERENCE_TOTAL:
         raise HTTPException(400, f"at most {REFERENCE_TOTAL} references in all")
-    if audios and not (pictures or videos):
+    if audios and not (pictures or videos or mods):
         raise HTTPException(400, "reference audio needs a reference picture or video beside it: the model does not take sound alone")
     if params.get("image") or params.get("first_frame_from"):
         raise HTTPException(400, "references do not combine with a first frame")
@@ -1415,7 +1416,33 @@ def references(params: dict) -> dict:
             total += seconds
         if total > REFERENCE_KIND_SECONDS + 0.05:
             raise HTTPException(400, f"the reference {kind}s are at most {REFERENCE_KIND_SECONDS:g} seconds in all, got {total:.1f} s")
-    return {**found, "video_sound": video_sound}
+    return {**found, "video_sound": video_sound, "refmods": mods}
+
+
+def refmods_of(params: dict) -> list[tuple[str, float]]:
+    """A clip's RefMods (refmod.py): [{"name", "strength"}] in the job, each a file saved in a refmods folder."""
+
+    given = params.get("refmods") or []
+    if not isinstance(given, list) or not all(isinstance(one, dict) for one in given):
+        raise HTTPException(400, "refmods is a list of {name, strength}")
+    if len(given) > refmod.MOST_IN_CLIP:
+        raise HTTPException(400, f"at most {refmod.MOST_IN_CLIP} RefMods in one clip")
+    saved = {one["name"] for one in refmod_saved()}
+    out = []
+    for one in given:
+        name = " ".join(str(one.get("name") or "").split())
+        try:
+            strength = float(one.get("strength", 1.0))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "a RefMod's strength is a number")
+        if not 0.0 < strength <= 1.0:
+            raise HTTPException(400, "a RefMod's strength is above 0 and at most 1")
+        if name not in saved:
+            raise HTTPException(400, f"no RefMod named {name or '(none)'} is saved here (Library: RefMod)")
+        out.append((name, round(strength, 2)))
+    if len({n for n, _ in out}) < len(out):
+        raise HTTPException(400, "a RefMod is named twice")
+    return out
 
 
 def estimate(preset: str, quality: str, seconds: float, text_only: bool = False, referenced: bool = False,
@@ -1901,6 +1928,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
                     env[name] = "\n".join(pictures[kind]) + "\n"
             if pictures["video_sound"]:
                 env["REF_VIDEO_SOUND"] = "1"
+            if pictures.get("refmods"):  # one per line: a name may hold spaces (spark_generate.py --refmod)
+                env["REFMODS"] = "".join(f"{name}:{strength:g}\n" for name, strength in pictures["refmods"])
             if params.get("ref_turbo"):
                 env["REF_TURBO"] = "1"
         env.update(passes(chosen, SPARK or (fast_h3 and not pictures)))  # Ref2VA runs on MiniMax H3
@@ -3901,7 +3930,7 @@ swap_router, swap_build, swap_title, swap_source, swap_estimate = swap.attach(HO
                                                                                lambda: SPARK and not windows_cuda.native_os() and memory_guard.guard_mode() == "warn")
 app.include_router(swap_router)
 import refmod  # noqa: E402  (Create a RefMod: pictures and clips saved as a MiniMax H3 reference, a Library action, beside this file)
-refmod_router, refmod_build, refmod_title, refmod_source = refmod.attach(HOME, PACK, SPARK, inside, relative, media_seconds)
+refmod_router, refmod_build, refmod_title, refmod_source, refmod_saved = refmod.attach(HOME, PACK, SPARK, inside, relative, media_seconds)
 app.include_router(refmod_router)
 import sound  # noqa: E402  (sound effects and foley: Stable Audio Open and MMAudio, run locally, beside this file)
 sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative, held_room, media_seconds)

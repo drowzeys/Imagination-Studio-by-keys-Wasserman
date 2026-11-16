@@ -55,19 +55,22 @@ ref_list() {
 ref_list "${REF_IMAGES:-}"; REFS=(${LIST[@]+"${LIST[@]}"})
 ref_list "${REF_VIDEOS:-}"; REF_CLIPS=(${LIST[@]+"${LIST[@]}"})
 ref_list "${REF_AUDIOS:-}"; REF_SOUNDS=(${LIST[@]+"${LIST[@]}"})
+# REFMODS: saved RefMods (app/refmod.py), one NAME:STRENGTH a line; a clip with one renders from references too
+MODS=(); if [ -n "${REFMODS:-}" ]; then while IFS= read -r MOD; do [ -z "$MOD" ] || MODS+=("$MOD"); done <<<"$REFMODS"; fi
 REF_COUNT=$(( ${#REFS[@]} + ${#REF_CLIPS[@]} + ${#REF_SOUNDS[@]} ))
-if [ "$REF_COUNT" -gt 0 ]; then
+if [ "$REF_COUNT" -gt 0 ] || [ "${#MODS[@]}" -gt 0 ]; then
   [ -z "${FIRST_FRAME:-}${LAST_FRAME:-}" ] || { echo "references (REF_IMAGES, REF_VIDEOS, REF_AUDIOS) and FIRST_FRAME / LAST_FRAME do not combine: a reference is not a frame of the clip" >&2; exit 2; }
   # MiniMax's limits for one request: 9 pictures, 3 videos, 3 audio clips, 12 files in all
   [ "${#REFS[@]}" -le 9 ] || { echo "at most 9 reference pictures, got ${#REFS[@]}" >&2; exit 2; }
   [ "${#REF_CLIPS[@]}" -le 3 ] || { echo "at most 3 reference videos, got ${#REF_CLIPS[@]}" >&2; exit 2; }
   [ "${#REF_SOUNDS[@]}" -le 3 ] || { echo "at most 3 reference audio clips, got ${#REF_SOUNDS[@]}" >&2; exit 2; }
   [ "$REF_COUNT" -le 12 ] || { echo "at most 12 references in all, got $REF_COUNT" >&2; exit 2; }
-  [ "${#REF_SOUNDS[@]}" = 0 ] || [ $(( ${#REFS[@]} + ${#REF_CLIPS[@]} )) -gt 0 ] \
+  [ "${#REF_SOUNDS[@]}" = 0 ] || [ $(( ${#REFS[@]} + ${#REF_CLIPS[@]} + ${#MODS[@]} )) -gt 0 ] \
     || { echo "REF_AUDIOS needs a reference picture or video beside it (REF_IMAGES or REF_VIDEOS): the model does not take sound alone" >&2; exit 2; }
   for REF in ${REFS[@]+"${REFS[@]}"}; do [ -s "$REF" ] || { echo "no reference picture at $REF" >&2; exit 2; }; ARGS+=(--ref "$REF"); done
   for REF in ${REF_CLIPS[@]+"${REF_CLIPS[@]}"}; do [ -s "$REF" ] || { echo "no reference video at $REF" >&2; exit 2; }; ARGS+=(--ref-video "$REF"); done
   for REF in ${REF_SOUNDS[@]+"${REF_SOUNDS[@]}"}; do [ -s "$REF" ] || { echo "no reference audio clip at $REF" >&2; exit 2; }; ARGS+=(--ref-audio "$REF"); done
+  for MOD in ${MODS[@]+"${MODS[@]}"}; do ARGS+=(--refmod "$MOD"); done
   [ "${REF_VIDEO_SIZE:-match}" = match ] || { echo "REF_VIDEO_SIZE=$REF_VIDEO_SIZE is not offered on a DGX Spark: a reference video is always brought down to the clip's pixel area there (match), for memory" >&2; exit 2; }
   [ "${#REF_CLIPS[@]}" = 0 ] || [ "${REF_VIDEO_SOUND:-0}" != 1 ] || ARGS+=(--ref-video-sound)
   if [ -n "${STEPS:-}" ]; then
@@ -76,7 +79,7 @@ if [ "$REF_COUNT" -gt 0 ]; then
   fi
   if [ "${REF_TURBO:-0}" = 1 ]; then ARGS+=(--ref-mode turbo); PASSES="${STEPS:-4}"; else ARGS+=(--ref-mode full); PASSES="${STEPS:-20}"; fi
   [ -z "${REF_SIZE:-}" ] || ARGS+=(--ref-size "$REF_SIZE")
-  echo "[tensorfold] reference to video: $PASSES passes$([ "${REF_TURBO:-0}" != 1 ] || echo " with the Ref2VA Turbo adapter"), ${#REFS[@]} picture(s), ${#REF_CLIPS[@]} video(s), ${#REF_SOUNDS[@]} audio clip(s)"
+  echo "[tensorfold] reference to video: $PASSES passes$([ "${REF_TURBO:-0}" != 1 ] || echo " with the Ref2VA Turbo adapter"), ${#REFS[@]} picture(s), ${#REF_CLIPS[@]} video(s), ${#REF_SOUNDS[@]} audio clip(s), ${#MODS[@]} RefMod(s)"
   KIND="MiniMax H3 Ref2VA, ${#REFS[@]} picture(s), ${#REF_CLIPS[@]} video(s), ${#REF_SOUNDS[@]} audio clip(s), $PASSES passes"
 else
   if [ "${SPARK_BASE:-fasth3}" = h3 ]; then ARGS+=(--base h3 --steps "${STEPS:-25}"); KIND="MiniMax H3 ${STEPS:-25} passes"

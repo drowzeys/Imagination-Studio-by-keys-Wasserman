@@ -628,6 +628,26 @@ def installed(kind: str, name: str) -> bool:
 
 # MiniMax's limits for one Ref2VA request, the same as on the Mac (h3_generate.py)
 PICTURE_LIMIT, VIDEO_LIMIT, AUDIO_LIMIT, TOTAL_LIMIT = 9, 3, 3, 12
+REFMOD_LIMIT = 8  # Load H3 RefMods' slots
+
+
+def refmods_of(given: list[str]) -> list[tuple[str, float]]:
+    """(name, strength) of each --refmod NAME[:STRENGTH]; a name may hold spaces and a subfolder (celebs/alice)."""
+
+    out = []
+    for one in given:
+        name, _, strength = one.rpartition(":") if ":" in one else (one, "", "")
+        try:
+            value = float(strength) if strength else 1.0
+        except ValueError:
+            name, value = one, 1.0
+        name = name.strip().removesuffix(".safetensors")
+        if not name or not 0.0 < value <= 1.0:
+            sys.exit(f"--refmod is NAME or NAME:STRENGTH with a strength above 0 and at most 1, got {one}")
+        out.append((name, value))
+    if len(out) > REFMOD_LIMIT:
+        sys.exit(f"at most {REFMOD_LIMIT} RefMods, got {len(out)}")
+    return out
 CLIP_SECONDS, TOTAL_SECONDS, CLIP_TOLERANCE = (2.0, 15.0), 15.0, 0.05
 ASPECT_LIMIT = 4.0  # a reference video is between 1:4 and 4:1
 MODEL_SHORT_EDGE, MODEL_MAX_PIXELS, REFERENCE_MULTIPLE = 768, 768 * 1344, 32
@@ -805,7 +825,8 @@ def reference(args) -> None:
             sys.exit(f"at most {limit} reference {kind}, got {len(files)}")
     if len(pictures) + len(videos) + len(audios) > TOTAL_LIMIT:
         sys.exit(f"at most {TOTAL_LIMIT} references in all, got {len(pictures) + len(videos) + len(audios)}")
-    if audios and not (pictures or videos):
+    mods = refmods_of(args.refmod)
+    if audios and not (pictures or videos or mods):
         sys.exit("a reference audio clip needs a reference picture or video beside it: the model does not take sound alone")
     if args.first_frame or args.last_frame:
         sys.exit("references and --first-frame / --last-frame do not combine: the reference model has no keyframe input")
@@ -867,7 +888,7 @@ def reference(args) -> None:
     if mode == "turbo" and steps != 4:
         print(f"[tensorfold] the Ref2VA Turbo adapter was trained for 4 passes; running {steps} as asked", flush=True)
     prompt = prompt_of(args)
-    if not args.ref_plain and not any(tag in prompt for tag in ("<Picture", "<Video")):
+    if not args.ref_plain and (pictures or videos) and not any(tag in prompt for tag in ("<Picture", "<Video")):
         named = [f"<Picture {i + 1}>" for i in range(len(pictures))] or [f"<Video {i + 1}>" for i in range(len(videos))]
         prompt = "Use " + " and ".join(named) + " as the subject. " + prompt
     model = ["1", 0]
@@ -921,14 +942,41 @@ def reference(args) -> None:
         w[str(80 + index)] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model, "lora_name": lora, "strength_model": strength}}
         model = [str(80 + index), 0]
         print(f"[tensorfold] LoRA {lora} at {strength:g} on the bf16 Ref2VA weights", flush=True)
+    positive = ["6", 0]
+    if mods:
+        # Luisa (luisacaotica)'s RefMod nodes: the saved references are loaded by name and added to the clip's own
+        # through the model's reference path (Apply H3 RefMod), after MiniMaxH3ReferenceToVideo made the condition
+        info = call("/object_info/MiniMaxH3RefModsLoader").get("MiniMaxH3RefModsLoader")
+        if not info:
+            sys.exit("the studio's ComfyUI has no RefMod nodes (ComfyUI-MiniMaxH3Mod): bash spark/setup-workflows.sh --no-models")
+        listed = info["input"]["required"]["mod_1"][0]
+        empty = next((n for n in listed if n in ("None", "(none)")), "None")
+        loader = {"show_info": False}
+        for slot in range(1, REFMOD_LIMIT + 1):
+            mod, strength = mods[slot - 1] if slot <= len(mods) else (empty, 1.0)
+            if slot <= len(mods) and mod not in listed:
+                sys.exit(f"no RefMod named {mod} in the studio's refmods folders (Load H3 RefMods lists: "
+                         f"{', '.join(n for n in listed if n != empty) or 'none'})")
+            loader.update({f"mod_{slot}": mod, f"strength_{slot}": strength, f"copies_{slot}": 1})
+        w["90"] = {"class_type": "MiniMaxH3RefModsLoader", "inputs": loader}
+        # Apply at its own defaults (a constant curve at full retention, no scrambling): every required input the
+        # node lists, so a new version's added input does not refuse the graph
+        apply = {"conditioning": ["6", 0], "mods": ["90", 0]}
+        for key, spec in call("/object_info/MiniMaxH3RefModApply")["MiniMaxH3RefModApply"]["input"]["required"].items():
+            if key not in apply:
+                options = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+                apply[key] = options.get("default", spec[0][0] if isinstance(spec[0], list) and spec[0] else None)
+        w["91"] = {"class_type": "MiniMaxH3RefModApply", "inputs": apply}
+        positive = ["91", 0]
+        print("[tensorfold] RefMods: " + ", ".join(f"{n} at {s:g}" for n, s in mods), flush=True)
     w["10"] = {"class_type": "BasicScheduler", "inputs": {"model": model, "scheduler": "simple", "steps": steps, "denoise": 1.0}}
-    w["11"] = {"class_type": "BasicGuider", "inputs": {"model": model, "conditioning": ["6", 0]}}
+    w["11"] = {"class_type": "BasicGuider", "inputs": {"model": model, "conditioning": positive}}
     guidance = float(os.environ.get("SPARK_REF_CFG") or 1.0)
     if guidance > 1.0:
         # an experiment, not a setting: the checkpoint is guidance-distilled and MiniMax runs it without a negative
         # branch. This runs every pass twice (the prompt, and the same references with an empty prompt).
         w["7"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}}
-        w["11"] = {"class_type": "CFGGuider", "inputs": {"model": model, "positive": ["6", 0], "negative": ["7", 0], "cfg": guidance}}
+        w["11"] = {"class_type": "CFGGuider", "inputs": {"model": model, "positive": positive, "negative": ["7", 0], "cfg": guidance}}
         print(f"[tensorfold] guidance {guidance:g} (experimental: two forwards a pass)", flush=True)
     w["12"] = {"class_type": "SamplerCustomAdvanced",
                "inputs": {"noise": ["8", 0], "guider": ["11", 0], "sampler": ["9", 0], "sigmas": ["10", 0],
@@ -937,8 +985,10 @@ def reference(args) -> None:
     cropped = crop_frames(w, args.crop, args.width, args.height) if args.crop else True
     kind = "Ref2VA with the Turbo adapter" if mode == "turbo" else "Ref2VA"
     count = (f"{len(pictures)} reference picture(s)" + (f", {len(videos)} video(s)" if videos else "")
-             + (f", {len(audios)} audio clip(s)" if audios else "") + (", the videos' own sound" if videos and args.ref_video_sound else ""))
-    print(f"[tensorfold] engine: cuda (ComfyUI, MiniMax H3 {kind}, {name.split('pruned_')[1].split('.')[0]}), "
+             + (f", {len(audios)} audio clip(s)" if audios else "") + (", the videos' own sound" if videos and args.ref_video_sound else "")
+             + (f", {len(mods)} RefMod(s)" if mods else ""))
+    build = name.split("pruned_")[1].split(".")[0] if "pruned_" in name else Path(name).stem  # another build: its own file name
+    print(f"[tensorfold] engine: cuda (ComfyUI, MiniMax H3 {kind}, {build}), "
           f"{count}, {steps} passes, generating {args.width}x{args.height}, {args.frames} frames", flush=True)
     for line in said:
         print(f"[tensorfold] reference {line}", flush=True)
@@ -957,6 +1007,7 @@ def reference(args) -> None:
                                         "forwards": steps, "total_s": round(seconds_taken, 1), "frames": args.frames,
                                         "size": [args.width, args.height], "references": len(pictures),
                                         "reference_videos": len(videos), "reference_audios": len(audios),
+                                        "refmods": [[n, s] for n, s in mods],
                                         "loras": [[lora, strength] for lora, strength in loras]}), flush=True)
 
 
@@ -973,7 +1024,7 @@ def video(args) -> None:
             sys.exit(f"--{name} must be a multiple of {step}, got {value}")
     if (args.frames - 5) % 17:
         sys.exit(f"--frames must be 17n + 5 (22, 39, 56, ... 362), got {args.frames}")
-    if args.ref or args.ref_video or args.ref_audio:
+    if args.ref or args.ref_video or args.ref_audio or args.refmod:
         return reference(args)
     base = args.base == "h3"
     if args.steps is None:
@@ -1596,6 +1647,10 @@ def main() -> None:
                    help="the transformer of a clip: FastH3 (the default), or MiniMax H3's own first-and-last-frame "
                         "model when it is installed (25 passes by default; what keyframe LoRAs were trained on)")
     v.add_argument("--lora", action="append", default=[], help="a style LoRA, PATH or PATH:STRENGTH (repeat to stack)")
+    v.add_argument("--refmod", action="append", default=[], help=f"a saved RefMod (ComfyUI-MiniMaxH3Mod), NAME or "
+                   f"NAME:STRENGTH, its name as Load H3 RefMods lists it (repeat for up to {REFMOD_LIMIT}): its references "
+                   "are added to the clip's through Apply H3 RefMod; the prompt describes the subject (no <Picture> tag "
+                   "names it)")
     v.add_argument("--ref-plain", action="store_true",
                    help="with references: the prompt as written, without `Use <Video 1> as the subject.` put ahead "
                         "of a prompt that names no reference (a LoRA trained on plain captions, such as line art)")

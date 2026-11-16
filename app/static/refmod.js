@@ -64,3 +64,26 @@ function rfmPanel(o) { const f = REFMOD.f, st = REFMOD.state || {}, redraw = () 
       : el("div", { class: "note" }, "None yet."),
     el("div", { class: "note" }, "Saved in " + (st.folder || "refmods") + (st.share ? "; each one is also linked into " + st.share + ", so that ComfyUI's Load H3 RefMods lists it." : ".") + " " + (st.licence || "")));
   return box; }
+// In Create, beside the reference pictures: saved RefMods the clip loads (C.refmods, sent as params.refmods). Their
+// references join the clip's through Apply H3 RefMod; no <Picture> tag names them, so the prompt describes the subject.
+function rfmClipPanel() { const st = REFMOD.state;
+  if (!st) { REFMOD.state = { ready: false, saved: [] }; rfmLoad().then(() => { if (tab === "Create") render(); }); return null; }
+  const saved = (st.saved || []).filter(s => s.kind !== "audio"), most = 8;
+  C.refmods = C.refmods.filter(m => saved.some(s => s.name === m.name));  // a RefMod deleted since it was picked
+  const on = name => C.refmods.find(m => m.name === name);
+  const flip = name => { const had = on(name); C.refmods = had ? C.refmods.filter(m => m !== had) : C.refmods.concat(C.refmods.length < most ? [{ name, strength: 1 }] : []);
+    if (!had && C.refmods.length >= most && !on(name)) toast("At most " + most + " RefMods in one clip"); C.prompt = ""; render(); };
+  return el("div", {},
+    el("h3", { style: "margin-top:18px" }, "Saved RefMods" + (C.refmods.length ? " · " + C.refmods.length + " in this clip" : "")),
+    el("div", { class: "note" }, "A RefMod is a subject saved earlier from pictures or a clip (Library: RefMod). Its references are added to this clip's, so a RefMod alone is enough. No <Picture> tag names it: describe the subject in the prompt (the woman with the black bob in the brown leather jacket). Keep one person per RefMod."),
+    saved.length ? el("div", {}, saved.map(s => { const m = on(s.name);
+      return el("div", { class: "kv", style: "padding:6px 0;border-bottom:1px solid var(--line);gap:10px;align-items:center" },
+        el("label", { style: "display:flex;gap:8px;align-items:center;flex:1;min-width:0;margin:0;text-transform:none;letter-spacing:0" },
+          el("input", { type: "checkbox", style: "width:auto", checked: !!m, onchange: () => flip(s.name) }),
+          el("span", { style: "overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: s.description || s.name }, el("b", {}, s.name), s.description ? " · " + s.description : "")),
+        el("span", { class: "note", style: "margin:0;white-space:nowrap" }, [s.concept, s.tokens ? s.tokens + " tokens" : ""].filter(Boolean).join(" · ")),
+        m ? el("label", { style: "display:flex;gap:6px;align-items:center;margin:0;white-space:nowrap" }, "strength",
+          el("input", { type: "range", min: 0.1, max: 1, step: 0.05, value: m.strength, style: "width:110px", "aria-label": "Strength of " + s.name,
+            oninput: e => { m.strength = Number(e.target.value); e.target.nextSibling.textContent = m.strength.toFixed(2); } }), el("span", { style: "width:34px" }, Number(m.strength).toFixed(2))) : null); }))
+      : el("div", { class: "note" }, "None saved yet: in the Library, press RefMod under a picture or a clip of the subject."));
+}

@@ -164,7 +164,7 @@ const media = (path, attrs = {}) => /\.(mp4|mov)$/i.test(path) ? el("video", { s
   : /\.(wav|mp3|m4a|aac|flac|ogg)$/i.test(path) ? el("audio", { src: file(path), controls: true, preload: "metadata", style: "width:100%", ...attrs }) : el("img", { src: file(path), loading: "lazy", ...attrs });
 
 const IMAGE_SIZES = { "1344x768": "1344x768 (16:9)", "1664x928": "1664x928 (16:9, larger)", "1024x1024": "1024x1024 (square)", "768x1344": "768x1344 (9:16)" };
-Object.assign(C, { goes: "video", start: "text", engine: "fasth3", passes: "8", h3quality: "standard", res: "480p", up: false, h3passes: "preset", refs: [], subjects: [], refPasses: "20", refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null });
+Object.assign(C, { goes: "video", start: "text", engine: "fasth3", passes: "8", h3quality: "standard", res: "480p", up: false, h3passes: "preset", refs: [], subjects: [], refmods: [], refPasses: "20", refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null });
 const ENGINES = { fasth3: "FastH3 (FastVideo, sparse attention): fastest", h3: "MiniMax H3 (Turbo adapter or full 20 steps)" };
 const RESOLUTIONS = { "480p": "480p · 864x480", "720p": "720p · 1280x720", draft: "Draft · 1344x768, generated at 672x384 with the 2x decoder",
   "2k": "2K · 2048x1152, generated at 1024x576 with the 2x decoder", native: "Native · 1344x768" };
@@ -693,6 +693,7 @@ function viewCreate() {
         C.refs.length ? el("div", { class: "grid", style: "margin-top:10px" }, C.refs.map((p, i) => el("div", { class: "tile on" }, media(p),
           el("div", { class: "cap" }, "<Picture " + (i + 1) + ">", drop(C.refs, C.subjects, i)),
           bind(C.subjects, i, el("input", { placeholder: "who or what this is: the woman with red hair" }), () => { C.prompt = ""; })))) : null,
+        typeof rfmClipPanel === "function" ? rfmClipPanel() : null,
         S.ref_media ? [
           el("h3", { style: "margin-top:18px" }, "Reference videos"),
           el("div", { class: "note" }, "Up to " + S.reference_video_limit + " clips (mp4 or mov), each 2 to 15 seconds and 15 seconds in all: <Video 1>, <Video 2>, … A video carries a subject and how it moves. It is read up to the clip's own length. Every second of it adds work to each pass: a 5 second reference about " + (S.platform === "spark" ? "doubles" : "triples") + " the time of a 5 second clip."),
@@ -753,7 +754,7 @@ function viewCreate() {
     const est = el("div", { class: "note" }); showEstimate(C, est);
     const job = C.job && jobs.find(j => j.id === C.job);
     const wants = loraWants();
-    const ready = C.prompt.trim() && (isRef() ? C.refs.length + C.refVideos.length > 0 : noFrame() || C.image) && !wants.length;
+    const ready = C.prompt.trim() && (isRef() ? C.refs.length + C.refVideos.length + C.refmods.length > 0 : noFrame() || C.image) && !wants.length;
     put(body, el("h2", {}, "Render"), el("div", { class: "note" }, output().label + (String(C.steps).trim() && !isRef() ? " · " + C.steps + " passes (custom)" : "") + " · " + (isRef() ? "MiniMax H3 Ref2VA, " + refPassText() + ", " + [[C.refs.length, "picture"], [C.refVideos.length, "video"], [C.refAudios.length, "audio clip"]].filter(k => k[0]).map(k => k[0] + " reference " + k[1] + (k[0] === 1 ? "" : "s")).join(", ") + (motionFields() ? ", motion: " + MOTION_MODES[C.motion.mode][0].toLowerCase() + " from the " + MOTION_LAYERS[C.motion.layer][0].toLowerCase() + (C.motion.layer === "reference" ? "" : " layer") : "") : S.qualities[C.quality]) + " · " + (isLong() ? S.long[C.seconds] : exact(framesOf(C))) + (lastOf() ? " · ends on the last frame" : "") + " · seed " + C.seed), est,
       wants.map(w => el("div", { class: "note lorawant", style: "color:var(--warn)" }, el("b", {}, w.name + " needs: "), w.text + " ", el("button", { type: "button", class: "small", onclick: w.go }, w.label))),
       !ready ? el("div", { class: "note", style: "color:var(--warn)" }, C.prompt.trim() ? (isRef() ? (S.ref_media ? "Add a reference picture or video in step 2." : "Add a reference picture in step 2.") : "Pick or upload a first frame in step 2.") : "Open step 4 once to build the prompt.") : null,
@@ -763,7 +764,7 @@ function viewCreate() {
       // how many Sparks this job may use, and what that means for it, before it is queued (sparks.js)
       el("div", { style: "margin-top:10px" }, sparksPick({ kind: isLong() ? "long" : "video", clips: 1, params: { loras: lorasOf(C), ...(isRef() ? { references: C.refs, reference_videos: C.refVideos, reference_audios: C.refAudios, ref_turbo: C.refPasses === "4" } : {}), ...(encoderOf() ? { text_encoder: encoderOf() } : {}) } })),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !ready, onclick: async () => { try {
-        const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
+        const base = { prompt: C.prompt, image: noFrame() ? null : C.image, ...(typeof prefs === "function" && !prefs().presets.qa_gate ? { qa: false } : {}), ...(lastOf() ? { last_image: lastOf() } : {}), preset: C.preset, quality: C.quality, seed: C.seed, ...extras(), ...(isRef() ? { references: C.refs, ref_turbo: C.refPasses === "4", ...(C.refmods.length ? { refmods: C.refmods.map(m => ({ name: m.name, strength: Number(m.strength) || 1 })) } : {}), ...(refMedia() ? { reference_videos: await motionVideos(), reference_audios: C.refAudios, reference_video_sound: C.video_sound, ...(motionFields() ? { motion: { pack: C.motion.pack, layer: C.motion.layer, mode: C.motion.mode, measured: C.motion.measured || null, free: motionFree() }, pace: C.motion.pace || "auto", silent: paceOf(C.motion) === "flow" && !musicNamed() } : {}) } : {}) } : {}) };
         const j = await api("/api/jobs", isLong() ? { kind: "long", title: S.long[C.seconds] + ": " + (C.action || C.scene || "Video").slice(0, 40), params: { ...base, total_seconds: Number(C.seconds), beats: (C.beats || "").split("\n") } }
           : { kind: "video", title: (C.action || C.scene || "Clip").slice(0, 48), params: { ...base, ...lengthOf(C), ...(C.retake ? { retake: true } : {}) } });
         C.job = j.id; await poll(); render(); } catch (e) { toast(e.message); } } }, "Queue this clip"),
