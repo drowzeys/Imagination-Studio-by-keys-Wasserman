@@ -46,9 +46,11 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
         parts = target.relative_to(root).parts
         if parts[0] not in FOLDERS or len(parts) < 2:
             raise ValueError("not in a folder of clips or pictures")
-        song_folder = parts[0] == "music" and len(parts) >= 3 and parts[1].endswith(".yue2")
-        take_note = (parts[0] == "sound" or parts[0] in ("music", "voice") and len(parts) == 2) and target.name.endswith(".take.json")
-        voice_text = parts[0] == "voice" and len(parts) == 2 and target.suffix.lower() == ".txt"
+        # a take's own folder (issue #257): <root>/<YYYY-MM>/<stem>/<stem>.* ; older takes lie flat in the root
+        own = len(parts) == 4 and bool(re.fullmatch(r"\d{4}-\d{2}", parts[1])) and target.name.startswith(parts[2] + ".")
+        song_folder = parts[0] == "music" and len(parts) >= 3 and any(part.endswith(".yue2") for part in parts[1:-1])
+        take_note = (parts[0] == "sound" or parts[0] in ("music", "voice") and (len(parts) == 2 or own)) and target.name.endswith(".take.json")
+        voice_text = parts[0] == "voice" and (len(parts) == 2 and target.suffix.lower() == ".txt" or own and target.name.endswith((".txt", ".stats.json")))
         # a sound's measured beats (beats.py keeps them beside the file): they follow it, and are nothing without it
         beats_note = parts[0] in ("music", "sound", "voice") and not song_folder and target.name.endswith(".beats.json")
         if not take_note and not voice_text and not beats_note and target.suffix.lower() not in (SONG_FOLDER if song_folder else FOLDERS[parts[0]]):
