@@ -1,8 +1,15 @@
-"""Send Slate shots to an operator-configured ComfyUI worker."""
+"""Send Slate shots to an operator-configured ComfyUI worker: a ComfyUI on another PC, or Comfy Cloud (issue #185).
+
+Comfy Cloud is the same panel with a key: ``STUDIO_COMFY_URL=https://cloud.comfy.org`` and ``STUDIO_COMFY_API_KEY``
+(the person's own, from platform.comfy.org; API access needs a paid Comfy Cloud plan). The key is read from the
+environment only: it is never written to a file, a log or an answer, it is sent only over https, and only to the
+address it was set for (a finished file is fetched from the signed address the cloud redirects to without it).
+The cloud speaks ComfyUI's own routes under ``/api`` and tells a job's state and outputs at ``/api/jobs/<id>``."""
 
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -39,12 +46,33 @@ def worker() -> str:
     return base
 
 
+def cloud_key() -> str:
+    """The Comfy Cloud API key, when one is set: the worker is then spoken to as Comfy Cloud."""
+
+    return (os.environ.get("STUDIO_COMFY_API_KEY") or "").strip()
+
+
 def request(route: str, body=None, content_type="application/json"):
-    base = worker()
+    base, key = worker(), cloud_key()
+    headers = {"Content-Type": content_type}
+    if key:
+        parts = urllib.parse.urlsplit(base)
+        if parts.scheme != "https" and parts.hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError("STUDIO_COMFY_API_KEY is only sent over https: set STUDIO_COMFY_URL=https://cloud.comfy.org")
+        route, headers["X-API-Key"] = "/api" + route, key
     if isinstance(body, dict):
         body = json.dumps(body).encode()
-    return remote.OPENER.open(urllib.request.Request(
-        base + route, data=body, headers={"Content-Type": content_type}), timeout=60)
+    try:
+        return remote.OPENER.open(urllib.request.Request(base + route, data=body, headers=headers), timeout=60)
+    except urllib.error.HTTPError as error:
+        if key and error.code in (401, 402, 429):
+            raise ValueError({401: "Comfy Cloud refused the API key: check STUDIO_COMFY_API_KEY.",
+                              402: "Comfy Cloud: not enough credits for this render.",
+                              429: "Comfy Cloud: the subscription is not active (API access needs a paid plan)."}[error.code]) from None
+        if key and error.code == 400:  # the cloud says what is wrong with a workflow in the answer's body
+            said = error.read(4000).decode("utf-8", "replace").replace(key, "…")
+            raise ValueError(f"Comfy Cloud did not take the request: {' '.join(said.split())[:300] or 'bad request'}") from None
+        raise
 
 
 def upload(home: Path, value: str) -> str:
@@ -74,15 +102,56 @@ def submit(home: Path, profile: dict, prompt: str, seed: int, images: list[str])
         if key not in workflow[node]["inputs"]:
             raise ValueError(f"Workflow input {node}.{key} does not exist.")
         workflow[node]["inputs"][key] = value
-    with request("/prompt", {"prompt": workflow}) as reply:
-        return json.load(reply)["prompt_id"]
+    # partner nodes (MiniMax's own, for one) are paid for with the same key, which the cloud wants in the graph's extras
+    extra = {"extra_data": {"api_key_comfy_org": cloud_key()}} if cloud_key() else {}
+    with request("/prompt", {"prompt": workflow, **extra}) as reply:
+        answer = json.load(reply)
+    if not isinstance(answer, dict) or not isinstance(answer.get("prompt_id"), str):
+        detail = answer.get("error") or answer.get("node_errors") if isinstance(answer, dict) else None
+        raise ValueError(f"ComfyUI did not take the workflow: {json.dumps(detail)[:300] if detail else 'no job id came back'}")
+    return answer["prompt_id"]
+
+
+def cloud_entry(job: str) -> dict | None:
+    """A Comfy Cloud job as {"outputs"} once it is done, None while it waits; ValueError with its reason when it
+    failed or was cancelled."""
+
+    with request("/jobs/" + job) as reply:
+        said = json.load(reply)
+    status = str(said.get("status") or "").lower()
+    if status in ("completed", "success", "succeeded"):
+        return {"outputs": said.get("outputs") or {}}
+    if status in ("failed", "error", "non_retryable_error", "lost", "cancelled", "canceled", "expired"):
+        error = said.get("execution_error")
+        detail = (error.get("exception_message") or error.get("message") if isinstance(error, dict) else error) or said.get("error_message")
+        raise ValueError(f"Comfy Cloud render {'was cancelled' if status.startswith('cancel') else 'failed'}: {str(detail or status)[:300]}")
+    return None
+
+
+def fetch(query: str):
+    """The finished file, open for reading. Comfy Cloud answers with a redirect to a signed address: that one is
+    fetched without the key, over https only, and no further redirect is followed."""
+
+    try:
+        return request("/view?" + query)
+    except urllib.error.HTTPError as error:
+        signed = error.headers.get("Location") if cloud_key() and error.code in (301, 302, 303, 307, 308) else None
+        if not signed:
+            raise
+        local = urllib.parse.urlsplit(worker()).hostname in ("127.0.0.1", "localhost", "::1")  # a stand-in on this machine
+        if urllib.parse.urlsplit(signed).scheme != "https" and not local:
+            raise ValueError("Comfy Cloud answered with an address that is not https.") from None
+        return remote.OPENER.open(urllib.request.Request(signed), timeout=60)
 
 
 def result(home: Path, profile: dict, job: str) -> dict:
     if not re.fullmatch(r"[0-9a-f-]{36}", job):
         raise ValueError("Invalid ComfyUI job ID.")
-    with request("/history/" + job) as reply:
-        entry = json.load(reply).get(job)
+    if cloud_key():
+        entry = cloud_entry(job)
+    else:
+        with request("/history/" + job) as reply:
+            entry = json.load(reply).get(job)
     if not entry:
         return {"state": "waiting"}
     if entry.get("status", {}).get("status_str") == "error":
@@ -91,7 +160,7 @@ def result(home: Path, profile: dict, job: str) -> dict:
         raise ValueError(f"ComfyUI render failed: {(detail or 'see the worker log')[:300]}")
     output = entry.get("outputs", {}).get(profile["output"], {})
     video = next((item for group in output.values() if isinstance(group, list) for item in group
-                  if isinstance(item, dict) and item.get("type") == "output"
+                  if isinstance(item, dict) and item.get("type", "output") == "output"
                   and str(item.get("filename", "")).lower().endswith(".mp4")), None)
     if video is None:
         raise ValueError("The configured output node did not produce an MP4.")
@@ -101,7 +170,7 @@ def result(home: Path, profile: dict, job: str) -> dict:
         part = target.with_suffix(f".{uuid.uuid4().hex}.part")
         try:
             query = urllib.parse.urlencode({key: video.get(key, "") for key in ("filename", "subfolder", "type")})
-            with request("/view?" + query) as reply, part.open("wb") as out:
+            with fetch(query) as reply, part.open("wb") as out:
                 size = 0
                 while chunk := reply.read(1 << 20):
                     size += len(chunk)

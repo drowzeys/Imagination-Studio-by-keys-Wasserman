@@ -122,3 +122,101 @@ def test_a_result_waits_then_lands_once_under_uploads(comfy):
     views = sum(path.startswith("/view?") for path, _ in Comfy.seen)
     assert slate_comfy.result(comfy, profile, JOB) == done and sum(path.startswith("/view?") for path, _ in Comfy.seen) == views  # fetched once
     assert not list((comfy / "uploads").glob("*.part"))
+
+
+# ---------- Comfy Cloud (issue #185): the same panel with a key ----------
+
+class Cloud(BaseHTTPRequestHandler):
+    seen: list = []
+    job: dict = {}
+    refuse: int = 0
+
+    def log_message(self, *a):
+        pass
+
+    def reply(self, body: bytes, kind="application/json", code=200, more=()):
+        self.send_response(code); self.send_header("Content-Type", kind); self.send_header("Content-Length", str(len(body)))
+        for name, value in more:
+            self.send_header(name, value)
+        self.end_headers(); self.wfile.write(body)
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        Cloud.seen.append((self.path, self.headers.get("X-API-Key"), body))
+        if Cloud.refuse:
+            return self.reply(b"{}", code=Cloud.refuse)
+        self.reply(json.dumps({"name": "ref.png", "subfolder": "", "type": "input"} if self.path == "/api/upload/image" else {"prompt_id": JOB, "node_errors": {}}).encode())
+
+    def do_GET(self):
+        Cloud.seen.append((self.path, self.headers.get("X-API-Key"), b""))
+        if self.path.startswith("/api/jobs/"):
+            return self.reply(json.dumps(Cloud.job).encode())
+        if self.path.startswith("/api/view?"):
+            return self.reply(b"", code=302, more=[("Location", f"http://127.0.0.1:{self.server.server_address[1]}/signed/shot.mp4?sig=abc")])
+        self.reply(MP4, "video/mp4")
+
+
+@pytest.fixture()
+def cloud(monkeypatch, comfy):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Cloud)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    Cloud.seen, Cloud.job, Cloud.refuse = [], {}, 0
+    monkeypatch.setenv("STUDIO_COMFY_URL", f"http://127.0.0.1:{server.server_address[1]}")
+    monkeypatch.setenv("STUDIO_COMFY_API_KEY", "comfy-secret-key")
+    yield comfy
+    server.shutdown()
+
+
+def test_with_a_key_the_shot_goes_to_comfy_cloud_s_own_routes(cloud):
+    profile = slate_comfy.profiles()["ref"]
+    assert slate_comfy.submit(cloud, profile, "a boat at dawn", 7, ["uploads/face.png"]) == JOB
+    (upload, key1, _), (route, key2, body) = Cloud.seen
+    assert (upload, route) == ("/api/upload/image", "/api/prompt") and key1 == key2 == "comfy-secret-key"
+    sent = json.loads(body)
+    assert sent["prompt"]["6"]["inputs"]["text"] == "a boat at dawn" and sent["prompt"]["21"]["inputs"]["image"] == "ref.png"
+    assert sent["extra_data"] == {"api_key_comfy_org": "comfy-secret-key"}  # what the cloud's partner nodes are paid with
+    assert Comfy.seen == []  # and nothing went to the other address
+
+
+def test_a_cloud_job_waits_fails_with_its_reason_or_lands_from_the_signed_address_without_the_key(cloud):
+    profile = slate_comfy.profiles()["ref"]
+    for waiting in ("pending", "in_progress", "queued_waiting"):
+        Cloud.job = {"status": waiting}
+        assert slate_comfy.result(cloud, profile, JOB) == {"state": "waiting"}
+    Cloud.job = {"status": "failed", "execution_error": {"exception_message": "model not found"}}
+    with pytest.raises(ValueError, match="Comfy Cloud render failed: model not found"):
+        slate_comfy.result(cloud, profile, JOB)
+    Cloud.job = {"status": "cancelled"}
+    with pytest.raises(ValueError, match="was cancelled"):
+        slate_comfy.result(cloud, profile, JOB)
+    Cloud.job = {"status": "completed", "outputs": {"25": {"videos": [{"filename": "shot.mp4", "subfolder": "", "type": "output"}]}}}
+    Cloud.seen = []
+    done = slate_comfy.result(cloud, profile, JOB)
+    assert done == {"state": "done", "path": f"uploads/comfy-{JOB}.mp4"} and (cloud / done["path"]).read_bytes() == MP4
+    (status, key1, _), (view, key2, _), (signed, key3, _) = Cloud.seen
+    assert status == "/api/jobs/" + JOB and view.startswith("/api/view?") and key1 == key2 == "comfy-secret-key"
+    assert signed.startswith("/signed/") and key3 is None  # the key never follows the redirect
+
+
+def test_the_key_is_only_sent_over_https_and_a_refusal_says_why(cloud, monkeypatch):
+    for code, why in ((401, "refused the API key"), (402, "not enough credits"), (429, "subscription is not active")):
+        Cloud.refuse = code
+        with pytest.raises(ValueError, match=why) as said:
+            slate_comfy.request("/prompt", {})
+        assert "comfy-secret-key" not in str(said.value)
+    Cloud.refuse = 400
+    with pytest.raises(ValueError, match="did not take the request"):
+        slate_comfy.request("/prompt", {})
+    seen = len(Cloud.seen)
+    monkeypatch.setenv("STUDIO_COMFY_URL", "http://comfy.example:8188")
+    with pytest.raises(ValueError, match="only sent over https"):
+        slate_comfy.request("/prompt", {})
+    assert len(Cloud.seen) == seen  # nothing was sent
+
+
+def test_the_panel_is_told_when_its_renders_go_to_the_cloud(cloud, monkeypatch):
+    import slate
+
+    assert slate.comfy_profiles() == {"ref": {"label": "One reference", "references": 1, "cloud": True}}
+    monkeypatch.delenv("STUDIO_COMFY_API_KEY")
+    assert slate.comfy_profiles() == {"ref": {"label": "One reference", "references": 1}}
