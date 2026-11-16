@@ -662,7 +662,7 @@ def scout(r: Run, model: str, w: int, h: int, key: str | None = None):
         raise NotHere(f"{model} is not installed or not offered on a {r.platform}")
     job = r.job({"kind": "scout", "title": f"studio-check {model}", "params": {"prompt": "A cyborg courier in a chrome jacket on a neon-lit rooftop in rain-soaked Neo-Tokyo, holographic billboards, cinematic night",
                                                                            "count": 1, "seed": 1, "width": w, "height": h, "image_model": model}})
-    out = r.output(job, r"scout_s\d+\.png$")
+    out = r.output(job, r"_s\d+\.png$")
     if key:
         r.ctx[key] = r.rel(out)
     return picture(out, (w, h)) | {"_job": job}

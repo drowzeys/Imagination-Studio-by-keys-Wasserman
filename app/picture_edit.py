@@ -31,6 +31,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+import take_names  # a take's readable folder and file names, beside this file
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import edit_plan  # noqa: E402  (the sizes and the noise seed, shared with the two render scripts)
 
@@ -157,7 +159,7 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         picked = lora_resolve(params.get("loras"), "image")
         angles = params.get("angles") or []
         prompt = (params.get("prompt") or "").strip()
-        folder = home / "scouts" / job_id
+        folder = take_names.pictures(home, job_id, params)  # its own readable folder by month (issue #257)
         if angles:
             if not any(p["id"] == ANGLE_LORA for p in picked):
                 raise HTTPException(400, "a set of camera angles needs the Multiple Angles LoRA: install it in the LoRA hub (Fun) and tick it here")
