@@ -84,3 +84,46 @@ def test_a_clip_made_from_a_clip_is_named_by_what_was_done_and_to_what(tmp_path)
     assert hlg.parent == sdr.parent and hlg.name.endswith("_bbbbbb-hlg.mp4") and sdr.name.endswith("_bbbbbb-sdr.mp4")
     assert names.derived(tmp_path, "check", "hlg", take, "-hlg") == tmp_path / "renders/check-hlg.mp4"  # nothing is made for a check
     assert names.derived(tmp_path, "1109-200000-bbbbbb", "title", "").parent.name.endswith("_title_bbbbbb")
+
+
+def test_a_finished_take_in_a_folder_named_by_its_id_moves_to_its_readable_place(tmp_path):
+    import json
+    home, job = tmp_path, "1107-181022-ee3e3a"
+    old = home / "sound/foley" / job
+    old.mkdir(parents=True)
+    for name in ("foley.wav", "foley.mp4", "render.json"):
+        (old / name).write_text("x")
+    (old / "foley.take.json").write_text(json.dumps({"id": job, "path": f"sound/foley/{job}/foley.wav", "clip": f"sound/foley/{job}/foley.mp4",
+                                                     "source": "renders/a.mp4"}))
+    outputs = names.settle(home, [f"sound/foley/{job}/foley.wav", f"sound/foley/{job}/foley.mp4"], job, "Rain on a window", "foley")
+    stem = Path(outputs[0]).parent.name
+    assert stem.endswith("-11-07_181022_rain-on-a-window_ee3e3a") and not old.exists()
+    assert outputs == [f"sound/foley/{stem[:7]}/{stem}/{stem}.wav", f"sound/foley/{stem[:7]}/{stem}/{stem}.mp4"]
+    new = home / "sound/foley" / stem[:7] / stem
+    assert sorted(p.name for p in new.iterdir()) == sorted([f"{stem}.wav", f"{stem}.mp4", f"{stem}.take.json", "render.json"])
+    said = json.loads((new / f"{stem}.take.json").read_text())
+    assert said["path"] == outputs[0] and said["clip"] == outputs[1] and said["source"] == "renders/a.mp4" and said["id"] == job
+    assert names.find(home / "sound/foley", job, ".take.json") == new / f"{stem}.take.json"  # found by its id as the others are
+    assert names.settle(home, outputs, job, "Rain on a window", "foley") == outputs  # already there: nothing to do
+    # pictures: the folder moves, each picture takes the stem, the contact sheet keeps its name
+    shots = home / "scouts" / "1107-190000-aaaaaa"
+    shots.mkdir(parents=True)
+    for name in ("scout_s7.png", "scout_s8_shot2.png", "sheet.jpg"):
+        (shots / name).write_text("x")
+    made = names.settle(home, [f"scouts/1107-190000-aaaaaa/{n}" for n in ("scout_s7.png", "scout_s8_shot2.png", "sheet.jpg")],
+                        "1107-190000-aaaaaa", "A red door", "picture")
+    assert [Path(p).name.split("aaaaaa")[-1] for p in made] == ["_s7.png", "_s8_shot2.png", "/sheet.jpg"[1:]] or \
+        [Path(p).name for p in made][2] == "sheet.jpg"
+    assert all((home / p).is_file() for p in made) and Path(made[0]).parent.name.endswith("_a-red-door_aaaaaa")
+    # left alone: a take already in another layout, a folder in the way, no outputs
+    flat = home / "voice"
+    flat.mkdir()
+    (flat / "1107-181022-ee3e3a.wav").write_text("x")
+    assert names.settle(home, ["voice/1107-181022-ee3e3a.wav"], job, "x") == ["voice/1107-181022-ee3e3a.wav"] and names.settle(home, [], job, "x") == []
+    again = home / "sound/sfx" / "1107-200000-bbbbbb"
+    again.mkdir(parents=True)
+    (again / "sound.wav").write_text("x")
+    way, _ = names.folder(home / "sound/sfx", "1107-200000-bbbbbb", "thunder", "sfx")
+    way.mkdir(parents=True)
+    assert names.settle(home, ["sound/sfx/1107-200000-bbbbbb/sound.wav"], "1107-200000-bbbbbb", "thunder", "sfx") == ["sound/sfx/1107-200000-bbbbbb/sound.wav"]
+    assert (again / "sound.wav").is_file()

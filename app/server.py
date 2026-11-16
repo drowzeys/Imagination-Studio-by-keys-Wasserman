@@ -2504,6 +2504,10 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
             job["outputs"] = [relative(Path(p)) for p in outputs if Path(p).is_file()]
             if not job["outputs"]:
                 raise RuntimeError("the script finished without writing its output")
+            if job["kind"] == "scout":  # pictures a bounded Windows writer left under the job's id: their readable place
+                several = params.get("prompts")
+                job["outputs"] = take_names.settle(HOME, job["outputs"], job["id"],
+                                                   str(params.get("prompt") or (several[0] if isinstance(several, list) and several else "")), "picture")
             if (WINDOWS or WIN32) and windows_runtime.bounded(job["kind"], params) and job["kind"] == "scout" and params.get("suite_import"):
                 ids = params["suite_shots"] if "suite_shots" in params else [params["suite_shot"]]
                 images = [path for path in job["outputs"] if path.endswith(".png")]
@@ -2536,6 +2540,11 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
                     windows_sound.save_take(job, HOME, HOME / job["outputs"][0], job["_sound_seconds"])
                 if (WINDOWS or WIN32) and job["kind"] == "foley" and windows_runtime.bounded("foley", params):
                     windows_foley.save_take(job, HOME, HOME / "sound/foley" / job["id"])
+                if job["kind"] in ("sfx", "foley") and job.get("outputs"):
+                    # a take a bounded Windows writer left in a folder named by the job's id gets its readable place
+                    # now that it is finished (take_names.settle, issue #257); any other layout is left as it is
+                    words = params.get("prompt") or ("foley " + take_names.title_of(params.get("video")) if job["kind"] == "foley" else "")
+                    job["outputs"] = take_names.settle(HOME, job["outputs"], job["id"], str(words), job["kind"])
                 job["status"] = "done"
     except sparks.Moved:  # the Spark it was on refused it, failed it or stopped answering: it is in the queue again
         params.clear()  # as it was queued: a retake's seed and the frames cut for it are made again

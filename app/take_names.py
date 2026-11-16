@@ -10,6 +10,8 @@ model's summary. The names are chosen once, when the job is built, and never cha
 where they are: the Library reads both layouts."""
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 import re
 import time
@@ -144,3 +146,58 @@ def derived(home: Path, job_id: str, what: str, source=None, tag: str = "", suff
         return home / "renders" / f"{job_id}{tag}{suffix}"
     place, name = folder(home / "renders", job_id, f"{what} {title_of(source)}".strip(), what)
     return place / f"{name}{tag}{suffix}"
+
+
+MEDIA_NAMES = ("sound", "foley")  # the fixed names some writers give a take's files: they take the folder's stem
+
+
+def settle(home: Path, outputs: list[str], job_id: str, title: str, fallback: str = "take") -> list[str]:
+    """A finished job whose files are in a flat folder named by its id (``<root>/<job id>/sound.wav``: the bounded
+    Windows writers, which check and guard that folder while they run) gets its readable place now that it is done:
+    the folder moves to ``<root>/<YYYY-MM>/<stem>/``, ``sound.*`` and ``foley.*`` become ``<stem>.*``, a picture
+    ``scout_s7.png`` becomes ``<stem>_s7.png``, and the take records in it name the new paths. Other files (logs,
+    measurements, a contact sheet) move along under their own names. Returns ``outputs`` (paths relative to
+    ``home``) as they are now. Anything unexpected (another layout, a folder in the way, a locked file) leaves
+    everything where it was: a take in its old place is still a good take."""
+    if not outputs:
+        return outputs
+    first = Path(outputs[0])
+    old = home / first.parent
+    if first.parent.name != job_id or not old.is_dir() or old.is_symlink() or len(first.parts) < 3:
+        return outputs
+    new, name = folder(old.parent, job_id, title, fallback)
+    if new.exists():
+        return outputs
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(old, new)
+    except OSError:
+        return outputs
+    moved = {}
+    for file in sorted(path for path in new.iterdir() if path.is_file()):
+        head = file.name.split(".", 1)[0]
+        target = file
+        if head in MEDIA_NAMES:
+            target = file.with_name(name + file.name[len(head):])
+        elif file.name.startswith("scout_") and file.suffix.lower() == ".png":
+            target = file.with_name(name + file.name[len("scout"):])
+        if target != file and not target.exists():
+            try:
+                file.replace(target)
+            except OSError:
+                target = file
+        else:
+            target = file
+        moved[(old / file.name).relative_to(home).as_posix()] = target.relative_to(home).as_posix()
+    for record in new.glob("*.take.json"):  # what a record says of its own files follows them
+        try:
+            said = json.loads(record.read_text(encoding="utf-8"))
+            if isinstance(said, dict):
+                changed = {key: moved[value] for key, value in said.items() if isinstance(value, str) and value in moved}
+                if changed:
+                    part = record.with_name(record.name + ".part")
+                    part.write_text(json.dumps({**said, **changed}, indent=1) + "\n", encoding="utf-8")
+                    part.replace(record)
+        except (OSError, ValueError):
+            continue
+    return [moved.get(Path(path).as_posix(), path) for path in outputs]
