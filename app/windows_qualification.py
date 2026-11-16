@@ -1,7 +1,6 @@
 """Compatibility boundaries for bounded Windows qualification; hashes remain provenance."""
 from __future__ import annotations
 
-from importlib import metadata
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -19,12 +18,40 @@ def version_family(version: str, parts: int = 1) -> str:
     return ".".join(match[1].split(".")[:parts])
 
 
+def site_versions(site: Path) -> dict[str, str]:
+    """{package name: version} of what is installed in ``site`` (a venv's site-packages), names in lower case with
+    underscores, read from each package's own record on disk. importlib.metadata answers a record it may not read
+    with no name, the same as an empty one: on a laptop whose Foley packages were installed from an elevated shell
+    the app could read none of them, and every dependency was reported missing with no reason. Here a record or a
+    folder that cannot be read is an OSError that says so; a record with no name inside (a leftover of an
+    interrupted install, #267) is still passed over."""
+    found = {}
+    for record in sorted(os.scandir(site), key=lambda entry: entry.name):
+        if not record.name.endswith((".dist-info", ".egg-info")) or record.name.startswith("~"):
+            continue
+        name = version = ""
+        for file in ("METADATA", "PKG-INFO"):
+            try:
+                with open(os.path.join(record.path, file), encoding="utf-8", errors="replace") as lines:
+                    for line in lines:
+                        if not line.strip():
+                            break  # the headers end at the first empty line
+                        if line.startswith("Name:") and not name:
+                            name = line[5:].strip()
+                        elif line.startswith("Version:") and not version:
+                            version = line[8:].strip()
+                break
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+        if name and version:
+            found[name.lower().replace("-", "_").replace(".", "_")] = version
+    return found
+
+
 def gpu_runtime(venv: Path) -> dict:
     config = dict(line.split("=", 1) for line in (venv / "pyvenv.cfg").read_text().splitlines() if "=" in line)
     config = {key.strip(): value.strip() for key, value in config.items()}
-    versions = {dist.metadata["Name"].lower().replace("-", "_"): dist.version
-                for dist in metadata.distributions(path=[str(venv / "Lib" / "site-packages")]) if dist.metadata["Name"]}
-    return {"python": config["version"], "versions": versions}
+    return {"python": config["version"], "versions": site_versions(venv / "Lib" / "site-packages")}
 
 
 def gpu_compatibility(venv: Path) -> dict:

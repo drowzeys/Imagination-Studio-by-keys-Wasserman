@@ -249,8 +249,7 @@ def test_saved_qualification_matches_json_round_tripped_fingerprint(monkeypatch)
     monkeypatch.setattr(audio, "upstream_sources", lambda: {"model.py": "source-hash"})
     names = ("torch", "torchaudio", "numpy", "transformers", "huggingface-hub",
              "stable-audio-3", "soundfile", "safetensors")
-    monkeypatch.setattr(audio.metadata, "distributions", lambda **kwargs: [
-        SimpleNamespace(metadata={"Name": name}, version="1.0") for name in names])
+    monkeypatch.setattr(windows_qualification, "site_versions", lambda site: {name.replace("-", "_"): "1.0" for name in names})
     monkeypatch.setattr(windows_memory, "single_gpu_uuid", lambda: "GPU-example")
     monkeypatch.setattr(windows_memory, "physical_memory_mb", lambda: 65536)
     monkeypatch.setattr(windows_memory, "host_memory", lambda: (32460, 13000))

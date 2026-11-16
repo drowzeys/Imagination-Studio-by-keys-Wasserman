@@ -116,12 +116,13 @@ def sound_python(kind: str) -> Path:
 
 
 def foley_packages(python: Path) -> bool:
-    from importlib import metadata
+    from windows_qualification import site_versions
     if not python.is_file():
         return False
-    site = python.parent.parent / "Lib" / "site-packages"
-    packages = {dist.metadata["Name"].lower().replace("-", "_") for dist in metadata.distributions(path=[str(site)])
-                if dist.metadata["Name"]}
+    try:
+        packages = site_versions(python.parent.parent / "Lib" / "site-packages")
+    except OSError:
+        return False
     return {"torch", "numpy", "soxr", "librosa", "torchdiffeq", "open_clip_torch"}.issubset(packages)
 
 
