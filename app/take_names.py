@@ -87,3 +87,17 @@ def find(root: Path, job_id: str, suffix: str) -> Path | None:
         if found.is_file():
             return found
     return None
+
+
+def clip(home: Path, job_id: str, title: str | None, prompt: str | None) -> Path:
+    """Where a clip made from this job goes when no place was named for it: its own folder under ``renders``, by
+    month, named by the job's title (or the first words of its prompt) and its token. Asked for when the job is
+    built, by the queue when another clip waits for it, and by a long video for its parts: one answer every time."""
+    folder, name = folder_of(home / "renders", job_id, title, prompt, "clip")
+    return folder / f"{name}.mp4"
+
+
+def folder_of(root: Path, job_id: str, title: str | None, prompt: str | None, fallback: str) -> tuple[Path, str]:
+    plain = unicodedata.normalize("NFKD", str(title or "")).encode("ascii", "ignore").decode("ascii")
+    words = title if re.search(r"[A-Za-z0-9]", plain) else prompt  # a title with no usable word (or none) leaves the prompt's
+    return folder(root, job_id, words or "", fallback)

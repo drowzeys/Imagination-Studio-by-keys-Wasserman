@@ -60,6 +60,7 @@ if LOCAL_GPU_CHILD:
         raise RuntimeError("a managed local GPU worker requires its private control key")
     os.environ["STUDIO_DISCOVER_DELAY"] = "-1"
 
+import take_names  # noqa: E402  (a take's readable folder and file names, beside this file)
 import chain  # noqa: E402  (a long video's last frame and join, beside this file)
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
@@ -1742,6 +1743,16 @@ def mac_comfy_room(what: str) -> None:
                             + (f": the most memory is held by {others}. Quit what you do not need and try again" if others else ""))
 
 
+def clip_target(job_id: str, params: dict) -> Path:
+    """Where a clip goes when no place was named for it: its own readable folder under renders, by month
+    (take_names.py, issue #257). A command built only to be checked ("check") names the old flat place and leaves
+    no folder behind. Clips made before this stay where they are."""
+
+    if job_id == "check":
+        return HOME / "renders" / f"{job_id}.mp4"
+    return take_names.clip(HOME, job_id, (jobs.get(job_id) or {}).get("title"), params.get("prompt"))
+
+
 def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list[str], dict, list[str]]:
     """(command, environment, output paths) for one job. ``room`` False leaves this machine's memory out of it: the
     clip renders on another Spark, whose own guard is asked (sparks.py)."""
@@ -1837,7 +1848,7 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     sized = {**(PRESETS[preset][2] if preset in PRESETS else {}), **chosen}
     # any length the model takes: "frames" (17n + 5), or "seconds" brought to the nearest such count
     frames = clip_frames(params, sized)
-    target = Path(params["output"]) if params.get("output") else HOME / "renders" / f"{job_id}.mp4"
+    target = Path(params["output"]) if params.get("output") else clip_target(job_id, params)
     target = inside(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     env = {"SEED": seed, "FRAMES": frames, **(PRESETS[preset][2] if preset in PRESETS else {}), **QUALITIES[quality][1]}
@@ -2265,7 +2276,8 @@ def long_take(job: dict) -> bool:
     total = int(params["total_seconds"])
     pieces = plan(total, int(params.get("segment_seconds", LONGEST)))
     beats = [line.strip() for line in params.get("beats") or [] if line.strip()]
-    folder = HOME / "renders" / job["id"]
+    final = clip_target(job["id"], params)  # the long video and its parts share the take's own folder
+    folder = final.parent
     folder.mkdir(parents=True, exist_ok=True)
     image, clips = params.get("image"), []
     for index, seconds in enumerate(pieces):
@@ -2291,7 +2303,6 @@ def long_take(job: dict) -> bool:
         job["outputs"] = [relative(c) for c in clips]  # finished parts can be watched while the rest renders
     # join: every part after the first repeats the frame it started from, so that frame is dropped (chain.py)
     job["progress"] = {"stage": "joining", "at": len(clips), "of": len(clips)}
-    final = HOME / "renders" / f"{job['id']}.mp4"
     try:
         chain.join(clips, final, total, FPS, folder, environment({}))
     except chain.JoinFailed as error:

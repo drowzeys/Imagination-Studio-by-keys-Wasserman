@@ -118,6 +118,9 @@ def attach(home: Path, jobs: dict, order: list, lock: threading.Lock):
                 extra += sorted(rel(p) for p in (home / name.with_suffix(".yue2")).rglob("*") if p.is_file())
             if own and name.parts[0] in ("music", "voice", "sound"):
                 take_folders.add(name.parent)
+            if (name.parts[0] == "renders" and len(name.parts) == 4 and re.fullmatch(r"\d{4}-\d{2}", name.parts[1])
+                    and name.name.startswith(("seg", name.parts[2]))):
+                take_folders.add(name.parent)  # a clip's own folder goes when its last file has (a long video's parts too)
         more, skipped = move(extra, gone, keep_films) if extra else ([], [])
         sound_folders = {Path(one["from"]).parent for one in moved + more
                          if len(Path(one["from"]).parts) == 4 and Path(one["from"]).parts[:2] in

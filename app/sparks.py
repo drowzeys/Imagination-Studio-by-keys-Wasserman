@@ -65,6 +65,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+
+import take_names  # where a clip goes when no place was named for it, beside this file
 import uuid
 from pathlib import Path
 
@@ -1279,7 +1281,9 @@ class Hub:
             return False
         for other in self.jobs.values():
             if other is not job and other["status"] in ("queued", "running") and other["kind"] in ("video", "studio", "long"):
-                if (other["params"].get("output") or f"renders/{other['id']}.mp4") in wanted:
+                made = other["params"].get("output") or take_names.clip(
+                    self.home, other["id"], other.get("title"), other["params"].get("prompt")).relative_to(self.home).as_posix()
+                if made in wanted or f"renders/{other['id']}.mp4" in wanted:
                     return True
         return False
 
