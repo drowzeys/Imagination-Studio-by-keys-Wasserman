@@ -39,7 +39,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$Repo = "https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git",
+  [string]$Repo = "https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git",
   [string]$Branch = "main",
   [switch]$SkipStudioSetup,          # only the Windows side (launchers, pin, power, startup)
   [string]$HfToken = "",             # a Hugging Face read token (asked for when none is saved yet)

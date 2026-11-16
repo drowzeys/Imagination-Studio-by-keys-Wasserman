@@ -17,7 +17,7 @@
 set -euo pipefail
 PREFIX="${PREFIX:-$HOME/.local/opt/tensorfold-studio}"
 BOLT_COMMIT="${BOLT_COMMIT:-7d124f36df08a5836d3a5e3e85c19b6d919c70dc}"
-BOLT_ASSET_URL="${BOLT_ASSET_URL:-https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/v4.2.0/bolt-cuda-${BOLT_COMMIT:0:8}-linux-aarch64.tar.gz}"
+BOLT_ASSET_URL="${BOLT_ASSET_URL:-https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/releases/download/v4.2.0/bolt-cuda-${BOLT_COMMIT:0:8}-linux-aarch64.tar.gz}"
 BOLT_ASSET_SHA256="${BOLT_ASSET_SHA256:-ed84ec49414d823e9480b88086189f78eefd95d18196a0c29e332b2746698d90}"
 CARRIER="${IMAGE:-ghcr.io/drowzeys/keys-tensorfold-studio:4.2.0}"
 ZIG_VERSION=0.17.0

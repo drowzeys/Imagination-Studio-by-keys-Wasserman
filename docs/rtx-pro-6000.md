@@ -24,7 +24,7 @@ export PATH=/usr/local/cuda/bin:$PATH && nvcc --version     # 12.9 or newer
 # 2. the Studio. The same four values again for scripts/app.sh. /data/studio is an example path.
 #    No flag is the core. Flags: docs/installation.md, under Install flags.
 #    STUDIO_GPU is the nvidia-smi index, and only when more than one GPU is not driving a display.
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git
 cd Imagination-Studio-by-keys-Wasserman
 PREFIX=/data/studio SPARK_MODELS=/data/studio/models \
 STUDIO_HOME=/data/studio/ImaginationStudio STUDIO_GPU=1 \

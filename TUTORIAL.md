@@ -25,7 +25,7 @@ Everything here was measured on one machine: a Mac Studio M5 Ultra with 256 GB.
 
 ```bash
 brew install python@3.11 uv ffmpeg
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git
 cd Imagination-Studio-by-keys-Wasserman
 bash oneshot-setup.sh --app
 ```
@@ -65,7 +65,7 @@ say otherwise.
 
 **Prefer to let an agent do it?** Give Claude Code (or another coding agent) this:
 
-> Clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman and follow its AGENTS.md section "Install for a
+> Clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman and follow its AGENTS.md section "Install for a
 > person and build the one-click app". Tell me before any large download starts and when the app is ready.
 
 ## 3. The clickable app

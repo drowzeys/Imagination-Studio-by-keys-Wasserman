@@ -20,7 +20,7 @@ the CUDA engine installation; that does not make an arbitrary Windows GPU suppor
 For a new install, run in an administrator PowerShell:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/drowzeys/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/main/oneshot-setup-rtx-spark-n1x.ps1 -OutFile "$env:TEMP\studio-setup.ps1"
 powershell -ExecutionPolicy Bypass -File "$env:TEMP\studio-setup.ps1"
 ```
 

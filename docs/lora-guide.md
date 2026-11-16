@@ -231,7 +231,7 @@ else; `--make-package DIR` writes those archives from a bundle. No LoRA file is 
 **For AI agents** (no prompts anywhere; run in this order on a new machine):
 
 ```bash
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git && cd Imagination-Studio-by-keys-Wasserman
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git && cd Imagination-Studio-by-keys-Wasserman
 bash oneshot-setup.sh --no-render --no-loras        # the Studio (oneshot-setup-spark.sh on a DGX Spark); model weights as listed under One-shot
 bash oneshot-essential-bundle.sh --json > lora-bundle.json; echo "exit $?"   # 0 all present, 1 some unavailable (listed), 2 usage or disk
 bash oneshot-essential-bundle.sh --verify --json    # fetches nothing: "present", "unavailable", "gated", and "menu" (group -> LoRAs -> state)

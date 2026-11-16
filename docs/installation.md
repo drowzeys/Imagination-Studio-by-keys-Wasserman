@@ -96,7 +96,7 @@ badge, or a purple `MAC · APPLE SILICON MX · H3-METAL`. On a GPU that header i
 the Qwen team for Qwen-Image-2.1-Turbo, and the ComfyUI team for the runtime this build stands on.
 
 ```bash
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git && cd Imagination-Studio-by-keys-Wasserman
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git && cd Imagination-Studio-by-keys-Wasserman
 sudo apt install -y git ffmpeg
 bash oneshot-setup.sh            # the same command as on a Mac: on Linux it runs oneshot-setup-spark.sh
                                  # the core install (125 GB free disk): models, engines, motion graphics, Finish,
@@ -400,7 +400,7 @@ conversion, with *Use it* and *Unlink*.
 
 ```bash
 brew install python@3.11 uv ffmpeg
-git clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman.git
+git clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman.git
 cd Imagination-Studio-by-keys-Wasserman
 bash oneshot-setup.sh --app             # engine, image model, FastH3, 2x decoder, motion graphics, Finish, the app; ends with a test clip
 bash oneshot-setup.sh --turbo --app     # the same plus MiniMax H3 Turbo (64 GB more on disk, 128 GB of memory)
@@ -436,7 +436,7 @@ if it is not running and opens it in your browser; double-click again to come ba
 
 **Or hand it to your coding agent.** Paste this:
 
-> Clone https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman and follow its AGENTS.md section "Install for a
+> Clone https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman and follow its AGENTS.md section "Install for a
 > person and build the one-click app". Tell me before any large download starts and when the app is ready.
 
 `--turbo` adds MiniMax H3's own transformer and its Turbo adapter, and with them a second engine card in the app;

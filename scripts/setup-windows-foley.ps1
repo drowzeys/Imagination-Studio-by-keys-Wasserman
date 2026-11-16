@@ -8,7 +8,7 @@ param(
 # against this sha256 and installed, so an ordinary Foley setup compiles nothing for it.
 $SoxrWheel = 'soxr-1.1.0-cp312-abi3-win_arm64.whl'
 $SoxrSha256 = 'e30ebcec1be4cb09f147d25b89dca2427529883937c422331eed696458d8c1ee'
-$SoxrUrl = "https://github.com/drowzeys/Imagination-Studio-by-keys-Wasserman/releases/download/windows-arm64-wheels-r1/$SoxrWheel"
+$SoxrUrl = "https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/releases/download/windows-arm64-wheels-r1/$SoxrWheel"
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path $PSScriptRoot -Parent
