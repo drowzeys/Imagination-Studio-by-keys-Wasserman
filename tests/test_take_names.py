@@ -72,3 +72,15 @@ def test_a_take_is_found_by_its_job_id_in_either_layout(tmp_path):
     # found whatever the year is now: the id carries none
     assert names.find(root, "1107-181022-ee3e3a", ".take.json") is not None
     assert names.find(tmp_path / "nowhere", "1107-181022-ee3e3a", ".wav") is None
+
+
+def test_a_clip_made_from_a_clip_is_named_by_what_was_done_and_to_what(tmp_path):
+    take = "renders/2026-11/2026-11-09_194432_train-through-snow_adc366/2026-11-09_194432_train-through-snow_adc366.mp4"
+    assert names.title_of(take) == "train through snow" and names.title_of("renders/c.mp4") == "c" and names.title_of(None) == ""
+    made = names.derived(tmp_path, "1109-200000-bbbbbb", "upscale", take)
+    assert made.parent.name.endswith("-11-09_200000_upscale-train-through-snow_bbbbbb") and made.name == made.parent.name + ".mp4"
+    assert made.parents[2] == tmp_path / "renders"
+    hlg, sdr = (names.derived(tmp_path, "1109-200000-bbbbbb", "hlg", take, tag) for tag in ("-hlg", "-sdr"))
+    assert hlg.parent == sdr.parent and hlg.name.endswith("_bbbbbb-hlg.mp4") and sdr.name.endswith("_bbbbbb-sdr.mp4")
+    assert names.derived(tmp_path, "check", "hlg", take, "-hlg") == tmp_path / "renders/check-hlg.mp4"  # nothing is made for a check
+    assert names.derived(tmp_path, "1109-200000-bbbbbb", "title", "").parent.name.endswith("_title_bbbbbb")

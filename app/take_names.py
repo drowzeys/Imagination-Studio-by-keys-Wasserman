@@ -126,3 +126,21 @@ def named(outputs: list[str]) -> list[str]:
             path = target
         out.append(str(path))
     return out
+
+
+def title_of(path) -> str:
+    """The words a file is known by: the title part of a take's stem (``<date>_<time>_<title>_<token>``), or the
+    file's own name without its ending when it is not one."""
+    name = Path(str(path or "")).stem
+    found = re.fullmatch(r"\d{4}-\d{2}-\d{2}_\d{6}_(.+)_[A-Za-z0-9-]+", name)
+    return found.group(1).replace("-", " ") if found else name
+
+
+def derived(home: Path, job_id: str, what: str, source=None, tag: str = "", suffix: str = ".mp4") -> Path:
+    """Where a clip made from another clip goes (an upscale, an HLG grade, a swap, a title card): its own folder
+    under ``renders`` by month, named by what was done and the clip it was done to. ``tag`` tells two files of one
+    job apart (``-hlg``, ``-sdr``). A command built only to be checked ("check") names the old flat place."""
+    if job_id == "check":
+        return home / "renders" / f"{job_id}{tag}{suffix}"
+    place, name = folder(home / "renders", job_id, f"{what} {title_of(source)}".strip(), what)
+    return place / f"{name}{tag}{suffix}"

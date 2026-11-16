@@ -711,7 +711,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative):
         except Refused as error:
             raise HTTPException(400, str(error))
         folder = home / "graphics" / job_id
-        target = home / "renders" / f"{job_id}.mp4"
+        import take_names  # a take's readable folder and file names (issue #257), beside this file
+        target = take_names.derived(home, job_id, str(params.get("template") or "graphics"), str(params.get("title") or ""))
         if job_id != "check":  # the queue's check of the settings writes nothing; the job's turn writes its folder
             target.parent.mkdir(parents=True, exist_ok=True)
             write(folder, made)

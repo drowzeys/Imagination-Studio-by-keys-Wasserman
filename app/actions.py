@@ -189,11 +189,11 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             refused = hlg.refusal(clip)
             if refused:
                 raise HTTPException(400, refused)
-            target, outputs = home / "renders" / f"{job_id}-hlg.mp4", []
+            target, outputs = take_names.derived(home, job_id, "hlg", clip, "-hlg"), []
             command = [sys.executable, str(pack / "app/hlg.py"), "run", "--video", str(clip), "-o", str(target), "--strength", f"{strength:g}"]
             outputs.append(str(target))
             if params.get("sdr", True):
-                plain = home / "renders" / f"{job_id}-sdr.mp4"
+                plain = take_names.derived(home, job_id, "hlg", clip, "-sdr")
                 command += ["--sdr", str(plain)]
                 outputs.append(str(plain))
             return command, {}, outputs
@@ -233,7 +233,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             redraw = number(params, "denoise", 0.1)
             if not 0 <= redraw <= 0.4:
                 raise HTTPException(400, "the re-draw is between 0 (only enlarge) and 0.4; 0.1 is the tested setting")
-            target = home / "renders" / f"{job_id}.mp4"
+            target = take_names.derived(home, job_id, "upscale", clip)
             return script + ["--video", str(clip), "--lora", str(lora), "--megapixels", f"{area:g}", "--denoise", f"{redraw:g}",
                              "-o", str(target)], env, [str(target)]
         person = " ".join((params.get("person") or "").split())
@@ -248,7 +248,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         window, steps = number(params, "window", 22, int), number(params, "steps", 12, int)
         if window not in WINDOWS or not 4 <= steps <= 30:
             raise HTTPException(400, "the window is 22, 39 or 56 frames and the passes are between 4 and 30")
-        target = home / "renders" / f"{job_id}.mp4"
+        target = take_names.derived(home, job_id, "remove", clip)
         command = script + ["--video", str(clip), "--person", person, "--lora", str(lora), "--window", str(window),
                             "--steps", str(steps), "--seed", str(number(params, "seed", 904234, int)),
                             "--keep", str(folder / "person"), "-o", str(target)]

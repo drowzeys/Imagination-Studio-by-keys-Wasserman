@@ -24,6 +24,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+import take_names  # a take's readable folder and file names (issue #257), beside this file
+
 import windows_cuda  # noqa: E402  (the native Windows CUDA tier, beside this file)
 
 # the windows a part is made in: spark/swap_plan.py, shared with the script that renders it
@@ -88,7 +90,7 @@ def tidy(home: Path, job_id: str) -> None:
     that made no clip (cancelled, or failed) leaves no mask preview and no anchor either: they belong to the clip."""
 
     shutil.rmtree(work_folder(home, job_id), ignore_errors=True)
-    if not (home / "renders" / f"{job_id}.mp4").is_file():
+    if not any(found.is_file() for found in (home / "renders" / f"{job_id}.mp4", take_names.find(home / "renders", job_id, ".mp4") or home / "renders" / "-")):
         for folder in (home / "masks" / job_id, home / "scouts" / job_id):
             shutil.rmtree(folder, ignore_errors=True)
 
@@ -260,7 +262,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds,
         found = guard(chosen["quality"])  # before it is queued, and again when its turn comes
         if not found["fits"]:
             raise HTTPException(400, found["reason"])
-        target = home / "renders" / f"{job_id}.mp4"
+        target = take_names.derived(home, job_id, "swap", chosen["clip"])
         mask = home / "masks" / job_id / "person.mp4"
         still = home / "scouts" / job_id / "anchor.png"
         # the folders of the outputs are made by the job when it runs (spark_swap.py), not when it is queued: a job the

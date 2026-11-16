@@ -76,7 +76,8 @@ def test_upscale():
     _, build, *_ = studio()
     command, _, outputs = build("upscale", {"video": "renders/c.mp4"}, "j2")
     assert command[command.index("--megapixels") + 1] == "2" and command[command.index("--denoise") + 1] == "0.1"
-    assert outputs == [str(Path(outputs[0]).parent / "j2.mp4")] and "/renders/" in outputs[0]
+    made = Path(outputs[0])  # its own folder, named by what was done and to which clip (issue #257)
+    assert len(outputs) == 1 and made.parent.name.endswith("_upscale-c_j2") and made.name == made.parent.name + ".mp4" and "/renders/" in outputs[0]
     assert "megapixels" in refused(build, "upscale", {"video": "renders/c.mp4", "megapixels": 9}, "j")
     assert "re-draw" in refused(build, "upscale", {"video": "renders/c.mp4", "denoise": 0.9}, "j")
     assert "not a clip" in refused(build, "upscale", {"video": "uploads/a.png"}, "j")
@@ -90,7 +91,7 @@ def test_remove_and_mask():
     command, _, outputs = build("remove", {"video": "renders/c.mp4", "person": "woman", "clean_frame": "uploads/a.png", "silent": True}, "j4")
     assert "--silent" in command and command[command.index("--clean-frame") + 1].endswith("uploads/a.png")
     assert command[command.index("--window") + 1] == "22" and command[command.index("--steps") + 1] == "12"
-    assert outputs[0].endswith("renders/j4.mp4")
+    assert Path(outputs[0]).parent.name.endswith("_remove-c_j4") and Path(outputs[0]).name == Path(outputs[0]).parent.name + ".mp4"
     assert "who to remove" in refused(build, "remove", {"video": "renders/c.mp4"}, "j")
     assert "window" in refused(build, "remove", {"video": "renders/c.mp4", "person": "x", "window": 30}, "j")
     assert "not a picture" in refused(build, "remove", {"video": "renders/c.mp4", "person": "x", "clean_frame": "renders/c.mp4"}, "j")
