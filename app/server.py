@@ -1799,6 +1799,8 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
         if room:
             mac_comfy_room(kind)
         return built
+    if kind in refmod.KINDS:  # Create a RefMod, a Library action on pictures and clips (refmod.py: spark/spark_refmod.py)
+        return refmod_build(kind, params, job_id)
     if kind in swap.KINDS:  # Character Swap, a Library action on a clip (swap.py: spark/spark_swap.py)
         return swap_build(kind, params, job_id)
     if kind in sound.KINDS:  # a sound effect or a clip's foley (sound.py)
@@ -2969,7 +2971,7 @@ def queue_job(body: dict) -> dict:
     if body.get("title") is not None and not isinstance(body.get("title"), str):
         raise HTTPException(400, "title is text")
     params = dict(body.get("params") or {})
-    if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS + swap.KINDS + sound.KINDS + finish.KINDS + graphics.KINDS:
+    if kind not in ("scout", "video", "studio", "export", "long", "edit") + actions.KINDS + swap.KINDS + refmod.KINDS + sound.KINDS + finish.KINDS + graphics.KINDS:
         raise HTTPException(400, "unknown job kind")
     if WINCUDA and windows_cuda.unsupported(kind):  # refused when queued, with the reason: never sent to WSL or bash
         raise HTTPException(501, windows_cuda.unsupported(kind))
@@ -2982,7 +2984,7 @@ def queue_job(body: dict) -> dict:
             raise HTTPException(400, f"a long video is over {LONGEST} seconds and at most {max(LONG) // 60} minutes")
         pieces = plan(total, int(params.get("segment_seconds", LONGEST)))
         build("video", {**params, "seconds": pieces[0], "output": None}, "check")
-    if kind not in ("export", "edit", "foley") + actions.KINDS + swap.KINDS + finish.KINDS + graphics.KINDS and not (params.get("prompt") or "").strip():
+    if kind not in ("export", "edit", "foley") + actions.KINDS + swap.KINDS + refmod.KINDS + finish.KINDS + graphics.KINDS and not (params.get("prompt") or "").strip():
         raise HTTPException(400, "a prompt is needed")
     if kind != "video" and params.get("references"):
         raise HTTPException(400, "reference pictures are for single clips")
@@ -3032,10 +3034,12 @@ def queue_job(body: dict) -> dict:
               room=not (selected is not None or required_worker or (kind in ("video", "studio") and said["used"] > 1)))
     if kind in graphics.KINDS and not body.get("title"):
         body = {**body, "title": graphics_title(params)}
+    if kind in refmod.KINDS and not body.get("title"):
+        body = {**body, "title": refmod_title(params)}
     if kind in swap.KINDS and not body.get("title"):
         body = {**body, "title": swap_title(params)}
     job = {"id": job_id, "kind": kind, "status": "queued", "title": body.get("title") or (action_title(kind, params) if kind in actions.KINDS else sound_title(kind, params) if kind in sound.KINDS else kind), "params": params,
-           "source": action_source(kind, params) if kind in actions.KINDS else swap_source(params) if kind in swap.KINDS else sound_source(kind, params) if kind in sound.KINDS else None,
+           "source": action_source(kind, params) if kind in actions.KINDS else swap_source(params) if kind in swap.KINDS else refmod_source(params) if kind in refmod.KINDS else sound_source(kind, params) if kind in sound.KINDS else None,
            "outputs": [], "progress": None, "error": None, "log": "", "created": time.time(), "started": None,
            "finished": None, "estimate": swap_estimate(params) if kind in swap.KINDS else clip_estimate(kind, params, referenced, ref_media)}
     if placement is not None:
@@ -3896,6 +3900,9 @@ swap_router, swap_build, swap_title, swap_source, swap_estimate = swap.attach(HO
                                                                                lambda: [n for n, f in transformers().items() if f == "references"],
                                                                                lambda: SPARK and not windows_cuda.native_os() and memory_guard.guard_mode() == "warn")
 app.include_router(swap_router)
+import refmod  # noqa: E402  (Create a RefMod: pictures and clips saved as a MiniMax H3 reference, a Library action, beside this file)
+refmod_router, refmod_build, refmod_title, refmod_source = refmod.attach(HOME, PACK, SPARK, inside, relative, media_seconds)
+app.include_router(refmod_router)
 import sound  # noqa: E402  (sound effects and foley: Stable Audio Open and MMAudio, run locally, beside this file)
 sound_router, sound_build, sound_title, sound_source = sound.attach(HOME, PACK, SPARK, inside, relative, held_room, media_seconds)
 app.include_router(action_router)

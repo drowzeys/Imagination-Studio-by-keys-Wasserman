@@ -20,7 +20,7 @@ function actButtons(m) { const gfx = typeof gfxButtons === "function" ? gfxButto
   return (m.kind === "video" ? [one("upscale", "Upscale", "Make this clip larger and sharper: a latent upscale, then one light re-draw guided by the clip itself"),
                                one("remove", "Remove a person", "Take one person out of this clip and rebuild the background")]
     : [one("turnaround", "Turnaround", "Five views of this picture's subject, from the front round to the side or back")])
-    .concat(typeof revButtons === "function" ? revButtons(m) : [], typeof swapButtons === "function" ? swapButtons(m) : [], gfx); }  // Restyle, Extend, Fix (revise.js), then Add a title, Caption this clip (graphics.js)
+    .concat(typeof revButtons === "function" ? revButtons(m) : [], typeof swapButtons === "function" ? swapButtons(m) : [], typeof rfmButtons === "function" ? rfmButtons(m) : [], gfx); }  // Restyle, Extend, Fix (revise.js), then Add a title, Caption this clip (graphics.js)
 // a LoRA's card in the hub, when the LoRA belongs to an action: where it is used, in place of "Use on this clip"
 function actHubNote(r) { const kind = r.action, a = actOf(kind);
   return el("div", { class: "note" }, "Used by the Library’s “" + (a.title || kind) + "” action: " + (kind === "turnaround" ? "press Turnaround under a picture." : "press " + (a.title || kind) + " under a clip.")
@@ -36,6 +36,7 @@ const actUse = (path, how) => how === "first" ? () => { C.image = path; C.goes =
   : () => { C.goes = "video"; C.start = "refs"; sync(); if (!isRef()) return toast("Reference pictures need MiniMax H3 Ref2VA on this machine"); if (!C.refs.includes(path)) { C.refs.push(path); C.subjects.push(""); } C.step = 1; tab = "Create"; render(); };
 function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KINDS !== "undefined" && REV_KINDS.includes(o.kind)) return revPanel(o);  // revise.js
   if (o.kind === "swap" && typeof swapPanel === "function") return swapPanel(o);  // swap.js
+  if (o.kind === "refmod" && typeof rfmPanel === "function") return rfmPanel(o);  // refmod.js
   const a = actOf(o.kind), f = ACT[ACT_KEY[o.kind]], redraw = () => render();
   const box = el("div", { class: "seg", id: "actpanel", style: "margin-top:12px" },
     el("div", { class: "seghead" }, el("b", {}, a.title || o.kind), el("span", { class: "note", style: "margin:0" }, o.path.split("/").pop()), el("span", { style: "flex:1" }),

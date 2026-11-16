@@ -1,5 +1,5 @@
 #!/bin/bash
-# The pieces behind three Library actions on a DGX Spark: "Turnaround sheet", "Upscale" and "Remove a person".
+# The pieces behind the Library actions on a DGX Spark: "Turnaround sheet", "Upscale", "Remove a person" and "Create a RefMod".
 #   bash spark/setup-workflows.sh            # install what is missing (about 2.5 GB of models, three node packs)
 #   bash spark/setup-workflows.sh --verify   # check, download nothing
 #   bash spark/setup-workflows.sh --no-models   # the node packs only (what --upgrade runs: it fetches no weights)
@@ -35,6 +35,9 @@ node() {
 node ComfyUI-H3-ContactSheet     https://github.com/matlowai/ComfyUI-H3-ContactSheet     3c8c8c66e69362e5abf9cf4c4e693baddab90ca3
 node ComfyUI-H3-Video-Upsampler  https://github.com/dntpi/ComfyUI-H3-Video-Upsampler     36cb612ec3df30094eeb4fec66f1528925ebba73
 node h3-relay                    https://github.com/akatz-ai/h3-relay                    cf489b7f2472fdf33866fae36de49aea03ef464f
+# Create a RefMod: Luisa (luisacaotica)'s RefMod nodes (MIT), pictures and clips saved as a MiniMax H3 reference with
+# the H3 video VAE alone (spark/spark_refmod.py, app/refmod.py); no model of its own
+node ComfyUI-MiniMaxH3Mod         https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod   54f93eb6569fe35c9303e9bceb1c8b66c5722bbf
 
 # model <repository> <file in it> <folder under $MODELS/Workflows-Comfy> <name there> <sha256>
 model() {
@@ -62,6 +65,21 @@ if ! grep -q "Workflows-Comfy/checkpoints" "$YAML" 2>/dev/null || ! grep -q "Wor
       || printf '  latent_upscale_models: |\n    Workflows-Comfy/latent_upscale_models\n' >> "$YAML"
     echo "  ✓ model folders added to extra_model_paths.yaml"; touch "$PREFIX/workflows.restart"
   fi
+fi
+# the RefMods: written to the studio's own refmods folder (first, so the node saves there); a second folder named in
+# $STUDIO_HOME/refmods/share.txt (another ComfyUI's models/refmods) is read too, and a new RefMod is hard-linked into it
+STUDIO_HOME="${STUDIO_HOME:-$HOME/ImaginationStudio}"
+if ! grep -q "^studio_refmods:" "$YAML" 2>/dev/null; then
+  if [ "$VERIFY" = 1 ]; then echo "  ! $YAML does not list the studio's refmods folder"; bad=1; else
+    mkdir -p "$STUDIO_HOME/refmods"
+    printf 'studio_refmods:\n  base_path: %s\n  is_default: true\n  refmods: refmods\n' "$STUDIO_HOME" >> "$YAML"
+    echo "  ✓ refmods folder added to extra_model_paths.yaml"; touch "$PREFIX/workflows.restart"
+  fi
+fi
+SHARE="$(head -n1 "$STUDIO_HOME/refmods/share.txt" 2>/dev/null || true)"
+if [ -n "$SHARE" ] && [ -d "$SHARE" ] && ! grep -q "^shared_refmods:" "$YAML" 2>/dev/null && [ "$VERIFY" = 0 ]; then
+  printf 'shared_refmods:\n  base_path: %s\n  refmods: .\n' "$SHARE" >> "$YAML"
+  echo "  ✓ shared refmods folder $SHARE added to extra_model_paths.yaml"; touch "$PREFIX/workflows.restart"
 fi
 # the fp16 video decoder is optional: the Studio's graphs use the files it already has (Ref2VA in bf16, or in int8
 # where only Character Swap's int8 file is here, and the 8-bit decoder)
