@@ -349,6 +349,19 @@ the LoRA hub, the Sharp Spec, Voice, Music, the Library actions and the Sparks s
 the tab a step is about and outlines the control; a bar at the bottom then carries the lesson forward from inside
 the app. Finished lessons are remembered in the browser.
 
+### Where takes are kept, and their names
+
+Every take has its own folder, by month: `renders/2026-11/2026-11-16_142233_lighthouse-in-the-storm_ee3e3a/`, with
+the files inside named the same way. The words in the middle are the job's title, or the first words of its prompt.
+Takes made before these folders stay where they are until you press **Organize older media** in the Library, which
+lists what would move first and can be undone.
+
+**Suggest a title** is optional and off. Switch on Settings → Presets → *Suggest a title for a clip* and the last
+step of Create shows a name field with a **Suggest a title** button. Your local model (Settings → Connections) is
+asked for a few words; you keep them, edit them, or clear the field for the usual name. It is one plain question to
+a local model server: no tool, no file and no cloud brain is involved, a slow or missing model just leaves the usual
+name, and nothing is asked while the setting is off.
+
 ### Search your library by what is in it
 
 The Library describes your clips and pictures by itself. Whenever nothing is rendering or waiting, the studio's local
