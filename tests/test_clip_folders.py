@@ -35,6 +35,10 @@ def test_a_clip_gets_its_own_readable_folder_and_a_named_place_is_kept(monkeypat
     # a place named for it (a film's segment) is kept as it is
     _, _, named = server.build("video", {**PLAIN, "output": "projects/film/seg01.mp4"}, job)
     assert Path(named[0]) == server.HOME / "projects/film/seg01.mp4"
+    # a job looked over before it is in the queue (its title is not known yet) leaves no folder of another name behind
+    before = sorted(p.name for p in (server.HOME / "renders").rglob("*") if p.is_dir())
+    assert Path(server.build("video", PLAIN, "1109-194433-eeeeee")[2][0]) == server.HOME / "renders/1109-194433-eeeeee.mp4"
+    assert sorted(p.name for p in (server.HOME / "renders").rglob("*") if p.is_dir()) == before
     # a command built only to be checked leaves no take folder behind
     before = sorted(p.name for p in (server.HOME / "renders").rglob("*") if p.is_dir())
     _, _, checked = server.build("video", PLAIN, "check")

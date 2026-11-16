@@ -1745,12 +1745,14 @@ def mac_comfy_room(what: str) -> None:
 
 def clip_target(job_id: str, params: dict) -> Path:
     """Where a clip goes when no place was named for it: its own readable folder under renders, by month
-    (take_names.py, issue #257). A command built only to be checked ("check") names the old flat place and leaves
-    no folder behind. Clips made before this stay where they are."""
+    (take_names.py, issue #257). A command built only to be checked, under "check" or under the id of a job that is
+    not in the queue yet, names the old flat place and leaves no folder behind: only a queued job has its title, and
+    one job must never get two folders. Clips made before this stay where they are."""
 
-    if job_id == "check":
+    job = jobs.get(job_id)
+    if job is None:  # "check", or a job being looked over before it is in the queue: its title is not known yet
         return HOME / "renders" / f"{job_id}.mp4"
-    return take_names.clip(HOME, job_id, (jobs.get(job_id) or {}).get("title"), params.get("prompt"))
+    return take_names.clip(HOME, job_id, job.get("title"), params.get("prompt"))
 
 
 def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list[str], dict, list[str]]:
