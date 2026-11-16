@@ -1,7 +1,7 @@
 {
   "release": "studio-1.2.2-windows-arm64-r1",
   "commit": "1c8bdbfd7ea58fdb110870c3ff17d065522b65d2",
-  "base": "https://github.com/drowzeys/TensorFold/releases/download",
+  "base": "https://github.com/Keys-Wasserman/Imagination-Studio-by-keys-Wasserman/releases/download",
   "target": {
     "os": "Windows 11 on Arm",
     "architecture": "ARM64 (PE machine 0xAA64)",

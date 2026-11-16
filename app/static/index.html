@@ -1081,6 +1081,29 @@ function viewLibrary() { if (!LIB.root) { LIB.box = el("section", { class: "card
   Promise.all([api("/api/library"), api("/api/trash").catch(e => ({ error: e.message }))]).then(([all_, bin]) => { const text = JSON.stringify([all_, bin]); if (text === LIB.text && LIB.data) return; LIB.text = text; LIB.data = [all_, bin]; if (tab === "Library") libDraw(all_, bin); })
     .catch(e => { if (!LIB.data) LIB.box.replaceChildren(el("h2", {}, "Library"), el("div", { class: "note" }, e.message)); });
   return LIB.root; }
+// Takes made before the readable folders (voice/2026-11/<date>_<time>_<title>_<id>/): offered to be moved there, only
+// when there are some. The server says what it would move and what it leaves (a take a film names by its path); the
+// last run can be taken back.
+function libOrganize() { const slot = el("div", { id: "library-organize" });
+  api("/api/organize").then(found => { if (!found.takes && !found.undo) return;
+    const kinds = Object.entries(found.kinds || {}).map(([what, n]) => count(n, what)).join(", ");
+    const run = async undo => { try { const r = await api("/api/organize", undo ? { undo: true } : {});
+        toast(undo ? "Put back " + count(r.files, "file") : "Moved " + count(r.takes, "take") + " (" + count(r.files, "file") + ")" + ((r.failed || []).length ? ", " + count(r.failed.length, "take") + " left where they were" : "")); }
+      catch (e) { toast(e.message); } render(); };
+    slot.replaceChildren(el("section", { class: "panel", "aria-label": "Organize older media", style: "margin-bottom:12px" },
+      el("h3", {}, "Organize older media"),
+      el("div", { class: "note" }, found.takes ? "New takes get a folder of their own by month, named by date, time and title. " + count(found.takes, "older take") + " (" + kinds + ") can be moved into such folders."
+        + (found.skipped_count ? " " + count(found.skipped_count, "take") + (found.skipped_count === 1 ? " stays where it is: a film or a project names it by its path, or its new place is taken." : " stay where they are: a film or a project names them by their path, or their new place is taken.") : "")
+        : "Every older take that can be moved is in its own folder."),
+      found.takes || found.skipped_count ? el("details", { style: "margin:6px 0" }, el("summary", { class: "note" }, "What would move, and what stays"),
+        el("div", { class: "note", style: "max-height:220px;overflow:auto;font-family:var(--mono,monospace);font-size:12px;overflow-wrap:anywhere" },
+          ...(found.moves || []).map(one => el("div", { style: "margin:4px 0" }, one.files[0][0] + (one.files.length > 1 ? " (+" + (one.files.length - 1) + " with it)" : ""), el("br"), "→ " + one.files[0][1])),
+          ...(found.skipped || []).map(one => el("div", { style: "margin:4px 0" }, "stays: " + one.what + " " + one.id + " (" + one.why + ")")))) : null,
+      el("div", { class: "row" }, el("span"),
+        found.undo ? el("button", { class: "fit", title: "Puts every file of the last run back where it was", onclick: () => run(true) }, "Undo the last run (" + count(found.undo, "file") + ")") : null,
+        found.takes ? el("button", { class: "fit", title: "Moves the files inside the studio folder; nothing is deleted, and it can be undone",
+          onclick: () => { if (confirm("Move " + count(found.takes, "older take") + " (" + count(found.files, "file") + ") into folders by month?\nNothing is deleted. Paths used by films and projects are left alone. You can undo it here.")) run(false); } }, "Organize " + count(found.takes, "take")) : null))); }).catch(() => {});
+  return slot; }
 function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library")); for (const p of [...LIBPICK]) if (!all_.some(m => m.path === p)) LIBPICK.delete(p);
   for (const p of [...LIB.media.keys()]) if (!all_.some(m => m.path === p)) LIB.media.delete(p);
     put(box, el("section", { class: "panel", id: "library-trash", "aria-label": "Trash", style: "margin-bottom:12px" },
@@ -1097,6 +1120,7 @@ function libDraw(all_, bin) { const box = el("div", {}, el("h2", {}, "Library"))
           bin.files ? el("button", { class: "fit", title: "Erases the files in the trash folder for good", onclick: async () => { if (!confirm("Erase the " + count(bin.files, "file") + " (" + sizeText(bin.bytes) + ") in the trash folder for good?\n" + relHome(bin.folder) + "\nThis cannot be undone.")) return;
             try { const r = await api("/api/trash?confirm=erase", undefined, "DELETE"); toast("Erased " + count(r.files, "file") + ", " + sizeText(r.bytes) + " freed"); } catch (e) { toast(e.message); } render(); } }, "Empty trash") : null)),
       typeof tbPanel === "function" ? tbPanel() : null));  // films in the trash, put back (trashbin.js): one trash, here
+    put(box, libOrganize());  // older takes into the readable folders, when there are any (issue #257)
     // what the filter row shows: a kind (a redraw), and words in the file name or folder, filtered in place as they are typed
     // a kind is a clip, a still, or one of the sounds: a voice line, a song, a sound effect
     const kindOf = m => m.kind === "audio" ? (m.sound || "sfx") : m.kind, kindList = all_.filter(m => LIBF.kind === "all" || kindOf(m) === LIBF.kind);
