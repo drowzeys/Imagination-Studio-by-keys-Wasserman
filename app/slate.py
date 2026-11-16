@@ -264,7 +264,8 @@ SETTINGS = ("preset", "quality", "frames", "seconds", "width", "height", "steps"
 @router.get("/api/slate/comfy/profiles")
 def comfy_profiles() -> dict:
     try:
-        return {key: {"label": profile["label"], "references": len(profile["inputs"].get("references", []))}
+        cloud = bool(slate_comfy.cloud_key())  # the panel says where a render goes, and that the cloud's is paid for
+        return {key: {"label": profile["label"], "references": len(profile["inputs"].get("references", [])), **({"cloud": True} if cloud else {})}
                 for key, profile in slate_comfy.profiles().items()}
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise HTTPException(503, f"Invalid ComfyUI configuration: {error}") from error

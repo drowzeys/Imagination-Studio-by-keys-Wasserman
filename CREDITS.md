@@ -507,6 +507,13 @@ Qwen-Image-2.1-Turbo (#10). **gsp-agent (@gsp-agent)** found the cause (Hugging 
 as one file with no index, and mflux's loader opens the index without looking) and wrote the workaround, an index
 built from the file's header, that the studio now makes itself.
 
+## Slate shots on a ComfyUI elsewhere, and on Comfy Cloud: 0eroiQ, AmbitiousRealism2025, Comfy Org
+
+**0eroiQ** wrote the Slate panel that sends a shot to a ComfyUI on another PC and brings the take back (#234).
+**AmbitiousRealism2025** asked for Comfy Cloud as a place to render (#185). **Comfy Org** runs **Comfy Cloud** and
+publishes its API; the panel speaks it with the person's own key, on their own plan, and the Studio ships no key,
+workflow or weight of theirs.
+
 ## Platform and tools
 
 - **Apple / ml-explore** — **MLX**, and the Metal 4 tensor operations on M5.

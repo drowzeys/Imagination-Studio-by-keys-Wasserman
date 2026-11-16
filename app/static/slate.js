@@ -486,7 +486,9 @@ function slComfy(project, shot) {
       render();
     }
   };
-  return el("div", { class: "group" }, el("label", {}, "Render on my PC · ComfyUI"),
+  // with a Comfy Cloud key set (STUDIO_COMFY_API_KEY) the same panel sends the shot to Comfy Cloud, on the person's own plan
+  return el("div", { class: "group" }, el("label", {}, profile.cloud ? "Render on Comfy Cloud" : "Render on my PC · ComfyUI"),
+    profile.cloud && !job.id ? el("div", { class: "note" }, "The prompt and any reference pictures are sent to Comfy Cloud, and the render is paid for from your Comfy Cloud plan.") : null,
     job.busy || job.id ? el("div", {}, profile.label) : slPick(job, "profile",
       Object.fromEntries(ids.map(id => [id, profiles[id].label])), () => { job.images = []; render(); }),
     !job.id && Array.from({ length: profile.references }, (_, index) => field("Reference image " + (index + 1),
