@@ -1140,6 +1140,9 @@ def image_models() -> list[str]:
     return found
 
 
+H3IMAGE_SIDE, H3IMAGE_PIXELS = 6272, 4096 * 4096  # MiniMax H3 Image's largest side and area (a scout's own size)
+
+
 def h3image_ready() -> bool:
     """MiniMax H3 Image's ComfyUI files (spark_generate.H3IMAGE: the int8 or w4a8 checkpoint, the int8 or nvfp4
     Qwen3-VL 32B encoder, its VAE) and a ComfyUI that knows the model (v0.45.0 and later). On a Spark or a card only."""
@@ -1820,7 +1823,14 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
         width, height = SCOUT_SIZES.get(params.get("preset", "2k"), (1024, 576))
         if params.get("width") and params.get("height"):  # an image for its own sake, at the size asked for
             width, height = int(params["width"]), int(params["height"])
-            if width % 16 or height % 16 or not (256 <= width <= 2048 and 256 <= height <= 2048):
+            if params.get("image_model") == "h3-image":
+                # MiniMax H3 Image works from about 4 MP to 20 MP and is best near 16 MP (ComfyUI's template's note):
+                # sides to 6272 (its 21:9 size), at most 4096x4096 of area, in multiples of 32 (its canvas)
+                if width % 32 or height % 32 or not (256 <= width <= H3IMAGE_SIDE and 256 <= height <= H3IMAGE_SIDE) \
+                        or width * height > H3IMAGE_PIXELS:
+                    raise HTTPException(400, f"MiniMax H3 Image sides are multiples of 32 between 256 and {H3IMAGE_SIDE}, "
+                                             f"at most 4096x4096 of area (16.8 MP)")
+            elif width % 16 or height % 16 or not (256 <= width <= 2048 and 256 <= height <= 2048):
                 raise HTTPException(400, "image sides are multiples of 16 between 256 and 2048")
         if (WINDOWS or WIN32) and windows_runtime.mode()["enabled"]:
             import windows_image_checks

@@ -630,14 +630,20 @@ function viewCreate() {
   if (C.mode === "image") {
     // the prompt goes to the image model and stops there
     const made = C.imageJob && jobs.find(j => j.id === C.imageJob);
+    // MiniMax H3 Image works from about 4 MP to 20 MP and is best near 16 MP (ComfyUI's template's note): its own sizes
+    const h3 = imageModel() === "h3-image";
+    const sizes = h3 ? { "2720x1536": ["16:9 · 4 MP", "2720 × 1536"], "5472x3072": ["16:9 · 16 MP", "5472 × 3072, the model's best"], "2048x2048": ["Square · 4 MP", "2048 × 2048"], "4096x4096": ["Square · 16 MP", "4096 × 4096"], "1536x2720": ["9:16 · 4 MP", "1536 × 2720"], "3072x5472": ["9:16 · 16 MP", "3072 × 5472"] }
+      : { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] };
+    if (!sizes[C.imageSize]) C.imageSize = Object.keys(sizes)[0];
     const [w, h] = C.imageSize.split("x").map(Number);
     put(body, el("h2", {}, "The picture"), goes, picture, imageModelPick(),
-      el("label", {}, "Size"), choice(C, "imageSize", { "1344x768": ["16:9", "1344 × 768"], "1664x928": ["16:9 large", "1664 × 928"], "1024x1024": ["Square", "1024 × 1024"], "768x1344": ["9:16", "768 × 1344"] }, render, true),
+      el("label", {}, "Size"), choice(C, "imageSize", sizes, render, true),
       el("div", { class: "row" },
         el("div", { class: "fit", style: "width:120px" }, el("label", {}, "How many"), bind(C, "count", el("input", { type: "number", min: 1, max: 12 }))),
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
       el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
         : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
+        : h3 ? "MiniMax H3 Image takes your prompt as written and needs a large size: below 4 MP it looks soft. Write a full description (subject, clothes, place, light, lens): it was trained on long captions"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
         const j = await api("/api/jobs", { kind: "scout", title: "Image: " + C.scene.slice(0, 40), params: { prompt: C.scene, count: C.count, seed: C.seed, width: w, height: h, image_model: imageModel() } });
