@@ -449,7 +449,7 @@ def attach(studio):
         try:
             if chain["join"]:
                 new = studio.inside(job["outputs"][0])
-                target = studio.HOME / "renders" / f"{job['id']}-extended.mp4"
+                target = new.with_name(new.stem + "-extended.mp4")  # beside the new clip, in its take's folder
                 job["progress"] = {"stage": "joining with the clip it continues", "at": 0, "of": 1}
                 join(studio.inside(chain["join"]), new, target)
                 job["progress"] = None
@@ -462,7 +462,7 @@ def attach(studio):
                 job["log"] = (job.get("log") or "") + f"[studio] {said}\n"
             elif chain.get("lay"):
                 new = studio.inside(job["outputs"][0])
-                target = studio.HOME / "renders" / f"{job['id']}-sound.mp4"
+                target = new.with_name(new.stem + "-sound.mp4")  # beside the new clip, in its take's folder
                 job["progress"] = {"stage": "laying the clip's own sound under it", "at": 0, "of": 1}
                 lay(new, studio.inside(chain["lay"]), target)
                 job["progress"] = None

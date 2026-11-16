@@ -152,7 +152,9 @@ def test_a_swap_is_built_with_the_parts_settings_and_its_outputs(tmp_path):
     assert command[command.index("--swap-lora") + 1].endswith("h3_character_swap_v1.5.safetensors")
     assert command[command.index("--turbo-lora") + 1].endswith("minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors")
     assert "--no-anchor" not in command and "--anchor-out" in command
-    assert outputs == [str(s.home / "renders/j1.mp4"), str(s.home / "masks/j1/person.mp4"), str(s.home / "scouts/j1/anchor.png")]
+    clip = Path(outputs[0])  # the swapped clip in its own folder, named by the clip it was made from (issue #257)
+    assert clip.parents[2] == s.home / "renders" and clip.parent.name.endswith("_swap-clip_j1") and clip.name == clip.parent.name + ".mp4"
+    assert outputs[1:] == [str(s.home / "masks/j1/person.mp4"), str(s.home / "scouts/j1/anchor.png")]
     assert env["SPARK_MODELS"] == str(s.models)
     command, _, outputs = s.build("swap", {**GOOD, "anchor": False, "quality": 480}, "j2")
     assert "--no-anchor" in command and "--anchor-out" not in command and len(outputs) == 2
@@ -498,6 +500,14 @@ def test_a_swap_that_made_no_clip_leaves_no_mask_preview_and_no_anchor(tmp_path)
     assert (tmp_path / "masks" / "0101-000000-kept01" / "person.mp4").is_file()
     assert (tmp_path / "scouts" / "0101-000000-kept01" / "anchor.png").is_file()
     assert (tmp_path / "scouts" / "0101-000000-other1").is_dir()
+    # a swap that finished into its own folder (issue #257) keeps its mask and anchor too
+    import take_names
+    done = take_names.derived(tmp_path, "0101-000000-kept02", "swap", "renders/clip.mp4")
+    done.parent.mkdir(parents=True)
+    done.write_bytes(b"x")
+    (tmp_path / "masks" / "0101-000000-kept02").mkdir(parents=True)
+    swap.tidy(tmp_path, "0101-000000-kept02")
+    assert (tmp_path / "masks" / "0101-000000-kept02").is_dir() and done.parent.name.endswith("_swap-clip_kept02")
     assert not swap.work_folder(tmp_path, "0101-000000-gone01").exists() and not swap.work_folder(tmp_path, "0101-000000-kept01").exists()
 
 

@@ -98,8 +98,10 @@ def test_each_template_writes_its_page_its_data_and_the_render_command(installed
         assert command[:4] == [sys.executable, str(Path(graphics.__file__).resolve()), "run", str(got["folder"])]
         hf = command[command.index("--") + 1:]
         assert hf == [str(installed["root"] / "node/bin/node"), str(installed["root"] / "node_modules/hyperframes/dist/cli.js"), "render",
-                      str(got["folder"]), "--quality", "delivery", "--fps", "24", "-o", str(HOME / "renders" / f"{job}.mp4")]
-        assert got["outputs"] == [str(HOME / "renders" / f"{job}.mp4")]
+                      str(got["folder"]), "--quality", "delivery", "--fps", "24", "-o", got["outputs"][0]]
+        clip = Path(got["outputs"][0])  # its own folder, named by the template, its title and the job (issue #257)
+        assert len(got["outputs"]) == 1 and clip.parents[2] == HOME / "renders" and clip.name == clip.parent.name + ".mp4"
+        assert clip.parent.name.split("_")[2].startswith(template) and clip.parent.name.endswith(job.split("-")[-1])
         assert got["env"]["HYPERFRAMES_NO_TELEMETRY"] == "1" and got["env"]["HYPERFRAMES_BROWSER_PATH"].endswith("chrome")
         for name in [p for k in ("video", "song", "voice") for p in [params.get(k)] if p] + params.get("pictures", []) + params.get("clips", []):
             assert any((got["folder"] / "assets").glob("*" + Path(name).suffix)), (template, name)
@@ -253,7 +255,8 @@ def test_a_graphic_is_queued_with_its_title_and_made(installed, monkeypatch, spa
             break
         time.sleep(0.1)
     assert job["status"] == "done", job
-    assert job["outputs"] == [f"renders/{job['id']}.mp4"] and unloaded == []
+    assert len(job["outputs"]) == 1 and job["outputs"][0].startswith("renders/20") and unloaded == []
+    assert job["outputs"][0].endswith(f"_title-the-long-night_{job['id'].split('-')[-1]}.mp4")
     installed["build"]({"template": "title", "title": "A"}, "check")  # the queue's check of the settings writes nothing
     assert not (HOME / "graphics" / "check").exists() and not (HOME / "renders" / "check.mp4").exists()
     bad = client.post("/api/jobs", json={"kind": "graphics", "params": {"template": "title"}})
