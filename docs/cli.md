@@ -436,8 +436,8 @@ videos at once, and sound by ear (the figures above are measurements).
 ### GHCR prebuilt carrier
 
 ```bash
-docker pull ghcr.io/drowzeys/keys-tensorfold-studio:3.3.0
-docker run --rm -v "$PWD":/out ghcr.io/drowzeys/keys-tensorfold-studio:3.3.0 cp -a /payload/. /out/payload/
+docker pull ghcr.io/keys-wasserman/keys-tensorfold-studio:3.3.0
+docker run --rm -v "$PWD":/out ghcr.io/keys-wasserman/keys-tensorfold-studio:3.3.0 cp -a /payload/. /out/payload/
 ```
 
 One image for both builds. For a Mac it holds the TensorFold wheel, `requirements.lock`, the render scripts, the
@@ -451,4 +451,4 @@ from 3.1.0 Fish Audio Drama 3's `spark-drama3/` (`drama3-generate` and `libtenso
 Drama 3 and Music engines are not in it: their installers clone TensorFold at the pinned commits. **It is not a runtime**: neither
 Metal nor the Spark's models run in a container, so the setup installs natively. Rebuild it with
 `PUSH=1 bash scripts/build-carrier.sh` (on a Spark, after `spark/build-engine.sh`, `spark/build-music3.sh` and `spark/build-drama3.sh`, to include its engines). Up to 2.2
-the image was `ghcr.io/drowzeys/keys-mac-tensorfold-studio`; the Mac setup still falls back to it.
+the image was `ghcr.io/keys-wasserman/keys-mac-tensorfold-studio`; the Mac setup still falls back to it.
