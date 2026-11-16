@@ -29,6 +29,12 @@ RECIPE = {"seconds": 5, "steps": 25, "cfg": 4.5, "rows": 360, "seed": 7}
 CUSTOM_NODES = ("ComfyUI-MMAudio", "studio_mmaudio")
 MAX_WIDTH = 660
 HOST_REQUIRED_MB = 9216
+# The render process's private-commit cap. Measured on an RTX Spark N1X (torch 2.14 cu134, pinned ComfyUI and
+# ComfyUI-MMAudio): the 5 s case peaks at 12,189 MiB and the 1 s case at 11,998 MiB, of which about 3.7 GiB is the
+# CUDA runtime before any model and the rest the models' host copies while they are cast and moved. The shared
+# 12,288 MiB cap left 100 MiB: a run a little higher died of MemoryError inside ComfyUI and ran out its deadline.
+# The job's 16,384 MiB cap, the device limit and the live memory guard are unchanged.
+PROCESS_COMMIT_MB = 14336
 FILES = {
     "mmaudio_large_44k_v2_fp16.safetensors": (2061198424, "a61378951ba4e8bfde2e977c0ad8211a7e02e1e92fd6a5b1c258a6464c1d102f"),
     "mmaudio_vae_44k_fp16.safetensors": (610966060, "2598189f081bd10c86975106e5b6e2490168667429a75b52d77671283f245649"),
@@ -92,7 +98,7 @@ def fingerprint() -> dict:
         stat = Path(executable).stat()
         media[name] = [hashlib.sha256(str(Path(executable).resolve()).encode()).hexdigest(), stat.st_size, stat.st_mtime_ns]
     return {"schema": 1, "runner_contract": GPU_CONTRACT,
-            "limits_mb": [limits.gpu_limit_mb, limits.process_commit_mb, limits.job_commit_mb],
+            "limits_mb": [limits.gpu_limit_mb, PROCESS_COMMIT_MB, limits.job_commit_mb],
             "python_abi": gpu_compatibility(gpu_python().parent.parent)["python_abi"],
             "recipe": RECIPE, "max_width": MAX_WIDTH, "host_required_mb": HOST_REQUIRED_MB,
             "sources": sources, "versions": {name: versions[name] for name in sorted(needed)},
@@ -372,7 +378,8 @@ def render(plan: dict, qualification=False) -> dict:
     case = check.CalibrationCase(lambda directory: prepare(directory, prepared),
                                  lambda base, directory, process, monitor: exercise(check, base, directory, process, monitor, output,
                                                                                   params, min(info["seconds"], 5)),
-                                 custom_nodes=CUSTOM_NODES, wddm_device_uuid=device_uuid())
+                                 custom_nodes=CUSTOM_NODES, wddm_device_uuid=device_uuid(),
+                                 process_commit_mb=PROCESS_COMMIT_MB)
     result = check.run_check(Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio/ComfyUI", 120, 0, guarded=True, calibration=case)
     sound_generate.lay(source, output / "foley.wav", output / "foley.mp4", not params["keep_sound"], params["foley_db"])
     validate_film(source, output / "foley.mp4")
@@ -478,7 +485,8 @@ def main() -> int:
         check = renderer.tools().checker()
         case = check.CalibrationCase(lambda directory: prepare(directory, clip),
                                      lambda base, directory, process, monitor: exercise(check, base, directory, process, monitor, args.output),
-                                     custom_nodes=CUSTOM_NODES, wddm_device_uuid=device_uuid())
+                                     custom_nodes=CUSTOM_NODES, wddm_device_uuid=device_uuid(),
+                                 process_commit_mb=PROCESS_COMMIT_MB)
         source = Path(os.environ["LOCALAPPDATA"]) / "ImaginationStudio/ComfyUI"
         result = check.run_check(source, 120, 0, guarded=True, calibration=case)
         (args.output / "report.json").write_text(json.dumps(result, indent=2), encoding="utf-8")

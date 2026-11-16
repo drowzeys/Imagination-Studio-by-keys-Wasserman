@@ -389,7 +389,13 @@ class CalibrationCase:
     process_commit_mb = 12 * 1024
     job_commit_mb = 16 * 1024
 
-    def __init__(self, prepare, exercise, custom_nodes: tuple[str, ...] = (), wddm_device_uuid: str | None = None):
+    def __init__(self, prepare, exercise, custom_nodes: tuple[str, ...] = (), wddm_device_uuid: str | None = None,
+                 process_commit_mb: int | None = None):
+        if process_commit_mb is not None:
+            # a recipe measured above the shared process cap names its own, never above the job's cap less its helpers' room
+            if type(process_commit_mb) is not int or not self.process_commit_mb <= process_commit_mb <= self.job_commit_mb - 1024:
+                raise ValueError("a recipe's process commit cap lies between the shared cap and the job cap less 1 GiB")
+            self.process_commit_mb = process_commit_mb
         if any(name not in ("ComfyUI-MMAudio", "studio_mmaudio") for name in custom_nodes):
             raise ValueError("the calibration only permits the explicitly supported extra node packs")
         self.prepare = prepare
