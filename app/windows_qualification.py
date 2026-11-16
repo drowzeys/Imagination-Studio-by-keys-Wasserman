@@ -20,10 +20,11 @@ def version_family(version: str, parts: int = 1) -> str:
 
 def site_versions(site: Path) -> dict[str, str]:
     """{package name: version} of what is installed in ``site`` (a venv's site-packages), names in lower case with
-    underscores. Read from each package's own record on disk, every time: importlib.metadata keeps a per-process
-    listing of a folder and answers an unreadable one with nothing, so one bad moment named every package missing
-    until the app was restarted. A folder that cannot be listed is an OSError with its reason; a record with no name
-    (a leftover of an interrupted install) is passed over."""
+    underscores, read from each package's own record on disk. importlib.metadata answers a record it may not read
+    with no name, the same as an empty one: on a laptop whose Foley packages were installed from an elevated shell
+    the app could read none of them, and every dependency was reported missing with no reason. Here a record or a
+    folder that cannot be read is an OSError that says so; a record with no name inside (a leftover of an
+    interrupted install, #267) is still passed over."""
     found = {}
     for record in sorted(os.scandir(site), key=lambda entry: entry.name):
         if not record.name.endswith((".dist-info", ".egg-info")) or record.name.startswith("~"):

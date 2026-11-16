@@ -146,4 +146,10 @@ foreach ($Name in @('mmaudio_large_44k_v2_fp16.safetensors', 'mmaudio_vae_44k_fp
         throw "A foley model file is missing: $Name"
     }
 }
+# pip --target builds in a temporary folder and moves the result, and a moved file keeps that folder's permissions.
+# From an elevated shell those name only the owner and administrators, so the app (never elevated) could not read
+# what was installed and reported every dependency missing. The environment's files inherit its own permissions again.
+$FoleyRuntime = Join-Path $Runtime 'foley-gpu-venv'
+& icacls.exe $FoleyRuntime /reset /T /C /Q | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not reset the permissions of $FoleyRuntime; if Foley reports missing dependencies, run: icacls `"$FoleyRuntime`" /reset /T /C" }
 Write-Host 'Foley files and dependencies are installed. This is not a render qualification; existing feature passes were not changed.'
