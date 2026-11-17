@@ -964,7 +964,7 @@ def compose_references(fields: dict, count: int) -> str:
         voices.append(f"<Audio {sounds}>")
     scene = (fields.get("scene") or "").strip()
     shot = joined(scene, fields.get("camera", ""), fields.get("action", ""), *follow)
-    spoken, away = [], 0
+    spoken, away, named = [], 0, {}
     for index, line in enumerate(fields.get("dialogue") or [], start=1):
         text = (line.get("text") or "").strip()
         if not text:
@@ -977,7 +977,21 @@ def compose_references(fields: dict, count: int) -> str:
             who = (line.get("speaker") or "").strip()
             spoken.append(f"An off-screen voice{', ' + who + ',' if who else ''} (S{index}), heard from outside the frame in {voice}, {verb}: <d>[{language}] {text}</d>")
         else:
-            spoken.append(f"<Subject {int(line.get('subject') or 1)}> (S{index}), in {voice}, {verb}: <d>[{language}] {text}</d>")
+            number = int(line.get("subject") or 1)
+            who = " ".join(str(line.get("speaker") or "").split())
+            if who:
+                named.setdefault(number, who)
+            spoken.append(f"<Subject {number}>{', ' + who + ',' if who else ''} (S{index}), in {voice}, {verb}: <d>[{language}] {text}</d>")
+    # A speaker given a subject number that no picture or video defines (a reference video with several people in
+    # it, and no pictures): each gets a definition of their own, so two speakers are two people. Without it every
+    # line was <Subject 1>, and the model gave all the words to whichever face it saw first.
+    defined = {int(n) for n in re.findall(r"<Subject (\d+)> is", "\n".join(subjects))}
+    seen = {int(line.get("subject") or 1) for line in fields.get("dialogue") or []
+            if (line.get("text") or "").strip() and not line.get("offscreen")}
+    source = " in <Video 1>" if any("<Video 1> is" in one for one in subjects) else ""
+    for number in sorted(seen - defined):
+        subjects.append(f"<Subject {number}> is {named.get(number) or 'another person'}{source}"
+                        + ("" if source or number == 1 else ", a different person from <Subject 1>") + ".")
     if spoken:
         if voices:
             shot += " The speaker's voice timbre references the delivery from " + " and ".join(voices) + "."

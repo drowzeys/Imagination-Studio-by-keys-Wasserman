@@ -741,7 +741,10 @@ function viewCreate() {
     put(body, el("h2", {}, "Words and sound"), el("div", { class: "note" }, "Spoken or sung lines are written into the prompt exactly. Leave empty for a clip with no speech."),
       C.dialogue.map((line, i) => el("div", { class: "seg" }, el("div", { class: "row" }, field("Voice", bind(line, "voice", el("input", { placeholder: "a calm, slightly raspy male voice" }))),
         keep(el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Language"), bind(line, "language", el("input")))),
-        isRef() && refPeople() > 1 ? el("div", { class: "fit", style: "width:140px" }, el("label", {}, "Speaker"), select(line, "subject", Object.fromEntries(Array.from({ length: refPeople() }, (_, k) => [k + 1, "<Subject " + (k + 1) + ">"])), () => { C.prompt = ""; })) : null,
+        // a reference video often holds several people and no pictures name them: the speaker is picked here, and
+        // a name for them goes beside it (server.compose_references defines a subject for each)
+        isRef() && (refPeople() > 1 || C.refVideos.length || C.dialogue.length > 1) ? el("div", { class: "fit", style: "width:140px" }, el("label", {}, "Speaker"), select(line, "subject", Object.fromEntries(Array.from({ length: Math.max(refPeople(), C.refVideos.length ? 4 : Math.min(4, C.dialogue.length)) }, (_, k) => [k + 1, "<Subject " + (k + 1) + ">"])), () => { C.prompt = ""; })) : null,
+        isRef() && (C.refVideos.length || C.dialogue.length > 1) ? el("div", { class: "fit", style: "width:200px" }, el("label", {}, "Who"), bind(line, "speaker", el("input", { placeholder: "the woman in the passenger seat" }), () => { C.prompt = ""; })) : null,
         el("label", { class: "check fit" }, bind(line, "sung", el("input", { type: "checkbox" })), el("span", {}, "sung")),
         el("button", { class: "small fit", onclick: () => { C.dialogue.splice(i, 1); render(); } }, "Remove")), field("Line", bind(line, "text", el("textarea", { style: "min-height:54px" }))))),
       el("button", { onclick: () => { C.dialogue.push({ voice: "", language: "English", text: "", sung: false }); render(); } }, "+ Add a line"),
