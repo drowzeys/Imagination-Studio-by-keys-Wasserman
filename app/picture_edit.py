@@ -46,7 +46,8 @@ SETS = {
     "cover": ("Wide and close", [("front", "eye", False), ("front", "eye", True), ("front-right-quarter", "elevated", False), ("front-right-quarter", "elevated", True)]),
 }
 LIMIT = 12  # results from one job
-STEPS = {"qwen": "8 steps", "flux3k-fast": "16 steps", "flux3k-full": "50 steps"}
+STEPS = {"qwen": "8 steps", "flux3k-fast": "16 steps", "flux3k-full": "50 steps", "h3-image": "6 steps"}
+H3IMAGE = "h3-image"  # MiniMax H3 Image: its own reference node (MiniMaxH3ImageConditioning), on a Spark or a card
 FLUX3 = ("flux3k-fast", "flux3k-full")  # the picture models that edit through FLUX3-K's own workflow
 PICTURES = edit_plan.PICTURES  # pictures in one edit: the edited one and nine beside it
 KINDS = (".png", ".jpg", ".jpeg", ".webp")
@@ -79,9 +80,15 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
     def flux3() -> list[dict]:
         return [m for m in models() if m["id"] in FLUX3]  # never Qwen's own (qwen, qwen-full: the base switch)
 
+    def h3image() -> list[dict]:
+        return [m for m in models() if m["id"] == H3IMAGE]
+
     def ready(model: str = "qwen") -> tuple[bool, str]:
         """Whether a picture can be edited here with ``model``, and if not, what is missing."""
 
+        if model == H3IMAGE:
+            return (True, "") if h3image() else (False, "MiniMax H3 Image is not installed here: its files go in "
+                                                        "$SPARK_MODELS/MiniMax-H3-Image-Comfy, with ComfyUI v0.45 or later")
         if model != "qwen":
             return (True, "") if any(m["id"] == model for m in flux3()) else (False, "that FLUX3-K model is not installed here: oneshot-setup" + ("-spark" if spark else "") + ".sh --flux3")
         if spark:
@@ -119,7 +126,8 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         qwen, why = ready()
         # the models an edit can go to: Qwen when its edit pipeline is here, and every installed FLUX3-K
         offered = ([{"id": "qwen", "label": "Qwen 2.1 Turbo", "note": "8 steps; image LoRAs and camera angles"}] if qwen else []) \
-            + [{**m, "note": STEPS[m["id"]] + ", BFL's prompt upsampler writes the caption"} for m in flux3()]
+            + [{**m, "note": STEPS[m["id"]] + ", BFL's prompt upsampler writes the caption"} for m in flux3()] \
+            + [{**m, "note": "6 steps, made at about 4 MP; the prompt names the pictures image 1, image 2, ..."} for m in h3image()]
         return {"ready": bool(offered), "why": "" if offered else why, "models": offered, "qwen": qwen,
                 "base": qwen and base_ready(), "limit": LIMIT, "pictures": PICTURES, "angle_lora": ANGLE_LORA,
                 "directions": [{"id": key, "label": text.replace(" view", ""), "degrees": degrees} for key, text, degrees in DIRECTIONS],
@@ -139,7 +147,8 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
         if not ok:
             raise HTTPException(400, why)
         if model != "qwen" and (params.get("loras") or params.get("angles") or params.get("base")):
-            raise HTTPException(400, "image LoRAs, camera angles and the 40-step base model are Qwen 2.1 Turbo's: pick it for those, or leave them out for FLUX3-K")
+            raise HTTPException(400, "image LoRAs, camera angles and the 40-step base model are Qwen 2.1 Turbo's: pick it for those, or leave them out for "
+                                     + ("MiniMax H3 Image" if model == H3IMAGE else "FLUX3-K"))
         source = inside(str(params.get("image") or ""))
         if not source.is_file() or source.suffix.lower() not in KINDS:
             raise HTTPException(400, "pick the picture to edit: a png, jpg or webp in the studio's folder")
@@ -176,7 +185,10 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
             seed = int(params.get("seed") or 0)
         except (TypeError, ValueError):
             raise HTTPException(400, "seed and size are numbers")
-        if resolution % 32 or not 512 <= resolution <= 1536:
+        if model == H3IMAGE:  # about 2048 (4 MP, the "source" default) or 4096 (16 MP) squared, in the picture's shape
+            if resolution not in (1024, 2048, 4096):
+                raise HTTPException(400, "MiniMax H3 Image is made at about 2048 or 4096 pixels squared (4 or 16 MP)")
+        elif resolution % 32 or not 512 <= resolution <= 1536:
             raise HTTPException(400, "the size is a multiple of 32 between 512 and 1536")
         # the result's size: the picture's own unless the job says otherwise
         size = str(params.get("size") or "source")
@@ -188,7 +200,11 @@ def attach(home: Path, pack: Path, spark: bool, lora_resolve, inside, relative, 
                 asked = {"WIDTH": int(params["width"]), "HEIGHT": int(params["height"])}
             except (KeyError, TypeError, ValueError):
                 raise HTTPException(400, "a size of your own needs a width and a height")
-            if edit_plan.refused(asked["WIDTH"], asked["HEIGHT"]):
+            if model == H3IMAGE:  # its own range: about 4 to 17 MP (server.H3IMAGE_SIDE, H3IMAGE_PIXELS)
+                w_, h_ = asked["WIDTH"], asked["HEIGHT"]
+                if w_ % 32 or h_ % 32 or not (256 <= w_ <= 6272 and 256 <= h_ <= 6272) or w_ * h_ > 6272 * 2688:
+                    raise HTTPException(400, "MiniMax H3 Image sides are multiples of 32 between 256 and 6272, at most 16.9 MP")
+            elif edit_plan.refused(asked["WIDTH"], asked["HEIGHT"]):
                 raise HTTPException(400, edit_plan.refused(asked["WIDTH"], asked["HEIGHT"]))
         base = bool(params.get("base"))
         if base and not base_ready():

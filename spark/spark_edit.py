@@ -136,6 +136,53 @@ def flux3_workflow(args, pictures: list[str], shown: list[str], prompt: str, see
     return w
 
 
+# MiniMax H3 Image: its conditioning node takes the pictures itself (image_1 is the one edited, the others are seen
+# beside it), scales them for the model, and names them <Picture 1>, <Picture 2>, ... to the text encoder.
+H3_CANVAS = 2048 * 2048  # the model is tuned for about this area (the node's own default canvas); it is soft below 4 MP
+
+
+def h3_prompt(prompt: str) -> str:
+    """The edit step's words for the pictures (image 1, image 2, ...) as the model names them (<Picture 1>, ...)."""
+
+    import re
+
+    return re.sub(r"(?<![<\w])(?:image|picture)\s+(\d+)\b", lambda m: f"<Picture {m.group(1)}>", prompt, flags=re.IGNORECASE)
+
+
+def h3_size(source: tuple[int, int], asked: tuple[int, int] | None, area: int = H3_CANVAS) -> tuple[int, int]:
+    """The result's size: the one asked for, else the edited picture's shape at about ``area``, in multiples of 32."""
+
+    if asked:
+        return asked
+    w, h = source
+    scale = (area / (w * h)) ** 0.5
+    return max(256, round(w * scale / 32) * 32), max(256, round(h * scale / 32) * 32)
+
+
+def h3image_workflow(args, pictures: list[str], prompt: str, seed: int, size: tuple[int, int]) -> dict:
+    """MiniMax H3 Image's edit: the layout of ComfyUI's template "image_minimax_h3_image_edit" without its prompt
+    expansion, 6 euler steps at CFG 1 against the zeroed condition."""
+
+    _, steps, cfg = sg.H3IMAGE["h3-image"]
+    w = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": sg.h3image_unet(), "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.h3image_text(), "type": "minimax", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": sg.H3IMAGE_VAE}},
+        "5": {"class_type": "MiniMaxH3ImageConditioning", "inputs": {"clip": ["3", 0], "vae": ["4", 0], "prompt": h3_prompt(prompt),
+                                                                     "width": size[0], "height": size[1]}},
+        "6": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}},
+        "12": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "seed": seed, "steps": args.steps if args.steps_set else steps,
+                                                    "cfg": cfg, "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
+                                                    "negative": ["6", 0], "latent_image": ["5", 1], "denoise": 1.0}},
+        "13": {"class_type": "VAEDecode", "inputs": {"samples": ["12", 0], "vae": ["4", 0]}},
+        "16": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": f"studio/edit_{uuid.uuid4().hex[:8]}"}},
+    }
+    for index, picture in enumerate(pictures):
+        w[str(30 + index)] = {"class_type": "LoadImage", "inputs": {"image": picture}}
+        w["5"]["inputs"][f"images.image_{index + 1}"] = [str(30 + index), 0]
+    return w
+
+
 def workflow(args, pictures: list[str], prompt: str, seed: int, loras: list[tuple[str, float]], made: tuple[int, int] | None = None) -> dict:
     w = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": sg.QWEN_BASE if args.base else sg.qwen_file(), "weight_dtype": "default"}},
@@ -191,15 +238,19 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=0, help="with --height: another size for the result (the edit shifts when its shape differs from the picture's)")
     parser.add_argument("--height", type=int, default=0)
     parser.add_argument("--lora", action="append", default=[], help="an image LoRA, PATH or PATH:STRENGTH (repeat to stack)")
-    parser.add_argument("--model", choices=("qwen", *sg.FLUX3), default="qwen",
-                        help="qwen: Qwen-Image-2.1 (the default); flux3k-fast or flux3k-full: FLUX3-K (oneshot-setup-spark.sh --flux3)")
+    parser.add_argument("--model", choices=("qwen", *sg.FLUX3, *sg.H3IMAGE), default="qwen",
+                        help="qwen: Qwen-Image-2.1 (the default); flux3k-fast or flux3k-full: FLUX3-K (oneshot-setup-spark.sh --flux3); "
+                             "h3-image: MiniMax H3 Image, made at about 4 MP (its files in $SPARK_MODELS/MiniMax-H3-Image-Comfy)")
     parser.add_argument("--no-upsample", dest="upsample", action="store_false",
                         help="FLUX3-K: send the prompt as written (a full caption of the result) instead of BFL's prompt upsampler's")
     args = parser.parse_args()
     args.steps_set = "--steps" in sys.argv[1:]
     flux3 = args.model in sg.FLUX3
-    if flux3 and (args.base or args.lora):
-        sys.exit("image LoRAs and the base model are Qwen-Image-2.1's: FLUX3-K takes neither")
+    h3 = args.model in sg.H3IMAGE
+    if (flux3 or h3) and (args.base or args.lora):
+        sys.exit("image LoRAs and the base model are Qwen-Image-2.1's: " + ("MiniMax H3 Image" if h3 else "FLUX3-K") + " takes neither")
+    if h3 and args.width and (args.width % 32 or args.height % 32):
+        sys.exit("MiniMax H3 Image's sides are multiples of 32")
     for path in args.image:
         if not Path(path).is_file():
             sys.exit(f"no picture at {path}")
@@ -207,9 +258,9 @@ def main() -> None:
         sys.exit(f"at most {edit_plan.PICTURES} pictures in one edit, got {len(args.image)}")
     if bool(args.width) != bool(args.height):
         sys.exit("--width and --height go together")
-    if args.width and edit_plan.refused(args.width, args.height):
+    if args.width and not h3 and edit_plan.refused(args.width, args.height):
         sys.exit(edit_plan.refused(args.width, args.height))
-    if args.resolution % 32 or not 256 <= args.resolution <= 2048:
+    if args.resolution % 32 or not 256 <= args.resolution <= (4096 if h3 else 2048):
         sys.exit("--resolution is a multiple of 32 between 256 and 2048")
     edits = json.loads(Path(args.set[1:]).read_text() if args.set.startswith("@") else args.set) if args.set else [[args.prompt, args.output]]
     if not edits or any(not str(p).strip() or not o for p, o in edits):
@@ -225,7 +276,9 @@ def main() -> None:
                 break
             time.sleep(1)
         time.sleep(5)
-    sg.ensure_server("flux3" if flux3 else "image")
+    sg.ensure_server("flux3" if flux3 else "h3image" if h3 else "image")
+    if h3:
+        return h3_edit(args, edits)
     if flux3 and not sg.installed("unet", sg.flux3_unet(args.model)):
         sys.exit(f"{args.model} is not installed: oneshot-setup-spark.sh --flux3")
     if args.base and not sg.installed("unet", sg.QWEN_BASE):
@@ -261,6 +314,28 @@ def main() -> None:
             print("[tensorfold] " + json.dumps({"output": str(output), "engine": "cuda", "model": args.model, "edit": prompt[:80], "seed": args.seed,
                                                 "noise_seed": noise, "turbo": not args.base, **({"upsampled": args.upsample} if flux3 else {}), "loras": [name for name, _ in loras], "pictures": len(pictures),
                                                 "size": list(size), "made_at": list(made), "total_s": round(seconds, 1)}), flush=True)
+    finally:
+        for name in sg.UPLOADED:
+            (sg.PREFIX / "ComfyUI" / "input" / name).unlink(missing_ok=True)
+
+
+def h3_edit(args, edits: list) -> None:
+    """MiniMax H3 Image: the pictures go to its node as they are (it scales them itself), the result is made at about
+    4 MP in the edited picture's shape, or at --width x --height."""
+
+    if not sg.installed("unet", sg.h3image_unet()):
+        sys.exit("MiniMax H3 Image is not installed: its files go in $SPARK_MODELS/MiniMax-H3-Image-Comfy")
+    area = args.resolution ** 2 if args.size == "model" else H3_CANVAS  # --size model: about --resolution squared (16 MP: 4096)
+    size = h3_size(edit_plan.picture_size(args.image[0]), (args.width, args.height) if args.width else None, area)
+    noise = edit_plan.noise_seed(args.seed, args.image)
+    try:
+        pictures = [sg.upload(path) for path in args.image]
+        for prompt, output in edits:
+            item, seconds = sg.render(h3image_workflow(args, pictures, prompt, noise, size), "12")
+            sg.fetch(item, Path(output))
+            print("[tensorfold] " + json.dumps({"output": str(output), "engine": "cuda", "model": args.model, "weights": sg.h3image_unet(),
+                                                "edit": h3_prompt(prompt)[:80], "seed": args.seed, "noise_seed": noise,
+                                                "pictures": len(pictures), "size": list(size), "total_s": round(seconds, 1)}), flush=True)
     finally:
         for name in sg.UPLOADED:
             (sg.PREFIX / "ComfyUI" / "input" / name).unlink(missing_ok=True)

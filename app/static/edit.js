@@ -12,6 +12,7 @@ const edHas = id => ED.loras.some(p => p.id === id);
 const edModels = () => (ED.state && ED.state.models) || [];
 const edModel = () => (edModels().some(m => m.id === ED.model) ? ED.model : (edModels()[0] || { id: "qwen" }).id);
 const edQwen = () => edModel() === "qwen";
+const edH3 = () => edModel() === "h3-image";  // MiniMax H3 Image: its own sizes (about 4 or 16 MP), no LoRAs or camera
 const edSame = (a, b) => a.direction === b.direction && a.height === b.height && !!a.close === !!b.close;
 async function edLoad() { try { ED.state = await api("/api/edit/state"); } catch (e) { ED.state = { ready: false, why: e.message, directions: [], heights: [], sets: {}, limit: 12 }; } if (tab === "Create" && C.goes === "edit") render(); }
 // from the hub, or a Library tile: open the step on this LoRA or this picture
@@ -95,7 +96,7 @@ function viewEdit(goes) { const body = el("div"), st = ED.state;
   if (!qwen) ED.way = "words";  // the camera is Qwen's Multiple Angles LoRA
   ED.model = edModel();
   const models = edModels().length > 1 ? el("div", { id: "editmodel" }, el("label", {}, "Picture model"),
-    choice(ED, "model", Object.fromEntries(edModels().map(m => [m.id, [mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), render, true)) : null;
+    choice(ED, "model", Object.fromEntries(edModels().map(m => [m.id, [m.id === "h3-image" ? m.label : mark(/^flux/.test(m.id) ? "flux" : "qwen", m.label), m.note]])), () => { if (edH3() ? !["source", "4096"].includes(String(ED.size)) : String(ED.size) === "4096") ED.size = "source"; render(); }, true)) : null;
   if (angle && qwen) ways.angles = ["Move the camera", "Multiple Angles LoRA" + (angle.installed ? "" : ": not installed yet")];
   if (ED.way === "angles" && angle && angle.installed && !edHas(angle.id)) ED.loras.push({ id: angle.id, strength: angle.strength || 1 });
   put(body, models, edPicture(),
@@ -105,9 +106,10 @@ function viewEdit(goes) { const body = el("div"), st = ED.state;
       ED.way === "words" ? el("div", { class: "note" }, "Describe the result, not the steps. What you do not mention is meant to stay; small things still shift, so compare with the picture you gave.") : null),
     edLoras(),
     el("div", { class: "row" },
-      el("div", { class: "fit", style: "width:300px" }, el("label", {}, "Size of the result"), bind(ED, "size", el("select", {}, [["source", "Same as the picture"], ["768", "About 768 × 768 pixels (faster)"], ["1024", "About 1024 × 1024 pixels"], ["1280", "About 1280 × 1280 pixels (slower)"]].map(([v, t]) => el("option", { value: v }, t))))),
+      el("div", { class: "fit", style: "width:300px" }, el("label", {}, "Size of the result"), bind(ED, "size", el("select", {}, (edH3() ? [["source", "About 4 MP, the picture's shape"], ["4096", "About 16 MP, the picture's shape (slower, the sharpest)"]] : [["source", "Same as the picture"], ["768", "About 768 × 768 pixels (faster)"], ["1024", "About 1024 × 1024 pixels"], ["1280", "About 1280 × 1280 pixels (slower)"]]).map(([v, t]) => el("option", { value: v }, t))))),
       el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(ED, "seed", el("input", { type: "number", min: 0 }))),
       st.base && qwen ? el("div", { class: "fit", style: "min-width:340px" }, el("label", {}, "Steps"), choice(ED, "base", { false: ["8 steps", "Turbo"], true: ["40 steps", "base model, slower"] }, () => { ED.base = ED.base === "true" || ED.base === true; render(); }, true)) : null, el("span")),
+    edH3() ? el("div", { class: "note" }, "MiniMax H3 Image sees every picture: the one being edited is image 1, further pictures are image 2, image 3, … in the order added; name them that way in the prompt (\"the man of image 2 sits on the sofa of image 1\"). It is made at about 4 MP in the picture's shape, or 16 MP; it is soft at small sizes. Results go to the Library.") :
     el("div", { class: "note" }, (qwen ? st.note : (edModels().find(m => m.id === edModel()) || {}).label + ", " + (edModels().find(m => m.id === edModel()) || {}).note + "; it sees all the pictures and writes the caption of the result itself") + ". “Same as the picture” returns the picture's own width and height (a 1280 × 736 picture comes back 1280 × 736); the other sizes keep its shape at about that many pixels. Results go to the Library, where a picture can open a clip, end one, or be a reference."),
     wants.length ? el("div", { class: "note lorawant", style: "color:var(--warn)" }, el("b", {}, "Needs: "), wants.join("; ") + ".") : null,
     el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: wants.length > 0 || ED.busy, onclick: async () => { if (ED.busy) return; ED.busy = true; render();   // the queue takes a moment to answer: a second click before it does must not make a second edit
