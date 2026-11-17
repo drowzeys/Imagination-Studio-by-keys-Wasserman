@@ -499,6 +499,10 @@ async function showEstimate(obj, node) { try { const r = await api("/api/estimat
   node.textContent = line;
   // a DGX Spark's memory guard (spark/memory_guard.py): said here, before the clip is queued, with what fits
   if (r.memory && r.memory.fits === false) put(node, el("div", { class: "tip", style: "margin-top:6px" }, el("b", {}, "This clip will be refused: memory" + (r.worker ? " on " + estimateWorkerName(r) : "")), el("div", {}, r.memory.reason || "It does not fit the selected worker's available memory.")));
+  // a small card (the guard warns there, it does not refuse): the figure is a DGX Spark's unified-memory peak, not
+  // this card's; ComfyUI streams the weights through system RAM, so the card's own memory is not what fills
+  else if (r.memory && r.memory.warning && typeof cardFace === "function" && cardFace()) put(node, el("span", { title: "Measured on a DGX Spark, where one pool holds everything: about " + Math.round((r.memory.need_mb || 0) / 1000) + " GB at its peak. On this GPU, ComfyUI keeps the weights in system RAM and streams them to the card, so that figure is not this card's. A clip that really runs out of memory fails on its own." },
+    (line ? " · " : "") + "streams from system RAM on this GPU (slower; larger sizes and longer clips may run out)"));
   else if (r.memory && r.memory.need_mb) put(node, el("span", { title: "Estimated from measured peaks; the server is stopped if the machine runs low all the same." }, (line ? " · " : "") + "about " + Math.round(r.memory.need_mb / 1000) + " GB of " + (r.worker ? estimateWorkerName(r) + "'s available memory" : typeof cardFace === "function" && cardFace() ? "this GPU's memory" : "this machine's memory"))); } catch { node.textContent = ""; } }
 
 /* ---------- Motion reference: Motion Previs on <Video 1> of a reference clip ---------- */
