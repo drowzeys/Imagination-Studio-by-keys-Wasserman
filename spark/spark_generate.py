@@ -344,6 +344,28 @@ def fits_or_exit(args, lora: bool = False, references: bool = False, base: bool 
         sys.exit("refused before anything was loaded: " + found["reason"])
 
 
+# ComfyUI refuses an upload over 100 MB (413 Request Entity Too Large, its --max-upload-size). A reference video is
+# kept without loss (prepared_video), and a long one at a large size passes that: 15 s at 1344x768 is several hundred
+# MB. The server is on this machine, so such a file is linked into its input folder instead (as spark_swap.put does).
+UPLOAD_MOST = 90 * 1024 * 1024
+
+
+def upload_or_link(path: str) -> str:
+    """The name ComfyUI's loader wants for this file: uploaded when small, else put in its input folder directly."""
+
+    if Path(path).stat().st_size <= UPLOAD_MOST:
+        return upload(path)
+    folder = Path(os.environ.get("SPARK_COMFY_INPUT") or PREFIX / "ComfyUI" / "input")
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"studio_{uuid.uuid4().hex[:10]}{Path(path).suffix.lower()}"
+    try:  # a hard link: the loaders refuse a symbolic link that leads out of the folder
+        os.link(Path(path).resolve(), folder / name)
+    except OSError:  # another file system
+        shutil.copy(path, folder / name)
+    UPLOADED.append(name)  # taken out again by forget_uploads
+    return name
+
+
 def upload(image: str) -> str:
     """Put an image (or a video or a sound file) in ComfyUI's input folder; returns the name its loader wants."""
 
@@ -932,7 +954,7 @@ def reference(args) -> None:
         # <Audio j> right before it), then the audio clips
         for i, ((path, probe), size) in enumerate(zip(probes, sizes)):
             clip, frames = prepared_video(path, size, args.frames, Path(scratch))
-            w[str(40 + i)] = {"class_type": "LoadVideo", "inputs": {"file": upload(str(clip))}}
+            w[str(40 + i)] = {"class_type": "LoadVideo", "inputs": {"file": upload_or_link(str(clip))}}
             w[str(50 + i)] = {"class_type": "GetVideoComponents", "inputs": {"video": [str(40 + i), 0]}}
             w["6"]["inputs"][f"ref_videos.ref_video_{i}"] = [str(50 + i), 0]
             used = frames - (frames - 5) % 17  # the node cuts the count down to 17n + 5
