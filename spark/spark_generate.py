@@ -603,20 +603,31 @@ def fetch(item: dict, target: Path) -> None:
 def own_transformer(args, loras=()) -> str:
     """A video model file of the user's own choosing (--transformer, SPARK_TRANSFORMER): another build of FastH3 or of
     MiniMax H3 Ref2VA in ComfyUI's diffusion_models folder (a 4-bit or 6-bit one, a hybrid), as ComfyUI lists it; ""
-    for the regular file. ComfyUI's own blocks run it, and nothing about it is measured here. A LoRA is refused with
-    it: a LoRA merges into the regular bf16 file."""
+    for the regular file. ComfyUI's own blocks run it, and nothing about it is measured here. A LoRA goes on a bf16 or
+    an 8-bit (int8) build (LORA_WEIGHTS); a 4- or 6-bit one is refused with it."""
 
     asked = (getattr(args, "transformer", "") or "").strip()
     if asked in ("", "regular"):
         return ""
-    if loras:
-        sys.exit("a LoRA merges into the regular bf16 transformer: render without the LoRA, or on the regular video model")
     listed = call("/object_info/UNETLoader")["UNETLoader"]["input"]["required"]["unet_name"][0]
     name = next((one for one in (asked, f"H3/{asked}") if one in listed), None)
     if name is None:
         sys.exit(f"ComfyUI does not list the video model {asked}")
+    if loras and not lora_weights(name):
+        sys.exit(f"a LoRA goes on a bf16 or an 8-bit (int8) video model, and {name} is neither (its 4- or 6-bit "
+                 "packing is not checked with a LoRA): render without the LoRA, or on the regular or an int8 model")
     print(f"[tensorfold] video model: {name} (a file of your own choosing, on ComfyUI's own blocks: not measured here)", flush=True)
     return name
+
+
+# The weight files a LoRA goes on. ComfyUI (v0.45, comfy-kitchen 0.2.41) puts a LoRA on an 8-bit layer by unpacking
+# it to float, adding the LoRA and packing it again; the rotated int8 format (convrot) is un-rotated when unpacked.
+# Checked on a 512x1024 layer: unpacked within 0.8% of the original, a rank-16 LoRA kept whole (cosine 1.000) through
+# the repacking. Under ComfyUI v0.42 it was merged into the rotated weights and spoiled the clip, so the bf16 file was
+# required. 4- and 6-bit packings (w4a8, w6a8, nvfp4) are not checked and are refused with a LoRA.
+def lora_weights(name: str) -> bool:
+    low = Path(name).name.lower()
+    return "bf16" in low or ("int8" in low and not any(tag in low for tag in ("w4a", "w6a", "nvfp4", "fp4")))
 
 
 def installed(kind: str, name: str) -> bool:
@@ -869,6 +880,9 @@ def reference(args) -> None:
         if args.steps == 4:
             args.steps = None
     name = REF2VA["bf16"] if mode == "turbo" or loras or not installed("unet", REF2VA["int8"]) else REF2VA["int8"]
+    if loras and not installed("unet", REF2VA["bf16"]) and installed("unet", REF2VA["int8"]):
+        name = REF2VA["int8"]  # a small-card install: the LoRA goes on the 8-bit file (lora_weights)
+        print("[tensorfold] LoRA on the 8-bit Ref2VA weights (the bf16 file is not installed here)", flush=True)
     chosen = own_transformer(args, loras)
     if chosen:
         if mode == "turbo":
@@ -941,7 +955,7 @@ def reference(args) -> None:
             sys.exit(f"ComfyUI does not list the LoRA {lora}")
         w[str(80 + index)] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model, "lora_name": lora, "strength_model": strength}}
         model = [str(80 + index), 0]
-        print(f"[tensorfold] LoRA {lora} at {strength:g} on the bf16 Ref2VA weights", flush=True)
+        print(f"[tensorfold] LoRA {lora} at {strength:g} on {name}", flush=True)
     positive = ["6", 0]
     if mods:
         # Luisa (luisacaotica)'s RefMod nodes: the saved references are loaded by name and added to the clip's own
@@ -1031,20 +1045,20 @@ def video(args) -> None:
         args.steps = 25 if base else 8
     loras = hub_loras(args.lora)
     if loras:
-        # TensorFold's engine merges a LoRA into its int8 weights itself (the TensorFoldH3Blocks node); ComfyUI merges
-        # the LoRA's keys outside the blocks into the bf16 file, never into the 8-bit one (its weights are rotated)
+        # TensorFold's engine merges a LoRA into its int8 weights itself (the TensorFoldH3Blocks node). ComfyUI's own
+        # blocks take the bf16 file, or on a small-card install (the 8-bit file only, docs/small-cards.md) the 8-bit
+        # one: ComfyUI v0.45 unpacks each rotated int8 layer, adds the LoRA and packs it again (lora_weights)
+        small = not (MAC or WINDOWS) and not fasth3_file("bf16").is_file() and fasth3_file("int8").is_file()
         if args.engine == "tensorfold" and not memory_guard.engine_takes_lora(ENGINE_LIB):
             print("[tensorfold] this engine build cannot take a LoRA (spark/build-engine.sh updates it): "
-                  "ComfyUI's own blocks with the bf16 weights", flush=True)
+                  f"ComfyUI's own blocks with the {'8-bit' if small else 'bf16'} weights", flush=True)
             args.engine = "comfy"
-        if args.weights != "bf16":
-            print("[tensorfold] a LoRA renders with the bf16 weights", flush=True)
-            if not (MAC or WINDOWS) and not fasth3_file("bf16").is_file() and fasth3_file("int8").is_file():
-                # a small-card install (docs/small-cards.md) fetched the 8-bit file only: a LoRA cannot merge into it
-                sys.exit("a LoRA merges into FastH3's bf16 transformer, and this install has the 8-bit file only (a small-card "
-                         f"install). Add it (44 GB): hf download FastVideo/FastVideo-FastH3-Comfy diffusion_models/{FASTH3['bf16']} "
-                         f"--local-dir {MODELS / 'FastH3-Comfy'}; or render without the LoRA")
-        args.weights = "bf16"
+        if small:
+            print("[tensorfold] a LoRA on the 8-bit FastH3 weights (the bf16 file is not installed here)", flush=True)
+        else:
+            if args.weights != "bf16":
+                print("[tensorfold] a LoRA renders with the bf16 weights", flush=True)
+            args.weights = "bf16"
     if base:
         # the undistilled model: ComfyUI's own blocks, dense attention (FastH3's sparse routing is FastH3's), the
         # model's own schedule (video shift 12, audio 3)

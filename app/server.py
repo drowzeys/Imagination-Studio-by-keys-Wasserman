@@ -1271,8 +1271,11 @@ def own_transformer(params: dict) -> str | None:
     if family != wants:
         raise HTTPException(400, f"{name} is a model for a clip from " + ("references" if family == "references" else "text or a frame")
                                  + ": this clip is from " + ("references" if wants == "references" else "text or a frame"))
-    if params.get("loras"):
-        raise HTTPException(400, "a LoRA merges into the regular video model: render without the LoRA, or on the regular model")
+    low = name.lower()
+    if params.get("loras") and not ("bf16" in low or ("int8" in low and not any(t in low for t in ("w4a", "w6a", "nvfp4", "fp4")))):
+        # spark_generate.lora_weights: a LoRA goes on a bf16 or an 8-bit (int8) build, not a 4- or 6-bit one
+        raise HTTPException(400, f"a LoRA goes on a bf16 or an 8-bit (int8) video model, and {name} is a 4- or 6-bit one: "
+                                 "render without the LoRA, or on the regular or an int8 model")
     if params.get("base") == "h3":
         raise HTTPException(400, "MiniMax H3's own transformer is a video model of its own: choose one or the other")
     return name
