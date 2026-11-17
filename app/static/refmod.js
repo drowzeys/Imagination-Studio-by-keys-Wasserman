@@ -10,7 +10,7 @@ const rfmIsClip = p => /\.(mp4|mov)$/i.test(p);
 // open the panel on one file, or on the files ticked in the Library
 function rfmOpen(paths) { const f = REFMOD.f, list = paths.filter(p => !/\.(wav|mp3|m4a|aac|flac|ogg)$/i.test(p));
   if (!list.length) return toast("Tick pictures or clips of the subject first");
-  f.files = list.slice(0, 24); f.starts = {}; f.replace = false;
+  f.files = list.slice(0, 24); f.starts = {}; f.replace = false; f.motion = false;
   if (!f.name) f.name = list[0].split("/").pop().replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9 _.-]/g, "").slice(0, 60) || "my subject";
   f.concept = list.every(rfmIsClip) ? "pose_motion" : "identity";
   rfmLoad().then(() => { if (tab === "Library") render(); });
@@ -44,7 +44,9 @@ function rfmPanel(o) { const f = REFMOD.f, st = REFMOD.state || {}, redraw = () 
       el("div", { style: "flex:1;min-width:220px" }, el("label", {}, "Name"), name),
       clips.length ? el("div", { class: "fit", style: "width:150px" }, el("label", {}, "Each clip's part (s)"), bind(f, "seconds", el("input", { type: "number", min: st.seconds?.[0] || 1, max: st.seconds?.[1] || 30, step: 0.5 }))) : null),
     el("label", {}, "What it is"), choice(f, "concept", RFM_CONCEPTS, redraw, true),
-    el("label", {}, "How it is kept"), choice(f, "mode", RFM_MODES, redraw, true),
+    clips.length ? el("label", { style: "display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0" }, el("input", { type: "checkbox", style: "width:auto", checked: !!f.motion, onchange: e => { f.motion = e.target.checked; if (f.motion) { f.mode = "compressed"; f.concept = "pose_motion"; } redraw(); } }),
+      el("span", {}, el("b", {}, "Motion only"), " (experimental): keep how things move in the clip, not who is in it, so the clip's own people do not come along. Uses Compressed Reference.")) : null,
+    el("label", {}, "How it is kept"), choice(f, "mode", RFM_MODES, () => { if (f.mode !== "compressed") f.motion = false; redraw(); }, true),
     f.mode === "compressed" && f.concept === "identity" ? el("div", { class: "note", style: "color:var(--warn)" }, "Compressed Reference pools the pictures to a small grid: a face does not survive it. Use Full Reference for a person.") : null,
     field("Describe it (optional, saved with it)", bind(f, "description", el("textarea", { rows: 2, maxlength: 400, placeholder: "young woman, black bob, brown leather jacket, black turtleneck" }))),
     over ? el("div", { class: "note", style: "color:var(--warn)" }, "At most " + most.image + " pictures and " + most.video + " clips in one RefMod.") : null,
@@ -54,7 +56,7 @@ function rfmPanel(o) { const f = REFMOD.f, st = REFMOD.state || {}, redraw = () 
         if (!f.name.trim()) return toast("Name the RefMod first");
         if (taken() && !f.replace) return toast("A RefMod named " + f.name.trim() + " is already saved: choose another name or tick Replace");
         actQueue("refmod", { name: f.name.trim(), images: pics, videos: clips, starts: clips.map(p => f.starts[p] || 0), seconds: Number(f.seconds) || 5,
-          mode: f.mode, concept: f.concept, description: f.description, replace: !!f.replace }, "refmod").then(() => rfmLoad().then(redraw)); } }, "Create RefMod"), el("span")),
+          mode: f.mode, concept: f.concept, description: f.description, replace: !!f.replace, motion_only: !!(f.motion && clips.length) }, "refmod").then(() => rfmLoad().then(redraw)); } }, "Create RefMod"), el("span")),
     actShow("refmod", job => { if (!saved.some(s => s.path === job.outputs[0])) rfmLoad().then(redraw);
       return el("div", { class: "note" }, "Saved: ", el("b", {}, job.outputs[0] || ""), st.share ? " (and linked into " + st.share + ")" : ""); }),
     el("h3", { style: "margin-top:16px" }, "Saved RefMods" + (saved.length ? " · " + saved.length : "")),

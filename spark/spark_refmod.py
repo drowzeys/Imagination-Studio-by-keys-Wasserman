@@ -70,7 +70,7 @@ def workflow(args, pictures: list[str], clips: list[str]) -> dict:
     w: dict = {"1": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}}}
     create = {"name": args.name, "mode": MODES[args.mode], "concept_type": args.concept, "vae": ["1", 0],
               "ref_resolution": args.resolution, "pool_h": args.grid, "pool_w": args.grid,
-              "latent_frames": args.frames, "identity": args.steps, "merge": args.merge, "motion_only": False,
+              "latent_frames": args.frames, "identity": args.steps, "merge": args.merge, "motion_only": args.motion_only,
               "multiplier": 1, "max_tokens": args.max_tokens, "extraction_preset": "manual", "subfolder": args.subfolder,
               "description": args.description, "save": True, "budget_policy": "truncate", "background_retention": 0.0}
     for i, name in enumerate(pictures, 1):
@@ -107,6 +107,8 @@ def main() -> None:
     parser.add_argument("--grid", type=int, default=16, help="Compressed Reference: the pooled grid's longer side")
     parser.add_argument("--steps", type=int, default=500, help="Compressed Reference: refinement steps (0: pooling alone)")
     parser.add_argument("--merge", action="store_true", help="Compressed Reference: one shared grid for all the references")
+    parser.add_argument("--motion-only", action="store_true", help="Compressed Reference, clips (experimental): the "
+                        "differences between frames are encoded, so the RefMod carries how things move, not what they look like")
     parser.add_argument("--max-tokens", type=int, default=5120, help="the most reference tokens the RefMod injects (0: no cap)")
     parser.add_argument("--work", required=True, help="a folder of the job's own, removed at the end")
     parser.add_argument("--share", default="", help="a second refmods folder the file is hard-linked into")
@@ -123,6 +125,8 @@ def main() -> None:
         sys.exit("the subfolder is one folder name: letters, digits, _ or -")
     if not args.resolution:
         args.resolution = 512 if args.video else 1024
+    if args.motion_only and (args.mode != "compressed" or not args.video):
+        sys.exit("motion only is for clips, in Compressed Reference (the node's training mode)")
     if not args.frames:
         args.frames = int(args.seconds * CLIP_FPS) + 1 if args.video else 1
     if not 256 <= args.resolution <= 2048 or args.resolution % 64:
@@ -181,7 +185,7 @@ def main() -> None:
                     shared = str(folder / target.name)
                 except OSError:
                     say(f"not shared to {folder}: {error}")
-        say(json.dumps({"output": str(target), "refmod": args.name, "mode": args.mode, "concept": args.concept,
+        say(json.dumps({"output": str(target), "refmod": args.name, "mode": args.mode, "motion_only": args.motion_only, "concept": args.concept,
                         "pictures": len(args.image), "clips": len(args.video), "resolution": args.resolution,
                         "bytes": target.stat().st_size, "shared": shared, "total_s": round(time.time() - started, 1)}))
     finally:

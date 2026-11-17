@@ -143,6 +143,13 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds)
         concept = params.get("concept") or "identity"
         if concept not in CONCEPTS:
             raise HTTPException(400, "the subject is one of " + ", ".join(CONCEPTS))
+        motion_only = params.get("motion_only", False)
+        if not isinstance(motion_only, bool):
+            raise HTTPException(400, "motion_only is true or false")
+        if motion_only:
+            if not clips:
+                raise HTTPException(400, "motion only is for clips: a picture has no motion")
+            mode = "compressed"  # the node keeps motion alone only in its pooled (training) mode
         description = " ".join(str(params.get("description") or "").split())
         if len(description) > DESCRIPTION_MOST:
             raise HTTPException(400, f"the description is at most {DESCRIPTION_MOST} characters")
@@ -150,7 +157,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds)
         if target.exists() and params.get("replace") is not True:
             raise HTTPException(400, f"a RefMod named {name} is already saved: choose another name, or replace it")
         return {"name": name, "pictures": pictures, "clips": clips, "starts": starts, "seconds": seconds, "mode": mode,
-                "concept": concept, "description": description, "target": target}
+                "concept": concept, "description": description, "target": target, "motion_only": motion_only}
 
     def build(kind: str, params: dict, job_id: str) -> tuple[list[str], dict, list[str]]:
         if kind not in KINDS:
@@ -166,6 +173,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, media_seconds)
             command += ["--image", str(picture)]
         for clip, start in zip(chosen["clips"], chosen["starts"]):
             command += ["--video", str(clip), "--start", f"{start:g}"]
+        if chosen["motion_only"]:
+            command.append("--motion-only")
         if chosen["description"]:
             command.append("--description=" + chosen["description"])  # one argument, even when the words start with "-"
         if share():
