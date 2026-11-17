@@ -243,3 +243,10 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             test()
             print("ok", name)
+
+
+def test_a_spoken_line_forbids_nothing_in_the_picture():
+    # a hand-written prompt quotes its dialogue; a composed one tags it: the words are heard, not shown
+    assert phrases("Dialogue (Oren, solemnly): \u201cI didn't keep it, and I never will.\u201d") == []
+    assert phrases('He says, "Do not leave." She does not smile.') == ["not smile"]
+    assert phrases("The speaker says: <d>[English] No photographs, please.</d> A bare wall.") == []

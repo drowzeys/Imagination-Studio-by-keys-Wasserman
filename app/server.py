@@ -61,6 +61,7 @@ if LOCAL_GPU_CHILD:
     os.environ["STUDIO_DISCOVER_DELAY"] = "-1"
 
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
+import script_lines  # noqa: E402  (the spoken lines of an uploaded prompt or script, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
 import memory_guard  # noqa: E402  (a DGX Spark's memory: what a clip needs and whether this machine has it, in spark/)
 import settings  # noqa: E402  (Settings: looks, layout, presets, settings.json, beside this file)
@@ -2338,7 +2339,8 @@ def long_take(job: dict) -> bool:
     folder.mkdir(parents=True, exist_ok=True)
     image, clips = params.get("image"), []
     for index, seconds in enumerate(pieces):
-        prompt = params["prompt"]
+        # the spoken lines split between the parts (the Create page): each part has its own prompt
+        prompt = params["prompts"][index] if params.get("prompts") else params["prompt"]
         if beats:  # one line per piece says what happens in it; the last line holds for the rest
             beat = f"In this part of the video: {beats[min(index, len(beats) - 1)].rstrip('.')}."
             prompt = prompt.replace("[Shot 1] ", f"[Shot 1] {beat} ", 1) if "[Shot 1] " in prompt else f"{beat} {prompt}"
@@ -2807,6 +2809,14 @@ def compose_prompt(body: dict) -> dict:
             **negation.check_fields(body.get("fields", {}))}
 
 
+@app.post("/api/dialogue/extract")
+def extract_dialogue(body: dict) -> dict:
+    """The spoken lines of an uploaded or pasted prompt or script, as the Words / Sound step's Voice / Line rows
+    (script_lines.py). Text in, rows out: the words of each line are kept as written."""
+
+    return script_lines.extract(str(body.get("text") or ""))
+
+
 @app.post("/api/prompt/check")
 def check_prompt(body: dict) -> dict:
     """What a finished video prompt forbids by name (negation.py): for a prompt typed or edited by hand, before it is
@@ -3029,6 +3039,10 @@ def queue_job(body: dict) -> dict:
         if not LONGEST < total <= max(LONG):
             raise HTTPException(400, f"a long video is over {LONGEST} seconds and at most {max(LONG) // 60} minutes")
         pieces = plan(total, int(params.get("segment_seconds", LONGEST)))
+        if params.get("prompts") is not None:
+            said = params["prompts"]
+            if not isinstance(said, list) or len(said) != len(pieces) or not all(isinstance(one, str) and one.strip() for one in said):
+                raise HTTPException(400, f"a long video's prompts are one for each of its {len(pieces)} parts")
         build("video", {**params, "seconds": pieces[0], "output": None}, "check")
     if kind not in ("export", "edit", "foley") + actions.KINDS + swap.KINDS + refmod.KINDS + finish.KINDS + graphics.KINDS and not (params.get("prompt") or "").strip():
         raise HTTPException(400, "a prompt is needed")
@@ -3684,6 +3698,8 @@ import shot  # noqa: E402  (a clip's keyframes held and no cut inside it, beside
 import qa  # noqa: E402  (Sam Wasserman's QA gate, beside this file)
 import remote  # noqa: E402  (another machine's Studio app, read over its own API, beside this file)
 import slate  # noqa: E402  (Wasserman Slate AI Studio, beside this file)
+import prompt_builder  # noqa: E402  (Prompt Builder: an H3 prompt from your own cast and a few choices, beside this file)
+app.include_router(prompt_builder.attach(HOME, queue=queue_job, find=jobs.get))
 import voice  # noqa: E402  (Voice: Fish Audio Drama 3 text to speech, run locally, beside this file)
 import bolt  # noqa: E402  (NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine, beside this file)
 

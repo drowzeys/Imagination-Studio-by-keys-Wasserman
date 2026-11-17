@@ -169,7 +169,9 @@ def default_text_encoder() -> str:
     folder = MODELS / "FastH3-Comfy" / "text_encoders"
     if (folder / H3_TEXT).is_file():
         return "regular"
-    others = sorted(p.name for p in folder.glob("qwen3vl_32b_minimax_h3_*.safetensors") if p.is_file() and p.name != H3_TEXT)
+    # a part of the encoder (a "generation_tail_50_63" file holds layers 50 to 63 only) is not a build of it
+    others = sorted(p.name for p in folder.glob("qwen3vl_32b_minimax_h3_*.safetensors")
+                    if p.is_file() and p.name != H3_TEXT and "tail" not in p.name.lower())
     return others[0] if len(others) == 1 else "regular"
 
 

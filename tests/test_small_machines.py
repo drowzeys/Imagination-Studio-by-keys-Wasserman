@@ -197,6 +197,11 @@ def test_a_small_card_install_renders_on_the_8_bit_file_by_default(tmp_path, mon
     (tmp_path / "models" / H3_ENCODER_NVFP4).parent.mkdir(parents=True)
     (tmp_path / "models" / H3_ENCODER_NVFP4).write_bytes(b"x")
     assert spark_generate.default_text_encoder() == "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    # a part of the encoder beside it (layers 50 to 63 only) is not a second build: the NVFP4 one stays the default
+    tail = (tmp_path / "models" / H3_ENCODER_NVFP4).with_name("qwen3vl_32b_minimax_h3_generation_tail_50_63_int8_convrot.safetensors")
+    tail.write_bytes(b"x")
+    assert spark_generate.default_text_encoder() == "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    tail.unlink()
     (tmp_path / "models" / H3_ENCODER_NVFP4).with_name("qwen3vl_32b_minimax_h3_w4a8.safetensors").write_bytes(b"x")
     assert spark_generate.default_text_encoder() == "regular"  # two others: no guess, the person picks one in the app
     (tmp_path / "models" / H3_ENCODER).write_bytes(b"x")
