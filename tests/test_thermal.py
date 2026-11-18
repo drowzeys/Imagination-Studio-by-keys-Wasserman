@@ -196,7 +196,7 @@ def test_bolt_given_back_on_an_idle_queue_is_not_left_held(monkeypatch):
     held, lifted = [], threading.Event()
     monkeypatch.setattr(server, "wake", threading.Event())
     monkeypatch.setattr(server, "stopping", threading.Event())
-    monkeypatch.setattr(server, "hub", SimpleNamespace(claim=lambda: None))
+    monkeypatch.setattr(server, "hub", SimpleNamespace(claim=lambda: None, measure=lambda: None, unmeasured=False))
     monkeypatch.setattr(server.bolt, "release", lambda why: held.append(why) or True)
     monkeypatch.setattr(server.bolt, "queue_empty", lambda: (held.clear(), lifted.set()))
     loop = threading.Thread(target=server.work, daemon=True)

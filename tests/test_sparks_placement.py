@@ -123,6 +123,7 @@ def test_preferred_unavailable_worker_falls_back_to_head(hub, state):
     address = target(hub)
     hub.state(address).update(state=state, job="other" if state == "busy" else None)
     clip = job(hub, {"worker": address, "policy": "prefer"})
+    hub.measure()  # as the queue thread does before it claims: the clip may wait for that worker if it did not fit here
     assert hub.claim() is clip and clip["remote"] is None
 
 

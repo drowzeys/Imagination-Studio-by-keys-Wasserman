@@ -2623,16 +2623,18 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
 def work() -> None:
     while True:
         wake.wait()
+        hub.measure()  # the fits claim asks for, read before the queue's lock is taken
         with lock:
             if stopping.is_set():
                 return
             job = hub.claim()  # the next job for this machine; on a DGX Spark a worker may have taken others (sparks.py)
-            if job is None:
+            if job is None and not hub.unmeasured:  # a clip queued since the fits were measured: measure and look again
                 wake.clear()
         if job is None:
             bolt.queue_empty()  # nothing for this machine: a Bolt unloaded for the queue's jobs may load again
             continue
         perform(job)
+        hub.fitted.clear()  # this machine's memory changed: a clip left to the workers as too big here is measured again
         hub.kick.set()
 
 
@@ -3073,14 +3075,17 @@ def queue_job(body: dict) -> dict:
     if selected is not None and (selected.get("memory") or {}).get("fits") is False:
         raise HTTPException(400, selected["memory"].get("reason") or "the selected worker cannot fit this clip")
     required_worker = placement and placement["worker"] != "head" and placement["policy"] == "require"
+    # a worker busy with another app's job, or away for a while, is not in the plan's count, but the clip may wait for
+    # it (Hub.later): this Spark's guard is then not asked now; the claim asks it before this Spark takes the clip
+    waits = bool(kind in sparks.KINDS and hub.later({"kind": kind, "params": params, "sparks": {"chosen": chosen}, "placement": placement}))
     if kind == "long":
         # held to the memory guard of the machine that renders the chain, as a single clip is
-        build("video", {**sizing, "output": None}, "check", room=not (selected is not None or required_worker or said["used"] > 1))
+        build("video", {**sizing, "output": None}, "check", room=not (selected is not None or required_worker or waits or said["used"] > 1))
     if kind not in ("export", "long"):
         # reject bad settings now, not when the job's turn comes; a clip other Sparks may take is held to their memory
         # guards (asked before it is handed over), not to this one's
         build(kind, params, "check" if kind in finish.KINDS + graphics.KINDS else job_id,  # these write their folder when built
-              room=not (selected is not None or required_worker or (kind in ("video", "studio") and said["used"] > 1)))
+              room=not (selected is not None or required_worker or waits or (kind in ("video", "studio") and said["used"] > 1)))
     if kind in graphics.KINDS and not body.get("title"):
         body = {**body, "title": graphics_title(params)}
     if kind in swap.KINDS and not body.get("title"):

@@ -919,3 +919,69 @@ def test_a_long_video_taken_back_from_a_worker_starts_again_from_its_first_piece
     folder = (server.HOME / job["outputs"][0]).parent
     assert all((server.HOME / path).read_bytes() == b"made here" for path in job["outputs"][1:])
     assert len(list(folder.glob("seg[0-9][0-9][0-9].mp4"))) == len(server.plan(40))
+
+
+def test_a_clip_too_big_here_waits_for_a_worker_busy_with_another_apps_job():
+    """Submitted while the worker renders a job of its own app's, a clip this Spark cannot hold is queued for the worker
+    (Hub.later), not refused by this Spark's guard nor taken here, and the worker renders it once it is free. With no
+    worker that could ever take it, it is refused when it is submitted, as before."""
+
+    one = Worker("spark-a")
+    one.jobs["theirs"] = {"id": "theirs", "status": "running"}  # its own app's job: it is busy, and not for us
+    fresh(one)
+    assert hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE
+    had = server.memory_of
+    server.memory_of = lambda *args, **kwargs: {"fits": False, "reason": "this machine has 43 GB for it"}
+    try:
+        queued = queue(2)
+        time.sleep(1)
+        seen = client.get(f"/api/jobs/{queued['id']}").json()
+        assert seen["status"] == "queued" and "too big" in seen["progress"]["stage"] and not local_render.most
+        one.jobs["theirs"]["status"] = "done"
+        job = finished([queued["id"]])[0]
+        assert job["status"] == "done" and job["spark"] == "spark-a"
+        client.post(f"/api/sparks/workers/{one.address}", json={"enabled": False})
+        alone = client.post("/api/jobs", json={"kind": "video", "title": "clip", "sparks": 2, "params": {
+            "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "frames": 22, "shot_check": False}})
+        assert alone.status_code == 400 and "43 GB" in alone.text
+    finally:
+        server.memory_of = had
+
+
+def test_a_clip_too_big_here_waits_through_its_workers_outage():
+    """The worker stops answering while it renders a clip this Spark cannot hold: the clip goes back to the queue and
+    waits for that worker (not taken here, where the guard would refuse it), and renders there once it is checked again."""
+
+    one = Worker("spark-a")
+    one.takes = 30  # it will not finish
+    fresh(one)
+    had_lost, had_memory = sparks.LOST, server.memory_of
+    sparks.LOST = 0.6
+    server.memory_of = lambda *args, **kwargs: {"fits": False, "reason": "this machine has 43 GB for it"}
+    try:
+        queued = queue(2)
+        until = time.time() + 10
+        while time.time() < until and not one.jobs:
+            time.sleep(0.05)
+        one.dead = True
+        until = time.time() + 10
+        while time.time() < until and not client.get(f"/api/jobs/{queued['id']}").json()["moved"]:
+            time.sleep(0.05)
+        time.sleep(0.5)
+        seen = client.get(f"/api/jobs/{queued['id']}").json()
+        assert seen["status"] == "queued" and "stopped answering" in seen["progress"]["stage"] and not local_render.most
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})  # still away: the check fails
+        settle()
+        assert client.get("/api/sparks").json()["workers"][0]["state"] == "unreachable"
+        hub.wake.set()
+        time.sleep(0.5)
+        seen = client.get(f"/api/jobs/{queued['id']}").json()
+        assert seen["status"] == "queued" and "does not answer over ssh" in seen["progress"]["stage"] and not local_render.most
+        one.dead, one.takes = False, TAKES
+        for job in one.jobs.values():
+            job["status"] = "cancelled"  # the take that was taken back
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        job = finished([queued["id"]])[0]
+    finally:
+        sparks.LOST, server.memory_of = had_lost, had_memory
+    assert job["status"] == "done" and job["spark"] == "spark-a" and len(job["moved"]) == 1
