@@ -274,6 +274,9 @@ class FakeComfy:
     def __init__(self):
         self.UPLOADED = []
 
+    def video_vae(self):
+        return self.H3_VAE  # spark_generate.video_vae: H3_VAE on every card but a GB300
+
     def upload(self, path):
         return "up_" + Path(path).name
 

@@ -223,7 +223,7 @@ def ref2va() -> str | None:
 def loaders(w: dict, vae: str | None = None) -> None:
     w["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": ref2va() or sg.REF2VA["bf16"], "weight_dtype": "default"}}
     w["3"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.H3_TEXT, "type": "minimax", "device": "default"}}
-    w["4"] = {"class_type": "VAELoader", "inputs": {"vae_name": vae or sg.H3_VAE}}
+    w["4"] = {"class_type": "VAELoader", "inputs": {"vae_name": vae or sg.video_vae()}}
     w["5"] = {"class_type": "VAELoader", "inputs": {"vae_name": sg.H3_AUDIO_VAE}}
 
 

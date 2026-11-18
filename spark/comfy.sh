@@ -9,7 +9,7 @@
 # from what is free, not from what is available) and stops the server when available memory is under
 # SPARK_MEMORY_FLOOR_MB (default: a tenth of the machine, 12.4 GB on a Spark) or is falling there within a second.
 # Environment: PREFIX, SPARK_COMFY_PORT (8190), SPARK_MEMORY_FLOOR_MB, SPARK_MEMORY_FREE_MB (free memory under which
-# the cache is given back: two thirds of the floor), SPARK_COMFY_ARGS (ComfyUI flags, default --use-ck-attention). TF_H3_CHECK=1 and TF_H3_PROFILE=1 reach TensorFold's H3 node (see its file).
+# the cache is given back: two thirds of the floor), SPARK_COMFY_ARGS (ComfyUI flags, default --use-ck-attention; on a GB300 --use-pytorch-cross-attention, spark/gpu_profile.py). TF_H3_CHECK=1 and TF_H3_PROFILE=1 reach TensorFold's H3 node (see its file).
 # SPARK_GOVERNOR names a machine-wide workload governor's folder (spark/workload.py): the server then starts only
 # inside a reservation of its own (spark/managed_comfy.py), with the same memory guard beside it and the governor's
 # telemetry as well, and `stop` ends that server. Unset, nothing changes.
@@ -82,13 +82,16 @@ case "${1:-start}" in
       COMMAND=("$PREFIX/venv/bin/python" "$HERE/../scripts/windows-comfy-calibration-launcher.py"
         --comfy "$PREFIX/ComfyUI/main.py" --gpu-limit-mb 12288 -- --listen 127.0.0.1 --port "$PORT" --disable-cuda-malloc)
     fi
-    # --use-ck-attention: ComfyUI's own flash-attention kernel, 12% faster a pass than PyTorch's on a GB10
+    # --use-ck-attention: ComfyUI's own flash-attention kernel, 12% faster a pass than PyTorch's on a GB10. On a GB300
+    # PyTorch's attention (cuDNN's kernel) is the faster one: spark/gpu_profile.py says which, SPARK_COMFY_ARGS over it
+    FLAGS="${SPARK_COMFY_ARGS:-$(python3 "$HERE/gpu_profile.py" comfy-args 2>/dev/null || true)}"
+    FLAGS="${FLAGS:---use-ck-attention}"
     if [ -n "${SPARK_GOVERNOR:-}" ]; then
       # shellcheck disable=SC2086
-      exec python3 "$HERE/managed_comfy.py" run "${COMMAND[@]}" ${SPARK_COMFY_ARGS:---use-ck-attention}
+      exec python3 "$HERE/managed_comfy.py" run "${COMMAND[@]}" $FLAGS
     fi
     # shellcheck disable=SC2086
-    nice -n 19 "${COMMAND[@]}" ${SPARK_COMFY_ARGS:---use-ck-attention} &
+    nice -n 19 "${COMMAND[@]}" $FLAGS &
     pid=$!
     trap 'kill $pid 2>/dev/null' TERM INT
     # the guard stands beside the server until it ends (status 3: it stopped the server). It is started with the

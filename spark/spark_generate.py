@@ -37,6 +37,7 @@ import memory_guard  # noqa: E402  (what a clip needs and whether this machine h
 import progress_file  # noqa: E402  (SPARK_PROGRESS_FILE: a clip's progress for a governor, off by default)
 import job_preview  # noqa: E402  (STUDIO_PREVIEW_FILE: a job's live preview for the app's API, off by default)
 import gpus  # noqa: E402  (two or more cards: each stage of a workflow placed on its card)
+import gpu_profile  # noqa: E402  (the card's own defaults: a GB300 renders on ComfyUI's blocks, fp16 decoder)
 sys.path.insert(0, str(HERE.parent / "app"))
 import spark_audio3  # noqa: E402
 PREFIX = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
@@ -126,7 +127,8 @@ H3_FL2VA = "minimax_h3_fl2va_pruned_bf16.safetensors"
 H3_TEXT = "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
 TEXT_TAG = ""
 # ComfyUI's 8-bit video decoder: half the decode time of the fp16 one on a GB10 (14 s against 26 s for 124 frames of
-# 864x480), the same picture to 42 to 44 dB. SPARK_VAE=minimax_h3_video_vae_fp16.safetensors selects the other.
+# 864x480), the same picture to 42 to 44 dB. SPARK_VAE=minimax_h3_video_vae_fp16.safetensors selects the other, and a
+# GB300 asks for that one itself (video_vae).
 H3_VAE = os.environ.get("SPARK_VAE", "minimax_h3_video_vae_int8_convrot.safetensors")
 H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
 # On a Mac MiniMax H3 is read from MiniMax's own files (mac/studio_files): the Ref2VA transformer with its full adaLN
@@ -515,8 +517,27 @@ def fetch(item: dict, target: Path) -> None:
 def installed(kind: str, name: str) -> bool:
     """Whether ComfyUI lists a model file (it reads its folders again on every call)."""
 
-    loader, field = {"unet": ("UNETLoader", "unet_name"), "lora": ("LoraLoaderModelOnly", "lora_name")}[kind]
+    loader, field = {"unet": ("UNETLoader", "unet_name"), "lora": ("LoraLoaderModelOnly", "lora_name"),
+                     "vae": ("VAELoader", "vae_name")}[kind]
     return name in call(f"/object_info/{loader}")[loader]["input"]["required"][field][0]
+
+
+def video_vae() -> str:
+    """The video decoder a clip loads: H3_VAE, or on a GB300 with SPARK_VAE unset the fp16 one (spark/gpu_profile.py:
+    its 8-bit one decodes about 5x slower there) once ComfyUI lists it. An install from before has only the 8-bit one,
+    and a clip still renders with that."""
+
+    wanted = H3_VAE if MAC else gpu_profile.video_vae(H3_VAE)
+    if wanted == H3_VAE:
+        return H3_VAE
+    try:
+        if installed("vae", wanted):
+            return wanted
+    except (OSError, KeyError, IndexError, TypeError, ValueError):
+        return H3_VAE
+    print(f"[tensorfold] {wanted} is not installed: the 8-bit video decoder, slower on this card "
+          "(oneshot-setup-spark.sh fetches it)", flush=True)
+    return H3_VAE
 
 
 # MiniMax's limits for one Ref2VA request, the same as on the Mac (h3_generate.py)
@@ -750,7 +771,7 @@ def reference(args) -> None:
     w = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": name, "weight_dtype": "default"}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": H3_TEXT, "type": "minimax", "device": "default"}},
-        "4": {"class_type": "VAELoader", "inputs": {"vae_name": H3_VAE}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": video_vae()}},
         "5": {"class_type": "VAELoader", "inputs": {"vae_name": H3_AUDIO_VAE}},
         "6": {"class_type": "MiniMaxH3ReferenceToVideo",
               "inputs": {"clip": ["3", 0], "vae": ["4", 0], "audio_vae": ["5", 0], "prompt": prompt, "width": args.width,
@@ -897,7 +918,7 @@ def video(args) -> None:
         # FastH3's schedule: video shift 10, audio shift 3 (fastvideo_inference.json); MiniMax H3's own: 12 and 3
         "2": {"class_type": "MiniMaxH3SigmaShift", "inputs": {"model": ["1", 0], "shift_video": 12.0 if base else 10.0, "shift_audio": 3.0}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": H3_TEXT, "type": "minimax", "device": "default"}},
-        "4": {"class_type": "VAELoader", "inputs": {"vae_name": H3_VAE}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": video_vae()}},
         "5": {"class_type": "VAELoader", "inputs": {"vae_name": H3_AUDIO_VAE}},
         "6": {"class_type": "MiniMaxH3ImageToVideo",
               "inputs": {"clip": ["3", 0], "vae": ["4", 0], "prompt": prompt_of(args), "width": args.width,
@@ -1497,9 +1518,9 @@ def main() -> None:
     v.add_argument("--crop", default="", help="WxH centre crop of the finished clip")
     v.add_argument("--weights", choices=sorted(FASTH3), default=os.environ.get("SPARK_WEIGHTS", "bf16"))
     v.add_argument("--engine", choices=("tensorfold", "comfy"),
-                   default=os.environ.get("SPARK_ENGINE") or ("tensorfold" if ENGINE_LIB.exists() else "comfy"),
+                   default=gpu_profile.engine(ENGINE_LIB),
                    help="what runs the transformer blocks: TensorFold's CUDA family (the default once "
-                        "spark/build-engine.sh has built it) or ComfyUI's own")
+                        "spark/build-engine.sh has built it, except on a GB300) or ComfyUI's own")
     v.add_argument("--base", choices=("fasth3", "h3"), default=os.environ.get("SPARK_BASE") or "fasth3",
                    help="the transformer of a clip: FastH3 (the default), or MiniMax H3's own first-and-last-frame "
                         "model when it is installed (25 passes by default; what keyframe LoRAs were trained on)")

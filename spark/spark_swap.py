@@ -550,7 +550,7 @@ def window_graph(one: dict, files: dict, part: dict, args, unet: str, loras: lis
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
         "2": {"class_type": "MiniMaxH3SigmaShift", "inputs": {"model": ["1", 0], "shift_video": SHIFT_VIDEO, "shift_audio": SHIFT_AUDIO}},
         "5": {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.H3_TEXT, "type": "minimax", "device": "default"}},
-        "6": {"class_type": "VAELoader", "inputs": {"vae_name": sg.H3_VAE}},
+        "6": {"class_type": "VAELoader", "inputs": {"vae_name": sg.video_vae()}},
         "7": {"class_type": "VAELoader", "inputs": {"vae_name": sg.H3_AUDIO_VAE}},
         "10": {"class_type": "LoadImage", "inputs": {"image": character}},
         "11": {"class_type": "LoadVideo", "inputs": {"file": put(files["ref"])}},
