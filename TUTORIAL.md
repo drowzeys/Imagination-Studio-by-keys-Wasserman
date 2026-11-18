@@ -479,8 +479,8 @@ row it says what the number does for this job, and lists any Spark not used, wit
 
 - **Several clips** (queued clips, a board's segments, a Slate scene's shots) render one per Spark, side by side, and
   come back into this Spark's Library and project.
-- **One clip** renders on one Spark. A long video, pictures, edits, Library actions, voice takes and songs stay on
-  this Spark.
+- **One clip** renders on one Spark. A long video renders on one Spark too, this one or a worker, piece by piece.
+  Pictures, edits, Library actions, voice takes and songs stay on this Spark.
 - **The Sparks tab** lists the other Sparks. Under *Add a Spark*, type the address you would give `ssh` and press
   **Add**. The other Spark needs the Studio installed once (`oneshot-setup-spark.sh`) and a key login from this one;
   no password is asked and nothing runs as root. Per row: **Check** only looks; **Update and start** sends this
@@ -493,7 +493,7 @@ Measured through the app, eight 56-frame 864x480 FastH3 clips: 263 s on one Spar
 on four, 65 s on five. Six to eight Sparks are not measured, and one clip split across several Sparks is not in the
 app. On a Mac the tab says there is one machine.
 
-On a GPU this machine renders the job. A job may also use DGX Sparks you add, up to five, this GPU counted. Several clips render one per machine. One clip renders on one machine. A long video, pictures, edits, Library actions, voice takes and songs stay on this GPU. The row of 1 to 8 above, and the times, are a DGX Spark's.
+On a GPU this machine renders the job. A job may also use DGX Sparks you add, up to five, this GPU counted. Several clips render one per machine. One clip renders on one machine. A long video renders on one machine, this GPU or a DGX Spark worker, piece by piece. Pictures, edits, Library actions, voice takes and songs stay on this GPU. The row of 1 to 8 above, and the times, are a DGX Spark's.
 
 ## 13. Memory on a DGX Spark
 
