@@ -475,19 +475,19 @@ License: commercial use is allowed, and a commercial product shows "MiniMax-Musi
 On a DGX Spark a job may use more than one Spark. **Sparks**, a row of numbers from 1 to 8, is how many machines a
 job may use, this one counted. It is at the top of the queue on every tab, in step 5 of Create, on the Production
 board and on a Slate shot. Choose more than there are and the app uses what is there: *5 of 8 available*. Under the
-row it says what the number does for this job, and lists any Spark not used, with the reason.
+row it says what the number does for this job, and lists any machine not used, with the reason.
 
-- **Several clips** (queued clips, a board's segments, a Slate scene's shots) render one per Spark, side by side, and
+- **Several clips** (queued clips, a board's segments, a Slate scene's shots) render one per machine, side by side, and
   come back into this Spark's Library and project.
-- **One clip** renders on one Spark. A long video, pictures, edits, Library actions, voice takes and songs stay on
+- **One clip** renders on one machine. A long video, pictures, edits, Library actions, voice takes and songs stay on
   this Spark.
-- **The Sparks tab** lists the other Sparks. Under *Add a Spark*, type the address you would give `ssh` and press
-  **Add**. The other Spark needs the Studio installed once (`oneshot-setup-spark.sh`) and a key login from this one;
-  no password is asked and nothing runs as root. Per row: **Check** only looks; **Update and start** sends this
-  Spark's Studio code (not the models) and starts its app; **Stop** frees its memory; untick *use* to give it no
-  clips.
+- **The Sparks tab** lists the other machines. Under *Add a worker*, type the address you would give `ssh` and press
+  **Add**. The other machine needs the Studio installed once (`oneshot-setup-spark.sh` on a Spark) and a key login
+  from this one; no password is asked and nothing runs as root. Per row: **Check** only looks; **Update and start**
+  sends this Spark's Studio code (not the models) and starts its app; **Stop** frees its memory; untick *use* to give
+  it no clips. A Mac's or a Windows PC's own Studio app is left as it is: update and start it there.
 - A worker that does not answer for 60 seconds during a job is marked down and its clip goes back to the queue. The
-  job card says *Taken back from* that Spark, with the reason. Press **Check** on it before it is used again.
+  job card says *Taken back from* that machine, with the reason. Press **Check** on it before it is used again.
 
 Measured through the app, eight 56-frame 864x480 FastH3 clips: 263 s on one Spark, 130 s on two, 98 s on three, 69 s
 on four, 65 s on five. Six to eight Sparks are not measured, and one clip split across several Sparks is not in the

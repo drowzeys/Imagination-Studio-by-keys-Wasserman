@@ -56,7 +56,7 @@ loss/refusal after dispatch fails explicitly, never on another GPU.
 ## Set it up: the Sparks tab
 
 1. Open **Machine → Sparks**.
-2. Under *Add a Spark*, type the other machine's address as you would after `ssh` (`10.0.10.5`, or
+2. Under *Add a worker*, type the other machine's address as you would after `ssh` (`10.0.10.5`, or
    `user@spark-5`) and press **Add**. If its Studio is not in the same folder as on this Spark, give the folder.
 3. The app looks at it and shows one of: *idle*, *rendering*, *its Studio app is not running*, *its Studio code
    differs from this Spark's*, *no Studio installed there*, *does not answer over ssh*.
@@ -65,11 +65,12 @@ loss/refusal after dispatch fails explicitly, never on another GPU.
    only when its code is this Spark's, which is also how it gets the memory guard. With automatic updates on
    (Settings → Updates), this Spark does that itself when a worker falls behind its code: once per version, for an idle
    worker this Studio started; one that then fails waits for you.
-5. Each Spark's row then says: its Studio's version, memory available, disk free, and what it renders (FastH3 clips
-   from text, a first frame or a last frame; Ref2VA; the image model; how many LoRAs; ffmpeg).
+5. Each worker's row then says what it is (*GB300*, *DGX Spark*, *Mac*), its Studio's version, memory available, disk
+   free, and what it renders (FastH3 clips from text, a first frame or a last frame; Ref2VA; the image model; how
+   many LoRAs; ffmpeg).
 
 **Check** looks again and changes nothing. **Stop** stops the worker's app and its ComfyUI server, which gives its
-memory back. **Remove** takes it off the list. Untick **use** to keep a Spark in the list and give it nothing.
+memory back. **Remove** takes it off the list. Untick **use** to keep a worker in the list and give it nothing.
 
 A worker's app is never opened to the network. This app reaches it through an ssh tunnel that it opens itself and
 closes when you remove the worker or stop the app. The list is kept in `sparks/sparks.json` in the studio folder
@@ -105,11 +106,11 @@ A job queued without `sparks` takes the number set on the Sparks tab. `GET /api/
 
 | The job | With Sparks = N |
 |---|---|
-| Several clips: jobs in the queue, the segments of a Production board, the shots of a Slate scene | One clip per Spark, side by side, on this Spark and the first N - 1 workers that are up and can render the clip. |
-| One clip | It renders on one Spark, the first that is free. One clip is not split across Sparks in the app (see the end of this page). |
-| A segment or shot that opens on the last frame of the one before | It waits for that one, then renders on any free Spark. A board that is one chain renders one clip at a time. |
+| Several clips: jobs in the queue, the segments of a Production board, the shots of a Slate scene | One clip per machine, side by side, on this Spark and the first N - 1 workers that are up and can render the clip. |
+| One clip | It renders on one machine, the first that is free. One clip is not split across machines in the app (see the end of this page). |
+| A segment or shot that opens on the last frame of the one before | It waits for that one, then renders on any free machine. A board that is one chain renders one clip at a time. |
 | A long video (over 15 s) | One Spark, this one: it is a chain, each piece opens on the last frame of the one before. |
-| A clip with a LoRA, or from references (Ref2VA) | Only on Sparks that have that LoRA, or Ref2VA, installed, and only when that Spark's memory guard accepts the clip. With none: this Spark. |
+| A clip with a LoRA, or from references (Ref2VA) | Only on workers that have that LoRA, or Ref2VA, installed, and only when that worker's memory guard accepts the clip. With none: this Spark. |
 | Pictures, edits, Library actions (Turnaround, Upscale, Remove a person), a timeline export, a clip that starts from a new picture | This Spark. |
 
 A clip rendered on a worker comes back into this Spark's studio folder at the path it would have had here (the
@@ -139,9 +140,18 @@ file is only read, by people and scripts, so a save of the list or an update of 
 display only: jobs, takes and the log keep each machine's own name, and the page maps them
 (`names` on `/api/sparks`).
 
+Beside its name each machine is shown by what it is, from what its own app reports (`what` on `/api/sparks`, for each
+worker and for `this`): a Linux machine by its card, without the maker's name (a GB10 is a *DGX Spark*, a GB300 is
+*GB300*), a Mac as *Mac* and a Windows PC as *Windows PC*. It is on the machine's row (*GB300 · user@gb300-1*), on its
+card and in **Render on**, and a label does not replace it. A worker that is down keeps what it last said; one on code
+from before `status` names no card until **Update and start**. With remote workers only, the counts under the chooser
+speak of Sparks while every worker is a DGX Spark (or has not said), and of machines once any other machine is on the
+list (*3 of 3 available machines. One clip per machine*); with a local GPU worker on the list they speak of workers,
+as before.
+
 ## What keeps it safe
 
-- **One job on a Spark at a time.** A worker that is rendering anything, for this Spark or for someone else, is
+- **One job on a worker at a time.** A worker that is rendering anything, for this Spark or for someone else, is
   given nothing until it is idle.
 - **Every clip passes the worker's own memory guard** (*The memory guard* in the README): this app asks it before
   anything is sent, the worker's app asks it again when it queues the job, and the guard stands beside the worker's
@@ -248,8 +258,8 @@ renders the clips no Spark can take, at the Mac's speed.
 
 ## A Mac as a worker
 
-A Mac with the Studio installed can be added to the list like a Spark, under **Machine → Sparks → Add a Spark or a
-Mac**, from a Spark at the head or from another Mac. It is given single clips, one at a time, through the same ssh
+A Mac with the Studio installed can be added to the list like a Spark, under **Machine → Sparks → Add a worker**, from a
+Spark at the head or from another Mac. It is given single clips, one at a time, through the same ssh
 tunnel to its own `127.0.0.1:7870`.
 
 **What it needs.**
@@ -273,8 +283,8 @@ own default (Small from a Spark). These stay on the head, and the page says why:
 - a text encoder file of a Spark's: it is a ComfyUI file, and a Mac reads only its own MLX files;
 - anything that is not a single clip, as with a Spark.
 
-It is given a clip only while it is idle: a Mac rendering its owner's own job shows *rendering a job that is not this
-Spark's* and is skipped until it is done.
+It is given a clip only while it is idle: a Mac rendering its owner's own job shows *rendering a job this Studio did not
+send* and is skipped until it is done.
 
 **Memory.** A Mac has no Spark memory guard. Its guard is its memory manager: when the clip's job starts there, the
 measured peak is held against the memory the Mac has, its idle engines are unloaded to make room, and a clip that
@@ -305,7 +315,7 @@ estimate for a list with a Mac in it is marked not measured.
 ## A Windows PC as a worker
 
 A Windows PC running the native Windows Studio (an RTX Spark N1X, [docs/rtx-spark-n1x.md](rtx-spark-n1x.md)) can be
-added to the list too, under **Machine → Sparks → Add a Spark, a Mac or a Windows PC**. It is the CUDA build, so it is
+added to the list too, under **Machine → Sparks → Add a worker**. It is the CUDA build, so it is
 given what a Spark is given: single FastH3 clips at the sizes and qualities it lists.
 
 **What it needs.**
