@@ -222,6 +222,14 @@ def ref2va() -> str | None:
 
 def loaders(w: dict, vae: str | None = None) -> None:
     w["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": ref2va() or sg.REF2VA["bf16"], "weight_dtype": "default"}}
+    # what the log says is the file that loads: a LoRA merged at run time into an 8-bit (int8_convrot) file is known to
+    # spoil the picture without any error (sg.REF2VA's note), so a run on that fallback says so
+    unet = w["1"]["inputs"]["unet_name"]
+    if unet != sg.REF2VA["bf16"]:
+        # measured once on an RTX 5060 Ti (2026-11-17): the Turnaround LoRA on the int8 file turned a full-body still
+        # from front to profile, the faces soft at 512 a view; one run, so the note stays a note
+        say(f"note: the bf16 Ref2VA file ({sg.REF2VA['bf16']}) is not here, so this runs on {unet}: a LoRA merged at "
+            "run time into an 8-bit file may come out weaker than on bf16. Check the result.")
     w["3"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": sg.H3_TEXT, "type": "minimax", "device": "default"}}
     w["4"] = {"class_type": "VAELoader", "inputs": {"vae_name": vae or sg.H3_VAE}}
     w["5"] = {"class_type": "VAELoader", "inputs": {"vae_name": sg.H3_AUDIO_VAE}}
@@ -263,7 +271,7 @@ def turnaround(args) -> None:
         "14": {"class_type": "SaveImage", "inputs": {"images": ["13", 0], "filename_prefix": prefix + "_view"}},
         "15": {"class_type": "SaveImage", "inputs": {"images": ["13", 1], "filename_prefix": prefix + "_sheet"}},
     })
-    say(f"engine: {sg.ENGINE} (ComfyUI, MiniMax H3 Ref2VA bf16 with the Turnaround LoRA at {strength:g}), five views of "
+    say(f"engine: {sg.ENGINE} (ComfyUI, MiniMax H3 Ref2VA {w['1']['inputs']['unet_name']} with the Turnaround LoRA at {strength:g}), five views of "
         f"{args.size}x{args.size}, {args.steps} passes")
     try:
         saved, seconds = execute(w, "12")
@@ -311,7 +319,7 @@ def upscale(args) -> None:
         w["8"]["inputs"].update(audio=["7", 1], audio_vae=["5", 0])
         w["10"]["inputs"]["audio"] = ["8", 1]
     width, height = probe["video"]
-    say(f"engine: {sg.ENGINE} (ComfyUI, H3 Video Upsampler on MiniMax H3 Ref2VA bf16 with the h3upscale LoRA), {width}x{height} "
+    say(f"engine: {sg.ENGINE} (ComfyUI, H3 Video Upsampler on MiniMax H3 Ref2VA {w['1']['inputs']['unet_name']} with the h3upscale LoRA), {width}x{height} "
         f"to {args.megapixels:g} megapixels, re-draw {args.denoise:g}, tiles of {args.tile_tokens} tokens")
     try:
         saved, seconds = execute(w, "8")
@@ -782,7 +790,7 @@ def remove(args) -> None:
             w["37"] = {"class_type": "CreateVideo", "inputs": {"images": ["31", 0], "fps": ["21", 2]}}
             w["38"] = {"class_type": "SaveVideo", "inputs": {"video": ["37", 0], "filename_prefix": f"studio/clean_{uuid.uuid4().hex[:8]}",
                                                              "format": "auto", "codec": "auto"}}
-            say(f"engine: {sg.ENGINE} (ComfyUI, MiniMax H3 Ref2VA bf16 with the Person Remover LoRA at {lora[1]:g}), "
+            say(f"engine: {sg.ENGINE} (ComfyUI, MiniMax H3 Ref2VA {w['1']['inputs']['unet_name']} with the Person Remover LoRA at {lora[1]:g}), "
                 f"{size['frames']} frames of {size['width']}x{size['height']} in {len(starts)} windows of {window}, {args.steps} passes each")
             saved, seconds = execute(w, "31", len(starts))
             if not saved.get("38"):
