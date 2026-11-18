@@ -466,9 +466,11 @@ def spark_comfy_needs() -> list[dict]:
                             download=f"oneshot-setup-spark.sh --flux3 ({repo})"))
     if isinstance(vae, str) and "int8" in vae and vae in where:
         fp16 = vae.replace("int8_convrot", "fp16")
+        # a GB300 decodes with it (spark/gpu_profile.py), and the installer fetches it there
         out.append(need("h3-video-vae-fp16", "MiniMax H3 video decoder (fp16, SPARK_VAE)", "Video (FastH3)",
                         models / Path(where[vae]).parent / fp16, optional=True, min_bytes=1 << 20,
-                        check=lambda p: "" if safetensors_header(p) else "not a safetensors file"))
+                        check=lambda p: "" if safetensors_header(p) else "not a safetensors file",
+                        download=f"oneshot-setup-spark.sh on a GB300 ({repo_of.get(fp16) or 'Comfy-Org/MiniMax-H3'})"))
     for folder, name, digest in workflow_models():
         nid = "sam3.1" if name.startswith("sam3") else "h3-latent-upscaler" if "upscaler" in name else "workflow-" + Path(name).stem
         out.append(need(nid, {"sam3.1": "SAM 3.1 (Remove a person)", "h3-latent-upscaler": "H3 latent upscaler (Upscale)"}.get(nid, name),
