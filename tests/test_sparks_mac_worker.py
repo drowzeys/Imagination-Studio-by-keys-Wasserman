@@ -96,7 +96,7 @@ def test_a_mac_is_looked_at_without_proc_and_told_apart_by_uname():
         assert hub.check(worker)["state"] == "stopped"
         # a Spark is still a Spark
         seen, hub.shell = answers({"host": "spark-5", "os": "Linux", "version": ""})
-        assert "oneshot-setup-spark.sh on that Spark" in hub.check(worker)["why"] and hub.platform(MAC) == "spark"
+        assert "oneshot-setup-spark.sh on a Spark) on that machine" in hub.check(worker)["why"] and hub.platform(MAC) == "spark"
 
 
 def test_a_macs_own_app_is_never_written_over_or_stopped():

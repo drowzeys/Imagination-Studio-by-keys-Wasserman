@@ -164,7 +164,7 @@ def test_remote_actions_and_mac_behavior_remain_and_local_workers_have_no_ssh_ac
       await button(page, "Update and start").attrs.onclick(); out.update = calls.pop();
       delete d.local_gpus; d.workers = [remote]; d.head = "mac"; d.this.kind = "Mac"; S.platform = "mac";
       page = viewSparks(); out.mac = text(page); out.cards = cards(page).length;
-      out.via = all(page, n => n.tag === "input").some(n => n.attrs.placeholder === "user@the-spark-that-leads");""")
+      out.via = all(page, n => n.tag === "input").some(n => n.attrs.placeholder === "user@the-machine-that-leads");""")
     assert not out["localUpdate"] and out["updates"] == 1
     assert out["update"] == ["/api/sparks/workers/worker%40example.invalid/update", {}, "POST"]
     assert out["cards"] == 0 and out["via"] and "this Mac" in out["mac"] and "Local GPUs" not in out["mac"]
@@ -292,7 +292,7 @@ def test_labels_and_live_machine_status_coexist_with_local_cards_and_placement()
     assert "17%" in out["panel"] and "23%" in out["panel"] and "45 °C" in out["panel"]
     assert out["id"] not in out["page"]
     assert out["options"][1] == ["head", "Head · Main renderer"]
-    assert out["options"][-1] == ["worker@example.invalid", "Spark · Remote renderer · worker@example.invalid"]
+    assert out["options"][-1] == ["worker@example.invalid", "Remote renderer · worker@example.invalid"]  # it has not said what it is
     assert out["label"] == "Remote renderer" and out["take"] == "on Remote renderer"
     assert out["panel"] in out["machinePanel"]
 

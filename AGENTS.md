@@ -242,6 +242,8 @@ Rules:
   so the only thing run on it is the read-only `WIN_PROBE` (PowerShell `-EncodedCommand`); nothing is copied to it,
   started or stopped there (`WIN_OWN`, `WIN_STOPPED`). `digest` compares code by its lines and by POSIX paths, since a
   Windows checkout has CRLF ends and backslashes: keep both, or a Windows worker never matches.
+  A worker is shown by what it is (`what_of`, `Hub.what`: its card, a GB10 as a DGX Spark; a Mac; a Windows PC), and
+  words about any worker say machine or worker, not Spark. `BUSY_ELSEWHERE` stays a constant: code compares it.
 - keys-HDR LORA, the HDR finish (`app/hlg.py`, the Library action `hlg`): processor and ffmpeg only, never under the GPU lock, numpy only (no OpenCV in the Studio's venv). It is a grade of an 8-bit SDR clip into BT.2020 / HLG: do not describe it as recovered detail or as what the model made. `TARGET` and `BANDS` are one look chosen by eye, not a standard. One curve for the whole clip: fit per frame or per shot, it flickers or jumps at cuts. A clip already HLG or PQ is refused.
 - RTX Spark N1X on Windows is native only: there is no WSL version (removed 2026-11-06); never add one back or send a
   job to WSL. The one-shot (`oneshot-setup-rtx-spark-n1x.ps1`, `docs/rtx-spark-n1x.md`) installs natively (`-Native` is

@@ -103,6 +103,8 @@ MEASURED = {1: 1.0, 2: 2.03, 3: 2.70, 4: 3.81, 5: 4.05}
 STATES = {"new": "not checked yet", "unreachable": "does not answer over ssh", "bare": "no Studio installed there",
           "stopped": "its Studio app is not running", "update": "its Studio code differs from this Spark's",
           "ready": "idle", "busy": "rendering", "down": "stopped answering"}
+# usable()'s reason for a worker that is rendering a job of its own or another head's, which other code compares
+BUSY_ELSEWHERE = "rendering a job this Studio did not send"
 # presets that need the 2x decoder, which a DGX Spark does not have (spark/video.sh refuses them); said by name
 DOUBLED = {"draft": "Draft", "2k": "2K", "qhd": "2K 2560x1440", "p960": "960p"}
 MAC_OWN = ("That Mac runs its own Studio app, which this one never writes over or stops: update it there (Machine → Updates), "
@@ -201,7 +203,7 @@ def address_of(given: str) -> str:
 
     text = (given or "").strip()
     if not ADDRESS.fullmatch(text):
-        raise ValueError("a Spark's address is its host name or IP address, as you would type it after ssh (10.0.10.5 or user@spark-5)")
+        raise ValueError("a worker's address is its host name or IP address, as you would type it after ssh (10.0.10.5 or user@spark-5)")
     return text
 
 
@@ -210,7 +212,7 @@ def folder_of(given: str) -> str:
 
     text = (given or "").strip().strip("/")
     if not FOLDER.fullmatch(text) or ".." in text.split("/"):
-        raise ValueError("the Studio's folder on a Spark is a path under the home folder there, like keys-Mac-TensorFold-Studio")
+        raise ValueError("the Studio's folder on a worker is a path under the home folder there, like keys-Mac-TensorFold-Studio")
     return text
 
 
@@ -384,6 +386,32 @@ def word_of(platform: str | None) -> str:
     return {"mac": "Mac", "windows": "Windows PC"}.get(platform, "Spark")
 
 
+def gpu_word(name: str | None, count: int | None = None) -> str:
+    """What an NVIDIA machine is called on the page, from the card name nvidia-smi gives: a GB10 is a "DGX Spark",
+    another card is its own name without the maker's ("NVIDIA GB300" is "GB300"). Paired cards of one name
+    (``count``, telemetry.combine_gpus) are "2× GB300", cards of different names are joined with " + ". "" for no name."""
+
+    words = []
+    for part in str(name or "").split(" + "):
+        bare = re.sub(r"^NVIDIA\s+", "", part.strip(), flags=re.IGNORECASE).strip()
+        if bare:
+            words.append("DGX Spark" if re.fullmatch(r"GB10", bare, flags=re.IGNORECASE) else bare)
+    many = f"{count}× " if len(words) == 1 and isinstance(count, int) and count > 1 else ""
+    return many + " + ".join(words)
+
+
+def what_of(info: dict | None) -> str:
+    """What a machine is, for the page, from what its app says of itself (/api/spark/self): "Mac", "Windows PC", or
+    the card of a Linux machine ("DGX Spark", "GB300"; gpu_word). "" when a Linux machine names no card: an app from
+    before its readings (``status``) were sent, or one whose nvidia-smi did not answer."""
+
+    platform = platform_of(info)
+    if platform != "spark":
+        return word_of(platform)
+    gpu = ((info or {}).get("status") or {}).get("gpu") or {}
+    return gpu_word(gpu.get("name"), gpu.get("count"))
+
+
 def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> str:
     """Why a worker cannot render this job ("" when it can), from what its app says it has (/api/spark/self).
     ``spark`` False: the job was queued on a Mac. A worker of the other kind (a Spark for a Mac, a Mac for a Spark) is
@@ -392,7 +420,7 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     info = info or {}
     theirs, mine = family(platform_of(info)), "spark" if spark else "mac"
     if kind not in KINDS:
-        return "only single clips are handed to another Spark"
+        return "only single clips are handed to another machine"
     if not info.get("fasth3"):
         return "FastH3 is not installed there"
     preset = params.get("preset") or ("small" if spark else "draft")  # what each machine renders when none is named
@@ -421,7 +449,7 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
         return "the LoRA " + ", ".join(missing) + " is not installed there"
     encoder = params.get("text_encoder")
     if encoder not in (None, "", "regular") and Path(str(encoder)).name not in (info.get("text_encoders") or []):
-        return f"the text encoder file is not on that {word_of(platform_of(info))}"
+        return f"the text encoder file is not on that {what_of(info) or 'machine'}"
     return ""
 
 
@@ -433,7 +461,7 @@ def here_only(kind: str, params: dict) -> str:
     if kind == "studio":
         return "A clip that starts from a new picture renders on this Spark: the picture model is here."
     if kind not in KINDS:
-        return "Pictures, edits, Library actions and exports render on this Spark: only clips are handed to other Sparks."
+        return "Pictures, edits, Library actions and exports render on this Spark: only clips are handed to other machines."
     return ""
 
 
@@ -487,6 +515,20 @@ def machine_word(spark: bool) -> str:
     if not spark:
         return "Mac"
     return "GPU" if card_face() else "Spark"
+
+
+class Live(dict):
+    """A worker's live state (Hub.state). Each answer it keeps (``info``) also keeps what the worker said it is
+    (what_of), so a worker that goes down before the page asks is still shown as what it was."""
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if key == "info" and value:
+            super().__setitem__("what", what_of(value))
+
+    def update(self, *args, **kwargs):
+        for key, value in dict(*args, **kwargs).items():
+            self[key] = value
 
 
 class Hub:
@@ -702,11 +744,21 @@ class Hub:
 
     def said(self, text: str) -> str:
         """Words for the page. "this Spark" is this machine: left as written on a GB10, "this Mac" on a Mac, "this GPU" on a card.
-        A worker is still called a Spark. Those sentences do not say "this Spark"."""
+        A sentence about a worker calls it a machine or a worker, never "this Spark"."""
 
         if not text or self.word == "Spark":
             return text
         return text.replace("this Spark", "this " + self.word)
+
+    def what(self, address: str) -> str:
+        """What a worker is, for the page (what_of): from its last answer, kept (Live) while it does not answer, so a
+        GB300 that is down is still a GB300; "Mac" or "Windows PC" from what ssh found there; "" while nothing says."""
+
+        live = self.state(address)
+        if live["info"]:
+            return what_of(live["info"])
+        platform = live.get("platform")
+        return live.get("what") or (word_of(platform) if platform in ("mac", "windows") else "")
 
     def platform(self, address: str) -> str:
         """What a worker is ("mac", "windows" or "spark"): what its app says, else what ssh last found there."""
@@ -738,8 +790,8 @@ class Hub:
 
     def state(self, address: str) -> dict:
         with self.mutex:
-            return self.live.setdefault(address, {"state": "new", "why": "", "info": None, "base": None, "tunnel": None, "job": None,
-                                                  "working": "", "checked": None, "fails": 0})
+            return self.live.setdefault(address, Live({"state": "new", "why": "", "info": None, "base": None, "tunnel": None, "job": None,
+                                                       "working": "", "checked": None, "fails": 0}))
 
     def usable(self, worker: dict) -> str:
         """Why a worker is given no clip now ("" when it may be): switched off, not up, or rendering for someone else."""
@@ -756,7 +808,7 @@ class Hub:
         if live["working"]:
             return live["working"]
         if live["state"] == "busy" and not live["job"]:
-            return "rendering a job that is not this Spark's"
+            return BUSY_ELSEWHERE
         if live["state"] not in ("ready", "busy"):
             return live["why"] or STATES.get(live["state"], live["state"])
         disk = (live["info"] or {}).get("disk_gb")
@@ -770,7 +822,7 @@ class Hub:
         memory = info.get("memory") or {}
         return {"address": worker["address"], "name": worker.get("name") or worker["address"], "label": self.label_of(worker), "folder": worker.get("folder"),
                 "kind": worker.get("kind", "ssh"), **({"gpu_uuid": worker["gpu_uuid"], "owned": self.local.owned(worker)} if worker.get("kind") == "local" else {}),
-                "platform": self.platform(worker["address"]),
+                "platform": self.platform(worker["address"]), "what": "" if worker.get("kind") == "local" else self.what(worker["address"]),
                 "enabled": worker.get("enabled", True), "state": live["state"], "says": self.said(STATES.get(live["state"], live["state"])),
                 "why": self.said(live["why"]), "usable": not why, "unusable": self.said(why), "working": live["working"], "checked": live["checked"],
                 "job": live["job"], "version": info.get("version") or live.get("version"), "via": worker.get("via"),
@@ -799,7 +851,7 @@ class Hub:
                 "default": max(1, min(int(found.get("sparks") or 1), self.chooser_limit())), "workers": rows, "folder": self.default_folder(),
                 "names": {**{self.name: self.label_of()}, **{key: row["label"] for row in rows for key in (row["name"], row["address"])}},
                 "head": "spark" if self.spark else "mac", "via": next((w.get("via") for w in reversed(found["workers"]) if w.get("via")), None),
-                "this": {"name": self.name, "label": self.label_of(), "status": mine.get("status"), "kind": self.word, "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
+                "this": {"name": self.name, "label": self.label_of(), "status": mine.get("status"), "kind": self.word, "what": what_of(mine), "version": mine.get("version"), "job": local, "state": "busy" if local else "ready",
                          "guard": bool(mine.get("guard")), "memory_gb": round(memory / 1000, 1) if memory is not None else None, "disk_gb": mine.get("disk_gb"),
                          "can": {key: bool(mine.get(key)) for key in ("fasth3", "image", "ref2va", "ref2va_turbo", "ffmpeg")} | {"loras": len(mine.get("loras") or [])}}}
 
@@ -969,7 +1021,7 @@ class Hub:
             self.hang_up(address)
             set_to("bare", ("No Studio code in " + (worker.get("folder") or self.default_folder()) + " there. " if not found.get("pack") else "")
                    + ("" if found.get("install") else ("No Studio environment there (the models and the engine): run oneshot-setup.sh on that Mac once; " if mac else
-                                                       "No Studio environment there (models, ComfyUI, the engine): run oneshot-setup-spark.sh on that Spark once; ")
+                                                       "No Studio environment there (models, ComfyUI, the engine): run its setup (oneshot-setup-spark.sh on a Spark) on that machine once; ")
                       + "“Update and start” sends the code, not the models."), info=None)
             return live
         if not found.get("app"):
@@ -1008,7 +1060,7 @@ class Hub:
             set_to("update", why, info=info)
             return live
         if info.get("active") and not live["job"]:
-            set_to("busy", "It is rendering a job that is not this Spark's.", info=info)
+            set_to("busy", "It is rendering a job this Studio did not send.", info=info)
         else:
             set_to("busy" if live["job"] else "ready", "", info=info)
         return live
@@ -1121,7 +1173,7 @@ class Hub:
             return live
         self.hang_up(address)
         if found.get("app") and not found.get("ours"):
-            live.update(state="update", why="The code is there. An app that this Studio did not start is running on that Spark: stop it there, "
+            live.update(state="update", why="The code is there. An app that this Studio did not start is running on that machine: stop it there, "
                         "then press “Update and start” again.", checked=time.time(), info=None)
             return live
         code, said = self.on(worker, self.stop_command(folder, comfy=False) + "; " + self.start_command(folder), 40)
@@ -1169,7 +1221,7 @@ class Hub:
             live.update(why="The app on that Windows PC is its owner's: it is left running. Quit it there to free its memory.", checked=time.time())
             return live
         if found["reached"] and found.get("app") and not found.get("ours"):
-            live.update(why=f"The app on that {'Mac' if found.get('os') == 'Darwin' else 'Spark'} was not started by this Studio: it is left running.", checked=time.time())
+            live.update(why=f"The app on that {'Mac' if found.get('os') == 'Darwin' else 'machine'} was not started by this Studio: it is left running.", checked=time.time())
             return live
         self.hang_up(address)
         self.on(worker, self.stop_command(worker.get("folder") or self.default_folder()), 40)
@@ -1186,7 +1238,7 @@ class Hub:
 
         worker = next((one for one in self.workers() if one["address"] == address), None)
         if worker is None:
-            raise HTTPException(404, "no such Spark in the list")
+            raise HTTPException(404, "no such worker in the list")
         live = self.state(address)
         with self.mutex:
             if live["working"]:
@@ -1367,7 +1419,7 @@ class Hub:
             live.update(state="update", why="Its Studio code no longer matches this Spark's: “Update and start” brings it level.")
             return False
         if info.get("active"):
-            live.update(state="busy", why="It is rendering a job that is not this Spark's.")
+            live.update(state="busy", why="It is rendering a job this Studio did not send.")
             return False
         live.update(state="ready", why="")
         return True
@@ -1552,7 +1604,7 @@ class Hub:
             if theirs.get("status") == "done":
                 break
             if theirs.get("status") in ("failed", "cancelled"):
-                self.move(job, worker, "its render failed: " + str(theirs.get("error") or "cancelled on that " + word_of(self.platform(address)))[-300:], down=False)
+                self.move(job, worker, "its render failed: " + str(theirs.get("error") or "cancelled on that " + (self.what(address) or "machine"))[-300:], down=False)
                 return False
             time.sleep(POLL)
         try:
@@ -1617,7 +1669,9 @@ class Hub:
         able, without = [], []
         workers = self.workers()
         mixed = any(worker.get("kind") == "local" for worker in workers)
-        macs = any(worker.get("kind") != "local" and self.platform(worker["address"]) != "spark" for worker in workers)  # a Mac or a Windows PC among the workers
+        # a worker that is not a DGX Spark (a Mac, a Windows PC, another card); one that has not said what it is is taken for a Spark
+        macs = any(worker.get("kind") != "local" and (self.platform(worker["address"]) != "spark" or self.what(worker["address"]) not in ("", "DGX Spark"))
+                   for worker in workers)
         unit = "worker" if mixed else "machine" if macs else "Spark"
         for worker in workers:
             why = self.usable(worker) or capable(kind, params, self.state(worker["address"])["info"], self.spark)
@@ -1671,7 +1725,7 @@ class Hub:
             if mixed and mode == "parallel":
                 estimate.update(measured=False, note="An estimate from the Spark-only benchmark of 8 clips; scaling local or mixed workers has not been measured.")
             elif macs and mode == "parallel":
-                estimate.update(measured=False, note="an estimate from one run of 8 clips on Sparks alone; a Mac or a Windows PC takes another time for a clip than a Spark, and that mix has not been measured")
+                estimate.update(measured=False, note="an estimate from one run of 8 clips on Sparks alone; another machine (a Mac, a Windows PC, another card) takes another time for a clip than a Spark, and that mix has not been measured")
         return {"supported": not self.local.child, "limit": self.chooser_limit(), "chosen": chosen, "available": available, "listed": listed, "used": used, "mode": mode,
                 "count": count, "says": says, "without": without, "estimate": estimate, "placement": selected}
 
@@ -1727,11 +1781,10 @@ class Hub:
             if any(worker["address"] == address for worker in found["workers"]):
                 raise HTTPException(400, f"{address} is already in the list")
             if sum(w.get("kind", "ssh") == "ssh" for w in found["workers"]) >= LIMIT - 1:
-                # said() rewrites "this Spark" only. This sentence does not say that, so the card branch is its own.
-                # A GB10 and a Mac keep the Spark sentence. A card does not call this machine a Spark.
+                # A card does not call this machine "this one" without saying it is a GPU.
                 if card_face():
                     raise HTTPException(400, f"at most {LIMIT} machines, this GPU included")
-                raise HTTPException(400, f"at most {LIMIT} Sparks, this one included")
+                raise HTTPException(400, f"at most {LIMIT} machines, this one included")
             found["workers"].append({"kind": "ssh", "address": address, "name": str(body.get("name") or "").strip()[:60] or address, "folder": folder, "enabled": True,
                                      **({"via": via} if via else {})})
             self.keep(found)
@@ -1746,7 +1799,7 @@ class Hub:
             found = self.config()
             worker = next((one for one in found["workers"] if one["address"] == address), None)
             if worker is None:
-                raise HTTPException(404, "no such Spark in the list")
+                raise HTTPException(404, "no such worker in the list")
             if worker.get("kind") == "local":
                 if "folder" in body or "via" in body:
                     raise HTTPException(400, "local GPU workers have no SSH folder or relay")
@@ -1785,11 +1838,11 @@ class Hub:
                 raise HTTPException(403, "a local child cannot remove workers")
             found = self.config()
             if not any(one["address"] == address for one in found["workers"]):
-                raise HTTPException(404, "no such Spark in the list")
+                raise HTTPException(404, "no such worker in the list")
             if self.state(address)["working"]:
                 raise HTTPException(400, "that worker has a lifecycle action in progress")
             if self.state(address)["job"]:
-                raise HTTPException(400, self.said("that Spark is rendering one of this Spark's clips: cancel the job first"))
+                raise HTTPException(400, self.said("that machine is rendering one of this Spark's clips: cancel the job first"))
             worker = next(w for w in found["workers"] if w["address"] == address)
             if worker.get("kind") == "local" and self.local.owned(worker):
                 raise HTTPException(400, "stop the owned local worker before removing it")

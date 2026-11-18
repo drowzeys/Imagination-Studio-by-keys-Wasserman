@@ -398,7 +398,7 @@ def test_a_worker_that_stops_answering_is_marked_down_and_its_clip_rendered_else
     client.post(f"/api/sparks/workers/{one.address}/check", json={})
     settle()
     row = client.get("/api/sparks").json()["workers"][0]
-    assert row["state"] == "busy" and not row["usable"] and f"not this {hub.word}'s" in row["why"]
+    assert row["state"] == "busy" and not row["usable"] and "a job this Studio did not send" in row["why"]
     for job in one.jobs.values():
         job["status"] = "cancelled"
     client.post(f"/api/sparks/workers/{one.address}/check", json={})
@@ -655,7 +655,7 @@ vm.runInThisContext(`(async () => { const out = {};
   /* an older app on a Mac: one machine */
   SPK.data = { supported: false, limit: 5, available: 1, note: "Multi-Spark rendering is for DGX Sparks: on a Mac every job renders on this machine.", workers: [], this: {} }; spkSet(5);
   const mac = sparksPick(); out.mac = [SPK.n, all(mac, "button").map(b => text(b)), text(mac)];
-  /* a DGX Spark with no worker still shows the number row and "Add a Spark" */
+  /* a DGX Spark with no worker still shows the number row and "Add a worker" */
   globalThis.S = { platform: "spark", platform_label: "DGX SPARK · NVIDIA GB10 · H3-CUDA" };
   out.gb10Count = spkCount(five, 3);
   SPK.n = 4; SPK.data = { supported: true, limit: 5, available: 1, listed: 1, default: 1, folder: "~/studio", head: "spark", workers: [], this: five.this };
@@ -696,19 +696,19 @@ def test_the_page_draws_the_chooser_and_the_list():
     assert out["buttons"] == list("12345") and out["on"] == ["5"] and out["far"] == ["4", "5"]
     assert "3 of 5 available" in out["says"] and "One clip per Spark" in out["says"] and "spark-node3 (it stopped answering)" in out["says"] and "Estimate" in out["says"]
     assert out["sent"] == {"sparks": 5, "kind": "video", "params": {}, "clips": 8, "seconds": 0} and out["kept"]
-    for words in ("spark-node5", "10.0.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a Spark", "3 available"):
+    for words in ("spark-node5", "10.0.10.5", "116.1 GB of memory available", "FastH3 clips", "no LoRAs", "It stopped answering for 60 s", "Update and start", "Add a worker", "3 available"):
         assert words in out["page"], words
     assert out["mac"][0] == 1 and out["mac"][1] == ["1"] and "DGX Sparks" in out["mac"][2]
     # a Mac at the head: its own name, no memory guard of its own claimed, and the Through field
     assert out["macCount"] == "this Mac alone" and "This Mac and 1 other" in out["macPage"] and "this Mac" in out["macPage"]
     assert "10.0.10.5 through spark@192.168.1.10" in out["macPage"] and "Through" in out["macPage"] and "memory guard ·" not in out["macPage"].split("spark-node5")[0]
     assert out["macFields"] == 3 + 1  # address, folder, through, and each worker's "use" box
-    assert "Sparks for new jobs" in out["gb10Page"] and "Add a Spark" in out["gb10Page"] and "Add a DGX Spark" not in out["gb10Page"]
+    assert "Sparks for new jobs" in out["gb10Page"] and "Add a worker" in out["gb10Page"] and "Add a Spark" not in out["gb10Page"]
     assert out["gb10Count"] == "3 of 3 available Sparks"
     assert out["gb10Pick"] and out["gb10N"] == 4 and out["gb10Bay"] == ""
     assert out["alonePick"] is None and out["aloneN"] == 1 and out["aloneBay"] == "none"
     assert out["cardWith"] == "this GPU and 2 Sparks" and out["cardOver"] == "3 of 5 available"
-    assert "Add a DGX Spark" in out["alonePage"] and "This GPU renders every clip" in out["alonePage"]
+    assert "Add a worker" in out["alonePage"] and "This GPU renders every clip" in out["alonePage"] and "Add a DGX Spark" not in out["alonePage"]
     # each machine's own panel: the label, then GPU, temperature, memory used and free, disk, the job it rolls, the LoRA count
     assert out["labelled"] == ["fa5a (head)", "d197", "unknown"]
     for words in ("fa5a (head)", "d197", "head", "NOV FF_S3f5.png · picture 3/8", "41% · 52 W", "58 °C", "62.5 GB used · 58.6 GB free of 121 GB", "900 GB free of 4000 GB", "load 1.5 on 20 cores",
@@ -741,6 +741,7 @@ def test_a_machine_is_called_by_the_labels_file_and_the_app_never_writes_it():
         assert after["names"][hub.name] == "fa5a (head)" and after["names"]["spark-one"] == "d197" and after["names"][one.address] == "d197"
         # a worker's own readings are what it reported on its last look; this Spark's are read in-process
         assert after["workers"][0]["status"]["gpu"]["temp_c"] == 58 and after["workers"][0]["status"]["memory"]["free_mb"] == 60000
+        assert after["workers"][0]["what"] == "DGX Spark" and "what" in after["this"]  # what it is, beside the label (a GB10)
         mine = after["this"]["status"]
         assert mine and {"gpu", "memory", "disk", "cpu", "job", "queued"} <= set(mine) and mine["disk"]["free_gb"] is not None
         # a save of the list (what the page does on every change) leaves the labels file as it was
@@ -769,7 +770,7 @@ if __name__ == "__main__":
 
 def test_a_quiet_card_lesson_points_at_the_page_that_is_there():
     """With no worker, Show me on a card must hit the Sparks tab that is actually drawn. A GB10, a Mac, and a
-    card that already has a worker keep the number row and “Add a Spark”."""
+    card that already has a worker keep the number row; every face adds a machine under “Add a worker”."""
 
     need_node()
     html = (ROOT / "app/static/index.html").read_text()
@@ -811,18 +812,18 @@ console.log(JSON.stringify({
     out = json.loads(done.stdout.strip().splitlines()[-1])
     quiet = out["quiet"]
     assert quiet["open"].startswith("This GPU renders the job")
-    assert "stays off until a DGX Spark is on the list" in quiet["choose"] and "The same row of numbers is at the top" not in quiet["choose"]
+    assert "stays off until another machine is on the list" in quiet["choose"] and "The same row of numbers is at the top" not in quiet["choose"]
     assert quiet["chooseGo"] == {"tab": "Sparks", "spot": "Sparks"}
-    assert quiet["add"] == "Add a DGX Spark" and "under “Add a DGX Spark”" in quiet["addBody"]
-    assert quiet["addGo"] == {"tab": "Sparks", "spot": "Add a DGX Spark"}
-    assert "Once a DGX Spark is on the list" in quiet["check"] and "this GPU's Studio code" in quiet["check"]
-    assert quiet["checkGo"] == {"tab": "Sparks", "spot": "Add a DGX Spark"}
+    assert quiet["add"] == "Add a worker" and "under “Add a worker”" in quiet["addBody"]
+    assert quiet["addGo"] == {"tab": "Sparks", "spot": "Add a worker"}
+    assert "Once another machine is on the list" in quiet["check"] and "this GPU's Studio code" in quiet["check"]
+    assert quiet["checkGo"] == {"tab": "Sparks", "spot": "Add a worker"}
     shared = "The same row of numbers is at the top of the render bay"
     for name in ("withWorker", "gb10", "mac"):
         one = out[name]
         assert one["choose"].startswith(shared) and one["chooseGo"] == {"tab": "Create", "step": 4, "spot": "Sparks", "set": {"goes": "video"}}
-        assert one["add"] == "Add a Spark" and "under “Add a Spark”" in one["addBody"] and "Add a DGX Spark" not in one["addBody"]
-        assert one["addGo"] == {"tab": "Sparks", "spot": "Add a Spark"}
+        assert one["add"] == "Add a worker" and "under “Add a worker”" in one["addBody"] and "a Mac, or a Windows PC" in one["addBody"]
+        assert one["addGo"] == {"tab": "Sparks", "spot": "Add a worker"}
         assert one["check"].startswith("Each row shows") and "this Spark's Studio code" in one["check"]
         assert one["checkGo"] == {"tab": "Sparks", "spot": "This Spark and"}
     assert out["gb10"]["open"].startswith("On a DGX Spark") and out["mac"]["open"].startswith("On a DGX Spark")
