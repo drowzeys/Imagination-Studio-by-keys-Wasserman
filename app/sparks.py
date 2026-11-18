@@ -14,7 +14,9 @@ What N means:
   first N - 1 workers that are up and can render the clip;
 - one clip: it renders on one Spark. Splitting one clip across Sparks is measured (docs/multi-spark.md) and is not
   in the app;
-- a long video is a chain (each piece opens on the last frame of the one before): one Spark, this one;
+- a long video is a chain (each piece opens on the last frame of the one before): one machine renders all its
+  pieces in order, this Spark or one worker, and this Spark cuts and joins them. A chain taken back from a worker
+  starts again from its first piece (its finished pieces are not kept);
 - pictures, edits, Library actions and exports: this Spark.
 
 A worker that stops answering while it renders is marked down and its clip goes back to the queue for another
@@ -82,7 +84,7 @@ LOST = float(os.environ.get("STUDIO_SPARK_LOST", "60"))    # a worker silent thi
 CALL = float(os.environ.get("STUDIO_SPARK_CALL", "10"))    # the longest one request to a worker may take
 MOVES = 2        # a clip is taken back from a worker at most this often; after that it renders on this Spark
 DISK_GB = 2      # a worker with less free disk than this is not given a clip
-KINDS = ("video",)  # what is handed to a worker: single clips
+KINDS = ("video", "long")  # what is handed to a worker: single clips, and long videos piece by piece
 PREFIX = "$HOME/.local/opt/tensorfold-studio"
 THEIR_HOME = "$HOME/TensorFoldStudio"  # a worker's studio folder, and where its app's pid and log are kept
 ADDRESS = re.compile(r"(?:[a-z_][a-z0-9_-]{0,31}@)?[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
@@ -393,6 +395,8 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     theirs, mine = family(platform_of(info)), "spark" if spark else "mac"
     if kind not in KINDS:
         return "only single clips are handed to another Spark"
+    if kind == "long" and platform_of(info) != "spark":  # family() counts a Windows PC with the Sparks
+        return "a long video is handed only to a DGX Spark or a Linux GPU worker: it has not been tried on a Mac or a Windows PC"
     if not info.get("fasth3"):
         return "FastH3 is not installed there"
     preset = params.get("preset") or ("small" if spark else "draft")  # what each machine renders when none is named
@@ -428,8 +432,6 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
 def here_only(kind: str, params: dict) -> str:
     """Why a job renders on this Spark whatever the number says ("" for a single clip, which may go to a worker)."""
 
-    if kind == "long":
-        return "A long video is a chain: each piece opens on the last frame of the one before, so its pieces render one after another, on this Spark."
     if kind == "studio":
         return "A clip that starts from a new picture renders on this Spark: the picture model is here."
     if kind not in KINDS:
@@ -613,11 +615,12 @@ class Hub:
         if target != "head" and not any(w["address"] == target for w in self.workers()):
             raise HTTPException(400, "That render worker is no longer in the list. Choose another worker.")
         if target != "head" and kind not in KINDS:
-            raise HTTPException(400, "Only single video clips can render on another worker.")
+            raise HTTPException(400, "Only video clips and long videos can render on another worker.")
         return {"worker": target, "policy": policy}
 
-    def estimate_worker(self, params: dict, placement) -> dict | None:
-        """Ask the selected worker's own per-device guard, never this host's other GPU."""
+    def estimate_worker(self, params: dict, placement, kind: str = "video") -> dict | None:
+        """Ask the selected worker's own per-device guard, never this host's other GPU. For a long video ``params``
+        are one piece's (its longest)."""
         if placement is None:
             return None  # caller already normalized the actual job kind
         selected = self.placement(placement)
@@ -631,7 +634,7 @@ class Hub:
         live = self.state(worker["address"])
         why = self.usable(worker) or ("the selected worker is busy" if live["job"] or live["state"] == "busy" else "")
         info = live["info"]
-        incapable = capable("video", params, info, self.spark) if info else ""
+        incapable = capable(kind, params, info, self.spark) if info else ""
         if incapable and selected["policy"] == "require":
             return {"worker": {"address": worker["address"], "name": self.label_of(worker)},
                     "memory": {"fits": False, "reason": "The required worker cannot render this clip: " + incapable},
@@ -1466,7 +1469,10 @@ class Hub:
             sparks.setdefault("not", {})[address] = why
             sparks["moves"] = sparks.get("moves", 0) + 1
             job.setdefault("moved", []).append({"from": name, "why": why, "at": time.time()})
-            job["log"] = (job["log"] + f"[sparks] {name}: {why}. The clip is back in the queue.\n")[-20000:]
+            again = "[sparks] The long video starts again from its first piece.\n" if job["kind"] == "long" else ""
+            job["log"] = (job["log"] + f"[sparks] {name}: {why}. The clip is back in the queue.\n" + again)[-20000:]
+            if job["kind"] == "long":
+                job["outputs"] = []  # its pieces are made again from the first: the ones made so far are not offered as its own
             job.update(status="queued", started=None, progress=None, spark=None, remote=None, their_job=None)
         raise Moved(why)
 
@@ -1486,9 +1492,10 @@ class Hub:
         theirs.update(qa=False, shot_check=False)  # both run here, on the fetched clip, where their tools are
         return theirs
 
-    def render(self, job: dict, worker: dict, params: dict, target: Path, label: str = "") -> bool:
+    def render(self, job: dict, worker: dict, params: dict, target: Path, label: str = "", kind: str | None = None) -> bool:
         """One take of ``job``'s clip rendered on ``worker`` and fetched to ``target``. False when the job was
-        cancelled meanwhile; Moved when the worker refused the clip, failed it, or stopped answering."""
+        cancelled meanwhile; Moved when the worker refused the clip, failed it, or stopped answering. ``kind`` is the
+        worker's job kind when it is not the job's own: a long video's piece is a "video" there."""
 
         # Already cancelled, or cancelled while the tunnel opens, the worker's memory guard is asked, or references
         # upload: do not create its job. A job already accepted is cancelled from the poll below.
@@ -1512,7 +1519,7 @@ class Hub:
             params_there = self.outbound(base, {**params, "preset": "small" if self.spark else "draft"} if other and not params.get("preset") else params)
             if job["status"] != "running":
                 return False
-            made = call(base, "/api/jobs", {"kind": job["kind"], "title": f"{job['title']} · for {self.name}",
+            made = call(base, "/api/jobs", {"kind": kind or job["kind"], "title": f"{job['title']} · for {self.name}",
                                           "placement": {"worker": "head", "policy": "require"}, "sender": self.name,
                                           "params": params_there}, timeout=60)
         except Refused as error:
@@ -1637,6 +1644,8 @@ class Hub:
             mode, says = "one", self.said(here)
         elif used < 2:
             mode, says = "one", (f"This {self.word} alone." if chosen < 2 else f"No other {unit} can take this job now, so it renders on this one.")
+        elif kind == "long":
+            mode, says = "one", f"A long video renders on one {unit}, piece by piece: the first that is free of the {used}."
         elif clips > 1:
             mode, says = "parallel", f"One clip per {unit}, {min(used, clips)} at a time: {clips} clips on {min(used, clips)} {unit}s."
         else:

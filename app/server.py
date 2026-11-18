@@ -1112,6 +1112,13 @@ def plan(total: int, piece: int = LONGEST) -> list[int]:
     return pieces
 
 
+def longest_piece(params: dict) -> dict:
+    """A long video's settings as its longest piece's: what its memory is measured by, here and on a worker."""
+
+    longest = max(plan(int(params["total_seconds"]), int(params.get("segment_seconds", LONGEST))))
+    return {key: value for key, value in params.items() if key not in ("total_seconds", "segment_seconds", "beats")} | {"seconds": longest}
+
+
 def zig_ready() -> bool:
     """Whether FastH3 will run on the native engine here (scripts/video.sh decides the same way)."""
 
@@ -2316,6 +2323,10 @@ def long_take(job: dict) -> bool:
     final = clip_target(job["id"], params)  # the long video and its parts share the take's own folder
     folder = final.parent
     folder.mkdir(parents=True, exist_ok=True)
+    if job.get("moved"):  # taken back from a worker: it starts again from its first piece, without the old ones
+        for stale in [*folder.glob("seg[0-9][0-9][0-9].mp4"), *folder.glob("seg[0-9][0-9][0-9]_first.jpg")]:
+            stale.unlink(missing_ok=True)
+    job["outputs"] = []
     image, clips = params.get("image"), []
     for index, seconds in enumerate(pieces):
         prompt = params["prompt"]
@@ -2331,9 +2342,16 @@ def long_take(job: dict) -> bool:
         target = folder / f"seg{index + 1:03d}.mp4"
         piece = {**params, "prompt": prompt, "image": image, "seconds": seconds, "output": relative(target),
                  "seed": int(params.get("seed", 0)) + index}
-        command, env, _ = build("video", piece, job["id"])
-        if not run(job, command, env, f"part {index + 1}/{len(pieces)} · "):
-            return False
+        if job.get("remote"):  # handed to a worker: it renders each piece as a clip of its own, cut and joined here
+            worker = next((one for one in hub.workers() if one["address"] == job["remote"]), {"address": job["remote"]})
+            build("video", piece, job["id"], room=False)
+            theirs = {key: value for key, value in piece.items() if key not in ("total_seconds", "segment_seconds", "beats")}
+            if not hub.render(job, worker, theirs, target, f"part {index + 1}/{len(pieces)} · ", kind="video"):
+                return False
+        else:
+            command, env, _ = build("video", piece, job["id"])
+            if not run(job, command, env, f"part {index + 1}/{len(pieces)} · "):
+                return False
         if not target.is_file():
             raise RuntimeError(f"part {index + 1} wrote no clip")
         clips.append(target)
@@ -3010,8 +3028,7 @@ def queue_job(body: dict) -> dict:
         total = int(params.get("total_seconds", 0))
         if not LONGEST < total <= max(LONG):
             raise HTTPException(400, f"a long video is over {LONGEST} seconds and at most {max(LONG) // 60} minutes")
-        pieces = plan(total, int(params.get("segment_seconds", LONGEST)))
-        build("video", {**params, "seconds": pieces[0], "output": None}, "check")
+        plan(total, int(params.get("segment_seconds", LONGEST)))  # its memory is asked below, of the machine that renders it
     if kind not in ("export", "edit", "foley") + actions.KINDS + swap.KINDS + finish.KINDS + graphics.KINDS and not (params.get("prompt") or "").strip():
         raise HTTPException(400, "a prompt is needed")
     if kind != "video" and params.get("references"):
@@ -3051,10 +3068,14 @@ def queue_job(body: dict) -> dict:
     if not 1 <= chosen <= limit:
         raise HTTPException(400, f"sparks is a whole number from 1 to {limit}")
     said = hub.plan({"sparks": chosen, "kind": kind, "params": params, "placement": placement})
-    selected = hub.estimate_worker(params, placement)
+    sizing = longest_piece(params) if kind == "long" else params  # a long video's memory is its longest piece's
+    selected = hub.estimate_worker(sizing, placement, "long" if kind == "long" else "video")
     if selected is not None and (selected.get("memory") or {}).get("fits") is False:
         raise HTTPException(400, selected["memory"].get("reason") or "the selected worker cannot fit this clip")
     required_worker = placement and placement["worker"] != "head" and placement["policy"] == "require"
+    if kind == "long":
+        # held to the memory guard of the machine that renders the chain, as a single clip is
+        build("video", {**sizing, "output": None}, "check", room=not (selected is not None or required_worker or said["used"] > 1))
     if kind not in ("export", "long"):
         # reject bad settings now, not when the job's turn comes; a clip other Sparks may take is held to their memory
         # guards (asked before it is handed over), not to this one's
@@ -4095,9 +4116,12 @@ hub.follow = (lambda: False) if LOCAL_GPU_CHILD else updater.automatic
 def fits_here(job: dict) -> bool:
     """Whether a queued clip fits this machine's memory now (sparks.Hub.claim leaves one that does not to a worker)."""
 
-    if job["kind"] not in ("video", "studio"):
+    if job["kind"] not in ("video", "studio", "long"):
         return True
     try:
+        if job["kind"] == "long":  # a chain fits when its longest piece does
+            build("video", {**longest_piece(job["params"]), "output": None}, "check")
+            return True
         build(job["kind"], job["params"], job["id"])
     except HTTPException:
         return False

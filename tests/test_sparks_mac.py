@@ -48,7 +48,7 @@ def test_a_mac_leads_the_sparks():
         # the measured run had a Spark at the head: from a Mac the time is an estimate that says so
         assert said["estimate"]["measured"] is False and "not a Mac" in said["estimate"]["note"]
         assert "This Mac alone." == hub.plan({"sparks": 1, "kind": "video", "params": job["params"]})["says"]
-        assert "this Mac" in hub.plan({"sparks": 2, "kind": "long", "params": {}})["says"]
+        assert "this Mac" in hub.plan({"sparks": 2, "kind": "scout", "params": {}})["says"]
         # a finished clip is written down on a Mac too
         hub.record({"id": "j1", "kind": "video", "outputs": ["renders/j1.mp4"], "params": job["params"], "spark": "spark-node5", "remote": WORKER, "sparks": {"chosen": 2}})
         assert hub.takes()["renders/j1.mp4"]["spark"] == "spark-node5"

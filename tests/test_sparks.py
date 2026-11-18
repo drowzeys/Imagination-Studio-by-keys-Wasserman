@@ -268,7 +268,9 @@ def test_what_a_worker_can_render_decides_what_it_is_given():
     assert sparks.capable("video", {"text_encoder": "other.safetensors"}, {**plain, "text_encoders": ["other.safetensors"]}) == ""
     assert "FastH3" in sparks.capable("video", {}, {}) and "only single clips" in sparks.capable("scout", {}, plain)
     # what stays on this Spark whatever the number, and why
-    assert "chain" in sparks.here_only("long", {}) and "picture model" in sparks.here_only("studio", {}) and sparks.here_only("video", {}) == ""
+    # a long video may go to a worker (its pieces render there and are joined here); a clip from a new picture stays here
+    assert sparks.here_only("long", {}) == "" and "picture model" in sparks.here_only("studio", {}) and sparks.here_only("video", {}) == ""
+    assert sparks.capable("long", {}, plain) == "" and "Windows" in sparks.capable("long", {}, {**plain, "platform": "windows"})
     assert "this Spark" in sparks.here_only("edit", {})
 
 
@@ -305,8 +307,10 @@ def test_the_number_is_held_to_the_sparks_there_are():
     # one clip: one Spark, and it says that a clip is not split
     alone = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 1}).json()
     assert alone["mode"] == "one" and "one Spark" in alone["says"] and "not in the app" in alone["says"]
-    # a long video and a picture stay here
-    assert client.post("/api/sparks/plan", json={"sparks": 3, "kind": "long"}).json()["used"] == 1
+    # a long video renders on one machine, piece by piece; a picture stays here
+    chained = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "long"}).json()
+    assert chained["mode"] == "one" and "piece by piece" in chained["says"]
+    assert client.post("/api/sparks/plan", json={"sparks": 3, "kind": "scout"}).json()["used"] == 1
     # a LoRA no worker has: this Spark alone, and the reason for each worker
     lora = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 4, "params": {"loras": [{"id": "camera-motion"}]}}).json()
     assert lora["available"] == 1 and lora["used"] == 1 and len(lora["without"]) == 2 and "camera-motion" in lora["without"][0]["why"]
@@ -849,3 +853,69 @@ def test_two_saves_of_the_list_at_once_do_not_move_each_others_file():
     assert not errors and json.loads(hub.book.read_text())["sparks"] in (1, 2, 3, 4)
     assert not list(hub.book.parent.glob("*.part"))
     hub.keep({"workers": [], "sparks": 1})
+
+
+class FailsFrom:
+    """A worker's ``fails`` that turns true once it has been given ``n`` jobs: its n-th render fails, not the ones before."""
+
+    def __init__(self, worker: Worker, n: int):
+        self.worker, self.n = worker, n
+
+    def __bool__(self):
+        return len(self.worker.jobs) >= self.n
+
+
+@pytest.fixture
+def chains(monkeypatch):
+    """ffmpeg's part of a long video stood in for: a piece's last frame is a small file, the join puts the pieces' bytes
+    one after another."""
+
+    monkeypatch.setattr(server, "last_frame", lambda video, image: image.write_bytes(b"last frame of " + video.read_bytes()))
+    monkeypatch.setattr(server.chain, "join", lambda clips, final, total, fps, folder, env=None: final.write_bytes(b"|".join(c.read_bytes() for c in clips)))
+
+
+def long_video(sparks_asked: int, total: int = 40) -> dict:
+    done = client.post("/api/jobs", json={"kind": "long", "title": "long", "sparks": sparks_asked, "params": {
+        "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "total_seconds": total, "shot_check": False}})
+    assert done.status_code == 200, done.text
+    return done.json()
+
+
+def test_a_long_video_renders_piece_by_piece_on_a_worker(chains):
+    """A long video too big for this Spark goes to a worker as a chain of single clips: each piece opens on the last
+    frame of the one before (uploaded to the worker), and this Spark joins them. Alone, this Spark refuses it."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    had = server.memory_of
+    server.memory_of = lambda *args, **kwargs: {"fits": False, "reason": "this machine has 43 GB for it"}
+    try:
+        alone = client.post("/api/jobs", json={"kind": "long", "title": "long", "sparks": 1, "params": {
+            "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "total_seconds": 40, "shot_check": False}})
+        assert alone.status_code == 400 and "43 GB" in alone.text
+        job = finished([long_video(2)["id"]])[0]
+    finally:
+        server.memory_of = had
+    assert job["status"] == "done" and job["spark"] == "spark-a", (job["status"], job["error"], job["log"][-500:])
+    pieces = server.plan(40)
+    sent = sorted(one.jobs.values(), key=lambda there: int(there["id"].rsplit("-", 1)[1]))
+    assert [there["kind"] for there in sent] == ["video"] * len(pieces)
+    assert [there["params"]["seconds"] for there in sent] == pieces and not any("total_seconds" in there["params"] for there in sent)
+    assert not sent[0]["params"].get("image") and all(there["params"]["image"].startswith("uploads/spark-a-") for there in sent[1:])
+    assert (server.HOME / job["outputs"][0]).read_bytes() == b"|".join(f"made on spark-a".encode() for _ in pieces)
+    assert len(job["outputs"]) == 1 + len(pieces)
+
+
+def test_a_long_video_taken_back_from_a_worker_starts_again_from_its_first_piece(chains):
+    """A chain whose second piece fails on the worker is rendered again from its first piece (here, the worker barred
+    for it): no piece the worker made is kept or offered as the video's."""
+
+    one = Worker("spark-a")
+    one.fails = FailsFrom(one, 2)
+    fresh(one)
+    job = finished([long_video(2)["id"]])[0]
+    assert job["status"] == "done" and job["spark"] == hub.name, (job["status"], job["error"])
+    assert len(one.jobs) == 2 and job["moved"][0]["from"] == "spark-a" and "starts again from its first piece" in job["log"]
+    folder = (server.HOME / job["outputs"][0]).parent
+    assert all((server.HOME / path).read_bytes() == b"made here" for path in job["outputs"][1:])
+    assert len(list(folder.glob("seg[0-9][0-9][0-9].mp4"))) == len(server.plan(40))

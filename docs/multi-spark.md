@@ -108,7 +108,7 @@ A job queued without `sparks` takes the number set on the Sparks tab. `GET /api/
 | Several clips: jobs in the queue, the segments of a Production board, the shots of a Slate scene | One clip per Spark, side by side, on this Spark and the first N - 1 workers that are up and can render the clip. |
 | One clip | It renders on one Spark, the first that is free. One clip is not split across Sparks in the app (see the end of this page). |
 | A segment or shot that opens on the last frame of the one before | It waits for that one, then renders on any free Spark. A board that is one chain renders one clip at a time. |
-| A long video (over 15 s) | One Spark, this one: it is a chain, each piece opens on the last frame of the one before. |
+| A long video (over 15 s) | One machine, the first that is free: this Spark or a worker that is a Spark or a Linux GPU (not a Mac or a Windows PC). It is a chain, each piece opens on the last frame of the one before: the worker renders the pieces one by one as clips of its own, each held to its memory guard, and this Spark cuts the frames between them and joins them. A chain taken back from a worker starts again from its first piece. |
 | A clip with a LoRA, or from references (Ref2VA) | Only on Sparks that have that LoRA, or Ref2VA, installed, and only when that Spark's memory guard accepts the clip. With none: this Spark. |
 | Pictures, edits, Library actions (Turnaround, Upscale, Remove a person), a timeline export, a clip that starts from a new picture | This Spark. |
 
