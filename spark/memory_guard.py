@@ -290,14 +290,18 @@ _DEVICE: dict = {"at": 0.0, "value": None}
 
 
 _CHOSEN: dict = {}
+CHOSEN_RETRY_S = 60.0
 
 
 def chosen_gpu() -> str:
     """The nvidia-smi index of the studio's card when ``STUDIO_GPU`` is unset, as ``spark/gpu.sh`` picks it: a single
     ``CUDA_VISIBLE_DEVICES`` index, else the only GPU not driving a display when another one is listed (a server
     started without scripts/app.sh beside a display card). "" for one GPU (a DGX Spark), for two compute cards (the
-    app asks for STUDIO_GPU there) and where nvidia-smi does not answer. Asked once."""
+    app asks for STUDIO_GPU there) and where nvidia-smi does not answer. Asked once when it answers; when it does not,
+    "" now and asked again after CHOSEN_RETRY_S (spark/gpu_profile.py classifies the card this names)."""
 
+    if "index" not in _CHOSEN and time.monotonic() - _CHOSEN.get("failed", -CHOSEN_RETRY_S) < CHOSEN_RETRY_S:
+        return ""
     if "index" not in _CHOSEN:
         visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
         pick = visible if visible.isdigit() else ""
@@ -305,9 +309,12 @@ def chosen_gpu() -> str:
             try:
                 said = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.total,display_active", "--format=csv,noheader,nounits"],
                                       capture_output=True, text=True, timeout=5)
-                rows = [[part.strip() for part in line.split(",")] for line in said.stdout.splitlines() if line.strip()] if said.returncode == 0 else []
+                rows = [[part.strip() for part in line.split(",")] for line in said.stdout.splitlines() if line.strip()] if said.returncode == 0 else None
             except (OSError, subprocess.SubprocessError):
-                rows = []
+                rows = None
+            if rows is None:  # nvidia-smi did not answer: not kept
+                _CHOSEN["failed"] = time.monotonic()
+                return ""
             compute = [row[0] for row in rows if len(row) >= 3 and row[0].isdigit() and row[1].isdigit() and row[2].lower() != "enabled"]
             pick = compute[0] if len(rows) > 1 and len(compute) == 1 else ""
         _CHOSEN["index"] = pick

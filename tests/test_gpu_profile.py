@@ -275,8 +275,40 @@ def test_a_failed_query_is_not_kept_and_the_card_is_asked_again(monkeypatch, tmp
     assert gpu_profile.profile() == "gb300" and asked == []  # a real answer is kept
 
 
-def test_several_rows_take_the_first_the_selected_card(monkeypatch):
+def test_several_cards_with_none_chosen_are_not_classified_by_the_first_row(monkeypatch):
     def smi(*query):
-        return [["10.3", "NVIDIA GB300"], ["12.0", "NVIDIA RTX PRO 2000"]] if query[0] == "--query-gpu=compute_cap,name" else []
+        return [["12.0", "NVIDIA RTX PRO 2000"], ["10.3", "NVIDIA GB300"]] if query[0] == "--query-gpu=compute_cap,name" else []
     monkeypatch.setattr(memory_guard, "smi", smi)
-    assert gpu_profile.profile() == "gb300"
+    assert gpu_profile.profile() == "default" and gpu_profile._SEEN == {}  # not kept: a display card may come first
+
+
+def test_a_failed_card_choice_is_asked_again_and_the_profile_follows(monkeypatch, tmp_path):
+    """Station layout: a display card at index 0, the GB300 at index 1, no STUDIO_GPU. If nvidia-smi does not answer
+    the first time, the choice is not kept; once it answers, the GB300 is chosen and classified."""
+
+    import subprocess
+    library = tmp_path / "libtf_h3.so"
+    library.write_text("")
+    monkeypatch.setattr(memory_guard, "_CHOSEN", {})
+    up = {"ok": False}
+    now = {"t": 5000.0}
+    monkeypatch.setattr(memory_guard.time, "monotonic", lambda: now["t"])
+    monkeypatch.setattr(gpu_profile.time, "monotonic", lambda: now["t"])
+
+    def run(argv, **kwargs):
+        if not up["ok"]:
+            raise subprocess.TimeoutExpired(argv, 5)
+        query = next(a for a in argv if a.startswith("--query-gpu="))
+        picked = argv[argv.index("-i") + 1] if "-i" in argv else None
+        cards = {"0": ["0", "16303", "Enabled", "12.0", "NVIDIA RTX PRO 2000"], "1": ["1", "256703", "Disabled", "10.3", "NVIDIA GB300"]}
+        fields = {"index": 0, "memory.total": 1, "display_active": 2, "compute_cap": 3, "name": 4}
+        wanted = [fields[f] for f in query.split("=", 1)[1].split(",")]
+        out = "\n".join(", ".join(card[i] for i in wanted) for k, card in cards.items() if picked in (None, k))
+        return subprocess.CompletedProcess(argv, 0, out + "\n", "")
+    monkeypatch.setattr(memory_guard.subprocess, "run", run)
+    assert gpu_profile.profile() == "default" and gpu_profile.engine(library) == "tensorfold"
+    assert "index" not in memory_guard._CHOSEN  # the failed choice is not kept
+    up["ok"] = True
+    now["t"] += 61
+    assert memory_guard.chosen_gpu() == "1"
+    assert gpu_profile.profile() == "gb300" and gpu_profile.engine(library) == "comfy"

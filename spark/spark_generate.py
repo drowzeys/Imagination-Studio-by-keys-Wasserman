@@ -130,6 +130,7 @@ TEXT_TAG = ""
 # 864x480), the same picture to 42 to 44 dB. SPARK_VAE=minimax_h3_video_vae_fp16.safetensors selects the other, and a
 # GB300 asks for that one itself (video_vae).
 H3_VAE = os.environ.get("SPARK_VAE", "minimax_h3_video_vae_int8_convrot.safetensors")
+H3_VAE = H3_VAE.strip() or "minimax_h3_video_vae_int8_convrot.safetensors"  # an empty SPARK_VAE counts as unset
 H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
 # On a Mac MiniMax H3 is read from MiniMax's own files (mac/studio_files): the Ref2VA transformer with its full adaLN
 # weights, the text encoder in bfloat16 and the video decoder in fp32, where a Spark has Comfy-Org's pruned, 8-bit copies.

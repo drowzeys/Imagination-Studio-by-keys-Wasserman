@@ -64,6 +64,11 @@ def profile() -> str:
     if key in _FAILED and time.monotonic() - _FAILED[key] < RETRY_S:
         return DEFAULT
     rows = memory_guard.smi("--query-gpu=compute_cap,name")
+    if len(rows) > 1 and "-i" not in key:
+        # several cards and none chosen (the choice failed, or two compute cards without STUDIO_GPU): the first row
+        # may be a display card, so nothing is kept and the default stands until a card is named
+        _FAILED[key] = time.monotonic()
+        return DEFAULT
     cap, name = (rows[0] + ["", ""])[:2] if rows else ("", "")
     if not re.fullmatch(r"\d+\.\d+", cap.strip()) and not name:
         # an older driver refuses the whole query over compute_cap: the name alone
