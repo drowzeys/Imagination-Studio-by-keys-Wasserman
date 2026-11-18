@@ -28,6 +28,7 @@ def fresh(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(gpu_profile, "_SEEN", {})
     monkeypatch.setattr(memory_guard, "_CHOSEN", {"index": ""})
+    monkeypatch.setattr(gpu_profile, "_FAILED", {})
 
 
 def card(monkeypatch, cap="12.1", name="NVIDIA GB10", old_driver=False):
@@ -246,3 +247,36 @@ def test_the_apps_times_and_memory_check_follow_the_engine_used(monkeypatch):
     monkeypatch.setenv("STUDIO_GPU_PROFILE", "default")
     monkeypatch.setenv("SPARK_ENGINE", "comfy")  # and on a GB10, where the app used to ignore it
     assert not server.spark_engine()
+
+
+def test_a_failed_query_is_not_kept_and_the_card_is_asked_again(monkeypatch, tmp_path):
+    """nvidia-smi that does not answer once (busy, timed out) must not leave a running app on the int8 engine for
+    good while a fresh render process detects the GB300: the failure is not kept, and the card is asked again."""
+
+    library = tmp_path / "libtf_h3.so"
+    library.write_text("")
+    answers = {"rows": []}
+    asked = []
+
+    def smi(*query):
+        asked.append(query[0])
+        return answers["rows"] if query[0] == "--query-gpu=compute_cap,name" else []
+    monkeypatch.setattr(memory_guard, "smi", smi)
+    now = {"t": 1000.0}
+    monkeypatch.setattr(gpu_profile.time, "monotonic", lambda: now["t"])
+    assert gpu_profile.profile() == "default" and gpu_profile.engine(library) == "tensorfold"
+    asked.clear()
+    answers["rows"] = [["10.3", "NVIDIA GB300"]]
+    now["t"] += 10
+    assert gpu_profile.profile() == "default" and asked == []  # within RETRY_S: not asked again yet
+    now["t"] += gpu_profile.RETRY_S
+    assert gpu_profile.profile() == "gb300" and gpu_profile.engine(library) == "comfy"
+    asked.clear()
+    assert gpu_profile.profile() == "gb300" and asked == []  # a real answer is kept
+
+
+def test_several_rows_take_the_first_the_selected_card(monkeypatch):
+    def smi(*query):
+        return [["10.3", "NVIDIA GB300"], ["12.0", "NVIDIA RTX PRO 2000"]] if query[0] == "--query-gpu=compute_cap,name" else []
+    monkeypatch.setattr(memory_guard, "smi", smi)
+    assert gpu_profile.profile() == "gb300"

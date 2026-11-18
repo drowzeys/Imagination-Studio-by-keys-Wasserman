@@ -677,7 +677,7 @@ if [ "$IMAGE_ONLY" = 0 ]; then
   if [ "$GPU_PROFILE" = gb300 ] && [ "${SPARK_ENGINE:-}" != tensorfold ]; then
     # its int8 blocks are tuned for the GB10: on a GB300 ComfyUI's own bf16 blocks are faster, and clips render there.
     # SPARK_ENGINE=tensorfold builds it anyway (with ENGINE_FROM_SOURCE=1: the prebuilt engine is a GB10's, sm_121)
-    echo "  - not built on a GB300: clips render on ComfyUI's own blocks, faster there (docs/gb300.md)"
+    echo "  - skipping the H3 engine build on a GB300: clips render on ComfyUI's own blocks, faster there (docs/gb300.md)"
   elif [ "$VERIFY" = 1 ]; then
     [ -s "$PREFIX/tf-h3/libtf_h3.so" ] && ok "libtf_h3.so" || echo "  not built: clips render on ComfyUI's own blocks (slower)"
   elif PREFIX="$PREFIX" bash "$HERE/spark/build-engine.sh"; then

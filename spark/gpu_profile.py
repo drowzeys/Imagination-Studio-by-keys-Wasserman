@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -33,6 +34,8 @@ COMFY_ARGS = "--use-ck-attention"  # ComfyUI's own flash-attention kernel, 12% f
 GB300_COMFY_ARGS = "--use-pytorch-cross-attention"
 GB300_VAE = "minimax_h3_video_vae_fp16.safetensors"  # Comfy-Org/MiniMax-H3, 5.2 GB
 _SEEN: dict = {}  # nvidia-smi's command for the card -> its profile: a card's compute capability does not change
+_FAILED: dict = {}  # the same command -> when nvidia-smi last did not say: asked again after RETRY_S, never kept
+RETRY_S = 60.0
 
 
 def classify(compute_cap: str, name: str = "") -> str:
@@ -48,20 +51,29 @@ def classify(compute_cap: str, name: str = "") -> str:
 def profile() -> str:
     """The profile of the studio's card: STUDIO_GPU_PROFILE when it says gb300 or default, else asked of nvidia-smi
     (the card memory_guard reads: STUDIO_GPU, the only compute card beside a display card, or the head's card of a
-    pair) once per card. "default" without nvidia-smi (a Mac) or when it does not answer."""
+    pair) and kept per card once it answers. "default" without nvidia-smi (a Mac) or while it does not answer: that
+    is not kept, and nvidia-smi is asked again after RETRY_S, so a long-running app does not keep a wrong engine
+    after one slow or failed query while a fresh render process detects the card."""
 
     said = os.environ.get("STUDIO_GPU_PROFILE", "").strip().lower()
     if said in (GB300, DEFAULT):
         return said
     key = tuple(memory_guard.nvidia_argv())
-    if key not in _SEEN:
-        rows = memory_guard.smi("--query-gpu=compute_cap,name")
-        cap, name = (rows[0] + ["", ""])[:2] if rows else ("", "")
-        if not re.fullmatch(r"\d+\.\d+", cap.strip()) and not name:
-            # an older driver refuses the whole query over compute_cap: the name alone
-            named = memory_guard.smi("--query-gpu=name")
-            name = named[0][0] if named and named[0] else ""
-        _SEEN[key] = classify(cap, name)
+    if key in _SEEN:
+        return _SEEN[key]
+    if key in _FAILED and time.monotonic() - _FAILED[key] < RETRY_S:
+        return DEFAULT
+    rows = memory_guard.smi("--query-gpu=compute_cap,name")
+    cap, name = (rows[0] + ["", ""])[:2] if rows else ("", "")
+    if not re.fullmatch(r"\d+\.\d+", cap.strip()) and not name:
+        # an older driver refuses the whole query over compute_cap: the name alone
+        named = memory_guard.smi("--query-gpu=name")
+        name = named[0][0] if named and named[0] else ""
+    if not re.fullmatch(r"\d+\.\d+", cap.strip()) and not name.strip():
+        _FAILED[key] = time.monotonic()  # nvidia-smi did not say: not kept, asked again later
+        return DEFAULT
+    _FAILED.pop(key, None)
+    _SEEN[key] = classify(cap, name)
     return _SEEN[key]
 
 

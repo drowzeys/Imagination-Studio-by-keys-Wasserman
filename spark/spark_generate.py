@@ -533,7 +533,8 @@ def video_vae() -> str:
     try:
         if installed("vae", wanted):
             return wanted
-    except (OSError, KeyError, IndexError, TypeError, ValueError):
+    except (OSError, KeyError, IndexError, TypeError, ValueError) as error:
+        print(f"[tensorfold] could not ask ComfyUI for {wanted} ({error}): the 8-bit video decoder", flush=True)
         return H3_VAE
     print(f"[tensorfold] {wanted} is not installed: the 8-bit video decoder, slower on this card "
           "(oneshot-setup-spark.sh fetches it)", flush=True)
