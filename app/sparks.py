@@ -1320,6 +1320,13 @@ class Hub:
         self.fitted[job["id"]] = (now, found)
         return found
 
+    def too_big_waiting(self) -> bool:
+        """Whether a queued clip was last measured as too big for this machine (it waits for a worker, or for room here).
+        Called with the queue's lock held."""
+
+        return any(job["status"] == "queued" and self.fitted.get(job["id"], (0.0, True))[1] is False
+                   for job in (self.jobs[i] for i in self.order))
+
     def measure(self) -> None:
         """The fit of each queued clip this Spark's claim will ask about (a worker may take it, or it came back from
         one) read now, outside the queue's lock: building a clip's command can probe its reference media. The server

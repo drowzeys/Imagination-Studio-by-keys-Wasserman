@@ -2626,8 +2626,11 @@ def perform_job(job: dict, worker: dict | None = None) -> None:
 
 
 def work() -> None:
+    waiting = False
     while True:
-        wake.wait()
+        # a clip left queued as too big here is measured again every FITTED seconds while it waits: memory freed by
+        # something outside the queue (another program ending) wakes nothing else
+        wake.wait(sparks.FITTED if waiting else None)
         hub.measure()  # the fits claim asks for, read before the queue's lock is taken
         with lock:
             if stopping.is_set():
@@ -2635,6 +2638,7 @@ def work() -> None:
             job = hub.claim()  # the next job for this machine; on a DGX Spark a worker may have taken others (sparks.py)
             if job is None and not hub.unmeasured:  # a clip queued since the fits were measured: measure and look again
                 wake.clear()
+            waiting = job is None and hub.too_big_waiting()
         if job is None:
             bolt.queue_empty()  # nothing for this machine: a Bolt unloaded for the queue's jobs may load again
             continue

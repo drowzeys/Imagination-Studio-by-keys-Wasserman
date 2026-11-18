@@ -1097,3 +1097,26 @@ def test_the_memory_preview_asks_the_guard_of_a_worker_the_job_may_go_to():
         assert ask(**clip, sparks=1, placement=prefer).get("worker", {}).get("address") == one.address
     finally:
         server.memory_of, server.SPARK = had
+
+
+def test_a_clip_waiting_as_too_big_is_taken_here_once_room_comes_back_without_another_event(monkeypatch):
+    """Memory freed outside the queue (another program ends) wakes nothing: while a clip waits as too big here, the
+    queue measures it again every FITTED seconds, and takes it here once it fits, with no new job or finished job."""
+
+    one = Worker("spark-a")
+    one.jobs["theirs"] = {"id": "theirs", "status": "running"}  # busy with its own app's job for the whole test
+    fresh(one)
+    monkeypatch.setattr(sparks, "FITTED", 0.5)
+    room = {"fits": False}
+    had = server.memory_of
+    server.memory_of = lambda *args, **kwargs: {"fits": room["fits"], "reason": "this machine has 43 GB for it"}
+    try:
+        queued = queue(2)
+        time.sleep(1.5)
+        assert client.get(f"/api/jobs/{queued['id']}").json()["status"] == "queued" and not local_render.most
+        room["fits"] = True  # nothing is queued, finished or cancelled from here on
+        job = finished([queued["id"]], limit=10)[0]
+        assert job["status"] == "done" and job["spark"] == hub.name and local_render.most
+    finally:
+        server.memory_of = had
+        one.jobs["theirs"]["status"] = "done"
