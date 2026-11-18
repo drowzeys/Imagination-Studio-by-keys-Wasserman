@@ -67,6 +67,7 @@ import chain  # noqa: E402  (a long video's last frame and join, beside this fil
 import lengths  # noqa: E402  (which frame counts the model takes, beside this file)
 sys.path.insert(0, str(PACK / "spark"))
 import memory_guard  # noqa: E402  (a DGX Spark's memory: what a clip needs and whether this machine has it, in spark/)
+import gpu_profile  # noqa: E402  (which engine a clip renders on: spark_generate.py's own choice, in spark/)
 import settings  # noqa: E402  (Settings: looks, layout, presets, settings.json, beside this file)
 
 FPS = 24
@@ -1423,6 +1424,13 @@ def references(params: dict) -> dict:
     return {**found, "video_sound": video_sound}
 
 
+def spark_engine() -> bool:
+    """Whether a clip's transformer blocks run on TensorFold's engine, as spark_generate.py chooses (gpu_profile.engine):
+    SPARK_ENGINE, else the engine once it is built, but not on a GB300. The times and memory checks follow it."""
+
+    return SPARK_ENGINE_LIB.exists() and gpu_profile.engine(SPARK_ENGINE_LIB) == "tensorfold"
+
+
 def estimate(preset: str, quality: str, seconds: float, text_only: bool = False, referenced: bool = False,
              ref_turbo: bool = False, ref_media: bool = False) -> int | None:
     if WINDOWS or WINCUDA and windows_cuda.h3_why_not():
@@ -1452,7 +1460,7 @@ def estimate(preset: str, quality: str, seconds: float, text_only: bool = False,
         parts = [estimate(preset, quality, piece, text_only=SPARK) for piece in plan(seconds)]
         return None if None in parts else int(sum(parts) + 2 * len(parts))
     if SPARK:
-        base = (SPARK_FASTH3_5S if SPARK_ENGINE_LIB.exists() else SPARK_COMFY_5S).get(quality, {}).get(preset)
+        base = (SPARK_FASTH3_5S if spark_engine() else SPARK_COMFY_5S).get(quality, {}).get(preset)
         # the pass time grows a little faster than the length: attention over all rows is part of every pass
         return None if base is None else int(base * (seconds / 5.0) ** 1.2 * (1.0 if text_only else 1.5))
     if zig_ready() and preset in ZIG_FASTH3_5S.get(quality, {}):
@@ -1674,7 +1682,7 @@ def memory_of(params: dict, env: dict, frames: int, lora: bool, found: dict | No
     found = found or {}
     videos = found.get("videos") or []
     lora = lora or bool(found and params.get("ref_turbo"))
-    engine = SPARK_ENGINE_LIB.exists() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
+    engine = spark_engine() and (not lora or memory_guard.engine_takes_lora(SPARK_ENGINE_LIB))
     # a Drama 3 server kept loaded after a voice take is unloaded before this job starts (voice.release): its memory
     # counts as this job's, like the ComfyUI server's own; so does MiniMax Music 3's CUDA engine (music.release), and
     # NVIDIA Nemotron 3.5 Bolt's (bolt.admit unloads it when the job does not fit beside it).
@@ -2372,7 +2380,7 @@ def local_ram_need(job: dict) -> int | None:
         if (room.get("route") == "int8" and card and card["total_mb"] >= 96000
                 and memory_guard.room_budget_mb() is None and not found and not params.get("loras")
                 and not params.get("text_encoder") and os.environ.get("TEXT_ENCODER", "regular") in ("", "regular")
-                and os.environ.get("SPARK_ENGINE", "tensorfold") == "tensorfold"
+                and spark_engine()
                 and sized.get("SPARK_BASE") != "h3" and os.environ.get("SPARK_BASE") != "h3"
                 and frames <= 243 and (room.get("rows") or 0) <= 75336
                 and int(sized.get("WIDTH") or 864) * int(sized.get("HEIGHT") or 480) <= 1376 * 768):
@@ -2677,7 +2685,7 @@ def state() -> dict:
             "music": music.state(),
             # NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine (bolt.py): its state, backend and memory
             "bolt": bolt.summary(),
-            "engine": ("CUDA · SD-Turbo (512x512 only)" if windows_storyboard.status()["available"] else "unavailable (Windows UI-only preview)") if WINDOWS else ("CUDA · TensorFold int8" if SPARK_ENGINE_LIB.exists() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
+            "engine": ("CUDA · SD-Turbo (512x512 only)" if windows_storyboard.status()["available"] else "unavailable (Windows UI-only preview)") if WINDOWS else ("CUDA · TensorFold int8" if spark_engine() else "CUDA · ComfyUI") if SPARK else ("native Zig engine" if zig_ready() else "MLX engine")}
     if local_windows:
         out["image_model_options"] = choices
         out["windows_runtime"] = {"qualification": selected_mode, "image_models": choices,

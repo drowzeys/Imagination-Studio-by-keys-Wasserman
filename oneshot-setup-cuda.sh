@@ -153,6 +153,10 @@ export PATH="$HOME/.local/bin:/usr/local/cuda/bin:$PATH"
 if [ -n "${STUDIO_GPU:-}" ] && [ -x "$HERE/spark/smi-pin/nvidia-smi" ]; then
   export PATH="$HERE/spark/smi-pin:$PATH"
 fi
+# the card's profile (spark/gpu_profile.py): a GB300 renders clips on ComfyUI's own blocks with the fp16 video decoder,
+# so it fetches that decoder and does not build TensorFold's H3 engine (docs/gb300.md). Every other card: default
+GPU_PROFILE="$(python3 "$HERE/spark/gpu_profile.py" 2>/dev/null || true)"
+GPU_PROFILE="${GPU_PROFILE:-default}"
 say() { printf '==> %s\n' "$*"; }
 ok() { printf '  \342\234\223 %s\n' "$*"; }
 die() { printf '  \342\234\227 %s\n' "$*" >&2; exit 1; }
@@ -272,6 +276,7 @@ if [ "$IMAGE_ONLY" = 0 ]; then
   [ "$SOUND_LEGACY" = 0 ] || ! missing "$MODELS/Sound-Comfy/stable-audio-open-1.0/model.safetensors" || NEED=$((NEED + 6))
   [ "$BOLT" = 0 ] || ! missing "${BOLT_MODELS:-$MODELS}/Nemotron-3.5-Bolt-24GB/model.safetensors.index.json" || NEED=$((NEED + 26))
   [ "$TRAIN" = 0 ] || ! missing "$MODELS/Train-H3/vae/minimax_h3_video_vae_fp16.safetensors" || NEED=$((NEED + 15))
+  [ "$GPU_PROFILE" != gb300 ] || ! missing "$MODELS/FastH3-Comfy/vae/minimax_h3_video_vae_fp16.safetensors" || NEED=$((NEED + 6))
   [ "$VOICE" = 0 ] || ! missing "${DRAMA3_CUDA_MODEL:-${DRAMA3_CHECKPOINT:-$HOME/models/drama-3}}/config.json" || NEED=$((NEED + 45))
 fi
 # motion graphics (about 400 MB) and Finish (about 150 MB) go under $PREFIX: a GB each, with room
@@ -427,6 +432,15 @@ if [ "$IMAGE_ONLY" = 0 ]; then
     text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors vae/minimax_h3_video_vae_int8_convrot.safetensors \
     vae/minimax_h3_audio_vae_fp32.safetensors
   got "FastH3 transformer (bf16), H3 text encoder (8-bit), video decoder (8-bit) and audio decoder"
+  if [ "$GPU_PROFILE" = gb300 ]; then
+    # the video decoder a GB300 decodes with: its 8-bit one is about 5x slower there (spark/gpu_profile.py)
+    if [ "$VERIFY" = 1 ] && missing "$MODELS/FastH3-Comfy/vae/minimax_h3_video_vae_fp16.safetensors"; then
+      echo "  - the fp16 video decoder is not installed: clips decode on the 8-bit one, slower on a GB300 (bash oneshot-setup-spark.sh fetches it, 5.2 GB)"
+    else
+      fetch Comfy-Org/MiniMax-H3 FastH3-Comfy vae/minimax_h3_video_vae_fp16.safetensors
+      got "video decoder (fp16), the one a GB300 decodes with"
+    fi
+  fi
 fi
 
 if [ "$REF2VA" = 1 ] && [ "$IMAGE_ONLY" = 0 ]; then
@@ -660,7 +674,11 @@ fi
 
 if [ "$IMAGE_ONLY" = 0 ]; then
   say "TensorFold's H3 engine for CUDA -> $PREFIX/tf-h3"
-  if [ "$VERIFY" = 1 ]; then
+  if [ "$GPU_PROFILE" = gb300 ] && [ "${SPARK_ENGINE:-}" != tensorfold ]; then
+    # its int8 blocks are tuned for the GB10: on a GB300 ComfyUI's own bf16 blocks are faster, and clips render there.
+    # SPARK_ENGINE=tensorfold builds it anyway (with ENGINE_FROM_SOURCE=1: the prebuilt engine is a GB10's, sm_121)
+    echo "  - skipping the H3 engine build on a GB300: clips render on ComfyUI's own blocks, faster there (docs/gb300.md)"
+  elif [ "$VERIFY" = 1 ]; then
     [ -s "$PREFIX/tf-h3/libtf_h3.so" ] && ok "libtf_h3.so" || echo "  not built: clips render on ComfyUI's own blocks (slower)"
   elif PREFIX="$PREFIX" bash "$HERE/spark/build-engine.sh"; then
     ok "libtf_h3.so (FastH3's blocks in int8 on the tensor cores)"

@@ -108,6 +108,7 @@ Without Docker, building the CUDA engines requires the supported toolkit and com
 For other GPUs, use the machine-specific instructions rather than assuming Spark's unified-memory budget:
 
 - [RTX Pro 6000 and local GPU workers](docs/rtx-pro-6000.md)
+- [GB300 (DGX Station)](docs/gb300.md)
 - [One to four local GPUs: the recipe](docs/local-gpus.md)
 - [RTX 5090](docs/rtx-5090.md)
 - [Two-GPU rendering](docs/two-gpus.md)
