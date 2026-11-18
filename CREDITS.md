@@ -173,8 +173,8 @@ own MOSS-Image support (comfyanonymous, Comfy Org and the ComfyUI contributors, 
 **MiniMax** released **MiniMax-H3-Image**: a picture model that makes a picture from a prompt and edits one from
 reference pictures, at up to about 16 megapixels, in a 6-step distilled sampler. Its transformer is MiniMax H3's without
 the audio layers and it uses MiniMax H3's text encoder. The weights are under the MiniMax-H3-Image Community License
-Agreement, which limits the territories where the model may be used; this pack ships none of them. On a DGX Spark it
-runs on **ComfyUI**'s own MiniMax-H3-Image support (comfyanonymous, Comfy Org and the ComfyUI contributors, GPL-3.0,
+Agreement, which limits the territories where the model may be used; this pack ships none of them. On a DGX Spark and
+on a Mac (PyTorch's Metal device) it runs on **ComfyUI**'s own MiniMax-H3-Image support (comfyanonymous, Comfy Org and the ComfyUI contributors, GPL-3.0,
 run as a separate program), from **Comfy Org**'s repackaged files (the pruned 8-bit checkpoint and the decoder).
 Asked for by **spenchey** (issue #243), with the list of files and what the model needs. Powered by MiniMax-H3-Image.
 

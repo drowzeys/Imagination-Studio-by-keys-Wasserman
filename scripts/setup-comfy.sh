@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # ComfyUI on a Mac for what a DGX Spark runs there: Upscale, Find a person and Remove a person (Library actions) and the
-# MOSS-Image picture model. The same graphs and the same authors' node packs as on a Spark (spark/spark_generate.py,
+# MOSS-Image and MiniMax-H3-Image picture models. The same graphs and the same authors' node packs as on a Spark (spark/spark_generate.py,
 # spark/spark_workflows.py), on PyTorch's Metal device, in an environment of their own (never the Studio's MLX venv):
 #   bash scripts/setup-comfy.sh --upscale     # dntpi's H3 Video Upsampler + LBH-123-AI's latent upscaler (0.7 GB)
 #   bash scripts/setup-comfy.sh --remove      # Akatz Labs' H3 Relay + Meta's SAM 3.1 (1.7 GB): Find and Remove a person
 #   bash scripts/setup-comfy.sh --moss        # MOSS-Image (OpenMOSS, Apache 2.0): 28 GB, Comfy-Org/MOSS-Image's files
+#   bash scripts/setup-comfy.sh --h3-image    # MiniMax-H3-Image (MiniMax-H3-Image Community License: territory limits): 50 GB,
+#                                             # Comfy-Org/MiniMax-H3-Image's 8-bit checkpoint, decoder and text encoder. It
+#                                             # moves this ComfyUI to v0.45.1, the first with the model
 #   bash scripts/setup-comfy.sh --verify      # check what is installed, download nothing
-# oneshot-setup.sh --upscale / --remove / --moss run this. Under $PREFIX (default ~/.local/opt/tensorfold-studio):
+# oneshot-setup.sh --upscale / --remove / --moss / --h3-image run this. Under $PREFIX (default ~/.local/opt/tensorfold-studio):
 #   comfy-venv/    PyTorch (Metal) and ComfyUI's requirements (about 1.6 GB)
 #   ComfyUI/       ComfyUI at the CUDA install's commit (COMFY_COMMIT in oneshot-setup-cuda.sh), the node packs at the Spark's
 #                  pins (spark/setup-workflows.sh)
@@ -23,13 +26,16 @@ H3_MODEL_DIR="${H3_MODEL_DIR:-$HOME/h3-models/MiniMax-H3}"
 VENV="$PREFIX/comfy-venv"; COMFY="$PREFIX/ComfyUI"
 # the CUDA install's pin, read from that script so the Mac and the CUDA build do not drift apart
 COMFY_COMMIT="$(sed -n 's/^COMFY_COMMIT=\([0-9a-f]*\).*/\1/p' "$HERE/oneshot-setup-cuda.sh")"
+# MiniMax-H3-Image's ComfyUI (v0.45.1), as on a Spark: an install that asks for the model, or has it, is moved there and stays
+COMFY_H3IMAGE_COMMIT="$(sed -n 's/^COMFY_H3IMAGE_COMMIT=\([0-9a-f]*\).*/\1/p' "$HERE/oneshot-setup-cuda.sh")"
+H3IMAGE_FILE="diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors"
 pin() { awk -v n="$1" '$1 == "node" && $2 == n {print $4}' "$HERE/spark/setup-workflows.sh"; }
 TORCH="torch==2.14.1 torchvision==0.29.1"
-UPSCALE=0; REMOVE=0; MOSS=0; VERIFY=0
+UPSCALE=0; REMOVE=0; MOSS=0; H3IMAGE=0; VERIFY=0
 for arg in "$@"; do
   case "$arg" in
-    --upscale) UPSCALE=1;; --remove) REMOVE=1;; --moss) MOSS=1;; --verify) VERIFY=1;;
-    *) echo "usage: setup-comfy.sh [--upscale] [--remove] [--moss] [--verify]" >&2; exit 2;;
+    --upscale) UPSCALE=1;; --remove) REMOVE=1;; --moss) MOSS=1;; --h3-image) H3IMAGE=1;; --verify) VERIFY=1;;
+    *) echo "usage: setup-comfy.sh [--upscale] [--remove] [--moss] [--h3-image] [--verify]" >&2; exit 2;;
   esac
 done
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
@@ -37,7 +43,7 @@ ok() { echo "  ✓ $*"; }
 note() { echo "  ! $*"; }
 bad=0
 
-echo "ComfyUI for the Library actions and MOSS-Image (Mac)"
+echo "ComfyUI for the Library actions, MOSS-Image and MiniMax-H3-Image (Mac)"
 if [ "$(uname -s)" != Darwin ]; then
   note "this is the Mac's: on a DGX Spark these are spark/setup-workflows.sh and oneshot-setup-spark.sh --moss"; exit 0
 fi
@@ -45,8 +51,10 @@ if [ "$VERIFY" = 1 ]; then  # what is there decides what is checked
   [ -d "$COMFY/custom_nodes/ComfyUI-H3-Video-Upsampler" ] && UPSCALE=1
   [ -d "$COMFY/custom_nodes/h3-relay" ] && REMOVE=1
   [ -s "$MODELS/diffusion_models/moss_image_sft_bf16.safetensors" ] && MOSS=1
-  [ -d "$COMFY" ] || { note "no ComfyUI at $COMFY: bash scripts/setup-comfy.sh --upscale|--remove|--moss"; exit 1; }
+  [ -d "$COMFY" ] || { note "no ComfyUI at $COMFY: bash scripts/setup-comfy.sh --upscale|--remove|--moss|--h3-image"; exit 1; }
 fi
+[ ! -s "$MODELS/$H3IMAGE_FILE" ] || H3IMAGE=1
+[ "$H3IMAGE" = 0 ] || [ -z "$COMFY_H3IMAGE_COMMIT" ] || COMFY_COMMIT="$COMFY_H3IMAGE_COMMIT"
 [ -n "$COMFY_COMMIT" ] || { echo "no COMFY_COMMIT in oneshot-setup-cuda.sh" >&2; exit 1; }
 command -v uv >/dev/null || { echo "  uv is needed: brew install uv" >&2; exit 1; }
 
@@ -117,6 +125,19 @@ if [ "$MOSS" = 1 ]; then
   model Comfy-Org/MOSS-Image text_encoders/qwen3.5_9b_bf16.safetensors text_encoders qwen3.5_9b_bf16.safetensors
   model Comfy-Org/MOSS-Image vae/flux2-vae_small.safetensors vae flux2-vae_small.safetensors
   [ -f "$COMFY/comfy_extras/nodes_moss_image.py" ] || { note "this ComfyUI has no MOSS-Image nodes"; bad=1; }
+fi
+if [ "$H3IMAGE" = 1 ]; then
+  [ "$VERIFY" = 1 ] || { echo "  MiniMax-H3-Image is under the MiniMax-H3-Image Community License Agreement. It limits where the model may"
+    echo "  be used (not in the European Union, the United Kingdom, the Republic of Korea or the United States without"
+    echo "  MiniMax's own licence), and asks for MiniMax's written authorisation above US\$1M yearly revenue or for a"
+    echo "  hosted service. Read it first: https://huggingface.co/MiniMaxAI/MiniMax-H3-Image/blob/main/LICENSE (50 GB)"; }
+  model Comfy-Org/MiniMax-H3-Image "$H3IMAGE_FILE" diffusion_models minimax_h3_image_pruned_int8_convrot.safetensors
+  model Comfy-Org/MiniMax-H3-Image vae/minimax_h3_image_vae_fp16.safetensors vae minimax_h3_image_vae_fp16.safetensors
+  # the 8-bit text encoder of the ComfyUI files: the Mac's own MiniMax H3 text encoder (bf16, H3_MODEL_DIR) is not this file
+  model Comfy-Org/MiniMax-H3-Image text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors text_encoders \
+    qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+  grep -q MiniMaxH3ImageConditioning "$COMFY/comfy_extras/nodes_minimax_h3.py" 2>/dev/null \
+    || { note "this ComfyUI has no MiniMax-H3-Image nodes"; bad=1; }
 fi
 "$VENV/bin/python" "$HERE/mac/comfy_files.py" "$PREFIX" >/dev/null && ok "model folders: $MODELS ($PREFIX/comfy-models.yaml)"
 if bash "$HERE/mac/comfy.sh" status | grep -q "^running"; then

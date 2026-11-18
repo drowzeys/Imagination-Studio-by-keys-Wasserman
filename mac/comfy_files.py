@@ -4,7 +4,7 @@
     python mac/comfy_files.py PREFIX --check    # print what is there as JSON, change nothing
 
 ComfyUI lists the files of $MAC_COMFY_MODELS ($PREFIX/comfy-models): what scripts/setup-comfy.sh downloaded (SAM 3.1,
-the H3 latent upscaler, the audio decoder, MOSS-Image's three files) and three pointer files (`*.studio.sft`) that
+the H3 latent upscaler, the audio decoder, MOSS-Image's three files, MiniMax-H3-Image's three) and three pointer files (`*.studio.sft`) that
 mac/studio_files reads as MiniMax H3's transformer, text encoder and video decoder from the Mac's own copy in
 H3_MODEL_DIR. The Spark's runner (spark/spark_generate.py) asks for these names on a Mac (`MAC_FILES`).
 """

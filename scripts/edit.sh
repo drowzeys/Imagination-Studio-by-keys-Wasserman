@@ -40,8 +40,21 @@ case "${IMAGE_MODEL:-qwen}" in
     [ "${UPSAMPLE:-1}" = 0 ] || ARGS+=(--upsampler "$FLUX3_MODEL_DIR/FLUX3-K-pup-MLX-8bit")
     if [ -n "${SET_FILE:-}" ]; then ARGS+=(--set "@$SET_FILE"); else ARGS+=(--prompt "$PROMPT" -o "$OUT"); fi
     exec "$PREFIX/flux3-venv/bin/python" "$HERE/../flux3_edit.py" "${ARGS[@]}";;
+  h3-image)
+    # MiniMax-H3-Image's edit: the DGX Spark's runner (spark/spark_edit.py) on the Mac's own ComfyUI (mac/comfy.sh,
+    # oneshot-setup.sh --h3-image); the prompt as written, further pictures are <Picture 2>, <Picture 3>
+    [ -z "${LORA:-}" ] && [ "${BASE:-0}" != 1 ] || { echo "image LoRAs and the base model are Qwen-Image-2.1's: MiniMax-H3-Image takes neither" >&2; exit 2; }
+    [ -x "$PREFIX/comfy-venv/bin/python" ] || { echo "MiniMax-H3-Image is not installed here: bash oneshot-setup.sh --h3-image" >&2; exit 1; }
+    ARGS=(--image "$IMAGE" --seed "${SEED:-0}" --size "${SIZE:-source}" --resolution "${RESOLUTION:-1024}" --model h3-image)
+    if [ -n "${IMAGES:-}" ]; then
+      while IFS= read -r ONE; do [ -z "$ONE" ] || ARGS+=(--image "$ONE"); done <<<"$IMAGES"
+    fi
+    [ -z "${WIDTH:-}" ] || [ -z "${HEIGHT:-}" ] || ARGS+=(--width "$WIDTH" --height "$HEIGHT")
+    [ -z "${MOST_PIXELS:-}" ] || ARGS+=(--most "$MOST_PIXELS")
+    if [ -n "${SET_FILE:-}" ]; then ARGS+=(--set "@$SET_FILE"); else ARGS+=(--prompt "$PROMPT" -o "$OUT"); fi
+    PREFIX="$PREFIX" exec "$PREFIX/comfy-venv/bin/python" "$HERE/../spark/spark_edit.py" "${ARGS[@]}";;
   qwen) ;;
-  *) echo "IMAGE_MODEL is qwen, flux3k-fast or flux3k-full, not ${IMAGE_MODEL}" >&2; exit 2;;
+  *) echo "IMAGE_MODEL is qwen, flux3k-fast, flux3k-full or h3-image, not ${IMAGE_MODEL}" >&2; exit 2;;
 esac
 MODEL="$QWEN_MODEL_DIR"
 if [ "${BASE:-0}" = 1 ]; then

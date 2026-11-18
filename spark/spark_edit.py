@@ -267,7 +267,7 @@ def main() -> None:
 
                 with Image.open(output) as opened:
                     opened.resize(size, Image.Resampling.LANCZOS).save(output)
-            print("[tensorfold] " + json.dumps({"output": str(output), "engine": "cuda", "model": args.model, "edit": prompt[:80], "seed": args.seed,
+            print("[tensorfold] " + json.dumps({"output": str(output), "engine": sg.ENGINE, "model": args.model, "edit": prompt[:80], "seed": args.seed,
                                                 "noise_seed": noise, "turbo": not args.base, **({"upsampled": args.upsample} if flux3 else {}), "loras": [name for name, _ in loras], "pictures": len(pictures),
                                                 "size": list(size), "made_at": list(made), "total_s": round(seconds, 1)}), flush=True)
     finally:

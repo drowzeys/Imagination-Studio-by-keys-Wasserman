@@ -763,7 +763,7 @@ function viewCreate() {
         el("div", { class: "fit", style: "width:110px" }, el("label", {}, "Seed"), bind(C, "seed", el("input", { type: "number", min: 0 })))),
       el("div", { class: "note" }, (imageModel() === "qwen" ? "Each image takes a few seconds after the model loads"
         : imageModel() === "moss-image" ? "MOSS-Image takes your prompt as written, about 45 s an image at 1344 × 768 once loaded; put the words to be lettered in quotes"
-        : imageModel() === "h3-image" ? "MiniMax-H3-Image takes your prompt as written: about 4 s an image at 1344 × 768 once loaded, 9 s at 1152 × 2048 and 18 s at 2048 × 2048 on a DGX Spark; put the words to be lettered in quotes"
+        : imageModel() === "h3-image" ? "MiniMax-H3-Image takes your prompt as written: about 4 s an image at 1344 × 768 once loaded, 9 s at 1152 × 2048 and 18 s at 2048 × 2048 on a DGX Spark (16 s, 21 s and 28 s on a Mac Studio M5 Ultra); put the words to be lettered in quotes"
         : "FLUX3-K writes a full scene description from your prompt first (5 to 20 s, once for all the images), then makes each image: Fast about 10 to 15 s, Full about a minute") + "; seeds count up from the one given."),
       el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "hot fit", disabled: !!imageModelWhy(), title: imageModelWhy(), onclick: async () => { try { if (!C.scene.trim()) throw new Error("describe the picture first");
         if (imageModelWhy()) throw new Error(imageModelWhy());
