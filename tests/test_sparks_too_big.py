@@ -389,9 +389,21 @@ def test_a_worker_that_stops_answering_is_marked_down_before_anything_is_measure
     assert STATION not in one["sparks"].get("not", {})  # too big here: it may go back to that worker
 
 
-def test_a_clip_read_as_fitting_here_bars_the_worker_that_failed_it(hub):
+@pytest.mark.parametrize("reading", ["fits", "never read", "forgotten"])
+def test_a_clip_not_read_as_too_big_bars_the_worker_that_failed_it(hub, reading):
+    """Read as fitting here, never read, or forgotten (forget_fits after a job here ended): move() measures nothing
+    and bars the worker that failed the clip, as before this change."""
+
     one = clip(hub)
-    hub.fitted[one["id"]] = (0.0, True)
-    hub.fits_here = lambda job: (_ for _ in ()).throw(AssertionError("measured in move()"))
-    fail_there(hub, one, "its render failed: ComfyUI stopped")
-    assert STATION in one["sparks"]["not"]  # it fits here: this Spark takes it, not the worker that failed it
+    hub.fits_here = lambda job: True
+    hub.measure()
+    assert hub.claim(STATION) is one
+    if reading == "never read":
+        hub.fitted.pop(one["id"], None)
+    elif reading == "forgotten":
+        hub.forget_fits()
+    asked = []
+    hub.fits_here = lambda job: asked.append(job["id"]) or True
+    with pytest.raises(sparks.Moved):
+        hub.move(one, hub.workers()[0], "its render failed: ComfyUI stopped", down=False)
+    assert asked == [] and STATION in one["sparks"]["not"] and one["status"] == "queued"
