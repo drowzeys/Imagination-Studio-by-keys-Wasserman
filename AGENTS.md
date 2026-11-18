@@ -453,6 +453,12 @@ Rules:
   machine's RAM and the card's free memory (`memory_guard.device`, `voice.mem_available_gb`); keep it that way, a
   check on RAM alone lets Drama 3 load beside a 62 GB ComfyUI on a 96 GB card. `STUDIO_VRAM_GB` pretends to be such a
   card on a Spark (it keeps the GB10's page-cache release). The engines build for the card's own sm (`TF_SM`).
+- An NVIDIA GB300 (DGX Station class; `spark/gpu_profile.py`, docs/gb300.md) runs the DGX Spark install. Recognised
+  by the studio card's compute capability (10.3) from nvidia-smi, a clip renders there on ComfyUI's own bf16 blocks,
+  with `--use-pytorch-cross-attention` and the fp16 video decoder (`GB300_VAE`): each measured against the GB10
+  default on one station (docs/gb300.md); change them only with new measurements. `SPARK_ENGINE`, `SPARK_COMFY_ARGS`
+  and `SPARK_VAE` win over the profile. A card query that fails is not kept (asked again after `RETRY_S`), and
+  several cards with none chosen (`STUDIO_GPU`) are never classified by the first row.
 - mflux, minimax-h3-mlx, flux3-mlx, TensorFold's music3-mlx, MMAudio and ComfyUI-MMAudio are pinned by commit and used at run time. Do not unpin.
 
 **No personal information, ever:** no real email, phone number, home or postal address, account name, private IP,
