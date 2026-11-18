@@ -31,6 +31,7 @@ REASON = ("The video model has no negative prompt here: a thing the prompt names
 # the same sentence server.py writes as QUIET_SOUND. A test holds the two equal.
 QUIET_SOUND = "Only ambient sound is heard."
 SPOKEN = re.compile(r"<d>.*?</d>", re.IGNORECASE | re.DOTALL)
+QUOTED = re.compile(r"“[^”]*”|\"[^\"\n]*\"")
 SOUNDSCAPE = re.compile(r"(?im)^[ \t]*overall_soundscape[ \t]*:")
 DESCRIPTION = re.compile(r"(?i)integrated_multimodal_description[ \t]*:")
 MUSIC = re.compile(r"(?im)^[ \t]*non_diegetic_music[ \t]*:")
@@ -63,6 +64,9 @@ def find(text: str, limit: int = 8) -> list[dict]:
 
     for own in OWN:
         text = re.sub(re.escape(own), " ", text, flags=re.IGNORECASE)
+    # what a character says is heard, not shown: "I didn't cherish it" in a line forbids nothing in the picture.
+    # Spoken lines are <d> tags in a composed prompt and quotation marks in one written by hand.
+    text = QUOTED.sub(" ", SPOKEN.sub(" ", text))
     out, seen = [], set()
     for match in FOUND.finditer(text):
         negation, rest = match.group(1), match.group(2).split()

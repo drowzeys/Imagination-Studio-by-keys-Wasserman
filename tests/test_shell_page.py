@@ -16,7 +16,7 @@ HARNESS = r"""
 const vm = require("vm"), fs = require("fs");
 globalThis.S = { platform: "spark", platform_label: "DGX SPARK · NVIDIA GB10 · H3-CUDA", presets: { small: { size: [864, 480] }, p720: { size: [1280, 720] }, sharp: { size: [1376, 768] } },
   sharp: { seed: 42, seconds: [8, 10], quality: "fh8" }, long: { 30: "30 s" }, ref2va: true, ref_media: true, reference_total: 12, sparks: { supported: true } };
-globalThis.TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
+globalThis.TABS = ["Home", "Story", "Image", "Video", "Previs", "Sound", "Edit", "Create", "Production", "Import", "Motion Previs", "Agent", "Voice", "Music", "Foley", "Editor", "Graphics", "Finish", "Prompt Builder", "Cast & Places", "Director", "Motion graphics", "Night shift", "Library", "Looks", "Machine", "Sparks", "Brains", "Updates", "Tutorial", "Nodes", "Settings"];
 globalThis.tab = "Home"; globalThis.renders = 0; globalThis.render = () => { renders++; };
 globalThis.toasts = []; globalThis.toast = t => toasts.push(String(t));
 globalThis.calls = []; globalThis.answers = {};
@@ -755,13 +755,13 @@ def test_every_tab_has_one_room_and_old_links_still_work():
       go("Voice"); out.voice = tab; goRoom("edit"); out.edit = tab; goRoom("library"); out.lib = tab; go("Nowhere"); out.still = tab; out.names = TABS.map(t => TAB_NAMES[t] || "");
       C.goes = "video"; out.createVideo = roomOf("Create").id; C.goes = "edit"; out.createEdit = roomOf("Create").id; C.goes = "image"; out.createImage = roomOf("Create").id;
       out.keys = ROOMS.map(r => r.key);""")
-    assert out["rooms"] == ["Apps", "Video", "Image", "Sound", "Story", "Cast & Places", "Director", "Previs", "Motion graphics", "Edit", "Night shift", "Agent", "Library", "Looks", "Wasserman's Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings"]
-    assert out["groups"] == [":Apps", "Creative Engines:Video,Image,Sound,Story,Cast & Places,Director,Previs,Motion graphics,Edit,Night shift", ":Agent", "Studio Vaults:Library,Looks,Wasserman's Filmmaker Suite,Nodes,Machine,Learn,Settings"]
+    assert out["rooms"] == ["Apps", "Video", "Prompt Builder", "Image", "Sound", "Story", "Cast & Places", "Director", "Previs", "Motion graphics", "Edit", "Night shift", "Agent", "Library", "Looks", "Wasserman's Filmmaker Suite", "Nodes", "Machine", "Learn", "Settings"]
+    assert out["groups"] == [":Apps", "Creative Engines:Video,Prompt Builder,Image,Sound,Story,Cast & Places,Director,Previs,Motion graphics,Edit,Night shift", ":Agent", "Studio Vaults:Library,Looks,Wasserman's Filmmaker Suite,Nodes,Machine,Learn,Settings"]
     assert out["homeless"] == ["Home", "Create"]  # home sits outside the rooms; Create is in Image and in Video
     assert (out["createVideo"], out["createEdit"], out["createImage"]) == ("video", "image", "image")
     assert out["voice"] == "Voice" and out["edit"] == "Edit" and out["lib"] == "Library" and out["still"] == "Library"
     assert all(out["names"])
-    assert out["keys"] == ["", "1", "2", "3", "4", "", "", "5", "", "6", "", "", "7", "8", "9", "", "0", "", ","]  # ⌥1 to ⌥9, ⌥0 and ⌥, for Settings
+    assert out["keys"] == ["", "1", "", "2", "3", "4", "", "", "5", "", "6", "", "", "7", "8", "9", "", "0", "", ","]  # ⌥1 to ⌥9, ⌥0 and ⌥, for Settings
 
 
 def test_the_sidebar_shows_both_groups_and_marks_the_room():
@@ -1481,7 +1481,7 @@ def test_each_new_room_is_named_in_the_sidebar_and_opens_its_own_page():
         got = out["rooms"][room]
         assert label in got["label"] and got["group"] == "engines" and got["fold"] == "more", got
         assert got["tab"] == tab and got["room"] == label and got["lit"] == [room] and got["icon"], got
-    assert out["engines"] == ["video", "image", "sound", "story", "cast", "director", "previs", "graphics", "edit", "night"]
+    assert out["engines"] == ["video", "builder", "image", "sound", "story", "cast", "director", "previs", "graphics", "edit", "night"]
     assert "Graphics" in out["editTabs"] and "Finish" in out["editTabs"] and out["finishRoom"] == "Edit" and out["train"]
 
 
