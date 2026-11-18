@@ -135,6 +135,7 @@ def test_prefer_worker_failure_uses_automatic_fallback(hub):
         hub.move(clip, hub.workers()[1], "synthetic refusal", down=False)
     assert clip["status"] == "queued"
     hub.state(address).update(job=None, state="ready")
+    hub.measure()  # as the queue thread does before it claims
     assert hub.claim() is clip
 
 

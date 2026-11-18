@@ -60,8 +60,9 @@ def busy_elsewhere(hub):
 
 
 def fail_there(hub, job, why, down=False):
-    """``job`` handed to the worker, then taken back from it."""
+    """``job`` handed to the worker, then taken back from it (its fit here read first, as the queue thread does)."""
 
+    hub.measure()
     assert hub.claim(STATION) is job
     with pytest.raises(sparks.Moved):
         hub.move(job, hub.workers()[0], why, down=down)
@@ -366,3 +367,31 @@ def test_clearing_the_fit_cache_while_a_worker_thread_prunes_it_is_safe(hub):
     assert order == ["pruned", "cleared"]  # the clear waited until the prune was done
     assert hub.fitted == {}
     assert not clearer.is_alive() and cleared.is_set()
+
+
+def test_a_worker_that_stops_answering_is_marked_down_before_anything_is_measured(hub):
+    """Taking a clip back from a silent worker never measures the clip here (that can build it and probe its media):
+    the worker is down at once, and the reading already taken, however old, decides whether it stays open to the clip."""
+
+    one = clip(hub)
+    hub.measure()
+    assert hub.claim(STATION) is one
+    hub.fitted[one["id"]] = (0.0, False)  # the reading has aged past FITTED while the worker rendered: still too big here
+    asked = []
+
+    def fits_here(job):
+        asked.append(hub.state(STATION)["state"])
+        return False
+    hub.fits_here = fits_here
+    with pytest.raises(sparks.Moved):
+        hub.move(one, hub.workers()[0], "it stopped answering for 60 s while rendering", down=True)
+    assert asked == [] and hub.state(STATION)["state"] == "down" and one["status"] == "queued"
+    assert STATION not in one["sparks"].get("not", {})  # too big here: it may go back to that worker
+
+
+def test_a_clip_read_as_fitting_here_bars_the_worker_that_failed_it(hub):
+    one = clip(hub)
+    hub.fitted[one["id"]] = (0.0, True)
+    hub.fits_here = lambda job: (_ for _ in ()).throw(AssertionError("measured in move()"))
+    fail_there(hub, one, "its render failed: ComfyUI stopped")
+    assert STATION in one["sparks"]["not"]  # it fits here: this Spark takes it, not the worker that failed it

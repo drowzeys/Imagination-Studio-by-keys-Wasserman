@@ -1602,20 +1602,25 @@ class Hub:
     # ---- one clip on a worker -----------------------------------------------------------------------------------------
 
     def move(self, job: dict, worker: dict, why: str, down: bool) -> None:
-        """A clip taken back from a worker: in the queue again, never for that worker; the worker marked down when it
-        is the worker that failed. Raises Moved (or nothing was moved: the job was cancelled meanwhile)."""
+        """A clip taken back from a worker: in the queue again; the worker marked down at once when it is the worker
+        that failed. The clip is not given to that worker again, except after a passing failure when its last reading
+        here (Hub.fits) found it too big for this Spark. Raises Moved (or nothing was moved: the job was cancelled meanwhile)."""
 
         address, name = worker["address"], worker.get("name") or worker["address"]
         live = self.state(address)
         # A worker that failed the clip for a passing reason (it stopped answering, its render or the fetch failed) may
         # be given it again when the clip is too big for this Spark: barred, the clip could only fail here. A refusal
         # (its own memory guard, its settings) bars it as before, and MOVES still caps the retries.
-        selected = job.get("placement")
-        keep_open = (job["status"] == "running" and not why.startswith(REFUSED)
-                     and not (selected and selected["policy"] == "require") and not self.fits(job))
-        if down:
+        if down:  # first: nothing is measured before a worker that stopped answering is marked down
             self.hang_up(address)
             live.update(state="down", why=why, checked=time.time(), info=None)
+        # Only the reading already taken (Hub.fits), however old: measuring here can build the clip and probe its media.
+        # A clip last read as too big for this Spark stays open to the worker; any other (fits, or never read) bars it.
+        with self.fit_lock:
+            known = self.fitted.get(job["id"])
+        selected = job.get("placement")
+        keep_open = (job["status"] == "running" and not why.startswith(REFUSED)
+                     and not (selected and selected["policy"] == "require") and known is not None and known[1] is False)
         with self.lock:
             if job["status"] != "running":
                 return
