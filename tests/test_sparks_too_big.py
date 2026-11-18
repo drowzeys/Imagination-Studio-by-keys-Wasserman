@@ -305,3 +305,27 @@ def test_a_long_video_goes_to_a_spark_or_linux_worker_only():
     assert sparks.capable("long", params, {**base, "platform": "spark"}) == ""
     assert sparks.capable("long", params, {**base, "platform": "windows"})
     assert sparks.capable("long", params, {**base, "platform": "mac"})
+
+
+def test_a_long_slow_measure_keeps_every_reading_claim_needs(hub, monkeypatch):
+    """Over 500 readings, the cache drops clips no longer queued, never a queued clip's reading: a pass longer than
+    FITTED over a long queue must not throw away its own early readings before claim looks them up."""
+
+    busy_elsewhere(hub)
+    clock = [1000.0]
+    monkeypatch.setattr(sparks.time, "time", lambda: clock[0])
+    waiting = [clip(hub) for _ in range(600)]
+    first = waiting[0]
+
+    def slow(job):
+        clock[0] += sparks.FITTED / 100  # 600 readings: a pass of six FITTED
+        return job is first and fits["first"]
+    fits = {"first": False}
+    hub.fits_here = slow
+    hub.measure()
+    assert hub.claim() is None and not hub.unmeasured
+    fits["first"] = True  # room for the first clip only
+    clock[0] += sparks.FITTED
+    hub.measure()
+    hub.fits_here = lambda job: pytest.fail("read under the lock")
+    assert hub.claim() is first and not hub.unmeasured

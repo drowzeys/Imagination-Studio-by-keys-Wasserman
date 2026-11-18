@@ -1315,8 +1315,9 @@ class Hub:
         except Exception:  # noqa: BLE001 - a reading; the job's own build says what is wrong when it runs
             found = True
         now = time.time()  # when it was read, not when the reading began: a slow build is not stale at once
-        if len(self.fitted) > 500:
-            self.fitted = {key: value for key, value in self.fitted.items() if now - value[0] < FITTED}
+        if len(self.fitted) > 500:  # readings of clips no longer queued go; a queued clip's stays, however old, for claim
+            queued = {i for i in list(self.order) if (self.jobs.get(i) or {}).get("status") == "queued"}
+            self.fitted = {key: value for key, value in self.fitted.items() if key in queued}
         self.fitted[job["id"]] = (now, found)
         return found
 
