@@ -532,6 +532,7 @@ class Hub:
         # workers that can take it, instead of failing here
         self.fits_here = lambda job: True
         self.fitted: dict[str, tuple[float, bool]] = {}  # job id -> (when, fits_here's answer): Hub.fits
+        self.fit_lock = threading.Lock()  # fitted is written by the queue's thread and by workers' threads (move)
         self.unmeasured = False  # claim() left a clip whose fit was not measured yet (Hub.measure)
         self.estimate_on = lambda job, name: None  # server.estimate_on: a job's time on the worker ``name``, or None
         self.started = False
@@ -1307,7 +1308,8 @@ class Hub:
         True when it cannot say: this Spark's memory guard then decides when the clip starts, as for any job."""
 
         now = time.time()
-        known = self.fitted.get(job["id"])
+        with self.fit_lock:
+            known = self.fitted.get(job["id"])
         if known and now - known[0] < FITTED:
             return known[1]
         try:
@@ -1315,11 +1317,20 @@ class Hub:
         except Exception:  # noqa: BLE001 - a reading; the job's own build says what is wrong when it runs
             found = True
         now = time.time()  # when it was read, not when the reading began: a slow build is not stale at once
+        queued = None
         if len(self.fitted) > 500:  # readings of clips no longer queued go; a queued clip's stays, however old, for claim
             queued = {i for i in list(self.order) if (self.jobs.get(i) or {}).get("status") == "queued"}
-            self.fitted = {key: value for key, value in self.fitted.items() if key in queued}
-        self.fitted[job["id"]] = (now, found)
+        with self.fit_lock:  # the build above stays outside: only the cache's own change is held
+            if queued is not None:
+                self.fitted = {key: value for key, value in self.fitted.items() if key in queued}
+            self.fitted[job["id"]] = (now, found)
         return found
+
+    def forget_fits(self) -> None:
+        """Every reading dropped (this machine's memory changed: a job it ran has ended), under the cache's own lock."""
+
+        with self.fit_lock:
+            self.fitted = {}
 
     def too_big_waiting(self) -> bool:
         """Whether a queued clip was last measured as too big for this machine (it waits for a worker, or for room here).

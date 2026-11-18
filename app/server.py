@@ -2643,7 +2643,7 @@ def work() -> None:
             bolt.queue_empty()  # nothing for this machine: a Bolt unloaded for the queue's jobs may load again
             continue
         perform(job)
-        hub.fitted.clear()  # this machine's memory changed: a clip left to the workers as too big here is measured again
+        hub.forget_fits()  # this machine's memory changed: a clip left to the workers as too big here is measured again
         hub.kick.set()
 
 

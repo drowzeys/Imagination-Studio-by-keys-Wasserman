@@ -329,3 +329,26 @@ def test_a_long_slow_measure_keeps_every_reading_claim_needs(hub, monkeypatch):
     hub.measure()
     hub.fits_here = lambda job: pytest.fail("read under the lock")
     assert hub.claim() is first and not hub.unmeasured
+
+
+def test_clearing_the_fit_cache_while_a_worker_thread_prunes_it_is_safe(hub):
+    """A worker's thread (move) can prune the cache while the queue's thread clears it after a job here ends: with the
+    cache's own lock, neither sees the other's change half done (no "dictionary changed size during iteration")."""
+
+    import threading
+    busy_elsewhere(hub)
+    waiting = [clip(hub) for _ in range(3)]
+    started, cleared = threading.Event(), threading.Event()
+
+    class Paused(dict):
+        def items(self):
+            started.set()
+            cleared.wait(0.5)  # the other thread clears now (or is held off by the lock)
+            return super().items()
+    hub.fitted = Paused({f"gone-{n}": (0.0, True) for n in range(600)})
+    hub.fits_here = lambda job: False
+    clearer = threading.Thread(target=lambda: (started.wait(2), hub.forget_fits(), cleared.set()))
+    clearer.start()
+    assert hub.fits(waiting[0]) is False  # pruned: no RuntimeError
+    clearer.join(timeout=5)
+    assert not clearer.is_alive() and cleared.is_set()
