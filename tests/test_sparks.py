@@ -1063,6 +1063,10 @@ def test_the_memory_preview_asks_the_guard_of_a_worker_the_job_may_go_to():
         one.jobs["theirs"] = {"id": "theirs", "status": "running"}  # busy with its own app's job: still asked
         client.post(f"/api/sparks/workers/{one.address}/check", json={})
         settle()
+        for _ in range(100):  # a loaded machine may answer the check a little after settle()
+            if hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE:
+                break
+            time.sleep(0.05)
         assert hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE and ask(**clip, sparks=2).get("worker")
         one.jobs.clear()
         one.has["ref2va"] = True  # reference pictures, but no ffmpeg for reference videos or audio
