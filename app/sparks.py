@@ -416,8 +416,9 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     if theirs != mine and params.get("text_encoder") not in (None, "", "regular"):
         return ("the text encoder file is one of this Mac's (an MLX file): a Spark reads only the files in its own ComfyUI folder" if mine == "mac"
                 else "the text encoder file is one of this Spark's (a ComfyUI file): a Mac reads only its own MLX files")
-    media = bool(params.get("reference_videos") or params.get("reference_audios"))
-    if params.get("references") or media:
+    # a job names its reference files; the memory preview (/api/estimate) only says it has some
+    media = bool(params.get("reference_videos") or params.get("reference_audios") or params.get("ref_media"))
+    if params.get("references") or params.get("referenced") or media:
         if not info.get("ref2va"):
             return "MiniMax H3 Ref2VA (reference to video) is not installed there"
         if params.get("ref_turbo") and not info.get("ref2va_turbo"):
@@ -667,6 +668,20 @@ class Hub:
                 return None
             raise HTTPException(503, "Required worker estimate is unavailable: " + str(error)[-160:]) from None
         return {**result, "worker": {"address": worker["address"], "name": worker.get("name") or worker["address"]}}
+
+    def guard_of(self, address: str, params: dict) -> dict | None:
+        """A worker's own memory guard and time for a clip (its /api/estimate), asked whether or not the worker is free
+        now: None when it cannot be asked (it is not up, or does not answer)."""
+
+        worker = next((w for w in self.workers() if w["address"] == address), None)
+        live = self.state(address)
+        if worker is None or live["state"] not in ("ready", "busy") or not live["info"]:
+            return None
+        try:
+            result = call(self.connect(address), "/api/estimate", estimate_params(params))
+        except (OSError, Refused):
+            return None
+        return {**result, "worker": {"address": address, "name": worker.get("name") or address}}
 
     def local_action(self, body: dict) -> dict:
         with self.local.mutex:

@@ -39,7 +39,7 @@ class Worker:
     """Another Spark's Studio app, as far as this one talks to it."""
 
     def __init__(self, name: str, **has):
-        self.name, self.jobs, self.uploads, self.files, self.most, self.cancelled = name, {}, {}, {}, 0, []
+        self.name, self.jobs, self.uploads, self.files, self.most, self.cancelled, self.estimates = name, {}, {}, {}, 0, [], []
         self.has = {"fasth3": True, "image": False, "ref2va": False, "ref2va_turbo": False, "ffmpeg": False, "loras": [], "text_encoders": [], **has}
         self.code, self.dead, self.fits, self.takes, self.fails = None, False, True, TAKES, False
         outer = self
@@ -68,6 +68,7 @@ class Worker:
                 if path == "/api/jobs" and method == "GET":
                     return self.answer(list(outer.jobs.values()))
                 if path == "/api/estimate":
+                    outer.estimates.append(json.loads(body or b"{}"))
                     return self.answer({"seconds": 40, "memory": {"fits": outer.fits, "reason": "" if outer.fits else "a clip with a LoRA needs about 76 GB; this machine has 40 GB for it, so it is refused",
                                                                   "need_mb": 57000, "available_mb": 116000}})
                 if path == "/api/upload":
@@ -1039,3 +1040,60 @@ def test_a_clip_on_a_worker_counts_down_from_that_workers_time():
     assert client.get(f"/api/jobs/{second['id']}").json()["estimate"] == int(took) != server.clip_estimate("video", {"preset": PRESET, "quality": QUALITY, "frames": 22})
     one.takes = TAKES
     finished([second["id"]])
+
+
+def test_the_memory_preview_asks_the_guard_of_a_worker_the_job_may_go_to():
+    """When this machine cannot fit a clip, the preview answers with the guard of a worker the job may use (its count,
+    a worker able to render it, free or busy with another app's job) when that guard says it fits; otherwise this
+    machine's own answer stands. A long video, as the page asks for it (kind "long", its length in seconds), is
+    measured by its longest piece, here and there, and timed as all its pieces."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    measured = []
+    had = server.memory_of, server.SPARK
+    server.memory_of = lambda params, sized, frames, *rest, **more: measured.append(frames) or {"fits": False, "reason": "this machine has 43 GB for it"}
+    server.SPARK = True
+    clip = {"preset": PRESET, "quality": QUALITY, "seconds": 5}
+    ask = lambda **body: client.post("/api/estimate", json=body).json()
+    try:
+        said = ask(**clip, sparks=2)
+        assert said["worker"]["address"] == one.address and said["memory"]["fits"] is True and said["seconds"] == 40
+        assert ask(**clip, sparks=1)["memory"]["fits"] is False  # this machine alone
+        one.jobs["theirs"] = {"id": "theirs", "status": "running"}  # busy with its own app's job: still asked
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        settle()
+        assert hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE and ask(**clip, sparks=2).get("worker")
+        one.jobs.clear()
+        one.has["ref2va"] = True  # reference pictures, but no ffmpeg for reference videos or audio
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        settle()
+        assert hub.usable(hub.workers()[0]) == ""
+        assert ask(**clip, sparks=2, referenced=True, references=1).get("worker")
+        refs = ask(**clip, sparks=2, referenced=True, references=1, ref_media=True)  # the page's flag for a reference video
+        assert "worker" not in refs and refs["memory"]["fits"] is False
+        one.fits = False  # its guard says no too: this machine's answer
+        assert ask(**clip, sparks=2)["memory"]["fits"] is False
+        one.fits = True
+        measured.clear()
+        one.estimates.clear()
+        long = ask(kind="long", preset=PRESET, quality=QUALITY, seconds=60, text_only=True, sparks=2)
+        assert measured == [server.lengths.of({"seconds": 15})] and one.estimates[-1]["seconds"] == 15
+        assert long["worker"]["address"] == one.address and long["seconds"] == 4 * 40 + 2 * 4
+        # a long video placed on that worker: its guard is asked of the longest piece too, in the preview and when queued
+        one.estimates.clear()
+        prefer = {"worker": one.address, "policy": "prefer"}
+        assert ask(kind="long", preset=PRESET, quality=QUALITY, seconds=60, placement=prefer)["memory"]["fits"] is True
+        queued = client.post("/api/jobs", json={"kind": "long", "title": "long", "placement": prefer, "params": {
+            "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "total_seconds": 60, "shot_check": False}})
+        assert queued.status_code == 200, queued.text
+        assert [asked["seconds"] for asked in one.estimates[:2]] == [15, 15]
+        client.post(f"/api/jobs/{queued.json()['id']}/cancel")
+        # preferred and busy with another app's job: the preview still says that worker's guard, as the job waits for it
+        one.jobs["theirs"] = {"id": "theirs", "status": "running"}
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        settle()
+        assert hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE
+        assert ask(**clip, sparks=1, placement=prefer).get("worker", {}).get("address") == one.address
+    finally:
+        server.memory_of, server.SPARK = had

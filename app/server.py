@@ -2816,35 +2816,59 @@ def check_prompt(body: dict) -> dict:
 @app.post("/api/estimate")
 def estimate_time(body: dict) -> dict:
     """The time a clip is expected to take (None where none was measured) and, on a DGX Spark, whether it fits the
-    machine's memory: {"fits", "reason", "need_mb", ...} from spark/memory_guard.py, shown before the job is queued."""
+    machine's memory: {"fits", "reason", "need_mb", ...} from spark/memory_guard.py, shown before the job is queued.
+    A long video (``kind`` "long" with its length in ``seconds`` or ``total_seconds``) is measured by its longest
+    piece. When this machine cannot fit the clip and the job may go to a worker (its count or a preferred worker,
+    free or busy), the answer is the guard of the first worker that may render it and says it fits, as queue_job lets
+    the clip wait for one."""
 
-    body = numbers(body, ("seconds", "references"))
+    body = numbers(body, ("seconds", "total_seconds", "references"))
     if body.get("frames") not in (None, ""):
         try:
             lengths.of({"frames": body["frames"]})
         except ValueError as error:
             raise HTTPException(400, str(error))
-    placement = hub.placement(body.get("placement"), kind=str(body.get("kind") or "video"))
-    selected = hub.estimate_worker(body, placement)
-    if selected is not None:
-        return selected
-    room = None
-    if SPARK and float(body.get("seconds") or 5) <= LONGEST + 1:
+    kind = "long" if body.get("kind") == "long" or body.get("total_seconds") not in (None, "") else str(body.get("kind") or "video")
+    sizing, pieces, total = body, None, 0  # what the memory is measured by: the clip, or a long video's longest piece
+    if kind == "long":
         try:
-            chosen, _ = custom(body)
-            sized = {**(PRESETS[body["preset"]][2] if body.get("preset") in PRESETS else {}), **chosen}
-            count = min(int(body.get("references") or 0), REFERENCE_TOTAL)  # the app itself attaches no more than this,
+            total = int(float(body.get("total_seconds") or body.get("seconds") or 0))
+            pieces = plan(total, int(body.get("segment_seconds") or LONGEST))
+            sizing = longest_piece({**body, "total_seconds": total})
+        except (HTTPException, TypeError, ValueError):
+            sizing = None  # the settings are refused for another reason when the job is queued
+    whole = lambda said: said if not pieces or not said.get("seconds") else {  # a worker times one piece: the video is all of them
+        **said, "seconds": int(sum(said["seconds"] * piece / max(pieces) for piece in pieces) + 2 * len(pieces))}
+    placement = hub.placement(body.get("placement"), kind=kind)
+    selected = hub.estimate_worker(sizing, placement, "long" if kind == "long" else "video") if sizing is not None else None
+    if selected is not None:
+        return whole(selected)
+    room = None
+    if SPARK and sizing is not None and float(sizing.get("seconds") or 5) <= LONGEST + 1:
+        try:
+            chosen, _ = custom(sizing)
+            sized = {**(PRESETS[sizing["preset"]][2] if sizing.get("preset") in PRESETS else {}), **chosen}
+            count = min(int(sizing.get("references") or 0), REFERENCE_TOTAL)  # the app itself attaches no more than this,
             # and a bigger number here only costs this process memory to hold a list it cannot answer for
-            room = memory_of(body, sized, lengths.of({"frames": body.get("frames"), "seconds": body.get("seconds") or 5}), bool(body.get("loras") or body.get("with_lora")),
-                             {"pictures": [None] * count, "videos": []} if body.get("referenced") else None)
+            room = memory_of(sizing, sized, lengths.of({"frames": sizing.get("frames"), "seconds": sizing.get("seconds") or 5}), bool(sizing.get("loras") or sizing.get("with_lora")),
+                             {"pictures": [None] * count, "videos": []} if sizing.get("referenced") else None)
             room = {key: room.get(key) for key in ("fits", "reason", "need_mb", "error_mb", "left_mb", "floor_mb", "available_mb", "nearest")}
         except (HTTPException, ValueError, KeyError):
             room = None  # the settings are refused for another reason when the job is queued
+    if room and room.get("fits") is False and (placement is None or placement["policy"] == "prefer") and kind in sparks.KINDS:
+        try:
+            count = int(body.get("sparks") or hub.config().get("sparks") or 1)
+        except (TypeError, ValueError):
+            count = 1
+        for address in hub.later({"kind": kind, "params": sizing, "sparks": {"chosen": count}, "placement": placement}):
+            other = hub.guard_of(address, sizing)
+            if other is not None and (other.get("memory") or {}).get("fits") is True:
+                return whole(other)
     if body.get("preset") == "custom" or body.get("steps") not in (None, "") or body.get("loras"):
         return {"seconds": None, "memory": room}  # a LoRA changes which engine renders the clip: no time is measured for it
-    seconds = estimate(body.get("preset", "draft"), body.get("quality", "standard"),
-                       clip_seconds({"frames": body.get("frames"), "seconds": body.get("seconds", 5)})
-                       if float(body.get("seconds") or 5) <= LONGEST + 1 or body.get("frames") else int(body["seconds"]),
+    length = total if pieces else (clip_seconds({"frames": body.get("frames"), "seconds": body.get("seconds", 5)})
+                                   if float(body.get("seconds") or 5) <= LONGEST + 1 or body.get("frames") else int(body["seconds"]))
+    seconds = estimate(body.get("preset", "draft"), body.get("quality", "standard"), length,
                        bool(body.get("text_only")), bool(body.get("referenced")),
                        bool(body.get("ref_turbo")), bool(body.get("ref_media")))
     # "card" marks a warm sample of this canvas. A GB10 number is never sent under that mark.
