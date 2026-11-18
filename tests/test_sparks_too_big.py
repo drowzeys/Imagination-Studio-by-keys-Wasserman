@@ -339,16 +339,30 @@ def test_clearing_the_fit_cache_while_a_worker_thread_prunes_it_is_safe(hub):
     busy_elsewhere(hub)
     waiting = [clip(hub) for _ in range(3)]
     started, cleared = threading.Event(), threading.Event()
+    order = []
 
     class Paused(dict):
-        def items(self):
-            started.set()
-            cleared.wait(0.5)  # the other thread clears now (or is held off by the lock)
-            return super().items()
+        def items(self):  # the prune walks this: it stops after the first entry, mid-iteration
+            def walk():
+                for n, pair in enumerate(dict.items(self)):
+                    yield pair
+                    if n == 0:
+                        started.set()
+                        cleared.wait(0.5)  # the other thread tries to clear now: the cache's lock holds it off
+                order.append("pruned")
+            return walk()
     hub.fitted = Paused({f"gone-{n}": (0.0, True) for n in range(600)})
     hub.fits_here = lambda job: False
-    clearer = threading.Thread(target=lambda: (started.wait(2), hub.forget_fits(), cleared.set()))
+
+    def clear():
+        started.wait(2)
+        hub.forget_fits()
+        order.append("cleared")
+        cleared.set()
+    clearer = threading.Thread(target=clear)
     clearer.start()
     assert hub.fits(waiting[0]) is False  # pruned: no RuntimeError
     clearer.join(timeout=5)
+    assert order == ["pruned", "cleared"]  # the clear waited until the prune was done
+    assert hub.fitted == {}
     assert not clearer.is_alive() and cleared.is_set()
