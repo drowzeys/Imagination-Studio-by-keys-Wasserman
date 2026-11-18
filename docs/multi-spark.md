@@ -108,7 +108,7 @@ A job queued without `sparks` takes the number set on the Sparks tab. `GET /api/
 | Several clips: jobs in the queue, the segments of a Production board, the shots of a Slate scene | One clip per Spark, side by side, on this Spark and the first N - 1 workers that are up and can render the clip. |
 | One clip | It renders on one Spark, the first that is free. One clip is not split across Sparks in the app (see the end of this page). |
 | A segment or shot that opens on the last frame of the one before | It waits for that one, then renders on any free Spark. A board that is one chain renders one clip at a time. |
-| A long video (over 15 s) | One Spark, this one: it is a chain, each piece opens on the last frame of the one before. |
+| A long video (over 15 s) | One machine, the first that is free: this Spark or a worker that is a Spark or a Linux GPU (not a Mac or a Windows PC). It is a chain, each piece opens on the last frame of the one before: the worker renders the pieces one by one as clips of its own, each held to its memory guard, and this Spark cuts the frames between them and joins them. A chain taken back from a worker starts again from its first piece. |
 | A clip with a LoRA, or from references (Ref2VA) | Only on Sparks that have that LoRA, or Ref2VA, installed, and only when that Spark's memory guard accepts the clip. With none: this Spark. |
 | Pictures, edits, Library actions (Turnaround, Upscale, Remove a person), a timeline export, a clip that starts from a new picture | This Spark. |
 
@@ -149,8 +149,17 @@ display only: jobs, takes and the log keep each machine's own name, and the page
   falls back to another machine.
 - **A worker that stops answering is bounded.** After 60 seconds of silence while rendering it is marked *stopped
   answering*, its tunnel is closed, and automatic/preferred work can return to the queue. A required job fails instead.
-  A down worker is given nothing more until **Check**. Automatic movement is bounded to two attempts, then the head;
-  that fallback is never applied to required placement.
+  A down worker is given nothing more until **Check**. Automatic and preferred movement is bounded to two attempts,
+  then the head; that fallback is never applied to required placement.
+- **A clip too big for this Spark waits for a worker instead of failing here.** When this Spark's memory cannot hold
+  a clip now (a clip from reference pictures beside a loaded brain, say) and a worker may render it, the clip stays
+  queued for that worker, saying *Waiting for <worker>: too big for this Spark's memory now*: while the worker is
+  busy, also with another app's job, while it is being checked, and while it is away (stopped answering,
+  unreachable, its app stopped) after it was seen able to render the clip: it renders there once **Check** finds it
+  back. The clip's fit here is measured outside the queue's lock, before this Spark looks for its next job. A passing failure there (lost connection, failed render or
+  fetch) keeps that worker open to the clip; a refusal by its memory guard does not. A clip that came back and still
+  does not fit here fails with that reason once no worker may take it again (two attempts spent, or every worker
+  refused it). With no worker in question at all, this Spark takes the clip and its memory guard decides, as before.
 - **Cancel** cancels the clip on the worker too.
 - **Stopping the app** closes its tunnels. Remote worker apps keep running until **Stop** on each; their models can
   stay warm. Owned local workers are drained and stopped with their head, not left unmanaged.

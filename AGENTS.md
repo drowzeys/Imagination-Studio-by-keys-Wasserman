@@ -222,7 +222,10 @@ Rules:
   never on a machine with `vm.panic_on_oom=1`. Do not lower the floor to make a job fit.
 - More than one DGX Spark (`app/sparks.py`, `app/static/sparks.js`, `docs/multi-spark.md`): a job's `sparks` counts
   participants including the head. The remote-only limit is `LIMIT`, 5; local workers can raise the combined chooser
-  to 8. Only single clips (`video` jobs) go to a worker, one per worker at a time, through its own job API over an ssh tunnel
+  to 8. Single clips (`video` jobs) and long videos (`long`, `KINDS`) go to a worker, one per worker at a time; a long
+  video goes only to a Linux worker (`capable`), renders there piece by piece under that worker's guard and is joined on
+  the head, and one taken back starts again from its first piece. A clip too big for the head waits for a worker that
+  can take it (`Hub.later`) instead of being claimed and refused here. Each goes through the worker's own job API over an ssh tunnel
   the app opens and closes itself: a worker's app listens on its own 127.0.0.1 and is never opened to the network, and
   nothing here runs as root, edits `/etc` or shares a folder. A worker renders only with this Spark's code (the files
   of `CODE`, compared by hash; *Update and start* sends them with rsync) and its own memory guard, which is asked

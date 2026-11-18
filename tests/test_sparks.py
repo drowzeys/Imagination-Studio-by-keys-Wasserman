@@ -39,7 +39,7 @@ class Worker:
     """Another Spark's Studio app, as far as this one talks to it."""
 
     def __init__(self, name: str, **has):
-        self.name, self.jobs, self.uploads, self.files, self.most, self.cancelled = name, {}, {}, {}, 0, []
+        self.name, self.jobs, self.uploads, self.files, self.most, self.cancelled, self.estimates = name, {}, {}, {}, 0, [], []
         self.has = {"fasth3": True, "image": False, "ref2va": False, "ref2va_turbo": False, "ffmpeg": False, "loras": [], "text_encoders": [], **has}
         self.code, self.dead, self.fits, self.takes, self.fails = None, False, True, TAKES, False
         outer = self
@@ -68,6 +68,7 @@ class Worker:
                 if path == "/api/jobs" and method == "GET":
                     return self.answer(list(outer.jobs.values()))
                 if path == "/api/estimate":
+                    outer.estimates.append(json.loads(body or b"{}"))
                     return self.answer({"seconds": 40, "memory": {"fits": outer.fits, "reason": "" if outer.fits else "a clip with a LoRA needs about 76 GB; this machine has 40 GB for it, so it is refused",
                                                                   "need_mb": 57000, "available_mb": 116000}})
                 if path == "/api/upload":
@@ -268,7 +269,9 @@ def test_what_a_worker_can_render_decides_what_it_is_given():
     assert sparks.capable("video", {"text_encoder": "other.safetensors"}, {**plain, "text_encoders": ["other.safetensors"]}) == ""
     assert "FastH3" in sparks.capable("video", {}, {}) and "only single clips" in sparks.capable("scout", {}, plain)
     # what stays on this Spark whatever the number, and why
-    assert "chain" in sparks.here_only("long", {}) and "picture model" in sparks.here_only("studio", {}) and sparks.here_only("video", {}) == ""
+    # a long video may go to a worker (its pieces render there and are joined here); a clip from a new picture stays here
+    assert sparks.here_only("long", {}) == "" and "picture model" in sparks.here_only("studio", {}) and sparks.here_only("video", {}) == ""
+    assert sparks.capable("long", {}, plain) == "" and "Windows" in sparks.capable("long", {}, {**plain, "platform": "windows"})
     assert "this Spark" in sparks.here_only("edit", {})
 
 
@@ -305,8 +308,10 @@ def test_the_number_is_held_to_the_sparks_there_are():
     # one clip: one Spark, and it says that a clip is not split
     alone = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 1}).json()
     assert alone["mode"] == "one" and "one Spark" in alone["says"] and "not in the app" in alone["says"]
-    # a long video and a picture stay here
-    assert client.post("/api/sparks/plan", json={"sparks": 3, "kind": "long"}).json()["used"] == 1
+    # a long video renders on one machine, piece by piece; a picture stays here
+    chained = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "long"}).json()
+    assert chained["mode"] == "one" and "piece by piece" in chained["says"]
+    assert client.post("/api/sparks/plan", json={"sparks": 3, "kind": "scout"}).json()["used"] == 1
     # a LoRA no worker has: this Spark alone, and the reason for each worker
     lora = client.post("/api/sparks/plan", json={"sparks": 3, "kind": "video", "clips": 4, "params": {"loras": [{"id": "camera-motion"}]}}).json()
     assert lora["available"] == 1 and lora["used"] == 1 and len(lora["without"]) == 2 and "camera-motion" in lora["without"][0]["why"]
@@ -849,3 +854,273 @@ def test_two_saves_of_the_list_at_once_do_not_move_each_others_file():
     assert not errors and json.loads(hub.book.read_text())["sparks"] in (1, 2, 3, 4)
     assert not list(hub.book.parent.glob("*.part"))
     hub.keep({"workers": [], "sparks": 1})
+
+
+class FailsFrom:
+    """A worker's ``fails`` that turns true once it has been given ``n`` jobs: its n-th render fails, not the ones before."""
+
+    def __init__(self, worker: Worker, n: int):
+        self.worker, self.n = worker, n
+
+    def __bool__(self):
+        return len(self.worker.jobs) >= self.n
+
+
+@pytest.fixture
+def chains(monkeypatch):
+    """ffmpeg's part of a long video stood in for: a piece's last frame is a small file, the join puts the pieces' bytes
+    one after another."""
+
+    monkeypatch.setattr(server, "last_frame", lambda video, image: image.write_bytes(b"last frame of " + video.read_bytes()))
+    monkeypatch.setattr(server.chain, "join", lambda clips, final, total, fps, folder, env=None: final.write_bytes(b"|".join(c.read_bytes() for c in clips)))
+
+
+def long_video(sparks_asked: int, total: int = 40) -> dict:
+    done = client.post("/api/jobs", json={"kind": "long", "title": "long", "sparks": sparks_asked, "params": {
+        "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "total_seconds": total, "shot_check": False}})
+    assert done.status_code == 200, done.text
+    return done.json()
+
+
+def test_a_long_video_renders_piece_by_piece_on_a_worker(chains):
+    """A long video too big for this Spark goes to a worker as a chain of single clips: each piece opens on the last
+    frame of the one before (uploaded to the worker), and this Spark joins them. Alone, this Spark refuses it."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    had = server.memory_of
+    server.memory_of = lambda *args, **kwargs: {"fits": False, "reason": "this machine has 43 GB for it"}
+    try:
+        alone = client.post("/api/jobs", json={"kind": "long", "title": "long", "sparks": 1, "params": {
+            "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "total_seconds": 40, "shot_check": False}})
+        assert alone.status_code == 400 and "43 GB" in alone.text
+        job = finished([long_video(2)["id"]])[0]
+    finally:
+        server.memory_of = had
+    assert job["status"] == "done" and job["spark"] == "spark-a", (job["status"], job["error"], job["log"][-500:])
+    pieces = server.plan(40)
+    sent = sorted(one.jobs.values(), key=lambda there: int(there["id"].rsplit("-", 1)[1]))
+    assert [there["kind"] for there in sent] == ["video"] * len(pieces)
+    assert [there["params"]["seconds"] for there in sent] == pieces and not any("total_seconds" in there["params"] for there in sent)
+    assert not sent[0]["params"].get("image") and all(there["params"]["image"].startswith("uploads/spark-a-") for there in sent[1:])
+    assert (server.HOME / job["outputs"][0]).read_bytes() == b"|".join(f"made on spark-a".encode() for _ in pieces)
+    assert len(job["outputs"]) == 1 + len(pieces)
+
+
+def test_a_long_video_taken_back_from_a_worker_starts_again_from_its_first_piece(chains):
+    """A chain whose second piece fails on the worker is rendered again from its first piece (here, the worker barred
+    for it): no piece the worker made is kept or offered as the video's."""
+
+    one = Worker("spark-a")
+    one.fails = FailsFrom(one, 2)
+    fresh(one)
+    job = finished([long_video(2)["id"]])[0]
+    assert job["status"] == "done" and job["spark"] == hub.name, (job["status"], job["error"])
+    assert len(one.jobs) == 2 and job["moved"][0]["from"] == "spark-a" and "starts again from its first piece" in job["log"]
+    folder = (server.HOME / job["outputs"][0]).parent
+    assert all((server.HOME / path).read_bytes() == b"made here" for path in job["outputs"][1:])
+    assert len(list(folder.glob("seg[0-9][0-9][0-9].mp4"))) == len(server.plan(40))
+
+
+def test_a_clip_too_big_here_waits_for_a_worker_busy_with_another_apps_job():
+    """Submitted while the worker renders a job of its own app's, a clip this Spark cannot hold is queued for the worker
+    (Hub.later), not refused by this Spark's guard nor taken here, and the worker renders it once it is free. With no
+    worker that could ever take it, it is refused when it is submitted, as before."""
+
+    one = Worker("spark-a")
+    one.jobs["theirs"] = {"id": "theirs", "status": "running"}  # its own app's job: it is busy, and not for us
+    fresh(one)
+    assert hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE
+    had = server.memory_of
+    server.memory_of = lambda *args, **kwargs: {"fits": False, "reason": "this machine has 43 GB for it"}
+    try:
+        queued = queue(2)
+        time.sleep(1)
+        seen = client.get(f"/api/jobs/{queued['id']}").json()
+        assert seen["status"] == "queued" and "too big" in seen["progress"]["stage"] and not local_render.most
+        one.jobs["theirs"]["status"] = "done"
+        job = finished([queued["id"]])[0]
+        assert job["status"] == "done" and job["spark"] == "spark-a"
+        client.post(f"/api/sparks/workers/{one.address}", json={"enabled": False})
+        alone = client.post("/api/jobs", json={"kind": "video", "title": "clip", "sparks": 2, "params": {
+            "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "frames": 22, "shot_check": False}})
+        assert alone.status_code == 400 and "43 GB" in alone.text
+    finally:
+        server.memory_of = had
+
+
+def test_a_clip_too_big_here_waits_through_its_workers_outage():
+    """The worker stops answering while it renders a clip this Spark cannot hold: the clip goes back to the queue and
+    waits for that worker (not taken here, where the guard would refuse it), and renders there once it is checked again."""
+
+    one = Worker("spark-a")
+    one.takes = 30  # it will not finish
+    fresh(one)
+    had_lost, had_memory = sparks.LOST, server.memory_of
+    sparks.LOST = 0.6
+    server.memory_of = lambda *args, **kwargs: {"fits": False, "reason": "this machine has 43 GB for it"}
+    try:
+        queued = queue(2)
+        until = time.time() + 10
+        while time.time() < until and not one.jobs:
+            time.sleep(0.05)
+        one.dead = True
+        until = time.time() + 10
+        while time.time() < until and not client.get(f"/api/jobs/{queued['id']}").json()["moved"]:
+            time.sleep(0.05)
+        time.sleep(0.5)
+        seen = client.get(f"/api/jobs/{queued['id']}").json()
+        assert seen["status"] == "queued" and "stopped answering" in seen["progress"]["stage"] and not local_render.most
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})  # still away: the check fails
+        settle()
+        assert client.get("/api/sparks").json()["workers"][0]["state"] == "unreachable"
+        hub.wake.set()
+        time.sleep(0.5)
+        seen = client.get(f"/api/jobs/{queued['id']}").json()
+        assert seen["status"] == "queued" and "does not answer over ssh" in seen["progress"]["stage"] and not local_render.most
+        one.dead, one.takes = False, TAKES
+        for job in one.jobs.values():
+            job["status"] = "cancelled"  # the take that was taken back
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        job = finished([queued["id"]])[0]
+    finally:
+        sparks.LOST, server.memory_of = had_lost, had_memory
+    assert job["status"] == "done" and job["spark"] == "spark-a" and len(job["moved"]) == 1
+
+
+def takes_of(*lines) -> None:
+    hub.folder.mkdir(parents=True, exist_ok=True)
+    with open(hub.folder / "takes.jsonl", "a") as out:
+        for line in lines:
+            out.write(json.dumps(line) + "\n")
+
+
+def test_a_worker_is_timed_by_its_own_takes():
+    """estimate_on: the median of the worker's last five clips with the same preset, quality, length and kind of start;
+    a long video per piece, plus its joins; None where the worker has made no such clip."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    (hub.folder / "takes.jsonl").unlink(missing_ok=True)
+    takes_of(*[{"path": f"renders/m{i}.mp4", "kind": "video", "spark": "spark-a", "elapsed": elapsed, "finished": 1000 + i,
+                "settings": {"preset": "sharp", "quality": "fh8", "seconds": 15, "referenced": False}}
+               for i, elapsed in enumerate((300.0, 280.0, 290.0, 900.0, 100.0, 295.0))])  # the oldest (300) is past the last five
+    job = {"kind": "long", "params": {"preset": "sharp", "quality": "fh8", "total_seconds": 60}}
+    assert server.estimate_on(job, "spark-a") == 4 * 290 + 2 * 4
+    assert server.estimate_on({"kind": "video", "params": {"preset": "sharp", "quality": "fh8", "seconds": 15}}, "spark-a") == 290
+    assert server.estimate_on(job, "spark-b") is None and server.estimate_on({**job, "params": {**job["params"], "quality": "fh4"}}, "spark-a") is None
+    takes_of(*[{"path": f"renders/f{i}.mp4", "kind": "video", "spark": "spark-a", "elapsed": elapsed, "finished": 2000 + i,
+                "settings": {"preset": "sharp", "quality": "fh8", "frames": 192, "seconds": 8, "referenced": ref}}
+               for i, (elapsed, ref) in enumerate(((150.0, False), (156.0, False), (540.0, True), (530.0, True)))],
+             {"path": "renders/old.mp4", "kind": "video", "spark": "spark-a", "elapsed": 999.0, "finished": 3000,
+              "settings": {"preset": "sharp", "quality": "fh8", "frames": 192, "seconds": 8}})  # written before the flag, frames named: left out
+    shot = {"kind": "video", "params": {"preset": "sharp", "quality": "fh8", "frames": 192, "seconds": 8}}
+    assert server.estimate_on(shot, "spark-a") == 153  # the median of two is their mean
+    assert server.estimate_on({**shot, "params": {**shot["params"], "references": ["a.png"]}}, "spark-a") == 535
+
+
+def test_a_clip_on_a_worker_counts_down_from_that_workers_time():
+    """A finished clip is written down with its kind of start; the next such clip handed to that worker takes its time
+    from those takes, not this machine's table."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    (hub.folder / "takes.jsonl").unlink(missing_ok=True)
+    one.takes = 1.2  # a whole second or more: the time is kept in whole seconds
+    first = finished([queue(2)["id"]])[0]
+    assert first["spark"] == "spark-a"
+    line = hub.takes()[first["outputs"][0]]
+    assert line["settings"]["referenced"] is False and line["elapsed"] > 0
+    took = line["elapsed"]
+    one.takes = 2
+    second = queue(2)
+    until = time.time() + 10
+    while time.time() < until and client.get(f"/api/jobs/{second['id']}").json()["status"] != "running":
+        time.sleep(0.05)
+    assert client.get(f"/api/jobs/{second['id']}").json()["estimate"] == int(took) != server.clip_estimate("video", {"preset": PRESET, "quality": QUALITY, "frames": 22})
+    one.takes = TAKES
+    finished([second["id"]])
+
+
+def test_the_memory_preview_asks_the_guard_of_a_worker_the_job_may_go_to():
+    """When this machine cannot fit a clip, the preview answers with the guard of a worker the job may use (its count,
+    a worker able to render it, free or busy with another app's job) when that guard says it fits; otherwise this
+    machine's own answer stands. A long video, as the page asks for it (kind "long", its length in seconds), is
+    measured by its longest piece, here and there, and timed as all its pieces."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    measured = []
+    had = server.memory_of, server.SPARK
+    server.memory_of = lambda params, sized, frames, *rest, **more: measured.append(frames) or {"fits": False, "reason": "this machine has 43 GB for it"}
+    server.SPARK = True
+    clip = {"preset": PRESET, "quality": QUALITY, "seconds": 5}
+    ask = lambda **body: client.post("/api/estimate", json=body).json()
+    try:
+        said = ask(**clip, sparks=2)
+        assert said["worker"]["address"] == one.address and said["memory"]["fits"] is True and said["seconds"] == 40
+        assert ask(**clip, sparks=1)["memory"]["fits"] is False  # this machine alone
+        one.jobs["theirs"] = {"id": "theirs", "status": "running"}  # busy with its own app's job: still asked
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        settle()
+        for _ in range(100):  # a loaded machine may answer the check a little after settle()
+            if hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE:
+                break
+            time.sleep(0.05)
+        assert hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE and ask(**clip, sparks=2).get("worker")
+        one.jobs.clear()
+        one.has["ref2va"] = True  # reference pictures, but no ffmpeg for reference videos or audio
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        settle()
+        assert hub.usable(hub.workers()[0]) == ""
+        assert ask(**clip, sparks=2, referenced=True, references=1).get("worker")
+        refs = ask(**clip, sparks=2, referenced=True, references=1, ref_media=True)  # the page's flag for a reference video
+        assert "worker" not in refs and refs["memory"]["fits"] is False
+        one.fits = False  # its guard says no too: this machine's answer
+        assert ask(**clip, sparks=2)["memory"]["fits"] is False
+        one.fits = True
+        measured.clear()
+        one.estimates.clear()
+        long = ask(kind="long", preset=PRESET, quality=QUALITY, seconds=60, text_only=True, sparks=2)
+        assert measured == [server.lengths.of({"seconds": 15})] and one.estimates[-1]["seconds"] == 15
+        assert long["worker"]["address"] == one.address and long["seconds"] == 4 * 40 + 2 * 4
+        # a long video placed on that worker: its guard is asked of the longest piece too, in the preview and when queued
+        one.estimates.clear()
+        prefer = {"worker": one.address, "policy": "prefer"}
+        assert ask(kind="long", preset=PRESET, quality=QUALITY, seconds=60, placement=prefer)["memory"]["fits"] is True
+        queued = client.post("/api/jobs", json={"kind": "long", "title": "long", "placement": prefer, "params": {
+            "prompt": "a walk", "preset": PRESET, "quality": QUALITY, "total_seconds": 60, "shot_check": False}})
+        assert queued.status_code == 200, queued.text
+        assert [asked["seconds"] for asked in one.estimates[:2]] == [15, 15]
+        client.post(f"/api/jobs/{queued.json()['id']}/cancel")
+        # preferred and busy with another app's job: the preview still says that worker's guard, as the job waits for it
+        one.jobs["theirs"] = {"id": "theirs", "status": "running"}
+        client.post(f"/api/sparks/workers/{one.address}/check", json={})
+        settle()
+        assert hub.usable(hub.workers()[0]) == sparks.BUSY_ELSEWHERE
+        assert ask(**clip, sparks=1, placement=prefer).get("worker", {}).get("address") == one.address
+    finally:
+        server.memory_of, server.SPARK = had
+
+
+def test_a_clip_waiting_as_too_big_is_taken_here_once_room_comes_back_without_another_event(monkeypatch):
+    """Memory freed outside the queue (another program ends) wakes nothing: while a clip waits as too big here, the
+    queue measures it again every FITTED seconds, and takes it here once it fits, with no new job or finished job."""
+
+    one = Worker("spark-a")
+    one.jobs["theirs"] = {"id": "theirs", "status": "running"}  # busy with its own app's job for the whole test
+    fresh(one)
+    monkeypatch.setattr(sparks, "FITTED", 0.5)
+    room = {"fits": False}
+    had = server.memory_of
+    server.memory_of = lambda *args, **kwargs: {"fits": room["fits"], "reason": "this machine has 43 GB for it"}
+    try:
+        queued = queue(2)
+        time.sleep(1.5)
+        assert client.get(f"/api/jobs/{queued['id']}").json()["status"] == "queued" and not local_render.most
+        room["fits"] = True  # nothing is queued, finished or cancelled from here on
+        job = finished([queued["id"]], limit=10)[0]
+        assert job["status"] == "done" and job["spark"] == hub.name and local_render.most
+    finally:
+        server.memory_of = had
+        one.jobs["theirs"]["status"] = "done"

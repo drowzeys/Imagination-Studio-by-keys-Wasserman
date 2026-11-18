@@ -14,17 +14,26 @@ What N means:
   first N - 1 workers that are up and can render the clip;
 - one clip: it renders on one Spark. Splitting one clip across Sparks is measured (docs/multi-spark.md) and is not
   in the app;
-- a long video is a chain (each piece opens on the last frame of the one before): one Spark, this one;
+- a long video is a chain (each piece opens on the last frame of the one before): one machine renders all its
+  pieces in order, this Spark or one worker, and this Spark cuts and joins them. A chain taken back from a worker
+  starts again from its first piece (its finished pieces are not kept);
 - pictures, edits, Library actions and exports: this Spark.
 
 A worker that stops answering while it renders is marked down and its clip goes back to the queue for another
 machine; a worker is never waited on for more than LOST seconds. One job runs on a Spark at a time.
 
+A clip too big for this Spark's memory now is not taken here while a worker may still render it: one that is free,
+busy with another app's job, not checked yet, or down after it was seen able to render it (Hub.later). It waits in
+the queue, saying for which worker, and is never failed here only because its workers are away for a while. A clip
+that has come back from workers MOVES times, or from every worker that could take it, and still does not fit here
+fails with that reason (claim).
+
 Kept in the studio folder, under sparks/:
   labels.json    {"head": "fa5a (head)", "<address or name>": "Mac Studio"}: what each machine is called on the page, written by
                  hand or by a script, never by this app (read by Hub.labels; sparks.json is rewritten on every save)
   sparks.json    {"workers": [{"address", "name", "folder", "enabled", "via"?}], "sparks": the number new jobs start with}
-  takes.jsonl    one line per finished clip: its path, seed, settings and the Spark that rendered it
+  takes.jsonl    one line per finished clip: its path, seed, settings (with "referenced": it was made from references), the
+                 Spark that rendered it and the time it took as seen from here (a worker's: its transfers included)
   tunnels.json   the tunnels this app has open (closed by the next start if this one was killed)
 
 This app may be on a DGX Spark or on a Mac. A Mac that cannot reach the workers' network goes through a machine that
@@ -80,9 +89,12 @@ PORT = 7870      # a worker's app, on its own 127.0.0.1
 POLL = float(os.environ.get("STUDIO_SPARK_POLL", "2"))     # seconds between looks at a worker's job
 LOST = float(os.environ.get("STUDIO_SPARK_LOST", "60"))    # a worker silent this long while it renders is down
 CALL = float(os.environ.get("STUDIO_SPARK_CALL", "10"))    # the longest one request to a worker may take
-MOVES = 2        # a clip is taken back from a worker at most this often; after that it renders on this Spark
+MOVES = 2        # a clip is taken back from a worker at most this often (a preferred worker too); then this Spark renders it, or it fails
+FITTED = 30      # seconds a queued clip's fit on this Spark is taken as read (Hub.fits); every job this Spark ends reads it again
+REFUSED = "it refused the clip"  # how move() is told of a refusal: the worker is never given that clip again
+BUSY_ELSEWHERE = "rendering a job that is not this Spark's"  # usable(): a worker busy for another app, which may be waited for
 DISK_GB = 2      # a worker with less free disk than this is not given a clip
-KINDS = ("video",)  # what is handed to a worker: single clips
+KINDS = ("video", "long")  # what is handed to a worker: single clips, and long videos piece by piece
 PREFIX = "$HOME/.local/opt/tensorfold-studio"
 THEIR_HOME = "$HOME/TensorFoldStudio"  # a worker's studio folder, and where its app's pid and log are kept
 ADDRESS = re.compile(r"(?:[a-z_][a-z0-9_-]{0,31}@)?[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
@@ -393,6 +405,8 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     theirs, mine = family(platform_of(info)), "spark" if spark else "mac"
     if kind not in KINDS:
         return "only single clips are handed to another Spark"
+    if kind == "long" and platform_of(info) != "spark":  # family() counts a Windows PC with the Sparks
+        return "a long video is handed only to a DGX Spark or a Linux GPU worker: it has not been tried on a Mac or a Windows PC"
     if not info.get("fasth3"):
         return "FastH3 is not installed there"
     preset = params.get("preset") or ("small" if spark else "draft")  # what each machine renders when none is named
@@ -402,8 +416,9 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
     if theirs != mine and params.get("text_encoder") not in (None, "", "regular"):
         return ("the text encoder file is one of this Mac's (an MLX file): a Spark reads only the files in its own ComfyUI folder" if mine == "mac"
                 else "the text encoder file is one of this Spark's (a ComfyUI file): a Mac reads only its own MLX files")
-    media = bool(params.get("reference_videos") or params.get("reference_audios"))
-    if params.get("references") or media:
+    # a job names its reference files; the memory preview (/api/estimate) only says it has some
+    media = bool(params.get("reference_videos") or params.get("reference_audios") or params.get("ref_media"))
+    if params.get("references") or params.get("referenced") or media:
         if not info.get("ref2va"):
             return "MiniMax H3 Ref2VA (reference to video) is not installed there"
         if params.get("ref_turbo") and not info.get("ref2va_turbo"):
@@ -428,8 +443,6 @@ def capable(kind: str, params: dict, info: dict | None, spark: bool = True) -> s
 def here_only(kind: str, params: dict) -> str:
     """Why a job renders on this Spark whatever the number says ("" for a single clip, which may go to a worker)."""
 
-    if kind == "long":
-        return "A long video is a chain: each piece opens on the last frame of the one before, so its pieces render one after another, on this Spark."
     if kind == "studio":
         return "A clip that starts from a new picture renders on this Spark: the picture model is here."
     if kind not in KINDS:
@@ -518,6 +531,10 @@ class Hub:
         # whether a queued job fits this Spark's own memory now (server.fits_here): one that does not is left to the
         # workers that can take it, instead of failing here
         self.fits_here = lambda job: True
+        self.fitted: dict[str, tuple[float, bool]] = {}  # job id -> (when, fits_here's answer): Hub.fits
+        self.fit_lock = threading.Lock()  # fitted is written by the queue's thread and by workers' threads (move)
+        self.unmeasured = False  # claim() left a clip whose fit was not measured yet (Hub.measure)
+        self.estimate_on = lambda job, name: None  # server.estimate_on: a job's time on the worker ``name``, or None
         self.started = False
         self.local = local_gpus.Manager(home, pack)
         self.closing = False
@@ -613,11 +630,12 @@ class Hub:
         if target != "head" and not any(w["address"] == target for w in self.workers()):
             raise HTTPException(400, "That render worker is no longer in the list. Choose another worker.")
         if target != "head" and kind not in KINDS:
-            raise HTTPException(400, "Only single video clips can render on another worker.")
+            raise HTTPException(400, "Only video clips and long videos can render on another worker.")
         return {"worker": target, "policy": policy}
 
-    def estimate_worker(self, params: dict, placement) -> dict | None:
-        """Ask the selected worker's own per-device guard, never this host's other GPU."""
+    def estimate_worker(self, params: dict, placement, kind: str = "video") -> dict | None:
+        """Ask the selected worker's own per-device guard, never this host's other GPU. For a long video ``params``
+        are one piece's (its longest)."""
         if placement is None:
             return None  # caller already normalized the actual job kind
         selected = self.placement(placement)
@@ -631,7 +649,7 @@ class Hub:
         live = self.state(worker["address"])
         why = self.usable(worker) or ("the selected worker is busy" if live["job"] or live["state"] == "busy" else "")
         info = live["info"]
-        incapable = capable("video", params, info, self.spark) if info else ""
+        incapable = capable(kind, params, info, self.spark) if info else ""
         if incapable and selected["policy"] == "require":
             return {"worker": {"address": worker["address"], "name": self.label_of(worker)},
                     "memory": {"fits": False, "reason": "The required worker cannot render this clip: " + incapable},
@@ -651,6 +669,20 @@ class Hub:
                 return None
             raise HTTPException(503, "Required worker estimate is unavailable: " + str(error)[-160:]) from None
         return {**result, "worker": {"address": worker["address"], "name": worker.get("name") or worker["address"]}}
+
+    def guard_of(self, address: str, params: dict) -> dict | None:
+        """A worker's own memory guard and time for a clip (its /api/estimate), asked whether or not the worker is free
+        now: None when it cannot be asked (it is not up, or does not answer)."""
+
+        worker = next((w for w in self.workers() if w["address"] == address), None)
+        live = self.state(address)
+        if worker is None or live["state"] not in ("ready", "busy") or not live["info"]:
+            return None
+        try:
+            result = call(self.connect(address), "/api/estimate", estimate_params(params))
+        except (OSError, Refused):
+            return None
+        return {**result, "worker": {"address": address, "name": worker.get("name") or address}}
 
     def local_action(self, body: dict) -> dict:
         with self.local.mutex:
@@ -738,7 +770,7 @@ class Hub:
 
     def state(self, address: str) -> dict:
         with self.mutex:
-            return self.live.setdefault(address, {"state": "new", "why": "", "info": None, "base": None, "tunnel": None, "job": None,
+            return self.live.setdefault(address, {"state": "new", "why": "", "info": None, "seen": None, "base": None, "tunnel": None, "job": None,
                                                   "working": "", "checked": None, "fails": 0})
 
     def usable(self, worker: dict) -> str:
@@ -756,7 +788,7 @@ class Hub:
         if live["working"]:
             return live["working"]
         if live["state"] == "busy" and not live["job"]:
-            return "rendering a job that is not this Spark's"
+            return BUSY_ELSEWHERE
         if live["state"] not in ("ready", "busy"):
             return live["why"] or STATES.get(live["state"], live["state"])
         disk = (live["info"] or {}).get("disk_gb")
@@ -947,7 +979,9 @@ class Hub:
         if worker.get("kind") == "local":
             return self.check_local(worker)
         found = self.probe(worker)
-        set_to = lambda state, why="", **more: live.update(state=state, why=why, checked=time.time(), fails=0, **more)
+        # "seen" keeps the last answer through an outage: what the worker could render when it was last there (later)
+        set_to = lambda state, why="", **more: live.update(state=state, why=why, checked=time.time(), fails=0, **more,
+                                                           **({"seen": more["info"]} if more.get("info") else {}))
         if not found["reached"]:
             self.hang_up(address)
             set_to("unreachable", (f"ssh through {worker['via']} did not get in (key logins are needed from here to {worker['via']} and from there to it): "
@@ -1037,10 +1071,10 @@ class Hub:
                 raise OSError("Local worker GPU UUID handshake does not match its lease")
             changed = differs(self.code(), info.get("code"))
             if changed or not info.get("guard"):
-                live.update(state="update", why="Its code or memory guard differs; stop it and start it again.", info=info)
+                live.update(state="update", why="Its code or memory guard differs; stop it and start it again.", info=info, seen=info)
             else:
                 busy = bool(live["job"] or info.get("active"))
-                live.update(state="busy" if busy else "ready", why="It is rendering another job." if info.get("active") and not live["job"] else "", info=info)
+                live.update(state="busy" if busy else "ready", why="It is rendering another job." if info.get("active") and not live["job"] else "", info=info, seen=info)
             live.update(checked=time.time(), fails=0)
         except (OSError, Refused, ValueError) as error:
             self.hang_up(worker["address"])
@@ -1240,8 +1274,90 @@ class Hub:
         except (TypeError, ValueError):
             return 1
 
+    def later(self, job: dict) -> list[str]:
+        """The workers that may render this clip, whether or not they can take it now (``team`` names those that can):
+        free, busy (with another of this Spark's clips or with another app's job), being looked at or not looked at
+        yet, or away (down, unreachable, its app stopped or behind this Spark's code) after it was seen able to render
+        it: a failed Check does not end the wait. A clip too big for this Spark waits for one of these instead of being
+        taken here (claim). The job's count, its preferred worker and the retry budget hold as in ``team``; a worker
+        barred for the clip or switched off is none."""
+        if self.local.child or here_only(job["kind"], job["params"]):
+            return []
+        sparks = job.get("sparks") or {}
+        selected = job.get("placement")
+        if selected and selected["policy"] == "require":
+            return []  # required on this Spark: it never waits for a worker; required on a worker: claim() never takes it here
+        preferred = selected and selected["worker"] != "head" and selected["worker"]
+        if sparks.get("moves", 0) >= MOVES or not preferred and self.asked(job) < 2:
+            return []
+        found = []
+        for worker in self.workers():
+            address, live = worker["address"], self.state(worker["address"])
+            if preferred and address != preferred or address in (sparks.get("not") or {}) or not worker.get("enabled", True):
+                continue
+            info = live["info"] or live["seen"]
+            if info is None and not (live["state"] == "new" or live["working"]):
+                continue  # never seen since this app started: nothing says it could render the clip
+            if info is not None and capable(job["kind"], job["params"], info, self.spark):
+                continue
+            found.append(address)
+        return found
+
+    def fits(self, job: dict) -> bool:
+        """``fits_here`` for a queued clip, read again after FITTED seconds at most (it builds the clip's command), and
+        True when it cannot say: this Spark's memory guard then decides when the clip starts, as for any job."""
+
+        now = time.time()
+        with self.fit_lock:
+            known = self.fitted.get(job["id"])
+        if known and now - known[0] < FITTED:
+            return known[1]
+        try:
+            found = bool(self.fits_here(job))
+        except Exception:  # noqa: BLE001 - a reading; the job's own build says what is wrong when it runs
+            found = True
+        now = time.time()  # when it was read, not when the reading began: a slow build is not stale at once
+        queued = None
+        if len(self.fitted) > 500:  # readings of clips no longer queued go; a queued clip's stays, however old, for claim
+            queued = {i for i in list(self.order) if (self.jobs.get(i) or {}).get("status") == "queued"}
+        with self.fit_lock:  # the build above stays outside: only the cache's own change is held
+            if queued is not None:
+                self.fitted = {key: value for key, value in self.fitted.items() if key in queued}
+            self.fitted[job["id"]] = (now, found)
+        return found
+
+    def forget_fits(self) -> None:
+        """Every reading dropped (this machine's memory changed: a job it ran has ended), under the cache's own lock."""
+
+        with self.fit_lock:
+            self.fitted = {}
+
+    def too_big_waiting(self) -> bool:
+        """Whether a queued clip was last measured as too big for this machine (it waits for a worker, or for room here).
+        Called with the queue's lock held."""
+
+        return any(job["status"] == "queued" and self.fitted.get(job["id"], (0.0, True))[1] is False
+                   for job in (self.jobs[i] for i in self.order))
+
+    def measure(self) -> None:
+        """The fit of each queued clip this Spark's claim will ask about (a worker may take it, or it came back from
+        one) read now, outside the queue's lock: building a clip's command can probe its reference media. The server
+        calls this before each claim of its own. claim() only looks the readings up, however old they are by then, and
+        leaves a clip queued since unread (``unmeasured``: the server measures again and claims again at once)."""
+
+        self.unmeasured = False
+        with self.lock:
+            now = time.time()
+            asked = [job for job in (self.jobs[i] for i in self.order)
+                     if job["status"] == "queued" and job["kind"] in ("video", "studio", "long")
+                     and now - self.fitted.get(job["id"], (0.0, True))[0] >= FITTED
+                     and ((job.get("sparks") or {}).get("moves") or self.team(job) or self.later(job))]
+        for job in asked:
+            self.fits(job)
+
     def team(self, job: dict) -> list[str]:
-        """Eligible targets; explicit placement is independent of count and retry limits."""
+        """Eligible targets now. Explicit placement is independent of the count; a preferred worker is retried at most
+        MOVES times, as the count's workers are (one that refused the clip is never retried)."""
         if self.local.child:
             return []
         sparks = job.get("sparks") or {}
@@ -1254,7 +1370,7 @@ class Hub:
             worker = next((w for w in self.workers() if w["address"] == selected["worker"]), None)
             if worker and not self.usable(worker) and not capable(job["kind"], job["params"], self.state(worker["address"])["info"], self.spark):
                 preferred = worker["address"]
-            if selected["policy"] == "prefer" and worker and worker["address"] in (sparks.get("not") or {}):
+            if selected["policy"] == "prefer" and worker and (worker["address"] in (sparks.get("not") or {}) or sparks.get("moves", 0) >= MOVES):
                 preferred = None
             if selected["policy"] == "require":
                 return [preferred] if preferred else []
@@ -1314,9 +1430,6 @@ class Hub:
         ready = [queued for queued in ready if queued["status"] == "queued"]
         if address is None:
             idle = {worker["address"] for worker in self.workers() if not self.usable(worker) and not self.state(worker["address"])["job"]}
-            ours = [job for job in ready
-                    if not (job.get("placement") and job["placement"]["policy"] == "require" and job["placement"]["worker"] != "head")
-                    and (not self.team(job) or self.fits_here(job))]
             for queued in ready:
                 selected = queued.get("placement")
                 if selected and selected["policy"] == "require" and selected["worker"] != "head":
@@ -1324,8 +1437,41 @@ class Hub:
                     name = self.label_of(worker) if worker else "the selected worker"
                     queued["progress"] = {"stage": "Waiting for required worker " + name, "at": 0, "of": 1}
             # a clip an idle worker can render is left to it (the hub's loop hands it over); this Spark takes it once
-            # its workers are busy, and takes at once what only it can render
-            job = next((job for job in ours if not idle.intersection(self.team(job))), None)
+            # its workers are busy, and takes at once what only it can render. A clip too big for this Spark now is
+            # left to the workers that may render it (later), and fails once none may (its retries spent, or each one
+            # refused it); with no worker ever in question, this Spark takes it and its memory guard decides.
+            job = None
+            for queued in ready:
+                selected = queued.get("placement")
+                if selected and selected["policy"] == "require" and selected["worker"] != "head":
+                    continue
+                team = self.team(queued)
+                if idle.intersection(team):
+                    continue
+                waiting = team or self.later(queued)
+                moves = (queued.get("sparks") or {}).get("moves", 0)
+                if waiting or moves:
+                    fits = self.fitted.get(queued["id"], (0.0, None))[1]  # measured before the lock was taken (measure)
+                    if fits is None:
+                        self.unmeasured = True  # queued since: it waits for the next measure, never built here
+                        continue
+                else:
+                    fits = True
+                if not fits:
+                    if waiting:
+                        names = ", ".join(self.label_of(worker) + ("" if self.state(worker["address"])["state"] in ("ready", "busy") else
+                                                                   f" ({STATES.get(self.state(worker['address'])['state'], 'away')})")
+                                          for worker in self.workers() if worker["address"] in waiting)
+                        queued["progress"] = {"stage": self.said(f"Waiting for {names}: too big for this Spark's memory now"), "at": 0, "of": 1}
+                    else:
+                        last = (queued.get("moved") or [{}])[-1]
+                        why = self.said(f"Too big for this Spark's memory now, and no worker may take it again: it came back {moves} time"
+                                        + ("s" if moves != 1 else "") + (f", last from {last['from']}: {last['why']}" if last else "") + ".")
+                        queued.update(status="failed", error=why, finished=time.time(), progress=None)
+                        queued["log"] = (queued.get("log", "") + "[sparks] " + why + "\n")[-20000:]
+                    continue
+                job = queued
+                break
         else:
             if self.state(address)["job"]:
                 return None
@@ -1333,7 +1479,7 @@ class Hub:
         if job is None:
             return None
         job["status"], job["started"] = "running", time.time()
-        if (job.get("progress") or {}).get("stage", "").startswith("Waiting for required worker "):
+        if (job.get("progress") or {}).get("stage", "").startswith("Waiting for "):
             job["progress"] = None
         job["remote"] = address
         job["spark"] = self.name if address is None else next((w.get("name") or address for w in self.workers() if w["address"] == address), address)
@@ -1362,7 +1508,7 @@ class Hub:
                 self.hang_up(address)
                 live.update(state="down", why="It stopped answering: " + str(error)[-120:], checked=time.time(), info=None)
             return False
-        live.update(info=info, fails=0, checked=time.time())
+        live.update(info=info, seen=info, fails=0, checked=time.time())
         if differs(self.code(), info.get("code")):
             live.update(state="update", why="Its Studio code no longer matches this Spark's: “Update and start” brings it level.")
             return False
@@ -1391,7 +1537,7 @@ class Hub:
                     live = self.state(worker["address"])
                     if live["job"] and refresh and live["base"]:  # rendering for us: only its memory and disk are read again
                         try:
-                            live["info"] = call(live["base"], "/api/spark/self", timeout=5)
+                            live["info"] = live["seen"] = call(live["base"], "/api/spark/self", timeout=5)
                         except (OSError, Refused):
                             pass  # the thread that follows its job decides when it is lost
                     if refresh and live["state"] == "update":
@@ -1409,6 +1555,14 @@ class Hub:
 
     def run(self, job: dict, worker: dict) -> None:
         try:
+            # the time left counts down from that worker's own times for such clips when it has some (read here, not
+            # under the queue's lock: it reads the takes list)
+            try:
+                measured = self.estimate_on(job, job["spark"])
+            except Exception:  # noqa: BLE001 - a reading; the job keeps the time it was given
+                measured = None
+            if measured:
+                job["estimate"] = measured
             self.work(job, worker)
         finally:
             live = self.state(worker["address"])
@@ -1448,14 +1602,25 @@ class Hub:
     # ---- one clip on a worker -----------------------------------------------------------------------------------------
 
     def move(self, job: dict, worker: dict, why: str, down: bool) -> None:
-        """A clip taken back from a worker: in the queue again, never for that worker; the worker marked down when it
-        is the worker that failed. Raises Moved (or nothing was moved: the job was cancelled meanwhile)."""
+        """A clip taken back from a worker: in the queue again; the worker marked down at once when it is the worker
+        that failed. The clip is not given to that worker again, except after a passing failure when its last reading
+        here (Hub.fits) found it too big for this Spark. Raises Moved (or nothing was moved: the job was cancelled meanwhile)."""
 
         address, name = worker["address"], worker.get("name") or worker["address"]
         live = self.state(address)
-        if down:
+        # A worker that failed the clip for a passing reason (it stopped answering, its render or the fetch failed) may
+        # be given it again when the clip is too big for this Spark: barred, the clip could only fail here. A refusal
+        # (its own memory guard, its settings) bars it as before, and MOVES still caps the retries.
+        if down:  # first: nothing is measured before a worker that stopped answering is marked down
             self.hang_up(address)
             live.update(state="down", why=why, checked=time.time(), info=None)
+        # Only the reading already taken (Hub.fits), however old: measuring here can build the clip and probe its media.
+        # A clip last read as too big for this Spark stays open to the worker; any other (fits, or never read) bars it.
+        with self.fit_lock:
+            known = self.fitted.get(job["id"])
+        selected = job.get("placement")
+        keep_open = (job["status"] == "running" and not why.startswith(REFUSED)
+                     and not (selected and selected["policy"] == "require") and known is not None and known[1] is False)
         with self.lock:
             if job["status"] != "running":
                 return
@@ -1463,10 +1628,14 @@ class Hub:
             if selected and selected["policy"] == "require":
                 raise RuntimeError(f"Required worker {name} failed: {why}. Placement forbids fallback.")
             sparks = job.setdefault("sparks", {"chosen": 1})
-            sparks.setdefault("not", {})[address] = why
+            if not keep_open:
+                sparks.setdefault("not", {})[address] = why
             sparks["moves"] = sparks.get("moves", 0) + 1
             job.setdefault("moved", []).append({"from": name, "why": why, "at": time.time()})
-            job["log"] = (job["log"] + f"[sparks] {name}: {why}. The clip is back in the queue.\n")[-20000:]
+            again = "[sparks] The long video starts again from its first piece.\n" if job["kind"] == "long" else ""
+            job["log"] = (job["log"] + f"[sparks] {name}: {why}. The clip is back in the queue.\n" + again)[-20000:]
+            if job["kind"] == "long":
+                job["outputs"] = []  # its pieces are made again from the first: the ones made so far are not offered as its own
             job.update(status="queued", started=None, progress=None, spark=None, remote=None, their_job=None)
         raise Moved(why)
 
@@ -1486,9 +1655,10 @@ class Hub:
         theirs.update(qa=False, shot_check=False)  # both run here, on the fetched clip, where their tools are
         return theirs
 
-    def render(self, job: dict, worker: dict, params: dict, target: Path, label: str = "") -> bool:
+    def render(self, job: dict, worker: dict, params: dict, target: Path, label: str = "", kind: str | None = None) -> bool:
         """One take of ``job``'s clip rendered on ``worker`` and fetched to ``target``. False when the job was
-        cancelled meanwhile; Moved when the worker refused the clip, failed it, or stopped answering."""
+        cancelled meanwhile; Moved when the worker refused the clip, failed it, or stopped answering. ``kind`` is the
+        worker's job kind when it is not the job's own: a long video's piece is a "video" there."""
 
         # Already cancelled, or cancelled while the tunnel opens, the worker's memory guard is asked, or references
         # upload: do not create its job. A job already accepted is cancelled from the poll below.
@@ -1512,11 +1682,11 @@ class Hub:
             params_there = self.outbound(base, {**params, "preset": "small" if self.spark else "draft"} if other and not params.get("preset") else params)
             if job["status"] != "running":
                 return False
-            made = call(base, "/api/jobs", {"kind": job["kind"], "title": f"{job['title']} · for {self.name}",
+            made = call(base, "/api/jobs", {"kind": kind or job["kind"], "title": f"{job['title']} · for {self.name}",
                                           "placement": {"worker": "head", "policy": "require"}, "sender": self.name,
                                           "params": params_there}, timeout=60)
         except Refused as error:
-            self.move(job, worker, f"it refused the clip: {error.said}", down=False)
+            self.move(job, worker, f"{REFUSED}: {error.said}", down=False)
             return False
         except OSError as error:
             self.move(job, worker, f"it stopped answering before the clip was queued ({str(error)[-120:]})", down=True)
@@ -1577,7 +1747,8 @@ class Hub:
         params = job["params"]
         line = {"path": job["outputs"][0], "job": job["id"], "title": job.get("title"), "prompt": str(params.get("prompt") or "")[:500] or None, "kind": job["kind"], "seed": params.get("seed"),
                 "settings": {key: params[key] for key in ("preset", "quality", "frames", "seconds", "width", "height", "steps", "loras", "total_seconds")
-                             if params.get(key) not in (None, "", [])},
+                             if params.get(key) not in (None, "", [])}
+                            | {"referenced": bool(params.get("references") or params.get("reference_videos") or params.get("reference_audios"))},
                 "spark": job.get("spark") or self.name, "address": job.get("remote"), "sparks": self.asked(job),
                 "moved": job.get("moved") or None, "elapsed": round(time.time() - job["started"], 1) if job.get("started") else None,
                 "finished": time.time()}
@@ -1637,6 +1808,8 @@ class Hub:
             mode, says = "one", self.said(here)
         elif used < 2:
             mode, says = "one", (f"This {self.word} alone." if chosen < 2 else f"No other {unit} can take this job now, so it renders on this one.")
+        elif kind == "long":
+            mode, says = "one", f"A long video renders on one {unit}, piece by piece: the first that is free of the {used}."
         elif clips > 1:
             mode, says = "parallel", f"One clip per {unit}, {min(used, clips)} at a time: {clips} clips on {min(used, clips)} {unit}s."
         else:
