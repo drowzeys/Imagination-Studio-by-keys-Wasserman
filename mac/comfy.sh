@@ -1,5 +1,5 @@
 #!/bin/bash
-# The ComfyUI server behind the Library actions and MOSS-Image on a Mac (scripts/setup-comfy.sh installs it).
+# The ComfyUI server behind the Library actions, MOSS-Image and MiniMax-H3-Image on a Mac (scripts/setup-comfy.sh installs it).
 #   bash mac/comfy.sh start     # in the background, on 127.0.0.1:8191 (spark/spark_generate.py does this itself)
 #   bash mac/comfy.sh stop      # frees the models' memory
 #   bash mac/comfy.sh status

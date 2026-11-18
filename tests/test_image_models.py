@@ -354,6 +354,27 @@ def test_a_mac_draws_moss_image_on_its_own_comfyui():
     assert set(G.MAC_FILES) == {"ref2va", "text", "vae"} and all(name.endswith(".studio.sft") for name in G.MAC_FILES.values())
 
 
+def test_a_mac_draws_and_edits_with_h3_image_on_its_own_comfyui():
+    script = (ROOT / "scripts/image.sh").read_text()
+    branch = script[script.index("  h3-image)"):script.index("  qwen) ;;")]
+    assert '"$PREFIX/comfy-venv/bin/python" "$HERE/spark/spark_generate.py"' in branch and "--model h3-image" in branch
+    assert "oneshot-setup.sh --h3-image" in branch
+    script = (ROOT / "scripts/edit.sh").read_text()
+    branch = script[script.index("  h3-image)"):script.index("  qwen) ;;")]
+    assert '"$PREFIX/comfy-venv/bin/python" "$HERE/../spark/spark_edit.py"' in branch and "--model h3-image" in branch
+    assert "MiniMax-H3-Image takes neither" in branch  # image LoRAs and the base model are Qwen's
+    setup = (ROOT / "scripts/setup-comfy.sh").read_text()
+    assert "--h3-image) H3IMAGE=1;;" in setup and 'COMFY_COMMIT="$COMFY_H3IMAGE_COMMIT"' in setup  # the Spark's pin, read from its script
+    block = setup[setup.index('if [ "$H3IMAGE" = 1 ]; then'):setup.index('"$VENV/bin/python" "$HERE/mac/comfy_files.py"')]
+    assert "MiniMax-H3-Image Community License" in block and "https://huggingface.co/MiniMaxAI/MiniMax-H3-Image/blob/main/LICENSE" in block
+    for name in ("minimax_h3_image_pruned_int8_convrot.safetensors", "minimax_h3_image_vae_fp16.safetensors", "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"):
+        assert "model Comfy-Org/MiniMax-H3-Image" in block and name in block
+    assert "--upscale|--remove|--moss|--h3-image) COMFY_ARGS" in (ROOT / "oneshot-setup.sh").read_text()
+    import server
+
+    assert server.MAC_COMFY_PEAK_GB["h3-image"] >= 50  # measured 50 GB on an M5 Ultra: a job that does not fit is refused
+
+
 def test_a_spark_without_qwens_files_does_not_offer_it_and_says_so_when_asked():
     import server
     from fastapi import HTTPException
@@ -429,6 +450,14 @@ def test_moss_image_on_a_mac_without_its_comfyui_says_how_to_install_it():
     assert done.returncode == 1 and "oneshot-setup.sh --moss" in done.stderr
 
 
+def test_h3_image_on_a_mac_without_its_comfyui_says_how_to_install_it():
+    if sys.platform.startswith("linux"):
+        return
+    done = subprocess.run(["bash", str(ROOT / "scripts/image.sh"), "x", "/tmp/never.png"], capture_output=True, text=True,
+                          env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", "IMAGE_MODEL": "h3-image"})
+    assert done.returncode == 1 and "oneshot-setup.sh --h3-image" in done.stderr
+
+
 def test_an_unknown_model_is_refused_by_the_script():
     if sys.platform.startswith("linux"):
         return  # scripts/image.sh hands over to spark/image.sh, whose argparse refuses it
@@ -444,10 +473,10 @@ if __name__ == "__main__":
             print("ok", name)
 
 
-def test_h3_image_is_offered_only_on_a_spark_with_its_files_and_a_comfyui_that_knows_it():
+def test_h3_image_is_offered_only_with_its_files_and_a_comfyui_that_knows_it():
     import server
 
-    had = server.SPARK, server.WINCUDA, {key: os.environ.get(key) for key in ("SPARK_MODELS", "PREFIX")}
+    had = server.SPARK, server.WINCUDA, {key: os.environ.get(key) for key in ("SPARK_MODELS", "PREFIX", "MAC_COMFY_MODELS")}
     encoder = "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
     own = ("diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors", "vae/minimax_h3_image_vae_fp16.safetensors")
     with tempfile.TemporaryDirectory() as folder:
@@ -476,7 +505,20 @@ def test_h3_image_is_offered_only_on_a_spark_with_its_files_and_a_comfyui_that_k
             assert "h3-image" not in server.image_models()  # the decoder too
             (files / own[1]).write_bytes(b"x")
             server.SPARK = False
-            assert "h3-image" not in server.image_models()  # a Mac has no path for it yet
+            assert "h3-image" not in server.image_models()  # a Mac reads its own ComfyUI's folder, not a Spark's
+            # a Mac: the three files in its ComfyUI's folder, that ComfyUI's environment, and the nodes
+            os.environ["MAC_COMFY_MODELS"] = folder + "/comfy-models"
+            mac = Path(folder) / "comfy-models"
+            for name in (*own, encoder):
+                (mac / name).parent.mkdir(parents=True, exist_ok=True)
+                (mac / name).write_bytes(b"x")
+            assert "h3-image" not in server.image_models()  # no comfy-venv: scripts/setup-comfy.sh has not run
+            python = Path(folder) / "prefix/comfy-venv/bin/python"
+            python.parent.mkdir(parents=True)
+            python.write_text("")
+            assert server.image_models()[-1] == "h3-image"
+            (mac / encoder).unlink()
+            assert "h3-image" not in server.image_models()  # the 8-bit text encoder is its own file on a Mac
         finally:
             server.SPARK, server.WINCUDA = had[0], had[1]
             for key, value in had[2].items():

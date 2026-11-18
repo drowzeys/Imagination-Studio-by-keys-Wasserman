@@ -1150,7 +1150,10 @@ def turbo_ready() -> bool:
 # --moss / oneshot-setup.sh --moss) runs on ComfyUI v0.42.0's own support on both machines, the Mac's ComfyUI on
 # PyTorch's Metal device (mac/comfy.sh): 45 s for 1344x768 on a Spark with the model loaded. MiniMax-H3-Image (MiniMax,
 # oneshot-setup-spark.sh --h3-image) runs on ComfyUI v0.45.1's own support, on a DGX Spark: 6 steps, 3 s for 1024x1024
-# and 18 s for 2048x2048 with the model loaded, and the same model edits a picture.
+# and 18 s for 2048x2048 with the model loaded, and the same model edits a picture. On a Mac (oneshot-setup.sh --h3-image)
+# the same graph and the same 8-bit files run on the Mac's ComfyUI, PyTorch's Metal device: on an M5 Ultra 16 s for
+# 1344x768, 21 s for 1152x2048 and 28 s for 2048x2048 with the model loaded, an edit of a 1344x768 picture 68 s from
+# nothing loaded; the server's memory peaked at 50 GB.
 IMAGE_MODELS = {"qwen": ("Qwen 2.1 Turbo", "8 steps, the quickest draft; Qwen Research License (non-commercial)"),
                 "qwen-full": ("Qwen 2.1 Full", "the 40-step base model at CFG 4: more detail than Turbo, about 8x slower"),
                 "flux3k-fast": ("FLUX3-K Fast", "FLUX 3 Image Klein, 16 steps: sharper text, whole figures, better prompt following"),
@@ -1192,14 +1195,21 @@ def image_models() -> list[str]:
 
 
 def h3image_ready() -> bool:
-    """MiniMax-H3-Image on a DGX Spark: its checkpoint and decoder, MiniMax H3's text encoder (its own copy or the one
-    FastH3 has: the same file), and a ComfyUI that knows the model (v0.45.1 and later)."""
+    """MiniMax-H3-Image: its checkpoint and decoder, MiniMax H3's 8-bit text encoder, and a ComfyUI that knows the model
+    (v0.45.1 and later). On a DGX Spark the text encoder is its own copy or the one FastH3 has (the same file); on a Mac
+    the three files are in the ComfyUI of scripts/setup-comfy.sh (oneshot-setup.sh --h3-image), in its own environment."""
 
-    if not SPARK or WINCUDA:
+    if WINCUDA or WINDOWS or WIN32:
         return False
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
-    models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
-    own, encoder = models / "MiniMax-H3-Image-Comfy", "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    encoder = "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    if SPARK:
+        models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
+        own = models / "MiniMax-H3-Image-Comfy"
+    else:
+        models = own = Path(os.environ.get("MAC_COMFY_MODELS") or prefix / "comfy-models")
+        if not (prefix / "comfy-venv/bin/python").exists():
+            return False
     nodes = prefix / "ComfyUI/comfy_extras/nodes_minimax_h3.py"
     try:
         knows = "MiniMaxH3ImageConditioning" in nodes.read_text(encoding="utf-8", errors="replace")
@@ -1714,10 +1724,10 @@ def without_ffmpeg(kind: str, params: dict) -> str:
     return f"{what} needs ffmpeg, which is not installed on this machine: {FFMPEG_HOW}" if what else ""
 
 
-# A Mac's ComfyUI jobs (mac/comfy.sh: Upscale, Find and Remove a person, MOSS-Image): their peaks, measured on the
+# A Mac's ComfyUI jobs (mac/comfy.sh: Upscale, Find and Remove a person, MOSS-Image, MiniMax-H3-Image): their peaks, measured on the
 # M5 Ultra (GB, the ComfyUI server's own memory at its highest, models loaded from nothing). Remove a person and Upscale
 # hold MiniMax H3's bf16 Ref2VA transformer and text encoder (62 GB each) at once.
-MAC_COMFY_PEAK_GB = {"upscale": 125.0, "mask": 12.0, "remove": 135.0, "moss-image": 40.0}  # measured 118, SAM only, 127, 36
+MAC_COMFY_PEAK_GB = {"upscale": 125.0, "mask": 12.0, "remove": 135.0, "moss-image": 40.0, "h3-image": 55.0}  # measured 118, SAM only, 127, 36, 50
 MAC_COMFY_FLOOR_GB = 16.0  # what stays available beside it: mac/comfy.sh's kill-guard stops the server under this
 
 
@@ -1863,7 +1873,10 @@ def build(kind: str, params: dict, job_id: str, room: bool = True) -> tuple[list
     if kind == "export":
         return ["python3", "-c", "pass"], {}, []
     if kind == "edit":  # a picture re-drawn by the image model (picture_edit.py)
-        return edit_build(params, job_id)
+        built = edit_build(params, job_id)
+        if room and params.get("image_model") == "h3-image":  # on a Mac its edit runs on the Mac's ComfyUI, as its pictures do
+            mac_comfy_room("h3-image")
+        return built
     preset = params.get("preset", "small" if SPARK else "draft")
     quality = params.get("quality", "fh8" if SPARK else "standard")  # a Spark has no "standard": an API call or an agent may leave it out
     chosen, _ = custom(params)

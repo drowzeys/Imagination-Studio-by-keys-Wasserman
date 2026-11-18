@@ -54,15 +54,17 @@ eight Qwen pictures put it on the left.*
 **Limits:** two seeds a prompt and one judge, by eye. These model times leave out the text encode, so they are lower
 than the whole-run times in the table above.
 
-### MiniMax-H3-Image on a DGX Spark
+### MiniMax-H3-Image on a DGX Spark and a Mac
 
 **MiniMax-H3-Image** is MiniMax's picture model: it makes a picture from a prompt and edits one from pictures, with a
-6-step sampler, at up to 2048 pixels a side in the app. On a DGX Spark it is a picture model beside the others, on
-ComfyUI's own support. Asked for by spenchey (#243).
+6-step sampler, at up to 2048 pixels a side in the app. On a DGX Spark and on a Mac it is a picture model beside the
+others, on ComfyUI's own support (a Mac's ComfyUI runs on PyTorch's Metal device, in its own environment). Asked for by spenchey (#243).
 
 - **Install:** `bash oneshot-setup-spark.sh --h3-image` (23 GB: the pruned 8-bit checkpoint and its decoder, from
   Comfy-Org/MiniMax-H3-Image). Its text encoder is the one FastH3 already has. It needs ComfyUI v0.45.1, which this
   option moves the install to; an install that does not ask for it stays on its ComfyUI. Not part of `--all`.
+  On a Mac: `bash oneshot-setup.sh --h3-image` (50 GB: the same checkpoint and decoder, and the 8-bit text encoder,
+  which a Mac does not have), on the Mac's ComfyUI (`scripts/setup-comfy.sh`), moved to v0.45.1 the same way.
 - **Licence:** the MiniMax-H3-Image Community License. Like MiniMax H3's, it limits where the model may be used (not
   the European Union, the United Kingdom, the Republic of Korea or the United States without MiniMax's own licence).
 - **Use:** pick **MiniMax-H3-Image** under Picture model, or in **Edit a picture**. The prompt goes as written; put
@@ -87,7 +89,11 @@ Measured on a DGX Spark (2026-11-15, 6 steps, one picture, the Studio's own scri
   Qwen 2.1 Turbo 12 to 24 s, FLUX3-K Fast 24 to 44 s.
 - **On ComfyUI v0.45.1 the rest still renders** (2026-11-15, one DGX Spark): a FastH3 clip (117 s from nothing
   loaded), a FLUX3-K Fast picture (14 s) and a MOSS-Image picture (60 s).
-- **Not there yet:** a Mac or Windows path, LoRAs, and a TensorFold engine for it. Its transformer has MiniMax H3's
+- **On a Mac** (2026-11-17, Mac Studio M5 Ultra, 256 GB, model loaded): 16 s for 1344 × 768, 21 s for 1152 × 2048,
+  28 s for 2048 × 2048; an edit of a 1344 × 768 picture 68 s from nothing loaded. The ComfyUI server's memory peaked at
+  50 GB; a job is refused when 55 GB is not there. Upscale, Remove a person and MOSS-Image were not measured on a
+  Mac's ComfyUI at v0.45.1.
+- **Not there yet:** a Windows path, LoRAs, and a TensorFold engine for it. Its transformer has MiniMax H3's
   layout without the audio layers, so a native engine looks possible; it is not built.
 
 ### MOSS-Image on a DGX Spark

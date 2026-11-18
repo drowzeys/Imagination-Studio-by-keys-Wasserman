@@ -29,6 +29,9 @@
 #   bash oneshot-setup.sh --remove      # also Find a person and Remove a person (the same ComfyUI, Akatz Labs' H3 Relay, Meta's
 #                                       # SAM 3.1: 1.7 GB more; needs --ref2va)
 #   bash oneshot-setup.sh --moss        # also MOSS-Image (OpenMOSS, Apache 2.0) as a picture model, on the same ComfyUI (28 GB)
+#   bash oneshot-setup.sh --h3-image    # also MiniMax-H3-Image as a picture model (text to picture and edits), on the same
+#                                       # ComfyUI, moved to v0.45.1 (50 GB; MiniMax-H3-Image Community License: the same
+#                                       # territory limits as MiniMax H3). Not part of --all: ask for it by name
 #   bash oneshot-setup.sh --graphics    # motion graphics: titles, captions, slideshows, music videos (scripts/setup-graphics.sh:
 #                                       # HyperFrames and GSAP, Node 22 if this Mac's is older, a browser; about 400 MB).
 #                                       # Part of every install; --no-graphics leaves it out
@@ -170,7 +173,7 @@ for arg in "$@"; do
     --finish) FINISH=1;; --no-finish) FINISH=0;;
     --train) TRAIN=1;;  # a CUDA machine's (spark/setup-train.sh): said below and left out
     --yue2|--swap) echo "  $arg: YuE2 and Character Swap run on Linux with an NVIDIA GPU (oneshot-setup-spark.sh $arg): left out on this Mac";;
-    --upscale|--remove|--moss) COMFY_ARGS+=("$arg");;
+    --upscale|--remove|--moss|--h3-image) COMFY_ARGS+=("$arg");;
     --image-edit) IMAGE_EDIT=1;;
     --no-memguard) MEMGUARD=0;; --memguard-stop-foreign) MEMGUARD_FOREIGN=1;;  # the machine memory guard (scripts/memguard.py)
     --app) APP=1;;

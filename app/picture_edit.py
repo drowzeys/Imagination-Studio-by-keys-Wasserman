@@ -9,7 +9,7 @@ Results are written beside the scout images, so they are in the Library and can 
 `image_model` picks the model (server.py IMAGE_MODELS): Qwen 2.1 Turbo, the default, or FLUX3-K Fast or Full where
 they are installed. FLUX3-K takes the same pictures as references (ten at most) and BFL's prompt upsampler writes the
 edit's caption from the prompt and the pictures; the hub's image LoRAs, the camera angles and Qwen's 40-step base
-model are Qwen's, so a FLUX3-K edit refuses them. MiniMax-H3-Image (a DGX Spark, oneshot-setup-spark.sh --h3-image)
+model are Qwen's, so a FLUX3-K edit refuses them. MiniMax-H3-Image (a DGX Spark, oneshot-setup-spark.sh --h3-image; a Mac, oneshot-setup.sh --h3-image)
 edits with the same model that makes its pictures: the first picture is the one changed, <Picture 1> in a prompt, the
 others its references; it takes the prompt as written and refuses Qwen's LoRAs, angles and base model the same way.
 
