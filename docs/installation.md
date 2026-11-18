@@ -148,7 +148,8 @@ Measured on one DGX Spark (2026-10-09, one run each; 124 frames, text to video, 
 
 The engine's column includes ComfyUI's 8-bit video decoder, the default here: it decodes 124 frames of 864x480 in
 14 s where the fp16 one takes 26 s (29 s against 42 s at 1344x768), and the picture matches the fp16 decode to 42 to
-44 dB. `SPARK_VAE=minimax_h3_video_vae_fp16.safetensors` selects the fp16 decoder if you download it.
+44 dB. `SPARK_VAE=minimax_h3_video_vae_fp16.safetensors` selects the fp16 decoder if you download it. A GB300 decodes
+with the fp16 one by default, and on ComfyUI's own blocks ([GB300](gb300.md)).
 
 | Also | Time |
 |---|---|
