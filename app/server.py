@@ -20,6 +20,7 @@ import re
 import shutil
 import signal
 import socket
+import statistics
 import subprocess
 import sys
 import threading
@@ -2356,6 +2357,10 @@ def long_take(job: dict) -> bool:
             raise RuntimeError(f"part {index + 1} wrote no clip")
         clips.append(target)
         job["outputs"] = [relative(c) for c in clips]  # finished parts can be watched while the rest renders
+        if index + 1 < len(pieces) and job.get("started"):
+            # the time left follows the pieces made so far, by their length, on whichever machine renders them
+            spent, made = time.time() - job["started"], sum(pieces[:index + 1])
+            job["estimate"] = int(spent * sum(pieces) / made + 2 * len(pieces))
     # join: every part after the first repeats the frame it started from, so that frame is dropped (chain.py)
     job["progress"] = {"stage": "joining", "at": len(clips), "of": len(clips)}
     try:
@@ -4134,6 +4139,45 @@ def fits_here(job: dict) -> bool:
 
 
 hub.fits_here = fits_here
+
+
+def estimate_on(job: dict, name: str) -> int | None:
+    """The time a clip or a long video is expected to take on the worker ``name``, from that worker's own takes
+    (sparks/takes.jsonl, timed here from hand-over to fetched clip): the median of its last five clips with the same
+    preset, quality and length (frames when the job names them, else seconds) and the same kind of start (from
+    references or not); for a long video, per piece, plus a moment for each join. A take written before
+    ``referenced`` was kept counts only when it names no frames (a reference shot names them). None when the worker has
+    rendered no such clip: the job keeps this machine's figure. A long video's own take is not read (its pieces are
+    not written down one by one), so a worker learns a long video's time from its single clips."""
+
+    kind, params = job["kind"], job["params"]
+    if kind not in ("video", "long") or params.get("preset") == "custom" or params.get("steps") not in (None, "") or params.get("loras"):
+        return None
+    referenced = kind == "video" and bool(params.get("references") or params.get("reference_videos") or params.get("reference_audios"))
+    frames = int(params["frames"]) if kind == "video" and params.get("frames") else None
+    pieces = plan(int(params["total_seconds"]), int(params.get("segment_seconds", LONGEST))) if kind == "long" else [float(params.get("seconds") or 5)]
+    took: dict[tuple, list[tuple[float, float]]] = {}
+    for one in hub.takes().values():
+        settings_ = one.get("settings") or {}
+        if not (one.get("spark") == name and one.get("kind") == "video" and one.get("elapsed")
+                and settings_.get("preset") == params.get("preset") and settings_.get("quality") == params.get("quality")
+                and not settings_.get("steps") and not settings_.get("loras")):
+            continue
+        was = settings_["referenced"] if "referenced" in settings_ else (False if not settings_.get("frames") else None)
+        if was is None or bool(was) != referenced:
+            continue
+        key = ("frames", int(settings_["frames"])) if settings_.get("frames") else ("seconds", float(settings_.get("seconds") or 5))
+        took.setdefault(key, []).append((float(one.get("finished") or 0), float(one["elapsed"])))
+    total = 0.0
+    for piece in [("frames", frames)] if frames else [("seconds", float(length)) for length in pieces]:
+        last = [elapsed for _, elapsed in sorted(took.get(piece, []))[-5:]]
+        if not last:
+            return None
+        total += statistics.median(last)
+    return int(total + (2 * len(pieces) if kind == "long" else 0))
+
+
+hub.estimate_on = estimate_on
 if not LOCAL_GPU_CHILD:
     app.include_router(updater.router())
     app.router.on_startup.append(updater.start)

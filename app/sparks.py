@@ -32,7 +32,8 @@ Kept in the studio folder, under sparks/:
   labels.json    {"head": "fa5a (head)", "<address or name>": "Mac Studio"}: what each machine is called on the page, written by
                  hand or by a script, never by this app (read by Hub.labels; sparks.json is rewritten on every save)
   sparks.json    {"workers": [{"address", "name", "folder", "enabled", "via"?}], "sparks": the number new jobs start with}
-  takes.jsonl    one line per finished clip: its path, seed, settings and the Spark that rendered it
+  takes.jsonl    one line per finished clip: its path, seed, settings (with "referenced": it was made from references), the
+                 Spark that rendered it and the time it took as seen from here (a worker's: its transfers included)
   tunnels.json   the tunnels this app has open (closed by the next start if this one was killed)
 
 This app may be on a DGX Spark or on a Mac. A Mac that cannot reach the workers' network goes through a machine that
@@ -531,6 +532,7 @@ class Hub:
         self.fits_here = lambda job: True
         self.fitted: dict[str, tuple[float, bool]] = {}  # job id -> (when, fits_here's answer): Hub.fits
         self.unmeasured = False  # claim() left a clip whose fit was not measured yet (Hub.measure)
+        self.estimate_on = lambda job, name: None  # server.estimate_on: a job's time on the worker ``name``, or None
         self.started = False
         self.local = local_gpus.Manager(home, pack)
         self.closing = False
@@ -1519,6 +1521,14 @@ class Hub:
 
     def run(self, job: dict, worker: dict) -> None:
         try:
+            # the time left counts down from that worker's own times for such clips when it has some (read here, not
+            # under the queue's lock: it reads the takes list)
+            try:
+                measured = self.estimate_on(job, job["spark"])
+            except Exception:  # noqa: BLE001 - a reading; the job keeps the time it was given
+                measured = None
+            if measured:
+                job["estimate"] = measured
             self.work(job, worker)
         finally:
             live = self.state(worker["address"])
@@ -1698,7 +1708,8 @@ class Hub:
         params = job["params"]
         line = {"path": job["outputs"][0], "job": job["id"], "title": job.get("title"), "prompt": str(params.get("prompt") or "")[:500] or None, "kind": job["kind"], "seed": params.get("seed"),
                 "settings": {key: params[key] for key in ("preset", "quality", "frames", "seconds", "width", "height", "steps", "loras", "total_seconds")
-                             if params.get(key) not in (None, "", [])},
+                             if params.get(key) not in (None, "", [])}
+                            | {"referenced": bool(params.get("references") or params.get("reference_videos") or params.get("reference_audios"))},
                 "spark": job.get("spark") or self.name, "address": job.get("remote"), "sparks": self.asked(job),
                 "moved": job.get("moved") or None, "elapsed": round(time.time() - job["started"], 1) if job.get("started") else None,
                 "finished": time.time()}

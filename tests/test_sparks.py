@@ -985,3 +985,57 @@ def test_a_clip_too_big_here_waits_through_its_workers_outage():
     finally:
         sparks.LOST, server.memory_of = had_lost, had_memory
     assert job["status"] == "done" and job["spark"] == "spark-a" and len(job["moved"]) == 1
+
+
+def takes_of(*lines) -> None:
+    hub.folder.mkdir(parents=True, exist_ok=True)
+    with open(hub.folder / "takes.jsonl", "a") as out:
+        for line in lines:
+            out.write(json.dumps(line) + "\n")
+
+
+def test_a_worker_is_timed_by_its_own_takes():
+    """estimate_on: the median of the worker's last five clips with the same preset, quality, length and kind of start;
+    a long video per piece, plus its joins; None where the worker has made no such clip."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    (hub.folder / "takes.jsonl").unlink(missing_ok=True)
+    takes_of(*[{"path": f"renders/m{i}.mp4", "kind": "video", "spark": "spark-a", "elapsed": elapsed, "finished": 1000 + i,
+                "settings": {"preset": "sharp", "quality": "fh8", "seconds": 15, "referenced": False}}
+               for i, elapsed in enumerate((300.0, 280.0, 290.0, 900.0, 100.0, 295.0))])  # the oldest (300) is past the last five
+    job = {"kind": "long", "params": {"preset": "sharp", "quality": "fh8", "total_seconds": 60}}
+    assert server.estimate_on(job, "spark-a") == 4 * 290 + 2 * 4
+    assert server.estimate_on({"kind": "video", "params": {"preset": "sharp", "quality": "fh8", "seconds": 15}}, "spark-a") == 290
+    assert server.estimate_on(job, "spark-b") is None and server.estimate_on({**job, "params": {**job["params"], "quality": "fh4"}}, "spark-a") is None
+    takes_of(*[{"path": f"renders/f{i}.mp4", "kind": "video", "spark": "spark-a", "elapsed": elapsed, "finished": 2000 + i,
+                "settings": {"preset": "sharp", "quality": "fh8", "frames": 192, "seconds": 8, "referenced": ref}}
+               for i, (elapsed, ref) in enumerate(((150.0, False), (156.0, False), (540.0, True), (530.0, True)))],
+             {"path": "renders/old.mp4", "kind": "video", "spark": "spark-a", "elapsed": 999.0, "finished": 3000,
+              "settings": {"preset": "sharp", "quality": "fh8", "frames": 192, "seconds": 8}})  # written before the flag, frames named: left out
+    shot = {"kind": "video", "params": {"preset": "sharp", "quality": "fh8", "frames": 192, "seconds": 8}}
+    assert server.estimate_on(shot, "spark-a") == 153  # the median of two is their mean
+    assert server.estimate_on({**shot, "params": {**shot["params"], "references": ["a.png"]}}, "spark-a") == 535
+
+
+def test_a_clip_on_a_worker_counts_down_from_that_workers_time():
+    """A finished clip is written down with its kind of start; the next such clip handed to that worker takes its time
+    from those takes, not this machine's table."""
+
+    one = Worker("spark-a")
+    fresh(one)
+    (hub.folder / "takes.jsonl").unlink(missing_ok=True)
+    one.takes = 1.2  # a whole second or more: the time is kept in whole seconds
+    first = finished([queue(2)["id"]])[0]
+    assert first["spark"] == "spark-a"
+    line = hub.takes()[first["outputs"][0]]
+    assert line["settings"]["referenced"] is False and line["elapsed"] > 0
+    took = line["elapsed"]
+    one.takes = 2
+    second = queue(2)
+    until = time.time() + 10
+    while time.time() < until and client.get(f"/api/jobs/{second['id']}").json()["status"] != "running":
+        time.sleep(0.05)
+    assert client.get(f"/api/jobs/{second['id']}").json()["estimate"] == int(took) != server.clip_estimate("video", {"preset": PRESET, "quality": QUALITY, "frames": 22})
+    one.takes = TAKES
+    finished([second["id"]])
