@@ -82,7 +82,7 @@ const APPS = () => [
   { id: "vhs", cat: "style", title: "VHS tape", one: "1980s home video, with a dial for the tape damage", art: "look-vh5tape-vhs", sign: "looks", lora: "vh5tape-vhs" },
   { id: "all-looks", cat: "style", title: "Every look", one: "The whole LoRA library, and your own", art: "vault-looks", sign: "looks", run: () => go("Looks") },
 
-  { id: "voice", cat: "sound", title: "Voices & cloning", one: "Fish Audio Drama 3: cast a voice or clone your own", art: "start-voice", sign: "sound", run: () => go("Voice") },
+  { id: "voice", cat: "sound", title: "Voices & cloning", one: "Make speech or clone a voice with the local voice model", art: "start-voice", sign: "sound", run: () => go("Voice") },
   { id: "song", cat: "sound", title: "Songs & score", one: "YuE2 or MiniMax-Music3: lyrics and a style to a song", art: "start-song", sign: "sound", run: () => go("Music") },
   { id: "foley", cat: "sound", title: "Sound effects & foley", one: "Foley for a clip, or any sound from words", art: "start-sfx", sign: "sound", run: () => go("Foley") },
 

@@ -13,7 +13,9 @@ function voLive(job) {
   if (!(S.voice && S.voice.live) || !job || job.status !== "running" || (job.params && job.params.live === false)) return null;
   if (!VO.player || VO.player.id !== job.id) VO.player = { id: job.id, el: el("audio", { src: "/api/voice/takes/" + encodeURIComponent(job.id) + "/live", controls: true, autoplay: true, preload: "auto", style: "width:100%;margin-top:8px" }) };
   return el("div", {}, el("div", { class: "note", style: "margin:8px 0 0" }, "Playing while it is made:"), VO.player.el); }
-const voSpeed = st => st.backend === "cuda"
+const voSpeed = st => st.backend === "chatterbox"
+  ? "One take at a time in the Studio queue. Chatterbox loads for each take and releases the GPU when it finishes. English, one speaker per take."
+  : st.backend === "cuda"
   ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 42 GB). About 18 s to load the first time; it stays loaded for " + Math.round(((st.server || {}).idle_unload_s || 300) / 60) + " minutes after a take and is unloaded at once when a video or picture job starts. Then about 0.7 s for each second of speech, the first sound after about 0.3 s, played as it comes; Whisper checks the words after."
   : st.serves ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 50 GB with its word check). About 5 s to load the first time; it stays loaded for " + Math.round(((st.server || {}).idle_unload_s || 300) / 60) + " minutes after a take and is unloaded at once when a video or picture job starts. Then about 0.35 s for each second of speech, the first sound after about 0.2 s, played as it comes. The engine checks its own words with Whisper as it goes: a runaway tail is cut, and a part with missing words is drawn again (a take that was short while playing is made once more)."
   : st.checks ? "One take at a time in the queue, never beside a video render (Drama 3 takes about 50 GB). About 4 s to load, then about 0.35 s for each second of speech, the first sound after about 0.25 s when it plays as it is made. The engine checks its own words with Whisper as it goes: a runaway tail is cut, and a part with missing words is drawn again (when it is not played as it is made) or reported."
@@ -53,16 +55,19 @@ async function voRender() {
     ...(VO.ref ? { ref_audio: VO.ref, ref_text: VO.refText, consent: VO.consent } : {}) }); } catch (e) { VO.busy = false; return toast(e.message); }
   VO.busy = false; await poll(); render(); }
 function voReference() {
+  const cb = S.voice && S.voice.backend === "chatterbox";
   const up = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg", disabled: !voOn(), onchange: async () => { if (!up.files[0]) return; const data = new FormData(); data.append("file", up.files[0]);
     try { const j = await (await fetch("/api/upload", { method: "POST", body: data })).json(); if (!j.path) throw new Error(j.error || "upload failed");
       const m = await refMeta(j.path), lim = S.voice.reference_seconds;
       if (m.duration && (m.duration < lim[0] - 0.05 || m.duration > lim[1] + 0.05)) return toast("A voice to clone is " + lim[0] + " to " + lim[1] + " seconds of speech, and this clip is " + m.duration.toFixed(1) + " s");
       VO.ref = j.path; VO.consent = false; render(); } catch (e) { toast(e.message); } } });
   return el("div", { class: "group" }, el("h3", {}, "Voice to clone (optional)"),
-    el("div", { class: "note" }, "A clean recording of one speaker, about 10 to 30 seconds, and what it says. Without one, Drama 3 makes a voice of its own (describe it in a [direction], e.g. “[a deep, gravelly man in his fifties, slow and patient]”). Clone a real person's voice only with their consent."),
+    el("div", { class: "note" }, cb
+      ? "Use a clean recording of one speaker, longer than five seconds, to clone or keep that voice. Without one, Chatterbox uses its built-in voice. Clone a real person's voice only with their consent."
+      : "A clean recording of one speaker, about 10 to 30 seconds, and what it says. Without one, Drama 3 makes a voice of its own (describe it in a [direction], e.g. “[a deep, gravelly man in his fifties, slow and patient]”). Clone a real person's voice only with their consent."),
     VO.ref ? el("div", {}, el("div", { class: "row", style: "align-items:center;margin-top:8px" }, el("audio", { src: file(VO.ref), controls: true, preload: "metadata", style: "width:100%" }),
         el("button", { class: "small fit", onclick: () => { VO.ref = null; VO.refText = ""; VO.consent = false; render(); } }, "Take it out")),
-      field("What the clip says (left empty, Whisper writes it)", bind(VO, "refText", el("textarea", { style: "min-height:52px", placeholder: "the exact words of the recording" }))),
+      cb ? null : field("What the clip says (left empty, Whisper writes it)", bind(VO, "refText", el("textarea", { style: "min-height:52px", placeholder: "the exact words of the recording" }))),
       el("label", { class: "check" }, el("input", { type: "checkbox", checked: VO.consent, onchange: e => { VO.consent = e.target.checked; render(); } }), el("span", {}, "I have the speaker's consent to clone this voice")))
       : field("Add a clip", up)); }
 function voTake(t) {
@@ -71,29 +76,37 @@ function voTake(t) {
     el("div", { class: "note", title: t.asr && t.asr.heard ? "Whisper heard: " + t.asr.heard : "" }, voLine(t)),
     el("div", { class: "note", style: "white-space:pre-wrap" }, t.text.length > 300 ? t.text.slice(0, 300) + "…" : t.text),
     el("div", { class: "row", style: "margin-top:8px;flex-wrap:wrap;gap:6px" },
-      el("a", { class: "fit", href: "/api/voice/takes/" + encodeURIComponent(t.id) + "/audio", download: "drama3-" + t.id + ".wav" }, el("button", { class: "small", type: "button" }, "Download WAV")),
+      el("a", { class: "fit", href: "/api/voice/takes/" + encodeURIComponent(t.id) + "/audio", download: (t.backend === "chatterbox" ? "chatterbox-" : "drama3-") + t.id + ".wav" }, el("button", { class: "small", type: "button" }, "Download WAV")),
       el("button", { class: "small fit", disabled: VO.cutting === t.path, title: "Opens the create wizard with this take as a reference audio clip (2 to 15 s; a longer take is cut to its first 15 s)", onclick: () => voUseAsRef(t.path, t.duration) }, VO.cutting === t.path ? "Cutting…" : "Use as Ref2VA voice reference"),
-      el("button", { class: "small fit", title: "Clone this take's voice for the next take: the same speaker across lines", disabled: !voOn() || (t.duration || 0) < 2, onclick: () => { VO.ref = t.path; VO.refText = t.reference ? "" : t.text.replace(/<\|speaker:\d+\|>|\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim(); VO.consent = false; window.scrollTo(0, 0); render(); } }, "Clone this voice"),
+      el("button", { class: "small fit", title: "Clone this take's voice for the next take: the same speaker across lines", disabled: !voOn() || (t.duration || 0) < ((S.voice && S.voice.reference_seconds || [2])[0]), onclick: () => { VO.ref = t.path; VO.refText = t.reference ? "" : t.text.replace(/<\|speaker:\d+\|>|\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim(); VO.consent = false; window.scrollTo(0, 0); render(); } }, "Clone this voice"),
       el("button", { class: "small fit", title: "Put this take's text and settings back in the form", onclick: () => { Object.assign(VO, { text: t.text, seed: t.seed + 1, temperature: t.temperature, top_p: t.top_p, top_k: t.top_k }); window.scrollTo(0, 0); render(); } }, "Again, next seed"))); }
 function viewVoice() {
-  const box = el("section", { class: "card" }, el("h2", {}, "Voice · Fish Audio Drama 3"));
+  const st = S.voice || { available: false, why: "This app does not know a voice engine.", defaults: {} };
+  const cb = st.backend === "chatterbox";
+  if (VO.engine !== st.backend && st.backend) { VO.engine = st.backend; Object.assign(VO, st.defaults); }
+  const box = el("section", { class: "card" }, el("h2", {}, "Voice · " + (cb ? "Chatterbox Turbo" : "Fish Audio Drama 3")));
   if (VO.takes === null) { VO.takes = []; voLoad(); }
-  const st = S.voice || { available: false, why: "This app does not know Drama 3.", defaults: {} };
   if (VO.job) { const fresh = jobs.find(j => j.id === VO.job.id); if (fresh) { if (fresh.status === "done" && VO.job.status !== "done") voLoad(); VO.job = fresh; } }
-  put(box, el("div", { class: "note", style: "margin-top:-4px" }, "Speech from text with Fish Audio Drama 3, on this machine: several speakers, directions for the delivery, a voice cloned from a clip. A take can go to a MiniMax H3 reference clip as its voice (", el("b", {}, "Use as Ref2VA voice reference"), ")."),
-    el("div", { class: "note vt-credit" }, typeof mark === "function" ? mark("fish", "") : null, el("b", {}, "Built with Fish Audio."), " " + (st.licence || "") + " Nothing is sent to Fish Audio: " + (typeof measuredLabel === "function" ? measuredLabel(st.label || "TensorFold") : (st.label || "TensorFold")) + "."));
+  put(box, el("div", { class: "note", style: "margin-top:-4px" }, cb
+    ? "English speech with Chatterbox Turbo on this machine. It makes one voice per take, and can clone a voice from a recording. A take can also become a MiniMax H3 Ref2VA voice reference."
+    : "Speech from text with Fish Audio Drama 3, on this machine: several speakers, directions for the delivery, a voice cloned from a clip. A take can go to a MiniMax H3 reference clip as its voice (Use as Ref2VA voice reference)."),
+    el("div", { class: "note vt-credit" }, cb ? null : typeof mark === "function" ? mark("fish", "") : null,
+      el("b", {}, cb ? "Made by Resemble AI." : "Built with Fish Audio."), " " + (st.licence || "") + " Runs locally."));
   if (!st.available) put(box, el("div", { class: "tip" }, el("b", {}, "Not available here. "), st.why || ""));
-  const text = el("textarea", { style: "min-height:130px", disabled: !st.available, placeholder: "What is said. <|speaker:0|> … <|speaker:15|> switch voices; [whispering], [sighs], [laughs] or a description in brackets steer the delivery." });
+  const text = el("textarea", { style: "min-height:130px", disabled: !st.available, placeholder: cb
+    ? "What is said. Chatterbox Turbo speaks English with one voice per take; [laugh], [chuckle] and [cough] add sounds."
+    : "What is said. <|speaker:0|> … <|speaker:15|> switch voices; [whispering], [sighs], [laughs] or a description in brackets steer the delivery." });
   bind(VO, "text", text);
   const num = (key, attrs) => bind(VO, key, el("input", { type: "number", disabled: !st.available, ...attrs }));
   put(box, el("div", { class: "group", "data-clear": "voice" }, el("h3", {}, "What is said"), text,
-    el("div", { class: "note" }, "Speaker tags ", el("code", {}, "<|speaker:0|>"), " to ", el("code", {}, "<|speaker:15|>"), " switch voices (text without one is speaker 0). Directions in brackets steer the delivery: ", el("code", {}, "[whispering]"), ", ", el("code", {}, "[sighs]"), ", ", el("code", {}, "[laughs]"),
-      ", or a description of the voice. Long text is split at sentence ends and keeps one voice. ", el("a", { href: "#", onclick: e => { e.preventDefault(); VO.text = VO_EXAMPLE; render(); } }, "Two-speaker example")),
+    cb ? el("div", { class: "note" }, "One speaker per take. Use a reference recording to keep a chosen voice consistent. Short sound tags such as [laugh] and [chuckle] are supported.")
+      : el("div", { class: "note" }, "Speaker tags ", el("code", {}, "<|speaker:0|>"), " to ", el("code", {}, "<|speaker:15|>"), " switch voices (text without one is speaker 0). Directions in brackets steer the delivery: ", el("code", {}, "[whispering]"), ", ", el("code", {}, "[sighs]"), ", ", el("code", {}, "[laughs]"),
+        ", or a description of the voice. Long text is split at sentence ends and keeps one voice. ", el("a", { href: "#", onclick: e => { e.preventDefault(); VO.text = VO_EXAMPLE; render(); } }, "Two-speaker example")),
     el("div", { class: "row", style: "margin-top:8px" }, el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Seed"), num("seed", { min: 0, step: 1 })),
-      el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 1.0" }, "Temperature"), num("temperature", { min: 0.1, max: 2, step: 0.05 })),
-      el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 0.9" }, "Top-p"), num("top_p", { min: 0.1, max: 1, step: 0.05 })),
-      el("div", { class: "fit", style: "width:120px" }, el("label", { title: "Fish's default 30" }, "Top-k"), num("top_k", { min: 1, max: 200, step: 1 })),
-      el("button", { class: "small fit", disabled: !st.available, title: "Fish's sampling: temperature 1.0, top-p 0.9, top-k 30", onclick: () => { Object.assign(VO, { temperature: 1.0, top_p: 0.9, top_k: 30 }); render(); } }, "Fish defaults"), ...clearButton("voice"))),
+      el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Temperature"), num("temperature", { min: 0.1, max: 2, step: 0.05 })),
+      el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Top-p"), num("top_p", { min: 0.1, max: 1, step: 0.05 })),
+      el("div", { class: "fit", style: "width:120px" }, el("label", {}, "Top-k"), num("top_k", { min: 1, max: cb ? 2000 : 200, step: 1 })),
+      el("button", { class: "small fit", disabled: !st.available, onclick: () => { Object.assign(VO, st.defaults); render(); } }, cb ? "Chatterbox defaults" : "Fish defaults"), ...clearButton("voice"))),
     voReference());
   put(box, el("div", { class: "row", style: "margin-top:16px;align-items:center" }, el("div", { class: "fit" }, el("button", { class: "hot", disabled: !st.available || voActive() || VO.busy || (VO.ref && !VO.consent), onclick: voRender }, VO.busy || voActive() ? "Rendering…" : "Render the take")),
     el("div", { class: "note", style: "margin:0" }, st.available ? voSpeed(st) : "")));
@@ -108,6 +121,8 @@ function viewVoice() {
    ahead of its sample line; the take is kept on the sheet (sheet.drama) and, ticked, goes into shots that open on cast
    stills as that speaker's reference audio (slate.py, cast_voices). */
 function slCastVoice(sheet) {
+  if (S.voice && S.voice.backend === "chatterbox") return el("div", { class: "group" }, el("h3", {}, "Cast voice"),
+    el("div", { class: "note" }, "Chatterbox Turbo needs a reference recording to cast a specific voice. Make a take in Voice, then use it as a Ref2VA reference."));
   const d = sheet.drama || null, job = d && d.job && jobs.find(j => j.id === d.job), active = job && ["queued", "running"].includes(job.status);
   if (d && d.job && job && job.status === "done" && job.voice) { sheet.drama = { path: job.voice.path, seconds: job.voice.duration, text: job.voice.text, seed: job.voice.seed, take: job.voice.id, asr: job.voice.asr ? job.voice.asr.score : null, use: d.use !== false }; slSave(); }
   const now = sheet.drama && sheet.drama.path ? sheet.drama : (sheet.drama && sheet.drama.was) || null, on = voOn(), long = now && now.seconds > 15.05;

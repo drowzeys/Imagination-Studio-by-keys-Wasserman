@@ -283,8 +283,7 @@ def test_the_estimate_of_a_small_card_says_the_clip_is_tried(monkeypatch, tmp_pa
 
 def test_a_small_card_offers_the_other_builds_of_the_video_model(monkeypatch, tmp_path):
     """Another build of FastH3 or of Ref2VA in the diffusion_models folders (a 4-bit one, a hybrid) is offered by name
-    where the guard warns, for the kind of clip its folder says; a strict guard (a DGX Spark) offers none, since its
-    estimates are the regular files' measurements."""
+    for the kind of clip its folder says. A strict guard still checks the job's memory when the model is selected."""
 
     from fastapi import HTTPException
 
@@ -309,4 +308,4 @@ def test_a_small_card_offers_the_other_builds_of_the_video_model(monkeypatch, tm
         with pytest.raises(HTTPException):
             server.own_transformer(bad)
     monkeypatch.setenv("STUDIO_MEMORY_GUARD", "strict")
-    assert server.transformers() == {}
+    assert server.transformers() == {"fasth3_omniref_int8.safetensors": "frames", w4a8: "references"}

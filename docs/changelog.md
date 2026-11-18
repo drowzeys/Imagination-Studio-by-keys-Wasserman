@@ -6,6 +6,20 @@ Historical release notes, retained as written for provenance. Old install comman
 
 ## Unreleased
 
+**Chatterbox Turbo is an optional local Voice engine for smaller NVIDIA cards.** `bash scripts/setup-chatterbox.sh`
+installs it in its own environment and downloads Resemble AI's MIT-licensed weights. On a Linux Studio with under
+50 GB of RAM, Voice uses it after a restart. Takes run one at a time in the Studio queue, one English speaker per
+take, and can clone from a consenting speaker's recording longer than five seconds. The Studio keeps a 12 GB
+admission budget until a peak is measured on this card.
+
+**Fix faces, a Library action on a clip (Linux and DGX Spark).** The face pass of the "MiniMax H3 R2V perfect face
+refine" workflow: Carasibana's H3 FaceRefine tracks and crops the face, SAM 3.1 and drozbay's MaskVidExperiments mask
+it on the latent grid, MiniMax H3 Ref2VA redraws it from a face picture at half strength, ylchen333's VOSR 2.0 nodes
+restore the crops, and it is stitched back. `spark/setup-workflows.sh` adds the three packs at pinned commits, the face
+detector and VOSR 2.0 (7 GB, checked by SHA-256), and ultralytics with headless OpenCV in `$PREFIX/face-site`, which
+only the Studio's ComfyUI reads. One run measured: 411 s for 5 s at 864x480 on a 16 GB card; see the user guide for
+what it did and did not fix.
+
 **Character Swap no longer refuses one continuous shot for a "cut" that is a fast gesture.** A person talking to a
 locked camera with their hands near the lens (measured on two filmed 720x1280 clips) gave 39 frames that `app/shot.py`'s
 two figures call a cut, and the swap refused the part ("the part has a cut 10.83 s in"). A cut changes most of the

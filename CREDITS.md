@@ -110,6 +110,14 @@ repository at a pinned commit when the Studio is installed; none of their code i
 - **Remove a person:** the Person Remover LoRA and H3 Relay (the windowed removal with its green mask and its relay
   of history frames, GPL-3.0) by Akatz Labs (akatz-ai); the person is found and followed by SAM 3.1 from Meta, in
   the build Comfy-Org repackaged for ComfyUI, under the SAM License.
+- **Fix faces:** the graph is the "MiniMax H3 R2V perfect face refine" ComfyUI workflow (2026-11-18; its maker is not
+  named in the file) from its face pass on. The face is tracked, cropped and stitched back by **Carasibana**'s
+  **ComfyUI-H3-FaceRefine** (MIT), modelled on ltdrdata's Impact Pack FaceDetailer; the face's mask is cleaned and
+  brought to MiniMax H3's latent grid by **drozbay**'s **MaskVidExperiments** (GPL-3.0); the redrawn crops are
+  restored by **VOSR 2.0** from **CSWRY** (weights Apache-2.0) through **ylchen333**'s
+  **ComfyUI-VOSR2** nodes (Apache-2.0). The face is found by **Bingsu**'s YOLOv8 face detector (`face_yolov8n.pt`
+  from `Bingsu/adetailer`, Apache-2.0 card) run by **Ultralytics** (AGPL-3.0, installed beside ComfyUI, not shipped
+  here) and masked by SAM 3.1 from Meta; the redraw is **MiniMax H3** Ref2VA.
 - **Character Swap:** the idea and the app it comes from are Comfy Org's **Openjutsu** (comfy-openjutsu, MIT), built
   on **Akatz Labs**' (akatz-ai) H3 Character Swap workflow (MIT) and their **Character Swap LoRA** version 1.5 (MiniMax
   H3 Community License). It runs with **LightX2V**'s 8-step Turbo LoRA for MiniMax H3 (Apache-2.0), **SAM 3.1** from
@@ -206,6 +214,13 @@ Spark, TensorFold/MLX on the Mac) follow Fish Audio's and the SGLang-Omni team's
 stall: silence or a flat hum after the first sentence or two) is drawn again with the next seed; the check follows the
 opt-in silence guard of TensorFold's Drama serve (`--silence-mid-s`, `--silence-redraws`) by **Ash Hart** and the
 TensorFold contributors.
+
+## The smaller voice model: Resemble AI
+
+**Resemble AI** made **Chatterbox Turbo**, a local English text-to-speech and voice-cloning model. Its code and
+weights are MIT licensed. The Studio's optional small-card route loads it for one queued take at a time, then gives
+the GPU back. The Studio downloads the model from `ResembleAI/chatterbox-turbo` and installs `chatterbox-tts` in a
+separate environment; it does not bundle either one.
 
 ## The music model: MiniMax (MiniMax-Music3)
 

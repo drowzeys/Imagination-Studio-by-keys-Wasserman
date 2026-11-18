@@ -206,14 +206,19 @@ def from_colons(text: str) -> list[dict]:
 
 def from_prose(text: str) -> list[dict]:
     lines = []
-    for sentence in re.split(r"(?<=[.!?”\"])\s+(?=[A-Z“\"])|\n+", text):
-        for m in QUOTED.finditer(sentence):
-            near = sentence[max(0, m.start() - 120):m.start()] + " " + sentence[m.end():m.end() + 60]
-            verb = VERB.search(near)
-            if not verb:
-                continue
-            voice = list(IN_VOICE.finditer(sentence[:m.start()])) or list(IN_VOICE.finditer(sentence[m.end():]))
-            lines.append(row(m.group("text"), voice[-1].group("voice") if voice else "", sung=verb.group(1).lower() in SUNG))
+    # Inspect each complete quoted span before splitting on sentence punctuation: spoken lines often contain
+    # several sentences, and splitting first leaves the opening quote unmatched (e.g. “Hello! How are you?”).
+    for m in QUOTED.finditer(text):
+        before = text[max(0, m.start() - 400):m.start()]
+        before = re.split(r"(?<=[.!?])\s+|\n+", before)[-1]
+        after = text[m.end():m.end() + 200]
+        after = re.split(r"(?<=[.!?])\s+|\n+", after)[0]
+        near = before + " " + after
+        verb = VERB.search(near)
+        if not verb:
+            continue
+        voice = list(IN_VOICE.finditer(before)) or list(IN_VOICE.finditer(after))
+        lines.append(row(m.group("text"), voice[-1].group("voice") if voice else "", sung=verb.group(1).lower() in SUNG))
     return lines
 
 

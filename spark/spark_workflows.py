@@ -4,6 +4,7 @@
     spark_workflows.py upscale    --video clip.mp4 --lora video-upscaler.safetensors -o bigger.mp4
     spark_workflows.py mask       --video clip.mp4 --person "man in a gray shirt" -o folder/name
     spark_workflows.py remove     --video clip.mp4 --person "man in a gray shirt" --lora person-remover.safetensors -o clean.mp4
+    spark_workflows.py facefix    --video clip.mp4 --face face.png -o fixed.mp4
 
 turnaround  five views of one subject from one picture: MATLOWAI's contact-sheet nodes pack five still pictures where
             a five-step video latent would go, and decode each on its own. Writes name_sheet.png and name_view1..5.png.
@@ -15,6 +16,9 @@ mask        the person found by a few words and tracked through the clip (SAM 3.
 remove      the person taken out and the background made again: Akatz Labs' Person Remover LoRA through their H3
             Relay node, in overlapping windows of 22 frames. --clean-frame is a first frame without the person; with
             none given, the plate is built as `mask` builds it and made sharp by one window of the remover itself.
+facefix     a clip's face drawn again close up: Carasibana's H3 FaceRefine crops it, SAM 3.1 and drozbay's
+            MaskVidExperiments mask it, MiniMax H3 Ref2VA redraws it from a face picture at half strength, ylchen333's
+            VOSR 2.0 nodes restore the crops when memory permits, and the face is stitched back. The clip's own sound is kept.
 
 All three render with MiniMax H3 Ref2VA in bf16: the LoRAs are merged at run time, which spoils the 8-bit file.
 """
@@ -51,7 +55,16 @@ WINDOWS = tuple(range(22, 363, 17))
 TAIL = 8
 NODES = {"turnaround": ("H3ContactSheet", "H3ContactSheetDecode"), "upscale": ("H3VideoUpsampler",),
          "mask": ("SAM3_Detect", "SAM3_VideoTrack", "SAM3_TrackToMask", "H3RelayGreenMask"),
-         "remove": ("SAM3_Detect", "SAM3_VideoTrack", "SAM3_TrackToMask", "H3RelayGreenMask", "H3RelayPersonRemover")}
+         "remove": ("SAM3_Detect", "SAM3_VideoTrack", "SAM3_TrackToMask", "H3RelayGreenMask", "H3RelayPersonRemover"),
+         "facefix": ("H3FaceTrackCrop", "H3FaceStitch", "MVEx_MaskCleanup", "MVEx_MaskToLatentSpace", "VOSR2ModelLoader",
+                     "VOSR2Upscale", "SAM3_VideoTrack", "SAM3_TrackToMask", "DifferentialDiffusion", "LTXVConcatAVLatent",
+                     "LTXVSeparateAVLatent",
+                     "MiniMaxH3ReferenceToVideo")}
+# Fix faces: the face detector H3 FaceRefine tracks with, and the VOSR 2.0 bundle its loader reads (setup-workflows.sh)
+FACE_DETECTOR = "face_yolov8n.pt"
+VOSR2_FILES = ("args.json", "checkpoints/ema_model.safetensors", "dinov2_vitl14.safetensors",
+               "Qwen-Image-vae-2d/config.json", "Qwen-Image-vae-2d/diffusion_pytorch_model.safetensors")
+CANVASES = (512, 640, 768)        # the face crop's side H3 draws again at: 768 is the author's, 512 costs 0.44 of it
 
 
 def say(text: str) -> None:
@@ -141,7 +154,7 @@ def lora_name(spec: str) -> tuple[str, float]:
     return link.name, strength
 
 
-async def follow(workflow: dict, sampler: str, parts: int) -> str:
+async def follow(workflow: dict, sampler: str | list, parts: int) -> str:
     """Queue a workflow and print the progress of `sampler` as `[tensorfold] step i/n` until it ends; returns its id.
 
     A node that expands into a graph of its own (the remover: one sampler a window) reports its inner nodes as
@@ -165,7 +178,14 @@ async def follow(workflow: dict, sampler: str, parts: int) -> str:
                 if data.get("prompt_id") not in (None, prompt_id):
                     continue
                 node = str(data.get("node"))
-                if event["type"] == "progress" and (node == sampler or node.startswith(sampler + ".")):
+                if event["type"] == "progress" and isinstance(sampler, list) and node in sampler:
+                    # several samplers one after another (Fix faces: one a person): their passes counted as one run
+                    at, of = int(data["value"]), int(data["max"])
+                    at, of = sampler.index(node) * of + at, len(sampler) * of
+                    if (at, of) != last:
+                        last = (at, of)
+                        say(f"step {at}/{of}")
+                elif event["type"] == "progress" and isinstance(sampler, str) and (node == sampler or node.startswith(sampler + ".")):
                     at, of = int(data["value"]), int(data["max"])
                     if parts > 1 and node != sampler:
                         if of < 2:
@@ -183,7 +203,7 @@ async def follow(workflow: dict, sampler: str, parts: int) -> str:
     return prompt_id
 
 
-def execute(workflow: dict, sampler: str, parts: int = 1) -> tuple[dict, float]:
+def execute(workflow: dict, sampler: str | list, parts: int = 1) -> tuple[dict, float]:
     """Run a workflow; returns ({node id: [saved file records]}, seconds)."""
 
     started = time.time()
@@ -233,12 +253,15 @@ def text_encoder() -> str:
     return next((one for one in (other, f"H3/{other}") if other != "regular" and one in have), sg.H3_TEXT)
 
 
-def loaders(w: dict, vae: str | None = None) -> None:
-    w["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": ref2va() or sg.REF2VA["bf16"], "weight_dtype": "default"}}
+def loaders(w: dict, vae: str | None = None, lora: bool = True, transformer: str = "") -> None:
+    unet_name = transformer or ref2va() or sg.REF2VA["bf16"]
+    if transformer and transformer not in listed("UNETLoader", "unet_name"):
+        sys.exit(f"ComfyUI does not list the video model {transformer}")
+    w["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": unet_name, "weight_dtype": "default"}}
     # what the log says is the file that loads: a LoRA merged at run time into an 8-bit (int8_convrot) file is known to
     # spoil the picture without any error (sg.REF2VA's note), so a run on that fallback says so
     unet = w["1"]["inputs"]["unet_name"]
-    if unet != sg.REF2VA["bf16"]:
+    if unet != sg.REF2VA["bf16"] and lora:   # without a LoRA (Fix faces may run without one) the 8-bit file is the plain model
         # measured once on an RTX 5060 Ti (2026-11-17): the Turnaround LoRA on the int8 file turned a full-body still
         # from front to profile, the faces soft at 512 a view; one run, so the note stays a note
         say(f"note: the bf16 Ref2VA file ({sg.REF2VA['bf16']}) is not here, so this runs on {unet}: a LoRA merged at "
@@ -856,6 +879,322 @@ def remove(args) -> None:
                     "forwards": args.steps, "total_s": round(seconds, 1), **size, **report}))
 
 
+# ----------------------------------------------------------------------------------------------------------- facefix
+def face_source(path: str, folder: Path) -> tuple[Path, dict]:
+    """The clip as the face pass takes it: 24 frames a second, a length MiniMax H3 draws (17n + 5, at most 362 frames)
+    and a sound track (the audio latent is kept as it is, so a clip without sound is given silence). A clip that is all
+    of that already is used as it is."""
+
+    probe = sg.probe_media(path)
+    if probe["video"] is None:
+        sys.exit(f"{path} has no picture")
+    counted = subprocess.run([sg._tool("ffprobe"), "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                              "stream=nb_read_frames,r_frame_rate", "-of", "json", path], capture_output=True, text=True)
+    stream = (json.loads(counted.stdout or "{}").get("streams") or [{}])[0]
+    frames, rate = int(stream.get("nb_read_frames") or 0), str(stream.get("r_frame_rate") or "0/1")
+    num, _, den = rate.partition("/")
+    fps = float(num) / float(den or 1) if num.replace(".", "").isdigit() and float(den or 1) else 0.0
+    if abs(fps - sg.FPS) > 0.01:
+        frames = int(frames / fps * sg.FPS) if fps else frames
+    usable = [n for n in WINDOWS if n <= frames]
+    if not usable:
+        sys.exit(f"the clip is {frames} frames at 24 a second: MiniMax H3 draws at least 22")
+    length = usable[-1]
+    if length == frames and abs(fps - sg.FPS) <= 0.01 and probe["audio"]:
+        return Path(path), {"width": probe["video"][0], "height": probe["video"][1], "frames": frames, "trimmed": 0}
+    target = folder / "source.mp4"
+    command = [sg._tool("ffmpeg"), "-v", "error", "-y", "-i", path]
+    if not probe["audio"]:
+        command += ["-f", "lavfi", "-i", f"anullsrc=r={sg.AUDIO_RATE}:cl=mono"]
+    command += ["-map", "0:v:0", "-map", "0:a:0" if probe["audio"] else "1:a:0", "-vf", f"fps={sg.FPS},trim=end_frame={length},setpts=PTS-STARTPTS",
+                "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", sg.SOUND_BITRATE,
+                "-t", f"{length / sg.FPS:.6f}", str(target)]
+    done = subprocess.run(command, capture_output=True, text=True)
+    if done.returncode:
+        sys.exit(f"the clip could not be prepared: {done.stderr.strip()[-300:]}")
+    return target, {"width": probe["video"][0], "height": probe["video"][1], "frames": length, "trimmed": frames - length,
+                    "silence_added": not probe["audio"]}
+
+
+# which face a pass follows: H3 FaceRefine's own select modes, chosen once per shot where the face first appears
+FACE_PICKS = ("largest_face", "smallest_face", "left_most", "right_most", "centre_most")
+FACES = 4                         # people in one Fix faces job: one pass each, chained
+
+
+def face_pass(w: dict, k: int, base: list, face: str, pick: str, args, model: list, restore: bool = True) -> list:
+    """One person's pass, nodes k*100 + n: their face tracked on `base` (the clip, or the previous person's result),
+    masked, redrawn from their picture, restored and stitched back. Returns the stitched frames. Shared nodes: the
+    loaders (1 to 5), the clip (7), the sound's latent (22), SAM 3.1 (12, 13), the model (25), the sampler and its
+    schedule (27, 28) and VOSR 2.0 (32)."""
+
+    n = lambda i: str(k * 100 + i)
+    w.update({
+        # the author's tracking settings; identity_track off: it needs insightface, which is not installed (the face is
+        # chosen once per shot by `pick`, then followed by continuity)
+        n(8): {"class_type": "H3FaceTrackCrop", "inputs": {
+            "images": base, "detector": FACE_DETECTOR, "confidence": 0.35, "crop_factor": args.crop_factor,
+            "canvas_width": args.canvas, "canvas_height": args.canvas, "canvas_mode": "manual", "smooth_window": 21,
+            "size_smooth_window": 51, "smooth_method": "gaussian", "size_mode": "per_frame", "identity_track": False,
+            "identity_threshold": 0.28, "select": pick, "fallback_detector": "none", "fallback_head_frac": 0.5,
+            "select_index": 0, "identity_model": "insightface", "cut_detection": "none", "cut_threshold": 3.0,
+            "absent_shots": "off", "X": 0, "Y": 0, "frame_index": 0}},
+        # the face picture, at about 2 megapixels and sides in multiples of 32
+        n(9): {"class_type": "LoadImage", "inputs": {"image": sg.upload(face)}},
+        n(10): {"class_type": "ResizeImageMaskNode", "inputs": {"input": [n(9), 0], "resize_type": "scale total pixels",
+                                                                "resize_type.megapixels": 2.0, "scale_method": "area"}},
+        n(11): {"class_type": "ResizeImageMaskNode", "inputs": {"input": [n(10), 0], "resize_type": "scale to multiple",
+                                                                "resize_type.multiple": 32, "scale_method": "area"}},
+        # the face in the crops, by SAM 3.1, then cleaned and brought to the latent's grid (the author's values)
+        n(14): {"class_type": "SAM3_VideoTrack", "inputs": {"images": [n(8), 0], "model": ["12", 0], "conditioning": ["13", 0],
+                                                          "detection_threshold": 0.5, "max_objects": 1, "detect_interval": 1}},
+        n(15): {"class_type": "SAM3_TrackToMask", "inputs": {"track_data": [n(14), 0], "object_indices": "0"}},
+        n(16): {"class_type": "MVEx_MaskCleanup", "inputs": {"masks": [n(15), 0], "threshold": 0.3, "method": "shrink_grow",
+                                                           "method.shrink": 12, "method.min_frames": 4, "edge_grow": 16}},
+        n(17): {"class_type": "MVEx_MaskToLatentSpace", "inputs": {"masks": [n(16), 0], "vae": ["4", 0], "compression": "auto",
+                                                                 "spatial_method": "max", "temporal_method": "max",
+                                                                 "grow_spatial": 36, "grow_temporal": 1, "grow_temp_mode": "both"}},
+        # the crops as the latent to start from, drawn again only inside the mask; the sound's latent is kept whole
+        n(18): {"class_type": "VAEEncode", "inputs": {"pixels": [n(8), 0], "vae": ["4", 0]}},
+        n(19): {"class_type": "SetLatentNoiseMask", "inputs": {"samples": [n(18), 0], "mask": [n(17), 0]}},
+        n(23): {"class_type": "LTXVConcatAVLatent", "inputs": {"video_latent": [n(19), 0], "audio_latent": ["22", 0]}},
+        n(24): {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": {
+            "clip": ["3", 0], "vae": ["4", 0], "audio_vae": ["5", 0], "ref_images.ref_image_0": [n(11), 0], "prompt": args.prompt,
+            "width": [n(8), 4], "height": [n(8), 5], "length": [n(8), 6], "ref_image_size": "match"}},
+        n(26): {"class_type": "RandomNoise", "inputs": {"noise_seed": args.seed + k - 1}},
+        n(29): {"class_type": "BasicGuider", "inputs": {"model": model, "conditioning": [n(24), 0]}},
+        n(30): {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": [n(26), 0], "guider": [n(29), 0], "sampler": ["27", 0],
+                                                                "sigmas": ["28", 0], "latent_image": [n(23), 0]}},
+        n(31): {"class_type": "VAEDecode", "inputs": {"samples": [n(30), 0], "vae": ["4", 0]}},
+        n(34): {"class_type": "H3FaceStitch", "inputs": {"base_images": base, "refined_crops": [n(33), 0] if restore else [n(31), 0], "transform": [n(8), 1],
+                                                       "masks": [n(15), 0], "paste_region": "face_only", "mask_dilation": 24,
+                                                       "feather": 24, "colour_match": 1.0, "blend": 1.0,
+                                                       "undetected_frames": "fade_out", "feather_scales_with_crop": False}},
+    })
+    if restore:  # VOSR needs another 3 GB beside H3; on a small machine stitch the H3 crop directly
+        w[n(33)] = {"class_type": "VOSR2Upscale", "inputs": {"model": ["32", 0], "image": [n(31), 0], "upscale": 1, "seed": args.seed,
+                                                     "color_alignment": "wavelet", "tile_size": 512, "tile_overlap": 32,
+                                                     "vae_tile_size": 1024, "vae_tile_overlap": 32}}
+    if args.keep:  # this person's crops before and after, side by side, to see what the pass did to the face
+        w[n(37)] = {"class_type": "ImageStitch", "inputs": {"image1": [n(8), 0], "image2": [n(33), 0] if restore else [n(31), 0], "direction": "right",
+                                                            "match_image_size": True, "spacing_width": 0, "spacing_color": "white"}}
+        w[n(38)] = {"class_type": "CreateVideo", "inputs": {"images": [n(37), 0], "fps": ["7", 2]}}
+        w[n(39)] = {"class_type": "SaveVideo", "inputs": {"video": [n(38), 0], "filename_prefix": f"studio/facecrops{k}_{uuid.uuid4().hex[:8]}",
+                                                          "format": "auto", "codec": "auto"}}
+    return [n(34), 0]
+
+
+def facefix_staged(args, source: Path, size: dict, faces: list, picks: list, lora, target: Path,
+                   scratch: Path, restore: bool) -> None:
+    """On a small card, save each face's latent before its video decoder loads. A fresh ComfyUI then
+    decodes and stitches it; another fresh server starts the next face. H3 and the decoder never share
+    the memory peak that stopped a 243-frame, two-face job on a 32 GB machine."""
+
+    current, total, kept = source, 0.0, []
+    for k, (face, pick) in enumerate(zip(faces, picks), 1):
+        say(f"face {k}/{len(faces)}: drawing the face into a latent")
+        w = {}
+        loaders(w, lora=bool(lora), transformer=args.transformer)
+        say(f"video model: {w['1']['inputs']['unet_name']}")
+        model = ["1", 0]
+        if lora:
+            w["2"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model, "lora_name": lora[0], "strength_model": lora[1]}}
+            model = ["2", 0]
+        w.update({
+            "6": {"class_type": "LoadVideo", "inputs": {"file": sg.upload(str(current))}},
+            "7": {"class_type": "GetVideoComponents", "inputs": {"video": ["6", 0]}},
+            "12": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": SAM}},
+            "13": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["12", 1], "text": "face"}},
+            "20": {"class_type": "VAEEncodeAudio", "inputs": {"audio": ["7", 1], "vae": ["5", 0]}},
+            "21": {"class_type": "SolidMask", "inputs": {"value": 0.0, "width": 32, "height": 32}},
+            "22": {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["20", 0], "mask": ["21", 0]}},
+            "25": {"class_type": "DifferentialDiffusion", "inputs": {"model": model, "strength": 1.0}},
+            "27": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+            "28": {"class_type": "BasicScheduler", "inputs": {"model": ["25", 0], "scheduler": "beta",
+                                                         "steps": args.steps, "denoise": args.denoise}},
+        })
+        face_pass(w, 1, ["7", 0], face, pick, args, ["25", 0], restore=False)
+        stitch = w["134"]
+        for node in ("131", "134", "137", "138", "139"):
+            w.pop(node, None)  # only the latent is saved in this server; decoding is the next stage
+        # The sampler returns a NestedTensor of (video, audio). ComfyUI's SaveLatent accepts one plain tensor;
+        # the original clip supplies the audio again when the decoded face is stitched into it.
+        w["142"] = {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": ["130", 0]}}
+        w["140"] = {"class_type": "SaveLatent", "inputs": {"samples": ["142", 0],
+                                                        "filename_prefix": f"studio/face_latent_{uuid.uuid4().hex[:8]}"}}
+        saved, seconds = execute(w, "130")
+        total += seconds
+        if not saved.get("140"):
+            sys.exit("ComfyUI finished without saving the face latent")
+        item = saved["140"][0]
+        latent_output = sg.PREFIX / "ComfyUI" / "output" / item.get("subfolder", "") / item["filename"]
+        latent_name = f"studio_face_{uuid.uuid4().hex[:10]}.latent"
+        latent_input = sg.PREFIX / "ComfyUI" / "input" / latent_name
+        shutil.copy2(latent_output, latent_input)
+        try:
+            sg.fresh_server("release H3 before decoding the refined face")
+            server("facefix")
+            say(f"face {k}/{len(faces)}: decoding and stitching on a fresh server")
+            stage = {node: w[node] for node in ("4", "12", "13", "108", "114", "115")}
+            stage["134"] = stitch
+            stage["6"] = {"class_type": "LoadVideo", "inputs": {"file": sg.upload(str(current))}}
+            stage["7"] = {"class_type": "GetVideoComponents", "inputs": {"video": ["6", 0]}}
+            stage["141"] = {"class_type": "LoadLatent", "inputs": {"latent": latent_name}}
+            stage["131"] = {"class_type": "VAEDecode", "inputs": {"samples": ["141", 0], "vae": ["4", 0]}}
+            if restore:
+                stage["32"] = {"class_type": "VOSR2ModelLoader", "inputs": {"model": "VOSR2", "dtype": "default"}}
+                stage["133"] = {"class_type": "VOSR2Upscale", "inputs": {"model": ["32", 0], "image": ["131", 0],
+                                                              "upscale": 1, "seed": args.seed, "color_alignment": "wavelet",
+                                                              "tile_size": 512, "tile_overlap": 32,
+                                                              "vae_tile_size": 1024, "vae_tile_overlap": 32}}
+                stage["134"]["inputs"]["refined_crops"] = ["133", 0]
+            if args.keep:
+                stage["137"] = {"class_type": "ImageStitch", "inputs": {"image1": ["108", 0],
+                    "image2": ["133", 0] if restore else ["131", 0], "direction": "right",
+                    "match_image_size": True, "spacing_width": 0, "spacing_color": "white"}}
+                stage["138"] = {"class_type": "CreateVideo", "inputs": {"images": ["137", 0], "fps": ["7", 2]}}
+                stage["139"] = {"class_type": "SaveVideo", "inputs": {"video": ["138", 0],
+                    "filename_prefix": f"studio/facecrops{k}_{uuid.uuid4().hex[:8]}", "format": "auto", "codec": "auto"}}
+            stage["35"] = {"class_type": "CreateVideo", "inputs": {"images": ["134", 0], "audio": ["7", 1], "fps": ["7", 2]}}
+            stage["36"] = {"class_type": "SaveVideo", "inputs": {"video": ["35", 0],
+                "filename_prefix": f"studio/face_{uuid.uuid4().hex[:8]}", "format": "auto", "codec": "auto"}}
+            saved, seconds = execute(stage, "134")
+            total += seconds
+            if not saved.get("36"):
+                sys.exit("ComfyUI finished without writing the stitched face clip")
+            current = target if k == len(faces) else scratch / f"face{k}.mp4"
+            take(saved["36"][0], current)
+            if args.keep and saved.get("139"):
+                keep = Path(args.keep)
+                keep.parent.mkdir(parents=True, exist_ok=True)
+                name = keep.parent / (f"{keep.name}_crops.mp4" if k == 1 else f"{keep.name}{k}_crops.mp4")
+                take(saved["139"][0], name)
+                kept.append(str(name))
+        finally:
+            latent_input.unlink(missing_ok=True)
+            latent_output.unlink(missing_ok=True)
+        if k < len(faces):
+            sg.fresh_server("release the decoder before drawing the next face")
+            server("facefix")
+    after = sg.probe_media(str(target))
+    say(json.dumps({"output": str(target), "engine": sg.ENGINE, "action": "facefix", "canvas": args.canvas,
+                    "forwards": args.steps, "denoise": args.denoise, "size": list(after["video"] or ()),
+                    "total_s": round(total, 1), **size, "faces": len(faces), "select": picks,
+                    "restoration": "vosr2" if restore else "h3", "kept": kept}))
+
+
+def facefix(args) -> None:
+    """Carasibana's H3 FaceRefine pass on a finished clip, as the 2026-11-18 "perfect face refine" workflow wires it:
+    the face is found and tracked on every frame and cropped to a square canvas so it fills it (H3FaceTrackCrop); SAM 3.1
+    finds the face in the crops, drozbay's MaskVidExperiments cleans that mask and brings it to the latent's grid; the
+    crops are drawn again by MiniMax H3 Ref2VA from the face picture (<Picture 1>), at half strength, only inside the
+    mask, the sound's latent kept untouched; VOSR 2.0 restores the refined crops at their own size, and H3FaceStitch
+    pastes the face back into the clip with a feathered, colour-matched edge. The clip's own sound is kept.
+    Several people: one pass each, with each face stitched into the clip before the next pass. On a small machine,
+    sampling and decoding use separate ComfyUI servers so their model memory does not overlap."""
+
+    faces, picks = args.face, args.select or []
+    if not 1 <= len(faces) <= FACES:
+        sys.exit(f"--face is given once a person, 1 to {FACES} times")
+    picks = picks + [None] * (len(faces) - len(picks))
+    if len(picks) != len(faces):
+        sys.exit("--select is given at most once a face")
+    # unnamed: one face is the largest; several are taken left to right (two: left_most then right_most)
+    default = ["largest_face"] if len(faces) == 1 else ["left_most", "right_most", "centre_most", "largest_face"]
+    picks = [one or default[i] for i, one in enumerate(picks)]
+    if any(one not in FACE_PICKS for one in picks):
+        sys.exit(f"--select is one of {', '.join(FACE_PICKS)}")
+    if len(set(picks)) != len(picks):
+        sys.exit("each face needs its own --select, or two passes follow the same person")
+    if args.canvas not in CANVASES:
+        sys.exit(f"--canvas is one of {', '.join(map(str, CANVASES))}")
+    if not 0.1 <= args.denoise <= 0.9 or not 2 <= args.steps <= 40:
+        sys.exit("--denoise is between 0.1 and 0.9 and --steps between 2 and 40")
+    for face in faces:
+        if not Path(face).is_file():
+            sys.exit(f"no picture at {face}")
+    server("facefix")
+    if SAM not in listed("CheckpointLoaderSimple", "ckpt_name"):
+        sys.exit(f"{SAM} is not installed: {SETUP}")
+    if FACE_DETECTOR not in listed("H3FaceTrackCrop", "detector"):
+        sys.exit(f"the face detector {FACE_DETECTOR} is not installed: {SETUP}")
+    bundle = sg.PREFIX / "ComfyUI" / "models" / "vosr2" / "VOSR2"
+    if any(not (bundle / part).is_file() for part in VOSR2_FILES):
+        # the loader would fetch 7 GB at run time, inside the render: the setup fetches it, checked, beforehand
+        sys.exit(f"VOSR 2.0 is not installed in {bundle}: {SETUP}")
+    lora = lora_name(args.lora) if args.lora else None
+    target = Path(args.output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix="studio-facefix-") as scratch:
+            source, size = face_source(args.video, Path(scratch))
+            ram_mb = sg.memory_guard.meminfo().get("MemTotal", 0)
+            restore = args.restore == "on" or (args.restore == "auto" and (not ram_mb or ram_mb >= 48 * 1024))
+            if not restore:
+                say("VOSR 2.0 restoration skipped: stitching the H3-refined crops directly"
+                    + (f" ({ram_mb // 1024} GB RAM; automatic mode reserves VOSR for 48 GB or more)" if args.restore == "auto" and ram_mb else ""))
+            if ram_mb and ram_mb < 48 * 1024:
+                say("small-machine route: saving each face latent, then restarting ComfyUI before its decoder loads")
+                facefix_staged(args, source, size, faces, picks, lora, target, Path(scratch), restore)
+                return
+            w = {}
+            loaders(w, lora=bool(lora), transformer=args.transformer)
+            model = ["1", 0]
+            if lora:
+                w["2"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model, "lora_name": lora[0], "strength_model": lora[1]}}
+                model = ["2", 0]
+            w.update({
+                "6": {"class_type": "LoadVideo", "inputs": {"file": sg.upload(str(source))}},
+                "7": {"class_type": "GetVideoComponents", "inputs": {"video": ["6", 0]}},
+                "12": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": SAM}},
+                "13": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["12", 1], "text": "face"}},
+                "20": {"class_type": "VAEEncodeAudio", "inputs": {"audio": ["7", 1], "vae": ["5", 0]}},
+                "21": {"class_type": "SolidMask", "inputs": {"value": 0.0, "width": 32, "height": 32}},
+                "22": {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["20", 0], "mask": ["21", 0]}},
+                "25": {"class_type": "DifferentialDiffusion", "inputs": {"model": model, "strength": 1.0}},
+                "27": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+                # 8 passes over the lower half of the noise, the author's schedule (beta)
+                "28": {"class_type": "BasicScheduler", "inputs": {"model": ["25", 0], "scheduler": "beta", "steps": args.steps,
+                                                                "denoise": args.denoise}},
+            })
+            if restore:
+                w["32"] = {"class_type": "VOSR2ModelLoader", "inputs": {"model": "VOSR2", "dtype": "default"}}
+            frames = ["7", 0]
+            for k, (face, pick) in enumerate(zip(faces, picks), 1):
+                frames = face_pass(w, k, frames, face, pick, args, ["25", 0], restore=restore)
+            w["35"] = {"class_type": "CreateVideo", "inputs": {"images": frames, "audio": ["7", 1], "fps": ["7", 2]}}
+            w["36"] = {"class_type": "SaveVideo", "inputs": {"video": ["35", 0], "filename_prefix": f"studio/face_{uuid.uuid4().hex[:8]}",
+                                                             "format": "auto", "codec": "auto"}}
+            unet = w["1"]["inputs"]["unet_name"]
+            say(f"engine: {sg.ENGINE} (ComfyUI, H3 FaceRefine + MaskVidExperiments" + (" + VOSR 2.0" if restore else "") + f" on MiniMax H3 Ref2VA {unet}"
+                + (f" with {lora[0]} at {lora[1]:g}" if lora else "") + f"), {size['frames']} frames of {size['width']}x{size['height']}, "
+                f"{len(faces)} face{'s' if len(faces) > 1 else ''} ({', '.join(picks)}), crops of {args.canvas}x{args.canvas}, "
+                f"{args.steps} passes at {args.denoise:g}")
+            if size.get("trimmed"):
+                say(f"note: the clip is cut to {size['frames']} frames, the longest length MiniMax H3 draws within it "
+                    f"({size['trimmed']} frame{'s' if size['trimmed'] != 1 else ''} left off the end)")
+            saved, seconds = execute(w, [str(k * 100 + 30) for k in range(1, len(faces) + 1)])
+            if not saved.get("36"):
+                sys.exit("ComfyUI finished without writing the clip")
+            take(saved["36"][0], target)
+            report = {"faces": len(faces), "select": picks, "restoration": "vosr2" if restore else "h3"}
+            if args.keep:
+                keep = Path(args.keep)
+                keep.parent.mkdir(parents=True, exist_ok=True)
+                kept = []
+                for k in range(1, len(faces) + 1):
+                    item = saved.get(str(k * 100 + 39))
+                    if item:
+                        name = keep.parent / (f"{keep.name}_crops.mp4" if k == 1 else f"{keep.name}{k}_crops.mp4")
+                        take(item[0], name)
+                        kept.append(str(name))
+                report["kept"] = kept
+    finally:
+        sg.forget_uploads()
+    after = sg.probe_media(str(target))
+    say(json.dumps({"output": str(target), "engine": sg.ENGINE, "action": "facefix", "canvas": args.canvas, "forwards": args.steps,
+                    "denoise": args.denoise, "size": list(after["video"] or ()), "total_s": round(seconds, 1), **size, **report}))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="action", required=True)
@@ -882,9 +1221,31 @@ def main() -> None:
             m.add_argument("--silent", action="store_true", help="leave the clip's own sound out")
             m.add_argument("--again", type=int, default=3, help="stretches of 22 frames to run a second time where green was left (0: none)")
             m.add_argument("--keep", default="", help="folder/name: keep the green clip and the clean frame beside the result")
+    f = sub.add_parser("facefix")
+    f.add_argument("--video", required=True)
+    f.add_argument("--face", required=True, action="append", help="a clear picture of a face (<Picture 1>); once a person, up to 4")
+    f.add_argument("--select", action="append", choices=FACE_PICKS,
+                   help="which face the --face of the same place follows (default: the largest; several: left to right)")
+    f.add_argument("-o", "--output", required=True)
+    f.add_argument("--canvas", type=int, default=768, help="the face crop's side, 512, 640 or 768 (the author's)")
+    f.add_argument("--crop-factor", type=float, default=2.5, help="the crop's side as a multiple of the face's height (the author's 2.5)")
+    f.add_argument("--steps", type=int, default=8); f.add_argument("--denoise", type=float, default=0.5)
+    f.add_argument("--seed", type=int, default=983546012546031); f.add_argument("--prompt", default="",
+                                                                               help="the author's is empty: the face picture alone guides the pass")
+    f.add_argument("--lora", default="", help="file[:strength], merged into the Ref2VA transformer for the pass")
+    f.add_argument("--transformer", default="", help="another Ref2VA checkpoint listed by ComfyUI")
+    f.add_argument("--restore", choices=("auto", "on", "off"), default="auto", help="VOSR 2.0 restoration: auto reserves it for 48 GB RAM or more")
+    f.add_argument("--keep", default="", help="folder/name: keep the face crops before and after, side by side")
     args = parser.parse_args()
     try:
-        {"turnaround": turnaround, "upscale": upscale, "mask": mask, "remove": remove}[args.action](args)
+        {"turnaround": turnaround, "upscale": upscale, "mask": mask, "remove": remove, "facefix": facefix}[args.action](args)
+    except Exception as error:  # ComfyUI's memory guard stopped the server: show its reason, not urllib's traceback
+        if not isinstance(error, (OSError, ConnectionError)) and type(error).__module__.split(".")[0] != "aiohttp":
+            raise
+        why = sg.stopped()
+        if why and args.action == "facefix" and "memory" in why:
+            why = why.split(". Use a shorter clip", 1)[0] + ". Try a 512 face crop, one face at a time, or H3 redraw only."
+        sys.exit(why or f"ComfyUI stopped answering during the render: {error} (log: {sg.side('log')})")
     finally:
         sg.mac_release()
 

@@ -1,6 +1,6 @@
 // Create a RefMod (app/refmod.py, spark/spark_refmod.py): pictures and clips of one subject saved as a MiniMax H3
 // reference in refmods/. Opened from "RefMod" under a picture or a clip, or "RefMod from selected" over the Library.
-const REFMOD = { state: null, f: { files: [], starts: {}, name: "", concept: "identity", mode: "full", seconds: 5, description: "", replace: false } };
+const REFMOD = { state: null, library: null, picker: false, f: { files: [], starts: {}, name: "", concept: "identity", mode: "full", seconds: 5, description: "", replace: false } };
 const RFM_CONCEPTS = { identity: ["A person or character", "a face, hair and outfit"], clothing: ["Clothing", "an outfit or costume"],
   pose_motion: ["A move", "a pose, dance, fight move or camera move"], style: ["A look", "the style of the pictures"],
   background: ["A place", "a set or background"], generic: ["Anything else", ""] };
@@ -10,7 +10,7 @@ const rfmIsClip = p => /\.(mp4|mov)$/i.test(p);
 // open the panel on one file, or on the files ticked in the Library
 function rfmOpen(paths) { const f = REFMOD.f, list = paths.filter(p => !/\.(wav|mp3|m4a|aac|flac|ogg)$/i.test(p));
   if (!list.length) return toast("Tick pictures or clips of the subject first");
-  f.files = list.slice(0, 24); f.starts = {}; f.replace = false; f.motion = false;
+  f.files = list.slice(0, 24); f.starts = {}; f.replace = false; f.motion = false; REFMOD.picker = false;
   if (!f.name) f.name = list[0].split("/").pop().replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9 _.-]/g, "").slice(0, 60) || "my subject";
   f.concept = list.every(rfmIsClip) ? "pose_motion" : "identity";
   rfmLoad().then(() => { if (tab === "Library") render(); });
@@ -27,6 +27,12 @@ function rfmPanel(o) { const f = REFMOD.f, st = REFMOD.state || {}, redraw = () 
   const clips = f.files.filter(rfmIsClip), pics = f.files.filter(p => !rfmIsClip(p));
   const most = { image: st.most_images || 16, video: st.most_videos || 8 };
   const over = pics.length > most.image || clips.length > most.video;
+  const available = (REFMOD.library || []).filter(m => (m.kind === "image" && pics.length < most.image || m.kind === "video" && clips.length < most.video) && !f.files.includes(m.path));
+  const addFromLibrary = () => { if (!REFMOD.library) { api("/api/library").then(list => { REFMOD.library = list; REFMOD.picker = true; redraw(); }).catch(e => toast(e.message)); } else { REFMOD.picker = !REFMOD.picker; redraw(); } };
+  const picker = REFMOD.picker ? el("div", { class: "seg", style: "margin-top:10px" },
+    el("div", { class: "note" }, "Choose any number of library pictures or clips of this subject. The RefMod limit is " + most.image + " pictures and " + most.video + " clips."),
+    available.length ? el("div", { class: "grid", style: "margin-top:8px;grid-template-columns:repeat(auto-fill,minmax(120px,1fr))" }, available.map(m => el("div", { class: "tile", role: "button", tabindex: "0", onclick: () => { f.files.push(m.path); redraw(); } }, media(m.path, { style: "aspect-ratio:1;object-fit:contain;background:#000", ...(m.kind === "video" ? { muted: true } : {}) }), el("div", { class: "cap" }, m.kind + " · " + m.path.split("/").pop().slice(-24)))))
+      : el("div", { class: "note" }, "No more pictures or clips can be added.")) : null;
   const chosen = el("div", { class: "grid", style: "margin-top:8px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))" }, f.files.map(p => el("div", { class: "tile" },
     media(p, { style: "aspect-ratio:1;object-fit:contain;background:#000", ...(rfmIsClip(p) ? { muted: true } : {}) }),
     el("div", { class: "cap" }, el("span", { style: "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: p }, p.split("/").pop()),
@@ -39,6 +45,7 @@ function rfmPanel(o) { const f = REFMOD.f, st = REFMOD.state || {}, redraw = () 
   const taken = () => saved.some(s => s.name === f.name.trim().replace(/\s+/g, " "));
   put(box,
     el("div", { class: "note" }, "A RefMod saves pictures and clips of one subject as a MiniMax H3 reference that a clip can load again, without the pictures. Only the H3 video decoder runs: it takes under a minute. Several pictures of the same subject (a character sheet, a face, the outfit) make a stronger one."),
+    el("button", { class: "small", style: "margin-top:8px", onclick: addFromLibrary }, REFMOD.picker ? "Done adding files" : "Add more from Library"), picker,
     chosen,
     el("div", { class: "row", style: "margin-top:10px;align-items:flex-end" },
       el("div", { style: "flex:1;min-width:220px" }, el("label", {}, "Name"), name),

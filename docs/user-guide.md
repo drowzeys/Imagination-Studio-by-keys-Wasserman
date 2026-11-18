@@ -363,7 +363,7 @@ It needs the local model (Settings → Brains & tools) and nothing else: no acco
 If a render is using the memory the model waits and tries again. **Settings → Presets & preferences → Describe new clips
 automatically** turns it off. The descriptions are kept in `library/captions.json` in the studio folder.
 
-### Library actions: Turnaround sheet, Upscale, Remove a person
+### Library actions: Turnaround sheet, Upscale, Remove a person, Fix faces
 
 Three LoRAs of the hub each do one job that is not "make a clip", through a workflow their authors built. The Library
 has a button for each, under the file it works on, and queues it like any render. On a DGX Spark each runs its
@@ -377,6 +377,7 @@ bfloat16. Credit and licences: [CREDITS.md](../CREDITS.md), [THIRD_PARTY_NOTICES
 | **keys-HDR LORA** (HDR finish) | a clip | The clip graded very bright and contrasty and written as real HDR (BT.2020, HLG, 10-bit HEVC) with an SDR copy; its own sound stays. A grade on the processor with no model: it adds no detail. Finish a joined film as one clip. | ITU-R BT.2100 / ARIB STD-B67 (the HLG curve), FFmpeg and x265 |
 | **Upscale** | a clip | The clip made larger and sharper: a latent upscale, then one light re-draw in tiles that the clip itself guides. Motion, mouths and the clip's own sound stay. | Video Upscaler LoRA and H3 Video Upsampler by dntpi; latent upscaler by LBH-123-AI | yes: the same nodes on the Mac's ComfyUI (`oneshot-setup.sh --upscale`) | yes |
 | **Remove a person** | a clip | One person taken out and the background drawn again. The person is found from a few words and followed through the clip; "1. Find the person" shows the mask alone first. | Person Remover LoRA and H3 Relay by Akatz Labs; SAM 3.1 by Meta | yes: SAM 3.1 and the H3 Relay nodes on the Mac's ComfyUI (`oneshot-setup.sh --remove`) | yes |
+| **Fix faces** | a clip and a face picture | The face drawn again close up: found and followed on every frame, cropped to a square it fills, redrawn by MiniMax H3 Ref2VA from the face picture at half strength inside the face's mask only, restored by VOSR 2.0 and stitched back with a feathered, colour-matched edge. The rest of the picture and the clip's own sound stay. One person: with several, the largest face is followed. | H3 FaceRefine by Carasibana; MaskVidExperiments by drozbay; VOSR 2.0 by CSWRY (nodes by ylchen333); YOLOv8 face detector by Bingsu; SAM 3.1 by Meta | no (not wired on a Mac's ComfyUI) | yes (Linux card; `spark/setup-workflows.sh`, 7 GB more) |
 
 **Turnaround.** The LoRA's own instruction, "the camera orbits the subject of `<Picture 1>` ninety degrees
 clockwise", was read as a roll of the picture on some seeds, on both engines (the model without the LoRA always reads
@@ -397,6 +398,20 @@ four frames away), and so is a frame that is a different picture altogether; wha
 job. The upscaler's and the remover's node packs each
 replace the layout of H3's packed sequence when they first run and do not share a server: after one of the two
 actions the other starts ComfyUI again, which costs the model load.
+
+**Fix faces.** The graph is the 2026-11-18 "MiniMax H3 R2V perfect face refine" ComfyUI workflow from its face pass
+on, with its settings: crops of 768 (512 and 640 offered), crop 2.5 times the face's height, 8 passes of Euler on the
+beta schedule at denoise 0.5, SAM 3.1 asked for "face", the mask cleaned (shrink 12, at least 4 frames, grown 16) and
+grown 36 points on the latent grid, the sound's latent kept untouched, VOSR 2.0 at x1 in tiles of 512, and the stitch
+pasting the face only (dilation 24, feather 24, full colour match, frames without a face faded out). Two changes:
+identity tracking is off (it needs insightface, not installed; one person is followed by continuity), and the clip is
+cut to the longest length MiniMax H3 draws (17n + 5 frames) and given silence when it has no sound. Measured once
+(2026-11-18, RTX 5060 Ti 16 GB beside 31 GB of RAM, int8 Ref2VA): a 5 s 864x480 clip, a woman whose face is about 45
+points tall, took 411 s through the app (399 s in ComfyUI, models loaded from nothing). The crops came back clearly
+sharper (hair, a necklace, skin), but at that size most of it is lost when the face is pasted back, the clip's own
+features (a crooked mouth) were kept rather than drawn toward the picture at 0.5, and one stretch showed a faint
+ghost of glasses around the eyes. Look at the crops (kept beside the result) before using it; try the stronger
+re-draw or another seed for a face that is wrong, not only soft.
 
 ![A turnaround sheet in the Library](../samples/ui_action_turnaround.png)
 

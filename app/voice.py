@@ -1029,14 +1029,76 @@ def join_wavs(files: list[Path], target: Path, gap_s: float) -> None:
                 out.writeframes(handle.readframes(handle.getnframes()))
 
 
-BACKENDS = {"mlx": Mlx, "cuda": Cuda}
+class Chatterbox:
+    """Small local voice engine. Each take is a queue-owned subprocess, so it leaves no resident GPU model."""
+
+    name, label = "chatterbox", "Chatterbox Turbo · Resemble AI"
+    NEED_GB = 12.0  # conservative admission budget until this card has a measured peak
+    fps, load_s = 21.5, 10.0
+    streams = False
+    credit = "Resemble AI"
+    licence = "Chatterbox Turbo code and weights are MIT licensed. Clone a real person's voice only with their consent."
+    sampling = {"temperature": (0.8, 0.1, 2.0), "top_p": (0.95, 0.1, 1.0), "top_k": (1000, 1, 2000)}
+    reference_seconds = (5.1, 60.0)  # Chatterbox requires strictly more than five seconds
+    text_limit = 500  # keep one small-card take within a bounded generation
+
+    def __init__(self) -> None:
+        prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio")).expanduser()
+        self.python = Path(os.environ.get("CHATTERBOX_VENV", prefix / "chatterbox-venv")).expanduser() / "bin/python"
+        self.model = Path(os.environ.get("CHATTERBOX_MODEL", prefix / "chatterbox-models/turbo")).expanduser()
+
+    def installed(self) -> bool:
+        return self.python.is_file() and all((self.model / name).is_file() and (self.model / name).stat().st_size > 0 for name in
+            ("t3_turbo_v1.safetensors", "s3gen_meanflow.safetensors", "ve.safetensors", "conds.pt", "tokenizer_config.json"))
+
+    def check(self) -> str:
+        if not self.installed():
+            return "Chatterbox Turbo is not installed. Run bash scripts/setup-chatterbox.sh and restart the Studio."
+        if not SPARK:
+            return "This Chatterbox Turbo route is for Linux with an NVIDIA CUDA card."
+        driver = tool("nvidia-smi")
+        try:
+            if not driver or subprocess.run([driver, "-L"], capture_output=True, timeout=5).returncode:
+                return "Chatterbox Turbo needs a working NVIDIA CUDA driver."
+        except (OSError, subprocess.TimeoutExpired):
+            return "Chatterbox Turbo could not read the NVIDIA CUDA driver."
+        free = mem_available_gb()
+        if 0 <= free < self.NEED_GB and not comfy_up():
+            return f"The Studio reserves {self.NEED_GB:g} GB for Chatterbox Turbo; {free:.0f} GB is available now."
+        return ""
+
+    def loaded(self) -> bool:
+        return False
+
+    def release(self, why: str) -> bool:
+        return False
+
+    def ram_route(self) -> str:
+        return "native:studio-voice chatterbox:" + str(self.model)
+
+    def command(self, text_file: Path, wav: Path, stats: Path, reference, seed: int, sampling: dict,
+                live: bool = False) -> list[str]:
+        script = Path(__file__).resolve().parent.parent / "scripts/chatterbox_generate.py"
+        argv = [str(self.python), "-I", str(script), "--model", str(self.model), "--text-file", str(text_file),
+                "--out", str(wav), "--stats", str(stats), "--seed", str(seed),
+                "--temperature", str(sampling["temperature"]), "--top-p", str(sampling["top_p"]),
+                "--top-k", str(sampling["top_k"])]
+        if reference:
+            argv.extend(("--reference", str(reference[0])))
+        return argv
+
+
+BACKENDS = {"mlx": Mlx, "cuda": Cuda, "chatterbox": Chatterbox}
 _backend = None
 
 
 def backend():
     global _backend
     if _backend is None:
-        chosen = os.environ.get("DRAMA3_BACKEND") or ("cuda" if SPARK else "mlx")
+        chosen = os.environ.get("VOICE_BACKEND") or os.environ.get("DRAMA3_BACKEND")
+        if not chosen:
+            small = Chatterbox()
+            chosen = "chatterbox" if SPARK and small.installed() and _linux_ram_gb() < 50 else ("cuda" if SPARK else "mlx")
         _backend = BACKENDS.get(chosen, Cuda)()
     return _backend
 
@@ -1044,9 +1106,12 @@ def backend():
 def state() -> dict:
     one = backend()
     why = one.check()
-    out = {"available": not why, "why": why, "backend": one.name, "label": one.label, "credit": CREDIT, "licence": LICENCE,
-           "defaults": {k: v[0] for k, v in SAMPLING.items()}, "ranges": {k: v[1:] for k, v in SAMPLING.items()},
-           "text_limit": TEXT_LIMIT, "reference_seconds": REFERENCE_SECONDS, "speakers": 16,
+    sampling = getattr(one, "sampling", SAMPLING)
+    out = {"available": not why, "why": why, "backend": one.name, "label": one.label,
+           "credit": getattr(one, "credit", CREDIT), "licence": getattr(one, "licence", LICENCE),
+           "defaults": {k: v[0] for k, v in sampling.items()}, "ranges": {k: v[1:] for k, v in sampling.items()},
+           "text_limit": getattr(one, "text_limit", TEXT_LIMIT), "reference_seconds": getattr(one, "reference_seconds", REFERENCE_SECONDS),
+           "speakers": 1 if one.name == "chatterbox" else 16,
            "live": bool(getattr(one, "streams", False)) or (hasattr(one, "serving") and one.serving()), "checks": bool(getattr(one, "streams", False)),
            "serves": bool(hasattr(one, "serving") and one.serving())}
     if hasattr(one, "status"):
@@ -1187,18 +1252,22 @@ def checked(body: dict) -> dict:
     text = str(body.get("text") or "").strip()
     if not spoken(text):
         raise HTTPException(400, "the text has no words to say")
-    if len(text) > TEXT_LIMIT:
-        raise HTTPException(400, f"at most {TEXT_LIMIT} characters in one take")
+    one = backend()
+    limit = getattr(one, "text_limit", TEXT_LIMIT)
+    if len(text) > limit:
+        raise HTTPException(400, f"at most {limit} characters in one take with {one.label}")
+    if one.name == "chatterbox" and SPEAKER.search(text):
+        raise HTTPException(400, "Chatterbox Turbo makes one voice per take; remove the speaker tags and render each speaker separately")
     bad = [n for n in SPEAKER.findall(text) if int(n) > 15]
     if bad:
         raise HTTPException(400, f"speakers are <|speaker:0|> to <|speaker:15|>, not <|speaker:{bad[0]}|>")
-    why = backend().check()
+    why = one.check()
     if why:
         raise HTTPException(400, why)
     params = {"text": text, "title": str(body.get("title") or "").strip()[:120]}
     try:
         params["seed"] = int(body.get("seed") if body.get("seed") not in (None, "") else random.randrange(1, 100000))
-        for key, (default, low, high) in SAMPLING.items():
+        for key, (default, low, high) in getattr(one, "sampling", SAMPLING).items():
             value = body.get(key)
             value = default if value in (None, "") else (int(value) if key == "top_k" else float(value))
             if not low <= value <= high:
@@ -1213,11 +1282,11 @@ def checked(body: dict) -> dict:
         if body.get("consent") is not True:
             raise HTTPException(400, "cloning a voice needs the speaker's consent: tick “I have the speaker's consent to clone this voice”")
         seconds = media_seconds(str(clip))[0]
-        low, high = REFERENCE_SECONDS
+        low, high = getattr(one, "reference_seconds", REFERENCE_SECONDS)
         if seconds is not None and not low - 0.05 <= seconds <= high + 0.05:
             raise HTTPException(400, f"a voice to clone is {low:g} to {high:g} seconds of speech, and this clip is {seconds:.1f} s")
         ref_text = " ".join(str(body.get("ref_text") or "").split())
-        if not ref_text and not qa.ready()["transcript"] and not hears_references(backend()):
+        if one.name != "chatterbox" and not ref_text and not qa.ready()["transcript"] and not hears_references(one):
             raise HTTPException(400, "write what the reference clip says (this machine has no speech-to-text tool to hear it)")
         params.update(ref_audio=relative(clip), ref_text=ref_text, consent=True)
     params["asr"] = body.get("asr", True) is not False
@@ -1236,7 +1305,8 @@ def perform(job: dict) -> bool:
     folder.mkdir(parents=True, exist_ok=True)
     stem = folder / job["id"]
     wav, stats, text_file = stem.with_suffix(".wav"), stem.with_suffix(".stats.json"), stem.with_suffix(".txt")
-    text_file.write_text(dialogue(params["text"]) + "\n")  # what the engine reads: a turn a line
+    one = backend()
+    text_file.write_text((params["text"] if one.name == "chatterbox" else dialogue(params["text"])) + "\n")
     reference = None
     if params.get("ref_audio"):
         job["progress"] = {"stage": "reading the voice reference", "at": 0, "of": 1}
@@ -1247,11 +1317,13 @@ def perform(job: dict) -> bool:
                                    "-c:a", "pcm_s16le", str(clean)], capture_output=True, text=True, timeout=120)
             if done.returncode:
                 raise RuntimeError("the reference clip could not be read: " + done.stderr.strip()[-200:])
-        elif backend().name == "cuda" and source.suffix.lower() != ".wav":
+        elif one.name in ("cuda", "chatterbox") and source.suffix.lower() != ".wav":
             raise RuntimeError("the CUDA engine reads a WAV reference only, and this machine has no ffmpeg to convert it")
         else:
             shutil.copy(source, clean)
-        if not params.get("ref_text") and hears_references(backend()):
+        if one.name == "chatterbox":
+            pass  # Chatterbox conditions directly on the sound, with no transcript
+        elif not params.get("ref_text") and hears_references(one):
             pass  # the Mac engine's server hears the clip itself with its loaded Whisper (ref_texts in its answer)
         elif not params.get("ref_text"):
             heard = qa.transcribe(clean)
@@ -1259,8 +1331,11 @@ def perform(job: dict) -> bool:
                 raise RuntimeError("no transcript of the reference clip: write what it says")
             params["ref_text"] = heard.strip()
         reference = (clean, params.get("ref_text") or "")
-    one = backend()
     job["engine"] = one.name
+    if one.name == "chatterbox":
+        why = one.check()
+        if why:
+            raise RuntimeError(why)
     if hasattr(one, "make") and one.serving():  # a persistent server, which holds the GPU lock itself while loaded
         measured = one.make(job, params["text"], wav, reference, int(params["seed"]), {k: params[k] for k in SAMPLING},
                             live=params.get("live", True) is not False)
@@ -1298,7 +1373,7 @@ def perform(job: dict) -> bool:
         if retaken:
             measured["retaken"] = retaken
     if not wav.is_file():
-        raise RuntimeError("Drama 3 finished without writing its take")
+        raise RuntimeError(f"{one.label} finished without writing its take")
     take = {"id": job["id"], "path": relative(wav), "title": params.get("title") or job.get("title"), "text": params["text"],
             "seed": params["seed"], **{k: params[k] for k in SAMPLING}, "backend": one.name, "created": time.time(),
             "duration": measured.get("audio_s"), "frames": measured.get("frames"), "frames_per_s": measured.get("frames_per_s"),
@@ -1308,7 +1383,7 @@ def perform(job: dict) -> bool:
             "load_s": measured.get("load_s"), "engine_s": measured.get("engine_s"), "verify": checked_by_engine(measured),
             "streamed": bool(measured.get("stream")), "retaken": measured.get("retaken"), "stalled": measured.get("stalled"),
             "reference": {"path": params["ref_audio"], "text": params["ref_text"], "consent": True} if params.get("ref_audio") else None,
-            "slate": params.get("slate"), "credit": CREDIT}
+            "slate": params.get("slate"), "credit": getattr(one, "credit", CREDIT)}
     if params.get("asr") and measured.get("app_check"):
         # the app's own end-of-text check (``redrawn``: the CUDA engine has none) heard the kept take already
         take["asr"] = {**engine_score(take["verify"]), "by": "whisper"}
@@ -1431,7 +1506,8 @@ def mlx_take(job: dict, one, text_file: Path, wav: Path, stats: Path, reference,
     stats.unlink(missing_ok=True)
     began = len(job.get("log") or "")
     try:
-        job["progress"] = {"stage": "Drama 3 voice" + ("" if live or not params.get("live", True) else ", again without playing"), "at": 0, "of": 1}
+        job["progress"] = {"stage": ("Chatterbox Turbo voice" if one.name == "chatterbox" else "Drama 3 voice")
+                           + ("" if live or not params.get("live", True) else ", again without playing"), "at": 0, "of": 1}
         if not run(job, command, {}):
             return None
     finally:
@@ -1510,6 +1586,8 @@ def render(body: dict) -> dict:
 def cast_voice(body: dict) -> dict:
     """A Slate voice sheet's cast voice: its sample line, its description as the direction (sheet_text)."""
 
+    if backend().name == "chatterbox":
+        raise HTTPException(400, "Cast voice from a description needs Drama 3. Chatterbox Turbo needs a reference recording for a chosen voice.")
     sheet = body.get("sheet") if isinstance(body.get("sheet"), dict) else {}
     return render({"text": sheet_text(sheet), "seed": body.get("seed"), "title": "Cast voice: " + str(sheet.get("name") or "voice")[:60],
                    "slate": {"project": body.get("project") or "", "voice": sheet.get("id") or ""}})

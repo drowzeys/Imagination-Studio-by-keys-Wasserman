@@ -1,6 +1,7 @@
 """app/prompt_builder.py: python3 -m pytest tests/test_prompt_builder.py. No GPU, no network, no brain.
 The Prompt Builder writes an H3 prompt from the user's own cast and a few choices; the Create page imports it."""
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -140,3 +141,57 @@ def test_a_reference_sheet_is_a_still_then_its_turnaround(monkeypatch):
     assert saved[0]["sheet"]["sheet"] == "scouts/job1/turn_sheet.png"
     assert "sheet" not in B.clean_character({"name": "X", "sheet": {"still": "../../x.png"}})
     assert here.post("/api/builder/cast/nobody/sheet").status_code == 404
+
+
+def test_more_looks_and_scenarios_are_offered():
+    o = B.options()
+    assert len(o["scenarios"]) >= 35 and len(o["locations"]) >= 40 and len(o["looks"]) >= 30
+    assert "A double-cross" in o["scenarios"] and "80s-horror" in o["looks"] and "a lighthouse in a storm" in o["locations"]
+
+
+def clip_record(prompt, monkeypatch, tmp_path_factory=None):
+    import shutil
+    import subprocess
+    clip = server.HOME / "renders" / "test-clip.mp4"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.which("ffmpeg") and not clip.is_file():
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=96x64:rate=24:duration=2",
+                        "-pix_fmt", "yuv420p", str(clip)], check=True, timeout=60)
+    job = {"id": "clip1", "kind": "video", "status": "done", "outputs": ["renders/test-clip.mp4"], "title": "Diner",
+           "params": {"prompt": prompt}}
+    monkeypatch.setattr(B, "lookup", {"clip1": job}.get)
+    return job
+
+
+def test_a_character_from_a_clip_made_here(monkeypatch):
+    import shutil
+    prompt = server.compose({"scene": "A diner at night. Rex Callahan: a broad-shouldered man, wearing a denim jacket. "
+                                      "Dee Morales: a lean woman; a leather jacket.",
+                             "dialogue": [{"voice": "a deep, gravelly voice", "text": "Tonight.", "speaker": "Rex Callahan"},
+                                          {"voice": "a fast, wry voice", "text": "Cute.", "speaker": "Dee Morales"},
+                                          {"voice": "a deep, gravelly voice", "text": "Again.", "speaker": "Rex Callahan"}]}, False)
+    clip_record(prompt, monkeypatch)
+    r = here.get("/api/builder/from-clip/clip1").json()
+    assert r["clip"] == "renders/test-clip.mp4"
+    assert r["characters"] == [
+        {"name": "Rex Callahan", "look": "a broad-shouldered man", "wardrobe": "a denim jacket", "voice": "a deep, gravelly voice"},
+        {"name": "Dee Morales", "look": "a lean woman", "wardrobe": "a leather jacket", "voice": "a fast, wry voice"}]
+    assert here.get("/api/builder/from-clip/nothing").status_code == 404
+    cast = here.put("/api/builder/cast", json=[{"name": "Rex Callahan", "look": "x", "wardrobe": "", "voice": ""}]).json()
+    if not shutil.which("ffmpeg"):
+        return
+    made = here.post(f"/api/builder/cast/{cast[0]['id']}/frame", json={"job": "clip1", "at": 1, "part": "left"}).json()
+    assert re.fullmatch(r"scouts/cast-[0-9a-f]{10}/frame\.png", made["picture"]) and (server.HOME / made["picture"]).is_file()
+    assert here.get("/api/builder/cast").json()[0]["picture"] == made["picture"]
+    assert here.post(f"/api/builder/cast/{cast[0]['id']}/frame", json={"job": "clip1", "part": "top"}).status_code == 400
+
+
+def test_a_sheet_from_a_characters_own_picture_puts_them_on_grey_first(monkeypatch):
+    queued = []
+    monkeypatch.setattr(B, "submit", lambda body: queued.append(body) or {"id": "j"})
+    monkeypatch.setattr(B, "lookup", lambda job_id: None)
+    monkeypatch.setattr(B.threading, "Thread", lambda **k: type("T", (), {"start": lambda self: None})())
+    cast = here.put("/api/builder/cast", json=[{"name": "Rex", "look": "a man", "picture": "scouts/cast-abc/frame.png"}]).json()
+    here.post(f"/api/builder/cast/{cast[0]['id']}/sheet")
+    assert queued[0]["kind"] == "edit" and queued[0]["params"]["image"] == "scouts/cast-abc/frame.png"
+    assert "plain light grey" in queued[0]["params"]["prompt"] and queued[0]["params"]["image_model"] == "qwen"

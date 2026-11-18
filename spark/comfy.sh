@@ -75,6 +75,12 @@ case "${1:-start}" in
       mkdir -p "$NODE"
       cp "$HERE/studio_mmaudio/__init__.py" "$NODE/__init__.py.$$" && mv -f "$NODE/__init__.py.$$" "$NODE/__init__.py"
     fi
+    # Fix faces: H3 FaceRefine's face detector (ultralytics and OpenCV), installed by spark/setup-workflows.sh into a
+    # folder of its own so the Studio's venv, which the app runs in too, keeps no OpenCV. Only this server sees it.
+    # YOLO_AUTOINSTALL=False: ultralytics would otherwise pip-install what it finds missing into that venv at run time
+    if [ -d "$PREFIX/face-site/ultralytics" ]; then
+      export PYTHONPATH="$PREFIX/face-site${PYTHONPATH:+:$PYTHONPATH}" YOLO_OFFLINE=1 YOLO_AUTOINSTALL=False
+    fi
     cd "$PREFIX/ComfyUI"
     # A small card (--small, $PREFIX/small-card; STUDIO_SMALL_CARD=1|0 overrides) beside ~32 GB of RAM: ComfyUI's
     # pinned memory takes half the RAM (15 GB on 31 GB), locked where neither the kernel nor the cache can reclaim

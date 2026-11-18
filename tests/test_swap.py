@@ -569,6 +569,9 @@ case "$(basename "$2")" in
   ComfyUI-H3-ContactSheet) echo 3c8c8c66e69362e5abf9cf4c4e693baddab90ca3;;
   ComfyUI-H3-Video-Upsampler) echo 36cb612ec3df30094eeb4fec66f1528925ebba73;;
   h3-relay) echo cf489b7f2472fdf33866fae36de49aea03ef464f;;
+  ComfyUI-H3-FaceRefine) echo d8521d14fe0d721d80cd9417fff5a559cbc21aba;;
+  MaskVidExperiments) echo c32ed8c17e6fe892a174ebf25fe98b1317de97fb;;
+  ComfyUI-VOSR2) echo 6a21810b3f4f1a0ffc477c55330db0ac03c671f0;;
 esac
 """
 # a download stood in for: curl writes the file asked for, and its checksum is taken as right
@@ -589,8 +592,16 @@ def setup_machine(tmp_path, comfy=True):
         (prefix / "ComfyUI").mkdir(parents=True)
         (prefix / "ComfyUI/main.py").write_text("")
         (prefix / "ComfyUI/extra_model_paths.yaml").write_text("studio:\n  base_path: " + str(models) + "\n")
+        # the Studio's venv, stood in for: it answers that the face detector's packages are in $PREFIX/face-site
+        (prefix / "venv/bin").mkdir(parents=True)
+        (prefix / "venv/bin/python").write_text("#!/bin/bash\nexit 0\n")
+        (prefix / "venv/bin/python").chmod(0o755)
     for one in (swap.SAM, swap.REF2VA[0], "MiniMax-H3-Comfy/diffusion_models/minimax_h3_ref2va_pruned_bf16.safetensors", swap.TURBO,
-                swap.SWAP_LORA, "Workflows-Comfy/latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors"):
+                swap.SWAP_LORA, "Workflows-Comfy/latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors",
+                "Workflows-Comfy/ultralytics/bbox/face_yolov8n.pt", "Workflows-Comfy/vosr2/VOSR2/args.json",
+                "Workflows-Comfy/vosr2/VOSR2/checkpoints/ema_model.safetensors", "Workflows-Comfy/vosr2/VOSR2/dinov2_vitl14.safetensors",
+                "Workflows-Comfy/vosr2/VOSR2/Qwen-Image-vae-2d/config.json",
+                "Workflows-Comfy/vosr2/VOSR2/Qwen-Image-vae-2d/diffusion_pytorch_model.safetensors"):
         (models / one).parent.mkdir(parents=True, exist_ok=True)
         (models / one).write_bytes(b"x")
     env = {**os.environ, "PREFIX": str(prefix), "SPARK_MODELS": str(models), "PATH": f"{tools}:{os.environ['PATH']}"}
@@ -702,7 +713,7 @@ def test_a_clip_gets_swap_the_character_and_its_panel_queues_one_job():
       SWAP.state = { ready: false, why: "Character Swap runs on a DGX Spark or another CUDA machine with MiniMax H3 Ref2VA, not on a Mac." };
       out.mac = text(actPanel());
     """)
-    assert got["video"] == ["Upscale", "Remove a person", "Restyle", "Extend", "Fix", "Swap the character"] and got["image"] == ["Turnaround"]
+    assert got["video"] == ["Upscale", "Remove a person", "Fix faces", "Restyle", "Extend", "Fix", "Swap the character"] and got["image"] == ["Turnaround"]
     assert got["id"] == "actpanel" and "Character Swap" in got["panel"] and "Swap the character" in got["panel"]
     assert "largest person" in got["panel"] and "Put the character in the first frame first" in got["panel"] and "FLUX3-K Fast" in got["panel"]
     assert "not licensed for use in the EU, the UK, South Korea or the US" in got["panel"]

@@ -5,8 +5,10 @@
     Remove a person    a person taken out of a clip (Akatz Labs' Person Remover LoRA and H3 Relay node)
     Find a person      the first half of the removal alone: the mask, to look at before the long render
     HDR finish         a finished clip graded and written as BT.2020 / HLG with an SDR copy (hlg.py: ffmpeg and numpy, no model)
+    Fix faces          a clip's face drawn again close up from a face picture (Carasibana's H3 FaceRefine, drozbay's
+                       MaskVidExperiments, ylchen333's VOSR 2.0 nodes; a Linux / DGX Spark ComfyUI only)
 
-They run as jobs in the Studio's queue (kinds turnaround, upscale, mask, remove, hlg). On a DGX Spark each goes through its
+They run as jobs in the Studio's queue (kinds turnaround, upscale, mask, remove, hlg, facefix). On a DGX Spark each goes through its
 author's own ComfyUI nodes (spark/spark_workflows.py, installed by spark/setup-workflows.sh). On a Mac the turnaround
 sheet is the MLX engine's own (h3_generate.py --sheet); Upscale, Find and Remove a person run the same
 spark/spark_workflows.py graphs on a ComfyUI of the Mac's own, on PyTorch's Metal device (mac/comfy.sh, installed by
@@ -28,14 +30,21 @@ from fastapi import APIRouter, HTTPException
 import hlg
 import windows_cuda  # noqa: E402  (the native Windows CUDA tier, beside this file)
 
-KINDS = ("turnaround", "upscale", "mask", "remove", "hlg")
+KINDS = ("turnaround", "upscale", "mask", "remove", "hlg", "facefix")
 PRESETS = Path(__file__).with_name("lora-presets.json")
 # the LoRA each action is built on (its id in the hub), and what the action is called on the page
-LORA = {"turnaround": "turnaround", "upscale": "video-upscaler", "remove": "person-remover", "mask": None, "hlg": None}
-TITLES = {"turnaround": "Turnaround sheet", "upscale": "Upscale", "remove": "Remove a person", "mask": "Find a person", "hlg": "keys-HDR LORA"}
+LORA = {"turnaround": "turnaround", "upscale": "video-upscaler", "remove": "person-remover", "mask": None, "hlg": None, "facefix": None}
+TITLES = {"turnaround": "Turnaround sheet", "upscale": "Upscale", "remove": "Remove a person", "mask": "Find a person", "hlg": "keys-HDR LORA",
+          "facefix": "Fix faces"}
 SIZES = (512, 1024, 2048)                 # a turnaround view's side: 512 is what the LoRA was trained at
 MEGAPIXELS = (1.0, 2.0, 3.0, 4.0)         # an upscale's area: 2 is about 1920x1080
 WINDOWS = (22, 39, 56)                    # the remover's window: 22 is the author's proven default
+CANVASES = (512, 640, 768)                # Fix faces: the face crop's side (spark_workflows.CANVASES); 768 is the author's
+# Fix faces: which face each picture's pass follows (H3 FaceRefine's select modes, spark_workflows.FACE_PICKS), and
+# how many people one job takes (one pass each, chained)
+FACE_PICKS = {"largest": "largest_face", "smallest": "smallest_face", "left": "left_most", "right": "right_most", "centre": "centre_most"}
+FACES = 4
+REGULAR_FACE_MODELS = {"minimax_h3_ref2va_pruned_bf16.safetensors", "minimax_h3_ref2va_pruned_int8_convrot.safetensors"}
 # On a Mac: the node pack and the files under $MAC_COMFY_MODELS each action needs, and the option that installs them
 X265 = {}                                 # whether this machine's ffmpeg has libx265: asked once, with a time limit
 MAC_NODES = {"upscale": "ComfyUI-H3-Video-Upsampler", "remove": "h3-relay", "mask": "h3-relay"}
@@ -54,6 +63,17 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
     router = APIRouter()
     prefix = Path(os.environ.get("PREFIX", Path.home() / ".local/opt/tensorfold-studio"))
     models = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models"))
+
+    def face_models() -> list[str]:
+        """Other Ref2VA files the Studio's ComfyUI can load for Fix faces."""
+
+        if not spark or windows_cuda.active():
+            return []
+        extra = Path(os.environ.get("STUDIO_EXTRA_VIDEO_MODELS",
+                            Path.home() / "Documents/Workspace/ComfyUI-Easy-Install/ComfyUI/models/diffusion_models"))
+        folders = (models / "MiniMax-H3-Comfy/diffusion_models", extra)
+        return sorted({one.name for folder in folders for one in folder.glob("*.safetensors")
+                       if one.is_file() and "ref2va" in one.name.lower() and one.name not in REGULAR_FACE_MODELS})
 
     def recipe(lora_id: str) -> dict:
         return next((r for r in json.loads(PRESETS.read_text()) if r["id"] == lora_id), {})
@@ -87,6 +107,9 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
                 except (OSError, subprocess.SubprocessError):
                     return "ffmpeg did not answer: try again."
             return "" if X265["ok"] else "The HDR finish writes HEVC, and this machine's ffmpeg was built without libx265."
+        if kind == "facefix" and (not spark or windows_cuda.active()):
+            # wired and tried on a Linux card only: a Mac's ComfyUI and the native Windows tier have not run it
+            return "Fix faces runs on a Linux machine or DGX Spark (its ComfyUI and the authors' node packs) for now."
         if not spark:
             model = Path(os.environ.get("H3_MODEL_DIR", Path.home() / "h3-models/MiniMax-H3"))
             if not (model / "Ref2VA/transformer").is_dir():
@@ -106,18 +129,26 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             return ""
         nodes = prefix / "ComfyUI" / "custom_nodes"
         need = {"turnaround": ["ComfyUI-H3-ContactSheet"], "upscale": ["ComfyUI-H3-Video-Upsampler"],
-                "remove": ["h3-relay"], "mask": ["h3-relay"]}[kind]
+                "remove": ["h3-relay"], "mask": ["h3-relay"],
+                "facefix": ["ComfyUI-H3-FaceRefine", "MaskVidExperiments", "ComfyUI-VOSR2"]}[kind]
         files = {"upscale": ["latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors"],
                  "remove": ["checkpoints/sam3.1_multiplex_fp16.safetensors"],
-                 "mask": ["checkpoints/sam3.1_multiplex_fp16.safetensors"]}.get(kind, [])
+                 "mask": ["checkpoints/sam3.1_multiplex_fp16.safetensors"],
+                 "facefix": ["checkpoints/sam3.1_multiplex_fp16.safetensors", "ultralytics/bbox/face_yolov8n.pt",
+                             "vosr2/VOSR2/checkpoints/ema_model.safetensors", "vosr2/VOSR2/dinov2_vitl14.safetensors"]}.get(kind, [])
         native = windows_cuda.active()
+        if kind == "facefix" and (any(not (nodes / n).is_dir() for n in need) or any(not (models / "Workflows-Comfy" / f).is_file() for f in files)
+                                  or not (prefix / "face-site/ultralytics").is_dir()):
+            return ("Not installed yet: run `bash spark/setup-workflows.sh` in the pack's folder (H3 FaceRefine, MaskVidExperiments, "
+                    "VOSR 2.0 and 7 GB of models), then restart ComfyUI.")
         if any(not (nodes / n).is_dir() for n in need) or any(not (models / "Workflows-Comfy" / f).is_file() for f in files):
             if native:
                 return (f"Not installed yet: run `{windows_cuda.setup_hint('workflows')}` in the Studio's folder (three node "
                         "packs and 2.5 GB of models); the next render restarts ComfyUI with them.")
             return "Not installed yet: run `bash spark/setup-workflows.sh` in the pack's folder (three node packs and 2.5 GB of models), then restart ComfyUI."
         if kind != "mask" and not any((models / "MiniMax-H3-Comfy/diffusion_models" / f"minimax_h3_ref2va_pruned_{one}.safetensors").is_file()
-                   for one in ("bf16", "int8_convrot")):  # either: Character Swap's install brings only the int8 file; finding a person is SAM's alone
+                   for one in ("bf16", "int8_convrot")) and not (kind == "facefix" and face_models()):
+            # Character Swap's install brings only the int8 file; Fix faces can also use a selected Ref2VA file.
             return ("MiniMax H3 Ref2VA is not installed: run `" + (windows_cuda.setup_hint("library-h3,h3-shared") if native else
                     "bash oneshot-setup-spark.sh --ref2va") + "`.")
         if LORA[kind] and lora_file(LORA[kind]) is None:
@@ -139,6 +170,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         out["upscale"].update(megapixels=MEGAPIXELS, megapixel=2.0)
         out["remove"].update(windows=WINDOWS, window=22, steps=12)
         out["hlg"].update(strength=1.0)
+        out["facefix"].update(canvases=CANVASES, canvas=768, steps=8, denoise=0.5, picks=list(FACE_PICKS), faces=FACES,
+                              models=face_models())
         if windows_cuda.native_os():
             import windows_library_checks as library
             for kind in library.KINDS:
@@ -224,6 +257,51 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             return (["bash", str(pack / "scripts/turnaround.sh"), str(picture), str(folder / "turn")], env,
                     [str(folder / "turn_sheet.png")] + [str(folder / f"turn_view{i}.png") for i in range(1, 6)])
         clip = media(params, "video", (".mp4", ".mov"))
+        if kind == "facefix":
+            # faces: [{image, which}], one a person; a single `image` is one face, the largest
+            given = params.get("faces") if params.get("faces") is not None else ([{"image": params.get("image")}] if params.get("image") else [])
+            if not isinstance(given, list) or not given:
+                raise HTTPException(400, "choose a picture of the face first")
+            if len(given) > FACES:
+                raise HTTPException(400, f"one job fixes at most {FACES} faces")
+            if not all(isinstance(one, dict) for one in given):
+                raise HTTPException(400, "faces is a list of {image, which}")
+            default = ["largest"] if len(given) == 1 else ["left", "right", "centre", "largest"]
+            faces, picks = [], []
+            for i, one in enumerate(given):
+                faces.append(media(one, "image", (".png", ".jpg", ".jpeg", ".webp")))
+                which = str(one.get("which") or default[i])
+                if which not in FACE_PICKS:
+                    raise HTTPException(400, "which face: largest, smallest, left, right or centre")
+                picks.append(which)
+            if len(set(picks)) != len(picks):
+                raise HTTPException(400, "give each picture a different face to follow: two pictures on the same face fix one person twice")
+            canvas, steps, redraw = number(params, "canvas", 768, int), number(params, "steps", 8, int), number(params, "denoise", 0.5)
+            if canvas not in CANVASES:
+                raise HTTPException(400, "the face crop is 512, 640 or 768 on a side")
+            if not 2 <= steps <= 40 or not 0.1 <= redraw <= 0.9:
+                raise HTTPException(400, "the passes are between 2 and 40 and the re-draw between 0.1 and 0.9 (0.5 is the author's)")
+            prompt = " ".join((params.get("prompt") or "").split())
+            if len(prompt) > 2000:
+                raise HTTPException(400, "the prompt for the face pass is at most 2000 characters")
+            target = home / "renders" / f"{job_id}.mp4"
+            command = script + ["--video", str(clip)]
+            for face, which in zip(faces, picks):
+                command += ["--face", str(face), "--select", FACE_PICKS[which]]
+            command += ["--canvas", str(canvas), "--steps", str(steps),
+                                "--denoise", f"{redraw:g}", "--seed", str(number(params, "seed", 983546012546031, int)),
+                                "--prompt", prompt, "--keep", str(home / "masks" / job_id / "face"), "-o", str(target)]
+            transformer = params.get("transformer") or ""
+            if transformer:
+                if not isinstance(transformer, str) or transformer not in face_models():
+                    raise HTTPException(400, "choose a Ref2VA video model listed under Fix faces")
+                command += ["--transformer", transformer]
+            restore = params.get("restore") or "auto"
+            if restore not in ("auto", "on", "off"):
+                raise HTTPException(400, "restoration is auto, on or off")
+            command += ["--restore", restore]
+            crops = [home / "masks" / job_id / ("face_crops.mp4" if k == 1 else f"face{k}_crops.mp4") for k in range(1, len(faces) + 1)]
+            return command, env, [str(target)] + [str(one) for one in crops]
         if kind == "upscale":
             area = number(params, "megapixels", 2.0)
             if area not in MEGAPIXELS:
@@ -257,13 +335,13 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         return command, env, [str(target), str(folder / "person_mask.mp4"), str(folder / "person_clean.png")]
 
     def title(kind: str, params: dict) -> str:
-        name = Path(str(params.get("image") or params.get("video") or "")).name
+        name = Path(str((params.get("video") if kind == "facefix" else None) or params.get("image") or params.get("video") or "")).name
         return f"{TITLES[kind]}: {name}" if name else TITLES[kind]
 
     def source_of(kind: str, params: dict) -> str | None:
         """The Library file an action's result came from, as the page shows it beside the result."""
 
-        path = params.get("image") if kind == "turnaround" else params.get("video")
+        path = params.get("image") if kind == "turnaround" else params.get("video")  # facefix: the clip, not its face picture
         return relative(inside(path)) if path else None
 
     build.lora_file = lora_file

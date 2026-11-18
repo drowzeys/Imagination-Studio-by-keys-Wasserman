@@ -128,6 +128,12 @@ REF2VA_5S = {"small": 223}
 REF2VA_TURBO_5S = {"small": 88}
 # the same on a DGX Spark (oneshot-setup-spark.sh --ref2va), through ComfyUI's own blocks
 SPARK_REF2VA = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "MiniMax-H3-Comfy"
+# Extra H3 checkpoints kept by the standalone ComfyUI-Easy-Install checkout. ComfyUI's folder
+# registry is extended by spark/setup-workflows.sh so its loader can resolve the same filename.
+SPARK_EXTRA_VIDEO_MODELS = Path(os.environ.get(
+    "STUDIO_EXTRA_VIDEO_MODELS",
+    Path.home() / "Documents/Workspace/ComfyUI-Easy-Install/ComfyUI/models/diffusion_models",
+))
 SPARK_REF2VA_5S = {"small": 321}
 SPARK_REF2VA_TURBO_5S = {"small": 107}
 REF2VA_ADAPTER = "lightx2v_ref2v_4step_v0.1_ourlayout.safetensors"
@@ -1258,15 +1264,22 @@ REGULAR_TRANSFORMERS = {"fastvideo_fasth3_8step_v2_pruned_bf16.safetensors", "fa
 def transformers() -> dict[str, str]:
     """Other builds of the video model found on this machine: file name -> "frames" (beside FastH3: a clip from text
     or a frame) or "references" (beside MiniMax H3 Ref2VA: a clip from references, Character Swap). A file put in
-    either diffusion_models folder is offered by name (a 4-bit or 6-bit build, a hybrid). Only where the memory guard
-    warns instead of refusing (a small card, docs/small-cards.md): its estimates are the regular files' measurements,
-    and a DGX Spark's strict guard would pass a file nobody measured there."""
+    either diffusion_models folder is offered by name. External ComfyUI files are offered only when their names say
+    Ref2VA; the strict memory guard still checks the job before and during a render."""
 
-    if not SPARK or windows_cuda.native_os() or memory_guard.guard_mode() != "warn":
+    if not SPARK or windows_cuda.native_os():
         return {}
     found = {}
-    for folder, family in ((SPARK_REF2VA.parent / "FastH3-Comfy/diffusion_models", "frames"), (SPARK_REF2VA / "diffusion_models", "references")):
+    reference_folders = [SPARK_REF2VA / "diffusion_models"]
+    default_ref2va = Path(os.environ.get("SPARK_MODELS", Path.home() / "spark-studio-models")) / "MiniMax-H3-Comfy"
+    if SPARK_REF2VA == default_ref2va:
+        reference_folders.append(SPARK_EXTRA_VIDEO_MODELS)
+    folders = [(SPARK_REF2VA.parent / "FastH3-Comfy/diffusion_models", "frames")]
+    folders.extend((folder, "references") for folder in reference_folders)
+    for folder, family in folders:
         for one in sorted(folder.glob("*.safetensors")):
+            if folder == SPARK_EXTRA_VIDEO_MODELS and "ref2va" not in one.name.lower():
+                continue
             if one.name not in REGULAR_TRANSFORMERS and one.is_file():
                 found.setdefault(one.name, family)
     return found
@@ -1279,6 +1292,8 @@ def own_transformer(params: dict) -> str | None:
     if asked in (None, "", "regular"):
         return None
     name = Path(str(asked)).name
+    if name != asked:
+        raise HTTPException(400, "choose a video model by its file name")
     family = transformers().get(name)
     wants = "references" if params.get("references") or params.get("reference_videos") or params.get("reference_audios") or params.get("refmods") else "frames"
     if family is None:
@@ -2329,11 +2344,12 @@ def shot_checked(job: dict, clip: Path, env: dict) -> bool:
 
 
 def long_take(job: dict) -> bool:
-    """A video longer than one clip: render it piece by piece, each opening on the last frame of the one before, and join."""
+    """A video longer than one clip: render pieces in order, continue from the last frame when unreferenced, then join."""
 
     params = job["params"]
     total = int(params["total_seconds"])
     pieces = plan(total, int(params.get("segment_seconds", LONGEST)))
+    has_references = bool(references(params))
     beats = [line.strip() for line in params.get("beats") or [] if line.strip()]
     folder = HOME / "renders" / job["id"]
     folder.mkdir(parents=True, exist_ok=True)
@@ -2344,7 +2360,9 @@ def long_take(job: dict) -> bool:
         if beats:  # one line per piece says what happens in it; the last line holds for the rest
             beat = f"In this part of the video: {beats[min(index, len(beats) - 1)].rstrip('.')}."
             prompt = prompt.replace("[Shot 1] ", f"[Shot 1] {beat} ", 1) if "[Shot 1] " in prompt else f"{beat} {prompt}"
-        if index:
+        # Ref2VA cannot take a generated first frame together with references. Keep the same references on
+        # every scene instead; unreferenced long videos continue from the previous scene's last frame.
+        if index and not has_references:
             still = folder / f"seg{index:03d}_first.jpg"
             last_frame(clips[-1], still)
             image = relative(still)
@@ -2406,7 +2424,7 @@ def local_ram_need(job: dict) -> int | None:
         chosen, _ = custom(params)
         sized = {**(PRESETS[params["preset"]][2] if params.get("preset") in PRESETS else {}), **chosen}
         frames = lengths.of({"frames": params.get("frames"), "seconds": min(float(params.get("seconds") or 5), LONGEST)})
-        found = references(params) if kind == "video" else None
+        found = references(params) if kind in ("video", "long") else None
         room = memory_of(params, sized, frames, bool(params.get("loras")), found)
         card = memory_guard.device()
         if (room.get("route") == "int8" and card and card["total_mb"] >= 96000
@@ -3046,9 +3064,9 @@ def queue_job(body: dict) -> dict:
         build("video", {**params, "seconds": pieces[0], "output": None}, "check")
     if kind not in ("export", "edit", "foley") + actions.KINDS + swap.KINDS + refmod.KINDS + finish.KINDS + graphics.KINDS and not (params.get("prompt") or "").strip():
         raise HTTPException(400, "a prompt is needed")
-    if kind != "video" and params.get("references"):
+    if kind not in ("video", "long") and params.get("references"):
         raise HTTPException(400, "reference pictures are for single clips")
-    if kind != "video" and (params.get("reference_videos") or params.get("reference_audios")):
+    if kind not in ("video", "long") and (params.get("reference_videos") or params.get("reference_audios")):
         raise HTTPException(400, "reference videos and audio are for single clips")
     if kind == "export":
         export_clips(params)
@@ -3065,7 +3083,7 @@ def queue_job(body: dict) -> dict:
         if not -30 <= level <= 0:
             raise HTTPException(400, "music_db is between -30 and 0")
         params["soundtrack"] = {"take": song["id"], "song": song["path"], "music_db": level}
-    found = references(params) if kind == "video" else {}
+    found = references(params) if kind in ("video", "long") else {}
     referenced, ref_media = bool(found), bool(found and (found["videos"] or found["audios"]))
     if kind in ("video", "studio", "long") and not referenced and not params.get("quality"):
         params["quality"] = API_QUALITY  # a job that names no quality gets the page's own default, as Home sends it
@@ -3688,6 +3706,8 @@ app.include_router(lora_router)
 import hf_gate  # noqa: E402  (gated weights: the person's Hugging Face sign-in and the licence they accept, beside this file)
 app.include_router(hf_gate.attach(lambda request: agents.local(request, True)))
 app.include_router(lineart.attach(HOME))
+# Import the sibling Builder before picture_edit adds the checkout root to sys.path.
+import prompt_builder  # noqa: E402  (Prompt Builder: an H3 prompt from your own cast and a few choices, beside this file)
 import picture_edit  # noqa: E402  (a picture re-drawn by the image model, with the hub's image LoRAs)
 edit_router, edit_build = picture_edit.attach(HOME, PACK, SPARK, lora_resolve, inside, relative,
                                               lambda: [{"id": k, "label": IMAGE_MODELS[k][0], "note": IMAGE_MODELS[k][1]} for k in image_models()])
@@ -3698,7 +3718,6 @@ import shot  # noqa: E402  (a clip's keyframes held and no cut inside it, beside
 import qa  # noqa: E402  (Sam Wasserman's QA gate, beside this file)
 import remote  # noqa: E402  (another machine's Studio app, read over its own API, beside this file)
 import slate  # noqa: E402  (Wasserman Slate AI Studio, beside this file)
-import prompt_builder  # noqa: E402  (Prompt Builder: an H3 prompt from your own cast and a few choices, beside this file)
 app.include_router(prompt_builder.attach(HOME, queue=queue_job, find=jobs.get))
 import voice  # noqa: E402  (Voice: Fish Audio Drama 3 text to speech, run locally, beside this file)
 import bolt  # noqa: E402  (NVIDIA Nemotron 3.5 Bolt, the brains' Studio-managed engine, beside this file)

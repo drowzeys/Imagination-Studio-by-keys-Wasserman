@@ -4,6 +4,17 @@
 
 Detailed engine and feature reference. These Mac/Linux recipes do not bypass [native Windows setup and qualification](windows.md#qualification); use the Windows app's PowerShell commands there.
 
+## Voice on a smaller NVIDIA card (Chatterbox Turbo)
+
+Run `bash scripts/setup-chatterbox.sh` to install Resemble AI's Chatterbox Turbo in a separate environment and
+download its roughly 4 GB of weights. Restart the Studio afterwards. On Linux machines with less than 50 GB of RAM,
+the Voice tab then uses Chatterbox Turbo instead of Drama 3. `VOICE_BACKEND=chatterbox` selects it explicitly;
+`VOICE_BACKEND=cuda` selects Drama 3. `bash scripts/setup-chatterbox.sh --verify` checks the installation without a
+download. The local model makes English speech, one speaker per take, with an optional reference clip longer than
+five seconds for cloning. It runs in the Studio queue and releases GPU memory when the take finishes. The Studio
+reserves 12 GB for a take until a peak is measured on this card. No Fish Audio API is called. Chatterbox Turbo's
+code and weights are MIT licensed.
+
 ## Voice (Fish Audio Drama 3)
 
 **Built with Fish Audio.** The **Voice** tab turns text into speech with Fish Audio Drama 3, run on this machine by
