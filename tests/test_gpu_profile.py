@@ -312,3 +312,24 @@ def test_a_failed_card_choice_is_asked_again_and_the_profile_follows(monkeypatch
     now["t"] += 61
     assert memory_guard.chosen_gpu() == "1"
     assert gpu_profile.profile() == "gb300" and gpu_profile.engine(library) == "comfy"
+
+
+def test_an_older_driver_with_several_cards_and_none_chosen_is_not_classified(monkeypatch):
+    """The name-only path (a driver without compute_cap) is held to the same rule: several cards, none chosen, is not
+    classified or kept, so a later answer is not overruled by a guess."""
+
+    answers = {"cap": None}
+
+    def smi(*query):
+        if query[0] == "--query-gpu=compute_cap,name":
+            return answers["cap"] or []
+        if query[0] == "--query-gpu=name":
+            return [["NVIDIA GB300"], ["NVIDIA RTX PRO 6000"]]
+        return []
+    monkeypatch.setattr(memory_guard, "smi", smi)
+    now = {"t": 100.0}
+    monkeypatch.setattr(gpu_profile.time, "monotonic", lambda: now["t"])
+    assert gpu_profile.profile() == "default" and gpu_profile._SEEN == {}
+    answers["cap"] = [["10.3", "NVIDIA GB300"], ["12.0", "NVIDIA RTX PRO 6000"]]
+    now["t"] += gpu_profile.RETRY_S + 1
+    assert gpu_profile.profile() == "default" and gpu_profile._SEEN == {}  # still several, none chosen

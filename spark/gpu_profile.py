@@ -73,6 +73,9 @@ def profile() -> str:
     if not re.fullmatch(r"\d+\.\d+", cap.strip()) and not name:
         # an older driver refuses the whole query over compute_cap: the name alone
         named = memory_guard.smi("--query-gpu=name")
+        if len(named) > 1 and "-i" not in key:  # several cards and none chosen: as above, nothing is kept
+            _FAILED[key] = time.monotonic()
+            return DEFAULT
         name = named[0][0] if named and named[0] else ""
     if not re.fullmatch(r"\d+\.\d+", cap.strip()) and not name.strip():
         _FAILED[key] = time.monotonic()  # nvidia-smi did not say: not kept, asked again later
