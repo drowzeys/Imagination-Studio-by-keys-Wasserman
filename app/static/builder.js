@@ -5,7 +5,7 @@
 // 15 s, the split into chained clips joined into one video).
 const PB = { opts: null, cast: null, pick: [], refs: true, clip: { job: "", at: 1, part: "full", found: null }, scenario: "", location: "", time: "", mood: "", look: "", shots: "auto",
   seconds: 10, language: "English", idea: "", prompt: "", busy: false, by: "", edit: null, said: "",
-  characterQuery: "", characterChoice: "", sheetImageModel: "studio",
+  characterQuery: "", characterChoice: "", sheetImageModel: "studio", clipLibrary: null, clipLibraryLoading: false,
   refmodsAvailable: [], refmods: [], refmodsLimit: 0, refmodQuery: "", refmodChoice: "",
   refmodStrength: 1, refmodsError: "", refmodsLoaded: false,
   refmodsFolder: "", refmodsFolderEntries: null, refmodsNote: "" };
@@ -127,16 +127,32 @@ function pbWatch() { if (PB_WATCH) return; PB_WATCH = setInterval(async () => {
 // clips made here, newest first: where a character's voice, look and picture can come from
 const pbClips = () => (typeof jobs !== "undefined" ? jobs : []).filter(j => ["video", "long"].includes(j.kind) && j.status === "done" && (j.outputs || []).length);
 const pbClipPick = () => select(PB.clip, "job", { "": "Pick a clip from the Library", ...Object.fromEntries(pbClips().slice(0, 60).map(j => [j.id, j.title || j.id])) }, () => { PB.clip.found = null; render(); });
+function pbLibraryClipPick() {
+  if (PB.clipLibrary === null && !PB.clipLibraryLoading) {
+    PB.clipLibraryLoading = true;
+    api("/api/library").then(list => { PB.clipLibrary = (list || []).filter(m => m.kind === "video"); })
+      .catch(e => { PB.clipLibrary = []; toast("Cannot read Library videos: " + e.message); })
+      .finally(() => { PB.clipLibraryLoading = false; if (tab === "Prompt Builder") render(); });
+  }
+  const choices = {"":"Loading Library videos…"};
+  if (PB.clipLibrary) {
+    choices[""] = PB.clipLibraryLoading ? "Loading Library videos…" : PB.clipLibrary.length ? "Choose a video from the Library…" : "No videos in the Library";
+    for (const m of PB.clipLibrary) choices[m.path] = m.path;
+  }
+  return field("Library video", select(PB.clip, "libraryPath", choices));
+}
 // a character's reference picture: the still of their sheet (alone, full body, on grey), else their own picture
 const pbRefOf = c => (c.sheet && c.sheet.state === "done" && c.sheet.still) || c.picture || "";
 
 function pbPictureTools(one) {
-  const take = async () => { if (!PB.clip.job) return toast("Pick a clip first");
-    try { await pbSaveCharacter(one); const r = await api("/api/builder/cast/" + encodeURIComponent(one.id) + "/frame", { job: PB.clip.job, at: Number(PB.clip.at) || 0, part: PB.clip.part });
+  const take = async () => { if (!PB.clip.libraryPath) return toast("Pick a video from the Library first");
+    try { await pbSaveCharacter(one); const r = await api("/api/builder/cast/" + encodeURIComponent(one.id) + "/frame", { path: PB.clip.libraryPath, at: Number(PB.clip.at) || 0, part: PB.clip.part });
       one.picture = r.picture; PB.cast = await api("/api/builder/cast"); render(); toast("Their picture is a frame of the clip. Make a reference sheet to put them alone on grey and turn them round."); } catch (e) { toast(e.message); } };
   return el("div", { class: "seg", style: "margin:8px 0" }, el("b", {}, "Their picture"),
     one.picture ? el("img", { src: file(one.picture), alt: one.name, style: "display:block;max-width:220px;max-height:200px;border-radius:6px;margin:6px 0" }) : el("div", { class: "note" }, "None yet: take one from a clip you made, where they are clearly seen."),
-    el("div", { class: "row" }, field("Clip", pbClipPick()), field("At (seconds)", bind(PB.clip, "at", el("input", { type: "number", min: 0, step: 0.5, style: "width:90px" }))),
+    el("div", { class: "row" }, pbLibraryClipPick(), el("button", {class:"fit small", onclick:() => {
+      PB.clipLibrary = null; PB.clipLibraryLoading = false; pbLibraryClipPick(); render();
+    }}, "Refresh videos"), field("At (seconds)", bind(PB.clip, "at", el("input", { type: "number", min: 0, step: 0.5, style: "width:90px" }))),
       field("Part of the frame", select(PB.clip, "part", { full: "Whole frame", left: "Left third", middle: "Middle third", right: "Right third", "left-half": "Left half", "right-half": "Right half" }))),
     el("div", { class: "row" }, el("button", { class: "fit", onclick: take }, "Use this frame as their picture"),
       one.picture ? el("button", { class: "fit", onclick: async () => { try {
@@ -240,7 +256,9 @@ function pbCastPanel() {
       field("Still image model for reference sheets", select(PB, "sheetImageModel", {
         studio:"Studio default (original behaviour)", qwen:"Qwen Image", "h3-image":"MiniMax H3-Image"
       })),
-      el("span", {class:"note"}, "Reference sheet turnaround: H3 Ref2VA. H3-Image requires installed model weights and the appropriate licence.")),
+      el("span", {class:"note"}, PB.sheetImageModel === "h3-image"
+        ? "MiniMax H3-Image reference still: about 16 MP; turnaround views: 2048 px. Slower and uses more memory. Requires installed weights and the appropriate licence."
+        : "Reference sheet turnaround: H3 Ref2VA. MiniMax H3-Image requires installed model weights and the appropriate licence.")),
     active && !scene.some(c => c.id === active.id) ? pbCharacter(active, PB.cast.indexOf(active)) : null,
     scene.length ? el("div", {}, el("h4", {style:"margin:14px 0 5px"}, "Selected characters"),
       el("div", {class:"grid", style:"margin-top:8px"}, scene.map(c => pbCharacter(c, PB.cast.indexOf(c))))) :

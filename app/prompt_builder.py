@@ -186,7 +186,8 @@ submit = None
 lookup = None
 LOCK = threading.RLock()  # cast.json is read and written by the page and by a reference sheet's thread
 SHEET_POLL_S = 5
-SHEET_SIZE = 1024  # a turnaround view's side: at 512 a full figure's face is about 20 pixels and comes out soft
+SHEET_SIZE = 1024  # standard turnaround output side
+SHEET_SIZE_H3_IMAGE = 2048  # keep the high-resolution H3 Image still detailed in the turnaround
 PICTURE = re.compile(r"scouts/[A-Za-z0-9_-]{1,40}/[A-Za-z0-9_.-]{1,80}\.(?:png|jpg)")
 
 
@@ -550,12 +551,24 @@ def characters_of_clip(job_id: str) -> dict:
 
 @router.post("/api/builder/cast/{cid}/frame")
 def picture_from_clip(cid: str, body: dict) -> dict:
-    """A frame of a clip made here (`job`, `at` seconds, `part` of the width) as a character's own picture."""
+    """A Library video (`path`) or a clip job (`job`), at `at` seconds and `part` of the width, as a character's picture."""
 
     import server
 
-    job = clip_job(str(body.get("job") or ""))
-    clip = server.inside(next((o for o in job["outputs"] if o.endswith(".mp4")), job["outputs"][0]))
+    source_path = str(body.get("path") or "").strip()
+    if source_path:
+        library_videos = {item.get("path") for item in server.library() if item.get("kind") == "video"}
+        if source_path not in library_videos:
+            raise HTTPException(400, "choose a video listed in the Studio Library")
+        clip = server.inside(source_path)
+        if not clip.is_file() or clip.suffix.lower() not in (".mp4", ".mov"):
+            raise HTTPException(400, "the selected Library item is not a readable video")
+    else:
+        job = clip_job(str(body.get("job") or ""))
+        output = next((o for o in job["outputs"] if o.endswith((".mp4", ".mov"))), None)
+        if not output:
+            raise HTTPException(400, "that job has no video output")
+        clip = server.inside(output)
     try:
         at = max(0.0, float(body.get("at") or 0))
     except (TypeError, ValueError):
@@ -637,7 +650,7 @@ def wait_for(job_id: str) -> dict | None:
         time.sleep(SHEET_POLL_S)
 
 
-def sheet_run(cid: str, still_job: str) -> None:
+def sheet_run(cid: str, still_job: str, turn_size: int = SHEET_SIZE) -> None:
     """The still's job, then the turnaround of its picture, recorded on the character as each lands."""
 
     try:
@@ -647,7 +660,7 @@ def sheet_run(cid: str, still_job: str) -> None:
         still = next((p for p in job.get("outputs") or [] if not p.endswith("sheet.jpg")), "")
         name = next((one["name"] for one in read_cast() if one["id"] == cid), "")
         turn = submit({"kind": "turnaround", "title": "Reference sheet: " + name,
-                       "params": {"image": still, "size": SHEET_SIZE, "strength": 1, "seed": 0}})
+                       "params": {"image": still, "size": turn_size, "strength": 1, "seed": 0}})
         update_sheet(cid, still=still, state="turn", job=turn["id"])
         job = wait_for(turn["id"])
         if not job or job.get("status") != "done":
@@ -684,17 +697,23 @@ def make_sheet(cid: str, body: dict = Body(default={})) -> dict:
         image_model = 'h3-image'
     if image_model not in ('studio', 'qwen', 'h3-image'):
         raise HTTPException(400, 'image_model must be studio, qwen or h3-image')
+    turn_size = SHEET_SIZE_H3_IMAGE if image_model == 'h3-image' else SHEET_SIZE
     if one.get("picture"):
         params = {"image": one["picture"], "prompt": plain_prompt(one),
                   "image_model": image_model if image_model != 'studio' else 'qwen', "seed": 11}
+        if image_model == 'h3-image':
+            # Match Edit a picture's supported 4096-pixel / about-16-MP H3 Image setting,
+            # keeping the source picture's aspect ratio for this full-body redraw.
+            params.update(size="model", resolution=4096)
         job = submit({"kind": "edit", "title": "Reference still: " + one["name"], "params": params})
     else:
-        params = {"prompt": sheet_prompt(one), "count": 1, "seed": 7, "width": 768, "height": 1344}
+        width, height = (3072, 5472) if image_model == 'h3-image' else (768, 1344)
+        params = {"prompt": sheet_prompt(one), "count": 1, "seed": 7, "width": width, "height": height}
         if image_model != 'studio':
             params['image_model'] = image_model
         job = submit({"kind": "scout", "title": "Reference still: " + one["name"], "params": params})
     update_sheet(cid, state="still", job=job["id"], error="", still="", sheet="", views=[])
-    threading.Thread(target=sheet_run, args=(cid, job["id"]), daemon=True, name="builder-sheet").start()
+    threading.Thread(target=sheet_run, args=(cid, job["id"], turn_size), daemon=True, name="builder-sheet").start()
     return {"job": job["id"]}
 
 
