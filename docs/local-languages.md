@@ -16,3 +16,6 @@ A translation may wrap UI helpers before the modules capture them; it must leave
 request payloads and model parameters alone. This hook does not translate model content or implement
 an automatic translator. Keep translation dictionaries and their tests in your add-on or fork.
 `StudioLanguage.current()` reports the selection; use a script's own localized display labels as needed.
+
+An optional [Traditional Chinese (Taiwan) pack](../tools/i18n-zh/README.md) is available as `languages/zh-TW.js`.
+Copy it into the data folder's `i18n` directory to make it available; it is not installed automatically.
