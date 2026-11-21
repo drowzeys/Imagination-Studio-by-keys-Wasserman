@@ -3,13 +3,14 @@
    Each is built on a LoRA from the hub that is not for making a clip but has a job of its own (app/actions.py).
    Credit: Turnaround LoRA and its contact-sheet nodes by matlod / MATLOWAI; Video Upscaler LoRA and the H3 Video
    Upsampler node by dntpi (Sandpies), on LBH-123-AI's latent upscaler; Person Remover LoRA and H3 Relay by Akatz Labs,
-   with Meta's SAM 3.1 for the mask. Fix faces: Carasibana's H3 FaceRefine, drozbay's MaskVidExperiments and ylchen333's
-   VOSR 2.0 nodes (CSWRY's VOSR 2.0), with SAM 3.1 for the face's mask. */
+   with Meta's SAM 3.1 for the mask. Fix faces: Carasibana's H3 FaceRefine, PixelAI Labs' H3 Face Size Fade,
+   drozbay's MaskVidExperiments and ylchen333's VOSR 2.0 nodes (CSWRY's VOSR 2.0), with SAM 3.1 for the mask. */
 const ACT = { state: null, open: null, busy: false, jobs: {}, faceLib: null, facePicking: null, faceQuery: "",
   turn: { size: "1024", strength: "1", seed: 1, prompt: "" },
   up: { megapixels: "2", denoise: "0.1" },
   rm: { person: "", clean: "auto", clean_frame: null, window: "22", steps: 12, seed: 904234, silent: false, mask: null },
-  face: { faces: [{ image: null, which: "largest" }], canvas: "768", steps: 8, denoise: "0.5", seed: 983546012546031, prompt: "", transformer: "", restore: "auto" } };
+  face: { faces: [{ image: null, which: "largest" }], canvas: "512", steps: 8, denoise: "0.5", full_fix_below_px: 110,
+    no_fix_above_px: 180, seed: 983546012546031, prompt: "", transformer: "", restore: "auto" } };
 // Fix faces: which face each picture's pass follows (actions.FACE_PICKS); several people are taken left to right
 const FACE_WHICH = { largest: "Largest face", smallest: "Smallest face", left: "Left-most", right: "Right-most", centre: "Nearest the centre" };
 const FACE_ORDER = ["left", "right", "centre", "largest"];
@@ -48,7 +49,7 @@ function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KI
     el("div", { class: "seghead" }, el("b", {}, a.title || o.kind), el("span", { class: "note", style: "margin:0" }, o.path.split("/").pop()), el("span", { style: "flex:1" }),
       el("button", { class: "small", onclick: () => { ACT.open = null; render(); } }, "Close")));
   if (!a.ready) { put(box, el("div", { class: "note", style: "color:var(--warn)" }, a.why || "Not available on this machine.")); return box; }
-  const by = o.kind === "facefix" ? el("div", { class: "note" }, "With H3 FaceRefine by Carasibana, MaskVidExperiments by drozbay and VOSR 2.0 (CSWRY, nodes by ylchen333), on MiniMax H3 Ref2VA.")
+  const by = o.kind === "facefix" ? el("div", { class: "note" }, "With H3 FaceRefine by Carasibana, H3 Face Size Fade by PixelAI Labs, MaskVidExperiments by drozbay and VOSR 2.0 (CSWRY, nodes by ylchen333), on MiniMax H3 Ref2VA.")
     : el("div", { class: "note" }, "With " + a.lora_name + " by " + a.author + ".");
   if (o.kind === "turnaround") {
     put(box, el("div", { class: "row", style: "align-items:flex-start" }, el("div", { style: "flex:0 0 220px" }, media(o.path, { style: "width:220px;border-radius:8px" })),
@@ -104,15 +105,21 @@ function actPanel() { const o = ACT.open; if (!o) return null; if (typeof REV_KI
       (a.models || []).length ? field("Video model", select(f, "transformer", { "": "Regular · MiniMax H3 Ref2VA", ...Object.fromEntries(a.models.map(n => [n, n.replace(/\.safetensors$/i, "")])) }, redraw)) : null,
       field("Crop restoration", select(f, "restore", { auto: "Automatic · use VOSR 2.0 when memory allows", on: "VOSR 2.0 · may exceed memory on this machine", off: "H3 redraw only · stitch directly" }, redraw)),
       el("div", { class: "note" }, "On machines with less than 48 GB RAM, Automatic stitches the H3-redrawn face directly. Loading VOSR 2.0 beside H3 stopped a two-face render on this machine's 32 GB RAM."),
-      field("Face crop", choice(f, "canvas", { 512: ["512", "fastest"], 640: ["640", ""], 768: ["768", "the author’s setting"] }, redraw, true)),
+      field("Face crop", choice(f, "canvas", { 512: ["512", "safer on 32 GB"], 640: ["640", ""], 768: ["768", "the author’s setting; needs more memory"] }, redraw, true)),
       field("Re-draw", choice(f, "denoise", { 0.35: ["Light", "0.35, keeps more of the clip’s face"], 0.5: ["Half", "0.5, the author’s setting"], 0.65: ["Stronger", "0.65, closer to the picture"] }, redraw, true)),
+      el("div", { class: "note" }, "PixelAI Labs' face size fade keeps the original face in close-ups. The pixel sizes scale with video height (set here for 1080p)."),
+      el("div", { class: "row" }, field("Full fix below (px)", bind(f, "full_fix_below_px", el("input", { type: "number", min: 8, max: 4095, step: 2, style: "max-width:110px" }))),
+        field("No fix above (px)", bind(f, "no_fix_above_px", el("input", { type: "number", min: 9, max: 4096, step: 2, style: "max-width:110px" })))),
       el("div", { class: "row" }, field("Passes", bind(f, "steps", el("input", { type: "number", min: 2, max: 40, style: "max-width:90px" }))),
         field("Seed", bind(f, "seed", el("input", { type: "number", min: 0, style: "max-width:170px" }))),
         field("Prompt for the face pass (optional)", bind(f, "prompt", el("input", { placeholder: "empty, as the author has it: the picture alone guides the face" })))),
       by, el("button", { class: "hot", disabled: ACT.busy, onclick: () => {
         if (f.faces.some(x => !x.image)) return toast("Load a picture for every face");
         if (new Set(f.faces.map(x => x.which)).size !== f.faces.length) return toast("Give each picture a different face to follow");
-        actQueue("facefix", { video: o.path, faces: f.faces.map(x => ({ image: x.image, which: x.which })), canvas: Number(f.canvas), denoise: Number(f.denoise), steps: Number(f.steps), seed: Number(f.seed), prompt: f.prompt, transformer: f.transformer, restore: f.restore }); } },
+        const full = Number(f.full_fix_below_px), none = Number(f.no_fix_above_px);
+        if (!Number.isInteger(full) || !Number.isInteger(none) || full < 8 || full >= none || none > 4096) return toast("Set full fix below a smaller face size than no fix above");
+        actQueue("facefix", { video: o.path, faces: f.faces.map(x => ({ image: x.image, which: x.which })), canvas: Number(f.canvas), denoise: Number(f.denoise),
+          full_fix_below_px: full, no_fix_above_px: none, steps: Number(f.steps), seed: Number(f.seed), prompt: f.prompt, transformer: f.transformer, restore: f.restore }); } },
         f.faces.length > 1 ? "Fix the " + f.faces.length + " faces" : "Fix the face"),
       actShow("facefix", job => el("div", {}, el("div", { class: "row", style: "align-items:flex-start;margin-top:8px" }, el("div", {}, el("label", {}, "Faces fixed"), el("video", { class: "main", src: file(job.outputs[0]), controls: true })),
         el("div", {}, el("label", {}, "The clip as it was"), el("video", { class: "main", src: file(o.path), controls: true }))),

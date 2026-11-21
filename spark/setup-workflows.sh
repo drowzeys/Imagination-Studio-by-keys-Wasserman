@@ -1,6 +1,6 @@
 #!/bin/bash
 # The pieces behind the Library actions on a DGX Spark: "Turnaround sheet", "Upscale", "Remove a person" and "Create a RefMod".
-#   bash spark/setup-workflows.sh            # install what is missing (about 2.5 GB of models, three node packs)
+#   bash spark/setup-workflows.sh            # install missing node packs and workflow models
 #   bash spark/setup-workflows.sh --verify   # check, download nothing
 #   bash spark/setup-workflows.sh --no-models   # the node packs only (what --upgrade runs: it fetches no weights)
 # Each action runs its author's own ComfyUI nodes, cloned from the author's repository at a pinned commit into
@@ -10,7 +10,8 @@
 #                      (weights Apache-2.0, 0.7 GB) + the Video Upscaler LoRA (hub)
 #   Remove a person    H3 Relay by Akatz Labs (GPL-3.0) + Meta's SAM 3.1 as repackaged by Comfy-Org (SAM License,
 #                      1.7 GB) + the Person Remover LoRA (hub)
-#   Fix faces          H3 FaceRefine by Carasibana (MIT), MaskVidExperiments by drozbay (GPL-3.0), ComfyUI-VOSR2 by
+#   Fix faces          H3 FaceRefine by Carasibana (MIT), H3 Face Fix by PixelAI Labs (MIT),
+#                      MaskVidExperiments by drozbay (GPL-3.0), ComfyUI-VOSR2 by
 #                      ylchen333 (Apache-2.0) + Bingsu's YOLOv8 face detector (6 MB) + CSWRY's VOSR 2.0 (Apache-2.0,
 #                      7 GB) + SAM 3.1; ultralytics (AGPL-3.0) and OpenCV in $PREFIX/face-site, not the venv
 # The three LoRAs come from the LoRA hub (oneshot-essential-bundle.sh). All three actions render with MiniMax H3
@@ -41,10 +42,12 @@ node h3-relay                    https://github.com/akatz-ai/h3-relay           
 # Create a RefMod: Luisa (luisacaotica)'s RefMod nodes (MIT), pictures and clips saved as a MiniMax H3 reference with
 # the H3 video VAE alone (spark/spark_refmod.py, app/refmod.py); no model of its own
 node ComfyUI-MiniMaxH3Mod         https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod   54f93eb6569fe35c9303e9bceb1c8b66c5722bbf
-# Fix faces (spark_workflows.py facefix): Carasibana's H3 FaceRefine (MIT) finds and crops the face, drozbay's
+# Fix faces (spark_workflows.py facefix): Carasibana's H3 FaceRefine (MIT) finds and crops the face, PixelAI Labs'
+# H3 Face Size Fade (MIT) reduces the paste on close-ups, drozbay's
 # MaskVidExperiments (GPL-3.0) turns SAM's face mask into the latent's noise mask, ylchen333's VOSR 2.0 nodes
 # (Apache-2.0) restore the refined crops before they are stitched back
 node ComfyUI-H3-FaceRefine        https://github.com/Carasibana/ComfyUI-H3-FaceRefine    d8521d14fe0d721d80cd9417fff5a559cbc21aba
+node ComfyUI-H3-FaceFix-PixelAILabs https://github.com/Pixelailabs/ComfyUI-H3-FaceFix-PixelAILabs 58301602a2f6ba54904c25c420367bfa9ffcf8b9
 node MaskVidExperiments           https://github.com/drozbay/MaskVidExperiments          c32ed8c17e6fe892a174ebf25fe98b1317de97fb
 node ComfyUI-VOSR2                https://github.com/ylchen333/ComfyUI-VOSR2             6a21810b3f4f1a0ffc477c55330db0ac03c671f0
 # FaceRefine's face detector needs ultralytics, which needs OpenCV. Neither goes into the Studio's venv (the app runs

@@ -5,8 +5,8 @@
     Remove a person    a person taken out of a clip (Akatz Labs' Person Remover LoRA and H3 Relay node)
     Find a person      the first half of the removal alone: the mask, to look at before the long render
     HDR finish         a finished clip graded and written as BT.2020 / HLG with an SDR copy (hlg.py: ffmpeg and numpy, no model)
-    Fix faces          a clip's face drawn again close up from a face picture (Carasibana's H3 FaceRefine, drozbay's
-                       MaskVidExperiments, ylchen333's VOSR 2.0 nodes; a Linux / DGX Spark ComfyUI only)
+    Fix faces          a clip's face drawn again close up from a face picture (Carasibana's H3 FaceRefine, PixelAI Labs'
+                       H3 Face Size Fade, drozbay's MaskVidExperiments, ylchen333's VOSR 2.0; Linux / DGX Spark only)
 
 They run as jobs in the Studio's queue (kinds turnaround, upscale, mask, remove, hlg, facefix). On a DGX Spark each goes through its
 author's own ComfyUI nodes (spark/spark_workflows.py, installed by spark/setup-workflows.sh). On a Mac the turnaround
@@ -130,7 +130,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         nodes = prefix / "ComfyUI" / "custom_nodes"
         need = {"turnaround": ["ComfyUI-H3-ContactSheet"], "upscale": ["ComfyUI-H3-Video-Upsampler"],
                 "remove": ["h3-relay"], "mask": ["h3-relay"],
-                "facefix": ["ComfyUI-H3-FaceRefine", "MaskVidExperiments", "ComfyUI-VOSR2"]}[kind]
+                "facefix": ["ComfyUI-H3-FaceRefine", "ComfyUI-H3-FaceFix-PixelAILabs", "MaskVidExperiments", "ComfyUI-VOSR2"]}[kind]
         files = {"upscale": ["latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors"],
                  "remove": ["checkpoints/sam3.1_multiplex_fp16.safetensors"],
                  "mask": ["checkpoints/sam3.1_multiplex_fp16.safetensors"],
@@ -139,8 +139,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         native = windows_cuda.active()
         if kind == "facefix" and (any(not (nodes / n).is_dir() for n in need) or any(not (models / "Workflows-Comfy" / f).is_file() for f in files)
                                   or not (prefix / "face-site/ultralytics").is_dir()):
-            return ("Not installed yet: run `bash spark/setup-workflows.sh` in the pack's folder (H3 FaceRefine, MaskVidExperiments, "
-                    "VOSR 2.0 and 7 GB of models), then restart ComfyUI.")
+            return ("Not installed yet: run `bash spark/setup-workflows.sh` in the pack's folder (H3 FaceRefine, "
+                    "PixelAI H3 Face Fix, MaskVidExperiments, VOSR 2.0 and 7 GB of models), then restart ComfyUI.")
         if any(not (nodes / n).is_dir() for n in need) or any(not (models / "Workflows-Comfy" / f).is_file() for f in files):
             if native:
                 return (f"Not installed yet: run `{windows_cuda.setup_hint('workflows')}` in the Studio's folder (three node "
@@ -170,7 +170,8 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
         out["upscale"].update(megapixels=MEGAPIXELS, megapixel=2.0)
         out["remove"].update(windows=WINDOWS, window=22, steps=12)
         out["hlg"].update(strength=1.0)
-        out["facefix"].update(canvases=CANVASES, canvas=768, steps=8, denoise=0.5, picks=list(FACE_PICKS), faces=FACES,
+        out["facefix"].update(canvases=CANVASES, canvas=512, steps=8, denoise=0.5,
+                              full_fix_below_px=110, no_fix_above_px=180, picks=list(FACE_PICKS), faces=FACES,
                               models=face_models())
         if windows_cuda.native_os():
             import windows_library_checks as library
@@ -276,11 +277,15 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
                 picks.append(which)
             if len(set(picks)) != len(picks):
                 raise HTTPException(400, "give each picture a different face to follow: two pictures on the same face fix one person twice")
-            canvas, steps, redraw = number(params, "canvas", 768, int), number(params, "steps", 8, int), number(params, "denoise", 0.5)
+            canvas, steps, redraw = number(params, "canvas", 512, int), number(params, "steps", 8, int), number(params, "denoise", 0.5)
             if canvas not in CANVASES:
                 raise HTTPException(400, "the face crop is 512, 640 or 768 on a side")
             if not 2 <= steps <= 40 or not 0.1 <= redraw <= 0.9:
                 raise HTTPException(400, "the passes are between 2 and 40 and the re-draw between 0.1 and 0.9 (0.5 is the author's)")
+            full = number(params, "full_fix_below_px", 110, int)
+            none = number(params, "no_fix_above_px", 180, int)
+            if not 8 <= full < none <= 4096:
+                raise HTTPException(400, "face size fade needs 8 <= full fix below < no fix above <= 4096 pixels")
             prompt = " ".join((params.get("prompt") or "").split())
             if len(prompt) > 2000:
                 raise HTTPException(400, "the prompt for the face pass is at most 2000 characters")
@@ -288,7 +293,7 @@ def attach(home: Path, pack: Path, spark: bool, inside, relative, windows: bool 
             command = script + ["--video", str(clip)]
             for face, which in zip(faces, picks):
                 command += ["--face", str(face), "--select", FACE_PICKS[which]]
-            command += ["--canvas", str(canvas), "--steps", str(steps),
+            command += ["--canvas", str(canvas), "--full-fix-below-px", str(full), "--no-fix-above-px", str(none), "--steps", str(steps),
                                 "--denoise", f"{redraw:g}", "--seed", str(number(params, "seed", 983546012546031, int)),
                                 "--prompt", prompt, "--keep", str(home / "masks" / job_id / "face"), "-o", str(target)]
             transformer = params.get("transformer") or ""

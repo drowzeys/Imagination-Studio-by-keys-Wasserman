@@ -18,7 +18,8 @@ remove      the person taken out and the background made again: Akatz Labs' Pers
             none given, the plate is built as `mask` builds it and made sharp by one window of the remover itself.
 facefix     a clip's face drawn again close up: Carasibana's H3 FaceRefine crops it, SAM 3.1 and drozbay's
             MaskVidExperiments mask it, MiniMax H3 Ref2VA redraws it from a face picture at half strength, ylchen333's
-            VOSR 2.0 nodes restore the crops when memory permits, and the face is stitched back. The clip's own sound is kept.
+            VOSR 2.0 nodes restore the crops when memory permits, and PixelAI Labs' face size fade limits the paste on
+            close-ups before the face is stitched back. The clip's own sound is kept.
 
 All three render with MiniMax H3 Ref2VA in bf16: the LoRAs are merged at run time, which spoils the 8-bit file.
 """
@@ -56,7 +57,7 @@ TAIL = 8
 NODES = {"turnaround": ("H3ContactSheet", "H3ContactSheetDecode"), "upscale": ("H3VideoUpsampler",),
          "mask": ("SAM3_Detect", "SAM3_VideoTrack", "SAM3_TrackToMask", "H3RelayGreenMask"),
          "remove": ("SAM3_Detect", "SAM3_VideoTrack", "SAM3_TrackToMask", "H3RelayGreenMask", "H3RelayPersonRemover"),
-         "facefix": ("H3FaceTrackCrop", "H3FaceStitch", "MVEx_MaskCleanup", "MVEx_MaskToLatentSpace", "VOSR2ModelLoader",
+         "facefix": ("H3FaceTrackCrop", "PixelAIH3FaceSizeFade", "H3FaceStitch", "MVEx_MaskCleanup", "MVEx_MaskToLatentSpace", "VOSR2ModelLoader",
                      "VOSR2Upscale", "SAM3_VideoTrack", "SAM3_TrackToMask", "DifferentialDiffusion", "LTXVConcatAVLatent",
                      "LTXVSeparateAVLatent",
                      "MiniMaxH3ReferenceToVideo")}
@@ -938,6 +939,10 @@ def face_pass(w: dict, k: int, base: list, face: str, pick: str, args, model: li
             "identity_threshold": 0.28, "select": pick, "fallback_detector": "none", "fallback_head_frac": 0.5,
             "select_index": 0, "identity_model": "insightface", "cut_detection": "none", "cut_threshold": 3.0,
             "absent_shots": "off", "X": 0, "Y": 0, "frame_index": 0}},
+        n(43): {"class_type": "PixelAIH3FaceSizeFade", "inputs": {
+            "transform": [n(8), 1], "full_fix_below_px": args.full_fix_below_px,
+            "no_fix_above_px": args.no_fix_above_px, "crop_factor": args.crop_factor,
+            "reference_height": 1080}},
         # the face picture, at about 2 megapixels and sides in multiples of 32
         n(9): {"class_type": "LoadImage", "inputs": {"image": sg.upload(face)}},
         n(10): {"class_type": "ResizeImageMaskNode", "inputs": {"input": [n(9), 0], "resize_type": "scale total pixels",
@@ -965,7 +970,7 @@ def face_pass(w: dict, k: int, base: list, face: str, pick: str, args, model: li
         n(30): {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": [n(26), 0], "guider": [n(29), 0], "sampler": ["27", 0],
                                                                 "sigmas": ["28", 0], "latent_image": [n(23), 0]}},
         n(31): {"class_type": "VAEDecode", "inputs": {"samples": [n(30), 0], "vae": ["4", 0]}},
-        n(34): {"class_type": "H3FaceStitch", "inputs": {"base_images": base, "refined_crops": [n(33), 0] if restore else [n(31), 0], "transform": [n(8), 1],
+        n(34): {"class_type": "H3FaceStitch", "inputs": {"base_images": base, "refined_crops": [n(33), 0] if restore else [n(31), 0], "transform": [n(43), 0],
                                                        "masks": [n(15), 0], "paste_region": "face_only", "mask_dilation": 24,
                                                        "feather": 24, "colour_match": 1.0, "blend": 1.0,
                                                        "undetected_frames": "fade_out", "feather_scales_with_crop": False}},
@@ -1034,7 +1039,7 @@ def facefix_staged(args, source: Path, size: dict, faces: list, picks: list, lor
             sg.fresh_server("release H3 before decoding the refined face")
             server("facefix")
             say(f"face {k}/{len(faces)}: decoding and stitching on a fresh server")
-            stage = {node: w[node] for node in ("4", "12", "13", "108", "114", "115")}
+            stage = {node: w[node] for node in ("4", "12", "13", "108", "114", "115", "143")}
             stage["134"] = stitch
             stage["6"] = {"class_type": "LoadVideo", "inputs": {"file": sg.upload(str(current))}}
             stage["7"] = {"class_type": "GetVideoComponents", "inputs": {"video": ["6", 0]}}
@@ -1088,7 +1093,8 @@ def facefix(args) -> None:
     finds the face in the crops, drozbay's MaskVidExperiments cleans that mask and brings it to the latent's grid; the
     crops are drawn again by MiniMax H3 Ref2VA from the face picture (<Picture 1>), at half strength, only inside the
     mask, the sound's latent kept untouched; VOSR 2.0 restores the refined crops at their own size, and H3FaceStitch
-    pastes the face back into the clip with a feathered, colour-matched edge. The clip's own sound is kept.
+    pastes the face back into the clip with a feathered, colour-matched edge; PixelAI Labs' face size fade keeps large
+    close-up faces as they were. The clip's own sound is kept.
     Several people: one pass each, with each face stitched into the clip before the next pass. On a small machine,
     sampling and decoding use separate ComfyUI servers so their model memory does not overlap."""
 
@@ -1109,6 +1115,8 @@ def facefix(args) -> None:
         sys.exit(f"--canvas is one of {', '.join(map(str, CANVASES))}")
     if not 0.1 <= args.denoise <= 0.9 or not 2 <= args.steps <= 40:
         sys.exit("--denoise is between 0.1 and 0.9 and --steps between 2 and 40")
+    if not 8 <= args.full_fix_below_px < args.no_fix_above_px <= 4096:
+        sys.exit("face size fade needs 8 <= --full-fix-below-px < --no-fix-above-px <= 4096")
     for face in faces:
         if not Path(face).is_file():
             sys.exit(f"no picture at {face}")
@@ -1227,8 +1235,10 @@ def main() -> None:
     f.add_argument("--select", action="append", choices=FACE_PICKS,
                    help="which face the --face of the same place follows (default: the largest; several: left to right)")
     f.add_argument("-o", "--output", required=True)
-    f.add_argument("--canvas", type=int, default=768, help="the face crop's side, 512, 640 or 768 (the author's)")
+    f.add_argument("--canvas", type=int, default=512, help="the face crop's side, 512 (safer on 32 GB), 640 or 768 (the author's)")
     f.add_argument("--crop-factor", type=float, default=2.5, help="the crop's side as a multiple of the face's height (the author's 2.5)")
+    f.add_argument("--full-fix-below-px", type=int, default=110, help="full face fix at this height or smaller, at 1080p")
+    f.add_argument("--no-fix-above-px", type=int, default=180, help="keep the original face at this height or larger, at 1080p")
     f.add_argument("--steps", type=int, default=8); f.add_argument("--denoise", type=float, default=0.5)
     f.add_argument("--seed", type=int, default=983546012546031); f.add_argument("--prompt", default="",
                                                                                help="the author's is empty: the face picture alone guides the pass")

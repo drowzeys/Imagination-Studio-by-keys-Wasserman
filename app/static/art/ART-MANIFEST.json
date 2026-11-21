@@ -210,6 +210,14 @@
    "ready": true
   },
   {
+   "name": "act-video-facefix",
+   "file": "art/act-video-facefix.webp",
+   "size": "1280x720",
+   "aspect": "16:9",
+   "purpose": "engine page card: Video: fix faces",
+   "ready": true
+  },
+  {
    "name": "act-previs-motion",
    "file": "art/act-previs-motion.webp",
    "size": "1280x720",

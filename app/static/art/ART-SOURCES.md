@@ -102,3 +102,9 @@ style of the key art above. Invented content only.
 - art/app-restyle.webp: one film frame on a desk, half rainy street at night, half painted
 - art/app-fix.webp: a loupe over a 35mm film strip, one frame lit amber
 - art/app-extend.webp: a film strip unspooling off a reel along an editing bench at night
+
+## Video: Fix faces key art (2026-11-21)
+
+Generated for this app with the built-in image generation tool. Invented content only: no real person, logo or text.
+
+- art/act-video-facefix.webp: a film loupe brings one face into clear focus across a strip of movie frames

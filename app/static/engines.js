@@ -26,6 +26,42 @@ function pageHead(eyebrow, title, line, right) {
 
 const slateMode = (mode, view) => { SL.mode = mode; try { localStorage.setItem("production-mode", mode); } catch {} if (view && SL.p) SL.view = view; go("Production"); };
 const longFirst = () => S && S.long ? Object.keys(S.long)[0] : null;
+const VIDEO_FACE = { open: false, clips: null, clip: "" };
+async function videoFaceOpen(path = "") {
+  VIDEO_FACE.open = true; VIDEO_FACE.clip = path; ACT.open = path ? { kind: "facefix", path } : null;
+  go("Video");
+  setTimeout(() => { const panel = document.querySelector("#video-facefix");
+    if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+  try { VIDEO_FACE.clips = (await api("/api/library")).filter(m => m.kind === "video");
+    if (!VIDEO_FACE.clip && VIDEO_FACE.clips.length) VIDEO_FACE.clip = VIDEO_FACE.clips[0].path; }
+  catch (e) { VIDEO_FACE.clips = []; toast(e.message); }
+  if (tab === "Video" && VIDEO_FACE.open) render();
+}
+function videoFacePanel() {
+  if (!VIDEO_FACE.open) return null;
+  const clips = VIDEO_FACE.clips;
+  const upload = el("input", { type: "file", accept: ".mp4,.mov", onchange: async e => {
+    const picked = e.target.files && e.target.files[0]; if (!picked) return;
+    const data = new FormData(); data.append("file", picked);
+    try { const response = await fetch("/api/upload", { method: "POST", body: data }); const result = await response.json();
+      if (!response.ok || !result.path) throw new Error(result.detail || result.error || "Upload failed");
+      VIDEO_FACE.clip = result.path; ACT.open = { kind: "facefix", path: result.path }; render(); }
+    catch (error) { toast(error.message); }
+  } });
+  return el("section", { class: "card", id: "video-facefix", style: "margin-top:16px" },
+    el("div", { class: "row", style: "align-items:center" }, el("h2", { style: "margin:0" }, "Fix faces in a clip"), el("span", { style: "flex:1" }),
+      el("button", { class: "small", onclick: () => { VIDEO_FACE.open = false; ACT.open = null; render(); } }, "Close")),
+    ACT.open && ACT.open.kind === "facefix" && ACT.open.path === VIDEO_FACE.clip ? actPanel() :
+      el("div", {}, el("div", { class: "note" }, "Choose a finished clip and a clear picture of the face. PixelAI Labs' fade keeps close-ups as they were."),
+        clips === null ? el("div", { class: "note" }, "Loading clips…") :
+          clips.length ? el("div", { class: "row", style: "align-items:flex-end;margin-top:8px" },
+            field("Clip from the Library", el("select", { value: VIDEO_FACE.clip, onchange: e => { VIDEO_FACE.clip = e.target.value; } },
+              clips.slice(0, 100).map(m => el("option", { value: m.path }, m.path.split("/").pop())))),
+            el("button", { class: "fit", onclick: () => { const selected = document.querySelector("#video-facefix select");
+              if (!selected) return; VIDEO_FACE.clip = selected.value; ACT.open = { kind: "facefix", path: VIDEO_FACE.clip }; render(); } }, "Use this clip")) :
+            el("div", { class: "note" }, "No clips in the Library yet."),
+        field("Or upload a clip", upload)));
+}
 // each engine: its cover, one line, the marks it shows, its one amber action, and its cards
 const ENGINE_PAGES = {
   story: () => ({ line: "Plan the film: the board, the bible, the shots. Wasserman Slate and the First AD lay it out with you.", marks: [],
@@ -48,6 +84,8 @@ const ENGINE_PAGES = {
       { art: "act-video-own", sign: "video", title: "From your picture", one: "Your own first frame", run: () => startCreate({ goes: "video", start: "own" }, 1) },
       { art: "act-video-refs", sign: "video", title: "References", one: "Keep a face, a motion or a voice", run: () => startCreate({ goes: "video", start: "refs" }, 1),
         off: S && S.ref2va ? "" : "Needs Ref2VA: oneshot-setup.sh --ref2va" },
+      { art: "act-video-facefix", sign: "video", title: "Fix faces", one: "Repair distant faces in a finished clip and keep close-ups",
+        words: "PixelAI Labs H3 Face Size Fade facefix ComfyUI-H3-FaceFix-PixelAILabs", run: () => videoFaceOpen() },
       { art: "start-long", sign: "video", title: "A long take", one: "Chained clips, 30 seconds and up", run: () => { const k = longFirst(); startCreate({ goes: "video", start: "text", ...(k ? { seconds: k } : {}) }); } },
       S && S.sharp ? { art: "start-sharp", sign: "video", title: "Sharp Spec", one: "Sam's locked recipe: 1376 × 768, 8 passes", run: () => { if (typeof sharpCreate === "function") sharpCreate(); go("Create"); } } : null].filter(Boolean) }),
   previs: () => ({ line: "Motion taken from a clip, and sets your own agent builds in Blender or Blockout.", marks: [mark("claude"), mark("codex")],
@@ -72,6 +110,7 @@ function engineLanding(id) { const r = ROOMS.find(x => x.id === id), e = ENGINE_
       el("div", { class: "stack" }, el("span", { class: "eyebrow engmark" }, el("img", { src: "brand/module-" + id + ".svg", alt: "", width: 22, height: 22 }), "Creative Engine"), el("h1", { class: "display" }, r.name), el("p", { class: "sub", style: "margin:0" }, e.line),
         e.marks.filter(Boolean).length ? el("div", { class: "marks" }, e.marks) : null,
         el("div", { class: "acts" }, el("button", { class: "primary", onclick: e.primary[1] }, e.primary[0])))),
-    el("div", { class: "cards" + (e.cards.length >= 4 ? " c4" : e.cards.length === 3 ? " c3" : "") }, e.cards.map(pcard))); }
+    el("div", { class: "cards" + (e.cards.length >= 4 ? " c4" : e.cards.length === 3 ? " c3" : "") }, e.cards.map(pcard)),
+    id === "video" ? videoFacePanel() : null); }
 const viewStory = () => engineLanding("story"), viewImage = () => engineLanding("image"), viewVideo = () => engineLanding("video"),
   viewPrevis = () => engineLanding("previs"), viewSound = () => engineLanding("sound"), viewEditHub = () => engineLanding("edit");

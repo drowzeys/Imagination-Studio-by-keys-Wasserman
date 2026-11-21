@@ -870,7 +870,8 @@ function viewCreate() {
         el("button", { class: "fit", onclick: () => { Object.assign(C, { step: 0, job: null, prompt: "", parts: null, scene: "", action: "", camera: "", dialogue: [], soundscape: "", music: "N/A", imagePrompt: "", image: null, lastImage: null, scoutJob: null, beats: "", refs: [], subjects: [], refVideos: [], video_subjects: [], refAudios: [], audio_notes: [], video_sound: false, motion: null }); MA.job = null; Object.assign(REF_SAID, { pictures: "", videos: "", audios: "" }); render(); } }, "Start a new clip"), el("span")));
     if (job) { put(body, el("h3", {}, "This clip"), jobCard(job));
       if (job.status === "done") put(body, el("video", { class: "main", src: file(job.outputs[0]), controls: true }),
-        el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: () => addToTimeline(job.outputs[0]) }, "Add to the editor timeline"), el("a", { class: "fit", href: file(job.outputs[0]), download: "" }, "Download"),
+        el("div", { class: "row", style: "margin-top:8px" }, el("button", { class: "fit", onclick: () => addToTimeline(job.outputs[0]) }, "Add to the editor timeline"),
+          el("button", { class: "fit", onclick: () => videoFaceOpen(job.outputs[0]) }, "Fix faces"), el("a", { class: "fit", href: file(job.outputs[0]), download: "" }, "Download"),
           job.kind === "long" ? el("button", { class: "fit", title: "Opens the Music tab with this video chosen: pick a song there and press “Use as soundtrack”", onclick: () => { MU.under = job.outputs[0]; MU.videos = null; tab = "Music"; history.replaceState(null, "", "#Music"); render(); toast("This video is chosen: open “Use as soundtrack” under a song"); } }, "Lay a song under it") : el("span"))); }
   }
   return el("section", { class: "card" }, steps, body, next);

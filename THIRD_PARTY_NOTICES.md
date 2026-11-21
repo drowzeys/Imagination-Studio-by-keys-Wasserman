@@ -139,11 +139,14 @@ those nodes through ComfyUI's HTTP API as a separate program. The three LoRAs co
 - The LoRA: `akatz-ai/MiniMax-H3-Person-Remover-LoRA` on Hugging Face, under the MiniMax H3 Community License
   Agreement.
 
-## Fix faces: H3 FaceRefine, MaskVidExperiments and VOSR 2.0
+## Fix faces: H3 FaceRefine, PixelAI H3 Face Fix, MaskVidExperiments and VOSR 2.0
 
 - **ComfyUI-H3-FaceRefine** by Carasibana: <https://github.com/Carasibana/ComfyUI-H3-FaceRefine>, commit
   `d8521d14fe0d721d80cd9417fff5a559cbc21aba`. MIT License. Used unmodified (its face track and crop node and its
   stitch node), cloned into ComfyUI's `custom_nodes` by `spark/setup-workflows.sh`.
+- **ComfyUI-H3-FaceFix-PixelAILabs** by PixelAI Labs: <https://github.com/Pixelailabs/ComfyUI-H3-FaceFix-PixelAILabs>,
+  commit `58301602a2f6ba54904c25c420367bfa9ffcf8b9`. MIT License. Its H3 Face Size Fade node scales each frame's
+  face paste by the source face size; the Studio loads the unmodified node from ComfyUI's `custom_nodes`.
 - **MaskVidExperiments** by drozbay: <https://github.com/drozbay/MaskVidExperiments>, commit
   `c32ed8c17e6fe892a174ebf25fe98b1317de97fb`. GNU General Public License v3.0. Used unmodified (MVEx Mask Cleanup
   and MVEx Mask To Latent Space), talked to over ComfyUI's API; none of its code is in this pack.

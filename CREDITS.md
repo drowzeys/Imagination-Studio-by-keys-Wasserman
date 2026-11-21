@@ -112,8 +112,9 @@ repository at a pinned commit when the Studio is installed; none of their code i
   the build Comfy-Org repackaged for ComfyUI, under the SAM License.
 - **Fix faces:** the graph is the "MiniMax H3 R2V perfect face refine" ComfyUI workflow (2026-11-18; its maker is not
   named in the file) from its face pass on. The face is tracked, cropped and stitched back by **Carasibana**'s
-  **ComfyUI-H3-FaceRefine** (MIT), modelled on ltdrdata's Impact Pack FaceDetailer; the face's mask is cleaned and
-  brought to MiniMax H3's latent grid by **drozbay**'s **MaskVidExperiments** (GPL-3.0); the redrawn crops are
+  **ComfyUI-H3-FaceRefine** (MIT), modelled on ltdrdata's Impact Pack FaceDetailer. **PixelAI Labs**' **H3 Face Size Fade**
+  node (MIT) reduces the paste on close-ups and keeps the original face once it is large enough in the frame. The mask is
+  cleaned and brought to MiniMax H3's latent grid by **drozbay**'s **MaskVidExperiments** (GPL-3.0); the redrawn crops are
   restored by **VOSR 2.0** from **CSWRY** (weights Apache-2.0) through **ylchen333**'s
   **ComfyUI-VOSR2** nodes (Apache-2.0). The face is found by **Bingsu**'s YOLOv8 face detector (`face_yolov8n.pt`
   from `Bingsu/adetailer`, Apache-2.0 card) run by **Ultralytics** (AGPL-3.0, installed beside ComfyUI, not shipped
